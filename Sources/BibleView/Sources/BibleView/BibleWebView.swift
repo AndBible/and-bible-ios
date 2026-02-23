@@ -1,0 +1,267 @@
+// BibleWebView.swift — WKWebView container for Vue.js Bible rendering
+
+import SwiftUI
+import WebKit
+
+/// SwiftUI wrapper around WKWebView that loads the Vue.js Bible frontend.
+///
+/// Usage:
+/// ```swift
+/// BibleWebView(bridge: bridge)
+///     .onAppear { bridge.emit(event: "loadDocument", data: documentJson) }
+/// ```
+#if os(iOS)
+/// UIViewController that hosts the WKWebView.
+/// Using a view controller (instead of bare UIViewRepresentable) ensures the
+/// WKWebView participates in the full UIKit responder chain and receives
+/// touch/click events reliably inside SwiftUI.
+public class BibleWebViewController: UIViewController {
+    let webView: WKWebView
+    let bridge: BibleBridge
+    var backgroundColorInt: Int = -1
+
+    init(webView: WKWebView, bridge: BibleBridge) {
+        self.webView = webView
+        self.bridge = bridge
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) not supported") }
+
+    public override func viewDidLoad() {
+        super.viewDidLoad()
+        view.addSubview(webView)
+        webView.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            webView.topAnchor.constraint(equalTo: view.topAnchor),
+            webView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            webView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            webView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+        ])
+        applyBackground()
+    }
+
+    func applyBackground() {
+        let color = BibleWebView.uiColor(fromArgbInt: backgroundColorInt)
+        webView.isOpaque = false
+        webView.backgroundColor = color
+        webView.scrollView.backgroundColor = color
+        view.backgroundColor = color
+        if #available(iOS 15.0, *) {
+            webView.underPageBackgroundColor = color
+        }
+    }
+}
+
+public struct BibleWebView: UIViewControllerRepresentable {
+    public typealias UIViewControllerType = BibleWebViewController
+
+    let bridge: BibleBridge
+    let initialState: String?
+    var backgroundColorInt: Int
+
+    public init(bridge: BibleBridge, initialState: String? = nil, backgroundColorInt: Int = -1) {
+        self.bridge = bridge
+        self.initialState = initialState
+        self.backgroundColorInt = backgroundColorInt
+    }
+
+    public func makeUIViewController(context: Context) -> BibleWebViewController {
+        let webView = createWebView(coordinator: context.coordinator)
+        let vc = BibleWebViewController(webView: webView, bridge: bridge)
+        vc.backgroundColorInt = backgroundColorInt
+        return vc
+    }
+
+    public func updateUIViewController(_ vc: BibleWebViewController, context: Context) {
+        vc.backgroundColorInt = backgroundColorInt
+        vc.applyBackground()
+    }
+
+    /// Convert a signed ARGB integer to UIColor.
+    static func uiColor(fromArgbInt value: Int) -> UIColor {
+        let uint = UInt32(bitPattern: Int32(value))
+        let a = CGFloat((uint >> 24) & 0xFF) / 255.0
+        let r = CGFloat((uint >> 16) & 0xFF) / 255.0
+        let g = CGFloat((uint >> 8) & 0xFF) / 255.0
+        let b = CGFloat(uint & 0xFF) / 255.0
+        return UIColor(red: r, green: g, blue: b, alpha: a)
+    }
+
+    public func makeCoordinator() -> WebViewCoordinator {
+        WebViewCoordinator(bridge: bridge)
+    }
+}
+#elseif os(macOS)
+public struct BibleWebView: NSViewRepresentable {
+    public typealias NSViewType = WKWebView
+
+    let bridge: BibleBridge
+    let initialState: String?
+    var backgroundColorInt: Int
+
+    public init(bridge: BibleBridge, initialState: String? = nil, backgroundColorInt: Int = -1) {
+        self.bridge = bridge
+        self.initialState = initialState
+        self.backgroundColorInt = backgroundColorInt
+    }
+
+    public func makeNSView(context: Context) -> WKWebView {
+        let webView = createWebView(coordinator: context.coordinator)
+        webView.setValue(false, forKey: "drawsBackground")
+        return webView
+    }
+
+    public func updateNSView(_ webView: WKWebView, context: Context) {}
+
+    public func makeCoordinator() -> WebViewCoordinator {
+        WebViewCoordinator(bridge: bridge)
+    }
+}
+#endif
+
+// MARK: - Shared WebView Creation
+
+extension BibleWebView {
+    func createWebView(coordinator: WebViewCoordinator) -> WKWebView {
+        let config = WKWebViewConfiguration()
+
+        // Register bridge message handler
+        let contentController = WKUserContentController()
+        contentController.add(bridge, name: BibleBridge.handlerName)
+
+        // Inject platform detection and Android API shim before page loads.
+        // The Vue.js code calls window.android.xxx() directly (from android.ts).
+        // This Proxy routes those calls to the iOS WKScriptMessageHandler bridge.
+        let platformScript = WKUserScript(
+            source: """
+            window.__PLATFORM__ = 'ios';
+            window.__activeLanguages__ = '["en"]';
+            window.bibleView = {};
+            window.bibleViewDebug = {};
+            window.android = new Proxy({}, {
+                get: function(target, prop) {
+                    if (prop === 'getActiveLanguages') {
+                        return function() { return window.__activeLanguages__; };
+                    }
+                    return function() {
+                        var args = Array.prototype.slice.call(arguments);
+                        window.webkit.messageHandlers.bibleView.postMessage({
+                            method: String(prop),
+                            args: args
+                        });
+                    };
+                }
+            });
+            // Prevent iOS tap highlight and fix Strong's link colors for night mode
+            var style = document.createElement('style');
+            style.textContent = [
+                '* { -webkit-tap-highlight-color: transparent; }',
+                '::selection { background: rgba(100,149,237,0.3); }',
+                // Make Strong's number links use theme-aware colors.
+                // Must override <a> tag default link/visited colors with pseudo-class selectors.
+                '.w-base { color: var(--verse-number-color, #aaa) !important; }',
+                'a.strongs, a.strongs:link, a.strongs:visited, a.strongs:active { color: var(--verse-number-color, #aaa) !important; }',
+                'a.morph, a.morph:link, a.morph:visited, a.morph:active { color: var(--verse-number-color, #aaa) !important; }',
+            ].join(' ');
+            (document.head || document.documentElement).appendChild(style);
+            // Double-click/tap toggles fullscreen mode (matching Android behavior)
+            document.addEventListener('dblclick', function(e) {
+                // Don't toggle fullscreen if clicking on interactive elements
+                if (e.target.closest('a, button, input, textarea, [contenteditable]')) return;
+                window.webkit.messageHandlers.bibleView.postMessage({
+                    method: 'toggleFullScreen',
+                    args: []
+                });
+            });
+            """,
+            injectionTime: .atDocumentStart,
+            forMainFrameOnly: true
+        )
+        contentController.addUserScript(platformScript)
+
+        // Inject selection detection script. Fires selectionChanged when text
+        // is selected and selectionCleared when it collapses.
+        let selectionScript = WKUserScript(
+            source: """
+            (function() {
+                var __selTimer = null;
+                document.addEventListener('selectionchange', function() {
+                    clearTimeout(__selTimer);
+                    __selTimer = setTimeout(function() {
+                        var sel = window.getSelection();
+                        if (sel && sel.rangeCount > 0 && !sel.getRangeAt(0).collapsed) {
+                            var text = sel.toString().trim();
+                            if (text.length > 0) {
+                                window.webkit.messageHandlers.bibleView.postMessage({
+                                    method: 'selectionChanged',
+                                    args: [text]
+                                });
+                            }
+                        } else {
+                            window.webkit.messageHandlers.bibleView.postMessage({
+                                method: 'selectionCleared',
+                                args: []
+                            });
+                        }
+                    }, 150);
+                });
+            })();
+            """,
+            injectionTime: .atDocumentEnd,
+            forMainFrameOnly: true
+        )
+        contentController.addUserScript(selectionScript)
+
+        config.userContentController = contentController
+
+        // Allow file access for local bundle
+        config.preferences.setValue(true, forKey: "allowFileAccessFromFileURLs")
+
+        let webView = WKWebView(frame: .zero, configuration: config)
+        webView.isInspectable = true
+
+        #if os(iOS)
+        webView.scrollView.isScrollEnabled = true
+        webView.scrollView.bounces = true
+        // Ensure taps pass through to web content without delay
+        webView.scrollView.delaysContentTouches = false
+        webView.scrollView.canCancelContentTouches = true
+        #endif
+
+        bridge.webView = webView
+        coordinator.webView = webView
+        webView.navigationDelegate = coordinator
+
+        loadBibleViewBundle(into: webView)
+
+        return webView
+    }
+
+    private func loadBibleViewBundle(into webView: WKWebView) {
+        // Look for the Vue.js built bundle first (bibleview-js/index.html)
+        if let bundleURL = Bundle.module.url(
+            forResource: "index",
+            withExtension: "html",
+            subdirectory: "Resources/bibleview-js"
+        ) {
+            let bundleDir = bundleURL.deletingLastPathComponent()
+            webView.loadFileURL(bundleURL, allowingReadAccessTo: bundleDir)
+        } else if let bundleURL = Bundle.module.url(
+            forResource: "index",
+            withExtension: "html",
+            subdirectory: "Resources"
+        ) {
+            // Fallback to placeholder
+            let bundleDir = bundleURL.deletingLastPathComponent()
+            webView.loadFileURL(bundleURL, allowingReadAccessTo: bundleDir)
+        } else {
+            webView.loadHTMLString("""
+                <html><body style="background:#1a1a1a;color:#ccc;font-family:system-ui;padding:20px;">
+                <h2>BibleView</h2>
+                <p>Vue.js bundle not found. Build bibleview-js and copy output to Resources/</p>
+                </body></html>
+            """, baseURL: nil)
+        }
+    }
+}

@@ -1,0 +1,137 @@
+<!--
+  - Copyright (c) 2020-2022 Martin Denham, Tuomas Airaksinen and the AndBible contributors.
+  -
+  - This file is part of AndBible: Bible Study (http://github.com/AndBible/and-bible).
+  -
+  - AndBible is free software: you can redistribute it and/or modify it under the
+  - terms of the GNU General Public License as published by the Free Software Foundation,
+  - either version 3 of the License, or (at your option) any later version.
+  -
+  - AndBible is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+  - without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+  - See the GNU General Public License for more details.
+  -
+  - You should have received a copy of the GNU General Public License along with AndBible.
+  - If not, see http://www.gnu.org/licenses/.
+  -->
+
+<template>
+  <template v-if="showStrongsSeparately">
+    <template v-if="(showStrongs && lemma) && (config.showMorphology && morph)">
+      <slot/><span class="w-base skip-offset">&nbsp;<a :class="{isHighlighted}" class="strongs highlight-transition" :href="formatLink(lemma)" @click.prevent="goToLink($event, formatLink(lemma))">{{formatName(lemma)}}</a>/<a :class="{isHighlighted}" class="morph highlight-transition" :href="formatLink(morph)" @click.prevent="goToLink($event, formatLink(morph))">{{formatName(morph)}}</a></span>
+    </template>
+    <template v-else-if="(showStrongs && lemma) && (!config.showMorphology || !morph)">
+      <slot/><span class="w-base skip-offset">&nbsp;<a class="strongs highlight-transition" :class="{isHighlighted}" :href="formatLink(lemma)" @click.prevent="goToLink($event, formatLink(lemma))">{{formatName(lemma)}}</a></span>
+    </template>
+    <template v-else-if="(!showStrongs || !lemma) && (config.showMorphology && morph)">
+      <slot/><span class="w-base skip-offset">&nbsp;<a class="morph highlight-transition" :href="formatLink(morph)" :class="{isHighlighted}" @click.prevent="goToLink($event, formatLink(morph))">{{formatName(morph)}}</a></span>
+    </template>
+    <template v-else><slot/></template>
+  </template>
+  <template v-else>
+    <span v-if="(showStrongsHidden && lemma) || (showStrongsHidden && config.showMorphology && morph)" :class="{isHighlighted}"  class="highlight-transition" @click="goToLink($event, formatLink(lemma, morph))"><slot/></span>
+    <span v-else-if="(showStrongs && lemma) || (showStrongs && config.showMorphology && morph)" :class="{isHighlighted}"  class="highlight-transition link-style" @click="goToLink($event, formatLink(lemma, morph))"><slot/></span>
+    <span v-else><slot/></span>
+  </template>
+</template>
+
+<script setup lang="ts">
+import {checkUnsupportedProps, useCommon} from "@/composables";
+import {addEventFunction, EventPriorities, navigateLink} from "@/utils";
+import {computed, inject, ref} from "vue";
+import {strongsModes} from "@/composables/config";
+import {exportModeKey, ordinalHighlightKey} from "@/types/constants";
+
+const props = defineProps<{
+    lemma?: string // example: strong:H8064 lemma.TR:XXXXX
+    morph?: string // example: strongMorph:TH8792
+    src?: string
+    n?: string
+    type?: string
+    subType?: string
+}>();
+
+checkUnsupportedProps(props, "n")
+checkUnsupportedProps(props, "src")
+checkUnsupportedProps(props, "type", ["x-split"])
+checkUnsupportedProps(props, "subType")
+const {strings, config} = useCommon();
+const isHighlighted = ref(false);
+const {addCustom, resetHighlights} = inject(ordinalHighlightKey)!;
+
+function prep(string: string): string[] {
+    let remainingString = string;
+    const res: string[] = []
+    do {
+        const match = remainingString.match(/([^ :]+:)([^:]+)$/)
+        if (!match) return res;
+        const s = match[0]
+        res.push(s);
+        remainingString = remainingString.slice(0, remainingString.length - s.length)
+    } while (remainingString.trim().length > 0)
+    return res;
+}
+
+function formatName(string: string): string {
+    return prep(string).filter(s => !s.startsWith("lemma.TR:")).map(s => s.match(/([^ :]+:)[HG0 ]*([^:]+) *$/)![2].trim()).join(",")
+}
+
+function formatLink(first?: string, second?: string): string {
+    const linkBodies = [];
+
+    function toArgs(string: string): string {
+        return prep(string).map(s => s.trim().replace(/ /g, "_").replace(/:/g, "=")).join("&");
+    }
+
+    if (first) {
+        linkBodies.push(toArgs(first))
+    }
+    if (second) {
+        linkBodies.push(toArgs(second))
+    }
+    // Link format:
+    // ab-w://?robinson=x&strong=y&strong=z, x and y have ' ' replaced to '_'.
+    return "ab-w://?" + linkBodies.join("&")
+}
+
+function goToLink(event: MouseEvent, url: string) {
+    const priority = showStrongsSeparately.value ? EventPriorities.STRONGS_LINK : EventPriorities.STRONGS_DOTTED;
+    addEventFunction(event, () => {
+        navigateLink(url)
+        resetHighlights();
+        isHighlighted.value = true;
+        addCustom(() => isHighlighted.value = false);
+    }, {priority, icon: "custom-morph", title: strings.strongsAndMorph, dottedStrongs: !showStrongsSeparately.value, hiddenStrongs:showStrongsHidden.value});
+}
+
+const exportMode = inject(exportModeKey, ref(false));
+const showStrongs = computed(() => !exportMode.value && config.strongsMode !== strongsModes.off);
+const showStrongsHidden = computed(() => !exportMode.value && config.strongsMode == strongsModes.hidden);
+const showStrongsSeparately = computed(() => !exportMode.value && config.strongsMode === strongsModes.links);
+
+</script>
+
+<style lang="scss">
+@use "@/common.scss" as *;
+
+.link-style {
+  text-decoration: underline dotted;
+
+  [lang=he], [lang=hbo] & {
+    text-decoration-style: solid;
+    text-decoration-color: hsla(var(--text-color-h), var(--text-color-s), var(--text-color-l), 0.5);
+  }
+}
+
+.w-base {
+  font-size: 0.6em;
+  text-decoration: none;
+  color: gray;
+}
+
+.strongs, .morph {
+  color: coral;
+  text-decoration: none;
+  cursor: pointer;
+}
+</style>

@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BibleView</title>
+    <style>
+        body { background: #1a1a1a; color: #ccc; font-family: system-ui; padding: 20px; }
+    </style>
+</head>
+<body>
+    <div id="app">
+        <h2>BibleView</h2>
+        <p>Vue.js bundle placeholder. Build the bibleview-js project and replace this file.</p>
+    </div>
+    <script>
+        // Initialize bridge objects expected by native side
+        window.bibleView = window.bibleView || {};
+        window.bibleViewDebug = window.bibleViewDebug || {};
+        window.bibleView.emit = function(event, data) {
+            console.log('[BibleView] emit:', event, data);
+        };
+        window.bibleView.response = function(callId, value) {
+            console.log('[BibleView] response:', callId, value);
+        };
+
+        // Signal ready
+        if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.bibleView) {
+            window.webkit.messageHandlers.bibleView.postMessage({ method: 'setClientReady', args: [] });
+        }
+    </script>
+</body>
+</html>

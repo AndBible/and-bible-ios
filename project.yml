@@ -1,0 +1,78 @@
+name: AndBible
+options:
+  bundleIdPrefix: org.andbible
+  deploymentTarget:
+    iOS: "17.0"
+    macOS: "14.0"
+
+packages:
+  BibleModules:
+    path: .
+
+targets:
+  AndBible:
+    type: application
+    platform: iOS
+    deploymentTarget: "17.0"
+
+    sources:
+      - AndBible
+
+    # Use SwiftData, SwiftUI, etc.
+    settings:
+      PRODUCT_BUNDLE_IDENTIFIER: org.andbible.ios
+      INFOPLIST_FILE: AndBible/Info.plist
+      ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+      DEVELOPMENT_TEAM: ""
+      CODE_SIGN_STYLE: Automatic
+      TARGETED_DEVICE_FAMILY: "1,2"  # iPhone and iPad
+      SUPPORTS_MACCATALYST: true
+      IPHONEOS_DEPLOYMENT_TARGET: "17.0"
+      SWIFT_VERSION: "5.9"
+      ENABLE_PREVIEWS: true
+      DEVELOPMENT_ASSET_PATHS: "\"AndBible/Preview Content\""
+
+    # Dependencies on local Swift Package modules
+    dependencies:
+      - package: BibleModules
+        product: BibleUI
+      - package: BibleModules
+        product: BibleView
+      - package: BibleModules
+        product: BibleCore
+      - package: BibleModules
+        product: SwordKit
+
+    # App schemes
+    scheme:
+      testTargets:
+        - AndBibleTests
+      gatherCoverageData: true
+
+  AndBibleTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - AndBibleTests
+    dependencies:
+      - target: AndBible
+      - package: BibleModules
+        product: BibleCore
+
+schemes:
+  AndBible:
+    build:
+      targets:
+        AndBible: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - AndBibleTests
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release

@@ -1,0 +1,97 @@
+# Open in "My Notes" title. (just demonstrating developer note)
+bookmarks: Signets
+bookmarksAndNotes: Mes signets et mes notes
+openMyNotes: Ouvrir dans Mes notes
+openStudyPad: Ouvrir le bloc-note (%s)
+noteText: Notes de bas de page (%s)
+noteTextWithoutType: Note de bas de page
+crossReferenceText: Références croisées
+findAllOccurrences: Trouver toutes les occurrences
+reportError: Rapporter une erreur
+errorTitle: Une erreur a eu lieu
+warningTitle: Avertissement
+normalTitle: Veuillez noter
+footnoteTypeStudy: Étude
+footnoteTypeExplanation: Explication
+footnoteTypeVariant: Variante
+footnoteTypeAlternative: Alternative
+footnoteTypeTranslation: Traduction
+clearLog: Supprimer le journal d'erreur
+editTextPlaceholder: Tapez pour éditer le texte
+inputPlaceholder: Écrire ici
+inputReference: Entrer les références bibliques
+invalidReference: Verset non trouvé
+bookmarkAccurate: Le signet a été créé dans %s
+bookmarkInaccurate: "Les informations sur le livre de signets ne sont pas enregistrées, le contenu est affiché dans %s."
+defaultBook: Bible par defaut
+ok: OK
+yes: "Oui"
+ambiguousSelection: "Quelle action voulez-vous accomplir ?"
+cancel: Annuler
+removeBookmarkConfirmationTitle: "Supprimer le signet ?"
+removeBookmarkConfirmation: "Êtes-vous certain de vouloir supprimer ce signet ?"
+createdAt: "Créé : %s"
+lastUpdatedOn: "Dernière mise à jour : %s"
+strongsAndMorph: Définition & morphologie
+externalLink: Ouvrir un lien externe
+referenceLink: Ouvrir un lien de référence
+openFootnote: Ouvrir une note de bas de page
+noMyNotesTitle: Pas Mes notes pour ce chapitre.
+noMyNotesDescription: >
+  Commencez par créer des signets dans un document biblique. Les signets apparaîtront ensuite ici et vous pourrez y ajouter vos notes personnelles.
+emptyStudyPad: >
+  Bloc-notes vide. Commencez à compléter ce bloc-notes en créant des entrées de texte ici ou en créant des signets avec une étiquette de signet correspondant à ce bloc-notes.
+doYouWantToDeleteEntry: "Supprimer cette entrée du bloc-note ?"
+removeStudyPadConfirmationTitle: "Supprimer l'entrée du bloc-note ?"
+dragHelp: Faites glisser pour réorganiser
+openAll: Ouvrir toutes les références
+editBookmarkPlaceholder: Tapez pour éditer Mes notes pour ce signet
+onlyLabel: Seulement l'étiquette
+wholeBookmark: Tout le signet
+assignLabelsMenuEntry1: Sélectionner ou éditer les étiquettes…
+favouriteLabels: Étiquettes favorites
+recentLabels: Étiquettes récentes
+bookmarkLabels: Étiquettes de signet
+refParserHelp: Veuillez installer le module %s pour utiliser les références dans des langues autres que l'anglais.
+openDownloads: Allez dans "Téléchargements d'extensions
+verseShare: Partager
+verseSpeak: Lecture audio
+verseCompare: Comparer
+verseMemorize: Mémoriser
+verseNote: Note
+verseMyNotes: Mes notes
+verseParagraphBreak: ""
+verseShareLong: Partager ce verset
+verseCompareLong: Comparer ce verset
+verseMemorizeLong: Mémoriser des versets bibliques
+verseNoteLong: Écrire une note
+verseParagraphBreakLong: Retour à la ligne
+addBookmark: Signets
+selectCustomIconTitle: "Sélection d'une icône de marqueur personnalisée "
+bookmarkSettingsTitle: Configurer les paramètres des étiquettes
+subtitlePlaceholder: Texte de sous-titre
+customIconLabel: Icône personnalisée
+editActionLabel: Éditer l’action
+editActionModeLabel: Mode
+editActionModeNone: Aucun
+editActionModeAppend: Ajouter du texte à la fin
+editActionModePrepend: Ajouter du texte au début
+editActionContentLabel: Table des matières
+editActionContentPlaceholder: Entrer du texte pour être ajouter au document…
+experimentalFeatureTitle: Expérimental
+experimentalFeatureHelpTitle: Au sujet des fonctionnalités expérimentales
+experimentalFeatureHelpContent: "Les fonctionnalités expérimentales sont de nouveaux ajouts qui sont encore développés et en test. Ils peuvent ne pas fonctionner parfaitement, et peuvent changer significativement, ou être supprimés dans de futures versions."
+insertParagraphBreak: Insérer un retour à la ligne
+insertSubtitle: Insérer un sous-titre
+xmlParseError: Erreur d'analyse XML
+invalidTag: Étiquette invalide
+invalidClosingTag: Étiquette de fin invalide
+unmatchedClosingTag: Étiquette de fin non correspondante
+unclosedTag: Étiquette non fermée
+unknownError: Erreur inconnue
+blur: Griser
+reset: Réinitialiser
+peek: Voir
+wordBlur: Griser les mots
+wordScramble: Mélanger les mots
+more: Plus

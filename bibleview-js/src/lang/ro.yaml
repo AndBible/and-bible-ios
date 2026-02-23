@@ -1,0 +1,97 @@
+# Open in "My Notes" title. (just demonstrating developer note)
+bookmarks: Semne de carte
+bookmarksAndNotes: Semne de carte și Notițele mele
+openMyNotes: Deschide în Notițele mele
+openStudyPad: Deschide în Notițe de studiu (%s)
+noteText: Note de subsol (%s)
+noteTextWithoutType: Note de subsol
+crossReferenceText: Trimiteri
+findAllOccurrences: Caută toate evenimentele
+reportError: Raportează o eroare
+errorTitle: A apărut o eroare
+warningTitle: Atenție
+normalTitle: Reține
+footnoteTypeStudy: Studiu
+footnoteTypeExplanation: Explicaţie
+footnoteTypeVariant: Variantă
+footnoteTypeAlternative: Alternativă
+footnoteTypeTranslation: Traducere
+clearLog: Șterge jurnalul de erori
+editTextPlaceholder: Atinge pentru a modifica textul
+inputPlaceholder: Scrie aici
+inputReference: Introdu trimiterea biblică
+invalidReference: Versetul nu a fost găsit
+bookmarkAccurate: Semnul de carte a fost creat în %s
+bookmarkInaccurate: "Informațiile semnelor de carte nu sînt stocate, conținutul este afișat în %s."
+defaultBook: Biblia prestabilită
+ok: Aprobă
+yes: "Da"
+ambiguousSelection: "Ce vrei să faci?"
+cancel: Renunță
+removeBookmarkConfirmationTitle: "Elimini semnul de carte?"
+removeBookmarkConfirmation: "Sigur vrei să elimini acest semn de carte?"
+createdAt: "Creat: %s"
+lastUpdatedOn: "Ultima actualizare: %s"
+strongsAndMorph: Definiție și morfologie
+externalLink: Deschide legătura externă
+referenceLink: Deschide legătura trimiterii
+openFootnote: Deschide nota de subsol
+noMyNotesTitle: Nu sînt notițe pentru acest capitol.
+noMyNotesDescription: >
+  Începe prin a crea semne de carte într-un document biblic. Semnele de carte vor apărea apoi aici și poți adăuga la ele notițele tale.
+emptyStudyPad: >
+  Nu sînt notițe de studiu. Adaugă notițe scriind ceva aici sau prin crearea de semne de carte cu o etichetă de semn de carte care corespunde acestor notițe de studiu.
+doYouWantToDeleteEntry: "Ștergi această notiță de studiu?"
+removeStudyPadConfirmationTitle: "Elimini notița de studiu?"
+dragHelp: Trage pentru a aranja
+openAll: Deschide toate trimiterile
+editBookmarkPlaceholder: Atinge pentru a modifica notițele acestui semn de carte
+onlyLabel: Doar eticheta
+wholeBookmark: Tot semnul de carte
+assignLabelsMenuEntry1: Alege sau modifică etichete…
+favouriteLabels: Etichete preferate
+recentLabels: Etichete recente
+bookmarkLabels: Etichetele semnelor de carte
+refParserHelp: Instalează extensia %s pentru a utiliza trimiteri în alte limbi decît engleza.
+openDownloads: Descarcă extensii
+verseShare: Trimite
+verseSpeak: Vorbește
+verseCompare: Compară
+verseMemorize: Memorează
+verseNote: Notiță
+verseMyNotes: Notițele mele
+verseParagraphBreak: Paragraf
+verseShareLong: Trimite acest verset
+verseCompareLong: Compară versetele
+verseMemorizeLong: Memorează versete biblice
+verseNoteLong: Scrie o notiță
+verseParagraphBreakLong: Întrerupere de paragraf
+addBookmark: Semn de carte
+selectCustomIconTitle: Alege simbolul de evidențiere
+bookmarkSettingsTitle: Opțiuni pentru Semne de carte
+subtitlePlaceholder: Textul subtitlului
+customIconLabel: Simbol personalizat
+editActionLabel: Modifică
+editActionModeLabel: Mod
+editActionModeNone: Nimic
+editActionModeAppend: Adaugă text la final
+editActionModePrepend: Adaugă text la început
+editActionContentLabel: Conținut
+editActionContentPlaceholder: Introdu textul de adăugat la document...
+experimentalFeatureTitle: Experimental
+experimentalFeatureHelpTitle: Despre caracteristicile experimentale
+experimentalFeatureHelpContent: Caracteristicile experimentale sunt funcții noi care sunt încă în curs de dezvoltare și testare. Este posibil ca acestea să nu funcționeze perfect și să sufere modificări semnificative sau să fie eliminate în versiunile viitoare ale aplicației.
+insertParagraphBreak: Introdu o întrerupere de paragraf
+insertSubtitle: Introdu subtitlul
+xmlParseError: Eroare de procesare XML
+invalidTag: Etichetă greșită
+invalidClosingTag: Etichetă de închidere greșită
+unmatchedClosingTag: Etichetă de închidere fără pereche
+unclosedTag: Etichetă neînchisă
+unknownError: Eroare necunoscută
+blur: Neclar
+reset: Restabilește
+peek: Vezi
+wordBlur: Cuvinte neclare
+wordScramble: Cuvinte amestecate
+more: Mai mult

@@ -1,0 +1,5 @@
+module CLibSword {
+    header "flatapi.h"
+    link "sword"
+    export *
+}

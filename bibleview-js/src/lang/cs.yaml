@@ -1,0 +1,97 @@
+# Open in "My Notes" title. (just demonstrating developer note)
+bookmarks: Záložky
+bookmarksAndNotes: Záložky a poznámky
+openMyNotes: Otevřít v Poznámkách
+openStudyPad: Otevřít ve studijní složce (%s)
+noteText: Poznámky pod čarou (%s)
+noteTextWithoutType: Poznámky pod čarou
+crossReferenceText: Křížový odkaz
+findAllOccurrences: Najít všechny výskyty
+reportError: Nahlásit chybu
+errorTitle: Vyskytla se chyba
+warningTitle: Varování
+normalTitle: Upozornění
+footnoteTypeStudy: Studium
+footnoteTypeExplanation: Vysvětlení
+footnoteTypeVariant: Varianta
+footnoteTypeAlternative: Alternativa
+footnoteTypeTranslation: Překlad
+clearLog: Smazat záznam chyb
+editTextPlaceholder: Úprava textu po kliknutí
+inputPlaceholder: Psát zde
+inputReference: Vložit biblický odkaz
+invalidReference: Verš nebyl nalezen
+bookmarkAccurate: Záložka vytvořena v %s
+bookmarkInaccurate: "Záložky knihy neuloženy, obsah je zobrazen v %s."
+defaultBook: výchozí dokument Bible
+ok: OK
+yes: "Ano"
+ambiguousSelection: "Co chcete provést?"
+cancel: Zrušit
+removeBookmarkConfirmationTitle: "Odstranit záložku?"
+removeBookmarkConfirmation: "Jste si jisti, že chcete tuto záložku odstranit?"
+createdAt: "Vytvořeno: %s"
+lastUpdatedOn: "Aktualizováno: %s"
+strongsAndMorph: Definice a morfologie
+externalLink: Otevřít externí odkaz
+referenceLink: Otevřít referenční odkaz
+openFootnote: Otevřít poznámku pod čarou
+noMyNotesTitle: K této kapitole nemáte poznámky.
+noMyNotesDescription: >
+  Nejprve si v biblickém dokumentu vytvořte záložku. Ty budou následně dostupné zde a můžete si k nim přidávat své poznámky.
+emptyStudyPad: >
+  Prázdná studijní složka. Sem můžete přidávat textové poznámky nebo tvořit záložky se štítkem odkazujícím k této studijní složce.
+doYouWantToDeleteEntry: "Smazat tento obsah ze složky?"
+removeStudyPadConfirmationTitle: "Odstranit studijní složku?"
+dragHelp: Přetažením setřídit
+openAll: Otevřít všechny odkazy
+editBookmarkPlaceholder: Klepnutím upravíte poznámky této záložky
+onlyLabel: Pouze štítek
+wholeBookmark: Celá záložka
+assignLabelsMenuEntry1: Vybrat nebo upravit štítky…
+favouriteLabels: Oblíbené štítky
+recentLabels: Poslední štítky
+bookmarkLabels: Štítky záložky
+refParserHelp: "Prosím nainstalujte modul %s, pokud chcete používat biblické odkazy v jiném jazyce než v angličtině."
+openDownloads: Přejít na stažení doplňků
+verseShare: Sdílet
+verseSpeak: Předčítání
+verseCompare: Porovnat
+verseMemorize: Zapamatovat
+verseNote: Poznámka
+verseMyNotes: Poznámky
+verseParagraphBreak: ""
+verseShareLong: Sdílet verš
+verseCompareLong: Porovnat verš
+verseMemorizeLong: Zapamatovat biblické verše
+verseNoteLong: Napsat poznámku
+verseParagraphBreakLong: Zalomení odstavce
+addBookmark: Záložka
+selectCustomIconTitle: Vybrat vlastní ikonu pro záložku
+bookmarkSettingsTitle: ""
+subtitlePlaceholder: ""
+customIconLabel: ""
+editActionLabel: ""
+editActionModeLabel: ""
+editActionModeNone: ""
+editActionModeAppend: ""
+editActionModePrepend: ""
+editActionContentLabel: Obsah
+editActionContentPlaceholder: ""
+experimentalFeatureTitle: ""
+experimentalFeatureHelpTitle: ""
+experimentalFeatureHelpContent: ""
+insertParagraphBreak: ""
+insertSubtitle: ""
+xmlParseError: ""
+invalidTag: ""
+invalidClosingTag: ""
+unmatchedClosingTag: ""
+unclosedTag: ""
+unknownError: ""
+blur: ""
+reset: Resetovat
+peek: ""
+wordBlur: ""
+wordScramble: ""
+more: Více
