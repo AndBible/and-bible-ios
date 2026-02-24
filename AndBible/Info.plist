@@ -46,6 +46,8 @@
 	<array>
 		<string>audio</string>
 	</array>
+	<key>NSMotionUsageDescription</key>
+	<string>AndBible uses motion sensors for tilt-to-scroll functionality.</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>NSAppTransportSecurity</key>

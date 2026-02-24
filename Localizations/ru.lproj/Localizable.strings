@@ -316,3 +316,29 @@
 "label_edit_icon" = "Icon";
 "no_icon" = "No Icon";
 "search_web" = "Web";
+
+/* Quick Settings & Help */
+"fullscreen" = "Fullscreen";
+"tilt_to_scroll" = "Tilt to Scroll";
+"reversed_split_mode" = "Reversed Split Mode";
+"window_pinning" = "Window Pinning";
+"label_settings" = "Label Settings";
+"all_text_options" = "All Text Options";
+"help_tips" = "Help & Tips";
+"sponsor_development" = "Sponsor Development";
+"help_navigation" = "Navigation";
+"help_navigation_body" = "Swipe left or right to move between chapters. Tap the book name in the toolbar to choose a different book and chapter.";
+"help_selection" = "Text Selection";
+"help_selection_body" = "Long-press on a verse to select it. An action bar appears with options: Bookmark, Copy, Share, Compare, Speak, and Web Search.";
+"help_pinning" = "Window Pinning";
+"help_pinning_body" = "When you have multiple windows, pin a window to keep it visible when switching Bible/Commentary categories.";
+"help_bookmarks" = "Bookmarks";
+"help_bookmarks_body" = "Long-press a verse and tap Bookmark. Add labels to organize and notes for your thoughts.";
+"help_studypads" = "StudyPads";
+"help_studypads_body" = "Rich text journals attached to labels. Access them from the label manager or bookmark list.";
+"help_search" = "Search";
+"help_search_body" = "Full-text search with All Words, Any Word, and Phrase modes. You will be prompted to create an index on first use.";
+"help_workspaces" = "Workspaces";
+"help_workspaces_body" = "Save different window arrangements as workspaces. Switch between them from the overflow menu.";
+"help_hidden" = "Hidden Features";
+"help_hidden_body" = "Double-tap the Bible text for fullscreen mode. Enable Tilt to Scroll in the overflow menu. Discrete calculator mode is available in Settings.";

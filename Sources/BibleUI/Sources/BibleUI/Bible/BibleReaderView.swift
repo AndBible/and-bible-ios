@@ -104,6 +104,11 @@ public struct BibleReaderView: View {
     @State private var showEpubBrowser = false
     @State private var showEpubSearch = false
     @State private var searchInitialQuery = ""
+    @State private var showLabelManager = false
+    @State private var showHelp = false
+    #if os(iOS)
+    @State private var tiltScrollService = TiltScrollService()
+    #endif
 
     /// The focused window's controller — reads from WindowManager's single source of truth.
     /// References `controllerVersion` to guarantee SwiftUI re-evaluates when controllers
@@ -232,6 +237,17 @@ public struct BibleReaderView: View {
                 }
             }
         }
+        #if os(iOS)
+        .onAppear {
+            // Auto-start tilt scroll if workspace has it enabled
+            if windowManager.activeWorkspace?.workspaceSettings?.enableTiltToScroll ?? false {
+                startTiltToScroll()
+            }
+        }
+        .onDisappear {
+            tiltScrollService.stop()
+        }
+        #endif
         .preferredColorScheme(nightMode ? .dark : nil)
         .sheet(isPresented: $showBookChooser) {
             NavigationStack {
@@ -443,6 +459,26 @@ public struct BibleReaderView: View {
                     .padding()
             }
         }
+        .sheet(isPresented: $showLabelManager) {
+            NavigationStack {
+                LabelManagerView()
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button(String(localized: "done")) { showLabelManager = false }
+                        }
+                    }
+            }
+        }
+        .sheet(isPresented: $showHelp) {
+            NavigationStack {
+                HelpView()
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button(String(localized: "done")) { showHelp = false }
+                        }
+                    }
+            }
+        }
         // MARK: - Keyboard Shortcuts (iPad/Mac)
         .background {
             Group {
@@ -472,7 +508,9 @@ public struct BibleReaderView: View {
     private var splitContent: some View {
         GeometryReader { geometry in
             let windows = windowManager.visibleWindows
-            let isHorizontal = geometry.size.width > geometry.size.height
+            let naturalHorizontal = geometry.size.width > geometry.size.height
+            let reverse = windowManager.activeWorkspace?.workspaceSettings?.enableReverseSplitMode ?? false
+            let isHorizontal = reverse ? !naturalHorizontal : naturalHorizontal
             let totalWeight = windows.map(\.layoutWeight).reduce(0, +)
             let normalizedTotal = max(totalWeight, 0.001) // avoid division by zero
 
@@ -967,6 +1005,84 @@ public struct BibleReaderView: View {
 
                         // Ellipsis menu
                         Menu {
+                            // Quick toggles
+                            Toggle(isOn: Binding(
+                                get: { isFullScreen },
+                                set: { newValue in
+                                    withAnimation(.easeInOut(duration: 0.2)) { isFullScreen = newValue }
+                                }
+                            )) {
+                                SwiftUI.Label(String(localized: "fullscreen"), systemImage: "arrow.up.left.and.arrow.down.right")
+                            }
+
+                            Toggle(isOn: Binding(
+                                get: { nightMode },
+                                set: { newValue in
+                                    nightMode = newValue
+                                    let store = SettingsStore(modelContext: modelContext)
+                                    store.setBool("night_mode", value: newValue)
+                                    for window in windowManager.visibleWindows {
+                                        if let ctrl = windowManager.controllers[window.id] as? BibleReaderController {
+                                            ctrl.updateDisplaySettings(displaySettings, nightMode: nightMode)
+                                        }
+                                    }
+                                }
+                            )) {
+                                SwiftUI.Label(String(localized: "night_mode"), systemImage: "moon.fill")
+                            }
+
+                            #if os(iOS)
+                            Toggle(isOn: Binding(
+                                get: { windowManager.activeWorkspace?.workspaceSettings?.enableTiltToScroll ?? false },
+                                set: { newValue in
+                                    updateWorkspaceSettings { $0.enableTiltToScroll = newValue }
+                                    if newValue {
+                                        startTiltToScroll()
+                                    } else {
+                                        tiltScrollService.stop()
+                                    }
+                                }
+                            )) {
+                                SwiftUI.Label(String(localized: "tilt_to_scroll"), systemImage: "gyroscope")
+                            }
+                            #endif
+
+                            if windowManager.visibleWindows.count > 1 {
+                                Toggle(isOn: Binding(
+                                    get: { windowManager.activeWorkspace?.workspaceSettings?.enableReverseSplitMode ?? false },
+                                    set: { newValue in
+                                        updateWorkspaceSettings { $0.enableReverseSplitMode = newValue }
+                                    }
+                                )) {
+                                    SwiftUI.Label(String(localized: "reversed_split_mode"), systemImage: "rectangle.split.1x2")
+                                }
+                            }
+
+                            Toggle(isOn: Binding(
+                                get: { windowManager.activeWorkspace?.workspaceSettings?.autoPin ?? false },
+                                set: { newValue in
+                                    updateWorkspaceSettings { $0.autoPin = newValue }
+                                }
+                            )) {
+                                SwiftUI.Label(String(localized: "window_pinning"), systemImage: "pin.fill")
+                            }
+
+                            Divider()
+
+                            Button(String(localized: "label_settings"), systemImage: "tag") {
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                                    showLabelManager = true
+                                }
+                            }
+
+                            Button(String(localized: "all_text_options"), systemImage: "textformat.size") {
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                                    showSettings = true
+                                }
+                            }
+
+                            Divider()
+
                             Button(String(localized: "bookmarks"), systemImage: "bookmark") {
                                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                                     showBookmarks = true
@@ -1068,6 +1184,21 @@ public struct BibleReaderView: View {
                                     }
                                 }
                             }
+                            Divider()
+                            Button(String(localized: "help_tips"), systemImage: "questionmark.circle") {
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                                    showHelp = true
+                                }
+                            }
+                            Button(String(localized: "sponsor_development"), systemImage: "heart") {
+                                if let url = URL(string: "https://shop.andbible.org") {
+                                    #if os(iOS)
+                                    UIApplication.shared.open(url)
+                                    #elseif os(macOS)
+                                    NSWorkspace.shared.open(url)
+                                    #endif
+                                }
+                            }
                         } label: {
                             Image(systemName: "ellipsis.circle")
                                 .font(.body)
@@ -1107,6 +1238,15 @@ public struct BibleReaderView: View {
         (displaySettings.strongsMode ?? 0) > 0
     }
 
+    /// Mutate workspace settings and persist to SwiftData.
+    private func updateWorkspaceSettings(_ transform: (inout WorkspaceSettings) -> Void) {
+        guard let workspace = windowManager.activeWorkspace else { return }
+        var settings = workspace.workspaceSettings ?? WorkspaceSettings()
+        transform(&settings)
+        workspace.workspaceSettings = settings
+        try? modelContext.save()
+    }
+
     /// Apply a Strong's mode value, persist to workspace, and update all WebViews.
     private func applyStrongsMode(_ mode: Int) {
         displaySettings.strongsMode = mode
@@ -1121,6 +1261,19 @@ public struct BibleReaderView: View {
             }
         }
     }
+
+    #if os(iOS)
+    /// Start tilt-to-scroll by wiring CoreMotion to the focused WebView.
+    private func startTiltToScroll() {
+        tiltScrollService.onScroll = { [weak windowManager] pixels in
+            guard let wm = windowManager,
+                  let activeId = wm.activeWindow?.id,
+                  let ctrl = wm.controllers[activeId] as? BibleReaderController else { return }
+            ctrl.bridge.webView?.evaluateJavaScript("window.scrollBy(0, \(pixels))", completionHandler: nil)
+        }
+        tiltScrollService.start()
+    }
+    #endif
 }
 
 /// Strong's number display modes matching Android's `strongsModeEntries`.

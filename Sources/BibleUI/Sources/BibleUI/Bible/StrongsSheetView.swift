@@ -27,32 +27,49 @@ func presentStrongsSheet(
         .compactMap({ $0 as? UIWindowScene }).first,
           let rootVC = windowScene.windows.first?.rootViewController else { return }
 
+    let doPresent = {
+        var topVC = rootVC
+        while let presented = topVC.presentedViewController {
+            topVC = presented
+        }
+
+        let content = StrongsSheetContent(
+            multiDocJSON: multiDocJSON,
+            configJSON: configJSON,
+            backgroundColorInt: backgroundColorInt,
+            controller: controller,
+            onFindAll: onFindAll
+        )
+        let hostingVC = UIHostingController(rootView: content)
+        let nav = UINavigationController(rootViewController: hostingVC)
+        nav.modalPresentationStyle = .pageSheet
+        if let sheet = nav.sheetPresentationController {
+            sheet.detents = [.medium(), .large()]
+            sheet.prefersScrollingExpandsWhenScrolledToEdge = true
+            sheet.prefersGrabberVisible = true
+        }
+        hostingVC.navigationItem.title = String(localized: "definition")
+        hostingVC.navigationItem.leftBarButtonItem = UIBarButtonItem(
+            systemItem: .done,
+            primaryAction: UIAction { _ in nav.dismiss(animated: true) }
+        )
+        topVC.present(nav, animated: true)
+    }
+
+    // If a VC is being dismissed (e.g. previous Strong's sheet swiped down),
+    // present() silently fails. Dismiss first, then present after transition.
     var topVC = rootVC
     while let presented = topVC.presentedViewController {
         topVC = presented
     }
-
-    let content = StrongsSheetContent(
-        multiDocJSON: multiDocJSON,
-        configJSON: configJSON,
-        backgroundColorInt: backgroundColorInt,
-        controller: controller,
-        onFindAll: onFindAll
-    )
-    let hostingVC = UIHostingController(rootView: content)
-    let nav = UINavigationController(rootViewController: hostingVC)
-    nav.modalPresentationStyle = .pageSheet
-    if let sheet = nav.sheetPresentationController {
-        sheet.detents = [.medium(), .large()]
-        sheet.prefersScrollingExpandsWhenScrolledToEdge = true
-        sheet.prefersGrabberVisible = true
+    if topVC.isBeingDismissed || rootVC.presentedViewController?.isBeingDismissed == true {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { doPresent() }
+    } else if rootVC.presentedViewController != nil {
+        // Another sheet is up — dismiss it first, then present
+        rootVC.presentedViewController?.dismiss(animated: true) { doPresent() }
+    } else {
+        doPresent()
     }
-    hostingVC.navigationItem.title = String(localized: "definition")
-    hostingVC.navigationItem.leftBarButtonItem = UIBarButtonItem(
-        systemItem: .done,
-        primaryAction: UIAction { _ in nav.dismiss(animated: true) }
-    )
-    topVC.present(nav, animated: true)
 }
 
 /// SwiftUI content for the Strong's definition sheet.

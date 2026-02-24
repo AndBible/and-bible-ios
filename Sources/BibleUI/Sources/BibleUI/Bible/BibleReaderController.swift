@@ -2307,16 +2307,71 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     }
 
     /// Try each key variant in a module and return the first valid renderText() result.
+    /// After setKey(), SWORD positions to the nearest entry even if the exact key
+    /// doesn't exist. We must verify currentKey() matches to avoid returning wrong entries.
     private func lookupInModule(_ module: SwordModule, keyOptions: [String]) -> String? {
+        // Save current key to restore after lookup (prevents corrupting module state
+        // when multiple lookups share the same SwordModule handle).
+        let savedKey = module.currentKey()
+
+        defer {
+            // Restore the module position so subsequent lookups aren't affected
+            module.setKey(savedKey.isEmpty ? keyOptions.first ?? "" : savedKey)
+        }
+
         for key in keyOptions {
             module.setKey(key)
-            let candidate = module.renderText()
-            if !candidate.isEmpty && !candidate.contains("@@@@") {
-                logger.info("Lexicon hit in \(module.info.name) for key '\(key)': '\(candidate.prefix(80))'")
-                return candidate.trimmingCharacters(in: .whitespacesAndNewlines)
+            let actualKey = module.currentKey().trimmingCharacters(in: .whitespacesAndNewlines)
+
+            // Verify the key actually matched. SWORD dictionary modules silently
+            // position to the nearest entry when the exact key doesn't exist.
+            if !actualKey.isEmpty {
+                if !keysMatchNormalized(requested: key, actual: actualKey) {
+                    continue
+                }
             }
+
+            let candidate = module.renderText()
+            if candidate.isEmpty || candidate.contains("@@@@") { continue }
+
+            // For modules where currentKey() returns empty (some zLD modules like
+            // BDBGlosses), verify the content references the requested Strong's number.
+            // Without this check, these modules return whatever entry they're stuck on.
+            if actualKey.isEmpty {
+                let numericKey = normalizeNumericKey(key)
+                if !numericKey.isEmpty && !candidate.contains(numericKey) {
+                    continue
+                }
+            }
+
+            return candidate.trimmingCharacters(in: .whitespacesAndNewlines)
         }
         return nil
+    }
+
+    /// Compare two dictionary keys by normalizing: strip letter prefixes, leading zeros,
+    /// and compare case-insensitively. Handles Strong's variants ("01121" == "1121" == "H1121")
+    /// and non-numeric keys like Robinson morphology codes ("V-2AAI-3S").
+    private func keysMatchNormalized(requested: String, actual: String) -> Bool {
+        // Direct case-insensitive match (handles morphology codes, etc.)
+        if requested.caseInsensitiveCompare(actual) == .orderedSame { return true }
+
+        // Numeric normalization: strip letter prefix and leading zeros, then compare
+        let reqNumeric = normalizeNumericKey(requested)
+        let actNumeric = normalizeNumericKey(actual)
+        if !reqNumeric.isEmpty && reqNumeric == actNumeric { return true }
+
+        return false
+    }
+
+    /// Strip optional letter prefix (H/G) and leading zeros from a key.
+    /// "H07225" → "7225", "01121" → "1121", "7225" → "7225"
+    private func normalizeNumericKey(_ key: String) -> String {
+        let afterLetters = String(key.drop(while: { $0.isLetter }))
+        let stripped = afterLetters.replacingOccurrences(of: "^0+", with: "", options: .regularExpression)
+        // Verify it's actually numeric
+        guard !stripped.isEmpty, stripped.allSatisfy({ $0.isNumber }) else { return "" }
+        return stripped
     }
 
     /// Find ALL lexicon/dictionary modules that can look up the given Strong's number.
