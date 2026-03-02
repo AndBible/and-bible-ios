@@ -38,6 +38,42 @@ public struct ModuleFeatures: OptionSet, Sendable {
     public static let dailyDevotion = ModuleFeatures(rawValue: 1 << 9)
 }
 
+/// Information about a single book in a Bible module's versification.
+///
+/// Contains the book name, OSIS abbreviation, display abbreviation,
+/// chapter count, and testament (OT/NT). Used by the book chooser and
+/// chapter navigation to dynamically adapt to the active module's canon.
+public struct BookInfo: Sendable, Identifiable, Equatable {
+    /// Unique identifier (uses the OSIS book ID).
+    public var id: String { osisId }
+
+    /// Full book name as reported by SWORD (e.g., "Genesis", "1 Corinthians", "Tobit").
+    public let name: String
+
+    /// OSIS book abbreviation used in verse keys (e.g., "Gen", "1Cor", "Tob").
+    public let osisId: String
+
+    /// Short abbreviation for compact display (e.g., "Gen", "1Cor").
+    public let abbreviation: String
+
+    /// Number of chapters in this book.
+    public let chapterCount: Int
+
+    /// Testament number: 1 = Old Testament, 2 = New Testament.
+    public let testament: Int
+
+    /// Whether this book is in the New Testament.
+    public var isNewTestament: Bool { testament == 2 }
+
+    public init(name: String, osisId: String, abbreviation: String, chapterCount: Int, testament: Int) {
+        self.name = name
+        self.osisId = osisId
+        self.abbreviation = abbreviation
+        self.chapterCount = chapterCount
+        self.testament = testament
+    }
+}
+
 /// Metadata about a SWORD module (installed or remote).
 public struct ModuleInfo: Sendable, Identifiable {
     /// Module abbreviation (e.g., "KJV", "ESV").

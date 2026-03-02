@@ -13,6 +13,16 @@
 "search" = "Search";
 "settings" = "Settings";
 "close" = "Close";
+"copy_reference" = "Copy Reference";
+"go_to_reference" = "Go to Reference";
+"go_to_reference_placeholder" = "e.g. Genesis 1, Matt 5:3, Gen.1.1";
+"go_to_reference_message" = "Type a reference or tap Browse to choose from the list.";
+"go_to_reference_invalid" = "Could not find that reference";
+"go" = "Go";
+"browse" = "Browse...";
+"move_up" = "Move Up";
+"move_down" = "Move Down";
+"reference_copied" = "Reference copied";
 "ok" = "OK";
 "yes" = "Yes";
 "no" = "No";
@@ -45,6 +55,9 @@
 "downloads" = "Downloads";
 "history" = "History";
 "workspaces" = "Workspaces";
+"rename" = "Rename";
+"clone" = "Clone";
+"copy_of %@" = "Copy of %@";
 "definition" = "Definition";
 "dictionary" = "Dictionary";
 "general_book" = "General Book";
@@ -450,6 +463,18 @@
 "all_text_options" = "All Text Options";
 "help_tips" = "Help & Tips";
 "sponsor_development" = "Sponsor Development";
+"about" = "About";
+"rate_app" = "Rate App";
+"report_bug" = "Report Bug";
+"tell_friend" = "Tell a Friend";
+"tell_friend_message" = "Check out AndBible — a powerful, free Bible study app with offline access, bookmarks, notes, and more! https://andbible.org";
+"version %@ (%@)" = "Version %@ (%@)";
+"about_description" = "AndBible is an open-source Bible study app. Read, search, bookmark, and take notes — all offline.";
+"about_sword_credit" = "Powered by the SWORD library from the CrossWire Bible Society";
+"about_website" = "Website";
+"about_source_code" = "Source Code";
+"about_privacy_policy" = "Privacy Policy";
+"about_license" = "License (GPLv3)";
 
 /* Help Sections */
 "help_navigation" = "Navigation";

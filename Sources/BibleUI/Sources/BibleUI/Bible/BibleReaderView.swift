@@ -8,11 +8,14 @@ import SwiftData
 import BibleView
 import BibleCore
 import SwordKit
+#if os(iOS)
+import StoreKit
+#endif
 
 #if os(iOS)
 /// Present a CompareView sheet using UIKit directly.
 /// Same reason as Strong's — triggered from WKScriptMessageHandler.
-func presentCompareView(book: String, chapter: Int, currentModuleName: String, startVerse: Int? = nil, endVerse: Int? = nil) {
+func presentCompareView(book: String, chapter: Int, currentModuleName: String, startVerse: Int? = nil, endVerse: Int? = nil, osisBookId: String? = nil) {
     guard let windowScene = UIApplication.shared.connectedScenes
         .compactMap({ $0 as? UIWindowScene }).first,
           let rootVC = windowScene.windows.first?.rootViewController else { return }
@@ -22,7 +25,7 @@ func presentCompareView(book: String, chapter: Int, currentModuleName: String, s
         topVC = presented
     }
 
-    let content = CompareView(book: book, chapter: chapter, currentModuleName: currentModuleName, startVerse: startVerse, endVerse: endVerse)
+    let content = CompareView(book: book, chapter: chapter, currentModuleName: currentModuleName, startVerse: startVerse, endVerse: endVerse, resolvedOsisBookId: osisBookId)
     let hostingVC = UIHostingController(rootView: NavigationStack { content })
     hostingVC.modalPresentationStyle = .pageSheet
     if let sheet = hostingVC.sheetPresentationController {
@@ -35,7 +38,7 @@ func presentCompareView(book: String, chapter: Int, currentModuleName: String, s
 // Label assignment is now presented via SwiftUI .sheet() in BibleWindowPane
 // (no UIKit hosting needed — avoids gesture/toolbar conflicts)
 #else
-func presentCompareView(book: String, chapter: Int, currentModuleName: String, startVerse: Int? = nil, endVerse: Int? = nil) {
+func presentCompareView(book: String, chapter: Int, currentModuleName: String, startVerse: Int? = nil, endVerse: Int? = nil, osisBookId: String? = nil) {
     // macOS: no-op for now
 }
 // Label assignment presented via SwiftUI .sheet() in BibleWindowPane (cross-platform)
@@ -76,6 +79,7 @@ public struct BibleReaderView: View {
     @State private var searchInitialQuery = ""
     @State private var showLabelManager = false
     @State private var showHelp = false
+    @State private var showAbout = false
     @State private var showRefChooser = false
     @State private var refChooserCompletion: ((String?) -> Void)?
     #if os(iOS)
@@ -116,7 +120,24 @@ public struct BibleReaderView: View {
 
             // Bottom window tab bar — hidden in fullscreen mode
             if !isFullScreen {
-                WindowTabBar()
+                WindowTabBar(
+                    onShowToast: { text in
+                        toastWorkItem?.cancel()
+                        withAnimation { toastMessage = text }
+                        let work = DispatchWorkItem {
+                            withAnimation { toastMessage = nil }
+                        }
+                        toastWorkItem = work
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5, execute: work)
+                    },
+                    onShowBookChooser: {
+                        showBookChooser = true
+                    },
+                    onGoToTypedRef: { window, text in
+                        guard let ctrl = windowManager.controllers[window.id] as? BibleReaderController else { return false }
+                        return ctrl.navigateToRef(text)
+                    }
+                )
             }
         }
         .animation(.easeInOut(duration: 0.2), value: isFullScreen)
@@ -200,7 +221,7 @@ public struct BibleReaderView: View {
                             if parts.count >= 2,
                                let chapter = Int(parts[1]) {
                                 let osisBook = String(parts[0])
-                                if let bookName = BibleReaderController.bookName(forOsisId: osisBook) {
+                                if let bookName = ctrl.bookName(forOsisId: osisBook) {
                                     ctrl.navigateTo(book: bookName, chapter: chapter)
                                 }
                             }
@@ -223,7 +244,7 @@ public struct BibleReaderView: View {
         .preferredColorScheme(nightMode ? .dark : nil)
         .sheet(isPresented: $showBookChooser) {
             NavigationStack {
-                BookChooserView { book, chapter in
+                BookChooserView(books: focusedController?.bookList ?? BibleReaderController.defaultBooks) { book, chapter in
                     showBookChooser = false
                     focusedController?.navigateTo(book: book, chapter: chapter)
                 }
@@ -237,7 +258,7 @@ public struct BibleReaderView: View {
                     searchIndexService: searchIndexService,
                     installedBibleModules: focusedController?.installedBibleModules ?? [],
                     currentBook: focusedController?.currentBook ?? "Genesis",
-                    currentOsisBookId: BibleReaderController.osisBookId(for: focusedController?.currentBook ?? "Genesis"),
+                    currentOsisBookId: focusedController?.osisBookId(for: focusedController?.currentBook ?? "Genesis") ?? BibleReaderController.osisBookId(for: focusedController?.currentBook ?? "Genesis"),
                     initialQuery: searchInitialQuery,
                     onNavigate: { book, chapter in
                         showSearch = false
@@ -292,13 +313,18 @@ public struct BibleReaderView: View {
                 CompareView(
                     book: focusedController?.currentBook ?? "Genesis",
                     chapter: focusedController?.currentChapter ?? 1,
-                    currentModuleName: focusedController?.activeModuleName ?? ""
+                    currentModuleName: focusedController?.activeModuleName ?? "",
+                    resolvedOsisBookId: focusedController.flatMap { $0.osisBookId(for: $0.currentBook) }
                 )
             }
         }
         .sheet(isPresented: $showHistory) {
             NavigationStack {
-                HistoryView { book, chapter in
+                HistoryView(
+                    bookNameResolver: { [weak ctrl = focusedController] osisId in
+                        ctrl?.bookName(forOsisId: osisId)
+                    }
+                ) { book, chapter in
                     showHistory = false
                     focusedController?.navigateTo(book: book, chapter: chapter)
                 }
@@ -451,11 +477,21 @@ public struct BibleReaderView: View {
                     }
             }
         }
+        .sheet(isPresented: $showAbout) {
+            NavigationStack {
+                AboutView()
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button(String(localized: "done")) { showAbout = false }
+                        }
+                    }
+            }
+        }
         .sheet(isPresented: $showRefChooser) {
             NavigationStack {
-                BookChooserView { book, chapter in
+                BookChooserView(books: focusedController?.bookList ?? BibleReaderController.defaultBooks) { book, chapter in
                     showRefChooser = false
-                    let osisId = BibleReaderController.osisBookId(for: book)
+                    let osisId = focusedController?.osisBookId(for: book) ?? BibleReaderController.osisBookId(for: book)
                     refChooserCompletion?("\(osisId).\(chapter)")
                     refChooserCompletion = nil
                 }
@@ -1186,6 +1222,41 @@ public struct BibleReaderView: View {
                                     NSWorkspace.shared.open(url)
                                     #endif
                                 }
+                            }
+                            Divider()
+                            Button(String(localized: "about"), systemImage: "info.circle") {
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                                    showAbout = true
+                                }
+                            }
+                            Button(String(localized: "rate_app"), systemImage: "star") {
+                                #if os(iOS)
+                                if let scene = UIApplication.shared.connectedScenes
+                                    .compactMap({ $0 as? UIWindowScene }).first {
+                                    SKStoreReviewController.requestReview(in: scene)
+                                }
+                                #endif
+                            }
+                            Button(String(localized: "report_bug"), systemImage: "ladybug") {
+                                if let url = URL(string: "https://github.com/AndBible/and-bible/issues") {
+                                    #if os(iOS)
+                                    UIApplication.shared.open(url)
+                                    #elseif os(macOS)
+                                    NSWorkspace.shared.open(url)
+                                    #endif
+                                }
+                            }
+                            Button(String(localized: "tell_friend"), systemImage: "square.and.arrow.up") {
+                                #if os(iOS)
+                                let text = String(localized: "tell_friend_message")
+                                guard let windowScene = UIApplication.shared.connectedScenes
+                                    .compactMap({ $0 as? UIWindowScene }).first,
+                                      let rootVC = windowScene.windows.first?.rootViewController else { return }
+                                var topVC = rootVC
+                                while let presented = topVC.presentedViewController { topVC = presented }
+                                let activityVC = UIActivityViewController(activityItems: [text], applicationActivities: nil)
+                                topVC.present(activityVC, animated: true)
+                                #endif
                             }
                         } label: {
                             Image(systemName: "ellipsis.circle")

@@ -24,6 +24,8 @@ struct BibleWindowPane: View {
     @State private var bridge = BibleBridge()
     @State private var controller: BibleReaderController?
     @State private var pendingLabelBookmarkId: UUID?
+    @State private var showGoToRefAlert = false
+    @State private var goToRefText = ""
     @Environment(WindowManager.self) private var windowManager
     @Environment(\.modelContext) private var modelContext
 
@@ -116,11 +118,59 @@ struct BibleWindowPane: View {
                 )
             }
         }
+        .alert(String(localized: "go_to_reference"), isPresented: $showGoToRefAlert) {
+            TextField(String(localized: "go_to_reference_placeholder"), text: $goToRefText)
+            Button(String(localized: "go")) {
+                if !(controller?.navigateToRef(goToRefText) ?? false) {
+                    onShowToast?(String(localized: "go_to_reference_invalid"))
+                }
+            }
+            Button(String(localized: "browse"), role: nil) {
+                onShowBookChooser?()
+            }
+            Button(String(localized: "cancel"), role: .cancel) { }
+        } message: {
+            Text(String(localized: "go_to_reference_message"))
+        }
     }
 
     /// Hamburger menu button overlay for per-window actions (matching Android's BibleFrame).
     private var windowMenuButton: some View {
         Menu {
+            // Content actions
+            Button(String(localized: "copy_reference"), systemImage: "doc.on.clipboard") {
+                copyReference()
+            }
+
+            Button(String(localized: "go_to_reference"), systemImage: "arrow.right.doc.on.clipboard") {
+                windowManager.activeWindow = window
+                goToRefText = ""
+                showGoToRefAlert = true
+            }
+
+            Divider()
+
+            // Move window actions
+            if windowManager.visibleWindows.count > 1 {
+                let sorted = windowManager.visibleWindows.sorted { $0.orderNumber < $1.orderNumber }
+                let currentIndex = sorted.firstIndex(where: { $0.id == window.id })
+
+                Button(String(localized: "move_up"), systemImage: "arrow.up") {
+                    guard let idx = currentIndex, idx > 0 else { return }
+                    windowManager.swapWindowOrder(window, sorted[idx - 1])
+                }
+                .disabled(currentIndex == nil || currentIndex == 0)
+
+                Button(String(localized: "move_down"), systemImage: "arrow.down") {
+                    guard let idx = currentIndex, idx < sorted.count - 1 else { return }
+                    windowManager.swapWindowOrder(window, sorted[idx + 1])
+                }
+                .disabled(currentIndex == nil || currentIndex == sorted.count - 1)
+
+                Divider()
+            }
+
+            // Layout actions
             if windowManager.isMaximized {
                 Button(String(localized: "restore_size"), systemImage: "arrow.down.right.and.arrow.up.left") {
                     windowManager.unmaximize()
@@ -183,6 +233,19 @@ struct BibleWindowPane: View {
         }
     }
 
+    /// Copy the current reference (e.g. "Genesis 1 (KJV)") to clipboard.
+    private func copyReference() {
+        guard let ctrl = controller else { return }
+        let ref = "\(ctrl.currentBook) \(ctrl.currentChapter) (\(ctrl.activeModuleName))"
+        #if os(iOS)
+        UIPasteboard.general.string = ref
+        #elseif os(macOS)
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(ref, forType: .string)
+        #endif
+        onShowToast?(String(localized: "reference_copied"))
+    }
+
     private func initializeController() {
         guard controller == nil else { return }
 
@@ -213,9 +276,10 @@ struct BibleWindowPane: View {
         ctrl.onShowStrongsDefinition = { json, config in onShowStrongsSheet?(json, config) }
         ctrl.onShowStrongsSearch = { strongsNum in onSearchForStrongs?(strongsNum) }
         ctrl.onShowCrossReferences = { refs in onShowCrossReferences?(refs) }
-        ctrl.onCompareVerses = { book, chapter, moduleName, startVerse, endVerse in
+        ctrl.onCompareVerses = { [weak ctrl] book, chapter, moduleName, startVerse, endVerse in
             #if os(iOS)
-            presentCompareView(book: book, chapter: chapter, currentModuleName: moduleName, startVerse: startVerse, endVerse: endVerse)
+            let osisId = ctrl?.osisBookId(for: book)
+            presentCompareView(book: book, chapter: chapter, currentModuleName: moduleName, startVerse: startVerse, endVerse: endVerse, osisBookId: osisId)
             #endif
         }
         ctrl.onAssignLabels = { bookmarkId in

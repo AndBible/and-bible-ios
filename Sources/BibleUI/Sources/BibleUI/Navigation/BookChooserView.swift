@@ -1,48 +1,48 @@
 // BookChooserView.swift — Book selection grid
 
 import SwiftUI
+import SwordKit
 
 /// Grid-based book chooser for navigating to a Bible book.
+///
+/// Displays books from the active module's versification, grouped by testament.
+/// Modules with apocrypha/deuterocanonical books will show additional sections.
 public struct BookChooserView: View {
+    let books: [BookInfo]
     let onSelect: (String, Int) -> Void
-    @State private var selectedBook: String?
+    @State private var selectedBook: BookInfo?
     @Environment(\.dismiss) private var dismiss
 
-    public init(onSelect: @escaping (String, Int) -> Void) {
+    /// Create a book chooser with a specific book list.
+    /// - Parameters:
+    ///   - books: The book list from the active module's versification.
+    ///   - onSelect: Callback with (bookName, chapter) when a chapter is selected.
+    public init(books: [BookInfo], onSelect: @escaping (String, Int) -> Void) {
+        self.books = books
         self.onSelect = onSelect
     }
 
-    private let oldTestamentBooks = [
-        "Genesis", "Exodus", "Leviticus", "Numbers", "Deuteronomy",
-        "Joshua", "Judges", "Ruth", "1 Samuel", "2 Samuel",
-        "1 Kings", "2 Kings", "1 Chronicles", "2 Chronicles",
-        "Ezra", "Nehemiah", "Esther", "Job", "Psalms",
-        "Proverbs", "Ecclesiastes", "Song of Solomon", "Isaiah", "Jeremiah",
-        "Lamentations", "Ezekiel", "Daniel", "Hosea", "Joel",
-        "Amos", "Obadiah", "Jonah", "Micah", "Nahum",
-        "Habakkuk", "Zephaniah", "Haggai", "Zechariah", "Malachi"
-    ]
+    /// Old Testament books from the provided list.
+    private var oldTestamentBooks: [BookInfo] {
+        books.filter { $0.testament == 1 }
+    }
 
-    private let newTestamentBooks = [
-        "Matthew", "Mark", "Luke", "John", "Acts",
-        "Romans", "1 Corinthians", "2 Corinthians", "Galatians", "Ephesians",
-        "Philippians", "Colossians", "1 Thessalonians", "2 Thessalonians",
-        "1 Timothy", "2 Timothy", "Titus", "Philemon", "Hebrews",
-        "James", "1 Peter", "2 Peter", "1 John", "2 John",
-        "3 John", "Jude", "Revelation"
-    ]
+    /// New Testament books from the provided list.
+    private var newTestamentBooks: [BookInfo] {
+        books.filter { $0.testament == 2 }
+    }
 
     public var body: some View {
         Group {
             if let book = selectedBook {
-                ChapterChooserView(bookName: book) { chapter in
-                    onSelect(book, chapter)
+                ChapterChooserView(bookName: book.name, chapterCount: book.chapterCount) { chapter in
+                    onSelect(book.name, chapter)
                 }
             } else {
                 bookGrid
             }
         }
-        .navigationTitle(selectedBook == nil ? String(localized: "choose_book") : selectedBook!)
+        .navigationTitle(selectedBook?.name ?? String(localized: "choose_book"))
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
@@ -61,23 +61,27 @@ public struct BookChooserView: View {
     private var bookGrid: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 16) {
-                Section(String(localized: "old_testament")) {
-                    bookGridSection(books: oldTestamentBooks)
+                if !oldTestamentBooks.isEmpty {
+                    Section(String(localized: "old_testament")) {
+                        bookGridSection(books: oldTestamentBooks)
+                    }
                 }
-                Section(String(localized: "new_testament")) {
-                    bookGridSection(books: newTestamentBooks)
+                if !newTestamentBooks.isEmpty {
+                    Section(String(localized: "new_testament")) {
+                        bookGridSection(books: newTestamentBooks)
+                    }
                 }
             }
             .padding()
         }
     }
 
-    private func bookGridSection(books: [String]) -> some View {
+    private func bookGridSection(books: [BookInfo]) -> some View {
         let columns = [GridItem(.adaptive(minimum: 100), spacing: 8)]
         return LazyVGrid(columns: columns, spacing: 8) {
-            ForEach(books, id: \.self) { book in
+            ForEach(books) { book in
                 Button(action: { selectedBook = book }) {
-                    Text(abbreviation(for: book))
+                    Text(book.abbreviation)
                         .font(.subheadline)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 8)
@@ -87,30 +91,5 @@ public struct BookChooserView: View {
                 .buttonStyle(.plain)
             }
         }
-    }
-
-    private static let abbreviations: [String: String] = [
-        "Genesis": "Gen", "Exodus": "Exod", "Leviticus": "Lev", "Numbers": "Num",
-        "Deuteronomy": "Deut", "Joshua": "Josh", "Judges": "Judg", "Ruth": "Ruth",
-        "1 Samuel": "1 Sam", "2 Samuel": "2 Sam", "1 Kings": "1 Kgs", "2 Kings": "2 Kgs",
-        "1 Chronicles": "1 Chr", "2 Chronicles": "2 Chr", "Ezra": "Ezra", "Nehemiah": "Neh",
-        "Esther": "Esth", "Job": "Job", "Psalms": "Psa", "Proverbs": "Prov",
-        "Ecclesiastes": "Eccl", "Song of Solomon": "Song", "Isaiah": "Isa", "Jeremiah": "Jer",
-        "Lamentations": "Lam", "Ezekiel": "Ezek", "Daniel": "Dan", "Hosea": "Hos",
-        "Joel": "Joel", "Amos": "Amos", "Obadiah": "Obad", "Jonah": "Jonah",
-        "Micah": "Mic", "Nahum": "Nah", "Habakkuk": "Hab", "Zephaniah": "Zeph",
-        "Haggai": "Hag", "Zechariah": "Zech", "Malachi": "Mal",
-        "Matthew": "Matt", "Mark": "Mark", "Luke": "Luke", "John": "John", "Acts": "Acts",
-        "Romans": "Rom", "1 Corinthians": "1 Cor", "2 Corinthians": "2 Cor",
-        "Galatians": "Gal", "Ephesians": "Eph", "Philippians": "Phil", "Colossians": "Col",
-        "1 Thessalonians": "1 Thess", "2 Thessalonians": "2 Thess",
-        "1 Timothy": "1 Tim", "2 Timothy": "2 Tim", "Titus": "Titus", "Philemon": "Phlm",
-        "Hebrews": "Heb", "James": "Jas", "1 Peter": "1 Pet", "2 Peter": "2 Pet",
-        "1 John": "1 John", "2 John": "2 John", "3 John": "3 John",
-        "Jude": "Jude", "Revelation": "Rev",
-    ]
-
-    private func abbreviation(for book: String) -> String {
-        Self.abbreviations[book] ?? book
     }
 }

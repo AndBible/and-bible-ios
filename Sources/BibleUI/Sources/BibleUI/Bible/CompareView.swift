@@ -11,6 +11,8 @@ struct CompareView: View {
     let currentModuleName: String
     var startVerse: Int? = nil
     var endVerse: Int? = nil
+    /// Optional pre-resolved OSIS book ID — avoids static 66-book fallback for apocrypha modules.
+    var resolvedOsisBookId: String? = nil
     @Environment(\.dismiss) private var dismiss
     @State private var installedModules: [String] = []
     @State private var selectedModules: Set<String> = []
@@ -219,7 +221,7 @@ struct CompareView: View {
                 return
             }
 
-            let osisBookId = BibleReaderController.osisBookId(for: book)
+            let osisBookId = resolvedOsisBookId ?? BibleReaderController.osisBookId(for: book)
 
             // Get SwordModule handles for all selected modules
             var modules: [(name: String, mod: SwordModule)] = []

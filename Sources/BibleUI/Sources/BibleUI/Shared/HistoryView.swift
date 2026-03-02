@@ -11,8 +11,11 @@ public struct HistoryView: View {
     @Environment(\.dismiss) private var dismiss
     @Query(sort: \HistoryItem.createdAt, order: .reverse) private var allHistory: [HistoryItem]
     var onNavigate: ((String, Int) -> Void)?
+    /// Resolves an OSIS book ID to a human-readable name using the active controller's dynamic book list.
+    var bookNameResolver: ((String) -> String?)?
 
-    public init(onNavigate: ((String, Int) -> Void)? = nil) {
+    public init(bookNameResolver: ((String) -> String?)? = nil, onNavigate: ((String, Int) -> Void)? = nil) {
+        self.bookNameResolver = bookNameResolver
         self.onNavigate = onNavigate
     }
 
@@ -80,7 +83,7 @@ public struct HistoryView: View {
         guard parts.count >= 2 else { return key }
         let osisId = String(parts[0])
         let chapter = String(parts[1])
-        let bookName = BibleReaderController.bookName(forOsisId: osisId) ?? osisId
+        let bookName = bookNameResolver?(osisId) ?? BibleReaderController.bookName(forOsisId: osisId) ?? osisId
         return "\(bookName) \(chapter)"
     }
 
@@ -89,7 +92,7 @@ public struct HistoryView: View {
         guard parts.count >= 2 else { return }
         let osisId = String(parts[0])
         let chapter = Int(parts[1]) ?? 1
-        let bookName = BibleReaderController.bookName(forOsisId: osisId) ?? osisId
+        let bookName = bookNameResolver?(osisId) ?? BibleReaderController.bookName(forOsisId: osisId) ?? osisId
         dismiss()
         onNavigate?(bookName, chapter)
     }

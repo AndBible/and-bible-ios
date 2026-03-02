@@ -164,6 +164,12 @@ public final class WindowManager {
         refreshWindows()
     }
 
+    /// Swap the order of two windows (move up/down).
+    public func swapWindowOrder(_ window1: Window, _ window2: Window) {
+        workspaceStore.swapWindowOrder(window1, window2)
+        refreshWindows()
+    }
+
     /// Restore all windows from maximized state.
     public func unmaximize() {
         activeWorkspace?.maximizedWindowId = nil

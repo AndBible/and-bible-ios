@@ -8,6 +8,13 @@ import BibleCore
 /// minimized windows appear dimmed with dashed borders. Tap minimized tabs to restore.
 struct WindowTabBar: View {
     @Environment(WindowManager.self) private var windowManager
+    var onShowToast: ((String) -> Void)?
+    var onShowBookChooser: (() -> Void)?
+    /// Callback to navigate a window to a typed reference. Returns true on success.
+    var onGoToTypedRef: ((Window, String) -> Bool)?
+    @State private var showGoToRefAlert = false
+    @State private var goToRefText = ""
+    @State private var goToRefWindow: Window?
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
@@ -32,6 +39,22 @@ struct WindowTabBar: View {
             .padding(.vertical, 6)
         }
         .background(.bar)
+        .alert(String(localized: "go_to_reference"), isPresented: $showGoToRefAlert) {
+            TextField(String(localized: "go_to_reference_placeholder"), text: $goToRefText)
+            Button(String(localized: "go")) {
+                if let w = goToRefWindow {
+                    if !(onGoToTypedRef?(w, goToRefText) ?? false) {
+                        onShowToast?(String(localized: "go_to_reference_invalid"))
+                    }
+                }
+            }
+            Button(String(localized: "browse"), role: nil) {
+                onShowBookChooser?()
+            }
+            Button(String(localized: "cancel"), role: .cancel) { }
+        } message: {
+            Text(String(localized: "go_to_reference_message"))
+        }
     }
 
     // MARK: - Window Tab
@@ -101,11 +124,47 @@ struct WindowTabBar: View {
         }
         .buttonStyle(.plain)
         .contextMenu {
+            // Content actions
+            if !isMinimized {
+                Button(String(localized: "copy_reference"), systemImage: "doc.on.clipboard") {
+                    copyReference(for: window)
+                }
+
+                Button(String(localized: "go_to_reference"), systemImage: "arrow.right.doc.on.clipboard") {
+                    windowManager.activeWindow = window
+                    goToRefWindow = window
+                    goToRefText = ""
+                    showGoToRefAlert = true
+                }
+            }
+
+            Divider()
+
             if isMinimized {
                 Button(String(localized: "restore"), systemImage: "arrow.up.left.and.arrow.down.right") {
                     windowManager.restoreWindow(window)
                 }
             } else {
+                // Move window actions
+                if windowManager.visibleWindows.count > 1 {
+                    let sorted = windowManager.visibleWindows.sorted { $0.orderNumber < $1.orderNumber }
+                    let currentIndex = sorted.firstIndex(where: { $0.id == window.id })
+
+                    Button(String(localized: "move_up"), systemImage: "arrow.up") {
+                        guard let idx = currentIndex, idx > 0 else { return }
+                        windowManager.swapWindowOrder(window, sorted[idx - 1])
+                    }
+                    .disabled(currentIndex == nil || currentIndex == 0)
+
+                    Button(String(localized: "move_down"), systemImage: "arrow.down") {
+                        guard let idx = currentIndex, idx < sorted.count - 1 else { return }
+                        windowManager.swapWindowOrder(window, sorted[idx + 1])
+                    }
+                    .disabled(currentIndex == nil || currentIndex == sorted.count - 1)
+
+                    Divider()
+                }
+
                 Button(String(localized: "minimize"), systemImage: "minus") {
                     windowManager.minimizeWindow(window)
                 }
@@ -162,12 +221,44 @@ struct WindowTabBar: View {
     }
 
     private func shortReference(for window: Window) -> String {
+        // Use controller's dynamic book list if available, otherwise fallback to static
+        if let ctrl = windowManager.controllers[window.id] as? BibleReaderController {
+            return "\(ctrl.osisBookId(for: ctrl.currentBook)) \(ctrl.currentChapter)"
+        }
         guard let pm = window.pageManager else { return "" }
+        let books = BibleReaderController.defaultBooks
         guard let bookIndex = pm.bibleBibleBook,
-              bookIndex >= 0, bookIndex < BibleReaderController.allBooks.count else { return "" }
-        let book = BibleReaderController.allBooks[bookIndex]
+              bookIndex >= 0, bookIndex < books.count else { return "" }
+        let book = books[bookIndex]
         let chapter = pm.bibleChapterNo ?? 1
-        let osisId = BibleReaderController.osisBookId(for: book)
-        return "\(osisId) \(chapter)"
+        return "\(book.osisId) \(chapter)"
+    }
+
+    private func copyReference(for window: Window) {
+        let ref = fullReference(for: window)
+        guard !ref.isEmpty else { return }
+        #if os(iOS)
+        UIPasteboard.general.string = ref
+        #elseif os(macOS)
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(ref, forType: .string)
+        #endif
+        onShowToast?(String(localized: "reference_copied"))
+    }
+
+    private func fullReference(for window: Window) -> String {
+        // Try to get reference from controller if available
+        if let ctrl = windowManager.controllers[window.id] as? BibleReaderController {
+            return "\(ctrl.currentBook) \(ctrl.currentChapter) (\(ctrl.activeModuleName))"
+        }
+        // Fallback to PageManager data
+        guard let pm = window.pageManager else { return "" }
+        let books = BibleReaderController.defaultBooks
+        let moduleName = pm.bibleDocument ?? "KJV"
+        guard let bookIndex = pm.bibleBibleBook,
+              bookIndex >= 0, bookIndex < books.count else { return "" }
+        let book = books[bookIndex]
+        let chapter = pm.bibleChapterNo ?? 1
+        return "\(book.name) \(chapter) (\(moduleName))"
     }
 }

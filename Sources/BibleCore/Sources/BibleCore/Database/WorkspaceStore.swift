@@ -52,6 +52,99 @@ public final class WorkspaceStore {
         return workspace
     }
 
+    /// Rename a workspace.
+    public func renameWorkspace(_ workspace: Workspace, to newName: String) {
+        workspace.name = newName
+        save()
+    }
+
+    /// Clone a workspace with all its windows, page managers, and history.
+    @discardableResult
+    public func cloneWorkspace(_ source: Workspace, newName: String) -> Workspace {
+        let cloned = Workspace(name: newName, orderNumber: source.orderNumber + 1)
+        cloned.contentsText = source.contentsText
+        cloned.textDisplaySettings = source.textDisplaySettings
+        cloned.workspaceSettings = source.workspaceSettings
+        cloned.workspaceColor = source.workspaceColor
+        cloned.unPinnedWeight = source.unPinnedWeight
+        modelContext.insert(cloned)
+
+        // Shift order of workspaces after the source
+        let allWorkspaces = workspaces()
+        for ws in allWorkspaces where ws.id != cloned.id && ws.orderNumber > source.orderNumber {
+            ws.orderNumber += 1
+        }
+
+        // Deep-copy windows
+        let sourceWindows = (source.windows ?? []).sorted { $0.orderNumber < $1.orderNumber }
+        var windowIdMap: [UUID: UUID] = [:]  // old -> new, for links references
+
+        for srcWindow in sourceWindows {
+            let newWindow = Window(
+                isSynchronized: srcWindow.isSynchronized,
+                isPinMode: srcWindow.isPinMode,
+                isLinksWindow: srcWindow.isLinksWindow,
+                orderNumber: srcWindow.orderNumber,
+                syncGroup: srcWindow.syncGroup,
+                layoutWeight: srcWindow.layoutWeight,
+                layoutState: srcWindow.layoutState
+            )
+            newWindow.workspace = cloned
+            newWindow.targetLinksWindowId = srcWindow.targetLinksWindowId
+            windowIdMap[srcWindow.id] = newWindow.id
+            modelContext.insert(newWindow)
+
+            // Deep-copy PageManager
+            if let srcPM = srcWindow.pageManager {
+                let newPM = PageManager(id: newWindow.id, currentCategoryName: srcPM.currentCategoryName)
+                newPM.window = newWindow
+                newPM.bibleDocument = srcPM.bibleDocument
+                newPM.bibleVersification = srcPM.bibleVersification
+                newPM.bibleBibleBook = srcPM.bibleBibleBook
+                newPM.bibleChapterNo = srcPM.bibleChapterNo
+                newPM.bibleVerseNo = srcPM.bibleVerseNo
+                newPM.commentaryDocument = srcPM.commentaryDocument
+                newPM.commentaryAnchorOrdinal = srcPM.commentaryAnchorOrdinal
+                newPM.dictionaryDocument = srcPM.dictionaryDocument
+                newPM.dictionaryKey = srcPM.dictionaryKey
+                newPM.generalBookDocument = srcPM.generalBookDocument
+                newPM.generalBookKey = srcPM.generalBookKey
+                newPM.mapDocument = srcPM.mapDocument
+                newPM.mapKey = srcPM.mapKey
+                newPM.epubIdentifier = srcPM.epubIdentifier
+                newPM.epubHref = srcPM.epubHref
+                newPM.textDisplaySettings = srcPM.textDisplaySettings
+                newPM.jsState = srcPM.jsState
+                modelContext.insert(newPM)
+            }
+
+            // Deep-copy HistoryItems
+            for item in srcWindow.historyItems ?? [] {
+                let newItem = HistoryItem(document: item.document, key: item.key)
+                newItem.anchorOrdinal = item.anchorOrdinal
+                newItem.createdAt = item.createdAt
+                newItem.window = newWindow
+                modelContext.insert(newItem)
+            }
+        }
+
+        // Remap links window references
+        if let srcMaxId = source.maximizedWindowId, let newId = windowIdMap[srcMaxId] {
+            cloned.maximizedWindowId = newId
+        }
+        if let srcLinksId = source.primaryTargetLinksWindowId, let newId = windowIdMap[srcLinksId] {
+            cloned.primaryTargetLinksWindowId = newId
+        }
+        for window in cloned.windows ?? [] {
+            if let targetId = window.targetLinksWindowId, let newId = windowIdMap[targetId] {
+                window.targetLinksWindowId = newId
+            }
+        }
+
+        save()
+        return cloned
+    }
+
     /// Delete a workspace and all its windows.
     public func delete(_ workspace: Workspace) {
         modelContext.delete(workspace)
@@ -90,6 +183,14 @@ public final class WorkspaceStore {
         save()
 
         return window
+    }
+
+    /// Swap the order of two windows.
+    public func swapWindowOrder(_ window1: Window, _ window2: Window) {
+        let temp = window1.orderNumber
+        window1.orderNumber = window2.orderNumber
+        window2.orderNumber = temp
+        save()
     }
 
     /// Delete a window.

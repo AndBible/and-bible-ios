@@ -166,6 +166,74 @@ public final class SwordModule: @unchecked Sendable {
         }
     }
 
+    // MARK: - Versification / Book List
+
+    /// Get the list of all books in this Bible module's versification.
+    ///
+    /// Iterates through the module's verse key positions using `getKeyChildren()`,
+    /// collecting book metadata (name, OSIS ID, abbreviation, chapter count, testament).
+    /// Jumps between books efficiently by setting the key to the last chapter of each book
+    /// and advancing to the next.
+    ///
+    /// - Returns: Ordered array of `BookInfo` for each book in the module's canon.
+    ///   Returns empty array for non-Bible modules or if the module has no verse key.
+    public func getBookList() -> [BookInfo] {
+        guard info.category == .bible || info.category == .commentary else { return [] }
+        return queue.sync {
+            let savedKey = String(cString: SWModule_getKeyText(handle))
+            defer { SWModule_setKeyText(handle, savedKey) }
+
+            SWModule_begin(handle)
+            guard SWModule_popError(handle) == 0 else { return [] }
+
+            var books: [BookInfo] = []
+            var lastBookNum = -1
+
+            while true {
+                guard let children = SWModule_getKeyChildren(handle) else { break }
+
+                // Parse key children array: [testament, book, chapter, verse,
+                //   chapterMax, verseMax, bookName, osisRef, shortText, bookAbbrev, osisBookName]
+                var parts: [String] = []
+                var i = 0
+                while let ptr = children[i], i < 11 {
+                    parts.append(String(cString: ptr))
+                    i += 1
+                }
+                guard parts.count >= 11 else { break }
+
+                let bookNum = Int(parts[1]) ?? -1
+                let testament = Int(parts[0]) ?? 0
+
+                if bookNum != lastBookNum && testament > 0 {
+                    let chapterMax = Int(parts[4]) ?? 1
+                    let bookName = parts[6]
+                    let osisBookName = parts[10]
+                    let bookAbbrev = parts[9]
+
+                    books.append(BookInfo(
+                        name: bookName,
+                        osisId: osisBookName,
+                        abbreviation: bookAbbrev,
+                        chapterCount: chapterMax,
+                        testament: testament
+                    ))
+                    lastBookNum = bookNum
+
+                    // Jump to the end of this book (last chapter, high verse) to skip
+                    // to the next book on the subsequent next() call
+                    SWModule_setKeyText(handle, "\(osisBookName) \(chapterMax):200")
+                }
+
+                // Advance to next position (should land on the first verse of the next book)
+                if SWModule_next(handle) != 0 { break }
+                if SWModule_popError(handle) != 0 { break }
+            }
+
+            return books
+        }
+    }
+
     // MARK: - Key Browsing
 
     /// Collect all entry keys in the module (for dictionary/genbook key browsing).
