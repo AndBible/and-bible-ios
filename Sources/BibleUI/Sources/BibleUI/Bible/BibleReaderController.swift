@@ -1304,10 +1304,16 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     // MARK: - Public Navigation API
 
     /// Navigate to a specific book and chapter. Sends content to the WebView.
-    public func navigateTo(book: String, chapter: Int) {
+    public func navigateTo(book: String, chapter: Int, verse: Int? = nil) {
         currentBook = book
         currentChapter = chapter
-        lastScrollOrdinal = nil  // New chapter — start at top
+        if let verse, verse > 1 {
+            // Scroll to specific verse using ordinal formula: (chapter-1)*40 + verse
+            lastScrollOrdinal = (chapter - 1) * 40 + verse
+            shouldRestoreScroll = true
+        } else {
+            lastScrollOrdinal = nil  // New chapter — start at top
+        }
 
         // Record history
         if let store = workspaceStore, let window = activeWindow {
@@ -2751,7 +2757,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         let parts = osisRef.split(separator: ".")
         guard parts.count >= 2, let chapter = Int(parts[1]) else { return false }
         guard let name = bookName(forOsisId: String(parts[0])) else { return false }
-        navigateTo(book: name, chapter: chapter)
+        let verse = parts.count >= 3 ? Int(parts[2]) : nil
+        navigateTo(book: name, chapter: chapter, verse: verse)
         return true
     }
 
