@@ -921,26 +921,26 @@ public struct SettingsView: View {
 
     private func selectionSummary(selectedNames: Set<String>, available: [ModuleInfo]) -> String {
         guard !available.isEmpty else {
-            return String(localized: "none", defaultValue: "None")
+            return String(localized: "prefs_swipe_mode_none", defaultValue: "None")
         }
         let availableNames = Set(available.map(\.name))
         let effectiveSelected = selectedNames.isEmpty ? availableNames : selectedNames.intersection(availableNames)
         if effectiveSelected.count >= availableNames.count {
             return String(localized: "all", defaultValue: "All")
         }
-        return String(localized: "settings_selected_count", defaultValue: "\(effectiveSelected.count) selected")
+        return String(format: String(localized: "%lld selected"), effectiveSelected.count)
     }
 
     private func inverseSelectionSummary(disabledNames: Set<String>, available: [ModuleInfo]) -> String {
         guard !available.isEmpty else {
-            return String(localized: "none", defaultValue: "None")
+            return String(localized: "prefs_swipe_mode_none", defaultValue: "None")
         }
         let availableNames = Set(available.map(\.name))
         let enabledCount = availableNames.subtracting(disabledNames).count
         if enabledCount >= availableNames.count {
             return String(localized: "all", defaultValue: "All")
         }
-        return String(localized: "settings_selected_count", defaultValue: "\(enabledCount) selected")
+        return String(format: String(localized: "%lld selected"), enabledCount)
     }
 
     private func applyScreenKeepOn(_ enabled: Bool) {
