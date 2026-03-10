@@ -612,3 +612,7 @@
 
 "open_bible_links_title" = "Open Bible links in AndBible";
 "open_bible_links_summary" = "When clicking links that refer to AndBible supported Bible URL, open them in AndBible";
+
+"crash_app" = "Crash app!";
+"crash_app_summary" = "Crash app after 10 seconds. Debugging feature, visible only in debug builds.";
+"crash_app_scheduled_summary" = "Crash scheduled in 10 seconds.";

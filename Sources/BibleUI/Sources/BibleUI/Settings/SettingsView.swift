@@ -67,6 +67,7 @@ public struct SettingsView: View {
     @State private var showRestartAlert = false
     @State private var showDiscreteHelp = false
     @State private var hasLoadedPreferences = false
+    @State private var debugCrashScheduled = false
 
     private struct LocaleOption: Identifiable {
         let value: String
@@ -615,6 +616,37 @@ public struct SettingsView: View {
                     }
                 }
                 #endif
+
+                #if DEBUG
+                Button(role: .destructive) {
+                    triggerDebugCrash()
+                } label: {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(String(
+                                localized: "crash_app",
+                                defaultValue: "Crash app!"
+                            ))
+                            .foregroundStyle(.red)
+                            Text(debugCrashScheduled
+                                ? String(
+                                    localized: "crash_app_scheduled_summary",
+                                    defaultValue: "Crash scheduled in 10 seconds."
+                                )
+                                : String(
+                                    localized: "crash_app_summary",
+                                    defaultValue: "Crash app after 10 seconds. Debugging feature, visible only in debug builds."
+                                ))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.red)
+                    }
+                }
+                .disabled(debugCrashScheduled)
+                #endif
             }
 
             Section(String(localized: "settings_data")) {
@@ -1096,6 +1128,16 @@ public struct SettingsView: View {
         #if os(iOS)
         guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
         openURL(url)
+        #endif
+    }
+
+    private func triggerDebugCrash() {
+        #if DEBUG
+        guard !debugCrashScheduled else { return }
+        debugCrashScheduled = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 10) {
+            fatalError("Crash app!")
+        }
         #endif
     }
 

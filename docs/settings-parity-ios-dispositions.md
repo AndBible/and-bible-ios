@@ -69,3 +69,16 @@ This file records explicit iOS disposition decisions for Android parity tickets 
   - iOS does not expose a public deep link to per-app "Open by default links" equivalent; app settings is the supported fallback.
 - iOS references:
   - UI + action: `Sources/BibleUI/Sources/BibleUI/Settings/SettingsView.swift`
+
+## SETPAR-506 — `crash_app`
+
+- Android contract:
+  - Key: `crash_app`
+  - Source: `and-bible/app/src/main/res/xml/settings.xml:247-251`
+  - Runtime behavior: debug/beta-only action that crashes app after 10 seconds (`SettingsActivity.kt:321-333`).
+- iOS adaptation (implemented):
+  - Added debug-only destructive action row in Advanced settings.
+  - On tap, schedules app crash after 10 seconds and disables repeat taps while pending.
+  - Action is excluded from non-debug builds.
+- iOS references:
+  - UI + action: `Sources/BibleUI/Sources/BibleUI/Settings/SettingsView.swift`
