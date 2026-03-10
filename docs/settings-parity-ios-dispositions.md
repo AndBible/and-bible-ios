@@ -17,3 +17,17 @@ This file records explicit iOS disposition decisions for Android parity tickets 
 - iOS references:
   - UI + persistence: `Sources/BibleUI/Sources/BibleUI/Settings/SettingsView.swift`
   - Key registry/default: `Sources/BibleCore/Sources/BibleCore/Database/AppPreferenceRegistry.swift`
+
+## SETPAR-501 — `experimental_features`
+
+- Android contract:
+  - Key: `experimental_features`
+  - Source: `and-bible/app/src/main/res/xml/settings.xml:218-225`
+  - Values: `bookmark_edit_actions`, `add_paragraph_break` (`arrays.xml:224-231`)
+- iOS disposition (implemented):
+  - Added matching multi-select UI with Android feature IDs.
+  - Added sanitization of stale/unknown persisted values.
+  - Persisted selected IDs are emitted via `appSettings.enabledExperimentalFeatures`.
+- iOS references:
+  - UI + persistence + sanitization: `Sources/BibleUI/Sources/BibleUI/Settings/SettingsView.swift`
+  - Runtime emission: `Sources/BibleUI/Sources/BibleUI/Bible/BibleReaderController.swift`

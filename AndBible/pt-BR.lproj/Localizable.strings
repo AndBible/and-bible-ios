@@ -494,3 +494,7 @@
 "prefs_volume_keys_scroll_title" = "Volume buttons scroll";
 "prefs_volume_keys_scroll_summary" = "Use volume up/down to scroll Bible text";
 "prefs_volume_keys_scroll_ios_note" = "iOS does not expose volume-button presses to apps. This setting is kept for Android parity and cross-device sync.";
+"prefs_experimental_features_title" = "Experimental features";
+"prefs_experimental_features_summary" = "Select which experimental features to enable. These features are still in development and may change or be removed";
+"experimental_feature_bookmark_edit_actions" = "Bookmark edit actions";
+"experimental_feature_add_paragraph_break" = "Add paragraph break bookmark";

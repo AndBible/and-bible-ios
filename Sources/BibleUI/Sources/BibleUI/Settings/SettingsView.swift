@@ -59,6 +59,7 @@ public struct SettingsView: View {
         AppPreferenceRegistry.stringDefault(for: .bibleViewSwipeMode) ?? "CHAPTER"
     @State private var volumeKeysScroll =
         AppPreferenceRegistry.boolDefault(for: .volumeKeysScroll) ?? true
+    @State private var enabledExperimentalFeatures: Set<String> = []
     @State private var selectedLanguage: String = AppPreferenceRegistry.stringDefault(for: .localePref) ?? ""
     @State private var showRestartAlert = false
     @State private var showDiscreteHelp = false
@@ -69,6 +70,13 @@ public struct SettingsView: View {
         let labelKey: String
         let labelDefault: String
         var id: String { value.isEmpty ? "__default" : value }
+    }
+
+    fileprivate struct ExperimentalFeatureOption: Identifiable {
+        let value: String
+        let titleKey: String
+        let titleDefault: String
+        var id: String { value }
     }
 
     /// Locale options mirror Android arrays.xml order/value contract.
@@ -115,6 +123,20 @@ public struct SettingsView: View {
         .init(value: "yue", labelKey: "lang_cantonese", labelDefault: "Cantonese"),
         .init(value: "zh-Hant-TW", labelKey: "lang_chinese_traditional", labelDefault: "Chinese (Traditional)"),
         .init(value: "zh-Hans-CN", labelKey: "lang_chinese_simplified", labelDefault: "Chinese (Simplified)")
+    ]
+
+    /// Feature IDs mirror Android experimental_features_values.
+    private static let experimentalFeatureOptions: [ExperimentalFeatureOption] = [
+        .init(
+            value: "bookmark_edit_actions",
+            titleKey: "experimental_feature_bookmark_edit_actions",
+            titleDefault: "Bookmark edit actions"
+        ),
+        .init(
+            value: "add_paragraph_break",
+            titleKey: "experimental_feature_add_paragraph_break",
+            titleDefault: "Add paragraph break bookmark"
+        )
     ]
 
     public init(
@@ -501,6 +523,28 @@ public struct SettingsView: View {
             }
 
             Section(String(localized: "prefs_advanced_settings_cat", defaultValue: "Advanced settings")) {
+                NavigationLink {
+                    ExperimentalFeaturesMultiSelectView(
+                        title: String(
+                            localized: "prefs_experimental_features_title",
+                            defaultValue: "Experimental features"
+                        ),
+                        options: Self.experimentalFeatureOptions,
+                        selectedValues: $enabledExperimentalFeatures
+                    )
+                } label: {
+                    settingsSelectionRow(
+                        title: String(
+                            localized: "prefs_experimental_features_title",
+                            defaultValue: "Experimental features"
+                        ),
+                        summary: String(
+                            localized: "prefs_experimental_features_summary",
+                            defaultValue: "Select which experimental features to enable. These features are still in development and may change or be removed"
+                        ),
+                        detail: experimentalFeaturesSummary(selectedValues: enabledExperimentalFeatures)
+                    )
+                }
                 Toggle(
                     String(
                         localized: "prefs_show_error_box_title",
@@ -642,6 +686,8 @@ public struct SettingsView: View {
             )
             bibleViewSwipeMode = Self.normalizedBibleViewSwipeMode(store.getString(.bibleViewSwipeMode))
             volumeKeysScroll = store.getBool(.volumeKeysScroll)
+            enabledExperimentalFeatures = Set(store.getStringSet(.experimentalFeatures))
+            sanitizeExperimentalFeatures(store: store)
             nightModeMode = store.getString(.nightModePref3)
             let manualNightMode = store.getBool("night_mode")
             nightMode = NightModeSettingsResolver.isNightMode(
@@ -684,6 +730,11 @@ public struct SettingsView: View {
         .onChange(of: disabledWordLookupDictionaryNames) { _, newValue in
             let store = SettingsStore(modelContext: modelContext)
             store.setStringSet(.disabledWordLookupDictionaries, values: Array(newValue))
+        }
+        .onChange(of: enabledExperimentalFeatures) { _, newValue in
+            let store = SettingsStore(modelContext: modelContext)
+            store.setStringSet(.experimentalFeatures, values: Array(newValue))
+            onSettingsChanged?()
         }
     }
 
@@ -972,6 +1023,19 @@ public struct SettingsView: View {
         return String(format: String(localized: "%lld selected"), enabledCount)
     }
 
+    private func experimentalFeaturesSummary(selectedValues: Set<String>) -> String {
+        guard !selectedValues.isEmpty else {
+            return String(localized: "prefs_swipe_mode_none", defaultValue: "Disabled")
+        }
+        let labels = Self.experimentalFeatureOptions
+            .filter { selectedValues.contains($0.value) }
+            .map { Self.localizedExperimentalFeatureTitle($0) }
+        if labels.isEmpty {
+            return String(localized: "prefs_swipe_mode_none", defaultValue: "Disabled")
+        }
+        return labels.joined(separator: ", ")
+    }
+
     private func applyScreenKeepOn(_ enabled: Bool) {
         #if os(iOS)
         UIApplication.shared.isIdleTimerDisabled = enabled
@@ -1013,6 +1077,16 @@ public struct SettingsView: View {
         if sanitizedDisabled != disabledWordLookupDictionaryNames {
             disabledWordLookupDictionaryNames = sanitizedDisabled
             store.setStringSet(.disabledWordLookupDictionaries, values: Array(sanitizedDisabled))
+        }
+    }
+
+    /// Remove persisted experimental feature IDs that no longer exist in Android arrays.xml.
+    private func sanitizeExperimentalFeatures(store: SettingsStore) {
+        let validValues = Set(Self.experimentalFeatureOptions.map(\.value))
+        let sanitized = enabledExperimentalFeatures.intersection(validValues)
+        if sanitized != enabledExperimentalFeatures {
+            enabledExperimentalFeatures = sanitized
+            store.setStringSet(.experimentalFeatures, values: Array(sanitized))
         }
     }
 
@@ -1058,6 +1132,11 @@ public struct SettingsView: View {
     private static func localizedLocaleOptionLabel(_ option: LocaleOption) -> String {
         let localized = String(localized: String.LocalizationValue(option.labelKey))
         return localized == option.labelKey ? option.labelDefault : localized
+    }
+
+    fileprivate static func localizedExperimentalFeatureTitle(_ option: ExperimentalFeatureOption) -> String {
+        let localized = String(localized: String.LocalizationValue(option.titleKey))
+        return localized == option.titleKey ? option.titleDefault : localized
     }
 
     private static func appleLanguageCode(forLocalePrefValue value: String) -> String? {
@@ -1175,6 +1254,32 @@ private struct DictionaryInverseMultiSelectView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+            }
+        }
+        .navigationTitle(title)
+    }
+}
+
+private struct ExperimentalFeaturesMultiSelectView: View {
+    let title: String
+    let options: [SettingsView.ExperimentalFeatureOption]
+    @Binding var selectedValues: Set<String>
+
+    var body: some View {
+        List(options) { option in
+            Toggle(
+                isOn: Binding(
+                    get: { selectedValues.contains(option.value) },
+                    set: { isEnabled in
+                        if isEnabled {
+                            selectedValues.insert(option.value)
+                        } else {
+                            selectedValues.remove(option.value)
+                        }
+                    }
+                )
+            ) {
+                Text(SettingsView.localizedExperimentalFeatureTitle(option))
             }
         }
         .navigationTitle(title)
