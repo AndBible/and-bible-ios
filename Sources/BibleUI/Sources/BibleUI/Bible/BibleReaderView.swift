@@ -1459,45 +1459,66 @@ public struct BibleReaderView: View {
     private func handleBibleToolbarTap(_ controller: BibleReaderController?) {
         switch toolbarActionsMode {
         case .defaultMode:
-            performBibleMenuAction()
+            performBibleMenuAction(controller)
         case .swapMenu, .swapActivity:
-            performBibleActivityAction(controller)
+            performBibleNextDocumentAction(controller)
         }
     }
 
     private func handleBibleToolbarLongPress(_ controller: BibleReaderController?) {
         switch toolbarActionsMode {
         case .swapMenu:
-            performBibleMenuAction()
+            performBibleMenuAction(controller)
         case .defaultMode, .swapActivity:
-            performBibleActivityAction(controller)
+            performBibleChooserAction()
         }
     }
 
     private func handleCommentaryToolbarTap(_ controller: BibleReaderController?) {
         switch toolbarActionsMode {
         case .defaultMode:
-            performCommentaryMenuAction()
+            performCommentaryMenuAction(controller)
         case .swapMenu, .swapActivity:
-            performCommentaryActivityAction(controller)
+            performCommentaryNextDocumentAction(controller)
         }
     }
 
     private func handleCommentaryToolbarLongPress(_ controller: BibleReaderController?) {
         switch toolbarActionsMode {
         case .swapMenu:
-            performCommentaryMenuAction()
+            performCommentaryMenuAction(controller)
         case .defaultMode, .swapActivity:
-            performCommentaryActivityAction(controller)
+            performCommentaryChooserAction()
         }
     }
 
-    private func performBibleMenuAction() {
+    /// Android `menuForDocs`: open menu, but auto-switch when exactly two docs exist.
+    private func performBibleMenuAction(_ controller: BibleReaderController?) {
+        guard let controller else {
+            performBibleChooserAction()
+            return
+        }
+        if controller.installedBibleModules.count == 2 {
+            cycleToNextModule(
+                modules: controller.installedBibleModules,
+                activeName: controller.activeModuleName
+            ) { nextName in
+                controller.switchModule(to: nextName)
+                controller.switchCategory(to: .bible)
+            }
+            return
+        }
+        performBibleChooserAction()
+    }
+
+    /// Android "document chooser activity" equivalent.
+    private func performBibleChooserAction() {
         pickerCategory = .bible
         showModulePicker = true
     }
 
-    private func performBibleActivityAction(_ controller: BibleReaderController?) {
+    /// Android swap behavior: tap opens next document.
+    private func performBibleNextDocumentAction(_ controller: BibleReaderController?) {
         guard let controller else { return }
         if controller.currentCategory != .bible {
             controller.switchCategory(to: .bible)
@@ -1512,16 +1533,37 @@ public struct BibleReaderView: View {
         }
     }
 
-    private func performCommentaryMenuAction() {
+    /// Android `menuForDocs`: open menu, but auto-switch when exactly two docs exist.
+    private func performCommentaryMenuAction(_ controller: BibleReaderController?) {
+        guard let controller else {
+            performCommentaryChooserAction()
+            return
+        }
+        if controller.installedCommentaryModules.count == 2 {
+            cycleToNextModule(
+                modules: controller.installedCommentaryModules,
+                activeName: controller.activeCommentaryModuleName
+            ) { nextName in
+                controller.switchCommentaryModule(to: nextName)
+                controller.switchCategory(to: .commentary)
+            }
+            return
+        }
+        performCommentaryChooserAction()
+    }
+
+    /// Android "document chooser activity" equivalent.
+    private func performCommentaryChooserAction() {
         pickerCategory = .commentary
         showModulePicker = true
     }
 
-    private func performCommentaryActivityAction(_ controller: BibleReaderController?) {
+    /// Android swap behavior: tap opens next document.
+    private func performCommentaryNextDocumentAction(_ controller: BibleReaderController?) {
         guard let controller else { return }
         if controller.currentCategory != .commentary {
             if controller.activeCommentaryModuleName == nil {
-                performCommentaryMenuAction()
+                performCommentaryChooserAction()
             } else {
                 controller.switchCategory(to: .commentary)
             }
