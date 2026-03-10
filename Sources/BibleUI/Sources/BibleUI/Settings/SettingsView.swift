@@ -42,6 +42,8 @@ public struct SettingsView: View {
     @State private var showErrorBox = AppPreferenceRegistry.boolDefault(for: .showErrorBox) ?? false
     @State private var enableBluetoothMediaButtons =
         AppPreferenceRegistry.boolDefault(for: .enableBluetoothPref) ?? true
+    @State private var disabledBibleBookmarkModalButtons: Set<String> = []
+    @State private var disabledGenBookmarkModalButtons: Set<String> = []
     @State private var fontSizeMultiplier = AppPreferenceRegistry.intDefault(for: .fontSizeMultiplier) ?? 100
     @State private var fullScreenHideButtons =
         AppPreferenceRegistry.boolDefault(for: .fullScreenHideButtonsPref) ?? true
@@ -77,6 +79,13 @@ public struct SettingsView: View {
     }
 
     fileprivate struct ExperimentalFeatureOption: Identifiable {
+        let value: String
+        let titleKey: String
+        let titleDefault: String
+        var id: String { value }
+    }
+
+    fileprivate struct BookmarkModalActionOption: Identifiable {
         let value: String
         let titleKey: String
         let titleDefault: String
@@ -141,6 +150,26 @@ public struct SettingsView: View {
             titleKey: "experimental_feature_add_paragraph_break",
             titleDefault: "Add paragraph break bookmark"
         )
+    ]
+
+    /// Android arrays.xml: prefs_bible_bookmark_modal_action_ids / _names.
+    private static let bibleBookmarkModalActionOptions: [BookmarkModalActionOption] = [
+        .init(value: "BOOKMARK", titleKey: "create_bookmark", titleDefault: "Create a new Bookmark"),
+        .init(value: "BOOKMARK_NOTES", titleKey: "create_bookmark_with_a_note", titleDefault: "Create a new Bookmark with a note"),
+        .init(value: "ADD_PARAGRAPH_BREAK", titleKey: "add_paragraph_break", titleDefault: "Paragraph break"),
+        .init(value: "MY_NOTES", titleKey: "my_notes_abbreviation", titleDefault: "My Notes"),
+        .init(value: "SHARE", titleKey: "share_verse_widget_title", titleDefault: "Share selection"),
+        .init(value: "COMPARE", titleKey: "compare", titleDefault: "Compare"),
+        .init(value: "SPEAK", titleKey: "speak", titleDefault: "Speak"),
+        .init(value: "MEMORIZE", titleKey: "memorize_abbreviation", titleDefault: "Memorize")
+    ]
+
+    /// Android arrays.xml: prefs_gen_bookmark_modal_action_ids / _names.
+    private static let genBookmarkModalActionOptions: [BookmarkModalActionOption] = [
+        .init(value: "BOOKMARK", titleKey: "create_bookmark", titleDefault: "Create a new Bookmark"),
+        .init(value: "BOOKMARK_NOTES", titleKey: "create_bookmark_with_a_note", titleDefault: "Create a new Bookmark with a note"),
+        .init(value: "ADD_PARAGRAPH_BREAK", titleKey: "add_paragraph_break", titleDefault: "Paragraph break"),
+        .init(value: "SPEAK", titleKey: "speak", titleDefault: "Speak")
     ]
 
     public init(
@@ -570,6 +599,7 @@ public struct SettingsView: View {
                         detail: experimentalFeaturesSummary(selectedValues: enabledExperimentalFeatures)
                     )
                 }
+                #if DEBUG
                 Toggle(
                     String(
                         localized: "prefs_show_error_box_title",
@@ -591,6 +621,7 @@ public struct SettingsView: View {
                 ))
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                #endif
 
                 #if os(iOS)
                 Button {
@@ -746,7 +777,10 @@ public struct SettingsView: View {
             selectedStrongsHebrewDictionaryNames = Set(store.getStringSet(.strongsHebrewDictionary))
             selectedRobinsonMorphologyDictionaryNames = Set(store.getStringSet(.robinsonGreekMorphology))
             disabledWordLookupDictionaryNames = Set(store.getStringSet(.disabledWordLookupDictionaries))
+            disabledBibleBookmarkModalButtons = Set(store.getStringSet(.disableBibleBookmarkModalButtons))
+            disabledGenBookmarkModalButtons = Set(store.getStringSet(.disableGenBookmarkModalButtons))
             sanitizeDictionaryPreferences(store: store)
+            sanitizeBookmarkModalActionPreferences(store: store)
             openLinksInSpecialWindow = store.getBool(.openLinksInSpecialWindowPref)
             monochromeMode = store.getBool(.monochromeMode)
             disableAnimations = store.getBool(.disableAnimations)
@@ -812,6 +846,16 @@ public struct SettingsView: View {
         .onChange(of: disabledWordLookupDictionaryNames) { _, newValue in
             let store = SettingsStore(modelContext: modelContext)
             store.setStringSet(.disabledWordLookupDictionaries, values: Array(newValue))
+        }
+        .onChange(of: disabledBibleBookmarkModalButtons) { _, newValue in
+            let store = SettingsStore(modelContext: modelContext)
+            store.setStringSet(.disableBibleBookmarkModalButtons, values: Array(newValue))
+            onSettingsChanged?()
+        }
+        .onChange(of: disabledGenBookmarkModalButtons) { _, newValue in
+            let store = SettingsStore(modelContext: modelContext)
+            store.setStringSet(.disableGenBookmarkModalButtons, values: Array(newValue))
+            onSettingsChanged?()
         }
         .onChange(of: enabledExperimentalFeatures) { _, newValue in
             let store = SettingsStore(modelContext: modelContext)
@@ -1021,6 +1065,56 @@ public struct SettingsView: View {
             ))
                 .font(.caption)
                 .foregroundStyle(.secondary)
+            NavigationLink {
+                BookmarkModalActionsInverseMultiSelectView(
+                    title: String(
+                        localized: "prefs_in_window_bible_bookmark_modal_buttons_title",
+                        defaultValue: "One-tap actions (Bibles)"
+                    ),
+                    options: Self.bibleBookmarkModalActionOptions,
+                    disabledValues: $disabledBibleBookmarkModalButtons
+                )
+            } label: {
+                settingsSelectionRow(
+                    title: String(
+                        localized: "prefs_in_window_bible_bookmark_modal_buttons_title",
+                        defaultValue: "One-tap actions (Bibles)"
+                    ),
+                    summary: String(
+                        localized: "prefs_in_window_bookmark_modal_buttons_description",
+                        defaultValue: "When a text is tapped, one-tap action window is shown. Which action buttons should be shown?"
+                    ),
+                    detail: inverseSelectionSummary(
+                        disabledValues: disabledBibleBookmarkModalButtons,
+                        options: Self.bibleBookmarkModalActionOptions
+                    )
+                )
+            }
+            NavigationLink {
+                BookmarkModalActionsInverseMultiSelectView(
+                    title: String(
+                        localized: "prefs_in_window_gen_bookmark_modal_buttons_title",
+                        defaultValue: "One-tap actions (Other)"
+                    ),
+                    options: Self.genBookmarkModalActionOptions,
+                    disabledValues: $disabledGenBookmarkModalButtons
+                )
+            } label: {
+                settingsSelectionRow(
+                    title: String(
+                        localized: "prefs_in_window_gen_bookmark_modal_buttons_title",
+                        defaultValue: "One-tap actions (Other)"
+                    ),
+                    summary: String(
+                        localized: "prefs_in_window_bookmark_modal_buttons_description",
+                        defaultValue: "When a text is tapped, one-tap action window is shown. Which action buttons should be shown?"
+                    ),
+                    detail: inverseSelectionSummary(
+                        disabledValues: disabledGenBookmarkModalButtons,
+                        options: Self.genBookmarkModalActionOptions
+                    )
+                )
+            }
             Picker(
                 String(localized: "prefs_interface_locale_title", defaultValue: "Application language"),
                 selection: $selectedLanguage
@@ -1105,6 +1199,21 @@ public struct SettingsView: View {
         return String(format: String(localized: "%lld selected"), enabledCount)
     }
 
+    private func inverseSelectionSummary(
+        disabledValues: Set<String>,
+        options: [BookmarkModalActionOption]
+    ) -> String {
+        guard !options.isEmpty else {
+            return String(localized: "prefs_swipe_mode_none", defaultValue: "None")
+        }
+        let availableValues = Set(options.map(\.value))
+        let enabledCount = availableValues.subtracting(disabledValues).count
+        if enabledCount >= availableValues.count {
+            return String(localized: "all", defaultValue: "All")
+        }
+        return String(format: String(localized: "%lld selected"), enabledCount)
+    }
+
     private func experimentalFeaturesSummary(selectedValues: Set<String>) -> String {
         guard !selectedValues.isEmpty else {
             return String(localized: "prefs_swipe_mode_none", defaultValue: "Disabled")
@@ -1179,6 +1288,23 @@ public struct SettingsView: View {
         }
     }
 
+    /// Remove persisted modal-action IDs that no longer exist in Android arrays.xml contracts.
+    private func sanitizeBookmarkModalActionPreferences(store: SettingsStore) {
+        let validBibleActions = Set(Self.bibleBookmarkModalActionOptions.map(\.value))
+        let sanitizedBible = disabledBibleBookmarkModalButtons.intersection(validBibleActions)
+        if sanitizedBible != disabledBibleBookmarkModalButtons {
+            disabledBibleBookmarkModalButtons = sanitizedBible
+            store.setStringSet(.disableBibleBookmarkModalButtons, values: Array(sanitizedBible))
+        }
+
+        let validGenActions = Set(Self.genBookmarkModalActionOptions.map(\.value))
+        let sanitizedGen = disabledGenBookmarkModalButtons.intersection(validGenActions)
+        if sanitizedGen != disabledGenBookmarkModalButtons {
+            disabledGenBookmarkModalButtons = sanitizedGen
+            store.setStringSet(.disableGenBookmarkModalButtons, values: Array(sanitizedGen))
+        }
+    }
+
     /// Remove persisted experimental feature IDs that no longer exist in Android arrays.xml.
     private func sanitizeExperimentalFeatures(store: SettingsStore) {
         let validValues = Set(Self.experimentalFeatureOptions.map(\.value))
@@ -1234,6 +1360,11 @@ public struct SettingsView: View {
     }
 
     fileprivate static func localizedExperimentalFeatureTitle(_ option: ExperimentalFeatureOption) -> String {
+        let localized = String(localized: String.LocalizationValue(option.titleKey))
+        return localized == option.titleKey ? option.titleDefault : localized
+    }
+
+    fileprivate static func localizedBookmarkModalActionTitle(_ option: BookmarkModalActionOption) -> String {
         let localized = String(localized: String.LocalizationValue(option.titleKey))
         return localized == option.titleKey ? option.titleDefault : localized
     }
@@ -1379,6 +1510,32 @@ private struct ExperimentalFeaturesMultiSelectView: View {
                 )
             ) {
                 Text(SettingsView.localizedExperimentalFeatureTitle(option))
+            }
+        }
+        .navigationTitle(title)
+    }
+}
+
+private struct BookmarkModalActionsInverseMultiSelectView: View {
+    let title: String
+    let options: [SettingsView.BookmarkModalActionOption]
+    @Binding var disabledValues: Set<String>
+
+    var body: some View {
+        List(options) { option in
+            Toggle(
+                isOn: Binding(
+                    get: { !disabledValues.contains(option.value) },
+                    set: { isEnabled in
+                        if isEnabled {
+                            disabledValues.remove(option.value)
+                        } else {
+                            disabledValues.insert(option.value)
+                        }
+                    }
+                )
+            ) {
+                Text(SettingsView.localizedBookmarkModalActionTitle(option))
             }
         }
         .navigationTitle(title)

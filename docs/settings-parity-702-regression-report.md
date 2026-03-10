@@ -91,4 +91,4 @@ The CI workflow now includes the expected improvements and still runs guardrails
 
 ## Follow-up Inputs
 
-See `docs/settings-parity-701-verification-matrix.md` for current functional parity status by key, including remaining partial gaps (`disable_*_bookmark_modal_buttons` UI and `show_errorbox` visibility drift).
+See `docs/settings-parity-701-verification-matrix.md` for current functional parity status by key. Current remaining items are only documented platform divergences.

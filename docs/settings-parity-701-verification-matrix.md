@@ -17,9 +17,9 @@ Date: 2026-03-10
 
 ## Summary
 
-- `Pass`: 22/35
-- `Adapted Pass`: 8/35
-- `Partial`: 3/35
+- `Pass`: 24/35
+- `Adapted Pass`: 9/35
+- `Partial`: 0/35
 - `Documented Divergence`: 2/35
 
 ## Key-by-Key Matrix
@@ -49,8 +49,8 @@ Date: 2026-03-10
 | `hide_window_buttons` | `SettingsView.swift:961-980,759,971` | `BibleReaderView.swift:699`; `BibleWindowPane.swift:79-83` | Pass | Window hamburger control visibility follows preference. |
 | `hide_bible_reference_overlay` | `SettingsView.swift:982-1002,760,992` | `BibleReaderView.swift:143-147,199-210,1611` | Pass | Fullscreen Bible reference capsule overlay is preference-gated. |
 | `show_active_window_indicator` | `SettingsView.swift:1003-1023,754,1013` | `BibleReaderController.swift:4030-4033,4064-4065,4102` | Pass | Indicator propagated via both `set_active` event and config payload. |
-| `disable_bible_bookmark_modal_buttons` | No settings UI row found (search in `SettingsView.swift`) | `BibleReaderController.swift:4074,4102` | Partial | Runtime payload exists, but no iOS settings surface to edit this set. |
-| `disable_gen_bookmark_modal_buttons` | No settings UI row found (search in `SettingsView.swift`) | `BibleReaderController.swift:4075,4102` | Partial | Runtime payload exists, but no iOS settings surface to edit this set. |
+| `disable_bible_bookmark_modal_buttons` | `SettingsView.swift:1071-1093,780,852,1292-1304` | `BibleReaderController.swift:4074,4102` | Pass | Inverse multi-select editor now matches Android action IDs and persists disabled button set. |
+| `disable_gen_bookmark_modal_buttons` | `SettingsView.swift:1096-1118,781,857,1299-1304` | `BibleReaderController.swift:4075,4102` | Pass | Inverse multi-select editor now matches Android action IDs and persists disabled button set. |
 | `discrete_help` | `SettingsView.swift:483-499,688-709` | Action-only key shape validated by `AndBibleTests.swift:25-45` | Adapted Pass | Implemented as help action + sheet content. |
 | `discrete_mode` | `SettingsView.swift:500-503` | `AndBibleApp.swift:29,163-165,176-190` | Adapted Pass | iOS icon switching implemented via alternate icon API. |
 | `show_calculator` | `SettingsView.swift:505-508` | `AndBibleApp.swift:31,143-149` | Pass | Startup calculator gate follows persisted preference. |
@@ -58,12 +58,10 @@ Date: 2026-03-10
 | `experimental_features` | `SettingsView.swift:551-571,771,818,1182-1189` | `BibleReaderController.swift:4076,4102` | Pass | Multi-select IDs are sanitized and emitted in appSettings. |
 | `enable_bluetooth_pref` | `SettingsView.swift:529-549,756,540` | `SpeakService.swift:85,107-113` | Adapted Pass | Android media-button behavior adapted to iOS `MPRemoteCommandCenter`. |
 | `request_sdcard_permission_pref` | Not surfaced in iOS settings UI | Disposition documented in `settings-parity-ios-dispositions.md:49-58` | Documented Divergence | No iOS SD-card permission model equivalent. |
-| `show_errorbox` | `SettingsView.swift:573-592,755,583` | `BibleReaderController.swift:4068,4102` | Partial | Functional consumer exists, but Android contract marks beta-only visibility (`settings-parity-contract.md:67`), while iOS currently shows this toggle unconditionally. |
+| `show_errorbox` | `SettingsView.swift:603-624,789` | `BibleReaderController.swift:4068,4102` | Adapted Pass | Visibility is now debug-only (`#if DEBUG`) to match Android beta-only visibility contract. |
 | `open_links` | `SettingsView.swift:595-617,1127-1131` | iOS adaptation in `settings-parity-ios-dispositions.md:60-72` | Adapted Pass | Opens iOS app settings as closest supported equivalent. |
 | `crash_app` | `SettingsView.swift:620-649,1134-1140` | iOS adaptation in `settings-parity-ios-dispositions.md:73-84` | Adapted Pass | Debug-only destructive action with 10-second delay and single-shot guard. |
 
 ## Open Gaps Identified by This Matrix
 
-1. `disable_bible_bookmark_modal_buttons`: missing settings UI editor on iOS (runtime payload only).
-2. `disable_gen_bookmark_modal_buttons`: missing settings UI editor on iOS (runtime payload only).
-3. `show_errorbox`: iOS visibility rule drift vs Android beta-only visibility contract.
+No functional gaps remain for the 35-key Android application-preferences contract. Remaining entries are documented platform divergences (`volume_keys_scroll`, `request_sdcard_permission_pref`).

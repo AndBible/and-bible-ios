@@ -561,11 +561,78 @@ public struct SearchView: View {
         let currentScope = scopeOption
         let currentSelectedModules = selectedModules
         let bookName = currentBook
+        let osisBookId = currentOsisBookId
+        let strongsQueries = Self.normalizedStrongsEntryAttributeQueries(for: currentQuery)
 
         Task.detached(priority: .userInitiated) {
             let (scopeBookName, scopeTestament) = Self.resolveScopeParams(
                 scope: currentScope, bookName: bookName
             )
+            let swordScope = Self.swordScope(for: currentScope, osisBookId: osisBookId)
+
+            // Strong's find-all queries must use SWORD entry-attribute search; the FTS index
+            // intentionally strips Strong's markup from indexed plain text.
+            if !strongsQueries.isEmpty {
+                let targetModuleNames: [String] = {
+                    if currentSelectedModules.isEmpty {
+                        if let primary = swordModule?.info.name {
+                            return [primary]
+                        }
+                        return []
+                    }
+                    return Array(currentSelectedModules).sorted()
+                }()
+
+                var modules: [(name: String, module: SwordModule)] = []
+                for moduleName in targetModuleNames {
+                    if let module = swordManager?.module(named: moduleName) {
+                        modules.append((name: moduleName, module: module))
+                    } else if let primary = swordModule, primary.info.name == moduleName {
+                        modules.append((name: moduleName, module: primary))
+                    }
+                }
+                if modules.isEmpty, let primary = swordModule {
+                    modules = [(name: primary.info.name, module: primary)]
+                }
+
+                if modules.count > 1 {
+                    var allHits: [SearchHit] = []
+                    var perModule: [(name: String, count: Int)] = []
+                    for (moduleName, module) in modules {
+                        let hits = Self.searchStrongsInModule(
+                            module,
+                            strongsQueries: strongsQueries,
+                            moduleName: moduleName,
+                            scope: swordScope
+                        )
+                        perModule.append((name: moduleName, count: hits.count))
+                        allHits.append(contentsOf: hits)
+                    }
+                    let totalCount = perModule.reduce(0) { $0 + $1.count }
+                    await MainActor.run {
+                        results = allHits
+                        multiResults = MultiResultGroup(perModule: perModule, totalCount: totalCount)
+                        resultSummary = String(localized: "\(totalCount) verses in \(perModule.count) translations")
+                        isSearching = false
+                    }
+                    return
+                }
+
+                if let module = modules.first {
+                    let hits = Self.searchStrongsInModule(
+                        module.module,
+                        strongsQueries: strongsQueries,
+                        moduleName: nil,
+                        scope: swordScope
+                    )
+                    await MainActor.run {
+                        results = hits
+                        resultSummary = String(localized: "\(hits.count) verses in 1 translation")
+                        isSearching = false
+                    }
+                    return
+                }
+            }
 
             if let service = searchIndexService {
                 // FTS5 index search
@@ -702,5 +769,63 @@ public struct SearchView: View {
         let bookPart = String(beforeColon[..<spaceIdx])
         guard let chapter = Int(chapterStr), let verse = Int(verseStr) else { return nil }
         return (bookPart, chapter, verse)
+    }
+
+    private static func normalizedStrongsEntryAttributeQueries(for query: String) -> [String] {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return [] }
+
+        var candidate = trimmed.uppercased()
+        if candidate.hasPrefix("LEMMA:STRONG:") {
+            candidate = String(candidate.dropFirst("LEMMA:STRONG:".count))
+        } else if candidate.hasPrefix("STRONG:") {
+            candidate = String(candidate.dropFirst("STRONG:".count))
+        } else if candidate.hasPrefix("LEMMA:") {
+            candidate = String(candidate.dropFirst("LEMMA:".count))
+        }
+
+        guard let prefix = candidate.first, prefix == "H" || prefix == "G" else { return [] }
+        let digitsRaw = String(candidate.dropFirst())
+        guard !digitsRaw.isEmpty, digitsRaw.allSatisfy(\.isNumber) else { return [] }
+
+        let stripped = String(digitsRaw.drop(while: { $0 == "0" }))
+        let normalizedDigits = stripped.isEmpty ? "0" : stripped
+
+        var normalizedKeys: [String] = []
+        normalizedKeys.append("lemma:strong:\(prefix)\(digitsRaw)")
+        if normalizedDigits != digitsRaw {
+            normalizedKeys.append("lemma:strong:\(prefix)\(normalizedDigits)")
+        }
+        return normalizedKeys
+    }
+
+    private static func searchStrongsInModule(
+        _ module: SwordModule,
+        strongsQueries: [String],
+        moduleName: String?,
+        scope: String?
+    ) -> [SearchHit] {
+        for strongsQuery in strongsQueries {
+            let options = SearchOptions(
+                query: strongsQuery,
+                searchType: .entryAttribute,
+                scope: scope
+            )
+            let swordResults = module.search(options)
+            let hits: [SearchHit] = swordResults.results.prefix(5000).compactMap { result in
+                guard let parsed = parseVerseKey(result.key) else { return nil }
+                return SearchHit(
+                    book: parsed.book,
+                    chapter: parsed.chapter,
+                    verse: parsed.verse,
+                    text: result.previewText,
+                    moduleName: moduleName
+                )
+            }
+            if !hits.isEmpty {
+                return hits
+            }
+        }
+        return []
     }
 }
