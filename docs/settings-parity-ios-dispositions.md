@@ -31,3 +31,28 @@ This file records explicit iOS disposition decisions for Android parity tickets 
 - iOS references:
   - UI + persistence + sanitization: `Sources/BibleUI/Sources/BibleUI/Settings/SettingsView.swift`
   - Runtime emission: `Sources/BibleUI/Sources/BibleUI/Bible/BibleReaderController.swift`
+
+## SETPAR-502 — `enable_bluetooth_pref`
+
+- Android contract:
+  - Key: `enable_bluetooth_pref`
+  - Source: `and-bible/app/src/main/res/xml/settings.xml:226-230`
+  - Runtime consumer: `MediaButtonHandler.kt` media-session controls.
+- iOS adaptation (implemented):
+  - Mapped to iOS `MPRemoteCommandCenter` handling in `SpeakService`.
+  - When disabled, iOS remote play/pause/stop/next/previous handlers are unregistered and disabled.
+  - When enabled, handlers are registered and control speech playback/navigation.
+- iOS references:
+  - UI + persistence: `Sources/BibleUI/Sources/BibleUI/Settings/SettingsView.swift`
+  - Runtime consumer: `Sources/BibleCore/Sources/BibleCore/Services/SpeakService.swift`
+
+## SETPAR-503 — `request_sdcard_permission_pref`
+
+- Android contract:
+  - Key: `request_sdcard_permission_pref`
+  - Source: `and-bible/app/src/main/res/xml/settings.xml:231-234`
+  - Runtime behavior: Android storage permission pathway.
+- iOS disposition (Android-only divergence):
+  - iOS has no SD-card permission model equivalent to Android storage permissions.
+  - This preference is intentionally not surfaced in iOS settings UI.
+  - No iOS runtime consumer is added.

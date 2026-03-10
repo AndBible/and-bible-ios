@@ -1616,6 +1616,7 @@ public struct BibleReaderView: View {
             manualNightMode: manualNightMode,
             systemIsDark: colorScheme == .dark
         )
+        speakService.applyBehaviorPreferences()
     }
 
     private func resetAutoFullscreenTracking() {

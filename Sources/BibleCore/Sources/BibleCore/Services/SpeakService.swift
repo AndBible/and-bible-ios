@@ -72,11 +72,17 @@ public final class SpeakService: NSObject, ObservableObject, AVSpeechSynthesizer
 
     private var sleepTimer: Timer?
 
+    #if os(iOS)
+    /// Whether remote media command handling (Bluetooth/lock-screen controls) is enabled.
+    private var remoteCommandHandlingEnabled = false
+    private var remoteCommandsRegistered = false
+    #endif
+
     public override init() {
         super.init()
         synthesizer.delegate = self
         #if os(iOS)
-        setupRemoteCommandCenter()
+        setRemoteCommandHandlingEnabled(AppPreferenceRegistry.boolDefault(for: .enableBluetoothPref) ?? true)
         setupAudioNotifications()
         #endif
     }
@@ -95,6 +101,16 @@ public final class SpeakService: NSObject, ObservableObject, AVSpeechSynthesizer
         if savedSpeed >= 0.5 && savedSpeed <= 2.0 {
             userSpeed = savedSpeed
         }
+        applyBehaviorPreferences()
+    }
+
+    /// Re-apply persisted behavior preferences that affect iOS media controls.
+    public func applyBehaviorPreferences() {
+        #if os(iOS)
+        let enabled = settingsStore?.getBool(.enableBluetoothPref)
+            ?? (AppPreferenceRegistry.boolDefault(for: .enableBluetoothPref) ?? true)
+        setRemoteCommandHandlingEnabled(enabled)
+        #endif
     }
 
     /// Speak the given text.
@@ -214,8 +230,26 @@ public final class SpeakService: NSObject, ObservableObject, AVSpeechSynthesizer
     // MARK: - Remote Command Center (iOS)
 
     #if os(iOS)
+    private func setRemoteCommandHandlingEnabled(_ enabled: Bool) {
+        guard remoteCommandHandlingEnabled != enabled else { return }
+        remoteCommandHandlingEnabled = enabled
+        if enabled {
+            setupRemoteCommandCenter()
+        } else {
+            tearDownRemoteCommandCenter()
+        }
+    }
+
     private func setupRemoteCommandCenter() {
+        guard !remoteCommandsRegistered else { return }
         let center = MPRemoteCommandCenter.shared()
+
+        center.playCommand.isEnabled = true
+        center.pauseCommand.isEnabled = true
+        center.togglePlayPauseCommand.isEnabled = true
+        center.stopCommand.isEnabled = true
+        center.nextTrackCommand.isEnabled = true
+        center.previousTrackCommand.isEnabled = true
 
         center.playCommand.addTarget { [weak self] _ in
             DispatchQueue.main.async { self?.resume() }
@@ -248,9 +282,12 @@ public final class SpeakService: NSObject, ObservableObject, AVSpeechSynthesizer
             DispatchQueue.main.async { self?.skipBackward() }
             return .success
         }
+
+        remoteCommandsRegistered = true
     }
 
     private func tearDownRemoteCommandCenter() {
+        guard remoteCommandsRegistered else { return }
         let center = MPRemoteCommandCenter.shared()
         center.playCommand.removeTarget(nil)
         center.pauseCommand.removeTarget(nil)
@@ -258,6 +295,15 @@ public final class SpeakService: NSObject, ObservableObject, AVSpeechSynthesizer
         center.stopCommand.removeTarget(nil)
         center.nextTrackCommand.removeTarget(nil)
         center.previousTrackCommand.removeTarget(nil)
+
+        center.playCommand.isEnabled = false
+        center.pauseCommand.isEnabled = false
+        center.togglePlayPauseCommand.isEnabled = false
+        center.stopCommand.isEnabled = false
+        center.nextTrackCommand.isEnabled = false
+        center.previousTrackCommand.isEnabled = false
+
+        remoteCommandsRegistered = false
     }
     #endif
 

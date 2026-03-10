@@ -39,6 +39,8 @@ public struct SettingsView: View {
     @State private var showActiveWindowIndicator =
         AppPreferenceRegistry.boolDefault(for: .showActiveWindowIndicator) ?? true
     @State private var showErrorBox = AppPreferenceRegistry.boolDefault(for: .showErrorBox) ?? false
+    @State private var enableBluetoothMediaButtons =
+        AppPreferenceRegistry.boolDefault(for: .enableBluetoothPref) ?? true
     @State private var fontSizeMultiplier = AppPreferenceRegistry.intDefault(for: .fontSizeMultiplier) ?? 100
     @State private var fullScreenHideButtons =
         AppPreferenceRegistry.boolDefault(for: .fullScreenHideButtonsPref) ?? true
@@ -523,6 +525,27 @@ public struct SettingsView: View {
             }
 
             Section(String(localized: "prefs_advanced_settings_cat", defaultValue: "Advanced settings")) {
+                Toggle(
+                    String(
+                        localized: "prefs_enable_bluetooth_title",
+                        defaultValue: "Enable Bluetooth media buttons"
+                    ),
+                    isOn: Binding(
+                        get: { enableBluetoothMediaButtons },
+                        set: { newValue in
+                            enableBluetoothMediaButtons = newValue
+                            let store = SettingsStore(modelContext: modelContext)
+                            store.setBool(.enableBluetoothPref, value: newValue)
+                            onSettingsChanged?()
+                        }
+                    )
+                )
+                Text(String(
+                    localized: "prefs_enable_bluetooth_summary",
+                    defaultValue: "Handle Bluetooth media buttons to start/stop speaking."
+                ))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 NavigationLink {
                     ExperimentalFeaturesMultiSelectView(
                         title: String(
@@ -672,6 +695,7 @@ public struct SettingsView: View {
             disableClickToEdit = store.getBool(.disableClickToEdit)
             showActiveWindowIndicator = store.getBool(.showActiveWindowIndicator)
             showErrorBox = store.getBool(.showErrorBox)
+            enableBluetoothMediaButtons = store.getBool(.enableBluetoothPref)
             fontSizeMultiplier = store.getInt(.fontSizeMultiplier)
             fullScreenHideButtons = store.getBool(.fullScreenHideButtonsPref)
             hideWindowButtons = store.getBool(.hideWindowButtons)
