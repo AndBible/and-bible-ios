@@ -45,6 +45,8 @@ public final class WindowManager {
     /// Parameters: (sourceWindow, ordinal, key)
     public var onSyncVerseChanged: ((Window, Int, String) -> Void)?
 
+    /// Creates a window manager for a workspace-backed window set.
+    /// - Parameter workspaceStore: Store used to load, mutate, and persist workspace windows.
     public init(workspaceStore: WorkspaceStore) {
         self.workspaceStore = workspaceStore
     }
@@ -114,7 +116,13 @@ public final class WindowManager {
         activeWindow = window
     }
 
-    /// Add a new window to the active workspace, optionally copying state from a source window.
+    /// Adds a new window to the active workspace, optionally copying state from an existing window.
+    /// - Parameters:
+    ///   - document: Explicit document/module to open. When `nil`, the source window's Bible document is reused.
+    ///   - category: Category to use when no eligible source category is inherited.
+    ///   - sourceWindow: Existing window whose sync state, layout weight, and reading position should be cloned.
+    /// - Returns: The newly created window, or `nil` when no workspace is active.
+    /// - Note: Non-Bible categories such as dictionary or EPUB are intentionally not inherited; new windows fall back to Bible/commentary semantics.
     @discardableResult
     public func addWindow(document: String? = nil, category: String = "bible", from sourceWindow: Window? = nil) -> Window? {
         guard let workspace = activeWorkspace else { return nil }

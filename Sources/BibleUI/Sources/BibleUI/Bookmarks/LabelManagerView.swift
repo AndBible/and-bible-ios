@@ -285,7 +285,3 @@ private struct LabelEditView: View {
         try? modelContext.save()
     }
 }
-
-// MARK: - Label Identifiable for sheet(item:)
-
-extension BibleCore.Label: Identifiable {}

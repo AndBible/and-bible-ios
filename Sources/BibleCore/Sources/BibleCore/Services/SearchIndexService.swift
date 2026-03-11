@@ -14,8 +14,13 @@ import Observation
 /// Before a module can be searched, it must be indexed. The service extracts
 /// all verse/entry text from the SWORD module and inserts it into an FTS5
 /// virtual table. Subsequent searches query this table for near-instant results.
+///
+/// Threading model:
+/// - the SQLite handle is opened with `SQLITE_OPEN_FULLMUTEX`
+/// - long-running indexing work happens on a background queue
+/// - observable UI state is pushed back to the main queue
 @Observable
-public class SearchIndexService {
+public final class SearchIndexService: @unchecked Sendable {
     private var db: OpaquePointer?
     @ObservationIgnored
     private let dbPath: String
@@ -32,6 +37,10 @@ public class SearchIndexService {
     /// Current key being processed during indexing (e.g. "Genesis 12:4").
     public var indexingKey: String = ""
 
+    /// Creates the shared FTS5 index database in the app documents directory if needed.
+    ///
+    /// The initializer opens `search_indexes.sqlite`, enables WAL mode, creates the
+    /// required tables, and invalidates metadata for indexes built against older schemas.
     public init() {
         let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
         dbPath = docs.appendingPathComponent("search_indexes.sqlite").path

@@ -53,6 +53,7 @@ public final class SyncService {
     private var notificationObserver: NSObjectProtocol?
     private var accountObserver: NSObjectProtocol?
 
+    /// Creates an idle sync monitor. Call `setInitialState(enabled:)` during app startup before `startMonitoring(container:)`.
     public init() {}
 
     deinit {

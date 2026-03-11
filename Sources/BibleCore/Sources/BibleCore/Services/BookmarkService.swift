@@ -9,6 +9,8 @@ import Observation
 public final class BookmarkService {
     private let store: BookmarkStore
 
+    /// Creates a bookmark service backed by the given persistence store.
+    /// - Parameter store: Store responsible for all bookmark, label, and StudyPad persistence.
     public init(store: BookmarkStore) {
         self.store = store
     }

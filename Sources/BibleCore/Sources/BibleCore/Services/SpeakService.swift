@@ -16,6 +16,9 @@ private let logger = Logger(subsystem: "org.andbible", category: "SpeakService")
 /// Uses ObservableObject + @Published so SwiftUI views react to state changes.
 /// Reports word-level progress via `onWordSpoken` for visual highlighting.
 /// Integrates with Now Playing info center and remote command center on iOS.
+/// The service owns one utterance at a time: `speak(text:)` cancels any active
+/// playback, reconfigures the audio session, and publishes progress state that
+/// the reader view uses for controls and highlighting.
 public final class SpeakService: NSObject, ObservableObject, AVSpeechSynthesizerDelegate, @unchecked Sendable {
     private let synthesizer = AVSpeechSynthesizer()
 
@@ -78,6 +81,10 @@ public final class SpeakService: NSObject, ObservableObject, AVSpeechSynthesizer
     private var remoteCommandsRegistered = false
     #endif
 
+    /// Creates the speech service and configures platform integrations.
+    ///
+    /// On iOS this applies the default Bluetooth/media-control preference,
+    /// registers audio interruption observers, and prepares remote command handling.
     public override init() {
         super.init()
         synthesizer.delegate = self
@@ -94,7 +101,10 @@ public final class SpeakService: NSObject, ObservableObject, AVSpeechSynthesizer
         #endif
     }
 
-    /// Restore persisted settings (speed, last sleep timer). Call after wiring settingsStore.
+    /// Restores persisted speech preferences after the caller assigns `settingsStore`.
+    ///
+    /// Currently this reloads the persisted speech speed and reapplies
+    /// behavior preferences that affect lock-screen and Bluetooth controls.
     public func restoreSettings() {
         guard let store = settingsStore else { return }
         let savedSpeed = store.getDouble("speak_speed", default: 1.0)
@@ -104,7 +114,10 @@ public final class SpeakService: NSObject, ObservableObject, AVSpeechSynthesizer
         applyBehaviorPreferences()
     }
 
-    /// Re-apply persisted behavior preferences that affect iOS media controls.
+    /// Reapplies persisted media-control preferences without rebuilding the service.
+    ///
+    /// This is used when the user changes settings that affect remote command
+    /// registration, such as Bluetooth/headset control enablement.
     public func applyBehaviorPreferences() {
         #if os(iOS)
         let enabled = settingsStore?.getBool(.enableBluetoothPref)
@@ -113,7 +126,12 @@ public final class SpeakService: NSObject, ObservableObject, AVSpeechSynthesizer
         #endif
     }
 
-    /// Speak the given text.
+    /// Starts speaking a new text payload.
+    /// - Parameters:
+    ///   - text: Fully rendered content to send to `AVSpeechSynthesizer`.
+    ///   - language: BCP-47 language code used to resolve the speech voice.
+    /// - Note: Any existing playback is stopped first. The service then resets interruption state,
+    ///   configures the audio session, and publishes fresh Now Playing metadata on iOS.
     public func speak(text: String, language: String = "en-US") {
         stop()
 
@@ -135,7 +153,7 @@ public final class SpeakService: NSObject, ObservableObject, AVSpeechSynthesizer
         #endif
     }
 
-    /// Pause speech.
+    /// Pauses playback at the next word boundary.
     public func pause() {
         synthesizer.pauseSpeaking(at: .word)
         isPaused = true
@@ -144,7 +162,8 @@ public final class SpeakService: NSObject, ObservableObject, AVSpeechSynthesizer
         #endif
     }
 
-    /// Resume paused speech.
+    /// Resumes a paused utterance.
+    /// - Note: The audio session is reactivated before playback continues so resume works after interruptions.
     public func resume() {
         configureAudioSession()
         synthesizer.continueSpeaking()
@@ -154,7 +173,9 @@ public final class SpeakService: NSObject, ObservableObject, AVSpeechSynthesizer
         #endif
     }
 
-    /// Stop speech entirely.
+    /// Stops playback immediately and clears playback-side effects.
+    /// - Note: This marks the stop as user-initiated, cancels any active sleep timer, clears highlights through
+    ///   `onSpeechStopped`, and removes Now Playing metadata on iOS.
     public func stop() {
         userStopped = true
         synthesizer.stopSpeaking(at: .immediate)
@@ -167,19 +188,23 @@ public final class SpeakService: NSObject, ObservableObject, AVSpeechSynthesizer
         #endif
     }
 
-    /// Skip forward (delegate to controller).
+    /// Stops the current utterance and asks the reader to advance to the next unit.
+    /// - Note: The actual navigation target is delegated to `onRequestNext`.
     public func skipForward() {
         stop()
         onRequestNext?()
     }
 
-    /// Skip backward (delegate to controller).
+    /// Stops the current utterance and asks the reader to move to the previous unit.
+    /// - Note: The actual navigation target is delegated to `onRequestPrevious`.
     public func skipBackward() {
         stop()
         onRequestPrevious?()
     }
 
-    /// Set a sleep timer.
+    /// Configures or clears the speech sleep timer.
+    /// - Parameter minutes: Whole minutes before playback should stop, or `nil`/`<= 0` to clear the timer.
+    /// - Note: The timer ticks once per second so the UI can show remaining time in real time.
     public func setSleepTimer(minutes: Int?) {
         cancelSleepTimer()
         guard let minutes, minutes > 0 else { return }
@@ -371,6 +396,13 @@ public final class SpeakService: NSObject, ObservableObject, AVSpeechSynthesizer
 
     // MARK: - AVSpeechSynthesizerDelegate
 
+    /// AVSpeechSynthesizer delegate callback fired before a word range is spoken.
+    /// - Parameters:
+    ///   - synthesizer: Active speech synthesizer.
+    ///   - characterRange: Character range within `currentText` that is about to be spoken.
+    ///   - utterance: Utterance currently being rendered.
+    /// - Note: The service translates the range back into a substring and forwards it through `onWordSpoken`
+    ///   so the reader can keep text highlighting synchronized with speech.
     public func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, willSpeakRangeOfSpeechString characterRange: NSRange, utterance: AVSpeechUtterance) {
         let text = currentText
         guard let range = Range(characterRange, in: text) else {
@@ -382,6 +414,11 @@ public final class SpeakService: NSObject, ObservableObject, AVSpeechSynthesizer
         onWordSpoken?(word, characterRange)
     }
 
+    /// AVSpeechSynthesizer delegate callback fired when an utterance finishes naturally.
+    /// - Parameters:
+    ///   - synthesizer: Active speech synthesizer.
+    ///   - utterance: Utterance that finished speaking.
+    /// - Note: Natural completion triggers `onFinishedSpeaking`; user-triggered stops use `didCancel` instead.
     public func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
         isSpeaking = false
         isPaused = false
@@ -395,6 +432,11 @@ public final class SpeakService: NSObject, ObservableObject, AVSpeechSynthesizer
         }
     }
 
+    /// AVSpeechSynthesizer delegate callback fired when playback is cancelled.
+    /// - Parameters:
+    ///   - synthesizer: Active speech synthesizer.
+    ///   - utterance: Utterance that was cancelled.
+    /// - Note: Cancellation clears state and highlights but deliberately does not call `onFinishedSpeaking`.
     public func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) {
         isSpeaking = false
         isPaused = false

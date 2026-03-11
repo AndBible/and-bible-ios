@@ -3597,9 +3597,6 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
     /// Send bookmark label data to Vue.js. Must be called before documents that contain bookmarks.
     private func sendLabelsToVueJS() {
-        // Collect user labels from the bookmark service
-        var labels: [[String: Any]] = []
-
         // Always include the default "Unlabeled" label
         let unlabeledJSON = """
         {"id":"\(Self.unlabeledLabelId)","name":"__UNLABELED__","isRealLabel":false,"style":{"color":\(BibleCore.Label.defaultColor),"isSpeak":false,"isParagraphBreak":false,"underline":false,"underlineWholeVerse":false,"markerStyle":false,"markerStyleWholeVerse":false,"hideStyle":false,"hideStyleWholeVerse":false,"customIcon":null}}
