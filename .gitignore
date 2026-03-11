@@ -1,8 +1,11 @@
 # Xcode
 *.xcodeproj/xcuserdata/
 *.xcworkspace/xcuserdata/
+*.xcodeproj/project.xcworkspace/xcuserdata/
 *.xcodeproj/project.xcworkspace/xcshareddata/IDEWorkspaceChecks.plist
 DerivedData/
+/.derivedData/
+/.artifacts/
 build/
 *.moved-aside
 *.pbxuser
