@@ -137,6 +137,17 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     /// The current window (for history recording)
     var activeWindow: Window?
 
+    /**
+     Creates one controller for a single `BibleView` bridge instance.
+
+     - Parameters:
+       - bridge: Bridge used to emit events to the Vue.js reader and receive callbacks.
+       - bookmarkService: Optional bookmark/studypad service used for annotation features.
+
+     Side effects:
+     - assigns itself as the bridge delegate
+     - initializes SWORD state and installed-module caches
+     */
     public init(bridge: BibleBridge, bookmarkService: BookmarkService? = nil) {
         self.bridge = bridge
         self.bookmarkService = bookmarkService
@@ -1413,6 +1424,15 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
     // MARK: - BibleBridgeDelegate — State
 
+    /**
+     Handles the initial "client ready" callback from the Vue.js reader.
+
+     - Parameter bridge: Bridge whose web client has finished bootstrapping.
+
+     Side effects:
+     - marks the client ready, reloads recent labels and active-language metadata, emits config,
+       and loads the current content into the web view
+     */
     public func bridgeDidSetClientReady(_ bridge: BibleBridge) {
         logger.info("Client ready, sending initial content")
         clientReady = true
@@ -1426,12 +1446,57 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         loadCurrentContent()
     }
 
+    /**
+     Persists serialized Vue.js UI state onto the active page manager.
+
+     - Parameters:
+       - bridge: Bridge reporting the updated state blob.
+       - state: Opaque state string produced by the web client.
+
+     Side effects:
+     - updates `activeWindow?.pageManager?.jsState`
+     - invokes `onPersistState` so the owning view can save SwiftData changes
+     */
     public func bridge(_ bridge: BibleBridge, saveState state: String) {
         activeWindow?.pageManager?.jsState = state
         onPersistState?()
     }
+
+    /**
+     Receives modal open/close notifications from the web client.
+
+     - Parameters:
+       - bridge: Bridge reporting modal visibility.
+       - isOpen: Whether a modal is currently shown inside the web client.
+
+     - Note: iOS currently does not need this signal, so the callback is intentionally a no-op.
+     */
     public func bridge(_ bridge: BibleBridge, reportModalState isOpen: Bool) {}
+
+    /**
+     Receives web-client focus changes for text inputs.
+
+     - Parameters:
+       - bridge: Bridge reporting the focus transition.
+       - focused: Whether a text input is currently focused in the web client.
+
+     - Note: iOS currently does not need this signal, so the callback is intentionally a no-op.
+     */
     public func bridge(_ bridge: BibleBridge, reportInputFocus focused: Bool) {}
+
+    /**
+     Handles keyboard navigation events forwarded from the web client.
+
+     - Parameters:
+       - bridge: Bridge reporting the key-down event.
+       - key: Logical key identifier from the Vue.js reader.
+
+     Side effects:
+     - navigates to the previous or next chapter for left/right arrow keys
+
+     Failure modes:
+     - ignores keys other than `ArrowLeft` and `ArrowRight`
+     */
     public func bridge(_ bridge: BibleBridge, onKeyDown key: String) {
         switch key {
         case "ArrowLeft":
@@ -1445,6 +1510,18 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
     // MARK: - BibleBridgeDelegate — Navigation & Scroll
 
+    /**
+     Tracks visible-verse changes reported by the web client during scrolling.
+
+     - Parameters:
+       - bridge: Bridge reporting the scroll position change.
+       - ordinal: Approximate verse ordinal currently near the viewport focus.
+       - key: Verse/document key string such as `Gen.1.5` used to infer chapter changes.
+
+     Side effects:
+     - marks the pane as interacted-with, updates scroll-restoration state, persists chapter/book
+       changes to the page manager, and notifies the window manager for synchronized scrolling
+     */
     public func bridge(_ bridge: BibleBridge, didScrollToOrdinal ordinal: Int, key: String) {
         // Focus-on-interaction: scrolling in a pane makes it the active window
         onInteraction?()
@@ -1490,6 +1567,19 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         bridge.emit(event: "scroll_to_verse", data: "{\"ordinal\":\(ordinal),\"now\":false}")
     }
 
+    /**
+     Supplies an earlier chapter document for infinite scroll prepend requests.
+
+     - Parameter callId: Bridge response identifier for the pending JS callback.
+
+     Side effects:
+     - updates the loaded chapter/book range when a prepend succeeds
+     - sends either a document JSON payload or `null` back through the bridge
+
+     Failure modes:
+     - returns `null` when the current category is not Bible content, when no previous chapter/book
+       exists, or when the adjacent chapter fails to load from SWORD
+     */
     public func bridge(_ bridge: BibleBridge, requestMoreToBeginning callId: Int) {
         guard currentCategory == .bible else {
             bridge.sendResponse(callId: callId, value: "null")
@@ -1521,6 +1611,19 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         }
     }
 
+    /**
+     Supplies a later chapter document for infinite scroll append requests.
+
+     - Parameter callId: Bridge response identifier for the pending JS callback.
+
+     Side effects:
+     - updates the loaded chapter/book range when an append succeeds
+     - sends either a document JSON payload or `null` back through the bridge
+
+     Failure modes:
+     - returns `null` when the current category is not Bible content, when no next chapter/book
+       exists, or when the adjacent chapter fails to load from SWORD
+     */
     public func bridge(_ bridge: BibleBridge, requestMoreToEnd callId: Int) {
         guard currentCategory == .bible else {
             bridge.sendResponse(callId: callId, value: "null")
@@ -1623,6 +1726,19 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         }
     }
 
+    /**
+     Creates or updates a Bible bookmark requested from the web client.
+
+     - Parameters:
+       - bookInitials: Module initials associated with the bookmark.
+       - startOrdinal: Start verse ordinal from the web selection.
+       - endOrdinal: End verse ordinal from the web selection.
+       - addNote: Whether the bookmark sheet should open directly to note editing.
+
+     Side effects:
+     - delegates to the shared Bible-bookmark creation path, emits bookmark updates, and may open
+       the bookmark modal in the web client
+     */
     public func bridge(_ bridge: BibleBridge, addBookmark bookInitials: String, startOrdinal: Int, endOrdinal: Int, addNote: Bool) {
         addOrUpdateBibleBookmark(
             bookInitials: bookInitials,
@@ -1635,6 +1751,22 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         )
     }
 
+    /**
+     Creates a generic bookmark for non-Bible content from a web-client request.
+
+     - Parameters:
+       - bookInitials: Module initials that own the referenced content.
+       - osisRef: Key/reference string for the bookmarked content.
+       - startOrdinal: Start ordinal attached to the selection.
+       - endOrdinal: End ordinal attached to the selection.
+       - addNote: Whether the bookmark modal should open with note editing active.
+
+     Side effects:
+     - inserts the generic bookmark, emits it back to Vue.js, and opens the bookmark modal
+
+     Failure modes:
+     - returns without side effects when bookmark services are unavailable
+     */
     public func bridge(_ bridge: BibleBridge, addGenericBookmark bookInitials: String, osisRef: String, startOrdinal: Int, endOrdinal: Int, addNote: Bool) {
         logger.info("Add generic bookmark: \(bookInitials) ref=\(osisRef)")
         guard let service = bookmarkService else { return }
@@ -1657,6 +1789,17 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         }
     }
 
+    /**
+     Deletes a Bible bookmark requested from the web client.
+
+     - Parameter bookmarkId: UUID string of the bookmark to remove.
+
+     Side effects:
+     - removes the bookmark from persistence and emits a delete event to Vue.js
+
+     Failure modes:
+     - returns without side effects when the bookmark service is unavailable or the identifier is invalid
+     */
     public func bridge(_ bridge: BibleBridge, removeBookmark bookmarkId: String) {
         logger.info("Remove bookmark: \(bookmarkId)")
         guard let service = bookmarkService, let uuid = UUID(uuidString: bookmarkId) else { return }
@@ -1664,12 +1807,36 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         bridge.emit(event: "delete_bookmarks", data: "[\"\(bookmarkId)\"]")
     }
 
+    /**
+     Deletes a generic bookmark requested from the web client.
+
+     - Parameter bookmarkId: UUID string of the generic bookmark to remove.
+
+     Side effects:
+     - removes the bookmark from persistence
+
+     Failure modes:
+     - returns without side effects when the bookmark service is unavailable or the identifier is invalid
+     */
     public func bridge(_ bridge: BibleBridge, removeGenericBookmark bookmarkId: String) {
         logger.info("Remove generic bookmark: \(bookmarkId)")
         guard let service = bookmarkService, let uuid = UUID(uuidString: bookmarkId) else { return }
         service.removeGenericBookmark(id: uuid)
     }
 
+    /**
+     Persists note text for an existing Bible bookmark and notifies the web client.
+
+     - Parameters:
+       - bookmarkId: UUID string of the bookmark whose note changed.
+       - note: Optional note text to persist.
+
+     Side effects:
+     - saves bookmark notes through the bookmark service and emits an updated note payload to Vue.js
+
+     Failure modes:
+     - returns without side effects when the bookmark service is unavailable or the identifier is invalid
+     */
     public func bridge(_ bridge: BibleBridge, saveBookmarkNote bookmarkId: String, note: String?) {
         logger.info("Save bookmark note: \(bookmarkId)")
         guard let service = bookmarkService, let uuid = UUID(uuidString: bookmarkId) else { return }
@@ -1681,6 +1848,17 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         """)
     }
 
+    /**
+     Requests native label-assignment UI for a bookmark from the owning SwiftUI view.
+
+     - Parameter bookmarkId: UUID string of the bookmark to edit.
+
+     Side effects:
+     - invokes `onAssignLabels` with the parsed bookmark identifier
+
+     Failure modes:
+     - returns without side effects when the identifier is invalid
+     */
     public func bridge(_ bridge: BibleBridge, assignLabels bookmarkId: String) {
         logger.info("Assign labels requested for: \(bookmarkId)")
         guard let uuid = UUID(uuidString: bookmarkId) else { return }
@@ -1698,6 +1876,9 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         bridge.emit(event: "set_config", data: buildConfigJSON())
     }
 
+    /**
+     Toggles one label assignment on a bookmark and re-emits the updated bookmark state.
+     */
     public func bridge(_ bridge: BibleBridge, toggleBookmarkLabel bookmarkId: String, labelId: String) {
         logger.info("Toggle label \(labelId) on bookmark \(bookmarkId)")
         guard let service = bookmarkService,
@@ -1710,6 +1891,9 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         sendLabelsToVueJS()
     }
 
+    /**
+     Removes one label assignment from a bookmark and re-emits the updated bookmark state.
+     */
     public func bridge(_ bridge: BibleBridge, removeBookmarkLabel bookmarkId: String, labelId: String) {
         logger.info("Remove label \(labelId) from bookmark \(bookmarkId)")
         guard let service = bookmarkService,
@@ -1720,6 +1904,9 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         emitBookmarkUpdate(bookmarkId: bmId)
     }
 
+    /**
+     Sets the primary label used to style a bookmark in Vue.js.
+     */
     public func bridge(_ bridge: BibleBridge, setPrimaryLabel bookmarkId: String, labelId: String) {
         logger.info("Set primary label \(labelId) on bookmark \(bookmarkId)")
         guard let service = bookmarkService,
@@ -1730,12 +1917,18 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         emitBookmarkUpdate(bookmarkId: bmId)
     }
 
+    /**
+     Updates whether a bookmark should highlight whole verses or a text-range selection.
+     */
     public func bridge(_ bridge: BibleBridge, setBookmarkWholeVerse bookmarkId: String, value: Bool) {
         logger.info("Set whole verse \(value) for bookmark \(bookmarkId)")
         guard let service = bookmarkService, let uuid = UUID(uuidString: bookmarkId) else { return }
         service.setWholeVerse(bookmarkId: uuid, value: value)
     }
 
+    /**
+     Updates the custom icon attached to a bookmark.
+     */
     public func bridge(_ bridge: BibleBridge, setBookmarkCustomIcon bookmarkId: String, value: String?) {
         logger.info("Set custom icon for bookmark \(bookmarkId)")
         guard let service = bookmarkService, let uuid = UUID(uuidString: bookmarkId) else { return }
@@ -1744,6 +1937,20 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
     // MARK: - BibleBridgeDelegate — StudyPad
 
+    /**
+     Creates a new StudyPad text entry relative to an existing bookmark or note row.
+
+     - Parameters:
+       - labelId: Label whose StudyPad journal is being edited.
+       - entryType: Type of row referenced by `afterEntryId` (`bookmark`, `generic-bookmark`, `journal`, or `none`).
+       - afterEntryId: Identifier of the row after which the new entry should be inserted.
+
+     Side effects:
+     - mutates StudyPad persistence and emits reorder/update events back to Vue.js
+
+     Failure modes:
+     - returns without side effects when identifiers are invalid or StudyPad creation fails
+     */
     public func bridge(_ bridge: BibleBridge, createNewStudyPadEntry labelId: String, entryType: String, afterEntryId: String) {
         logger.info("Create StudyPad entry type=\(entryType) after \(afterEntryId) in label \(labelId)")
         guard let service = bookmarkService,
@@ -1785,6 +1992,9 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         )
     }
 
+    /**
+     Deletes one StudyPad text entry and emits the resulting reordered state.
+     */
     public func bridge(_ bridge: BibleBridge, deleteStudyPadEntry studyPadId: String) {
         logger.info("Delete StudyPad entry: \(studyPadId)")
         guard let service = bookmarkService,
@@ -1805,6 +2015,9 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         )
     }
 
+    /**
+     Updates StudyPad entry metadata such as indent level or order number from a Vue.js payload.
+     */
     public func bridge(_ bridge: BibleBridge, updateStudyPadTextEntry data: String) {
         logger.info("Update StudyPad text entry metadata")
         guard let service = bookmarkService,
@@ -1826,6 +2039,9 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         }
     }
 
+    /**
+     Persists edited text for one StudyPad text entry.
+     */
     public func bridge(_ bridge: BibleBridge, updateStudyPadTextEntryText id: String, text: String) {
         logger.info("Update StudyPad entry text: \(id)")
         guard let service = bookmarkService,
@@ -1833,6 +2049,9 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         service.updateStudyPadTextEntryText(id: uuid, text: text)
     }
 
+    /**
+     Persists reordered StudyPad rows and bookmark associations for one label.
+     */
     public func bridge(_ bridge: BibleBridge, updateOrderNumber labelId: String, data: String) {
         logger.info("Update order numbers for label \(labelId)")
         guard let service = bookmarkService,
@@ -1867,6 +2086,9 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         """)
     }
 
+    /**
+     Updates one `BibleBookmarkToLabel` association from a JSON payload emitted by Vue.js.
+     */
     public func bridge(_ bridge: BibleBridge, updateBookmarkToLabel data: String) {
         logger.info("Update BibleBookmarkToLabel")
         guard let service = bookmarkService,
@@ -1892,6 +2114,9 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         }
     }
 
+    /**
+     Updates one `GenericBookmarkToLabel` association from a JSON payload emitted by Vue.js.
+     */
     public func bridge(_ bridge: BibleBridge, updateGenericBookmarkToLabel data: String) {
         logger.info("Update GenericBookmarkToLabel")
         guard let service = bookmarkService,
@@ -1917,6 +2142,9 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         }
     }
 
+    /**
+     Persists an optional bookmark edit action configured in the web client.
+     */
     public func bridge(_ bridge: BibleBridge, setBookmarkEditAction bookmarkId: String, value: String) {
         logger.info("Set edit action on bookmark \(bookmarkId): \(value)")
         guard let service = bookmarkService,
@@ -1943,11 +2171,17 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         }
     }
 
+    /**
+     Tracks whether the embedded web client is currently editing content.
+     */
     public func bridge(_ bridge: BibleBridge, setEditing enabled: Bool) {
         logger.info("WebView editing mode: \(enabled)")
         editingInWebView = enabled
     }
 
+    /**
+     Persists the current insertion cursor position for a StudyPad label.
+     */
     public func bridge(_ bridge: BibleBridge, setStudyPadCursor labelId: String, orderNumber: Int) {
         logger.info("StudyPad cursor: label=\(labelId) order=\(orderNumber)")
         guard let uuid = UUID(uuidString: labelId) else { return }
@@ -1962,12 +2196,18 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
     // MARK: - BibleBridgeDelegate — Selection
 
+    /**
+     Records the latest text selection reported by the web client and enables native action mode UI.
+     */
     public func bridge(_ bridge: BibleBridge, selectionChanged text: String) {
         hasActiveSelection = true
         selectedText = text
         bridge.emit(event: "set_action_mode", data: "true")
     }
 
+    /**
+     Clears native selection state when the web client deselects text.
+     */
     public func bridgeSelectionCleared(_ bridge: BibleBridge) {
         hasActiveSelection = false
         selectedText = ""
@@ -2007,6 +2247,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
                 if let jsonStr = result as? String,
                    let data = jsonStr.data(using: .utf8),
                    let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                    /// Coerces JSON bridge values into optional `Int` values while treating `NSNull` as missing.
                     func asInt(_ value: Any?) -> Int? {
                         if value is NSNull { return nil }
                         if let intValue = value as? Int { return intValue }
@@ -2164,6 +2405,9 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     /// Whether any plain word-lookup dictionaries are currently available.
     var hasWordLookupDictionaries: Bool { !findWordLookupDictionaryModules().isEmpty }
 
+    /**
+     Builds a shareable verse string for the current module and forwards it to native sharing UI.
+     */
     public func bridge(_ bridge: BibleBridge, shareVerse bookInitials: String, startOrdinal: Int, endOrdinal: Int) {
         let text = getVerseText(startOrdinal: startOrdinal, endOrdinal: endOrdinal)
         guard !text.isEmpty else { return }
@@ -2172,6 +2416,9 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         onShareVerseText?(shareText)
     }
 
+    /**
+     Copies a verse selection and its reference to the platform pasteboard.
+     */
     public func bridge(_ bridge: BibleBridge, copyVerse bookInitials: String, startOrdinal: Int, endOrdinal: Int) {
         let text = getVerseText(startOrdinal: startOrdinal, endOrdinal: endOrdinal)
         guard !text.isEmpty else { return }
@@ -2185,6 +2432,9 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         #endif
     }
 
+    /**
+     Opens the native compare flow for the selected verse range.
+     */
     public func bridge(_ bridge: BibleBridge, compareVerses bookInitials: String, startOrdinal: Int, endOrdinal: Int) {
         logger.info("Compare verses requested: \(startOrdinal)-\(endOrdinal)")
         let startVerse = ordinalToVerse(startOrdinal)
@@ -2192,12 +2442,18 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         onCompareVerses?(currentBook, currentChapter, activeModuleName, startVerse, endVerse)
     }
 
+    /**
+     Starts TTS playback for the selected verse range.
+     */
     public func bridge(_ bridge: BibleBridge, speak bookInitials: String, v11n: String, startOrdinal: Int, endOrdinal: Int) {
         speakVerseRange(startOrdinal: startOrdinal, endOrdinal: endOrdinal)
     }
 
     // MARK: - BibleBridgeDelegate — Navigation Actions
 
+    /**
+     Opens a label-backed StudyPad journal document in the current pane.
+     */
     public func bridge(_ bridge: BibleBridge, openStudyPad labelId: String, bookmarkId: String) {
         logger.info("Open StudyPad for label: \(labelId)")
         guard let uuid = UUID(uuidString: labelId) else { return }
@@ -2205,6 +2461,9 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         loadStudyPadDocument(labelId: uuid, bookmarkId: bmUuid)
     }
 
+    /**
+     Opens the chapter-level My Notes document in the current pane.
+     */
     public func bridge(_ bridge: BibleBridge, openMyNotes v11n: String, ordinal: Int) {
         loadMyNotesDocument()
     }
@@ -2308,6 +2567,18 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         loadCurrentChapter()
     }
 
+    /**
+     Routes an external-style link emitted by the web client to the appropriate native handler.
+
+     - Parameter link: Link string using one of the supported pseudo-schemes or a standard URL.
+
+     Side effects:
+     - may open Strong's sheets, cross-reference sheets, search, EPUB navigation, or delegate real
+       URLs to the host platform
+
+     Failure modes:
+     - unrecognized schemes fall through to the platform URL-opening path
+     */
     public func bridge(_ bridge: BibleBridge, openExternalLink link: String) {
         // Handle Strong's/morphology links: ab-w://?strong=H1234&robinson=...
         if link.hasPrefix("ab-w://") {
@@ -2819,11 +3090,26 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         return result
     }
 
+    /**
+     Normalizes selected text before dictionary lookup by trimming whitespace and trailing punctuation.
+
+     - Parameter text: Raw selected text from the web client.
+     - Returns: Sanitized lookup key used against plain dictionary modules.
+     */
     private func normalizeWordLookupQuery(_ text: String) -> String {
         text.trimmingCharacters(in: .whitespacesAndNewlines)
             .replacingOccurrences(of: #"[.,;:!?"'()\[\]]+$"#, with: "", options: .regularExpression)
     }
 
+    /**
+     Builds a multi-fragment dictionary document for the current word-lookup query.
+
+     - Parameter query: Normalized lookup key to resolve across enabled plain dictionaries.
+     - Returns: Multi-document JSON for the lookup results, or `nil` when nothing matches.
+
+     Failure modes:
+     - returns `nil` when no enabled lookup dictionaries are installed or when none contain the key
+     */
     private func buildWordLookupMultiDocJSON(query: String) -> String? {
         let modules = findWordLookupDictionaryModules()
         guard !modules.isEmpty else { return nil }
@@ -3084,6 +3370,9 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         }
     }
 
+    /**
+     Requests that the owning SwiftUI view present the downloads/install UI.
+     */
     public func bridgeDidRequestOpenDownloads(_ bridge: BibleBridge) {
         onRequestOpenDownloads?()
     }
@@ -3093,6 +3382,17 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     /// Callback for presenting a reference chooser dialog (returns OSIS ref via completion).
     var onRefChooserDialog: ((@escaping (String?) -> Void) -> Void)?
 
+    /**
+     Opens the native reference chooser and returns the selected OSIS reference to Vue.js.
+
+     - Parameter callId: Bridge response identifier for the pending chooser callback.
+
+     Side effects:
+     - invokes the native chooser callback and sends the resolved OSIS string or `null` back
+
+     Failure modes:
+     - returns `null` immediately when no native chooser handler is configured
+     */
     public func bridge(_ bridge: BibleBridge, refChooserDialog callId: Int) {
         // Show a reference picker and return the selected OSIS ref
         if let handler = onRefChooserDialog {
@@ -3109,6 +3409,19 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         }
     }
 
+    /**
+     Parses human-readable or OSIS-format references on behalf of the web client.
+
+     - Parameters:
+       - callId: Bridge response identifier for the pending parse request.
+       - text: Raw reference text entered by the user.
+
+     Side effects:
+     - sends either a resolved OSIS reference string or `null` through the bridge response channel
+
+     Failure modes:
+     - returns `null` for empty input or any reference string the native parser cannot resolve
+     */
     public func bridge(_ bridge: BibleBridge, parseRef callId: Int, text: String) {
         // Try to resolve human-readable reference to OSIS key
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -3257,6 +3570,11 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         return true
     }
 
+    /**
+     Receives help-dialog requests from the web client.
+
+     - Note: iOS currently logs the request only; native help presentation is handled elsewhere.
+     */
     public func bridge(_ bridge: BibleBridge, helpDialog content: String, title: String?) {
         logger.info("Help dialog: \(title ?? "Help")")
     }
@@ -3274,14 +3592,23 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     /// Callback to open content in a links window (book, chapter).
     var onOpenInLinksWindow: ((String, Int) -> Void)?
 
+    /**
+     Forwards a toast/banner message request to the owning SwiftUI view.
+     */
     public func bridge(_ bridge: BibleBridge, showToast text: String) {
         onShowToast?(text)
     }
 
+    /**
+     Forwards HTML sharing content to the host view so platform share UI can be presented.
+     */
     public func bridge(_ bridge: BibleBridge, shareHtml html: String) {
         onShareHtml?(html)
     }
 
+    /**
+     Toggles whether one compare document should be hidden in the current compare session.
+     */
     public func bridge(_ bridge: BibleBridge, toggleCompareDocument documentId: String) {
         if hiddenCompareDocuments.contains(documentId) {
             hiddenCompareDocuments.remove(documentId)
@@ -3295,6 +3622,12 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     /// Callback for fullscreen toggle requests (from double-tap in WebView).
     public var onToggleFullScreen: (() -> Void)?
 
+    /**
+     Handles double-tap fullscreen requests originating in the embedded web client.
+
+     Failure modes:
+     - returns without side effects when the user has disabled double-tap fullscreen in preferences
+     */
     public func bridgeDidRequestToggleFullScreen(_ bridge: BibleBridge) {
         // Match Android: double-tap fullscreen can be disabled by user preference.
         guard appPreferenceBool(.doubleTapToFullscreen) else { return }
@@ -3303,6 +3636,9 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
     // MARK: - EPUB Link Navigation
 
+    /**
+     Navigates EPUB links emitted by the web client either to another spine entry or an in-page anchor.
+     */
     public func bridge(_ bridge: BibleBridge, openEpubLink bookInitials: String, toKey: String, toId: String) {
         guard activeEpubReader != nil else { return }
         if !toKey.isEmpty {
@@ -3361,6 +3697,14 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
     // MARK: - Content Loading
 
+    /**
+     Loads the currently selected Bible chapter into the embedded Vue.js reader.
+
+     Side effects:
+     - clears selection and special-document state, loads SWORD or placeholder content, emits labels
+       and document JSON to the bridge, restores scroll position when needed, and reapplies active
+       window/background styling
+     */
     private func loadCurrentChapter() {
         showingMyNotes = false
         showingStudyPad = false
@@ -4032,6 +4376,15 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         """
     }
 
+    /**
+     Serializes optional bookmark text offsets into the JSON array form expected by Vue.js.
+
+     - Parameters:
+       - startOffset: Optional inclusive start offset inside the verse text.
+       - endOffset: Optional inclusive end offset inside the verse text.
+
+     - Returns: `null` when no start offset exists, otherwise a two-element JSON array string.
+     */
     private func jsonOffsetRange(startOffset: Int?, endOffset: Int?) -> String {
         guard let startOffset else { return "null" }
         let endValue = endOffset.map(String.init) ?? "null"
@@ -4111,18 +4464,27 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
     // MARK: - JSON Builders
 
+    /// Reads a boolean parity preference, falling back to the registry default when unset.
     private func appPreferenceBool(_ key: AppPreferenceKey) -> Bool {
         settingsStore?.getBool(key) ?? (AppPreferenceRegistry.boolDefault(for: key) ?? false)
     }
 
+    /// Reads an integer parity preference, falling back to the registry default when unset.
     private func appPreferenceInt(_ key: AppPreferenceKey) -> Int {
         settingsStore?.getInt(key) ?? (AppPreferenceRegistry.intDefault(for: key) ?? 0)
     }
 
+    /// Reads a string-set parity preference and returns an empty array when unset.
     private func appPreferenceStringSet(_ key: AppPreferenceKey) -> [String] {
         settingsStore?.getStringSet(key) ?? []
     }
 
+    /**
+     Escapes a string array into a JSON array literal without allocating an intermediate encoder.
+
+     - Parameter values: Raw string values to escape and join.
+     - Returns: JSON array literal string containing the escaped values.
+     */
     private static func jsonStringArray(_ values: [String]) -> String {
         let escaped = values.map {
             $0
@@ -4132,6 +4494,15 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         return "[" + escaped.map { "\"\($0)\"" }.joined(separator: ",") + "]"
     }
 
+    /**
+     Builds the combined reader/configuration payload consumed by the Vue.js application.
+
+     - Returns: JSON string containing `config` and `appSettings` sections for the current pane.
+
+     Side effects:
+     - reads persisted settings, workspace cursor state, recent/favourite labels, and active-window
+       state to compute the emitted payload
+     */
     private func buildConfigJSON() -> String {
         let s = displaySettings
         let d = TextDisplaySettings.appDefaults
@@ -4179,6 +4550,17 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         """
     }
 
+    /**
+     Generates fallback OSIS XML for placeholder chapters when real SWORD content is unavailable.
+
+     - Parameters:
+       - osisBookId: OSIS book abbreviation for the chapter.
+       - bookName: Localized/native book name displayed in titles.
+       - chapter: Chapter number to render.
+       - verseCount: Number of placeholder verses to include.
+
+     - Returns: OSIS XML fragment with generated title, verse, and paragraph structure.
+     */
     private func buildChapterXML(osisBookId: String, bookName: String, chapter: Int, verseCount: Int) -> String {
         // For Genesis 1, use the real ESV-like content
         if osisBookId == "Gen" && chapter == 1 {
@@ -4208,6 +4590,22 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         return xml
     }
 
+    /**
+     Wraps chapter XML and bookmark metadata in the document JSON format expected by Vue.js.
+
+     - Parameters:
+       - osisBookId: OSIS book abbreviation for the current chapter.
+       - bookName: Display name of the book.
+       - chapter: Chapter number being rendered.
+       - verseCount: Number of verses represented by `xml`.
+       - isNT: Whether the document belongs to the New Testament.
+       - xml: Escaped OSIS XML payload for the rendered content.
+       - bookmarks: Chapter bookmarks to serialize alongside the document.
+       - bookCategory: Document category string consumed by the frontend.
+       - bookInitials: Optional module initials override for compare/nonstandard documents.
+
+     - Returns: JSON string for one Vue.js document record.
+     */
     private func buildDocumentJSON(osisBookId: String, bookName: String, chapter: Int, verseCount: Int, isNT: Bool, xml: String, bookmarks: [BibleBookmark] = [], bookCategory: String = "BIBLE", bookInitials: String? = nil) -> String {
         let escapedXml = xml
             .replacingOccurrences(of: "\\", with: "\\\\")
@@ -4231,6 +4629,11 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
     // MARK: - Genesis 1 Real Content
 
+    /**
+     Returns the hard-coded Genesis 1 sample used by placeholder rendering.
+
+     - Returns: Static OSIS XML fragment for Genesis 1.
+     */
     private func genesis1OSISXML() -> String {
         "<div><title type=\"x-gen\">Genesis 1</title><div type=\"x-milestone\" subType=\"x-preverse\" sID=\"pv1\"/><div sID=\"gen1\" type=\"section\"/><title>The Creation of the World</title><div sID=\"gen2\" type=\"paragraph\"/><div type=\"x-milestone\" subType=\"x-preverse\" eID=\"pv1\"/><verse osisID=\"Gen.1.1\" verseOrdinal=\"1\">In the beginning, God created the heavens and the earth. </verse><verse osisID=\"Gen.1.2\" verseOrdinal=\"2\">The earth was without form and void, and darkness was over the face of the deep. And the Spirit of God was hovering over the face of the waters. <div eID=\"gen2\" type=\"paragraph\"/></verse><div type=\"x-milestone\" subType=\"x-preverse\" sID=\"pv2\"/><div sID=\"gen3\" type=\"paragraph\"/><div type=\"x-milestone\" subType=\"x-preverse\" eID=\"pv2\"/><verse osisID=\"Gen.1.3\" verseOrdinal=\"3\">And God said, \u{201C}Let there be light,\u{201D} and there was light. </verse><verse osisID=\"Gen.1.4\" verseOrdinal=\"4\">And God saw that the light was good. And God separated the light from the darkness. </verse><verse osisID=\"Gen.1.5\" verseOrdinal=\"5\">God called the light Day, and the darkness he called Night. And there was evening and there was morning, the first day. <div eID=\"gen3\" type=\"paragraph\"/></verse><div type=\"x-milestone\" subType=\"x-preverse\" sID=\"pv3\"/><div sID=\"gen4\" type=\"paragraph\"/><div type=\"x-milestone\" subType=\"x-preverse\" eID=\"pv3\"/><verse osisID=\"Gen.1.6\" verseOrdinal=\"6\">And God said, \u{201C}Let there be an expanse in the midst of the waters, and let it separate the waters from the waters.\u{201D} </verse><verse osisID=\"Gen.1.7\" verseOrdinal=\"7\">And God made the expanse and separated the waters that were under the expanse from the waters that were above the expanse. And it was so. </verse><verse osisID=\"Gen.1.8\" verseOrdinal=\"8\">And God called the expanse Heaven. And there was evening and there was morning, the second day. <div eID=\"gen4\" type=\"paragraph\"/></verse><div type=\"x-milestone\" subType=\"x-preverse\" sID=\"pv4\"/><div sID=\"gen5\" type=\"paragraph\"/><div type=\"x-milestone\" subType=\"x-preverse\" eID=\"pv4\"/><verse osisID=\"Gen.1.9\" verseOrdinal=\"9\">And God said, \u{201C}Let the waters under the heavens be gathered together into one place, and let the dry land appear.\u{201D} And it was so. </verse><verse osisID=\"Gen.1.10\" verseOrdinal=\"10\">God called the dry land Earth, and the waters that were gathered together he called Seas. And God saw that it was good. </verse><verse osisID=\"Gen.1.11\" verseOrdinal=\"11\">And God said, \u{201C}Let the earth sprout vegetation, plants yielding seed, and fruit trees bearing fruit in which is their seed, each according to its kind, on the earth.\u{201D} And it was so. </verse><verse osisID=\"Gen.1.12\" verseOrdinal=\"12\">The earth brought forth vegetation, plants yielding seed according to their own kinds, and trees bearing fruit in which is their seed, each according to its kind. And God saw that it was good. </verse><verse osisID=\"Gen.1.13\" verseOrdinal=\"13\">And there was evening and there was morning, the third day. <div eID=\"gen5\" type=\"paragraph\"/></verse><div type=\"x-milestone\" subType=\"x-preverse\" sID=\"pv5\"/><div sID=\"gen6\" type=\"paragraph\"/><div type=\"x-milestone\" subType=\"x-preverse\" eID=\"pv5\"/><verse osisID=\"Gen.1.14\" verseOrdinal=\"14\">And God said, \u{201C}Let there be lights in the expanse of the heavens to separate the day from the night. And let them be for signs and for seasons, and for days and years, </verse><verse osisID=\"Gen.1.15\" verseOrdinal=\"15\">and let them be lights in the expanse of the heavens to give light upon the earth.\u{201D} And it was so. </verse><verse osisID=\"Gen.1.16\" verseOrdinal=\"16\">And God made the two great lights\u{2014}the greater light to rule the day and the lesser light to rule the night\u{2014}and the stars. </verse><verse osisID=\"Gen.1.17\" verseOrdinal=\"17\">And God set them in the expanse of the heavens to give light on the earth, </verse><verse osisID=\"Gen.1.18\" verseOrdinal=\"18\">to rule over the day and over the night, and to separate the light from the darkness. And God saw that it was good. </verse><verse osisID=\"Gen.1.19\" verseOrdinal=\"19\">And there was evening and there was morning, the fourth day. <div eID=\"gen6\" type=\"paragraph\"/></verse><div type=\"x-milestone\" subType=\"x-preverse\" sID=\"pv6\"/><div sID=\"gen7\" type=\"paragraph\"/><div type=\"x-milestone\" subType=\"x-preverse\" eID=\"pv6\"/><verse osisID=\"Gen.1.20\" verseOrdinal=\"20\">And God said, \u{201C}Let the waters swarm with swarms of living creatures, and let birds fly above the earth across the expanse of the heavens.\u{201D} </verse><verse osisID=\"Gen.1.21\" verseOrdinal=\"21\">So God created the great sea creatures and every living creature that moves, with which the waters swarm, according to their kinds, and every winged bird according to its kind. And God saw that it was good. </verse><verse osisID=\"Gen.1.22\" verseOrdinal=\"22\">And God blessed them, saying, \u{201C}Be fruitful and multiply and fill the waters in the seas, and let birds multiply on the earth.\u{201D} </verse><verse osisID=\"Gen.1.23\" verseOrdinal=\"23\">And there was evening and there was morning, the fifth day. <div eID=\"gen7\" type=\"paragraph\"/></verse><div type=\"x-milestone\" subType=\"x-preverse\" sID=\"pv7\"/><div sID=\"gen8\" type=\"paragraph\"/><div type=\"x-milestone\" subType=\"x-preverse\" eID=\"pv7\"/><verse osisID=\"Gen.1.24\" verseOrdinal=\"24\">And God said, \u{201C}Let the earth bring forth living creatures according to their kinds\u{2014}livestock and creeping things and beasts of the earth according to their kinds.\u{201D} And it was so. </verse><verse osisID=\"Gen.1.25\" verseOrdinal=\"25\">And God made the beasts of the earth according to their kinds and the livestock according to their kinds, and everything that creeps on the ground according to its kind. And God saw that it was good. <div eID=\"gen8\" type=\"paragraph\"/></verse><div type=\"x-milestone\" subType=\"x-preverse\" sID=\"pv8\"/><div sID=\"gen9\" type=\"paragraph\"/><div type=\"x-milestone\" subType=\"x-preverse\" eID=\"pv8\"/><verse osisID=\"Gen.1.26\" verseOrdinal=\"26\">Then God said, \u{201C}Let us make man in our image, after our likeness. And let them have dominion over the fish of the sea and over the birds of the heavens and over the livestock and over all the earth and over every creeping thing that creeps on the earth.\u{201D} </verse><verse osisID=\"Gen.1.27\" verseOrdinal=\"27\">So God created man in his own image, in the image of God he created him; male and female he created them. </verse><verse osisID=\"Gen.1.28\" verseOrdinal=\"28\">And God blessed them. And God said to them, \u{201C}Be fruitful and multiply and fill the earth and subdue it, and have dominion over the fish of the sea and over the birds of the heavens and over every living thing that moves on the earth.\u{201D} </verse><verse osisID=\"Gen.1.29\" verseOrdinal=\"29\">And God said, \u{201C}Behold, I have given you every plant yielding seed that is on the face of all the earth, and every tree with seed in its fruit. You shall have them for food. </verse><verse osisID=\"Gen.1.30\" verseOrdinal=\"30\">And to every beast of the earth and to every bird of the heavens and to everything that creeps on the earth, everything that has the breath of life, I have given every green plant for food.\u{201D} And it was so. </verse><verse osisID=\"Gen.1.31\" verseOrdinal=\"31\">And God saw everything that he had made, and behold, it was very good. And there was evening and there was morning, the sixth day. <div eID=\"gen9\" type=\"paragraph\"/></verse><div eID=\"gen1\" type=\"section\"/></div>"
     }
