@@ -4,25 +4,73 @@ import SwiftUI
 import SwiftData
 import BibleCore
 
-/// Displays a filterable, sortable list of bookmarks from SwiftData.
+/**
+ Displays a searchable, filterable, and sortable list of Bible bookmarks from SwiftData.
+
+ `BookmarkListView` is the main bookmark-browser surface. It excludes note-bearing bookmarks that
+ belong in the My Notes flow, supports label-chip filtering, search-by-reference text, and
+ navigation back into the reader or into a label's study pad.
+
+ Data dependencies:
+ - `modelContext` is used for bookmark deletion
+ - `bookmarks` queries all `BibleBookmark` records for in-memory filtering and sorting
+ - `labels` queries all labels so the view can build filter chips and label-manager entry points
+
+ Side effects:
+ - deleting rows or context-menu deletions mutate SwiftData and save immediately
+ - opening the label manager or label-assignment sheet changes modal presentation state
+ - selecting a bookmark dismisses through the caller-provided navigation callback rather than
+   performing navigation directly inside the list
+ */
 public struct BookmarkListView: View {
+    /// SwiftData context used for bookmark deletion and save operations.
     @Environment(\.modelContext) private var modelContext
+
+    /// Dismiss action for closing the bookmark sheet.
     @Environment(\.dismiss) private var dismiss
+
+    /// Raw bookmark query used as the source set for filtering and sorting.
     @Query(sort: \BibleBookmark.createdAt, order: .reverse) private var bookmarks: [BibleBookmark]
+
+    /// Raw label query used to build filter chips and label-management affordances.
     @Query(sort: \BibleCore.Label.name) private var labels: [BibleCore.Label]
+
+    /// Current bookmark sort order.
     @State private var sortOrder: BookmarkSortOrder = .createdAtDesc
+
+    /// Selected label filter, or `nil` when showing all labels.
     @State private var selectedLabelId: UUID?
+
+    /// Search text applied to formatted references and note previews.
     @State private var searchText = ""
+
+    /// Bookmark currently being edited in the label-assignment sheet.
     @State private var editingLabelsBookmarkId: UUID?
+
+    /// Presents the label manager sheet.
     @State private var showLabelManager = false
+
+    /// Optional callback used to navigate back into the reader for a bookmark.
     var onNavigate: ((String, Int) -> Void)?
+
+    /// Optional callback used to open a study pad for a selected label.
     var onOpenStudyPad: ((UUID) -> Void)?
 
+    /**
+     Creates the bookmark list view.
+
+     - Parameters:
+       - onNavigate: Callback invoked when the user opens a bookmark from the list.
+       - onOpenStudyPad: Callback invoked when the user wants to open a selected label's study pad.
+     */
     public init(onNavigate: ((String, Int) -> Void)? = nil, onOpenStudyPad: ((UUID) -> Void)? = nil) {
         self.onNavigate = onNavigate
         self.onOpenStudyPad = onOpenStudyPad
     }
 
+    /**
+     Bookmarks after note suppression, label filtering, text filtering, and sort application.
+     */
     private var filteredBookmarks: [BibleBookmark] {
         // Hide bookmarks that have notes (those belong in My Notes)
         var result = bookmarks.filter { $0.notes == nil || $0.notes!.notes.isEmpty }
@@ -63,10 +111,14 @@ public struct BookmarkListView: View {
         return result
     }
 
+    /// User-created labels that should appear in the filter strip.
     private var userLabels: [BibleCore.Label] {
         labels.filter { $0.isRealLabel }
     }
 
+    /**
+     Builds the bookmark list screen, empty state, and related sheets.
+     */
     public var body: some View {
         Group {
             if bookmarks.isEmpty {
@@ -122,6 +174,7 @@ public struct BookmarkListView: View {
         }
     }
 
+    /// Main list content once at least one bookmark exists.
     private var bookmarkList: some View {
         List {
             // Label filter chips
@@ -154,6 +207,7 @@ public struct BookmarkListView: View {
         }
     }
 
+    /// Sort-order menu shown in the navigation bar.
     private var sortMenu: some View {
         Menu {
             Picker(String(localized: "sort"), selection: $sortOrder) {
@@ -166,6 +220,7 @@ public struct BookmarkListView: View {
         }
     }
 
+    /// Horizontal label-filter chips plus the selected-label study-pad action.
     private var labelFilterSection: some View {
         Section {
             ScrollView(.horizontal, showsIndicators: false) {
@@ -209,6 +264,11 @@ public struct BookmarkListView: View {
         }
     }
 
+    /**
+     Deletes the currently visible bookmarks at the given filtered-list offsets.
+
+     - Parameter offsets: Index offsets from `filteredBookmarks`.
+     */
     private func deleteBookmarks(at offsets: IndexSet) {
         let toDelete = offsets.map { filteredBookmarks[$0] }
         for bookmark in toDelete {
@@ -217,7 +277,12 @@ public struct BookmarkListView: View {
         try? modelContext.save()
     }
 
-    /// Convert bookmark ordinals to a human-readable verse reference.
+    /**
+     Converts bookmark ordinals into a human-readable verse reference string.
+
+     - Parameter bookmark: Bookmark whose ordinals should be rendered for the list UI.
+     - Returns: Reference text like `Genesis 1:1` or `Genesis 1:1-3`.
+     */
     static func verseReference(for bookmark: BibleBookmark) -> String {
         let bookName = bookmark.book ?? "Unknown"
         let startChapter = bookmark.ordinalStart / 40 + 1
@@ -236,21 +301,36 @@ public struct BookmarkListView: View {
 
 // MARK: - UUID Identifiable for sheet(item:)
 
+/// Retroactive `Identifiable` conformance so raw `UUID` values can drive `sheet(item:)`.
 extension UUID: @retroactive Identifiable {
+    /// Retroactive `Identifiable` conformance value for SwiftUI sheet presentation.
     public var id: UUID { self }
 }
 
 // MARK: - Bookmark Row
 
+/**
+ Renders one bookmark row inside `BookmarkListView`.
+
+ The row shows the reference, label colors, optional icon, optional note preview, and a quick
+ affordance for editing the bookmark's labels.
+ */
 private struct BookmarkRow: View {
+    /// Bookmark being rendered.
     let bookmark: BibleBookmark
+
+    /// Callback used to navigate to the bookmark's passage.
     var onNavigate: ((String, Int) -> Void)?
+
+    /// Callback used to open label editing for the bookmark.
     var onEditLabels: (() -> Void)?
 
+    /// Labels currently assigned to the bookmark, sorted by name.
     private var assignedLabels: [BibleCore.Label] {
         bookmark.bookmarkToLabels?.compactMap { $0.label }.sorted { $0.name < $1.name } ?? []
     }
 
+    /// Builds the tappable bookmark row.
     var body: some View {
         Button {
             let chapter = bookmark.ordinalStart / 40 + 1
@@ -267,6 +347,7 @@ private struct BookmarkRow: View {
         .buttonStyle(.plain)
     }
 
+    /// Header row containing label dots, icon, reference, and created-at date.
     private var headerRow: some View {
         HStack {
             // Label color dots
@@ -297,6 +378,7 @@ private struct BookmarkRow: View {
     }
 
     @ViewBuilder
+    /// Optional note-preview text shown when the bookmark has saved note content.
     private var notePreview: some View {
         if let notes = bookmark.notes, !notes.notes.isEmpty {
             Text(notes.notes)
@@ -307,6 +389,7 @@ private struct BookmarkRow: View {
     }
 
     @ViewBuilder
+    /// Label tags or add-label affordance shown at the bottom of the bookmark row.
     private var labelTags: some View {
         if !assignedLabels.isEmpty {
             HStack(spacing: 4) {
@@ -348,12 +431,21 @@ private struct BookmarkRow: View {
 
 // MARK: - Filter Chip
 
+/// Capsule-shaped label-filter button used in the bookmark list filter strip.
 private struct FilterChip: View {
+    /// User-visible chip title.
     let title: String
+
+    /// Base color used for borders and selected-state fill.
     let chipColor: Color
+
+    /// Whether this chip currently represents the active filter.
     let isSelected: Bool
+
+    /// Action invoked when the chip is tapped.
     let action: () -> Void
 
+    /// Builds the chip button.
     var body: some View {
         Button(action: action) {
             Text(title)
