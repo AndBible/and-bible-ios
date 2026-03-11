@@ -385,6 +385,91 @@ final class AndBibleTests: XCTestCase {
         XCTAssertNil(store.loadWebDAVConfiguration()?.folderPath)
     }
 
+    func testWebDAVSyncConfigurationExpandsServerRootToNextCloudDAVEndpoint() async throws {
+        let configuration = WebDAVSyncConfiguration(
+            serverURL: "https://nextcloud.example.com",
+            username: "alice",
+            folderPath: nil
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            XCTAssertEqual(
+                request.url?.absoluteString,
+                "https://nextcloud.example.com/remote.php/dav/files/alice"
+            )
+            let response = HTTPURLResponse(
+                url: try XCTUnwrap(request.url),
+                statusCode: 207,
+                httpVersion: nil,
+                headerFields: nil
+            )!
+            return (response, Self.sampleWebDAVMultiStatusXML.data(using: .utf8)!)
+        }
+
+        let client = try configuration.makeWebDAVClient(
+            password: "secret",
+            session: makeMockedURLSession()
+        )
+        _ = try await client.testConnection()
+    }
+
+    func testWebDAVSyncConfigurationPreservesExplicitDAVEndpoint() async throws {
+        let configuration = WebDAVSyncConfiguration(
+            serverURL: "https://nextcloud.example.com/custom/remote.php/dav/files/alice",
+            username: "alice",
+            folderPath: nil
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            XCTAssertEqual(
+                request.url?.absoluteString,
+                "https://nextcloud.example.com/custom/remote.php/dav/files/alice"
+            )
+            let response = HTTPURLResponse(
+                url: try XCTUnwrap(request.url),
+                statusCode: 207,
+                httpVersion: nil,
+                headerFields: nil
+            )!
+            return (response, Self.sampleWebDAVMultiStatusXML.data(using: .utf8)!)
+        }
+
+        let client = try configuration.makeWebDAVClient(
+            password: "secret",
+            session: makeMockedURLSession()
+        )
+        _ = try await client.testConnection()
+    }
+
+    func testRemoteSyncSettingsStoreMakeWebDAVClientReturnsNilWhenPasswordMissing() throws {
+        let settingsStore = try makeInMemorySettingsStore()
+        let secretStore = InMemorySecretStore()
+        let store = RemoteSyncSettingsStore(settingsStore: settingsStore, secretStore: secretStore)
+
+        try store.saveWebDAVConfiguration(
+            WebDAVSyncConfiguration(
+                serverURL: "https://nextcloud.example.com",
+                username: "alice",
+                folderPath: nil
+            ),
+            password: nil
+        )
+
+        XCTAssertNil(try store.makeWebDAVClient(session: makeMockedURLSession()))
+    }
+
+    func testWebDAVSyncConfigurationRejectsLoginPageURLs() {
+        let configuration = WebDAVSyncConfiguration(
+            serverURL: "https://nextcloud.example.com/login",
+            username: "alice",
+            folderPath: nil
+        )
+
+        XCTAssertThrowsError(try configuration.resolvedDAVBaseURL()) { error in
+            XCTAssertEqual(error as? WebDAVClientError, .invalidURL)
+        }
+    }
+
     private func makeTemporaryBundledSwordPath() throws -> String {
         let fm = FileManager.default
         let sourceRoot = URL(fileURLWithPath: #filePath)

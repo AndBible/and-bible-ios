@@ -53,6 +53,118 @@ public struct WebDAVSyncConfiguration: Sendable, Equatable {
         self.username = username
         self.folderPath = folderPath
     }
+
+    /**
+     Resolves the persisted server URL into the DAV base endpoint used by `WebDAVClient`.
+
+     Android stores the plain server root URL for its NextCloud adapter. This helper expands that
+     root into the standard NextCloud DAV files endpoint, while still accepting already-expanded
+     DAV URLs for advanced or generic WebDAV setups.
+
+     - Returns: Normalized DAV base URL suitable for `WebDAVClient` requests.
+     - Side Effects: none.
+     - Failure modes:
+       - throws `WebDAVClientError.invalidURL` when the server URL is malformed, uses a non-HTTP
+         scheme, contains whitespace, or points at a login page instead of a DAV root
+     */
+    public func resolvedDAVBaseURL() throws -> URL {
+        let trimmedServerURL = serverURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedUsername = username.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedServerURL.isEmpty, !trimmedUsername.isEmpty else {
+            throw WebDAVClientError.invalidURL
+        }
+        guard trimmedServerURL.rangeOfCharacter(from: .whitespacesAndNewlines) == nil else {
+            throw WebDAVClientError.invalidURL
+        }
+        guard var components = URLComponents(string: trimmedServerURL) else {
+            throw WebDAVClientError.invalidURL
+        }
+        guard let scheme = components.scheme?.lowercased(), scheme == "http" || scheme == "https" else {
+            throw WebDAVClientError.invalidURL
+        }
+
+        let normalizedPathComponents = components.path
+            .split(separator: "/")
+            .map(String.init)
+        if normalizedPathComponents.last?.lowercased() == "login" {
+            throw WebDAVClientError.invalidURL
+        }
+
+        if !Self.pathAlreadyPointsAtDAVRoot(normalizedPathComponents) {
+            let encodedUsername = trimmedUsername.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed)
+                ?? trimmedUsername
+            let prefix = normalizedPathComponents.isEmpty
+                ? ""
+                : "/" + normalizedPathComponents.joined(separator: "/")
+            components.path = "\(prefix)/remote.php/dav/files/\(encodedUsername)"
+        } else {
+            components.path = "/" + normalizedPathComponents.joined(separator: "/")
+        }
+
+        guard let url = components.url else {
+            throw WebDAVClientError.invalidURL
+        }
+        return url
+    }
+
+    /**
+     Builds a transport client from the persisted WebDAV configuration.
+
+     - Parameters:
+       - password: Secret password or app password used for HTTP Basic authentication.
+       - session: URL session used for transport. Tests can inject a custom configuration.
+     - Returns: `WebDAVClient` bound to the resolved DAV endpoint and supplied credentials.
+     - Side Effects: none.
+     - Failure modes:
+       - throws `WebDAVClientError.invalidURL` when `resolvedDAVBaseURL()` cannot normalize the
+         stored server URL into a valid DAV endpoint
+     */
+    public func makeWebDAVClient(
+        password: String,
+        session: URLSession = .shared
+    ) throws -> WebDAVClient {
+        WebDAVClient(
+            baseURL: try resolvedDAVBaseURL(),
+            username: username.trimmingCharacters(in: .whitespacesAndNewlines),
+            password: password.trimmingCharacters(in: .whitespacesAndNewlines),
+            session: session
+        )
+    }
+
+    /**
+     Detects whether a normalized server path already points at a DAV resource root.
+
+     - Parameter pathComponents: Slash-delimited path components from the server URL.
+     - Returns: `true` when the path already contains a DAV-specific endpoint segment.
+     - Side Effects: none.
+     - Failure modes: This helper cannot fail.
+     */
+    private static func pathAlreadyPointsAtDAVRoot(_ pathComponents: [String]) -> Bool {
+        guard !pathComponents.isEmpty else {
+            return false
+        }
+
+        if pathComponents.count >= 3 {
+            for index in 0...(pathComponents.count - 3) {
+                if pathComponents[index] == "remote.php",
+                   pathComponents[index + 1] == "dav",
+                   pathComponents[index + 2] == "files" {
+                    return true
+                }
+            }
+        }
+
+        if pathComponents.count >= 2 {
+            for index in 0...(pathComponents.count - 2) {
+                if pathComponents[index] == "remote.php",
+                   pathComponents[index + 1] == "webdav" {
+                    return true
+                }
+            }
+        }
+
+        return false
+    }
 }
 
 /**
@@ -321,6 +433,29 @@ public final class RemoteSyncSettingsStore {
      */
     public func webDAVPassword() -> String? {
         secretStore.secret(forKey: Keys.webDAVPassword)
+    }
+
+    /**
+     Builds a configured `WebDAVClient` from persisted settings and Keychain-backed credentials.
+
+     - Parameter session: URL session used for transport. Tests can inject a custom configuration.
+     - Returns: Configured client when the required WebDAV settings and password are present, or
+       `nil` when configuration is incomplete.
+     - Side Effects: Reads from `SettingsStore` and the configured `SecretStoring` backend.
+     - Failure modes:
+       - returns `nil` when the configuration or password has not been fully provided yet
+       - rethrows `WebDAVClientError.invalidURL` when the stored server URL cannot be normalized
+         into a valid DAV endpoint
+     */
+    public func makeWebDAVClient(session: URLSession = .shared) throws -> WebDAVClient? {
+        guard let configuration = loadWebDAVConfiguration() else {
+            return nil
+        }
+        let trimmedPassword = webDAVPassword()?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !trimmedPassword.isEmpty else {
+            return nil
+        }
+        return try configuration.makeWebDAVClient(password: trimmedPassword, session: session)
     }
 
     /**
