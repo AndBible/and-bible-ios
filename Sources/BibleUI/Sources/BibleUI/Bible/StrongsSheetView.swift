@@ -14,8 +14,24 @@ import UIKit
 
 private let logger = Logger(subsystem: "org.andbible", category: "StrongsSheet")
 
-/// Present a Strong's definition sheet using UIKit (reliable from WKScriptMessageHandler callbacks).
-/// The sheet contains a Vue.js WebView that renders a MultiFragmentDocument.
+/**
+ Presents a Strong's definition sheet using UIKit rather than SwiftUI sheet state.
+
+ This entry point is used by web-view bridge callbacks, where the call site is outside the normal
+ SwiftUI view-state mutation flow. The presented sheet hosts a dedicated `BibleWebView` that renders
+ a Vue `MultiFragmentDocument`.
+
+ - Parameters:
+   - multiDocJSON: Serialized MultiDocument payload to render initially.
+   - configJSON: Serialized reader configuration passed to the embedded web view.
+   - backgroundColorInt: Signed ARGB background color matching the parent reader theme.
+   - controller: Reader controller used for recursive Strong's lookups.
+   - onFindAll: Callback invoked when the sheet requests a "find all occurrences" search.
+ - Side effects: Walks UIKit presentation state, may dismiss an already-presented sheet, and presents
+   a new page-sheet navigation controller.
+ - Failure modes: Returns without presenting anything if no active `UIWindowScene` or root view
+   controller is available.
+ */
 func presentStrongsSheet(
     multiDocJSON: String,
     configJSON: String,
@@ -93,20 +109,40 @@ func presentStrongsSheet(
     }
 }
 
-/// SwiftUI content for the Strong's definition sheet.
-/// Contains a BibleWebView with a lightweight bridge delegate that renders the MultiDocument.
+/**
+ SwiftUI root content embedded inside the UIKit Strong's sheet.
+
+ The view creates a dedicated `BibleBridge`, hosts a `BibleWebView`, and attaches a
+ `StrongsSheetDelegate` that handles recursive link navigation within the sheet.
+ */
 struct StrongsSheetContent: View {
+    /// Initial MultiDocument payload rendered in the sheet.
     let multiDocJSON: String
+
+    /// Reader configuration emitted into the embedded web view.
     let configJSON: String
+
+    /// Signed ARGB background color matching the parent reader theme.
     let backgroundColorInt: Int
+
+    /// Reader controller used for follow-up Strong's lookups.
     let controller: BibleReaderController
+
+    /// Callback invoked when the sheet requests a "find all occurrences" search.
     let onFindAll: ((String) -> Void)?
+
     /// Set by presentStrongsSheet to allow updating the back button.
     var onDelegateReady: ((StrongsSheetDelegate) -> Void)?
 
+    /// Bridge instance dedicated to the sheet's embedded web view.
     @State private var bridge = BibleBridge()
+
+    /// Retained delegate handling the embedded web-view bridge lifecycle.
     @State private var sheetDelegate: StrongsSheetDelegate?
 
+    /**
+     Builds the embedded web view and installs the sheet-specific bridge delegate on appear.
+     */
     var body: some View {
         BibleWebView(bridge: bridge, backgroundColorInt: backgroundColorInt)
             .onAppear {
@@ -125,21 +161,54 @@ struct StrongsSheetContent: View {
     }
 }
 
-/// Lightweight BibleBridgeDelegate for the Strong's definition sheet.
-/// Only handles client_ready (to load the document) and openExternalLink (for navigation).
-/// All other bridge methods are no-ops.
+/**
+ Lightweight `BibleBridgeDelegate` used by the Strong's definition sheet.
+
+ The delegate owns the current document JSON, an in-sheet back stack for recursive Strong's
+ navigation, and the bridge callbacks needed to load documents and handle link taps.
+
+ All unrelated `BibleBridgeDelegate` requirements are intentionally left as no-ops because the
+ Strong's sheet only needs document loading and link handling.
+ */
 final class StrongsSheetDelegate: NSObject, BibleBridgeDelegate {
+    /// Bridge connected to the sheet's embedded web view.
     private let bridge: BibleBridge
+
+    /// Current document payload rendered in the sheet.
     private var currentDocJSON: String
-    private var historyStack: [String] = []  // previous doc JSONs for back navigation
-    var onHistoryChanged: ((Bool) -> Void)?  // callback: canGoBack changed
+
+    /// Previously rendered document payloads used for in-sheet back navigation.
+    private var historyStack: [String] = []
+
+    /// Callback notifying UIKit when back-navigation availability changes.
+    var onHistoryChanged: ((Bool) -> Void)?
+
+    /// Reader configuration emitted into the embedded web view on load.
     private let configJSON: String
+
+    /// Signed ARGB background color matching the parent reader theme.
     private let backgroundColorInt: Int
+
+    /// Reader controller used for recursive Strong's lookups.
     private weak var controller: BibleReaderController?
+
+    /// Callback invoked when the sheet requests a "find all occurrences" search.
     private let onFindAll: ((String) -> Void)?
 
+    /// Whether the in-sheet Strong's history stack currently allows navigating back.
     var canGoBack: Bool { !historyStack.isEmpty }
 
+    /**
+     Creates the Strong's sheet bridge delegate.
+
+     - Parameters:
+       - bridge: Bridge connected to the embedded web view.
+       - multiDocJSON: Initial MultiDocument payload to render.
+       - configJSON: Serialized reader configuration.
+       - backgroundColorInt: Signed ARGB background color.
+       - controller: Reader controller used for recursive Strong's lookups.
+       - onFindAll: Callback invoked for "find all occurrences" requests.
+     */
     init(bridge: BibleBridge, multiDocJSON: String, configJSON: String,
          backgroundColorInt: Int,
          controller: BibleReaderController, onFindAll: ((String) -> Void)?) {
@@ -152,6 +221,12 @@ final class StrongsSheetDelegate: NSObject, BibleBridgeDelegate {
         super.init()
     }
 
+    /**
+     Pops the in-sheet history stack and re-renders the previous Strong's document.
+
+     Failure modes:
+     - returns without changes when there is no prior document in the history stack
+     */
     func goBack() {
         guard let previousJSON = historyStack.popLast() else { return }
         currentDocJSON = previousJSON
@@ -165,6 +240,13 @@ final class StrongsSheetDelegate: NSObject, BibleBridgeDelegate {
 
     // MARK: - Core: Client Ready → Load Document
 
+    /**
+     Emits configuration and document payloads once the embedded web client reports readiness.
+
+     Side effects:
+     - emits config/document/setup events into the embedded bridge
+     - injects CSS and debug click logging into the hosted web view
+     */
     func bridgeDidSetClientReady(_ bridge: BibleBridge) {
         logger.info("StrongsSheet: client ready, sending config + document")
         bridge.emit(event: "set_config", data: configJSON)
@@ -217,6 +299,9 @@ final class StrongsSheetDelegate: NSObject, BibleBridgeDelegate {
         """)
     }
 
+    /**
+     Converts a signed ARGB integer into a CSS hex color string without alpha.
+     */
     private static func cssColor(fromArgbInt value: Int) -> String {
         let uint = UInt32(bitPattern: Int32(truncatingIfNeeded: value))
         let r = (uint >> 16) & 0xFF
@@ -227,6 +312,11 @@ final class StrongsSheetDelegate: NSObject, BibleBridgeDelegate {
 
     // MARK: - Link Handling
 
+    /**
+     Routes Strong's-sheet links to recursive lookup, find-all search, or external URL handling.
+
+     - Parameter link: Link emitted by the embedded Bible web view.
+     */
     func bridge(_ bridge: BibleBridge, openExternalLink link: String) {
         logger.info("StrongsSheet openExternalLink: '\(link)'")
         // Recursive Strong's navigation within the sheet
@@ -248,6 +338,18 @@ final class StrongsSheetDelegate: NSObject, BibleBridgeDelegate {
         }
     }
 
+    /**
+     Handles recursive `ab-w://` links by building a new Strong's document in place.
+
+     Side effects:
+     - resolves new document JSON through `BibleReaderController`
+     - appends the current document to the in-sheet history stack
+     - emits clear/add/setup events into the embedded bridge
+
+     Failure modes:
+     - returns without changes when the URL cannot be parsed, no Strong's/Robinson values exist,
+       or the backing controller can no longer build a follow-up document
+     */
     private func handleStrongsLink(_ link: String) {
         guard let components = URLComponents(string: link) else {
             logger.error("handleStrongsLink: failed to parse URL: '\(link)'")
@@ -293,6 +395,14 @@ final class StrongsSheetDelegate: NSObject, BibleBridgeDelegate {
         """)
     }
 
+    /**
+     Handles `ab-find-all://` links by dismissing the sheet and forwarding a search request.
+
+     Failure modes:
+     - returns without action when the URL cannot be parsed or no lookup name can be derived
+     - if no presented UIKit controller is available, the sheet cannot dismiss itself and the
+       callback is not invoked
+     */
     private func handleFindAllLink(_ link: String) {
         guard let components = URLComponents(string: link) else { return }
         let items = components.queryItems ?? []
@@ -322,50 +432,139 @@ final class StrongsSheetDelegate: NSObject, BibleBridgeDelegate {
 
     // MARK: - No-op implementations for remaining protocol methods
 
+    /// No-op because the Strong's sheet does not react to ordinal-scroll callbacks.
     func bridge(_ bridge: BibleBridge, didScrollToOrdinal ordinal: Int, key: String) {}
+
+    /// No-op because the Strong's sheet does not support paged loading toward the beginning.
     func bridge(_ bridge: BibleBridge, requestMoreToBeginning callId: Int) {}
+
+    /// No-op because the Strong's sheet does not support paged loading toward the end.
     func bridge(_ bridge: BibleBridge, requestMoreToEnd callId: Int) {}
+
+    /// No-op because bookmark creation is handled in the main reader, not the Strong's sheet.
     func bridge(_ bridge: BibleBridge, addBookmark bookInitials: String, startOrdinal: Int, endOrdinal: Int, addNote: Bool) {}
+
+    /// No-op because generic bookmark creation is handled in the main reader.
     func bridge(_ bridge: BibleBridge, addGenericBookmark bookInitials: String, osisRef: String, startOrdinal: Int, endOrdinal: Int, addNote: Bool) {}
+
+    /// No-op because bookmark removal is out of scope for the Strong's sheet.
     func bridge(_ bridge: BibleBridge, removeBookmark bookmarkId: String) {}
+
+    /// No-op because generic bookmark removal is out of scope for the Strong's sheet.
     func bridge(_ bridge: BibleBridge, removeGenericBookmark bookmarkId: String) {}
+
+    /// No-op because bookmark note editing is not supported in the Strong's sheet.
     func bridge(_ bridge: BibleBridge, saveBookmarkNote bookmarkId: String, note: String?) {}
+
+    /// No-op because label assignment is not supported in the Strong's sheet.
     func bridge(_ bridge: BibleBridge, assignLabels bookmarkId: String) {}
+
+    /// No-op because label toggling is not supported in the Strong's sheet.
     func bridge(_ bridge: BibleBridge, toggleBookmarkLabel bookmarkId: String, labelId: String) {}
+
+    /// No-op because label removal is not supported in the Strong's sheet.
     func bridge(_ bridge: BibleBridge, removeBookmarkLabel bookmarkId: String, labelId: String) {}
+
+    /// No-op because primary-label selection is not supported in the Strong's sheet.
     func bridge(_ bridge: BibleBridge, setPrimaryLabel bookmarkId: String, labelId: String) {}
+
+    /// No-op because bookmark verse-scope editing is not supported in the Strong's sheet.
     func bridge(_ bridge: BibleBridge, setBookmarkWholeVerse bookmarkId: String, value: Bool) {}
+
+    /// No-op because bookmark icon editing is not supported in the Strong's sheet.
     func bridge(_ bridge: BibleBridge, setBookmarkCustomIcon bookmarkId: String, value: String?) {}
+
+    /// No-op because verse sharing is handled in the main reader.
     func bridge(_ bridge: BibleBridge, shareVerse bookInitials: String, startOrdinal: Int, endOrdinal: Int) {}
+
+    /// No-op because verse copying is handled in the main reader.
     func bridge(_ bridge: BibleBridge, copyVerse bookInitials: String, startOrdinal: Int, endOrdinal: Int) {}
+
+    /// No-op because verse comparison is handled in the main reader.
     func bridge(_ bridge: BibleBridge, compareVerses bookInitials: String, startOrdinal: Int, endOrdinal: Int) {}
+
+    /// No-op because TTS actions are handled in the main reader.
     func bridge(_ bridge: BibleBridge, speak bookInitials: String, v11n: String, startOrdinal: Int, endOrdinal: Int) {}
+
+    /// No-op because Study Pad navigation is not initiated from the Strong's sheet.
     func bridge(_ bridge: BibleBridge, openStudyPad labelId: String, bookmarkId: String) {}
+
+    /// No-op because My Notes navigation is not initiated from the Strong's sheet.
     func bridge(_ bridge: BibleBridge, openMyNotes v11n: String, ordinal: Int) {}
+
+    /// No-op because the Strong's sheet does not open the downloads screen.
     func bridgeDidRequestOpenDownloads(_ bridge: BibleBridge) {}
+
+    /// No-op because reference chooser dialogs are not supported in the Strong's sheet.
     func bridge(_ bridge: BibleBridge, refChooserDialog callId: Int) {}
+
+    /// No-op because reference parsing is not supported in the Strong's sheet.
     func bridge(_ bridge: BibleBridge, parseRef callId: Int, text: String) {}
+
+    /// No-op because help dialogs are not presented from the Strong's sheet.
     func bridge(_ bridge: BibleBridge, helpDialog content: String, title: String?) {}
+
+    /// No-op because selection-change callbacks are not consumed in the Strong's sheet.
     func bridge(_ bridge: BibleBridge, selectionChanged text: String) {}
+
+    /// No-op because selection-cleared callbacks are not consumed in the Strong's sheet.
     func bridgeSelectionCleared(_ bridge: BibleBridge) {}
+
+    /// No-op because Study Pad entry creation is not supported in the Strong's sheet.
     func bridge(_ bridge: BibleBridge, createNewStudyPadEntry labelId: String, entryType: String, afterEntryId: String) {}
+
+    /// No-op because Study Pad entry deletion is not supported in the Strong's sheet.
     func bridge(_ bridge: BibleBridge, deleteStudyPadEntry studyPadId: String) {}
+
+    /// No-op because Study Pad entry updates are not supported in the Strong's sheet.
     func bridge(_ bridge: BibleBridge, updateStudyPadTextEntry data: String) {}
+
+    /// No-op because Study Pad text updates are not supported in the Strong's sheet.
     func bridge(_ bridge: BibleBridge, updateStudyPadTextEntryText id: String, text: String) {}
+
+    /// No-op because Study Pad ordering is not supported in the Strong's sheet.
     func bridge(_ bridge: BibleBridge, updateOrderNumber labelId: String, data: String) {}
+
+    /// No-op because bookmark-to-label updates are not supported in the Strong's sheet.
     func bridge(_ bridge: BibleBridge, updateBookmarkToLabel data: String) {}
+
+    /// No-op because generic bookmark-to-label updates are not supported in the Strong's sheet.
     func bridge(_ bridge: BibleBridge, updateGenericBookmarkToLabel data: String) {}
+
+    /// No-op because bookmark edit-action changes are not supported in the Strong's sheet.
     func bridge(_ bridge: BibleBridge, setBookmarkEditAction bookmarkId: String, value: String) {}
+
+    /// No-op because edit-mode changes are not supported in the Strong's sheet.
     func bridge(_ bridge: BibleBridge, setEditing enabled: Bool) {}
+
+    /// No-op because Study Pad cursor updates are not supported in the Strong's sheet.
     func bridge(_ bridge: BibleBridge, setStudyPadCursor labelId: String, orderNumber: Int) {}
+
+    /// No-op because state persistence is not required for the ephemeral Strong's sheet.
     func bridge(_ bridge: BibleBridge, saveState state: String) {}
+
+    /// No-op because the Strong's sheet does not track nested modal state.
     func bridge(_ bridge: BibleBridge, reportModalState isOpen: Bool) {}
+
+    /// No-op because the Strong's sheet does not react to input-focus changes.
     func bridge(_ bridge: BibleBridge, reportInputFocus focused: Bool) {}
+
+    /// No-op because raw key-down events are not handled in the Strong's sheet.
     func bridge(_ bridge: BibleBridge, onKeyDown key: String) {}
+
+    /// No-op because toast display is handled by the main reader host.
     func bridge(_ bridge: BibleBridge, showToast text: String) {}
+
+    /// No-op because HTML sharing is not triggered from the Strong's sheet.
     func bridge(_ bridge: BibleBridge, shareHtml html: String) {}
+
+    /// No-op because compare-document toggling is not supported in the Strong's sheet.
     func bridge(_ bridge: BibleBridge, toggleCompareDocument documentId: String) {}
+
+    /// No-op because EPUB links are not opened from the Strong's sheet.
     func bridge(_ bridge: BibleBridge, openEpubLink bookInitials: String, toKey: String, toId: String) {}
+
+    /// No-op because fullscreen toggling is not driven from the Strong's sheet.
     func bridgeDidRequestToggleFullScreen(_ bridge: BibleBridge) {}
 }
 #endif
