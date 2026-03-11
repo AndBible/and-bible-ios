@@ -6,22 +6,66 @@ import BibleCore
 import SwordKit
 import UniformTypeIdentifiers
 
-/// Import and export app data (bookmarks, labels, reading plans, notes).
+/**
+ Settings screen for exporting backups, importing backups, installing SWORD modules, and importing EPUB books.
+
+ The view coordinates file export to temporary files, file-importer presentation, security-scoped
+ resource access, and dispatch to the relevant backup or installer service.
+
+ Data dependencies:
+ - `modelContext` is passed into `BackupService` for backup import/export operations
+
+ Side effects:
+ - export actions write temporary files and present a share sheet
+ - import actions read user-selected files through `fileImporter` and mutate app data through
+   backup/import services
+ - module and EPUB install actions import external content into the app's storage locations
+ - status text reflects the latest success or failure message across all operations
+ */
 public struct ImportExportView: View {
+    /// SwiftData context used by backup import/export services.
     @Environment(\.modelContext) private var modelContext
+
+    /// Controls presentation of the share sheet after a successful export.
     @State private var showExportSheet = false
+
+    /// Controls presentation of the backup import file picker.
     @State private var showImportPicker = false
+
+    /// URL of the most recently exported file shared through the share sheet.
     @State private var exportedFileURL: URL?
+
+    /// Latest user-visible success or error message across import/export actions.
     @State private var statusMessage: String?
+
+    /// Whether a backup export is currently in progress.
     @State private var isExporting = false
+
+    /// Whether a backup import is currently in progress.
     @State private var isImporting = false
+
+    /// Controls presentation of the SWORD module ZIP picker.
     @State private var showModuleZipPicker = false
+
+    /// Whether a SWORD module installation is currently in progress.
     @State private var isInstallingModule = false
+
+    /// Controls presentation of the EPUB picker.
     @State private var showEpubPicker = false
+
+    /// Whether an EPUB installation is currently in progress.
     @State private var isInstallingEpub = false
 
+    /**
+     Creates the import/export screen.
+
+     - Note: This initializer has no inputs and performs no side effects.
+     */
     public init() {}
 
+    /**
+     Builds the export, import, module-install, EPUB-install, and status sections.
+     */
     public var body: some View {
         List {
             // Export section
@@ -152,8 +196,14 @@ public struct ImportExportView: View {
         }
     }
 
-    // MARK: - Export
+    /**
+     Exports a full JSON backup, writes it to a temporary file, and presents the share sheet.
 
+     Side effects:
+     - toggles export state and clears prior status messages
+     - queries `BackupService` for a full backup payload
+     - writes the payload to a temporary file and presents the share sheet on success
+     */
     private func exportFullBackup() {
         isExporting = true
         statusMessage = nil
@@ -174,6 +224,9 @@ public struct ImportExportView: View {
         isExporting = false
     }
 
+    /**
+     Exports bookmarks as CSV, writes the file to a temporary location, and presents the share sheet.
+     */
     private func exportBookmarksCSV() {
         isExporting = true
         statusMessage = nil
@@ -194,8 +247,19 @@ public struct ImportExportView: View {
         isExporting = false
     }
 
-    // MARK: - Import
+    /**
+     Handles backup/bookmark import results from the generic file importer.
 
+     Supported formats:
+     - `.json`: full backup import via `BackupService.importFullBackup`
+     - `.csv`: bookmark import via `BackupService.importBookmarksCSV`
+     - `.bbl`, `.cmt`, `.dct`: MySword/MyBible hint only; no import is performed
+
+     Side effects:
+     - starts and stops security-scoped resource access for the chosen file
+     - reads the imported file data and updates status text with success or error details
+     - mutates persisted app data through `BackupService` for supported formats
+     */
     private func handleImport(_ result: Result<[URL], Error>) {
         switch result {
         case .success(let urls):
@@ -245,8 +309,14 @@ public struct ImportExportView: View {
         }
     }
 
-    // MARK: - Module ZIP Import
+    /**
+     Handles SWORD module ZIP import results from the file importer.
 
+     Side effects:
+     - starts and stops security-scoped resource access for the chosen ZIP file
+     - installs the module through `ModuleRepository`
+     - updates status text with the installed module name or any failure message
+     */
     private func handleModuleZipImport(_ result: Result<[URL], Error>) {
         switch result {
         case .success(let urls):
@@ -274,8 +344,14 @@ public struct ImportExportView: View {
         }
     }
 
-    // MARK: - EPUB Import
+    /**
+     Handles EPUB import results from the file importer.
 
+     Side effects:
+     - installs the selected EPUB through `EpubReader.install`
+     - resolves the installed reader title when possible for a friendlier success message
+     - updates status text with the final success or failure message
+     */
     private func handleEpubImport(_ result: Result<[URL], Error>) {
         switch result {
         case .success(let urls):
@@ -301,14 +377,23 @@ public struct ImportExportView: View {
         }
     }
 
-    // MARK: - Helpers
-
+    /**
+     Returns the current date formatted for exported backup file names.
+     */
     private func dateString() -> String {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd"
         return formatter.string(from: Date())
     }
 
+    /**
+     Writes export data to a temporary file and returns its URL for sharing.
+
+     - Parameters:
+       - data: File contents to write.
+       - fileName: Target filename appended within the temporary directory.
+     - Returns: Temporary file URL on success, or `nil` after updating `statusMessage` on failure.
+     */
     private func saveToTempFile(data: Data, fileName: String) -> URL? {
         let tempDir = FileManager.default.temporaryDirectory
         let fileURL = tempDir.appendingPathComponent(fileName)
