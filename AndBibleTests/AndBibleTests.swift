@@ -1,6 +1,7 @@
 import XCTest
 import BibleCore
 import SwordKit
+import SwiftData
 @testable import BibleUI
 
 final class AndBibleTests: XCTestCase {
@@ -134,6 +135,50 @@ final class AndBibleTests: XCTestCase {
             hits.allSatisfy { !$0.reference.isEmpty },
             "Expected Strong's hits to parse into verse references"
         )
+    }
+
+    func testBookmarkStoreBibleBookmarksCanFilterByLabel() throws {
+        let schema = Schema([
+            BibleBookmark.self,
+            BibleBookmarkNotes.self,
+            BibleBookmarkToLabel.self,
+            GenericBookmark.self,
+            GenericBookmarkNotes.self,
+            GenericBookmarkToLabel.self,
+            Label.self,
+            StudyPadTextEntry.self,
+            StudyPadTextEntryText.self,
+        ])
+        let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: schema, configurations: [configuration])
+        let store = BookmarkStore(modelContext: ModelContext(container))
+
+        let matchingLabel = Label(name: "Matching")
+        let otherLabel = Label(name: "Other")
+        store.insert(matchingLabel)
+        store.insert(otherLabel)
+
+        let matchingBookmark = BibleBookmark(kjvOrdinalStart: 1, kjvOrdinalEnd: 1)
+        matchingBookmark.book = "Genesis"
+        store.insert(matchingBookmark)
+
+        let otherBookmark = BibleBookmark(kjvOrdinalStart: 2, kjvOrdinalEnd: 2)
+        otherBookmark.book = "Genesis"
+        store.insert(otherBookmark)
+
+        let matchingJunction = BibleBookmarkToLabel()
+        matchingJunction.bookmark = matchingBookmark
+        matchingJunction.label = matchingLabel
+        store.insert(matchingJunction)
+
+        let otherJunction = BibleBookmarkToLabel()
+        otherJunction.bookmark = otherBookmark
+        otherJunction.label = otherLabel
+        store.insert(otherJunction)
+
+        let filtered = store.bibleBookmarks(labelId: matchingLabel.id)
+
+        XCTAssertEqual(filtered.map(\.id), [matchingBookmark.id])
     }
 
     private func makeTemporaryBundledSwordPath() throws -> String {

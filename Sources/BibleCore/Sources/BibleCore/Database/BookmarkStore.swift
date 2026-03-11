@@ -8,13 +8,20 @@ import SwiftData
 public final class BookmarkStore {
     private let modelContext: ModelContext
 
+    /// Creates a bookmark store bound to the caller's SwiftData context.
+    /// - Parameter modelContext: Context used for all bookmark, label, and StudyPad queries.
     public init(modelContext: ModelContext) {
         self.modelContext = modelContext
     }
 
     // MARK: - Bible Bookmarks
 
-    /// Fetch all Bible bookmarks, optionally filtered by label.
+    /// Fetches Bible bookmarks using the requested sort order.
+    /// - Parameters:
+    ///   - labelId: Optional label filter. When present, results are filtered after fetch by
+    ///     inspecting the bookmark-to-label relationship.
+    ///   - sortOrder: Ordering strategy for the returned bookmarks.
+    /// - Returns: Matching Bible bookmarks.
     public func bibleBookmarks(labelId: UUID? = nil, sortOrder: BookmarkSortOrder = .bibleOrder) -> [BibleBookmark] {
         var descriptor = FetchDescriptor<BibleBookmark>()
 
@@ -33,10 +40,16 @@ public final class BookmarkStore {
             descriptor.sortBy = [SortDescriptor(\.kjvOrdinalStart)]
         }
 
-        return (try? modelContext.fetch(descriptor)) ?? []
+        let results = (try? modelContext.fetch(descriptor)) ?? []
+        guard let labelId else { return results }
+        return results.filter { bookmark in
+            bookmark.bookmarkToLabels?.contains { $0.label?.id == labelId } ?? false
+        }
     }
 
-    /// Fetch a single Bible bookmark by ID.
+    /// Fetches a single Bible bookmark by primary key.
+    /// - Parameter id: Bookmark UUID.
+    /// - Returns: The bookmark when found, otherwise `nil`.
     public func bibleBookmark(id: UUID) -> BibleBookmark? {
         var descriptor = FetchDescriptor<BibleBookmark>(
             predicate: #Predicate { $0.id == id }
@@ -45,7 +58,13 @@ public final class BookmarkStore {
         return try? modelContext.fetch(descriptor).first
     }
 
-    /// Fetch Bible bookmarks overlapping an ordinal range, optionally filtered by book.
+    /// Fetches Bible bookmarks whose stored KJVA ordinal range overlaps the given range.
+    /// - Parameters:
+    ///   - startOrdinal: Inclusive start of the query range.
+    ///   - endOrdinal: Inclusive end of the query range.
+    ///   - book: Optional book name filter used to avoid cross-book collisions when the current
+    ///     ordinal scheme is only unique within a book.
+    /// - Returns: Overlapping bookmarks.
     public func bibleBookmarks(overlapping startOrdinal: Int, endOrdinal: Int, book: String? = nil) -> [BibleBookmark] {
         let descriptor: FetchDescriptor<BibleBookmark>
         if let book {
@@ -64,25 +83,29 @@ public final class BookmarkStore {
         return (try? modelContext.fetch(descriptor)) ?? []
     }
 
-    /// Insert a new Bible bookmark.
+    /// Inserts a new Bible bookmark and immediately saves the context.
+    /// - Parameter bookmark: Bookmark to persist.
     public func insert(_ bookmark: BibleBookmark) {
         modelContext.insert(bookmark)
         save()
     }
 
-    /// Insert a BibleBookmarkToLabel junction.
+    /// Inserts a Bible-to-label junction row and immediately saves the context.
+    /// - Parameter btl: Junction row linking a bookmark and a label.
     public func insert(_ btl: BibleBookmarkToLabel) {
         modelContext.insert(btl)
         save()
     }
 
-    /// Delete a Bible bookmark.
+    /// Deletes a Bible bookmark and relies on SwiftData cascade rules for attached notes/junctions.
+    /// - Parameter bookmark: Bookmark to delete.
     public func delete(_ bookmark: BibleBookmark) {
         modelContext.delete(bookmark)
         save()
     }
 
-    /// Delete a Bible bookmark by ID.
+    /// Deletes a Bible bookmark by ID when it exists.
+    /// - Parameter id: Bookmark UUID.
     public func deleteBibleBookmark(id: UUID) {
         if let bookmark = bibleBookmark(id: id) {
             delete(bookmark)
@@ -91,7 +114,8 @@ public final class BookmarkStore {
 
     // MARK: - Generic Bookmarks
 
-    /// Fetch all generic bookmarks.
+    /// Fetches all generic bookmarks ordered by most recent creation time first.
+    /// - Returns: Generic bookmarks across all non-Bible documents.
     public func genericBookmarks() -> [GenericBookmark] {
         let descriptor = FetchDescriptor<GenericBookmark>(
             sortBy: [SortDescriptor(\.createdAt, order: .reverse)]
@@ -99,7 +123,9 @@ public final class BookmarkStore {
         return (try? modelContext.fetch(descriptor)) ?? []
     }
 
-    /// Fetch a single generic bookmark by ID.
+    /// Fetches a single generic bookmark by primary key.
+    /// - Parameter id: Bookmark UUID.
+    /// - Returns: The bookmark when found, otherwise `nil`.
     public func genericBookmark(id: UUID) -> GenericBookmark? {
         var descriptor = FetchDescriptor<GenericBookmark>(
             predicate: #Predicate { $0.id == id }
@@ -108,19 +134,22 @@ public final class BookmarkStore {
         return try? modelContext.fetch(descriptor).first
     }
 
-    /// Insert a new generic bookmark.
+    /// Inserts a new generic bookmark and immediately saves the context.
+    /// - Parameter bookmark: Bookmark to persist.
     public func insert(_ bookmark: GenericBookmark) {
         modelContext.insert(bookmark)
         save()
     }
 
-    /// Insert a GenericBookmarkToLabel junction.
+    /// Inserts a generic-bookmark-to-label junction row and immediately saves the context.
+    /// - Parameter gbtl: Junction row linking a generic bookmark and a label.
     public func insert(_ gbtl: GenericBookmarkToLabel) {
         modelContext.insert(gbtl)
         save()
     }
 
-    /// Delete a generic bookmark.
+    /// Deletes a generic bookmark and relies on SwiftData cascade rules for attached notes/junctions.
+    /// - Parameter bookmark: Bookmark to delete.
     public func delete(_ bookmark: GenericBookmark) {
         modelContext.delete(bookmark)
         save()
@@ -128,7 +157,9 @@ public final class BookmarkStore {
 
     // MARK: - Labels
 
-    /// Fetch all labels.
+    /// Fetches labels ordered by name.
+    /// - Parameter includeSystem: Whether reserved internal labels should be included.
+    /// - Returns: Matching labels.
     public func labels(includeSystem: Bool = false) -> [Label] {
         let descriptor = FetchDescriptor<Label>(
             sortBy: [SortDescriptor(\.name)]
@@ -140,7 +171,9 @@ public final class BookmarkStore {
         return results
     }
 
-    /// Fetch a label by ID.
+    /// Fetches a label by primary key.
+    /// - Parameter id: Label UUID.
+    /// - Returns: The label when found, otherwise `nil`.
     public func label(id: UUID) -> Label? {
         var descriptor = FetchDescriptor<Label>(
             predicate: #Predicate { $0.id == id }
@@ -149,13 +182,15 @@ public final class BookmarkStore {
         return try? modelContext.fetch(descriptor).first
     }
 
-    /// Insert a new label.
+    /// Inserts a new label and immediately saves the context.
+    /// - Parameter label: Label to persist.
     public func insert(_ label: Label) {
         modelContext.insert(label)
         save()
     }
 
-    /// Delete a label.
+    /// Deletes a label and relies on SwiftData cascade rules for attached StudyPad entries.
+    /// - Parameter label: Label to delete.
     public func delete(_ label: Label) {
         modelContext.delete(label)
         save()
@@ -163,7 +198,11 @@ public final class BookmarkStore {
 
     // MARK: - StudyPad
 
-    /// Fetch StudyPad text entries for a label, ordered by orderNumber.
+    /// Fetches StudyPad entries for a label ordered by `orderNumber`.
+    /// - Parameter labelId: Label UUID owning the StudyPad.
+    /// - Returns: Entries belonging to that label.
+    /// - Note: The current implementation sorts in SwiftData, then filters by relationship in
+    ///   memory.
     public func studyPadEntries(labelId: UUID) -> [StudyPadTextEntry] {
         let descriptor = FetchDescriptor<StudyPadTextEntry>(
             sortBy: [SortDescriptor(\.orderNumber)]
@@ -173,19 +212,23 @@ public final class BookmarkStore {
         return all.filter { $0.label?.id == labelId }
     }
 
-    /// Insert a StudyPad text entry.
+    /// Inserts a StudyPad entry shell and immediately saves the context.
+    /// - Parameter entry: Entry to persist.
     public func insert(_ entry: StudyPadTextEntry) {
         modelContext.insert(entry)
         save()
     }
 
-    /// Delete a StudyPad text entry.
+    /// Deletes a StudyPad entry and relies on cascade rules for detached text content.
+    /// - Parameter entry: Entry to delete.
     public func delete(_ entry: StudyPadTextEntry) {
         modelContext.delete(entry)
         save()
     }
 
-    /// Fetch a single StudyPad text entry by ID.
+    /// Fetches a StudyPad entry shell by primary key.
+    /// - Parameter id: Entry UUID.
+    /// - Returns: The entry when found, otherwise `nil`.
     public func studyPadEntry(id: UUID) -> StudyPadTextEntry? {
         var descriptor = FetchDescriptor<StudyPadTextEntry>(
             predicate: #Predicate { $0.id == id }
@@ -194,7 +237,9 @@ public final class BookmarkStore {
         return try? modelContext.fetch(descriptor).first
     }
 
-    /// Fetch the text content for a StudyPad entry.
+    /// Fetches the detached text payload for a StudyPad entry.
+    /// - Parameter entryId: Parent StudyPad entry UUID.
+    /// - Returns: The text row when found, otherwise `nil`.
     public func studyPadEntryText(entryId: UUID) -> StudyPadTextEntryText? {
         var descriptor = FetchDescriptor<StudyPadTextEntryText>(
             predicate: #Predicate { $0.studyPadTextEntryId == entryId }
@@ -203,7 +248,10 @@ public final class BookmarkStore {
         return try? modelContext.fetch(descriptor).first
     }
 
-    /// Insert or update text content for a StudyPad entry.
+    /// Inserts or updates detached StudyPad text content for an entry.
+    /// - Parameters:
+    ///   - entryId: Parent StudyPad entry UUID.
+    ///   - text: New text payload.
     public func upsertStudyPadEntryText(entryId: UUID, text: String) {
         if let existing = studyPadEntryText(entryId: entryId) {
             existing.text = text
@@ -220,41 +268,57 @@ public final class BookmarkStore {
 
     // MARK: - BookmarkToLabel Lookups
 
-    /// Fetch a single BibleBookmarkToLabel junction by bookmark and label IDs.
+    /// Fetches a Bible bookmark-to-label junction for the given bookmark/label pair.
+    /// - Parameters:
+    ///   - bookmarkId: Bookmark UUID.
+    ///   - labelId: Label UUID.
+    /// - Returns: Matching junction row when present.
     public func bibleBookmarkToLabel(bookmarkId: UUID, labelId: UUID) -> BibleBookmarkToLabel? {
         let descriptor = FetchDescriptor<BibleBookmarkToLabel>()
         let all = (try? modelContext.fetch(descriptor)) ?? []
         return all.first { $0.bookmark?.id == bookmarkId && $0.label?.id == labelId }
     }
 
-    /// Fetch a single GenericBookmarkToLabel junction by bookmark and label IDs.
+    /// Fetches a generic bookmark-to-label junction for the given bookmark/label pair.
+    /// - Parameters:
+    ///   - bookmarkId: Bookmark UUID.
+    ///   - labelId: Label UUID.
+    /// - Returns: Matching junction row when present.
     public func genericBookmarkToLabel(bookmarkId: UUID, labelId: UUID) -> GenericBookmarkToLabel? {
         let descriptor = FetchDescriptor<GenericBookmarkToLabel>()
         let all = (try? modelContext.fetch(descriptor)) ?? []
         return all.first { $0.bookmark?.id == bookmarkId && $0.label?.id == labelId }
     }
 
-    /// Fetch all BibleBookmarkToLabel junctions for a given label.
+    /// Fetches all Bible bookmark-to-label junction rows for a label.
+    /// - Parameter labelId: Label UUID.
+    /// - Returns: Matching junction rows.
     public func bibleBookmarkToLabels(labelId: UUID) -> [BibleBookmarkToLabel] {
         let descriptor = FetchDescriptor<BibleBookmarkToLabel>()
         let all = (try? modelContext.fetch(descriptor)) ?? []
         return all.filter { $0.label?.id == labelId }
     }
 
-    /// Fetch all GenericBookmarkToLabel junctions for a given label.
+    /// Fetches all generic bookmark-to-label junction rows for a label.
+    /// - Parameter labelId: Label UUID.
+    /// - Returns: Matching junction rows.
     public func genericBookmarkToLabels(labelId: UUID) -> [GenericBookmarkToLabel] {
         let descriptor = FetchDescriptor<GenericBookmarkToLabel>()
         let all = (try? modelContext.fetch(descriptor)) ?? []
         return all.filter { $0.label?.id == labelId }
     }
 
-    /// Fetch Bible bookmarks that have a specific label.
+    /// Fetches Bible bookmarks carrying the given label.
+    /// - Parameter labelId: Label UUID.
+    /// - Returns: Bible bookmarks associated with the label.
     public func bibleBookmarks(withLabel labelId: UUID) -> [BibleBookmark] {
         let btls = bibleBookmarkToLabels(labelId: labelId)
         return btls.compactMap { $0.bookmark }
     }
 
-    /// Fetch generic bookmarks that have a specific label.
+    /// Fetches generic bookmarks carrying the given label.
+    /// - Parameter labelId: Label UUID.
+    /// - Returns: Generic bookmarks associated with the label.
     public func genericBookmarks(withLabel labelId: UUID) -> [GenericBookmark] {
         let gbtls = genericBookmarkToLabels(labelId: labelId)
         return gbtls.compactMap { $0.bookmark }

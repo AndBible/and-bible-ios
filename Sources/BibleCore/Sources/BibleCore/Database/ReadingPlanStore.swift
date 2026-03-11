@@ -8,11 +8,14 @@ import SwiftData
 public final class ReadingPlanStore {
     private let modelContext: ModelContext
 
+    /// Creates a reading-plan store bound to the caller's SwiftData context.
+    /// - Parameter modelContext: Context used for reading-plan persistence.
     public init(modelContext: ModelContext) {
         self.modelContext = modelContext
     }
 
-    /// Fetch all reading plans.
+    /// Fetches all reading plans ordered by most recent `startDate` first.
+    /// - Returns: Persisted reading plans.
     public func plans() -> [ReadingPlan] {
         let descriptor = FetchDescriptor<ReadingPlan>(
             sortBy: [SortDescriptor(\.startDate, order: .reverse)]
@@ -20,7 +23,8 @@ public final class ReadingPlanStore {
         return (try? modelContext.fetch(descriptor)) ?? []
     }
 
-    /// Fetch active reading plans.
+    /// Fetches only active reading plans.
+    /// - Returns: Plans whose `isActive` flag is `true`.
     public func activePlans() -> [ReadingPlan] {
         let descriptor = FetchDescriptor<ReadingPlan>(
             predicate: #Predicate { $0.isActive }
@@ -28,7 +32,9 @@ public final class ReadingPlanStore {
         return (try? modelContext.fetch(descriptor)) ?? []
     }
 
-    /// Fetch a reading plan by ID.
+    /// Fetches a reading plan by primary key.
+    /// - Parameter id: Plan UUID.
+    /// - Returns: The plan when found, otherwise `nil`.
     public func plan(id: UUID) -> ReadingPlan? {
         var descriptor = FetchDescriptor<ReadingPlan>(
             predicate: #Predicate { $0.id == id }
@@ -37,20 +43,23 @@ public final class ReadingPlanStore {
         return try? modelContext.fetch(descriptor).first
     }
 
-    /// Insert a new reading plan.
+    /// Inserts a new reading plan and immediately saves the context.
+    /// - Parameter plan: Plan to persist.
     public func insert(_ plan: ReadingPlan) {
         modelContext.insert(plan)
         save()
     }
 
-    /// Mark a day as completed.
+    /// Marks a reading-plan day as completed and stamps `completedDate`.
+    /// - Parameter day: Day record to mutate.
     public func completeDay(_ day: ReadingPlanDay) {
         day.isCompleted = true
         day.completedDate = Date()
         save()
     }
 
-    /// Delete a reading plan.
+    /// Deletes a reading plan and relies on cascade rules for child day records.
+    /// - Parameter plan: Plan to delete.
     public func delete(_ plan: ReadingPlan) {
         modelContext.delete(plan)
         save()
