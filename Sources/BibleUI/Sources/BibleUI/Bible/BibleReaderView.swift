@@ -13,8 +13,22 @@ import StoreKit
 #endif
 
 #if os(iOS)
-/// Present a CompareView sheet using UIKit directly.
-/// Same reason as Strong's — triggered from WKScriptMessageHandler.
+/**
+ Presents `CompareView` from UIKit instead of SwiftUI sheet state.
+
+ This entry point is used by bridge-driven actions that originate from the embedded WKWebView,
+ where no SwiftUI view state mutation hook is available at the call site.
+
+ - Parameters:
+   - book: User-visible book name for the comparison session.
+   - chapter: One-based chapter number to compare.
+   - currentModuleName: Active Bible module that should anchor the comparison.
+   - startVerse: Optional starting verse for range-limited comparisons.
+   - endVerse: Optional ending verse for range-limited comparisons.
+   - osisBookId: Optional OSIS book identifier when the caller already resolved it.
+ - Important: This function walks UIKit presentation state and presents a page sheet from the
+   top-most view controller. It should only be called on iOS.
+ */
 func presentCompareView(book: String, chapter: Int, currentModuleName: String, startVerse: Int? = nil, endVerse: Int? = nil, osisBookId: String? = nil) {
     guard let windowScene = UIApplication.shared.connectedScenes
         .compactMap({ $0 as? UIWindowScene }).first,
@@ -38,91 +52,229 @@ func presentCompareView(book: String, chapter: Int, currentModuleName: String, s
 // Label assignment is now presented via SwiftUI .sheet() in BibleWindowPane
 // (no UIKit hosting needed — avoids gesture/toolbar conflicts)
 #else
+/**
+ No-op macOS placeholder for UIKit-only compare-sheet presentation requests.
+
+ - Parameters:
+   - book: Ignored on macOS.
+   - chapter: Ignored on macOS.
+   - currentModuleName: Ignored on macOS.
+   - startVerse: Ignored on macOS.
+   - endVerse: Ignored on macOS.
+   - osisBookId: Ignored on macOS.
+ - Note: Compare presentation on macOS is currently handled through native SwiftUI paths only.
+ */
 func presentCompareView(book: String, chapter: Int, currentModuleName: String, startVerse: Int? = nil, endVerse: Int? = nil, osisBookId: String? = nil) {
     // macOS: no-op for now
 }
 // Label assignment presented via SwiftUI .sheet() in BibleWindowPane (cross-platform)
 #endif
 
-/// The primary Bible reading view — coordinates toolbar, sheets, and multi-window split content.
-/// Each window is rendered by a `BibleWindowPane` with its own bridge/controller/WebView.
+/**
+ Coordinates the primary reading experience, including panes, toolbars, sheets, and overlays.
+
+ `BibleReaderView` is the top-level SwiftUI coordinator for the reading screen. It resolves the
+ focused pane from `WindowManager`, owns sheet presentation state for cross-cutting features, and
+ pushes workspace-level display and behavior preferences into each `BibleWindowPane`.
+
+ Data dependencies:
+ - `WindowManager` from the environment provides pane layout, active-window focus, controller
+   registration, workspace settings, and synchronization callbacks
+ - `SearchIndexService` from the environment is passed into search flows
+ - `modelContext` from the environment persists workspace, settings, and toolbar-toggle changes
+ - `colorScheme` from the environment participates in effective night-mode resolution
+
+ Side effects:
+ - `onAppear` loads persisted preferences, wires TTS callbacks, restores speech settings, and
+   registers synchronized-scrolling callbacks on `WindowManager`
+ - iOS `onAppear` and `onDisappear` start and stop tilt-to-scroll based on workspace settings
+ - sheet dismissals reload behavior preferences or refresh installed-module lists where needed
+ - toolbar toggles and helper actions mutate SwiftData-backed workspace/settings state and push
+   display updates into active pane controllers
+ */
 public struct BibleReaderView: View {
+    /// Shared workspace/window coordinator that owns panes, focus, and controller registration.
     @Environment(WindowManager.self) private var windowManager
+
+    /// Search index service passed through to `SearchView` for FTS index inspection and creation.
     @Environment(SearchIndexService.self) private var searchIndexService
+
+    /// SwiftData context used to persist workspace settings and display-configuration changes.
     @Environment(\.modelContext) private var modelContext
+
+    /// System color scheme used to resolve automatic night-mode behavior.
     @Environment(\.colorScheme) private var colorScheme
+
+    /// Presents the book/chapter/verse chooser flow for the focused controller.
     @State private var showBookChooser = false
+
+    /// Presents the full-text search sheet for the focused module.
     @State private var showSearch = false
+
+    /// Presents bookmark browsing and navigation UI.
     @State private var showBookmarks = false
+
+    /// Presents the consolidated settings screen.
     @State private var showSettings = false
+
+    /// Presents module download and install management.
     @State private var showDownloads = false
+
+    /// Presents reading history for jump-back navigation.
     @State private var showHistory = false
+
+    /// Presents the compare-translations sheet.
     @State private var showCompare = false
+
+    /// Presents reading-plan management UI.
     @State private var showReadingPlans = false
+
+    /// Presents the expanded speech controls sheet.
     @State private var showSpeakControls = false
+
+    /// Workspace-resolved text and color settings pushed into every visible pane.
     @State private var displaySettings: TextDisplaySettings = .appDefaults
+
+    /// Effective night-mode value currently applied to pane controllers and overlays.
     @State private var nightMode = false
+
+    /// Stored night-mode strategy (`system`, `manual`, or other Android-parity raw values).
     @State private var nightModeMode = AppPreferenceRegistry.stringDefault(for: .nightModePref3) ?? NightModeSetting.system.rawValue
+
+    /// Shared text-to-speech service used by all panes and speak-related overlays.
     @StateObject private var speakService = SpeakService()
+
+    /// Pending plain-text payload for the native share sheet.
     @State private var shareText: String?
+
+    /// Pending cross-reference payload for modal presentation.
     @State private var crossReferences: [CrossReference]?
+
+    /// Presents the document-category-specific module picker.
     @State private var showModulePicker = false
+
+    /// Active module category that the picker should display.
     @State private var pickerCategory: DocumentCategory = .bible
+
+    /// Presents workspace selection and management UI.
     @State private var showWorkspaces = false
+
+    /// Transient toast text shown above the bottom edge of the reader.
     @State private var toastMessage: String?
+
+    /// Pending dismissal work item for the transient toast overlay.
     @State private var toastWorkItem: DispatchWorkItem?
+
+    /// Whether the reader is currently hiding its standard chrome in fullscreen mode.
     @State private var isFullScreen = false
+
+    /// Android-parity preference controlling whether navigation drills down to verse selection.
     @State private var navigateToVersePref = AppPreferenceRegistry.boolDefault(for: .navigateToVersePref) ?? false
+
+    /// Android-parity preference enabling automatic fullscreen while scrolling.
     @State private var autoFullscreenPref = AppPreferenceRegistry.boolDefault(for: .autoFullscreenPref) ?? false
+
+    /// Android-parity preference switching bookmark actions between one-step and two-step flows.
     @State private var disableTwoStepBookmarkingPref =
         AppPreferenceRegistry.boolDefault(for: .disableTwoStepBookmarking) ?? false
+
+    /// Stored Android-parity toolbar gesture mode for Bible/commentary buttons.
     @State private var toolbarButtonActionsMode =
         AppPreferenceRegistry.stringDefault(for: .toolbarButtonActions) ?? "default"
+
+    /// Stored Android-parity horizontal swipe mode for the Bible view.
     @State private var bibleViewSwipeMode =
         AppPreferenceRegistry.stringDefault(for: .bibleViewSwipeMode) ?? "CHAPTER"
+
+    /// Preference controlling whether the window tab bar hides in fullscreen.
     @State private var fullScreenHideButtonsPref =
         AppPreferenceRegistry.boolDefault(for: .fullScreenHideButtonsPref) ?? true
+
+    /// Preference controlling whether each pane's hamburger button is hidden.
     @State private var hideWindowButtonsPref =
         AppPreferenceRegistry.boolDefault(for: .hideWindowButtons) ?? false
+
+    /// Preference controlling whether the floating fullscreen reference capsule is hidden.
     @State private var hideBibleReferenceOverlayPref =
         AppPreferenceRegistry.boolDefault(for: .hideBibleReferenceOverlay) ?? false
+
+    /// Suppresses the tap handler that SwiftUI fires after a completed Bible-button long press.
     @State private var suppressBibleTapAfterLongPress = false
+
+    /// Suppresses the tap handler that SwiftUI fires after a completed commentary-button long press.
     @State private var suppressCommentaryTapAfterLongPress = false
+
+    /// Tracks whether fullscreen was last entered by the double-tap gesture instead of scrolling.
     @State private var lastFullScreenByDoubleTap = false
+
+    /// Cached scroll direction used to accumulate auto-fullscreen distance per direction.
     @State private var autoFullscreenDirectionDown: Bool?
+
+    /// Accumulated user scroll distance toward the auto-fullscreen threshold.
     @State private var autoFullscreenDistance: Double = 0
+
+    /// Presents the dictionary key browser for the active dictionary module.
     @State private var showDictionaryBrowser = false
+
+    /// Presents the general-book key browser for the active general-book module.
     @State private var showGeneralBookBrowser = false
+
+    /// Presents the map browser for the active map module.
     @State private var showMapBrowser = false
+
+    /// Presents the EPUB library chooser.
     @State private var showEpubLibrary = false
+
+    /// Presents the current EPUB table-of-contents browser.
     @State private var showEpubBrowser = false
+
+    /// Presents EPUB full-text search UI.
     @State private var showEpubSearch = false
+
+    /// Initial query forwarded into `SearchView`, usually from Strong's lookups.
     @State private var searchInitialQuery = ""
+
+    /// Presents label-management UI from the toolbar ellipsis menu.
     @State private var showLabelManager = false
+
+    /// Presents the in-app help and tips screen.
     @State private var showHelp = false
+
+    /// Presents the about screen.
     @State private var showAbout = false
+
+    /// Presents the reference chooser used by bridge-driven dialogs.
     @State private var showRefChooser = false
+
+    /// Completion callback for the bridge-driven reference chooser flow.
     @State private var refChooserCompletion: ((String?) -> Void)?
     #if os(iOS)
+    /// Motion-driven scroll helper used when tilt-to-scroll is enabled for the workspace.
     @State private var tiltScrollService = TiltScrollService()
     #endif
 
+    /// Minimum cumulative scroll distance before auto-fullscreen toggles the reader chrome.
     private let autoFullscreenScrollThreshold: Double = 56.0
 
-    /// The focused window's controller — reads from WindowManager's single source of truth.
-    /// References `controllerVersion` to guarantee SwiftUI re-evaluates when controllers
-    /// are registered/unregistered (dictionary subscript mutations alone are unreliable).
+    /**
+     The focused window's controller resolved from `WindowManager`'s single source of truth.
+
+     Referencing `controllerVersion` guarantees SwiftUI re-evaluates when controllers are
+     registered or unregistered because dictionary subscript mutations alone are unreliable.
+     */
     private var focusedController: BibleReaderController? {
         _ = windowManager.controllerVersion
         guard let activeId = windowManager.activeWindow?.id else { return nil }
         return windowManager.controllers[activeId] as? BibleReaderController
     }
 
+    /// User-visible reference string for the currently focused Bible location.
     private var currentReference: String {
         guard let ctrl = focusedController else { return "Genesis 1" }
         return "\(ctrl.currentBook) \(ctrl.currentChapter)"
     }
 
+    /// Preferred SwiftUI color-scheme override derived from the stored night-mode strategy.
     private var preferredColorSchemeOverride: ColorScheme? {
         switch NightModeSettingsResolver.effectiveMode(from: nightModeMode) {
         case .system:
@@ -132,20 +284,24 @@ public struct BibleReaderView: View {
         }
     }
 
+    /// Whether the quick night-mode toggle should be shown in the ellipsis menu.
     private var isNightModeQuickToggleEnabled: Bool {
         NightModeSettingsResolver.isManualMode(rawValue: nightModeMode)
     }
 
+    /// Whether the bottom window tab bar should remain visible in the current fullscreen state.
     private var shouldShowWindowTabBar: Bool {
         !isFullScreen || !fullScreenHideButtonsPref
     }
 
+    /// Whether the floating fullscreen Bible reference capsule should be displayed.
     private var shouldShowBibleReferenceOverlay: Bool {
         isFullScreen &&
             !hideBibleReferenceOverlayPref &&
             focusedController?.currentCategory == .bible
     }
 
+    /// Bottom inset for the floating reference capsule, accounting for other bottom chrome.
     private var bibleReferenceOverlayBottomPadding: CGFloat {
         var padding: CGFloat = shouldShowWindowTabBar ? 58 : 16
         if speakService.isSpeaking {
@@ -154,8 +310,21 @@ public struct BibleReaderView: View {
         return padding
     }
 
+    /**
+     Creates the reader coordinator view.
+
+     - Note: This initializer performs no work directly. The view resolves its dependencies from
+       the SwiftUI environment when rendered.
+     */
     public init() {}
 
+    /**
+     Builds the full reading-screen hierarchy.
+
+     The body composes the document header, split pane layout, sheet presenters, keyboard
+     shortcuts, fullscreen overlays, toast feedback, and speech mini-player around the current
+     `WindowManager` state.
+     */
     public var body: some View {
         VStack(spacing: 0) {
             // Document header bar — hidden in fullscreen mode
@@ -635,6 +804,13 @@ public struct BibleReaderView: View {
 
     // MARK: - Split Content
 
+    /**
+     Lays out the visible reading panes and separators for the active workspace.
+
+     The layout orientation follows the current geometry and the workspace reverse-split setting.
+     Pane sizes are derived from persisted `layoutWeight` values so resizing survives navigation
+     and relayout.
+     */
     private var splitContent: some View {
         GeometryReader { geometry in
             let windows = windowManager.visibleWindows
@@ -689,6 +865,13 @@ public struct BibleReaderView: View {
         }
     }
 
+    /**
+     Builds one `BibleWindowPane` and wires all pane-level callbacks back into this coordinator.
+
+     - Parameter window: Persisted window model that owns the pane's category, history, and
+       layout state.
+     - Returns: A fully configured pane view bound to coordinator-owned presentation state.
+     */
     private func paneView(for window: Window) -> some View {
         BibleWindowPane(
             window: window,
@@ -773,6 +956,12 @@ public struct BibleReaderView: View {
 
     // MARK: - Module Picker
 
+    /**
+     Presents the module picker for the currently requested document category.
+
+     The picker auto-routes dictionary, general-book, map, and EPUB selections into their
+     respective browser sheets after switching the focused controller to the chosen module.
+     */
     private var modulePicker: some View {
         NavigationStack {
             List {
@@ -889,6 +1078,7 @@ public struct BibleReaderView: View {
 
     // MARK: - Speak Mini Player
 
+    /// Compact speech-control bar shown while text-to-speech is active.
     private var speakMiniPlayer: some View {
         Button(action: { showSpeakControls = true }) {
             HStack(spacing: 12) {
@@ -947,6 +1137,12 @@ public struct BibleReaderView: View {
 
     // MARK: - Document Header
 
+    /**
+     Builds the top document header bar for the focused pane state.
+
+     The header switches between Bible navigation chrome and category-specific back/navigation
+     controls for notes, study pads, dictionaries, maps, general books, and EPUB content.
+     */
     private var documentHeader: some View {
         let controller = focusedController
         return VStack(spacing: 0) {
@@ -1421,8 +1617,12 @@ public struct BibleReaderView: View {
         .frame(width: 24, height: 22)
     }
 
-    /// Whether the Strong's toggle should be shown (matching Android's `isStrongsInBook`).
-    /// Checks the actual module's features via controller.hasStrongs.
+    /**
+     Whether the Strong's toggle should be shown for the active module.
+
+     This mirrors Android's `isStrongsInBook` behavior by consulting the focused controller's
+     resolved module features instead of a static module-category assumption.
+     */
     private var moduleHasStrongs: Bool {
         focusedController?.hasStrongs ?? false
     }
@@ -1432,7 +1632,11 @@ public struct BibleReaderView: View {
         (displaySettings.strongsMode ?? 0) > 0
     }
 
-    /// Mutate workspace settings and persist to SwiftData.
+    /**
+     Mutates workspace settings and persists the updated value to SwiftData.
+
+     - Parameter transform: Mutation closure applied to the current workspace settings value.
+     */
     private func updateWorkspaceSettings(_ transform: (inout WorkspaceSettings) -> Void) {
         guard let workspace = windowManager.activeWorkspace else { return }
         var settings = workspace.workspaceSettings ?? WorkspaceSettings()
@@ -1441,7 +1645,11 @@ public struct BibleReaderView: View {
         try? modelContext.save()
     }
 
-    /// Apply a Strong's mode value, persist to workspace, and update all WebViews.
+    /**
+     Applies a Strong's display mode, persists it, and refreshes visible pane controllers.
+
+     - Parameter mode: Raw Vue.js/config mode value (`0...3`) matching `StrongsMode`.
+     */
     private func applyStrongsMode(_ mode: Int) {
         displaySettings.strongsMode = mode
         if let workspace = windowManager.activeWorkspace {
@@ -1456,10 +1664,16 @@ public struct BibleReaderView: View {
         }
     }
 
+    /// Resolved toolbar gesture mode for the Bible and commentary buttons.
     private var toolbarActionsMode: ToolbarButtonActionsMode {
         ToolbarButtonActionsMode(rawValue: toolbarButtonActionsMode) ?? .defaultMode
     }
 
+    /**
+     Handles a primary tap on the Bible toolbar button using the Android-parity gesture mode.
+
+     - Parameter controller: Focused pane controller, if one is currently registered.
+     */
     private func handleBibleToolbarTap(_ controller: BibleReaderController?) {
         switch toolbarActionsMode {
         case .defaultMode:
@@ -1469,6 +1683,11 @@ public struct BibleReaderView: View {
         }
     }
 
+    /**
+     Handles a long press on the Bible toolbar button using the Android-parity gesture mode.
+
+     - Parameter controller: Focused pane controller, if one is currently registered.
+     */
     private func handleBibleToolbarLongPress(_ controller: BibleReaderController?) {
         switch toolbarActionsMode {
         case .swapMenu:
@@ -1478,6 +1697,11 @@ public struct BibleReaderView: View {
         }
     }
 
+    /**
+     Handles a primary tap on the commentary toolbar button using the Android-parity gesture mode.
+
+     - Parameter controller: Focused pane controller, if one is currently registered.
+     */
     private func handleCommentaryToolbarTap(_ controller: BibleReaderController?) {
         switch toolbarActionsMode {
         case .defaultMode:
@@ -1487,6 +1711,11 @@ public struct BibleReaderView: View {
         }
     }
 
+    /**
+     Handles a long press on the commentary toolbar button using the Android-parity gesture mode.
+
+     - Parameter controller: Focused pane controller, if one is currently registered.
+     */
     private func handleCommentaryToolbarLongPress(_ controller: BibleReaderController?) {
         switch toolbarActionsMode {
         case .swapMenu:
@@ -1496,7 +1725,14 @@ public struct BibleReaderView: View {
         }
     }
 
-    /// Android `menuForDocs`: open menu, but auto-switch when exactly two docs exist.
+    /**
+     Handles the Android `menuForDocs` Bible action.
+
+     When exactly two Bible modules are installed, this mirrors Android's auto-cycle shortcut.
+     Otherwise it opens the Bible picker sheet.
+
+     - Parameter controller: Focused pane controller, if one is currently registered.
+     */
     private func performBibleMenuAction(_ controller: BibleReaderController?) {
         guard let controller else {
             performBibleChooserAction()
@@ -1515,13 +1751,21 @@ public struct BibleReaderView: View {
         performBibleChooserAction()
     }
 
-    /// Android "document chooser activity" equivalent.
+    /**
+     Presents the Bible module chooser.
+
+     - Note: This is the SwiftUI-sheet equivalent of Android's document chooser activity.
+     */
     private func performBibleChooserAction() {
         pickerCategory = .bible
         showModulePicker = true
     }
 
-    /// Android swap behavior: tap opens next document.
+    /**
+     Cycles to the next Bible module or switches back into Bible mode.
+
+     - Parameter controller: Focused pane controller, if one is currently registered.
+     */
     private func performBibleNextDocumentAction(_ controller: BibleReaderController?) {
         guard let controller else { return }
         if controller.currentCategory != .bible {
@@ -1537,7 +1781,14 @@ public struct BibleReaderView: View {
         }
     }
 
-    /// Android `menuForDocs`: open menu, but auto-switch when exactly two docs exist.
+    /**
+     Handles the Android `menuForDocs` commentary action.
+
+     When exactly two commentary modules are installed, this mirrors Android's auto-cycle
+     shortcut. Otherwise it opens the commentary picker sheet.
+
+     - Parameter controller: Focused pane controller, if one is currently registered.
+     */
     private func performCommentaryMenuAction(_ controller: BibleReaderController?) {
         guard let controller else {
             performCommentaryChooserAction()
@@ -1556,13 +1807,21 @@ public struct BibleReaderView: View {
         performCommentaryChooserAction()
     }
 
-    /// Android "document chooser activity" equivalent.
+    /**
+     Presents the commentary module chooser.
+
+     - Note: This is the SwiftUI-sheet equivalent of Android's document chooser activity.
+     */
     private func performCommentaryChooserAction() {
         pickerCategory = .commentary
         showModulePicker = true
     }
 
-    /// Android swap behavior: tap opens next document.
+    /**
+     Cycles to the next commentary module or switches back into commentary mode.
+
+     - Parameter controller: Focused pane controller, if one is currently registered.
+     */
     private func performCommentaryNextDocumentAction(_ controller: BibleReaderController?) {
         guard let controller else { return }
         if controller.currentCategory != .commentary {
@@ -1582,6 +1841,14 @@ public struct BibleReaderView: View {
         }
     }
 
+    /**
+     Advances to the next module in a category, wrapping to the first module when needed.
+
+     - Parameters:
+       - modules: Ordered modules available for the active category.
+       - activeName: Name of the currently selected module, if any.
+       - apply: Closure that switches the controller to the resolved next module name.
+     */
     private func cycleToNextModule(
         modules: [ModuleInfo],
         activeName: String?,
@@ -1599,6 +1866,7 @@ public struct BibleReaderView: View {
         }
     }
 
+    /// Reloads behavior-related preferences after the settings sheet changes persisted values.
     private func reloadBehaviorPreferences() {
         let store = SettingsStore(modelContext: modelContext)
         navigateToVersePref = store.getBool(.navigateToVersePref)
@@ -1619,11 +1887,19 @@ public struct BibleReaderView: View {
         speakService.applyBehaviorPreferences()
     }
 
+    /// Clears accumulated scroll-direction state for auto-fullscreen tracking.
     private func resetAutoFullscreenTracking() {
         autoFullscreenDirectionDown = nil
         autoFullscreenDistance = 0
     }
 
+    /**
+     Applies Android-style auto-fullscreen behavior to user-driven vertical scrolling.
+
+     - Parameters:
+       - window: Pane whose native scroll delta triggered the callback.
+       - deltaY: Signed vertical scroll delta reported by the embedded web view.
+     */
     private func handleAutoFullscreenScroll(from window: Window, deltaY: Double) {
         guard windowManager.activeWindow?.id == window.id else { return }
         guard autoFullscreenPref else {
@@ -1653,6 +1929,13 @@ public struct BibleReaderView: View {
         }
     }
 
+    /**
+     Dispatches horizontal swipe gestures according to the configured Bible swipe mode.
+
+     - Parameters:
+       - window: Pane whose native swipe gesture triggered the callback.
+       - direction: Swipe direction detected by the native web-view wrapper.
+     */
     private func handleHorizontalSwipe(from window: Window, direction: NativeHorizontalSwipeDirection) {
         guard windowManager.activeWindow?.id == window.id else { return }
         guard let ctrl = windowManager.controllers[window.id] as? BibleReaderController else { return }
@@ -1690,16 +1973,28 @@ public struct BibleReaderView: View {
     #endif
 }
 
-/// Strong's number display modes matching Android's `strongsModeEntries`.
-/// Vue.js config values: off=0, inline=1, links=2, hidden=3.
+/**
+ Strong's number display modes matching Android's `strongsModeEntries`.
+
+ Vue.js config values: off=`0`, inline=`1`, links=`2`, hidden=`3`.
+ */
 enum StrongsMode: Int, CaseIterable, Identifiable {
+    /// Hide Strong's numbers entirely.
     case off = 0
+
+    /// Render Strong's numbers inline in the verse text.
     case inline = 1
+
+    /// Render Strong's numbers as tappable links only.
     case links = 2
+
+    /// Keep Strong's data available while suppressing visible markers in the text flow.
     case hidden = 3
 
+    /// Stable raw-value identifier for `ForEach` and menu construction.
     var id: Int { rawValue }
 
+    /// Localized label shown in the Strong's display-mode menu.
     var label: String {
         switch self {
         case .off: String(localized: "strongs_off")
@@ -1710,14 +2005,26 @@ enum StrongsMode: Int, CaseIterable, Identifiable {
     }
 }
 
+/// Horizontal swipe modes for Bible panes, mirroring the Android preference values.
 private enum BibleSwipeMode: String {
+    /// Swiping left or right changes chapter.
     case chapter = "CHAPTER"
+
+    /// Swiping left or right scrolls by page height within the current document.
     case page = "PAGE"
+
+    /// Horizontal swipe gestures are ignored.
     case none = "NONE"
 }
 
+/// Gesture mappings for the Bible and commentary toolbar buttons.
 private enum ToolbarButtonActionsMode: String {
+    /// Tap opens the menu and long press opens the chooser.
     case defaultMode = "default"
+
+    /// Tap advances to the next document and long press opens the menu.
     case swapMenu = "swap-menu"
+
+    /// Tap advances to the next document and long press opens the chooser.
     case swapActivity = "swap-activity"
 }
