@@ -20,6 +20,7 @@ public class BibleWebViewController: UIViewController {
     let bridge: BibleBridge
     var backgroundColorInt: Int = -1
 
+    /// Creates the UIKit host for a bridge-backed `WKWebView`.
     init(webView: WKWebView, bridge: BibleBridge) {
         self.webView = webView
         self.bridge = bridge
@@ -28,6 +29,7 @@ public class BibleWebViewController: UIViewController {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) not supported") }
 
+    /// Installs and pins the web view to the controller's bounds.
     public override func viewDidLoad() {
         super.viewDidLoad()
         view.addSubview(webView)
@@ -41,6 +43,7 @@ public class BibleWebViewController: UIViewController {
         applyBackground()
     }
 
+    /// Applies the configured ARGB background color to all visible web view surfaces.
     func applyBackground() {
         let color = BibleWebView.uiColor(fromArgbInt: backgroundColorInt)
         webView.isOpaque = false
@@ -53,6 +56,10 @@ public class BibleWebViewController: UIViewController {
     }
 }
 
+/// SwiftUI wrapper that hosts the Vue.js Bible client inside `WKWebView`.
+///
+/// The native bridge/controller layer owns this view and uses `BibleBridge.emit(event:data:)`
+/// to push documents, config, and bookmark updates into the already loaded client bundle.
 public struct BibleWebView: UIViewControllerRepresentable {
     public typealias UIViewControllerType = BibleWebViewController
 
@@ -60,12 +67,14 @@ public struct BibleWebView: UIViewControllerRepresentable {
     let initialState: String?
     var backgroundColorInt: Int
 
+    /// Creates a new bridge-backed web view wrapper.
     public init(bridge: BibleBridge, initialState: String? = nil, backgroundColorInt: Int = -1) {
         self.bridge = bridge
         self.initialState = initialState
         self.backgroundColorInt = backgroundColorInt
     }
 
+    /// Builds the UIKit controller wrapper and initial web view.
     public func makeUIViewController(context: Context) -> BibleWebViewController {
         let webView = createWebView(coordinator: context.coordinator)
         let vc = BibleWebViewController(webView: webView, bridge: bridge)
@@ -73,12 +82,13 @@ public struct BibleWebView: UIViewControllerRepresentable {
         return vc
     }
 
+    /// Reapplies visual state that can change after creation.
     public func updateUIViewController(_ vc: BibleWebViewController, context: Context) {
         vc.backgroundColorInt = backgroundColorInt
         vc.applyBackground()
     }
 
-    /// Convert a signed ARGB integer to UIColor.
+    /// Converts a signed Android-style ARGB integer into `UIColor`.
     static func uiColor(fromArgbInt value: Int) -> UIColor {
         let uint = UInt32(bitPattern: Int32(truncatingIfNeeded: value))
         let a = CGFloat((uint >> 24) & 0xFF) / 255.0
@@ -88,11 +98,13 @@ public struct BibleWebView: UIViewControllerRepresentable {
         return UIColor(red: r, green: g, blue: b, alpha: a)
     }
 
+    /// Creates the coordinator that owns navigation, logging, and gesture callbacks.
     public func makeCoordinator() -> WebViewCoordinator {
         WebViewCoordinator(bridge: bridge)
     }
 }
 #elseif os(macOS)
+/// macOS variant of `BibleWebView` using `NSViewRepresentable`.
 public struct BibleWebView: NSViewRepresentable {
     public typealias NSViewType = WKWebView
 
@@ -100,20 +112,24 @@ public struct BibleWebView: NSViewRepresentable {
     let initialState: String?
     var backgroundColorInt: Int
 
+    /// Creates a new bridge-backed macOS web view wrapper.
     public init(bridge: BibleBridge, initialState: String? = nil, backgroundColorInt: Int = -1) {
         self.bridge = bridge
         self.initialState = initialState
         self.backgroundColorInt = backgroundColorInt
     }
 
+    /// Builds the `WKWebView` and attaches the coordinator.
     public func makeNSView(context: Context) -> WKWebView {
         let webView = createWebView(coordinator: context.coordinator)
         webView.setValue(false, forKey: "drawsBackground")
         return webView
     }
 
+    /// macOS currently has no incremental update work beyond the bridge itself.
     public func updateNSView(_ webView: WKWebView, context: Context) {}
 
+    /// Creates the coordinator that owns navigation and logging callbacks.
     public func makeCoordinator() -> WebViewCoordinator {
         WebViewCoordinator(bridge: bridge)
     }
@@ -123,6 +139,11 @@ public struct BibleWebView: NSViewRepresentable {
 // MARK: - Shared WebView Creation
 
 extension BibleWebView {
+    /// Creates and configures the shared `WKWebView` used on both iOS and macOS.
+    ///
+    /// This method installs the native bridge handler, injects the Android compatibility shim
+    /// used by the Vue.js client, attaches coordinator delegates, and loads the packaged
+    /// `bibleview-js` bundle from SwiftPM resources.
     func createWebView(coordinator: WebViewCoordinator) -> WKWebView {
         let config = WKWebViewConfiguration()
 
@@ -279,6 +300,7 @@ extension BibleWebView {
         return webView
     }
 
+    /// Loads the packaged Vue.js bundle, falling back to the placeholder page in development.
     private func loadBibleViewBundle(into webView: WKWebView) {
         // Look for the Vue.js built bundle first (bibleview-js/index.html)
         if let bundleURL = Bundle.module.url(

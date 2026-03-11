@@ -7,6 +7,10 @@ import os.log
 
 private let logger = Logger(subsystem: "org.andbible", category: "BibleBridge")
 
+/// Direction reported by native `UISwipeGestureRecognizer` handlers installed on the web view.
+///
+/// `BibleReaderView` maps these values onto Android-style chapter or page navigation depending
+/// on the current `bible_view_swipe_mode` setting.
 public enum NativeHorizontalSwipeDirection: Sendable {
     case left
     case right
@@ -15,72 +19,130 @@ public enum NativeHorizontalSwipeDirection: Sendable {
 /// Protocol for handling bridge events from the Vue.js WebView.
 public protocol BibleBridgeDelegate: AnyObject {
     // MARK: - Navigation & Scroll
+    /// Reports the verse ordinal currently nearest the top of the rendered document.
+    ///
+    /// Vue.js sends this when scrolling so native code can persist reading position and history.
+    /// Android equivalent: `BibleJavascriptInterface.scrolledToOrdinal(...)`.
     func bridge(_ bridge: BibleBridge, didScrollToOrdinal ordinal: Int, key: String)
+    /// Requests additional content before the currently rendered range.
+    ///
+    /// Used by infinite-scroll style chapter expansion. The delegate should respond with
+    /// `sendResponse(callId:value:)` once more content has been loaded.
     func bridge(_ bridge: BibleBridge, requestMoreToBeginning callId: Int)
+    /// Requests additional content after the currently rendered range.
+    ///
+    /// Used by infinite-scroll style chapter expansion. The delegate should respond with
+    /// `sendResponse(callId:value:)` once more content has been loaded.
     func bridge(_ bridge: BibleBridge, requestMoreToEnd callId: Int)
 
     // MARK: - Bookmarks
+    /// Creates or edits a verse bookmark for the current Bible document selection.
+    ///
+    /// Android equivalent: `BibleJavascriptInterface.addBookmark(...)`.
     func bridge(_ bridge: BibleBridge, addBookmark bookInitials: String, startOrdinal: Int, endOrdinal: Int, addNote: Bool)
+    /// Creates or edits a bookmark for non-Bible content such as dictionaries or general books.
     func bridge(_ bridge: BibleBridge, addGenericBookmark bookInitials: String, osisRef: String, startOrdinal: Int, endOrdinal: Int, addNote: Bool)
+    /// Deletes a Bible bookmark identified by its persisted UUID string.
     func bridge(_ bridge: BibleBridge, removeBookmark bookmarkId: String)
+    /// Deletes a non-Bible bookmark identified by its persisted UUID string.
     func bridge(_ bridge: BibleBridge, removeGenericBookmark bookmarkId: String)
+    /// Persists a note attached to an existing bookmark.
     func bridge(_ bridge: BibleBridge, saveBookmarkNote bookmarkId: String, note: String?)
+    /// Opens the native label assignment UI for the specified bookmark.
     func bridge(_ bridge: BibleBridge, assignLabels bookmarkId: String)
+    /// Toggles a label assignment on a bookmark.
     func bridge(_ bridge: BibleBridge, toggleBookmarkLabel bookmarkId: String, labelId: String)
+    /// Removes a label assignment from a bookmark.
     func bridge(_ bridge: BibleBridge, removeBookmarkLabel bookmarkId: String, labelId: String)
+    /// Marks one label as the bookmark's primary label for styling and StudyPad grouping.
     func bridge(_ bridge: BibleBridge, setPrimaryLabel bookmarkId: String, labelId: String)
+    /// Switches a bookmark between whole-verse highlighting and partial-selection highlighting.
     func bridge(_ bridge: BibleBridge, setBookmarkWholeVerse bookmarkId: String, value: Bool)
+    /// Sets or clears a custom icon override for a bookmark.
     func bridge(_ bridge: BibleBridge, setBookmarkCustomIcon bookmarkId: String, value: String?)
 
     // MARK: - Content Actions
+    /// Shares the selected verse range using native share UI.
     func bridge(_ bridge: BibleBridge, shareVerse bookInitials: String, startOrdinal: Int, endOrdinal: Int)
+    /// Copies the selected verse range to the system pasteboard.
     func bridge(_ bridge: BibleBridge, copyVerse bookInitials: String, startOrdinal: Int, endOrdinal: Int)
+    /// Opens the compare view for the selected verse range.
     func bridge(_ bridge: BibleBridge, compareVerses bookInitials: String, startOrdinal: Int, endOrdinal: Int)
+    /// Starts text-to-speech playback for the selected verse range and versification.
     func bridge(_ bridge: BibleBridge, speak bookInitials: String, v11n: String, startOrdinal: Int, endOrdinal: Int)
 
     // MARK: - Navigation Actions
+    /// Opens the StudyPad view focused on the supplied label and bookmark.
     func bridge(_ bridge: BibleBridge, openStudyPad labelId: String, bookmarkId: String)
+    /// Opens the "My Notes" view for the current versification and verse ordinal.
     func bridge(_ bridge: BibleBridge, openMyNotes v11n: String, ordinal: Int)
+    /// Handles an app-internal or external hyperlink tapped in the web content.
     func bridge(_ bridge: BibleBridge, openExternalLink link: String)
+    /// Opens the downloads/module management UI.
     func bridgeDidRequestOpenDownloads(_ bridge: BibleBridge)
 
     // MARK: - Dialogs
+    /// Requests the native reference chooser and expects an async response via `sendResponse`.
     func bridge(_ bridge: BibleBridge, refChooserDialog callId: Int)
+    /// Requests native reference parsing for free-form user input.
     func bridge(_ bridge: BibleBridge, parseRef callId: Int, text: String)
+    /// Shows help content generated by the web client in a native dialog.
     func bridge(_ bridge: BibleBridge, helpDialog content: String, title: String?)
 
     // MARK: - Selection
+    /// Reports the plain-text value of the current DOM selection.
     func bridge(_ bridge: BibleBridge, selectionChanged text: String)
+    /// Reports that the DOM selection has been cleared or collapsed.
     func bridgeSelectionCleared(_ bridge: BibleBridge)
 
     // MARK: - StudyPad
+    /// Creates a new StudyPad entry after the supplied entry identifier.
     func bridge(_ bridge: BibleBridge, createNewStudyPadEntry labelId: String, entryType: String, afterEntryId: String)
+    /// Deletes a StudyPad entry by identifier.
     func bridge(_ bridge: BibleBridge, deleteStudyPadEntry studyPadId: String)
+    /// Replaces a full serialized StudyPad text entry payload.
     func bridge(_ bridge: BibleBridge, updateStudyPadTextEntry data: String)
+    /// Updates only the text field of an existing StudyPad text entry.
     func bridge(_ bridge: BibleBridge, updateStudyPadTextEntryText id: String, text: String)
+    /// Persists reordered StudyPad items for a label.
     func bridge(_ bridge: BibleBridge, updateOrderNumber labelId: String, data: String)
+    /// Persists reordered or reparented bookmark-to-label relationships.
     func bridge(_ bridge: BibleBridge, updateBookmarkToLabel data: String)
+    /// Persists reordered or reparented generic-bookmark-to-label relationships.
     func bridge(_ bridge: BibleBridge, updateGenericBookmarkToLabel data: String)
+    /// Stores the bookmark editing mode requested by the StudyPad UI.
     func bridge(_ bridge: BibleBridge, setBookmarkEditAction bookmarkId: String, value: String)
+    /// Reports whether the web StudyPad editor has entered editing mode.
     func bridge(_ bridge: BibleBridge, setEditing enabled: Bool)
+    /// Persists the current StudyPad cursor location for a label.
     func bridge(_ bridge: BibleBridge, setStudyPadCursor labelId: String, orderNumber: Int)
 
     // MARK: - State
+    /// Saves opaque client-side UI state such as scroll position and expanded document ranges.
     func bridge(_ bridge: BibleBridge, saveState state: String)
+    /// Signals that the Vue.js client finished bootstrapping and can receive events safely.
     func bridgeDidSetClientReady(_ bridge: BibleBridge)
+    /// Reports whether the web client currently has a modal dialog open.
     func bridge(_ bridge: BibleBridge, reportModalState isOpen: Bool)
+    /// Reports whether an editable field inside the web client currently has keyboard focus.
     func bridge(_ bridge: BibleBridge, reportInputFocus focused: Bool)
+    /// Forwards raw key presses from the web client to native code.
     func bridge(_ bridge: BibleBridge, onKeyDown key: String)
 
     // MARK: - Toast & Sharing
+    /// Requests a transient native toast/banner message.
     func bridge(_ bridge: BibleBridge, showToast text: String)
+    /// Shares HTML rendered by the client rather than plain verse text.
     func bridge(_ bridge: BibleBridge, shareHtml html: String)
+    /// Toggles a compare document on or off in the native compare state.
     func bridge(_ bridge: BibleBridge, toggleCompareDocument documentId: String)
 
     // MARK: - EPUB Navigation
+    /// Navigates from one EPUB anchor to another anchor or key within the same module.
     func bridge(_ bridge: BibleBridge, openEpubLink bookInitials: String, toKey: String, toId: String)
 
     // MARK: - Fullscreen
+    /// Toggles native fullscreen mode in response to a client-side double tap gesture.
     func bridgeDidRequestToggleFullScreen(_ bridge: BibleBridge)
 }
 
@@ -148,7 +210,7 @@ public final class BibleBridge: NSObject, WKScriptMessageHandler {
         }
 
         switch method {
-        // --- Tier 1: Logging & State ---
+        // --- Logging & state sync from JavaScript to native ---
         case "console":
             handleConsole(args)
         case "jsLog":
@@ -190,7 +252,7 @@ public final class BibleBridge: NSObject, WKScriptMessageHandler {
                 delegate?.bridge(self, onKeyDown: key)
             }
 
-        // --- Navigation & Scroll ---
+        // --- Navigation & scroll position ---
         case "scrolledToOrdinal":
             if let key = args[safe: 0] as? String, let ordinal = args[safe: 1] as? Int {
                 delegate?.bridge(self, didScrollToOrdinal: ordinal, key: key)
@@ -204,7 +266,7 @@ public final class BibleBridge: NSObject, WKScriptMessageHandler {
                 delegate?.bridge(self, requestMoreToEnd: callId)
             }
 
-        // --- Bookmark Operations ---
+        // --- Bookmark CRUD and label assignment ---
         case "addBookmark":
             if let initials = args[safe: 0] as? String,
                let start = args[safe: 1] as? Int,
@@ -267,7 +329,7 @@ public final class BibleBridge: NSObject, WKScriptMessageHandler {
                 delegate?.bridge(self, setBookmarkCustomIcon: id, value: args[safe: 1] as? String)
             }
 
-        // --- Content Actions ---
+        // --- Content actions (share/copy/compare/speak) ---
         // Note: JavaScript sends endOrdinal=-1 to mean "single verse" (same as start).
         // Normalize here so delegate methods don't need to handle -1.
         case "shareVerse":
@@ -307,7 +369,7 @@ public final class BibleBridge: NSObject, WKScriptMessageHandler {
         case "addParagraphBreakBookmark", "addGenericParagraphBreakBookmark":
             break // Paragraph break bookmarks — Android-specific, not applicable on iOS
 
-        // --- StudyPad ---
+        // --- StudyPad editing and ordering ---
         case "openStudyPad":
             if let labelId = args[safe: 0] as? String, let bmId = args[safe: 1] as? String {
                 delegate?.bridge(self, openStudyPad: labelId, bookmarkId: bmId)
@@ -359,7 +421,7 @@ public final class BibleBridge: NSObject, WKScriptMessageHandler {
                 delegate?.bridge(self, setBookmarkEditAction: bmId, value: value)
             }
 
-        // --- Navigation ---
+        // --- Navigation and link handling ---
         case "openExternalLink":
             if let link = args.first as? String {
                 logger.info("openExternalLink received from JS: '\(link)', delegate=\(self.delegate != nil)")
@@ -380,7 +442,7 @@ public final class BibleBridge: NSObject, WKScriptMessageHandler {
                 delegate?.bridge(self, toggleCompareDocument: docId)
             }
 
-        // --- Dialogs ---
+        // --- Dialog and async request entry points ---
         case "refChooserDialog":
             if let callId = args.first as? Int {
                 delegate?.bridge(self, refChooserDialog: callId)
@@ -412,34 +474,46 @@ public final class BibleBridge: NSObject, WKScriptMessageHandler {
 
     // MARK: - Send to JavaScript
 
-    /// Send an async response back to JavaScript.
+    /// Sends a raw JSON response payload back to a pending JavaScript bridge call.
+    ///
+    /// JavaScript Promise-based bridge methods include a numeric `callId`; native code must answer
+    /// with `bibleView.response(callId, value)` once the async work completes.
     public func sendResponse(callId: Int, value: String) {
         let js = "bibleView.response(\(callId), \(value));"
         evaluateJavaScript(js)
     }
 
-    /// Send an async response with a JSON-encodable value.
+    /// Encodes an async response payload as JSON and sends it back to JavaScript.
     public func sendResponse<T: Encodable>(callId: Int, value: T) {
         guard let data = try? bridgeEncoder.encode(value),
               let json = String(data: data, encoding: .utf8) else { return }
         sendResponse(callId: callId, value: json)
     }
 
-    /// Emit an event to Vue.js.
+    /// Emits an event into the Vue.js client without waiting for a response.
+    ///
+    /// Native code uses events such as `set_config`, `set_document`, and `update_bookmarks` to push
+    /// refreshed state into the already-loaded client.
     public func emit(event: String, data: String = "null") {
         let js = "try { bibleView.emit('\(event)', \(data)); } catch(e) { window.webkit.messageHandlers.bibleView.postMessage({method:'console',args:['BRIDGE','JS EMIT ERROR in \(event): ' + e.message + ' ' + e.stack]}); }"
         evaluateJavaScript(js)
     }
 
-    /// Emit an event with a JSON-encodable payload.
+    /// Encodes an event payload as JSON and emits it to Vue.js.
     public func emit<T: Encodable>(event: String, data: T) {
         guard let jsonData = try? bridgeEncoder.encode(data),
               let json = String(data: jsonData, encoding: .utf8) else { return }
         emit(event: event, data: json)
     }
 
-    /// Query the current text selection from the WebView DOM.
-    /// Returns ordinal range and text, or nil if no selection.
+    /// Queries the current DOM selection directly from the web view.
+    ///
+    /// This is the lightweight fallback path used when native code only needs plain text and verse
+    /// ordinals. For richer selection details including offsets, callers should use a higher-level
+    /// bridge API exposed by the web client.
+    ///
+    /// - Returns: The selected text and optional start/end ordinals, or `nil` if no usable
+    ///   selection is active.
     @MainActor
     public func querySelection() async -> (text: String, startOrdinal: Int?, endOrdinal: Int?)? {
         guard let webView else { return nil }
@@ -481,13 +555,15 @@ public final class BibleBridge: NSObject, WKScriptMessageHandler {
         return nil
     }
 
-    /// Clear the current text selection in the WebView.
+    /// Clears the current browser selection in the web client.
     public func clearSelection() {
         evaluateJavaScript("window.getSelection().removeAllRanges();")
     }
 
-    /// Update the cached active languages in the WebView's JavaScript context.
-    /// Called when modules are installed/uninstalled so `getActiveLanguages()` returns current data.
+    /// Updates the cached active-language list stored in the JavaScript bootstrap shim.
+    ///
+    /// The web client reads this synchronously through `window.android.getActiveLanguages()` during
+    /// rendering, so native code refreshes it whenever installed modules change.
     public func updateActiveLanguages(_ languages: [String]) {
         guard let data = try? JSONSerialization.data(withJSONObject: languages),
               let json = String(data: data, encoding: .utf8) else { return }

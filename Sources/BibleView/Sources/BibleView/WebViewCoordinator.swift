@@ -9,7 +9,11 @@ import UIKit
 
 private let logger = Logger(subsystem: "org.andbible", category: "WebViewCoordinator")
 
-/// Coordinator for the WKWebView, handling navigation events and lifecycle.
+/// Coordinator for the WKWebView, handling navigation, logging, and native gesture callbacks.
+///
+/// `BibleWebView` uses this coordinator as the `WKNavigationDelegate` on both platforms and, on
+/// iOS, also as the `UIScrollViewDelegate`/`UIGestureRecognizerDelegate` to translate native scroll
+/// and swipe input into Android-parity bridge callbacks.
 public class WebViewCoordinator: NSObject, WKNavigationDelegate {
     let bridge: BibleBridge
     weak var webView: WKWebView?
@@ -18,6 +22,7 @@ public class WebViewCoordinator: NSObject, WKNavigationDelegate {
     private var didInstallSwipeRecognizers = false
     #endif
 
+    /// Creates a coordinator bound to a single `BibleBridge` instance.
     init(bridge: BibleBridge) {
         self.bridge = bridge
         super.init()
@@ -25,6 +30,7 @@ public class WebViewCoordinator: NSObject, WKNavigationDelegate {
 
     // MARK: - WKNavigationDelegate
 
+    /// Marks the page as loaded and resets native scroll tracking.
     public func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         logger.info("BibleView page loaded successfully")
         #if os(iOS)
@@ -36,6 +42,12 @@ public class WebViewCoordinator: NSObject, WKNavigationDelegate {
         logger.error("BibleView navigation failed: \(error.localizedDescription)")
     }
 
+    /// Intercepts app-internal links and forwards them to the native bridge delegate.
+    ///
+    /// Local `file://` navigation is allowed so the packaged Vue.js bundle can load assets.
+    /// `osis://`, `multi://`, `ab-w://`, `ab-find-all://`, and standard HTTP(S) links are routed
+    /// back to native code so `BibleReaderController` can decide whether to navigate internally,
+    /// open a Strong's sheet, or hand off to the system browser.
     public func webView(
         _ webView: WKWebView,
         decidePolicyFor navigationAction: WKNavigationAction,
@@ -79,6 +91,7 @@ public class WebViewCoordinator: NSObject, WKNavigationDelegate {
 
 #if os(iOS)
 extension WebViewCoordinator: UIScrollViewDelegate, UIGestureRecognizerDelegate {
+    /// Installs left/right swipe recognizers used for Android-style swipe navigation modes.
     func installSwipeRecognizersIfNeeded(on webView: WKWebView) {
         guard !didInstallSwipeRecognizers else { return }
         didInstallSwipeRecognizers = true
@@ -97,6 +110,7 @@ extension WebViewCoordinator: UIScrollViewDelegate, UIGestureRecognizerDelegate 
         webView.addGestureRecognizer(right)
     }
 
+    /// Converts UIKit swipe directions into bridge callbacks.
     @objc private func handleHorizontalSwipe(_ recognizer: UISwipeGestureRecognizer) {
         switch recognizer.direction {
         case .left:
@@ -115,10 +129,15 @@ extension WebViewCoordinator: UIScrollViewDelegate, UIGestureRecognizerDelegate 
         true
     }
 
+    /// Resets the baseline used to compute native vertical scroll deltas.
     public func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
         lastUserScrollOffsetY = scrollView.contentOffset.y
     }
 
+    /// Reports native user-driven vertical scrolling back to the bridge.
+    ///
+    /// Only tracking, dragging, and decelerating states are forwarded so programmatic web view
+    /// scrolls do not trigger fullscreen auto-hide or similar native behaviors.
     public func scrollViewDidScroll(_ scrollView: UIScrollView) {
         let offsetY = scrollView.contentOffset.y
         guard scrollView.isTracking || scrollView.isDragging || scrollView.isDecelerating else {
@@ -137,6 +156,7 @@ extension WebViewCoordinator: UIScrollViewDelegate, UIGestureRecognizerDelegate 
         lastUserScrollOffsetY = offsetY
     }
 
+    /// Finalizes the last recorded scroll offset after inertial scrolling ends.
     public func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
         lastUserScrollOffsetY = scrollView.contentOffset.y
     }
