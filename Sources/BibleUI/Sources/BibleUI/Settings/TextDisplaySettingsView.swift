@@ -6,21 +6,45 @@ import BibleCore
 import UIKit
 #endif
 
-/// Settings for controlling how Bible text is displayed.
-/// Binds to a TextDisplaySettings struct for persistence.
+/**
+ Form-driven editor for text presentation settings used by the Bible reader.
+
+ The view exposes bindings for typography, spacing, content toggles, annotation visibility, and
+ Strong's display modes by mutating a shared `TextDisplaySettings` value.
+
+ Data dependencies:
+ - `settings` is the persisted display-settings model owned by the parent screen
+ - `onChange` lets the parent push updated settings into the reader after each mutation
+
+ Side effects:
+ - every binding write mutates `settings` and invokes `onChange`
+ - on iOS, presenting the font picker bridges into `UIFontPickerViewController`
+ */
 public struct TextDisplaySettingsView: View {
+    /// Shared text display settings being edited by the form.
     @Binding var settings: TextDisplaySettings
+
+    /// Callback invoked after any user-visible settings mutation.
     var onChange: (() -> Void)?
+
     #if os(iOS)
+    /// Whether the native iOS font picker sheet is currently presented.
     @State private var showFontPicker = false
     #endif
 
+    /**
+     Creates a text-display settings editor bound to a persisted settings model.
+
+     - Parameters:
+       - settings: Shared display settings value to mutate from the form.
+       - onChange: Optional callback invoked after any setting changes.
+     */
     public init(settings: Binding<TextDisplaySettings>, onChange: (() -> Void)? = nil) {
         self._settings = settings
         self.onChange = onChange
     }
 
-    // Computed bindings that map optional Int/Bool to concrete slider/toggle values
+    /// Slider binding that maps the optional stored font size to a concrete numeric control.
     private var fontSizeBinding: Binding<Double> {
         Binding(
             get: { Double(settings.fontSize ?? 18) },
@@ -28,6 +52,7 @@ public struct TextDisplaySettingsView: View {
         )
     }
 
+    /// Picker binding that maps the optional stored font family to a concrete selection value.
     private var fontFamilyBinding: Binding<String> {
         Binding(
             get: { settings.fontFamily ?? "sans-serif" },
@@ -35,6 +60,7 @@ public struct TextDisplaySettingsView: View {
         )
     }
 
+    /// Slider binding that maps the optional stored line spacing to a concrete numeric control.
     private var lineSpacingBinding: Binding<Double> {
         Binding(
             get: { Double(settings.lineSpacing ?? 10) },
@@ -42,6 +68,14 @@ public struct TextDisplaySettingsView: View {
         )
     }
 
+    /**
+     Creates a `Bool` binding for optional toggle-backed fields in `TextDisplaySettings`.
+
+     - Parameters:
+       - keyPath: Optional Boolean field being edited.
+       - defaultValue: Fallback used when the field is currently `nil`.
+     - Returns: A non-optional binding suitable for SwiftUI toggle controls.
+     */
     private func boolBinding(_ keyPath: WritableKeyPath<TextDisplaySettings, Bool?>, default defaultValue: Bool) -> Binding<Bool> {
         Binding(
             get: { settings[keyPath: keyPath] ?? defaultValue },
@@ -49,6 +83,7 @@ public struct TextDisplaySettingsView: View {
         )
     }
 
+    /// Human-readable current font label used by the iOS font picker row.
     private var currentFontName: String {
         let family = settings.fontFamily ?? "sans-serif"
         if family == "sans-serif" { return "Sans Serif (Default)" }
@@ -57,6 +92,9 @@ public struct TextDisplaySettingsView: View {
         return family
     }
 
+    /**
+     Builds the grouped typography, layout, content, and annotation settings form.
+     */
     public var body: some View {
         Form {
             Section(String(localized: "settings_font")) {
@@ -133,11 +171,17 @@ public struct TextDisplaySettingsView: View {
         .navigationTitle(String(localized: "text_display"))
     }
 
-    // MARK: - Font Options (macOS fallback)
-
+    /**
+     Static font option descriptor used by the macOS fallback picker.
+     */
     private struct FontOption {
+        /// User-visible label shown in the picker.
         let label: String
+
+        /// Stored font-family value written back to `TextDisplaySettings`.
         let value: String
+
+        /// Preview font name used to render the picker label.
         let previewFont: String
     }
 
@@ -159,10 +203,18 @@ public struct TextDisplaySettingsView: View {
 // MARK: - UIFontPickerViewController Wrapper (iOS only)
 
 #if os(iOS)
+/**
+ UIKit bridge that presents the native iOS font picker and writes the selected family name back to
+ the SwiftUI settings form.
+ */
 private struct FontPickerView: UIViewControllerRepresentable {
+    /// Bound font family updated when the user chooses a font.
     @Binding var selectedFamily: String
+
+    /// Dismiss action used to close the presented picker sheet.
     @Environment(\.dismiss) private var dismiss
 
+    /// Creates the configured UIKit font picker controller.
     func makeUIViewController(context: Context) -> UIFontPickerViewController {
         let config = UIFontPickerViewController.Configuration()
         config.includeFaces = false
@@ -171,19 +223,27 @@ private struct FontPickerView: UIViewControllerRepresentable {
         return picker
     }
 
+    /// No-op updater because the UIKit picker is configured once during presentation.
     func updateUIViewController(_ uiViewController: UIFontPickerViewController, context: Context) {}
 
+    /// Creates the delegate coordinator that forwards picker events back into SwiftUI.
     func makeCoordinator() -> Coordinator {
         Coordinator(self)
     }
 
+    /**
+     Delegate bridge that handles UIKit font-picker callbacks.
+     */
     class Coordinator: NSObject, UIFontPickerViewControllerDelegate {
+        /// Parent SwiftUI wrapper updated by UIKit delegate callbacks.
         let parent: FontPickerView
 
+        /// Creates a coordinator bound to one picker wrapper instance.
         init(_ parent: FontPickerView) {
             self.parent = parent
         }
 
+        /// Writes the selected font family back into the SwiftUI binding and dismisses the sheet.
         func fontPickerViewControllerDidPickFont(_ viewController: UIFontPickerViewController) {
             guard let descriptor = viewController.selectedFontDescriptor else { return }
             if let family = descriptor.object(forKey: .family) as? String {
@@ -192,6 +252,7 @@ private struct FontPickerView: UIViewControllerRepresentable {
             parent.dismiss()
         }
 
+        /// Dismisses the picker without mutating the selected font family.
         func fontPickerViewControllerDidCancel(_ viewController: UIFontPickerViewController) {
             parent.dismiss()
         }

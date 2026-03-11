@@ -8,87 +8,223 @@ import SwordKit
 import UIKit
 #endif
 
-/// Main settings screen for the app.
+/**
+ Top-level application settings screen covering reader behavior, appearance, security, sync, and
+ module-backed preference selection.
+
+ The view mixes direct `TextDisplaySettings` bindings with persisted Android-parity preferences
+ stored through `SettingsStore` and `UserDefaults`-backed `AppStorage`.
+
+ Data dependencies:
+ - `modelContext` is used to load and persist Android-parity settings through `SettingsStore`
+ - `displaySettings`, `nightMode`, and `nightModeMode` are shared reader settings owned by the parent
+ - `colorScheme` and `openURL` influence night-mode resolution and system-settings actions
+
+ Side effects:
+ - `onAppear` discovers installed modules, hydrates persisted preferences, sanitizes stale selections,
+   and applies keep-screen-on / locale side effects
+ - many toggles and pickers persist changes immediately through `SettingsStore`
+ - dictionary, modal-action, and experimental-feature selections propagate through `onChange`
+ - security and advanced actions may update `AppStorage`, open system settings, or schedule a debug crash
+ */
 public struct SettingsView: View {
+    /// SwiftData context used to read and persist settings through `SettingsStore`.
     @Environment(\.modelContext) private var modelContext
+
+    /// Current system color scheme used to resolve night-mode behavior.
     @Environment(\.colorScheme) private var colorScheme
+
+    /// URL opener used for system-settings actions.
     @Environment(\.openURL) private var openURL
+
+    /// Shared text display settings edited by nested settings screens.
     @Binding var displaySettings: TextDisplaySettings
+
+    /// Shared effective night-mode state used by the reader.
     @Binding var nightMode: Bool
+
+    /// Shared persisted night-mode switching mode (`system`, `manual`, or `automatic`).
     @Binding var nightModeMode: String
+
+    /// Callback invoked when settings mutations should trigger reader refreshes.
     var onSettingsChanged: (() -> Void)?
 
+    /// Installed dictionaries that advertise Greek Strong's definitions.
     @State private var strongsGreekDictionaries: [ModuleInfo] = []
+
+    /// Installed dictionaries that advertise Hebrew Strong's definitions.
     @State private var strongsHebrewDictionaries: [ModuleInfo] = []
+
+    /// Installed dictionaries that advertise Robinson morphology parsing.
     @State private var robinsonMorphologyDictionaries: [ModuleInfo] = []
+
+    /// Installed general-purpose dictionaries available for word lookup.
     @State private var wordLookupDictionaries: [ModuleInfo] = []
+
+    /// Explicitly enabled Greek Strong's dictionaries. Empty means "all enabled".
     @State private var selectedStrongsGreekDictionaryNames: Set<String> = []
+
+    /// Explicitly enabled Hebrew Strong's dictionaries. Empty means "all enabled".
     @State private var selectedStrongsHebrewDictionaryNames: Set<String> = []
+
+    /// Explicitly enabled Robinson morphology dictionaries. Empty means "all enabled".
     @State private var selectedRobinsonMorphologyDictionaryNames: Set<String> = []
+
+    /// Explicitly disabled general word-lookup dictionaries.
     @State private var disabledWordLookupDictionaryNames: Set<String> = []
+
+    /// Persisted discrete-mode security preference mirrored through AppStorage.
     @AppStorage(AppPreferenceKey.discreteMode.rawValue)
     private var discreteMode = AppPreferenceRegistry.boolDefault(for: .discreteMode) ?? false
+
+    /// Persisted calculator-gate preference mirrored through AppStorage.
     @AppStorage(AppPreferenceKey.showCalculator.rawValue)
     private var showCalculator = AppPreferenceRegistry.boolDefault(for: .showCalculator) ?? false
+
+    /// Persisted calculator PIN mirrored through AppStorage.
     @AppStorage(AppPreferenceKey.calculatorPin.rawValue)
     private var calculatorPin = AppPreferenceRegistry.stringDefault(for: .calculatorPin) ?? "1234"
+
+    /// Whether link taps should open in the special links window.
     @State private var openLinksInSpecialWindow =
         AppPreferenceRegistry.boolDefault(for: .openLinksInSpecialWindowPref) ?? true
+
+    /// Whether monochrome reader rendering is enabled.
     @State private var monochromeMode = AppPreferenceRegistry.boolDefault(for: .monochromeMode) ?? false
+
+    /// Whether reader-side animations should be disabled.
     @State private var disableAnimations = AppPreferenceRegistry.boolDefault(for: .disableAnimations) ?? false
+
+    /// Whether Study Pad click-to-edit should be disabled.
     @State private var disableClickToEdit = AppPreferenceRegistry.boolDefault(for: .disableClickToEdit) ?? false
+
+    /// Whether the active reader window indicator should be shown.
     @State private var showActiveWindowIndicator =
         AppPreferenceRegistry.boolDefault(for: .showActiveWindowIndicator) ?? true
+
+    /// Whether the JavaScript error box should be shown in debug builds.
     @State private var showErrorBox = AppPreferenceRegistry.boolDefault(for: .showErrorBox) ?? false
+
+    /// Whether Bluetooth media buttons should control speaking features.
     @State private var enableBluetoothMediaButtons =
         AppPreferenceRegistry.boolDefault(for: .enableBluetoothPref) ?? true
+
+    /// Disabled one-tap actions for Bible bookmark modals.
     @State private var disabledBibleBookmarkModalButtons: Set<String> = []
+
+    /// Disabled one-tap actions for general bookmark modals.
     @State private var disabledGenBookmarkModalButtons: Set<String> = []
+
+    /// Global font size multiplier percentage applied to reader rendering.
     @State private var fontSizeMultiplier = AppPreferenceRegistry.intDefault(for: .fontSizeMultiplier) ?? 100
+
+    /// Whether the bottom window button bar should hide in fullscreen mode.
     @State private var fullScreenHideButtons =
         AppPreferenceRegistry.boolDefault(for: .fullScreenHideButtonsPref) ?? true
+
+    /// Whether in-window action buttons should be hidden in reader panes.
     @State private var hideWindowButtons =
         AppPreferenceRegistry.boolDefault(for: .hideWindowButtons) ?? false
+
+    /// Whether the fullscreen Bible reference overlay should be hidden.
     @State private var hideBibleReferenceOverlay =
         AppPreferenceRegistry.boolDefault(for: .hideBibleReferenceOverlay) ?? false
+
+    /// Whether navigation should include verse selection after choosing a chapter.
     @State private var navigateToVerse = AppPreferenceRegistry.boolDefault(for: .navigateToVersePref) ?? false
+
+    /// Whether the app should keep the screen awake while in use.
     @State private var screenKeepOn = AppPreferenceRegistry.boolDefault(for: .screenKeepOnPref) ?? false
+
+    /// Whether double-tapping a pane should toggle fullscreen.
     @State private var doubleTapToFullscreen =
         AppPreferenceRegistry.boolDefault(for: .doubleTapToFullscreen) ?? true
+
+    /// Whether scrolling should automatically trigger fullscreen.
     @State private var autoFullscreen = AppPreferenceRegistry.boolDefault(for: .autoFullscreenPref) ?? false
+
+    /// Whether Bible selection actions should use the one-step bookmarking flow.
     @State private var disableTwoStepBookmarking =
         AppPreferenceRegistry.boolDefault(for: .disableTwoStepBookmarking) ?? false
+
+    /// Android-parity mode controlling Bible/commentary toolbar tap semantics.
     @State private var toolbarButtonActionsMode =
         AppPreferenceRegistry.stringDefault(for: .toolbarButtonActions) ?? "default"
+
+    /// Android-parity mode controlling horizontal swipe actions in the reader.
     @State private var bibleViewSwipeMode =
         AppPreferenceRegistry.stringDefault(for: .bibleViewSwipeMode) ?? "CHAPTER"
+
+    /// Persisted cross-platform preference for volume-key scrolling.
     @State private var volumeKeysScroll =
         AppPreferenceRegistry.boolDefault(for: .volumeKeysScroll) ?? true
+
+    /// Enabled experimental feature identifiers.
     @State private var enabledExperimentalFeatures: Set<String> = []
+
+    /// Persisted interface-language override aligned with Android locale values.
     @State private var selectedLanguage: String = AppPreferenceRegistry.stringDefault(for: .localePref) ?? ""
+
+    /// Controls the restart-required alert shown after language changes.
     @State private var showRestartAlert = false
+
+    /// Controls the discrete-mode help sheet presentation.
     @State private var showDiscreteHelp = false
+
+    /// Guards locale persistence until initial preference hydration finishes.
     @State private var hasLoadedPreferences = false
+
+    /// Tracks whether the debug crash action has already been scheduled.
     @State private var debugCrashScheduled = false
 
+    /**
+     Locale option mirroring one Android `locale_pref` entry.
+     */
     private struct LocaleOption: Identifiable {
+        /// Persisted locale value written to `locale_pref`.
         let value: String
+
+        /// Localization key for the option label.
         let labelKey: String
+
+        /// English fallback label used when the locale key is missing.
         let labelDefault: String
+
+        /// Stable identity that preserves an explicit row for the default option.
         var id: String { value.isEmpty ? "__default" : value }
     }
 
+    /**
+     Experimental feature option mirroring one Android arrays.xml contract value.
+     */
     fileprivate struct ExperimentalFeatureOption: Identifiable {
+        /// Persisted feature identifier.
         let value: String
+
+        /// Localization key for the feature title.
         let titleKey: String
+
+        /// English fallback title used when the localization key is missing.
         let titleDefault: String
+
+        /// Stable identity derived from the persisted feature identifier.
         var id: String { value }
     }
 
+    /**
+     One-tap bookmark modal action option mirroring Android arrays.xml identifiers.
+     */
     fileprivate struct BookmarkModalActionOption: Identifiable {
+        /// Persisted action identifier.
         let value: String
+
+        /// Localization key for the action title.
         let titleKey: String
+
+        /// English fallback title used when the localization key is missing.
         let titleDefault: String
+
+        /// Stable identity derived from the persisted action identifier.
         var id: String { value }
     }
 
@@ -172,6 +308,15 @@ public struct SettingsView: View {
         .init(value: "SPEAK", titleKey: "speak", titleDefault: "Speak")
     ]
 
+    /**
+     Creates the top-level settings screen bound to shared reader settings.
+
+     - Parameters:
+       - displaySettings: Shared text-display settings edited by nested settings views.
+       - nightMode: Shared effective night-mode state used by the reader.
+       - nightModeMode: Shared persisted night-mode mode string.
+       - onSettingsChanged: Optional callback invoked when changes should refresh reader content.
+     */
     public init(
         displaySettings: Binding<TextDisplaySettings>,
         nightMode: Binding<Bool>,
@@ -184,6 +329,9 @@ public struct SettingsView: View {
         self.onSettingsChanged = onSettingsChanged
     }
 
+    /**
+     Builds the full settings form, preference hydration, alerts, and settings-side effects.
+     */
     public var body: some View {
         Form {
             if hasDictionaryPreferences {
@@ -865,6 +1013,9 @@ public struct SettingsView: View {
     }
 
     @ViewBuilder
+    /**
+     Builds the "Look & feel" section, including nested display editors and appearance toggles.
+     */
     private var lookAndFeelSection: some View {
         Section(String(localized: "prefs_display_customization_cat", defaultValue: "Look & feel")) {
             NavigationLink(String(localized: "settings_text_display")) {
@@ -1154,6 +1305,7 @@ public struct SettingsView: View {
         }
     }
 
+    /// Whether any module-backed dictionary preference sections should be shown.
     private var hasDictionaryPreferences: Bool {
         !strongsGreekDictionaries.isEmpty ||
             !strongsHebrewDictionaries.isEmpty ||
@@ -1162,6 +1314,9 @@ public struct SettingsView: View {
     }
 
     @ViewBuilder
+    /**
+     Builds the common title/summary/detail row used by selection-style settings links.
+     */
     private func settingsSelectionRow(title: String, summary: String, detail: String) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title)
@@ -1175,6 +1330,14 @@ public struct SettingsView: View {
         }
     }
 
+    /**
+     Summarizes an explicit-selection dictionary preference using Android's empty-means-all semantics.
+
+     - Parameters:
+       - selectedNames: Explicitly selected module names, where an empty set means "all".
+       - available: Installed modules currently available for the preference.
+     - Returns: User-visible summary text for the current selection.
+     */
     private func selectionSummary(selectedNames: Set<String>, available: [ModuleInfo]) -> String {
         guard !available.isEmpty else {
             return String(localized: "prefs_swipe_mode_none", defaultValue: "None")
@@ -1187,6 +1350,14 @@ public struct SettingsView: View {
         return String(format: String(localized: "%lld selected"), effectiveSelected.count)
     }
 
+    /**
+     Summarizes an inverse-selection dictionary preference where the stored set represents disabled modules.
+
+     - Parameters:
+       - disabledNames: Explicitly disabled module names.
+       - available: Installed modules currently available for the preference.
+     - Returns: User-visible summary text for the enabled dictionary count.
+     */
     private func inverseSelectionSummary(disabledNames: Set<String>, available: [ModuleInfo]) -> String {
         guard !available.isEmpty else {
             return String(localized: "prefs_swipe_mode_none", defaultValue: "None")
@@ -1199,6 +1370,14 @@ public struct SettingsView: View {
         return String(format: String(localized: "%lld selected"), enabledCount)
     }
 
+    /**
+     Summarizes inverse-selection bookmark modal action preferences.
+
+     - Parameters:
+       - disabledValues: Persisted disabled action identifiers.
+       - options: Full Android-parity option set for the modal type.
+     - Returns: User-visible summary text for the enabled action count.
+     */
     private func inverseSelectionSummary(
         disabledValues: Set<String>,
         options: [BookmarkModalActionOption]
@@ -1214,6 +1393,9 @@ public struct SettingsView: View {
         return String(format: String(localized: "%lld selected"), enabledCount)
     }
 
+    /**
+     Builds the comma-separated summary for enabled experimental features.
+     */
     private func experimentalFeaturesSummary(selectedValues: Set<String>) -> String {
         guard !selectedValues.isEmpty else {
             return String(localized: "prefs_swipe_mode_none", defaultValue: "Disabled")
@@ -1227,12 +1409,18 @@ public struct SettingsView: View {
         return labels.joined(separator: ", ")
     }
 
+    /**
+     Applies the keep-screen-on preference to the platform idle timer.
+     */
     private func applyScreenKeepOn(_ enabled: Bool) {
         #if os(iOS)
         UIApplication.shared.isIdleTimerDisabled = enabled
         #endif
     }
 
+    /**
+     Opens the closest iOS system settings destination available for Bible-link handling.
+     */
     private func openBibleLinkSystemSettings() {
         #if os(iOS)
         guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
@@ -1240,6 +1428,9 @@ public struct SettingsView: View {
         #endif
     }
 
+    /**
+     Schedules a deliberate debug crash after a 10-second delay.
+     */
     private func triggerDebugCrash() {
         #if DEBUG
         guard !debugCrashScheduled else { return }
@@ -1250,8 +1441,11 @@ public struct SettingsView: View {
         #endif
     }
 
-    /// Remove persisted dictionary selections that are no longer valid for current module lists.
-    /// Keeps Android semantics where empty selected-set means "all enabled".
+    /**
+     Removes persisted dictionary selections that no longer exist in the current module lists.
+
+     The stored selection keeps Android semantics where an empty selected set means "all enabled".
+     */
     private func sanitizeDictionaryPreferences(store: SettingsStore) {
         let validGreek = Set(strongsGreekDictionaries.map(\.name))
         if !selectedStrongsGreekDictionaryNames.isEmpty {
@@ -1315,6 +1509,7 @@ public struct SettingsView: View {
         }
     }
 
+    /// Normalizes stored night-mode values to one of the currently supported picker options.
     private static func nightModePickerSelection(from rawValue: String) -> String {
         if NightModeSettingsResolver.availableModes.contains(where: { $0.rawValue == rawValue }) {
             return rawValue
@@ -1325,6 +1520,7 @@ public struct SettingsView: View {
         return NightModeSetting.system.rawValue
     }
 
+    /// Normalizes persisted swipe-mode values to the Android contract supported by iOS.
     private static func normalizedBibleViewSwipeMode(_ rawValue: String) -> String {
         switch rawValue {
         case "CHAPTER", "PAGE", "NONE":
@@ -1334,6 +1530,7 @@ public struct SettingsView: View {
         }
     }
 
+    /// Normalizes persisted toolbar-button action values to supported Android-parity modes.
     private static func normalizedToolbarButtonActionsMode(_ rawValue: String) -> String {
         switch rawValue {
         case "default", "swap-menu", "swap-activity":
@@ -1343,6 +1540,7 @@ public struct SettingsView: View {
         }
     }
 
+    /// Localized title for one night-mode option exposed by the settings picker.
     private static func nightModeModeTitle(_ mode: NightModeSetting) -> String {
         switch mode {
         case .system:
@@ -1354,21 +1552,27 @@ public struct SettingsView: View {
         }
     }
 
+    /// Localized label for one locale picker option with English fallback behavior.
     private static func localizedLocaleOptionLabel(_ option: LocaleOption) -> String {
         let localized = String(localized: String.LocalizationValue(option.labelKey))
         return localized == option.labelKey ? option.labelDefault : localized
     }
 
+    /// Localized title for one experimental feature option with English fallback behavior.
     fileprivate static func localizedExperimentalFeatureTitle(_ option: ExperimentalFeatureOption) -> String {
         let localized = String(localized: String.LocalizationValue(option.titleKey))
         return localized == option.titleKey ? option.titleDefault : localized
     }
 
+    /// Localized title for one bookmark modal action option with English fallback behavior.
     fileprivate static func localizedBookmarkModalActionTitle(_ option: BookmarkModalActionOption) -> String {
         let localized = String(localized: String.LocalizationValue(option.titleKey))
         return localized == option.titleKey ? option.titleDefault : localized
     }
 
+    /**
+     Maps Android `locale_pref` values to the closest Apple language override value.
+     */
     private static func appleLanguageCode(forLocalePrefValue value: String) -> String? {
         switch value {
         case "":
@@ -1386,6 +1590,9 @@ public struct SettingsView: View {
         }
     }
 
+    /**
+     Maps legacy Apple language overrides back to Android-aligned `locale_pref` values.
+     */
     private static func localePrefValue(forAppleLanguage appleLanguage: String) -> String? {
         let normalized = appleLanguage.replacingOccurrences(of: "_", with: "-")
         let directValues = Set(localeOptions.map(\.value))
@@ -1413,11 +1620,20 @@ public struct SettingsView: View {
     }
 }
 
+/**
+ Multi-select dictionary picker for preferences where an empty selection means "all dictionaries".
+ */
 private struct DictionaryMultiSelectView: View {
+    /// Navigation title for the picker sheet.
     let title: String
+
+    /// Installed dictionary modules shown as toggle rows.
     let dictionaries: [ModuleInfo]
+
+    /// Explicitly selected dictionary names. Empty means "all enabled".
     @Binding var selectedNames: Set<String>
 
+    /// Builds the dictionary toggle list.
     var body: some View {
         List(dictionaries, id: \.name) { dictionary in
             Toggle(
@@ -1441,6 +1657,9 @@ private struct DictionaryMultiSelectView: View {
         .navigationTitle(title)
     }
 
+    /**
+     Applies one dictionary toggle change while preserving empty-means-all semantics.
+     */
     private func updateSelection(dictionaryName: String, isEnabled: Bool) {
         let allNames = Set(dictionaries.map(\.name))
         var effectiveSelected = selectedNames.isEmpty ? allNames : selectedNames
@@ -1459,11 +1678,20 @@ private struct DictionaryMultiSelectView: View {
     }
 }
 
+/**
+ Inverse-selection dictionary picker for preferences where the stored set represents disabled items.
+ */
 private struct DictionaryInverseMultiSelectView: View {
+    /// Navigation title for the picker sheet.
     let title: String
+
+    /// Installed dictionary modules shown as toggle rows.
     let dictionaries: [ModuleInfo]
+
+    /// Persisted dictionary names that should be disabled.
     @Binding var disabledNames: Set<String>
 
+    /// Builds the inverse-selection dictionary toggle list.
     var body: some View {
         List(dictionaries, id: \.name) { dictionary in
             Toggle(
@@ -1490,11 +1718,20 @@ private struct DictionaryInverseMultiSelectView: View {
     }
 }
 
+/**
+ Multi-select picker for enabling Android-parity experimental feature flags.
+ */
 private struct ExperimentalFeaturesMultiSelectView: View {
+    /// Navigation title for the picker sheet.
     let title: String
+
+    /// Available feature options derived from the Android contract.
     let options: [SettingsView.ExperimentalFeatureOption]
+
+    /// Persisted set of enabled experimental feature identifiers.
     @Binding var selectedValues: Set<String>
 
+    /// Builds the experimental-features toggle list.
     var body: some View {
         List(options) { option in
             Toggle(
@@ -1516,11 +1753,20 @@ private struct ExperimentalFeaturesMultiSelectView: View {
     }
 }
 
+/**
+ Inverse-selection picker for bookmark modal actions where unchecked rows are hidden from the modal.
+ */
 private struct BookmarkModalActionsInverseMultiSelectView: View {
+    /// Navigation title for the picker sheet.
     let title: String
+
+    /// Available action options derived from the Android arrays.xml contract.
     let options: [SettingsView.BookmarkModalActionOption]
+
+    /// Persisted set of disabled action identifiers.
     @Binding var disabledValues: Set<String>
 
+    /// Builds the bookmark-modal action toggle list.
     var body: some View {
         List(options) { option in
             Toggle(

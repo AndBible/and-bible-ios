@@ -9,6 +9,7 @@ import AppKit
 #endif
 
 extension Color {
+    /// Cross-platform system background color used by color-related settings views.
     static var systemBackground: Color {
         #if os(iOS)
         Color(uiColor: .systemBackground)
@@ -17,8 +18,11 @@ extension Color {
         #endif
     }
 
-    /// Create a Color from a signed ARGB integer (Vue.js convention).
-    /// -1 = white (0xFFFFFFFF), -16777216 = black (0xFF000000).
+    /**
+     Creates a `Color` from a signed ARGB integer using the Vue reader's color convention.
+
+     `-1` maps to white (`0xFFFFFFFF`) and `-16777216` maps to black (`0xFF000000`).
+     */
     init(argbInt: Int) {
         let uint = UInt32(bitPattern: Int32(truncatingIfNeeded: argbInt))
         let a = Double((uint >> 24) & 0xFF) / 255.0
@@ -47,17 +51,47 @@ extension Color {
     }
 }
 
-/// Settings for controlling colors and theming.
-/// Binds to TextDisplaySettings color fields for persistence.
+/**
+ Form-driven editor for day and night theme colors stored in `TextDisplaySettings`.
+
+ The view converts between SwiftUI `Color` values and the signed ARGB integer format expected by the
+ Vue-based reader configuration.
+
+ Data dependencies:
+ - `settings` is the shared display-settings model whose color fields are being edited
+ - `onChange` lets the parent re-emit updated settings to the reader after any color mutation
+
+ Side effects:
+ - each color picker mutation writes an ARGB integer back into `settings` and invokes `onChange`
+ - the reset action restores the standard light and dark theme defaults in one batch
+ */
 public struct ColorSettingsView: View {
+    /// Shared display settings whose theme colors are being edited.
     @Binding var settings: TextDisplaySettings
+
+    /// Callback invoked after any theme-color mutation.
     var onChange: (() -> Void)?
 
+    /**
+     Creates a color settings editor bound to a shared display-settings model.
+
+     - Parameters:
+       - settings: Shared display settings value whose color fields should be edited.
+       - onChange: Optional callback invoked after any color mutation.
+     */
     public init(settings: Binding<TextDisplaySettings>, onChange: (() -> Void)? = nil) {
         self._settings = settings
         self.onChange = onChange
     }
 
+    /**
+     Creates a `Color` binding backed by a signed ARGB field in `TextDisplaySettings`.
+
+     - Parameters:
+       - keyPath: Optional ARGB integer field to edit.
+       - defaultValue: Fallback ARGB color used when the field is currently `nil`.
+     - Returns: A SwiftUI `Color` binding suitable for `ColorPicker`.
+     */
     private func colorBinding(for keyPath: WritableKeyPath<TextDisplaySettings, Int?>, default defaultValue: Int) -> Binding<Color> {
         Binding(
             get: { Color(argbInt: settings[keyPath: keyPath] ?? defaultValue) },
@@ -65,6 +99,9 @@ public struct ColorSettingsView: View {
         )
     }
 
+    /**
+     Builds the day-theme, night-theme, and reset-to-defaults color settings form.
+     */
     public var body: some View {
         Form {
             Section(String(localized: "day_theme")) {
