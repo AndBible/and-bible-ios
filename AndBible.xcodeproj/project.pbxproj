@@ -8,6 +8,8 @@
 
 /* Begin PBXBuildFile section */
 		15CEC5F063F925DDA0084CDF /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 6AC3AEB9ADE0BA981610EA58 /* Assets.xcassets */; };
+		1A2B3C4D5E6F708192A3B4C5 /* BibleUI in Frameworks */ = {isa = PBXBuildFile; productRef = 28DDAC55D2C87E9CB1F31A12 /* BibleUI */; };
+		1A2B3C4D5E6F708192A3B4C6 /* SwordKit in Frameworks */ = {isa = PBXBuildFile; productRef = 020BEFE49A96B4F15548630F /* SwordKit */; };
 		2107085A8D114A50F42310B0 /* BibleCore in Frameworks */ = {isa = PBXBuildFile; productRef = FDFDEF929B7A5ACE42C2B819 /* BibleCore */; };
 		43956CB017A08C141BDA48A8 /* BibleCore in Frameworks */ = {isa = PBXBuildFile; productRef = 3C9AB5341FEDFFF29A3ADAD5 /* BibleCore */; };
 		605562C8D06E0B4B1A1C232B /* AndBibleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC344294A2096586A9E7F9C1 /* AndBibleTests.swift */; };
@@ -23,16 +25,6 @@
 		E798724B03764F55FC3187E5 /* SwordKit in Frameworks */ = {isa = PBXBuildFile; productRef = 020BEFE49A96B4F15548630F /* SwordKit */; };
 		5126013EC1173F5B6609881C /* Localizable.strings in Resources */ = {isa = PBXBuildFile; fileRef = 451FFBBE453EACF1547FF4B6 /* Localizable.strings */; };
 /* End PBXBuildFile section */
-
-/* Begin PBXContainerItemProxy section */
-		FA05B93C349A9AED161CF11F /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = 6E0E23974B08DAE9D1AB989D /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = 105CB795998FF5CDD04BF6FF;
-			remoteInfo = AndBible;
-		};
-/* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
 		0ABFA8AEBF4A6CA89CDD4AF5 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
@@ -112,7 +104,9 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				1A2B3C4D5E6F708192A3B4C5 /* BibleUI in Frameworks */,
 				2107085A8D114A50F42310B0 /* BibleCore in Frameworks */,
+				1A2B3C4D5E6F708192A3B4C6 /* SwordKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -208,11 +202,12 @@
 			buildRules = (
 			);
 			dependencies = (
-				73CE1BE81D02738CEE391477 /* PBXTargetDependency */,
 			);
 			name = AndBibleTests;
 			packageProductDependencies = (
+				28DDAC55D2C87E9CB1F31A12 /* BibleUI */,
 				FDFDEF929B7A5ACE42C2B819 /* BibleCore */,
+				020BEFE49A96B4F15548630F /* SwordKit */,
 			);
 			productName = AndBibleTests;
 			productReference = 6F16572A9AD36BA967BA4C23 /* AndBibleTests.xctest */;
@@ -337,14 +332,6 @@
 		};
 /* End PBXSourcesBuildPhase section */
 
-/* Begin PBXTargetDependency section */
-		73CE1BE81D02738CEE391477 /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			target = 105CB795998FF5CDD04BF6FF /* AndBible */;
-			targetProxy = FA05B93C349A9AED161CF11F /* PBXContainerItemProxy */;
-		};
-/* End PBXTargetDependency section */
-
 /* Begin PBXVariantGroup section */
 		451FFBBE453EACF1547FF4B6 /* Localizable.strings */ = {
 			isa = PBXVariantGroup;
@@ -404,7 +391,6 @@
 		2C1FD067F5C669FF7EAEE612 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				BUNDLE_LOADER = "$(TEST_HOST)";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -413,7 +399,6 @@
 				PRODUCT_BUNDLE_IDENTIFIER = org.andbible.AndBibleTests;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/AndBible.app/AndBible";
 			};
 			name = Debug;
 		};
@@ -589,7 +574,6 @@
 		D5F40546F1ED81133FFD89C6 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				BUNDLE_LOADER = "$(TEST_HOST)";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -598,7 +582,6 @@
 				PRODUCT_BUNDLE_IDENTIFIER = org.andbible.AndBibleTests;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/AndBible.app/AndBible";
 			};
 			name = Release;
 		};

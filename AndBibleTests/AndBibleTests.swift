@@ -4,6 +4,17 @@ import SwordKit
 @testable import BibleUI
 
 final class AndBibleTests: XCTestCase {
+    private var temporarySwordModulePaths: [String] = []
+
+    override func tearDown() {
+        let fm = FileManager.default
+        for path in temporarySwordModulePaths {
+            try? fm.removeItem(atPath: path)
+        }
+        temporarySwordModulePaths.removeAll()
+        super.tearDown()
+    }
+
     func testAppPreferenceRegistryHasDefinitionForAllKeys() {
         let keys = AppPreferenceKey.allCases
         XCTAssertEqual(keys.count, 35)
@@ -93,9 +104,10 @@ final class AndBibleTests: XCTestCase {
     }
 
     func testStrongsSearchFindAllOccurrencesReturnsBundledKJVMatches() throws {
+        let modulePath = try makeTemporaryBundledSwordPath()
         let manager = try XCTUnwrap(
-            SwordManager(),
-            "Expected SwordManager to initialize against the bundled simulator module path"
+            SwordManager(modulePath: modulePath),
+            "Expected SwordManager to initialize against a temporary bundled sword module path"
         )
         let installedModules = manager.installedModules()
         XCTAssertTrue(
@@ -122,5 +134,44 @@ final class AndBibleTests: XCTestCase {
             hits.allSatisfy { !$0.reference.isEmpty },
             "Expected Strong's hits to parse into verse references"
         )
+    }
+
+    private func makeTemporaryBundledSwordPath() throws -> String {
+        let fm = FileManager.default
+        let sourceRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let bundledSwordURL = sourceRoot
+            .appendingPathComponent("AndBible", isDirectory: true)
+            .appendingPathComponent("Resources", isDirectory: true)
+            .appendingPathComponent("sword", isDirectory: true)
+        XCTAssertTrue(
+            fm.fileExists(atPath: bundledSwordURL.path),
+            "Expected repo-bundled sword resources at \(bundledSwordURL.path)"
+        )
+
+        let tempRoot = fm.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+            .appendingPathComponent("sword", isDirectory: true)
+        try fm.createDirectory(at: tempRoot, withIntermediateDirectories: true)
+        try copyDirectoryContents(from: bundledSwordURL, to: tempRoot)
+
+        temporarySwordModulePaths.append(tempRoot.path)
+        return tempRoot.path
+    }
+
+    private func copyDirectoryContents(from source: URL, to destination: URL) throws {
+        let fm = FileManager.default
+        try fm.createDirectory(at: destination, withIntermediateDirectories: true)
+
+        for item in try fm.contentsOfDirectory(at: source, includingPropertiesForKeys: [.isDirectoryKey]) {
+            let target = destination.appendingPathComponent(item.lastPathComponent, isDirectory: true)
+            let values = try item.resourceValues(forKeys: [.isDirectoryKey])
+            if values.isDirectory == true {
+                try copyDirectoryContents(from: item, to: target)
+            } else {
+                try fm.copyItem(at: item, to: target)
+            }
+        }
     }
 }

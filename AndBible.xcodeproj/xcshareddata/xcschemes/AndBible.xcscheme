@@ -30,15 +30,6 @@
       shouldUseLaunchSchemeArgsEnv = "YES"
       codeCoverageEnabled = "YES"
       onlyGenerateCoverageForSpecifiedTargets = "NO">
-      <MacroExpansion>
-         <BuildableReference
-            BuildableIdentifier = "primary"
-            BlueprintIdentifier = "105CB795998FF5CDD04BF6FF"
-            BuildableName = "AndBible.app"
-            BlueprintName = "AndBible"
-            ReferencedContainer = "container:AndBible.xcodeproj">
-         </BuildableReference>
-      </MacroExpansion>
       <Testables>
          <TestableReference
             skipped = "NO"
