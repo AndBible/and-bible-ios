@@ -2,6 +2,7 @@ import XCTest
 @testable import BibleCore
 import SwordKit
 import SwiftData
+import SQLite3
 @testable import BibleUI
 
 final class AndBibleTests: XCTestCase {
@@ -1332,6 +1333,118 @@ final class AndBibleTests: XCTestCase {
         }
     }
 
+    func testRemoteSyncArchiveStagingDownloadsInitialBackupAndExtractsSQLiteFile() async throws {
+        let adapter = MockRemoteSyncAdapter()
+        let initialDatabaseURL = try makeTemporarySQLiteDatabase(userVersion: 3)
+        defer { try? FileManager.default.removeItem(at: initialDatabaseURL) }
+        let initialArchiveData = try RemoteSyncArchiveStagingService.gzip(Data(contentsOf: initialDatabaseURL))
+        await adapter.setDownloadData(initialArchiveData, forID: "/org.andbible.ios-sync-bookmarks/initial.sqlite3.gz")
+
+        let service = RemoteSyncArchiveStagingService(adapter: adapter)
+        let stagedBackup = try await service.downloadInitialBackup(
+            RemoteSyncFile(
+                id: "/org.andbible.ios-sync-bookmarks/initial.sqlite3.gz",
+                name: "initial.sqlite3.gz",
+                size: Int64(initialArchiveData.count),
+                timestamp: 1_000,
+                parentID: "/org.andbible.ios-sync-bookmarks",
+                mimeType: "application/gzip"
+            ),
+            currentSchemaVersion: 5
+        )
+
+        XCTAssertEqual(stagedBackup.schemaVersion, 3)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: stagedBackup.databaseFileURL.path))
+        XCTAssertEqual(try readSQLiteUserVersion(at: stagedBackup.databaseFileURL), 3)
+        let initialEvents = await adapter.eventsSnapshot()
+        XCTAssertEqual(initialEvents, [
+            .download(id: "/org.andbible.ios-sync-bookmarks/initial.sqlite3.gz")
+        ])
+
+        service.cleanupInitialBackup(stagedBackup)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: stagedBackup.databaseFileURL.path))
+    }
+
+    func testRemoteSyncArchiveStagingRejectsInitialBackupWithNewerSchemaVersion() async throws {
+        let adapter = MockRemoteSyncAdapter()
+        let initialDatabaseURL = try makeTemporarySQLiteDatabase(userVersion: 7)
+        defer { try? FileManager.default.removeItem(at: initialDatabaseURL) }
+        let initialArchiveData = try RemoteSyncArchiveStagingService.gzip(Data(contentsOf: initialDatabaseURL))
+        await adapter.setDownloadData(initialArchiveData, forID: "/org.andbible.ios-sync-bookmarks/initial.sqlite3.gz")
+
+        let service = RemoteSyncArchiveStagingService(adapter: adapter)
+
+        await XCTAssertThrowsErrorAsync(
+            try await service.downloadInitialBackup(
+                RemoteSyncFile(
+                    id: "/org.andbible.ios-sync-bookmarks/initial.sqlite3.gz",
+                    name: "initial.sqlite3.gz",
+                    size: Int64(initialArchiveData.count),
+                    timestamp: 1_000,
+                    parentID: "/org.andbible.ios-sync-bookmarks",
+                    mimeType: "application/gzip"
+                ),
+                currentSchemaVersion: 3
+            )
+        ) { error in
+            XCTAssertEqual(
+                error as? RemoteSyncArchiveStagingError,
+                .incompatibleInitialBackupVersion(7)
+            )
+        }
+    }
+
+    func testRemoteSyncArchiveStagingDownloadsPatchArchivesInSuppliedOrder() async throws {
+        let adapter = MockRemoteSyncAdapter()
+        let firstArchive = Data("first-archive".utf8)
+        let secondArchive = Data("second-archive".utf8)
+        await adapter.setDownloadData(firstArchive, forID: "/org.andbible.ios-sync-bookmarks/device-b/1.1.sqlite3.gz")
+        await adapter.setDownloadData(secondArchive, forID: "/org.andbible.ios-sync-bookmarks/device-a/2.1.sqlite3.gz")
+
+        let service = RemoteSyncArchiveStagingService(adapter: adapter)
+        let stagedArchives = try await service.downloadPatchArchives([
+            RemoteSyncDiscoveredPatch(
+                sourceDevice: "device-b",
+                patchNumber: 1,
+                schemaVersion: 1,
+                file: RemoteSyncFile(
+                    id: "/org.andbible.ios-sync-bookmarks/device-b/1.1.sqlite3.gz",
+                    name: "1.1.sqlite3.gz",
+                    size: Int64(firstArchive.count),
+                    timestamp: 1_000,
+                    parentID: "/org.andbible.ios-sync-bookmarks/device-b",
+                    mimeType: "application/gzip"
+                )
+            ),
+            RemoteSyncDiscoveredPatch(
+                sourceDevice: "device-a",
+                patchNumber: 2,
+                schemaVersion: 1,
+                file: RemoteSyncFile(
+                    id: "/org.andbible.ios-sync-bookmarks/device-a/2.1.sqlite3.gz",
+                    name: "2.1.sqlite3.gz",
+                    size: Int64(secondArchive.count),
+                    timestamp: 1_200,
+                    parentID: "/org.andbible.ios-sync-bookmarks/device-a",
+                    mimeType: "application/gzip"
+                )
+            ),
+        ])
+
+        XCTAssertEqual(stagedArchives.map(\.patch.sourceDevice), ["device-b", "device-a"])
+        XCTAssertEqual(try Data(contentsOf: stagedArchives[0].archiveFileURL), firstArchive)
+        XCTAssertEqual(try Data(contentsOf: stagedArchives[1].archiveFileURL), secondArchive)
+        let patchDownloadEvents = await adapter.eventsSnapshot()
+        XCTAssertEqual(patchDownloadEvents, [
+            .download(id: "/org.andbible.ios-sync-bookmarks/device-b/1.1.sqlite3.gz"),
+            .download(id: "/org.andbible.ios-sync-bookmarks/device-a/2.1.sqlite3.gz"),
+        ])
+
+        service.cleanupPatchArchives(stagedArchives)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: stagedArchives[0].archiveFileURL.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: stagedArchives[1].archiveFileURL.path))
+    }
+
     func testWebDAVSyncConfigurationRejectsLoginPageURLs() {
         let configuration = WebDAVSyncConfiguration(
             serverURL: "https://nextcloud.example.com/login",
@@ -1558,6 +1671,7 @@ private actor MockRemoteSyncAdapter: RemoteSyncAdapting {
     private var fallbackListFilesResult: [RemoteSyncFile] = []
     private var listFilesResultsQueue: [[RemoteSyncFile]] = []
     private var createFolderResults: [RemoteSyncFile] = []
+    private var downloadDataByID: [String: Data] = [:]
     private var knownResponses: [String: Bool] = [:]
     private var makeKnownResponse = "device-known-default"
     private var events: [MockRemoteSyncAdapterEvent] = []
@@ -1572,6 +1686,10 @@ private actor MockRemoteSyncAdapter: RemoteSyncAdapting {
 
     func enqueueCreateFolderResult(_ result: RemoteSyncFile) {
         createFolderResults.append(result)
+    }
+
+    func setDownloadData(_ data: Data, forID id: String) {
+        downloadDataByID[id] = data
     }
 
     func setKnownResponse(_ value: Bool, forSyncFolderID syncFolderID: String, secretFileName: String) {
@@ -1621,6 +1739,11 @@ private actor MockRemoteSyncAdapter: RemoteSyncAdapting {
         )
     }
 
+    func download(id: String) async throws -> Data {
+        events.append(.download(id: id))
+        return downloadDataByID[id] ?? Data()
+    }
+
     func delete(id: String) async throws {
         events.append(.delete(id: id))
     }
@@ -1639,9 +1762,70 @@ private actor MockRemoteSyncAdapter: RemoteSyncAdapting {
 private enum MockRemoteSyncAdapterEvent: Equatable {
     case listFiles(parentIDs: [String]?, name: String?, mimeType: String?, modifiedAtLeast: Date?)
     case createFolder(name: String, parentID: String?)
+    case download(id: String)
     case delete(id: String)
     case isSyncFolderKnown(syncFolderID: String, secretFileName: String)
     case makeKnown(syncFolderID: String, deviceIdentifier: String)
+}
+
+private func makeTemporarySQLiteDatabase(userVersion: Int) throws -> URL {
+    let url = FileManager.default.temporaryDirectory.appendingPathComponent(
+        "remote-sync-test-\(UUID().uuidString).sqlite3"
+    )
+
+    var database: OpaquePointer?
+    guard sqlite3_open_v2(
+        url.path,
+        &database,
+        SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE,
+        nil
+    ) == SQLITE_OK,
+    let database else {
+        if let database {
+            sqlite3_close(database)
+        }
+        throw NSError(domain: "AndBibleTests.SQLite", code: 1)
+    }
+    defer { sqlite3_close(database) }
+
+    guard sqlite3_exec(database, "PRAGMA user_version = \(userVersion);", nil, nil, nil) == SQLITE_OK else {
+        throw NSError(domain: "AndBibleTests.SQLite", code: 2)
+    }
+    guard sqlite3_exec(database, "CREATE TABLE IF NOT EXISTS sample (id INTEGER PRIMARY KEY, value TEXT);", nil, nil, nil) == SQLITE_OK else {
+        throw NSError(domain: "AndBibleTests.SQLite", code: 3)
+    }
+    guard sqlite3_exec(database, "INSERT INTO sample (value) VALUES ('fixture');", nil, nil, nil) == SQLITE_OK else {
+        throw NSError(domain: "AndBibleTests.SQLite", code: 4)
+    }
+
+    return url
+}
+
+private func readSQLiteUserVersion(at url: URL) throws -> Int {
+    var database: OpaquePointer?
+    guard sqlite3_open_v2(url.path, &database, SQLITE_OPEN_READONLY, nil) == SQLITE_OK,
+          let database else {
+        if let database {
+            sqlite3_close(database)
+        }
+        throw NSError(domain: "AndBibleTests.SQLite", code: 5)
+    }
+    defer { sqlite3_close(database) }
+
+    var statement: OpaquePointer?
+    guard sqlite3_prepare_v2(database, "PRAGMA user_version;", -1, &statement, nil) == SQLITE_OK,
+          let statement else {
+        if let statement {
+            sqlite3_finalize(statement)
+        }
+        throw NSError(domain: "AndBibleTests.SQLite", code: 6)
+    }
+    defer { sqlite3_finalize(statement) }
+
+    guard sqlite3_step(statement) == SQLITE_ROW else {
+        throw NSError(domain: "AndBibleTests.SQLite", code: 7)
+    }
+    return Int(sqlite3_column_int(statement, 0))
 }
 
 private func XCTAssertThrowsErrorAsync<T>(

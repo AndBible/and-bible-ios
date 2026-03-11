@@ -537,6 +537,42 @@ void SWConfig_save(void *config) { }
 
 #include <zlib.h>
 
+unsigned char *gzip_data(const unsigned char *input, unsigned long input_len,
+                         unsigned long *output_len) {
+    if (!input || input_len == 0 || !output_len) return NULL;
+
+    z_stream stream;
+    memset(&stream, 0, sizeof(stream));
+
+    if (deflateInit2(&stream, Z_DEFAULT_COMPRESSION, Z_DEFLATED, 15 + 16, 8,
+                     Z_DEFAULT_STRATEGY) != Z_OK) {
+        return NULL;
+    }
+
+    unsigned long bound = deflateBound(&stream, input_len);
+    unsigned char *output = (unsigned char *)malloc(bound);
+    if (!output) {
+        deflateEnd(&stream);
+        return NULL;
+    }
+
+    stream.next_in = (Bytef *)input;
+    stream.avail_in = (uInt)input_len;
+    stream.next_out = output;
+    stream.avail_out = (uInt)bound;
+
+    int ret = deflate(&stream, Z_FINISH);
+    if (ret != Z_STREAM_END) {
+        free(output);
+        deflateEnd(&stream);
+        return NULL;
+    }
+
+    *output_len = stream.total_out;
+    deflateEnd(&stream);
+    return output;
+}
+
 unsigned char *gunzip_data(const unsigned char *input, unsigned long input_len,
                            unsigned long *output_len) {
     if (!input || input_len == 0 || !output_len) return NULL;

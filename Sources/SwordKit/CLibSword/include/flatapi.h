@@ -176,6 +176,11 @@ int InstallMgr_uninstallModule(void *installMgr, void *mgr,
 
 // --- Gzip Decompression (uses zlib, always available) ---
 
+/// Compress data into gzip format. Caller must free result with gunzip_free().
+/// Returns NULL on error. Sets *output_len to compressed size.
+unsigned char *gzip_data(const unsigned char *input, unsigned long input_len,
+                         unsigned long *output_len);
+
 /// Decompress gzip data. Caller must free result with gunzip_free().
 /// Returns NULL on error. Sets *output_len to decompressed size.
 unsigned char *gunzip_data(const unsigned char *input, unsigned long input_len,

@@ -52,7 +52,7 @@ let package = Package(
         // BibleCore: Domain models, persistence, business logic
         .target(
             name: "BibleCore",
-            dependencies: ["SwordKit"],
+            dependencies: ["SwordKit", "CLibSword"],
             path: "Sources/BibleCore/Sources/BibleCore",
             resources: [
                 .copy("Resources"),

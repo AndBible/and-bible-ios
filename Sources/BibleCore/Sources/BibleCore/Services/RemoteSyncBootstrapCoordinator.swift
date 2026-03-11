@@ -43,6 +43,16 @@ public protocol RemoteSyncAdapting: Sendable {
     func createNewFolder(name: String, parentID: String?) async throws -> RemoteSyncFile
 
     /**
+     Downloads one remote file payload into memory.
+
+     - Parameter id: Backend-specific file identifier returned by prior adapter calls.
+     - Returns: Raw remote file payload bytes.
+     - Side effects: performs a remote file-download request.
+     - Throws: Backend-specific transport errors.
+     */
+    func download(id: String) async throws -> Data
+
+    /**
      Deletes a remote file or folder tree.
 
      - Parameter id: Backend-specific identifier to delete.
