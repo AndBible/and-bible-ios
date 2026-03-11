@@ -1,5 +1,6 @@
 import XCTest
 import BibleCore
+import SwordKit
 @testable import BibleUI
 
 final class AndBibleTests: XCTestCase {
@@ -89,5 +90,37 @@ final class AndBibleTests: XCTestCase {
         XCTAssertEqual(parsed?.book, "Genesis")
         XCTAssertEqual(parsed?.chapter, 1)
         XCTAssertEqual(parsed?.verse, 1)
+    }
+
+    func testStrongsSearchFindAllOccurrencesReturnsBundledKJVMatches() throws {
+        let manager = try XCTUnwrap(
+            SwordManager(),
+            "Expected SwordManager to initialize against the bundled simulator module path"
+        )
+        let installedModules = manager.installedModules()
+        XCTAssertTrue(
+            installedModules.contains(where: { $0.name == "KJV" && $0.features.contains(.strongsNumbers) }),
+            "Expected bundled KJV module with Strong's support to be installed for regression testing"
+        )
+
+        let module = try XCTUnwrap(
+            manager.module(named: "KJV"),
+            "Expected bundled KJV module to be available for Strong's regression testing"
+        )
+        let queryOptions = try XCTUnwrap(
+            StrongsSearchSupport.normalizedQueryOptions(for: "H02022"),
+            "Expected H02022 to normalize into entry-attribute Strong's search queries"
+        )
+
+        let hits = StrongsSearchSupport.searchVerseHits(in: module, queryOptions: queryOptions)
+
+        XCTAssertFalse(
+            hits.isEmpty,
+            "Expected the bundled KJV Strong's search for H02022 to return at least one verse"
+        )
+        XCTAssertTrue(
+            hits.allSatisfy { !$0.reference.isEmpty },
+            "Expected Strong's hits to parse into verse references"
+        )
     }
 }

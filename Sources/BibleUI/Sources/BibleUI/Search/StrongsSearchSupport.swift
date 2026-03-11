@@ -1,7 +1,17 @@
 import Foundation
+import SwordKit
 
 struct NormalizedStrongsQueryOptions: Equatable {
     let entryAttributeQueries: [String]
+}
+
+struct StrongsSearchVerseHit: Equatable {
+    let book: String
+    let chapter: Int
+    let verse: Int
+    let previewText: String
+
+    var reference: String { "\(book) \(chapter):\(verse)" }
 }
 
 enum StrongsSearchSupport {
@@ -46,6 +56,35 @@ enum StrongsSearchSupport {
             return parsed
         }
         return nil
+    }
+
+    static func searchVerseHits(
+        in module: SwordModule,
+        queryOptions: NormalizedStrongsQueryOptions,
+        scope: String? = nil
+    ) -> [StrongsSearchVerseHit] {
+        for query in queryOptions.entryAttributeQueries {
+            let options = SearchOptions(
+                query: query,
+                searchType: .entryAttribute,
+                caseInsensitive: true,
+                scope: scope
+            )
+            let swordResults = module.search(options)
+            let hits: [StrongsSearchVerseHit] = swordResults.results.prefix(5000).compactMap { result in
+                guard let parsed = parseVerseKey(result.key) else { return nil }
+                return StrongsSearchVerseHit(
+                    book: parsed.book,
+                    chapter: parsed.chapter,
+                    verse: parsed.verse,
+                    previewText: result.previewText
+                )
+            }
+            if !hits.isEmpty {
+                return hits
+            }
+        }
+        return []
     }
 
     private static func parseHumanVerseKey(_ key: String) -> (book: String, chapter: Int, verse: Int)? {

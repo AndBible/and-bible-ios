@@ -629,11 +629,19 @@ public struct SearchView: View {
                 if !strongsModules.isEmpty {
                     var hits: [SearchHit] = []
                     for strongsModule in strongsModules {
-                        hits = Self.searchStrongsInModule(
-                            strongsModule,
+                        hits = StrongsSearchSupport.searchVerseHits(
+                            in: strongsModule,
                             queryOptions: strongsQueryOptions,
                             scope: swordScope
-                        )
+                        ).map {
+                            SearchHit(
+                                book: $0.book,
+                                chapter: $0.chapter,
+                                verse: $0.verse,
+                                text: $0.previewText,
+                                moduleName: nil
+                            )
+                        }
                         if !hits.isEmpty { break }
                     }
                     let resolvedHits = hits
@@ -808,34 +816,4 @@ public struct SearchView: View {
         return modules
     }
 
-    private static func searchStrongsInModule(
-        _ module: SwordModule,
-        queryOptions: NormalizedStrongsQueryOptions,
-        scope: String?
-    ) -> [SearchHit] {
-        // Use SWORD's entry attribute search with the correct path format.
-        for query in queryOptions.entryAttributeQueries {
-            let options = SearchOptions(
-                query: query,
-                searchType: .entryAttribute,
-                caseInsensitive: true,
-                scope: scope
-            )
-            let swordResults = module.search(options)
-            let hits: [SearchHit] = swordResults.results.prefix(5000).compactMap { result in
-                guard let parsed = StrongsSearchSupport.parseVerseKey(result.key) else { return nil }
-                return SearchHit(
-                    book: parsed.book,
-                    chapter: parsed.chapter,
-                    verse: parsed.verse,
-                    text: result.previewText,
-                    moduleName: nil
-                )
-            }
-            if !hits.isEmpty {
-                return hits
-            }
-        }
-        return []
-    }
 }
