@@ -4,21 +4,56 @@ import SwiftUI
 import SwiftData
 import BibleCore
 
-/// Displays a StudyPad: a collection of notes and bookmark references
-/// organized under a label.
+/**
+ Displays one StudyPad label as a mixed journal of note entries and linked bookmark references.
+
+ The view resolves its backing `Label`, loads both persisted note entries and bookmark-to-label
+ associations, and presents editing sheets for creating or updating text notes.
+
+ Data dependencies:
+ - `labelId` identifies the label whose StudyPad content should be loaded
+ - `modelContext` is used for `BookmarkStore` queries and note deletion/persistence
+
+ Side effects:
+ - `onAppear` loads the label metadata and its current note/bookmark entries from SwiftData
+ - presenting the note editor can insert or update `StudyPadTextEntry` rows and then refresh local
+   state through `loadEntries()`
+ - deleting a note mutates SwiftData and saves the context before reloading the StudyPad list
+ */
 public struct StudyPadView: View {
+    /// Identifier of the label whose StudyPad content should be displayed.
     let labelId: UUID
+
+    /// SwiftData context used for queries, deletion, and persistence.
     @Environment(\.modelContext) private var modelContext
+
+    /// Persisted text note entries assigned to the selected label.
     @State private var entries: [StudyPadTextEntry] = []
+
+    /// Bible bookmark-to-label rows assigned to the selected label.
     @State private var bookmarkEntries: [BibleBookmarkToLabel] = []
+
+    /// Whether the create-note sheet is currently presented.
     @State private var showNewNote = false
+
+    /// Note entry currently being edited, or `nil` when no edit sheet is active.
     @State private var editingEntry: StudyPadTextEntry?
+
+    /// Resolved label metadata used for the navigation title.
     @State private var label: BibleCore.Label?
 
+    /**
+     Creates a StudyPad view for one label.
+
+     - Parameter labelId: Identifier of the label whose notes and bookmark references should be displayed.
+     */
     public init(labelId: UUID) {
         self.labelId = labelId
     }
 
+    /**
+     Builds the empty state or mixed StudyPad entry list with note editor sheet presentation.
+     */
     public var body: some View {
         Group {
             if entries.isEmpty && bookmarkEntries.isEmpty {
@@ -64,6 +99,7 @@ public struct StudyPadView: View {
         }
     }
 
+    /// Scrollable list that interleaves bookmark references and text note entries.
     private var entryList: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
@@ -94,11 +130,24 @@ public struct StudyPadView: View {
         }
     }
 
+    /**
+     Resolves the StudyPad label metadata for the current `labelId`.
+
+     Side effects:
+     - updates local `label` state used by the navigation title
+     */
     private func loadLabel() {
         let store = BookmarkStore(modelContext: modelContext)
         label = store.label(id: labelId)
     }
 
+    /**
+     Reloads text entries and bookmark references assigned to the current label.
+
+     Side effects:
+     - replaces the local `entries` and `bookmarkEntries` arrays from SwiftData-backed queries
+     - sorts bookmark associations by their persisted `orderNumber`
+     */
     private func loadEntries() {
         let store = BookmarkStore(modelContext: modelContext)
         entries = store.studyPadEntries(labelId: labelId)
@@ -110,6 +159,15 @@ public struct StudyPadView: View {
         }.sorted { ($0.orderNumber) < ($1.orderNumber) }
     }
 
+    /**
+     Deletes one text note entry and refreshes the StudyPad content.
+
+     - Parameter entry: Entry to delete from SwiftData.
+
+     Side effects:
+     - removes the entry from the model context
+     - attempts to save the context and then reloads StudyPad state
+     */
     private func deleteEntry(_ entry: StudyPadTextEntry) {
         modelContext.delete(entry)
         try? modelContext.save()
@@ -119,10 +177,20 @@ public struct StudyPadView: View {
 
 // MARK: - Bookmark Row in StudyPad
 
+/**
+ Renders one bookmark reference row inside the StudyPad list.
+
+ The row can optionally expand to show bookmark notes when the bookmark-to-label association marks
+ the content as expanded.
+ */
 private struct BookmarkStudyPadRow: View {
+    /// Bookmark whose reference and optional notes should be shown.
     let bookmark: BibleBookmark
+
+    /// Whether bookmark notes should be rendered beneath the verse reference.
     let isExpanded: Bool
 
+    /// Builds the bookmark summary row shown in the StudyPad list.
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
@@ -147,11 +215,23 @@ private struct BookmarkStudyPadRow: View {
 
 // MARK: - Note Entry Row
 
+/**
+ Renders one editable text note row inside the StudyPad list.
+
+ Tapping the row opens the edit flow, while the overflow menu exposes explicit edit and delete
+ actions.
+ */
 private struct NoteEntryRow: View {
+    /// Persisted StudyPad text entry displayed in the row.
     let entry: StudyPadTextEntry
+
+    /// Callback invoked when the user starts editing the entry.
     let onEdit: () -> Void
+
+    /// Callback invoked when the user deletes the entry.
     let onDelete: () -> Void
 
+    /// Builds the tappable note row and overflow actions.
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
@@ -185,14 +265,39 @@ private struct NoteEntryRow: View {
 
 // MARK: - Note Editor
 
+/**
+ Modal editor for creating or updating one StudyPad text note.
+
+ Data dependencies:
+ - `labelId` identifies which label should own a newly created note
+ - `existingEntry` determines whether the editor updates an existing row or inserts a new one
+ - `modelContext` persists note mutations
+
+ Side effects:
+ - `onAppear` seeds the editor text from the existing entry when editing
+ - saving mutates SwiftData, may create a nested `StudyPadTextEntryText` row, and dismisses the
+   sheet through the caller's toolbar action
+ */
 private struct NoteEditorView: View {
+    /// Label that should own a newly created note.
     let labelId: UUID
+
+    /// Existing entry being edited, or `nil` when creating a new note.
     let existingEntry: StudyPadTextEntry?
+
+    /// Callback invoked after a save so the parent view can reload state.
     let onSave: (StudyPadTextEntry) -> Void
+
+    /// SwiftData context used to insert and update note entities.
     @Environment(\.modelContext) private var modelContext
+
+    /// Dismiss action for closing the editor sheet.
     @Environment(\.dismiss) private var dismiss
+
+    /// Editable note text shown in the `TextEditor`.
     @State private var noteText = ""
 
+    /// Builds the editor body, toolbar actions, and initial text hydration.
     var body: some View {
         VStack {
             TextEditor(text: $noteText)
@@ -226,6 +331,14 @@ private struct NoteEditorView: View {
         }
     }
 
+    /**
+     Persists the current note text by updating an existing entry or creating a new one.
+
+     Side effects:
+     - trims the editor text and returns early when no user-visible content remains
+     - updates or inserts `StudyPadTextEntry` and `StudyPadTextEntryText` rows in SwiftData
+     - attempts to save the context and invokes `onSave` so the parent can refresh its content
+     */
     private func saveNote() {
         let trimmedText = noteText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedText.isEmpty else { return }

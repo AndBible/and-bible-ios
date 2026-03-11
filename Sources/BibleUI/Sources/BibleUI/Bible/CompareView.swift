@@ -4,28 +4,74 @@ import SwiftUI
 import BibleCore
 import SwordKit
 
-/// Shows the current passage verse-by-verse across user-selected Bible modules.
+/**
+ Presents a verse-by-verse translation comparison for the current passage across multiple modules.
+
+ The view loads installed Bible modules, lets the user choose which translations to compare, and
+ then builds an interleaved verse list where each verse shows all available translations together.
+
+ Data dependencies:
+ - `book`, `chapter`, `startVerse`, and `endVerse` define the passage range to compare
+ - `currentModuleName` is highlighted first in each verse's translation list
+ - `resolvedOsisBookId` can supply a pre-resolved book identifier for non-standard canons
+
+ Side effects:
+ - `onAppear` loads installed modules and may automatically present the module picker
+ - translation selection mutates local state and triggers asynchronous SWORD module loading
+ - `loadComparisons()` performs detached background work and then publishes verse results on the main actor
+ */
 struct CompareView: View {
+    /// User-visible book name for the compared passage.
     let book: String
+
+    /// One-based chapter number for the compared passage.
     let chapter: Int
+
+    /// Module currently active in the main reader and prioritized in sorting/highlighting.
     let currentModuleName: String
+
+    /// Optional first verse in the comparison range.
     var startVerse: Int? = nil
+
+    /// Optional last verse in the comparison range.
     var endVerse: Int? = nil
+
     /// Optional pre-resolved OSIS book ID — avoids static 66-book fallback for apocrypha modules.
     var resolvedOsisBookId: String? = nil
+
+    /// Dismiss action for closing the comparison screen.
     @Environment(\.dismiss) private var dismiss
+
+    /// Names of installed modules eligible for comparison.
     @State private var installedModules: [String] = []
+
+    /// User-selected module names to compare against each other.
     @State private var selectedModules: Set<String> = []
+
+    /// Verse-by-verse comparison results currently rendered on screen.
     @State private var verses: [VerseComparison] = []
+
+    /// Whether asynchronous comparison loading is currently in progress.
     @State private var isLoading = false
+
+    /// Whether the translation-selection sheet is presented.
     @State private var showModulePicker = false
 
+    /**
+     Represents one verse and all translation texts available for that verse.
+     */
     struct VerseComparison: Identifiable {
+        /// One-based verse number used for display and stable identity.
         let verseNumber: Int
+
+        /// Translation texts keyed by module name for the current verse.
         let translations: [(name: String, text: String)]
+
+        /// Stable identifier derived from `verseNumber`.
         var id: Int { verseNumber }
     }
 
+    /// Title string describing the currently compared book, chapter, and optional verse range.
     private var compareTitle: String {
         if let sv = startVerse, let ev = endVerse, sv != ev {
             return "\(book) \(chapter):\(sv)-\(ev)"
@@ -35,6 +81,9 @@ struct CompareView: View {
         return "\(book) \(chapter)"
     }
 
+    /**
+     Builds the empty state, loading state, or verse comparison list with translation picker controls.
+     */
     var body: some View {
         Group {
             if verses.isEmpty && !isLoading {
@@ -93,8 +142,9 @@ struct CompareView: View {
         }
     }
 
-    // MARK: - Verse-by-Verse Comparison View
-
+    /**
+     Scrollable verse list that interleaves all selected translations for each verse.
+     */
     private var verseComparisonList: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
@@ -130,8 +180,9 @@ struct CompareView: View {
         }
     }
 
-    // MARK: - Module Picker
-
+    /**
+     Translation picker sheet used to toggle the modules included in comparison loading.
+     */
     private var modulePicker: some View {
         List {
             Section {
@@ -178,8 +229,14 @@ struct CompareView: View {
         }
     }
 
-    // MARK: - Data Loading
+    /**
+     Loads installed module names and decides whether to auto-open the picker or compare directly.
 
+     Side effects:
+     - performs detached SWORD manager access off the main actor
+     - updates `installedModules`, `selectedModules`, and `showModulePicker` on the main actor
+     - may trigger `loadComparisons()` automatically when only one eligible module exists
+     */
     private func loadInstalledModules() {
         Task.detached {
             guard let mgr = SwordManager() else { return }
@@ -210,6 +267,14 @@ struct CompareView: View {
         }
     }
 
+    /**
+     Loads verse-by-verse comparison data for the currently selected modules.
+
+     Side effects:
+     - sets `isLoading` before starting background work
+     - resolves module handles, computes the available verse range, and builds interleaved results
+     - publishes `verses` and clears `isLoading` on the main actor when loading finishes
+     */
     private func loadComparisons() {
         guard selectedModules.count >= 2 else { return }
         isLoading = true
