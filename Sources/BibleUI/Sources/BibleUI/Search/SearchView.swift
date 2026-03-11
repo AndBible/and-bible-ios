@@ -7,58 +7,173 @@ import SwiftUI
 import BibleCore
 import SwordKit
 
-/// Full-text search interface with index management, scope, and multi-translation support.
+/**
+ Full-text search interface with index management, scope filters, and multi-translation support.
+
+ State machine:
+ - `checkingIndex`: inspect whether the active module already has an FTS index
+ - `needsIndex`: prompt the user to create the index
+ - `creatingIndex`: show live progress from `SearchIndexService`
+ - `ready`: render search options and results
+
+ Data dependencies:
+ - `swordModule` provides the primary search target and fallback direct-SWORD search path
+ - `swordManager` resolves additional modules for multi-translation or Strong's searches
+ - `searchIndexService` provides FTS index presence checks, index creation, and indexed search
+ - `installedBibleModules`, `currentBook`, and `currentOsisBookId` define search scopes and
+   translation-selection behavior
+
+ Side effects:
+ - `onAppear` seeds initial module selection, applies `initialQuery`, and triggers the index check
+ - `startIndexCreation()` launches asynchronous index creation through `SearchIndexService`
+ - `performSearch()` launches detached search work and marshals results back onto the main actor
+ - `navigateTo(_:)` dismisses the sheet and notifies the caller with the selected passage
+ */
 public struct SearchView: View {
+    /// Callback invoked when the user selects a search hit and wants to navigate to it.
     let onNavigate: ((String, Int) -> Void)?
+
+    /// Primary Sword module whose search index and results drive the screen.
     var swordModule: SwordModule?
+
+    /// Sword manager used to resolve additional modules for translation or Strong's searches.
     var swordManager: SwordManager?
+
+    /// Optional FTS index service used for index existence checks, creation, and indexed search.
     var searchIndexService: SearchIndexService?
+
+    /// Installed Bible modules available for multi-translation search selection.
     var installedBibleModules: [ModuleInfo]
+
+    /// Current user-visible book name used for the "current book" scope label and fallback navigation.
     var currentBook: String
+
+    /// Current OSIS book identifier used to build SWORD scope expressions.
     var currentOsisBookId: String
 
+    /// Current state of the search/index lifecycle.
     @State private var viewState: ViewState = .checkingIndex
+
+    /// User-entered search text, also seeded from `initialQuery` when present.
     @State private var query = ""
+
+    /// Whether a background search task is currently running.
     @State private var isSearching = false
+
+    /// Flattened result list displayed in the main results section.
     @State private var results: [SearchHit] = []
+
+    /// Aggregate per-module counts used when searching across multiple translations.
     @State private var multiResults: MultiResultGroup?
+
+    /// Word-match mode controlling FTS query decoration and fallback search semantics.
     @State private var wordMode: SearchWordMode = .allWords
+
+    /// Selected search scope (whole Bible, testament, or current book).
     @State private var scopeOption: ScopeChoice = .wholeBible
+
+    /// Presents the translation picker for multi-module search selection.
     @State private var showTranslationPicker = false
+
+    /// Installed module names selected for indexed multi-translation search.
     @State private var selectedModules: Set<String> = []
+
+    /// Whether the options panel is expanded above the results list.
     @State private var showOptions = true
+
+    /// Navigation-title summary of the most recent search results.
     @State private var resultSummary: String = ""
+
+    /// Dismiss action for closing the search sheet after navigation or cancellation.
     @Environment(\.dismiss) private var dismiss
 
+    /**
+     High-level search/index lifecycle states that drive the visible UI.
+     */
     enum ViewState {
+        /// Verifies whether the active module already has a searchable index.
         case checkingIndex
+
+        /// Prompts the user to build an index for the named module.
         case needsIndex(moduleName: String, moduleDescription: String)
+
+        /// Shows progress while `SearchIndexService` is building one or more indexes.
         case creatingIndex
+
+        /// Shows search controls and current results.
         case ready
     }
 
+    /// Search scope choices exposed in the options panel.
     enum ScopeChoice: Hashable {
-        case wholeBible, oldTestament, newTestament, currentBook
+        /// Search across the entire Bible.
+        case wholeBible
+
+        /// Search only the Old Testament range.
+        case oldTestament
+
+        /// Search only the New Testament range.
+        case newTestament
+
+        /// Search only the currently focused book.
+        case currentBook
     }
 
+    /**
+     One passage-level search result shown in the list.
+     */
     struct SearchHit: Identifiable {
+        /// Stable UI identity for list diffing.
         let id = UUID()
+
+        /// User-visible book name parsed from the search result key.
         let book: String
+
+        /// One-based chapter number parsed from the search result key.
         let chapter: Int
+
+        /// One-based verse number parsed from the search result key.
         let verse: Int
+
+        /// Snippet or preview text shown in the result row.
         let text: String
+
+        /// Module name when the result came from a multi-translation search.
         let moduleName: String?
+
+        /// Formatted human-readable reference string shown in the list row.
         var reference: String { "\(book) \(chapter):\(verse)" }
     }
 
+    /**
+     Aggregate counts for multi-translation result presentation.
+     */
     struct MultiResultGroup {
+        /// Per-module result totals used for the horizontal summary pill list.
         let perModule: [(name: String, count: Int)]
+
+        /// Total hits across all selected modules.
         let totalCount: Int
     }
 
     /// Optional initial query to auto-populate and execute (e.g. from "Find all occurrences").
     private var initialQuery: String
 
+    /**
+     Creates the search view for one primary module and optional index service.
+
+     - Parameters:
+       - swordModule: Primary module to search and to use for index checks.
+       - swordManager: Manager used to resolve additional modules for multi-search or Strong's.
+       - searchIndexService: Optional index service providing FTS-backed search and indexing.
+       - installedBibleModules: Installed Bible modules available to the translation picker.
+       - currentBook: Current user-visible book name for the current-book search scope.
+       - currentOsisBookId: Current OSIS book identifier for SWORD scope construction.
+       - initialQuery: Optional query to prefill and auto-run on appear.
+       - onNavigate: Callback invoked when the user selects a search hit.
+     - Note: Initialization has no side effects. Index checks and optional auto-search begin in
+       `onAppear`.
+     */
     public init(
         swordModule: SwordModule? = nil,
         swordManager: SwordManager? = nil,
@@ -79,6 +194,12 @@ public struct SearchView: View {
         self.onNavigate = onNavigate
     }
 
+    /**
+     Builds the search UI for the current `viewState`.
+
+     The body switches between index-check progress, index-creation prompt/progress, and the full
+     search interface while also wiring the toolbar and translation-picker sheet.
+     */
     public var body: some View {
         Group {
             switch viewState {
@@ -128,6 +249,7 @@ public struct SearchView: View {
         }
     }
 
+    /// Navigation title derived from the active state and latest result summary.
     private var navigationTitle: String {
         switch viewState {
         case .needsIndex, .creatingIndex:
@@ -147,6 +269,13 @@ public struct SearchView: View {
 
     // MARK: - Index Prompt
 
+    /**
+     Builds the prompt shown when the active module needs an FTS index before search can proceed.
+
+     - Parameters:
+       - moduleName: Module identifier used for index creation bookkeeping.
+       - moduleDescription: User-visible description shown in the prompt text.
+     */
     private func indexPromptView(moduleName: String, moduleDescription: String) -> some View {
         VStack(spacing: 24) {
             Spacer()
@@ -187,6 +316,7 @@ public struct SearchView: View {
 
     // MARK: - Index Progress
 
+    /// Progress view shown while `SearchIndexService` builds one or more module indexes.
     private var indexProgressView: some View {
         VStack(spacing: 24) {
             Spacer()
@@ -226,6 +356,7 @@ public struct SearchView: View {
 
     // MARK: - Search Content
 
+    /// Main search UI shown once the view reaches the `.ready` state.
     private var searchContent: some View {
         VStack(spacing: 0) {
             if showOptions {
@@ -264,6 +395,7 @@ public struct SearchView: View {
 
     // MARK: - Search Options Panel
 
+    /// Search-mode, scope, and translation controls shown above the result list.
     private var searchOptionsPanel: some View {
         VStack(spacing: 12) {
             Picker(String(localized: "search_match"), selection: $wordMode) {
@@ -309,6 +441,13 @@ public struct SearchView: View {
         .background(.bar)
     }
 
+    /**
+     Builds one pill-style scope selector button.
+
+     - Parameters:
+       - label: User-visible scope label.
+       - choice: Scope value activated when the button is tapped.
+     */
     private func scopeButton(_ label: String, choice: ScopeChoice) -> some View {
         Button(label) {
             scopeOption = choice
@@ -326,6 +465,7 @@ public struct SearchView: View {
 
     // MARK: - Results Sections
 
+    /// Result section used for single-translation searches.
     private var singleResultsSection: some View {
         Section {
             ForEach(results) { hit in
@@ -337,6 +477,11 @@ public struct SearchView: View {
         }
     }
 
+    /**
+     Builds the grouped-results UI for multi-translation searches.
+
+     - Parameter multi: Aggregate result counts and module summary data for the current search.
+     */
     private func multiResultsSection(_ multi: MultiResultGroup) -> some View {
         Group {
             Section {
@@ -369,6 +514,11 @@ public struct SearchView: View {
         }
     }
 
+    /**
+     Builds one result-row view for a search hit.
+
+     - Parameter hit: Passage-level search result to render.
+     */
     private func searchHitRow(_ hit: SearchHit) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             if let moduleName = hit.moduleName {
@@ -386,6 +536,12 @@ public struct SearchView: View {
         .padding(.vertical, 2)
     }
 
+    /**
+     Returns a `Text` value with query terms and Strong's tags visually emphasized.
+
+     - Parameter text: Source snippet text returned by indexed or SWORD search.
+     - Returns: Styled text that bolds query-term matches and formats Strong's tags as superscripts.
+     */
     private func highlightedText(_ text: String) -> Text {
         let terms = query.lowercased().split(separator: " ").map(String.init)
         let lower = text.lowercased()
@@ -454,7 +610,14 @@ public struct SearchView: View {
         return result
     }
 
-    /// Returns the index of '>' if text[from] starts a Strong's tag like <H12345> or <G999>.
+    /**
+     Returns the closing angle-bracket index for a Strong's tag at the given position.
+
+     - Parameters:
+       - text: Full snippet text being scanned for inline Strong's tags.
+       - start: Candidate index that may begin a tag like `<H12345>` or `<G999>`.
+     - Returns: The index of the closing `>` when a valid Strong's tag is found, otherwise `nil`.
+     */
     private static func strongsTagClosingIndex(in text: String, from start: String.Index) -> String.Index? {
         guard text[start] == "<" else { return nil }
         let afterLt = text.index(after: start)
@@ -472,6 +635,11 @@ public struct SearchView: View {
 
     // MARK: - Translation Picker
 
+    /**
+     Builds the translation picker used for multi-translation searches.
+
+     - Parameter modules: Installed Bible modules available for selection.
+     */
     private func makeTranslationPicker(modules: [ModuleInfo]) -> some View {
         NavigationStack {
             List {
@@ -497,6 +665,11 @@ public struct SearchView: View {
     }
 
     @ViewBuilder
+    /**
+     Builds one row in the translation picker.
+
+     - Parameter mod: Installed module metadata for the row being rendered.
+     */
     private func translationRow(_ mod: ModuleInfo) -> some View {
         let modName = mod.name
         let modDesc = mod.description
@@ -526,6 +699,11 @@ public struct SearchView: View {
 
     // MARK: - Navigation
 
+    /**
+     Dismisses the search sheet and forwards the selected result to the caller.
+
+     - Parameter hit: Selected search result.
+     */
     private func navigateTo(_ hit: SearchHit) {
         dismiss()
         onNavigate?(hit.book, hit.chapter)
@@ -533,6 +711,7 @@ public struct SearchView: View {
 
     // MARK: - Index Management
 
+    /// Checks whether the active module already has an index and updates `viewState` accordingly.
     private func checkIndex() {
         guard let service = searchIndexService, let mod = swordModule else {
             // No service or module — skip index check, go directly to ready
@@ -552,13 +731,18 @@ public struct SearchView: View {
         }
     }
 
-    /// Auto-execute search if an initialQuery was provided (e.g. "Find all occurrences").
+    /// Auto-executes a search when `initialQuery` seeded the query field on appear.
     private func autoSearchIfNeeded() {
         if !initialQuery.isEmpty && !query.isEmpty {
             performSearch()
         }
     }
 
+    /**
+     Starts asynchronous index creation for the primary and any selected unindexed modules.
+
+     Once all requested indexes are built, the view transitions back to `.ready`.
+     */
     private func startIndexCreation() {
         guard let service = searchIndexService else {
             viewState = .ready
@@ -597,6 +781,12 @@ public struct SearchView: View {
 
     // MARK: - Search Execution
 
+    /**
+     Executes the current search query using Strong's lookup, indexed FTS, or SWORD fallback.
+
+     The method snapshots current view state, then performs the potentially expensive work in a
+     detached task so UI updates remain responsive. Results are marshalled back to the main actor.
+     */
     private func performSearch() {
         guard !query.trimmingCharacters(in: .whitespaces).isEmpty else { return }
         isSearching = true
@@ -733,6 +923,14 @@ public struct SearchView: View {
 
     // MARK: - Helpers
 
+    /**
+     Resolves `SearchIndexService` scope parameters from the selected scope choice.
+
+     - Parameters:
+       - scope: Current scope selection from the UI.
+       - bookName: User-visible current book name used for the current-book scope.
+     - Returns: Book-name and testament filters appropriate for indexed search APIs.
+     */
     nonisolated private static func resolveScopeParams(
         scope: ScopeChoice, bookName: String
     ) -> (scopeBookName: String?, scopeTestament: String?) {
@@ -744,6 +942,14 @@ public struct SearchView: View {
         }
     }
 
+    /**
+     Converts a scope choice into the SWORD scope string used by non-indexed search APIs.
+
+     - Parameters:
+       - choice: Current scope selection from the UI.
+       - osisBookId: Current OSIS book identifier for current-book searches.
+     - Returns: SWORD scope expression or `nil` for whole-Bible search.
+     */
     nonisolated private static func swordScope(for choice: ScopeChoice, osisBookId: String) -> String? {
         switch choice {
         case .wholeBible: return nil
@@ -753,6 +959,12 @@ public struct SearchView: View {
         }
     }
 
+    /**
+     Converts indexed single-module results into list rows.
+
+     - Parameter ftsResults: Raw index-search results returned by `SearchIndexService`.
+     - Returns: Passage-level hits suitable for UI presentation.
+     */
     nonisolated private static func convertIndexResults(
         _ ftsResults: [SearchIndexService.IndexSearchResult]
     ) -> [SearchHit] {
@@ -767,6 +979,14 @@ public struct SearchView: View {
         }
     }
 
+    /**
+     Flattens grouped multi-translation results into one ordered hit list.
+
+     - Parameters:
+       - grouped: Raw grouped index results keyed by module name.
+       - query: Original query string. Present for signature parity with earlier helpers.
+     - Returns: Flat passage-level hits annotated with their source module name.
+     */
     nonisolated private static func convertGroupedResults(
         _ grouped: [String: [SearchIndexService.IndexSearchResult]],
         query: String
@@ -786,6 +1006,15 @@ public struct SearchView: View {
         return allHits
     }
 
+    /**
+     Resolves the best modules to use for Strong's "find all occurrences" searches.
+
+     - Parameters:
+       - currentModule: Currently open Bible module, preferred when it advertises Strong's support.
+       - installedModules: Installed Bible modules available to the reader.
+       - swordManager: Module manager used to resolve additional Strong's-capable modules.
+     - Returns: Ordered modules to try for Strong's search, without duplicates.
+     */
     nonisolated private static func resolveStrongsSearchModules(
         currentModule: SwordModule?,
         installedModules: [ModuleInfo],
