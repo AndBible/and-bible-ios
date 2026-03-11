@@ -2,7 +2,12 @@
 
 import Foundation
 
-/// Canonical list of Android "Application preferences" keys targeted for iOS parity.
+/**
+ * Canonical list of Android "Application preferences" keys targeted for iOS parity.
+ *
+ * The raw values must stay aligned with Android preference keys because they are used as durable
+ * storage identifiers across SwiftData, `UserDefaults`, localization audits, and regression tests.
+ */
 public enum AppPreferenceKey: String, CaseIterable, Sendable {
     // Dictionaries
     case strongsGreekDictionary = "strongs_greek_dictionary"
@@ -50,12 +55,25 @@ public enum AppPreferenceKey: String, CaseIterable, Sendable {
     case crashApp = "crash_app"
 }
 
+/**
+ * Declares where a parity preference is persisted on iOS.
+ *
+ * Routing is centralized here so UI code and services do not need to duplicate storage decisions.
+ */
 public enum AppPreferenceStorageBackend: Sendable {
+    /// Persist the value in `SettingsStore`/SwiftData local storage.
     case swiftData
+    /// Persist the value in `UserDefaults`, usually for bootstrap-time reads before SwiftData exists.
     case userDefaults
+    /// Do not persist the value; the preference represents an action row rather than durable state.
     case action
 }
 
+/**
+ * Declares the logical shape of a parity preference value.
+ *
+ * Consumers use this metadata for default decoding, regression tests, and guardrail tooling.
+ */
 public enum AppPreferenceValueType: Sendable {
     case bool
     case int
@@ -64,13 +82,25 @@ public enum AppPreferenceValueType: Sendable {
     case action
 }
 
+/**
+ * Defines the full iOS-side contract for one Android parity preference key.
+ *
+ * Each definition records the durable key, storage backend, logical value type, optional default,
+ * and the Android source reference used during parity review.
+ */
 public struct AppPreferenceDefinition: Sendable {
+    /// Durable preference key shared with Android parity tracking.
     public let key: AppPreferenceKey
+    /// Storage backend that should handle reads and writes for this key.
     public let storage: AppPreferenceStorageBackend
+    /// Logical value type used for decoding and regression assertions.
     public let valueType: AppPreferenceValueType
+    /// Default raw value used when no persisted value exists.
     public let defaultValue: String?
+    /// Android source reference proving the contract origin for this key.
     public let androidReference: String
 
+    /// Creates a parity preference definition.
     public init(
         key: AppPreferenceKey,
         storage: AppPreferenceStorageBackend,
@@ -86,8 +116,21 @@ public struct AppPreferenceDefinition: Sendable {
     }
 }
 
-/// Registry for Android parity keys, types, defaults, and storage backend routing.
+/**
+ * Registry for Android parity keys, types, defaults, and storage backend routing.
+ *
+ * This registry is the single source of truth for:
+ * - which Android application-preference keys iOS has committed to mirror
+ * - where each key is stored
+ * - how each key is typed and defaulted
+ * - which Android source file/line range justified the contract
+ *
+ * It has no runtime side effects by itself, but downstream code treats its contents as
+ * authoritative. Missing definitions are fatal because partial registries would silently break
+ * parity reads, settings UI, and regression tooling.
+ */
 public enum AppPreferenceRegistry {
+    /// In-memory lookup table keyed by the durable Android preference identifier.
     private static let definitionMap: [AppPreferenceKey: AppPreferenceDefinition] = [
         .strongsGreekDictionary: .init(
             key: .strongsGreekDictionary,
@@ -338,10 +381,23 @@ public enum AppPreferenceRegistry {
         ),
     ]
 
+    /**
+     * Returns every registered parity definition in the same order as `AppPreferenceKey.allCases`.
+     *
+     * - Returns: Full registry contents for UI generation, tests, and audit scripts.
+     * - Note: Missing entries are filtered out here, but `definition(for:)` still treats them as fatal.
+     */
     public static var definitions: [AppPreferenceDefinition] {
         AppPreferenceKey.allCases.compactMap { definitionMap[$0] }
     }
 
+    /**
+     * Returns the registry definition for a single parity key.
+     * - Parameter key: Android parity preference key.
+     * - Returns: The corresponding definition.
+     * - Failure: Triggers `fatalError` if the registry is incomplete for the requested key.
+     * - Important: Callers rely on this being exhaustive; do not replace the fatal failure with a silent fallback.
+     */
     public static func definition(for key: AppPreferenceKey) -> AppPreferenceDefinition {
         guard let definition = definitionMap[key] else {
             fatalError("Missing app preference definition for key: \(key.rawValue)")
@@ -349,20 +405,41 @@ public enum AppPreferenceRegistry {
         return definition
     }
 
+    /**
+     * Decodes a registry default into a boolean when the key declares one.
+     * - Parameter key: Android parity preference key.
+     * - Returns: Boolean default for the key, or `nil` when the key has no default.
+     */
     public static func boolDefault(for key: AppPreferenceKey) -> Bool? {
         guard let value = definition(for: key).defaultValue else { return nil }
         return value == "true"
     }
 
+    /**
+     * Decodes a registry default into an integer when the key declares one.
+     * - Parameter key: Android parity preference key.
+     * - Returns: Integer default for the key, or `nil` when the key has no default or the raw default is malformed.
+     */
     public static func intDefault(for key: AppPreferenceKey) -> Int? {
         guard let value = definition(for: key).defaultValue else { return nil }
         return Int(value)
     }
 
+    /**
+     * Returns the raw string default declared for a parity key.
+     * - Parameter key: Android parity preference key.
+     * - Returns: Raw default string, or `nil` when the key has no default.
+     */
     public static func stringDefault(for key: AppPreferenceKey) -> String? {
         definition(for: key).defaultValue
     }
 
+    /**
+     * Decodes a CSV-backed preference payload into a trimmed string array.
+     * - Parameter stored: Raw persisted CSV string, or `nil`.
+     * - Returns: Non-empty trimmed members in their stored order.
+     * - Failure: `nil`, empty strings, and empty CSV members decode as an empty array.
+     */
     public static func decodeCSVSet(_ stored: String?) -> [String] {
         guard let stored, !stored.isEmpty else { return [] }
         return stored
@@ -371,6 +448,12 @@ public enum AppPreferenceRegistry {
             .filter { !$0.isEmpty }
     }
 
+    /**
+     * Encodes a string collection into the normalized CSV format used by SwiftData parity settings.
+     * - Parameter values: Raw values to persist.
+     * - Returns: Sorted, comma-delimited, trimmed values with empty members removed.
+     * - Note: This function does not deduplicate by itself. Callers that require set semantics should pass de-duplicated input.
+     */
     public static func encodeCSVSet(_ values: [String]) -> String {
         values
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
