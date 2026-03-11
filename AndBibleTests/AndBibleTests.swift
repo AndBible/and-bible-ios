@@ -1091,6 +1091,247 @@ final class AndBibleTests: XCTestCase {
         ])
     }
 
+    func testRemoteSyncPatchStatusStorePersistsAndQueriesStatuses() throws {
+        let settingsStore = try makeInMemorySettingsStore()
+        let store = RemoteSyncPatchStatusStore(settingsStore: settingsStore)
+
+        store.addStatuses([
+            RemoteSyncPatchStatus(sourceDevice: "device-a", patchNumber: 1, sizeBytes: 100, appliedDate: 1_000),
+            RemoteSyncPatchStatus(sourceDevice: "device-a", patchNumber: 2, sizeBytes: 200, appliedDate: 2_000),
+            RemoteSyncPatchStatus(sourceDevice: "device-b", patchNumber: 1, sizeBytes: 300, appliedDate: 3_000),
+        ], for: .bookmarks)
+
+        XCTAssertEqual(
+            store.status(for: .bookmarks, sourceDevice: "device-a", patchNumber: 2),
+            RemoteSyncPatchStatus(sourceDevice: "device-a", patchNumber: 2, sizeBytes: 200, appliedDate: 2_000)
+        )
+        XCTAssertEqual(store.lastPatchNumber(for: .bookmarks, sourceDevice: "device-a"), 2)
+        XCTAssertEqual(store.totalBytesUsed(for: .bookmarks), 600)
+        XCTAssertEqual(store.statuses(for: .bookmarks).count, 3)
+    }
+
+    func testRemoteSyncPatchStatusStoreClearCategoryDoesNotTouchOtherCategories() throws {
+        let settingsStore = try makeInMemorySettingsStore()
+        let store = RemoteSyncPatchStatusStore(settingsStore: settingsStore)
+
+        store.addStatus(
+            RemoteSyncPatchStatus(sourceDevice: "device-a", patchNumber: 1, sizeBytes: 100, appliedDate: 1_000),
+            for: .bookmarks
+        )
+        store.addStatus(
+            RemoteSyncPatchStatus(sourceDevice: "device-b", patchNumber: 1, sizeBytes: 200, appliedDate: 2_000),
+            for: .workspaces
+        )
+
+        store.clearCategory(.bookmarks)
+
+        XCTAssertTrue(store.statuses(for: .bookmarks).isEmpty)
+        XCTAssertEqual(store.statuses(for: .workspaces).count, 1)
+    }
+
+    func testRemoteSyncPatchDiscoveryParsesAndroidPatchFileNames() {
+        XCTAssertEqual(
+            RemoteSyncPatchDiscoveryService.parsePatchFileName("7.12.sqlite3.gz")?.patchNumber,
+            7
+        )
+        XCTAssertEqual(
+            RemoteSyncPatchDiscoveryService.parsePatchFileName("7.12.sqlite3.gz")?.schemaVersion,
+            12
+        )
+        XCTAssertEqual(
+            RemoteSyncPatchDiscoveryService.parsePatchFileName("5.sqlite3.gz")?.schemaVersion,
+            1
+        )
+        XCTAssertNil(RemoteSyncPatchDiscoveryService.parsePatchFileName("initial.sqlite3.gz"))
+    }
+
+    func testRemoteSyncPatchDiscoveryFindsInitialBackup() async throws {
+        let adapter = MockRemoteSyncAdapter()
+        await adapter.enqueueListFilesResult([
+            RemoteSyncFile(
+                id: "/org.andbible.ios-sync-bookmarks/initial.sqlite3.gz",
+                name: "initial.sqlite3.gz",
+                size: 123,
+                timestamp: 1_000,
+                parentID: "/org.andbible.ios-sync-bookmarks",
+                mimeType: "application/gzip"
+            )
+        ])
+        let service = RemoteSyncPatchDiscoveryService(
+            adapter: adapter,
+            statusStore: RemoteSyncPatchStatusStore(settingsStore: try makeInMemorySettingsStore())
+        )
+
+        let file = try await service.findInitialBackup(syncFolderID: "/org.andbible.ios-sync-bookmarks")
+
+        XCTAssertEqual(file?.name, "initial.sqlite3.gz")
+    }
+
+    func testRemoteSyncPatchDiscoveryReturnsPendingPatchesFilteredByAppliedStatus() async throws {
+        let settingsStore = try makeInMemorySettingsStore()
+        let statusStore = RemoteSyncPatchStatusStore(settingsStore: settingsStore)
+        statusStore.addStatus(
+            RemoteSyncPatchStatus(sourceDevice: "device-a", patchNumber: 1, sizeBytes: 100, appliedDate: 1_000),
+            for: .bookmarks
+        )
+
+        let adapter = MockRemoteSyncAdapter()
+        await adapter.enqueueListFilesResult([
+            RemoteSyncFile(
+                id: "/org.andbible.ios-sync-bookmarks/device-a",
+                name: "device-a",
+                size: 0,
+                timestamp: 1_000,
+                parentID: "/org.andbible.ios-sync-bookmarks",
+                mimeType: NextCloudSyncAdapter.folderMimeType
+            ),
+            RemoteSyncFile(
+                id: "/org.andbible.ios-sync-bookmarks/device-b",
+                name: "device-b",
+                size: 0,
+                timestamp: 1_100,
+                parentID: "/org.andbible.ios-sync-bookmarks",
+                mimeType: NextCloudSyncAdapter.folderMimeType
+            ),
+        ])
+        await adapter.enqueueListFilesResult([
+            RemoteSyncFile(
+                id: "/org.andbible.ios-sync-bookmarks/device-a/1.1.sqlite3.gz",
+                name: "1.1.sqlite3.gz",
+                size: 111,
+                timestamp: 2_000,
+                parentID: "/org.andbible.ios-sync-bookmarks/device-a",
+                mimeType: "application/gzip"
+            ),
+            RemoteSyncFile(
+                id: "/org.andbible.ios-sync-bookmarks/device-a/2.1.sqlite3.gz",
+                name: "2.1.sqlite3.gz",
+                size: 222,
+                timestamp: 2_100,
+                parentID: "/org.andbible.ios-sync-bookmarks/device-a",
+                mimeType: "application/gzip"
+            ),
+            RemoteSyncFile(
+                id: "/org.andbible.ios-sync-bookmarks/device-b/1.1.sqlite3.gz",
+                name: "1.1.sqlite3.gz",
+                size: 333,
+                timestamp: 2_050,
+                parentID: "/org.andbible.ios-sync-bookmarks/device-b",
+                mimeType: "application/gzip"
+            ),
+        ])
+
+        let service = RemoteSyncPatchDiscoveryService(adapter: adapter, statusStore: statusStore)
+        let result = try await service.discoverPendingPatches(
+            for: .bookmarks,
+            bootstrapState: RemoteSyncBootstrapState(syncFolderID: "/org.andbible.ios-sync-bookmarks"),
+            progressState: RemoteSyncProgressState(lastSynchronized: 100_000),
+            currentSchemaVersion: 1
+        )
+
+        XCTAssertEqual(result.deviceFolders.map(\.name), ["device-a", "device-b"])
+        XCTAssertEqual(result.pendingPatches.count, 2)
+        XCTAssertEqual(result.pendingPatches[0].sourceDevice, "device-b")
+        XCTAssertEqual(result.pendingPatches[0].patchNumber, 1)
+        XCTAssertEqual(result.pendingPatches[1].sourceDevice, "device-a")
+        XCTAssertEqual(result.pendingPatches[1].patchNumber, 2)
+
+        let events = await adapter.eventsSnapshot()
+        XCTAssertEqual(events, [
+            .listFiles(
+                parentIDs: ["/org.andbible.ios-sync-bookmarks"],
+                name: nil,
+                mimeType: NextCloudSyncAdapter.folderMimeType,
+                modifiedAtLeast: nil
+            ),
+            .listFiles(
+                parentIDs: [
+                    "/org.andbible.ios-sync-bookmarks/device-a",
+                    "/org.andbible.ios-sync-bookmarks/device-b",
+                ],
+                name: nil,
+                mimeType: nil,
+                modifiedAtLeast: Date(timeIntervalSince1970: 100)
+            ),
+        ])
+    }
+
+    func testRemoteSyncPatchDiscoveryThrowsWhenPatchSequenceHasGap() async throws {
+        let statusStore = RemoteSyncPatchStatusStore(settingsStore: try makeInMemorySettingsStore())
+        let adapter = MockRemoteSyncAdapter()
+        await adapter.enqueueListFilesResult([
+            RemoteSyncFile(
+                id: "/org.andbible.ios-sync-bookmarks/device-a",
+                name: "device-a",
+                size: 0,
+                timestamp: 1_000,
+                parentID: "/org.andbible.ios-sync-bookmarks",
+                mimeType: NextCloudSyncAdapter.folderMimeType
+            )
+        ])
+        await adapter.enqueueListFilesResult([
+            RemoteSyncFile(
+                id: "/org.andbible.ios-sync-bookmarks/device-a/3.1.sqlite3.gz",
+                name: "3.1.sqlite3.gz",
+                size: 333,
+                timestamp: 2_000,
+                parentID: "/org.andbible.ios-sync-bookmarks/device-a",
+                mimeType: "application/gzip"
+            )
+        ])
+
+        let service = RemoteSyncPatchDiscoveryService(adapter: adapter, statusStore: statusStore)
+
+        await XCTAssertThrowsErrorAsync(
+            try await service.discoverPendingPatches(
+                for: .bookmarks,
+                bootstrapState: RemoteSyncBootstrapState(syncFolderID: "/org.andbible.ios-sync-bookmarks"),
+                progressState: RemoteSyncProgressState(),
+                currentSchemaVersion: 1
+            )
+        ) { error in
+            XCTAssertEqual(error as? RemoteSyncPatchDiscoveryError, .patchFilesSkipped)
+        }
+    }
+
+    func testRemoteSyncPatchDiscoveryThrowsWhenRemotePatchNeedsNewerSchema() async throws {
+        let statusStore = RemoteSyncPatchStatusStore(settingsStore: try makeInMemorySettingsStore())
+        let adapter = MockRemoteSyncAdapter()
+        await adapter.enqueueListFilesResult([
+            RemoteSyncFile(
+                id: "/org.andbible.ios-sync-bookmarks/device-a",
+                name: "device-a",
+                size: 0,
+                timestamp: 1_000,
+                parentID: "/org.andbible.ios-sync-bookmarks",
+                mimeType: NextCloudSyncAdapter.folderMimeType
+            )
+        ])
+        await adapter.enqueueListFilesResult([
+            RemoteSyncFile(
+                id: "/org.andbible.ios-sync-bookmarks/device-a/1.7.sqlite3.gz",
+                name: "1.7.sqlite3.gz",
+                size: 333,
+                timestamp: 2_000,
+                parentID: "/org.andbible.ios-sync-bookmarks/device-a",
+                mimeType: "application/gzip"
+            )
+        ])
+
+        let service = RemoteSyncPatchDiscoveryService(adapter: adapter, statusStore: statusStore)
+
+        await XCTAssertThrowsErrorAsync(
+            try await service.discoverPendingPatches(
+                for: .bookmarks,
+                bootstrapState: RemoteSyncBootstrapState(syncFolderID: "/org.andbible.ios-sync-bookmarks"),
+                progressState: RemoteSyncProgressState(),
+                currentSchemaVersion: 3
+            )
+        ) { error in
+            XCTAssertEqual(error as? RemoteSyncPatchDiscoveryError, .incompatiblePatchVersion(7))
+        }
+    }
+
     func testWebDAVSyncConfigurationRejectsLoginPageURLs() {
         let configuration = WebDAVSyncConfiguration(
             serverURL: "https://nextcloud.example.com/login",
@@ -1314,14 +1555,19 @@ private struct RequestLogEntry: Equatable {
 }
 
 private actor MockRemoteSyncAdapter: RemoteSyncAdapting {
-    private var listFilesResult: [RemoteSyncFile] = []
+    private var fallbackListFilesResult: [RemoteSyncFile] = []
+    private var listFilesResultsQueue: [[RemoteSyncFile]] = []
     private var createFolderResults: [RemoteSyncFile] = []
     private var knownResponses: [String: Bool] = [:]
     private var makeKnownResponse = "device-known-default"
     private var events: [MockRemoteSyncAdapterEvent] = []
 
     func setListFilesResult(_ result: [RemoteSyncFile]) {
-        listFilesResult = result
+        fallbackListFilesResult = result
+    }
+
+    func enqueueListFilesResult(_ result: [RemoteSyncFile]) {
+        listFilesResultsQueue.append(result)
     }
 
     func enqueueCreateFolderResult(_ result: RemoteSyncFile) {
@@ -1354,7 +1600,10 @@ private actor MockRemoteSyncAdapter: RemoteSyncAdapting {
                 modifiedAtLeast: modifiedAtLeast
             )
         )
-        return listFilesResult
+        if !listFilesResultsQueue.isEmpty {
+            return listFilesResultsQueue.removeFirst()
+        }
+        return fallbackListFilesResult
     }
 
     func createNewFolder(name: String, parentID: String?) async throws -> RemoteSyncFile {
@@ -1393,4 +1642,18 @@ private enum MockRemoteSyncAdapterEvent: Equatable {
     case delete(id: String)
     case isSyncFolderKnown(syncFolderID: String, secretFileName: String)
     case makeKnown(syncFolderID: String, deviceIdentifier: String)
+}
+
+private func XCTAssertThrowsErrorAsync<T>(
+    _ expression: @autoclosure () async throws -> T,
+    _ errorHandler: (Error) -> Void,
+    file: StaticString = #filePath,
+    line: UInt = #line
+) async {
+    do {
+        _ = try await expression()
+        XCTFail("Expected async expression to throw", file: file, line: line)
+    } catch {
+        errorHandler(error)
+    }
 }

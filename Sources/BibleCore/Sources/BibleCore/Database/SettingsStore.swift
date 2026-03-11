@@ -185,6 +185,33 @@ public final class SettingsStore {
         upsert(key: key, value: String(value))
     }
 
+    /**
+     Removes a persisted setting row when present.
+     * - Parameter key: Unique setting key to delete.
+     * - Side Effects: Deletes the matching `Setting` row and saves `modelContext`.
+     * - Failure: Save errors are swallowed.
+     */
+    public func remove(_ key: String) {
+        guard let existing = fetchSetting(key) else {
+            return
+        }
+        modelContext.delete(existing)
+        try? modelContext.save()
+    }
+
+    /**
+     Reads all persisted settings whose keys start with the supplied prefix.
+     * - Parameter prefix: Leading key prefix to match.
+     * - Returns: Matching `Setting` rows, filtered in memory when the fetch succeeds.
+     * - Note: This fetches all `Setting` rows first because the table is small and this avoids
+     *   relying on string-prefix support inside SwiftData predicates.
+     * - Failure: Fetch errors are swallowed and reported as an empty array.
+     */
+    public func entries(withPrefix prefix: String) -> [Setting] {
+        let descriptor = FetchDescriptor<Setting>()
+        return (try? modelContext.fetch(descriptor).filter { $0.key.hasPrefix(prefix) }) ?? []
+    }
+
     // MARK: - Active Workspace
 
     /**
