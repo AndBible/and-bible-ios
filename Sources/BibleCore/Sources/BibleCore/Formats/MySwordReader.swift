@@ -13,6 +13,11 @@ import SQLite3
 
  Shared module metadata is read from the `Details` table. The reader is intentionally
  read-only and does not mutate the source database.
+
+ - Important: `MySwordReader` is marked `@unchecked Sendable` so higher-level import and module
+   management flows can store and pass reader instances across actor boundaries. The class does
+   not synchronize access to the underlying SQLite handle, so callers must confine each
+   instance's use to one actor, queue, or thread at a time and avoid overlapping method calls.
  */
 public final class MySwordReader: @unchecked Sendable {
     /// Open SQLite handle for the source MySword database.

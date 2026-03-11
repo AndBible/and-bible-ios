@@ -16,6 +16,20 @@ private let logger = Logger(subsystem: "org.andbible", category: "BibleWindowPan
  delegating sheet/alert/toast presentation back to `BibleReaderView` through callback closures.
  This separation lets multiple panes render different modules and references simultaneously
  while still sharing workspace-level state from `WindowManager`.
+
+ Data dependencies:
+ - `window`, `isFocused`, `displaySettings`, `nightMode`, `disableTwoStepBookmarking`, and
+   `hideWindowButtons` drive pane rendering and controller updates
+ - `WindowManager` is required from the environment for controller registration, layout actions,
+   active-window coordination, and window-menu actions
+ - `modelContext` is required from the environment so the pane can construct stores and persist
+   bookmark, history, and settings mutations initiated by the controller
+
+ Side effects:
+ - `onAppear` lazily creates the pane controller and registers it with `WindowManager`
+ - `onDisappear` unregisters the controller when the pane leaves the hierarchy
+ - `onChange` for `nightMode` and `displaySettings` pushes updated display state into the
+   embedded web view via `BibleReaderController.updateDisplaySettings`
  */
 struct BibleWindowPane: View {
     /// Window model that owns this pane's persisted position, layout, and history state.

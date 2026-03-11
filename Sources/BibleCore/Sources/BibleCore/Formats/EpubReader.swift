@@ -44,6 +44,12 @@ public struct EpubInfo: Sendable {
  The indexed `content` table stores rewritten HTML for rendering, while `content_fts` stores
  plain text for full-text search. The HTML rewrite stage converts EPUB-internal links into
  `<epubRef>` tags and image paths into `file://` URLs that WKWebView can load directly.
+
+ - Important: `EpubReader` is marked `@unchecked Sendable` so higher-level import and reading
+   flows can move reader instances across actor boundaries without copying extracted-package
+   state. The class does not provide internal synchronization for `indexDb`, so callers must
+   serialize access to a given instance and avoid overlapping SQLite operations from multiple
+   tasks, threads, or actors.
  */
 public final class EpubReader: @unchecked Sendable {
     /// Filesystem directory containing the extracted EPUB package contents.
@@ -276,6 +282,10 @@ public final class EpubReader: @unchecked Sendable {
 
      The lookup checks the indexed `content` row first and falls back to the TOC table because
      NCX hrefs may include fragments while the content table stores base hrefs.
+
+     - Parameter href: Relative EPUB href, optionally including a fragment identifier.
+     - Returns: The best available section title, or `nil` when neither indexed content nor the
+       flattened TOC contains a matching href.
      */
     public func getTitle(href: String) -> String? {
         let base = href.components(separatedBy: "#").first ?? href
@@ -832,6 +842,7 @@ public final class EpubReader: @unchecked Sendable {
  decompression failures, and index-construction failures.
  */
 public enum EpubError: LocalizedError {
+    /// The archive structure or required EPUB metadata was invalid, with a reason string.
     case invalidEpub(String)
     case decompressionFailed
     case indexingFailed

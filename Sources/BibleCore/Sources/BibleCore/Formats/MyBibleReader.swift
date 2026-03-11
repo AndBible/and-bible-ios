@@ -13,6 +13,11 @@ import SQLite3
 
  Some MyBible packages may not be Bible texts. `detectType()` checks for the `verses` table so
  callers can gate Bible-specific features when the schema diverges.
+
+ - Important: `MyBibleReader` is marked `@unchecked Sendable` so higher-level import and module
+   management flows can store and pass reader instances across actor boundaries. The class does
+   not synchronize access to the underlying SQLite handle, so callers must confine each
+   instance's use to one actor, queue, or thread at a time and avoid overlapping method calls.
  */
 public final class MyBibleReader: @unchecked Sendable {
     /// Open SQLite handle for the source MyBible database.
