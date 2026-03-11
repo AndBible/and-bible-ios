@@ -3,73 +3,145 @@
 import Foundation
 import SwiftData
 
-/// Codable backup format for full app data.
+/// Full JSON backup payload for app data export/import.
+///
+/// Version `1` currently contains:
+/// - Bible bookmarks and their label assignments
+/// - user-visible labels
+/// - reading plans and their completed day numbers
+/// - StudyPad text entries
 public struct AppBackup: Codable {
+    /// Backup schema version.
     public var version: Int = 1
+    /// Export timestamp as seconds since 1970.
     public var timestamp: Double
+    /// Exporting platform identifier.
     public var platform: String = "iOS"
+    /// Exported Bible bookmarks.
     public var bookmarks: [BookmarkBackup]
+    /// Exported user labels.
     public var labels: [LabelBackup]
+    /// Exported reading plans.
     public var readingPlans: [ReadingPlanBackup]
+    /// Exported StudyPad entries.
     public var studyPadEntries: [StudyPadEntryBackup]
 }
 
+/// Codable representation of a Bible bookmark inside a full JSON backup.
 public struct BookmarkBackup: Codable {
+    /// Bookmark UUID string.
     public var id: String
+    /// Start KJVA ordinal used by the bookmark.
     public var kjvOrdinalStart: Int
+    /// End KJVA ordinal used by the bookmark.
     public var kjvOrdinalEnd: Int
+    /// Start ordinal in the original versification.
     public var ordinalStart: Int
+    /// End ordinal in the original versification.
     public var ordinalEnd: Int
+    /// Original versification identifier.
     public var v11n: String
+    /// Optional book snapshot used to avoid cross-book collisions.
     public var book: String?
+    /// Creation timestamp as seconds since 1970.
     public var createdAt: Double
+    /// Last-update timestamp as seconds since 1970.
     public var lastUpdatedOn: Double
+    /// Whether the bookmark covers a whole verse.
     public var wholeVerse: Bool
+    /// Optional primary label UUID string.
     public var primaryLabelId: String?
+    /// Optional detached note text.
     public var notes: String?
+    /// Label UUID strings associated with the bookmark.
     public var labelIds: [String]
 }
 
+/// Codable representation of a user-visible label inside a full JSON backup.
 public struct LabelBackup: Codable {
+    /// Label UUID string.
     public var id: String
+    /// User-visible label name.
     public var name: String
+    /// Android-style ARGB color payload.
     public var color: Int
+    /// Marker-style highlight flag.
     public var markerStyle: Bool
+    /// Underline-style highlight flag.
     public var underlineStyle: Bool
+    /// Favourite/quick-access flag.
     public var favourite: Bool
 }
 
+/// Codable representation of a reading plan inside a full JSON backup.
 public struct ReadingPlanBackup: Codable {
+    /// Reading-plan UUID string.
     public var id: String
+    /// Template/import code.
     public var planCode: String
+    /// User-visible plan name.
     public var planName: String
+    /// Start date as seconds since 1970.
     public var startDate: Double
+    /// Persisted current-day pointer.
     public var currentDay: Int
+    /// Total number of days in the plan.
     public var totalDays: Int
+    /// Whether the plan is active.
     public var isActive: Bool
+    /// 1-based completed day numbers.
     public var completedDays: [Int]
 }
 
+/// Codable representation of a StudyPad text entry inside a full JSON backup.
 public struct StudyPadEntryBackup: Codable {
+    /// StudyPad entry UUID string.
     public var id: String
+    /// Owning label UUID string, when present.
     public var labelId: String?
+    /// Display order within the StudyPad.
     public var orderNumber: Int
+    /// Nesting depth within the StudyPad.
     public var indentLevel: Int
+    /// Detached text payload.
     public var text: String
 }
 
-/// Manages backup (export) and restore (import) of app data.
+/// Manages export and import of app data.
+///
+/// Export shapes:
+/// - CSV: Bible bookmarks only, with quoted note text for spreadsheet-friendly interchange
+/// - JSON: full app backup including labels, reading plans, and StudyPad entries
+///
+/// Import order matters because later records depend on earlier ones:
+/// 1. labels
+/// 2. Bible bookmarks and label junctions
+/// 3. StudyPad entries
+/// 4. reading plans and reconstructed day rows
+///
+/// Error handling is intentionally soft-fail:
+/// - export methods return `nil` on encoding failures
+/// - import methods return the count of successfully inserted items and skip malformed rows
 @Observable
 public final class BackupService {
     private let modelContext: ModelContext
 
+    /// Creates a backup service bound to the caller's SwiftData context.
+    /// - Parameter modelContext: Context used for all export/import reads and writes.
     public init(modelContext: ModelContext) {
         self.modelContext = modelContext
     }
 
     // MARK: - CSV Export (Bookmarks)
 
-    /// Export all bookmarks as CSV data.
+    /// Exports Bible bookmarks as UTF-8 CSV data.
+    ///
+    /// Current column order:
+    /// `id,kjvOrdinalStart,kjvOrdinalEnd,v11n,createdAt,wholeVerse,primaryLabelId,notes`
+    ///
+    /// Notes are wrapped in quotes and embedded quotes are doubled for CSV compatibility.
+    ///
+    /// - Returns: CSV data on success, otherwise `nil`.
     public func exportBookmarksCSV() -> Data? {
         let store = BookmarkStore(modelContext: modelContext)
         let bookmarks = store.bibleBookmarks()
@@ -89,7 +161,8 @@ public final class BackupService {
 
     // MARK: - Full JSON Backup
 
-    /// Export all app data as a JSON backup.
+    /// Exports a full JSON backup of bookmarks, labels, reading plans, and StudyPad entries.
+    /// - Returns: Pretty-printed, sorted-key JSON data on success, otherwise `nil`.
     public func exportFullBackup() -> Data? {
         let store = BookmarkStore(modelContext: modelContext)
         let planStore = ReadingPlanStore(modelContext: modelContext)
@@ -175,7 +248,12 @@ public final class BackupService {
 
     // MARK: - Full JSON Restore
 
-    /// Import app data from a JSON backup. Returns count of items imported.
+    /// Imports app data from a full JSON backup payload.
+    /// - Parameter data: JSON backup data previously produced by `exportFullBackup()`.
+    /// - Returns: Count of successfully inserted top-level rows.
+    /// - Note: The import recreates reading-plan day rows from the matching built-in
+    ///   `ReadingPlanService.availablePlans` template and restores completion state from
+    ///   `completedDays`.
     public func importFullBackup(_ data: Data) -> Int {
         guard let backup = try? JSONDecoder().decode(AppBackup.self, from: data) else {
             return 0
@@ -298,7 +376,11 @@ public final class BackupService {
 
     // MARK: - CSV Import
 
-    /// Import bookmarks from CSV data. Returns count of imported items.
+    /// Imports Bible bookmarks from CSV data.
+    /// - Parameter data: UTF-8 CSV data in the column order emitted by `exportBookmarksCSV()`.
+    /// - Returns: Count of successfully inserted bookmark rows.
+    /// - Note: CSV import restores primary-label IDs and note text when those optional columns are
+    ///   present.
     public func importBookmarksCSV(_ data: Data) -> Int {
         guard let csv = String(data: data, encoding: .utf8) else { return 0 }
         let lines = csv.components(separatedBy: .newlines).dropFirst() // Skip header
