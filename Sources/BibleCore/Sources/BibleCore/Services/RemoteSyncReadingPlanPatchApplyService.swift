@@ -158,6 +158,7 @@ public final class RemoteSyncReadingPlanPatchApplyService {
     }
 
     private let metadataRestoreService: RemoteSyncInitialBackupMetadataRestoreService
+    private let snapshotService: RemoteSyncReadingPlanSnapshotService
     private let fileManager: FileManager
     private let temporaryDirectory: URL
 
@@ -166,6 +167,7 @@ public final class RemoteSyncReadingPlanPatchApplyService {
 
      - Parameters:
        - metadataRestoreService: Reader used for staged Android `LogEntry` rows.
+       - snapshotService: Snapshot service used to refresh outbound fingerprint baselines after replay.
        - fileManager: File manager used for temporary-file cleanup.
        - temporaryDirectory: Scratch directory for temporary decompressed patch databases. Defaults
          to the process temporary directory.
@@ -174,10 +176,12 @@ public final class RemoteSyncReadingPlanPatchApplyService {
      */
     public init(
         metadataRestoreService: RemoteSyncInitialBackupMetadataRestoreService = RemoteSyncInitialBackupMetadataRestoreService(),
+        snapshotService: RemoteSyncReadingPlanSnapshotService = RemoteSyncReadingPlanSnapshotService(),
         fileManager: FileManager = .default,
         temporaryDirectory: URL? = nil
     ) {
         self.metadataRestoreService = metadataRestoreService
+        self.snapshotService = snapshotService
         self.fileManager = fileManager
         self.temporaryDirectory = temporaryDirectory ?? fileManager.temporaryDirectory
     }
@@ -199,6 +203,7 @@ public final class RemoteSyncReadingPlanPatchApplyService {
        - replaces local Android `LogEntry` metadata for `.readingPlans`
        - appends applied-patch rows to `RemoteSyncPatchStatusStore`
        - rewrites preserved Android status payloads in `RemoteSyncReadingPlanStatusStore`
+       - refreshes outbound reading-plan fingerprint baselines after successful replay
      - Failure modes:
        - rethrows patch-archive decompression failures
        - rethrows malformed staged `LogEntry` metadata failures
@@ -310,6 +315,10 @@ public final class RemoteSyncReadingPlanPatchApplyService {
             for: .readingPlans
         )
         patchStatusStore.addStatuses(appliedPatchStatuses, for: .readingPlans)
+        snapshotService.refreshBaselineFingerprints(
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
 
         return RemoteSyncReadingPlanPatchApplyReport(
             appliedPatchCount: appliedPatchStatuses.count,

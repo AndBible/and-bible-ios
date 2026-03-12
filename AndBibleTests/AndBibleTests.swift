@@ -1,5 +1,6 @@
 import XCTest
 @testable import BibleCore
+import CLibSword
 import SwordKit
 import SwiftData
 import SQLite3
@@ -3748,6 +3749,303 @@ final class AndBibleTests: XCTestCase {
         ])
     }
 
+    /// Verifies that outbound upload stays idle when the current reading-plan snapshot matches the stored baseline exactly.
+    func testRemoteSyncReadingPlanPatchUploadReturnsNilWhenStateMatchesBaseline() async throws {
+        let container = try makeReadingPlanRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        let settingsStore = SettingsStore(modelContext: modelContext)
+        let logEntryStore = RemoteSyncLogEntryStore(settingsStore: settingsStore)
+        let snapshotService = RemoteSyncReadingPlanSnapshotService()
+        let fingerprintStore = RemoteSyncRowFingerprintStore(settingsStore: settingsStore)
+
+        let template = ReadingPlanService.availablePlans.first(where: { $0.code == "y1ot1nt1_OTthenNT" })!
+        let plan = ReadingPlanService.startPlan(template: template, modelContext: modelContext)
+        plan.startDate = Date(timeIntervalSince1970: 1_735_689_600)
+        plan.currentDay = 1
+        try modelContext.save()
+
+        logEntryStore.addEntry(
+            RemoteSyncLogEntry(
+                tableName: "ReadingPlan",
+                entityID1: .blob(uuidBlob(plan.id)),
+                entityID2: .text(""),
+                type: .upsert,
+                lastUpdated: 1_000,
+                sourceDevice: "pixel"
+            ),
+            for: .readingPlans
+        )
+        snapshotService.refreshBaselineFingerprints(
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+        let currentSnapshot = snapshotService.snapshotCurrentState(
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+        let planKey = logEntryStore.key(
+            for: .readingPlans,
+            tableName: "ReadingPlan",
+            entityID1: .blob(uuidBlob(plan.id)),
+            entityID2: .text("")
+        )
+        let persistedFingerprint = fingerprintStore.fingerprint(
+            for: .readingPlans,
+            tableName: "ReadingPlan",
+            entityID1: .blob(uuidBlob(plan.id)),
+            entityID2: .text("")
+        )
+        XCTAssertEqual(persistedFingerprint, currentSnapshot.fingerprintsByKey[planKey])
+
+        let adapter = MockRemoteSyncAdapter()
+        let service = RemoteSyncReadingPlanPatchUploadService(
+            adapter: adapter,
+            nowProvider: { 2_000 }
+        )
+
+        let report = try await service.uploadPendingPatch(
+            bootstrapState: RemoteSyncBootstrapState(deviceFolderID: "/org.andbible.ios-sync-readingplans/ios-device"),
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+
+        XCTAssertNil(report)
+        let events = await adapter.eventsSnapshot()
+        let uploadedFiles = await adapter.uploadedFilesSnapshot()
+        XCTAssertEqual(events, [])
+        XCTAssertTrue(uploadedFiles.isEmpty)
+    }
+
+    /// Verifies that outbound upload writes an Android-shaped sparse patch, uploads it, and advances local sync bookkeeping.
+    func testRemoteSyncReadingPlanPatchUploadWritesAndUploadsSparsePatch() async throws {
+        let container = try makeReadingPlanRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        let settingsStore = SettingsStore(modelContext: modelContext)
+        let logEntryStore = RemoteSyncLogEntryStore(settingsStore: settingsStore)
+        let patchStatusStore = RemoteSyncPatchStatusStore(settingsStore: settingsStore)
+        let stateStore = RemoteSyncStateStore(settingsStore: settingsStore)
+        let snapshotService = RemoteSyncReadingPlanSnapshotService()
+        let metadataRestoreService = RemoteSyncInitialBackupMetadataRestoreService()
+        let restoreService = RemoteSyncReadingPlanRestoreService()
+
+        let template = ReadingPlanService.availablePlans.first(where: { $0.code == "y1ot1nt1_OTthenNT" })!
+        let plan = ReadingPlanService.startPlan(template: template, modelContext: modelContext)
+        plan.startDate = Date(timeIntervalSince1970: 1_735_689_600)
+        plan.currentDay = 1
+        try modelContext.save()
+
+        logEntryStore.addEntry(
+            RemoteSyncLogEntry(
+                tableName: "ReadingPlan",
+                entityID1: .blob(uuidBlob(plan.id)),
+                entityID2: .text(""),
+                type: .upsert,
+                lastUpdated: 1_000,
+                sourceDevice: "pixel"
+            ),
+            for: .readingPlans
+        )
+        snapshotService.refreshBaselineFingerprints(
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+
+        plan.currentDay = 2
+        let dayOne = try XCTUnwrap(plan.days?.first(where: { $0.dayNumber == 1 }))
+        dayOne.isCompleted = true
+        dayOne.completedDate = Date(timeIntervalSince1970: 1_735_689_700)
+        try modelContext.save()
+
+        let adapter = MockRemoteSyncAdapter()
+        await adapter.enqueueUploadResult(
+            RemoteSyncFile(
+                id: "/org.andbible.ios-sync-readingplans/ios-device/1.1.sqlite3.gz",
+                name: "1.1.sqlite3.gz",
+                size: 0,
+                timestamp: 2_000,
+                parentID: "/org.andbible.ios-sync-readingplans/ios-device",
+                mimeType: "application/gzip"
+            )
+        )
+        let service = RemoteSyncReadingPlanPatchUploadService(
+            adapter: adapter,
+            nowProvider: { 2_000 }
+        )
+
+        let report = try await service.uploadPendingPatch(
+            bootstrapState: RemoteSyncBootstrapState(deviceFolderID: "/org.andbible.ios-sync-readingplans/ios-device"),
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+
+        let unwrappedReport = try XCTUnwrap(report)
+        XCTAssertEqual(unwrappedReport.patchNumber, 1)
+        XCTAssertEqual(unwrappedReport.upsertedPlanCount, 1)
+        XCTAssertEqual(unwrappedReport.upsertedStatusCount, 1)
+        XCTAssertEqual(unwrappedReport.deletedRowCount, 0)
+        XCTAssertEqual(unwrappedReport.logEntryCount, 2)
+        XCTAssertEqual(unwrappedReport.lastUpdated, 2_000)
+
+        let events = await adapter.eventsSnapshot()
+        XCTAssertEqual(events, [
+            .upload(
+                name: "1.1.sqlite3.gz",
+                parentID: "/org.andbible.ios-sync-readingplans/ios-device",
+                contentType: NextCloudSyncAdapter.gzipMimeType
+            )
+        ])
+
+        let uploadedFiles = await adapter.uploadedFilesSnapshot()
+        let uploadedArchive = try XCTUnwrap(uploadedFiles.first)
+        let archiveURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("uploaded-readingplan-patch-\(UUID().uuidString).sqlite3.gz")
+        let databaseURL = archiveURL.deletingPathExtension()
+        defer {
+            try? FileManager.default.removeItem(at: archiveURL)
+            try? FileManager.default.removeItem(at: databaseURL)
+        }
+        try uploadedArchive.data.write(to: archiveURL, options: .atomic)
+        let patchDatabaseData = try gunzipTestData(uploadedArchive.data)
+        try patchDatabaseData.write(to: databaseURL, options: .atomic)
+
+        let metadataSnapshot = try metadataRestoreService.readSnapshot(from: databaseURL)
+        let patchSnapshot = try restoreService.readSnapshot(from: databaseURL)
+        XCTAssertEqual(patchSnapshot.plans.count, 1)
+        XCTAssertEqual(patchSnapshot.plans[0].currentDay, 2)
+        XCTAssertEqual(patchSnapshot.plans[0].statuses.count, 1)
+        XCTAssertEqual(patchSnapshot.plans[0].statuses[0].dayNumber, 1)
+        XCTAssertEqual(metadataSnapshot.logEntries.map(\.type), [.upsert, .upsert])
+        XCTAssertEqual(Set(metadataSnapshot.logEntries.map(\.tableName)), ["ReadingPlan", "ReadingPlanStatus"])
+        XCTAssertEqual(Set(metadataSnapshot.logEntries.map(\.sourceDevice)), ["ios-device"])
+
+        XCTAssertEqual(
+            patchStatusStore.statuses(for: .readingPlans),
+            [
+                RemoteSyncPatchStatus(
+                    sourceDevice: "ios-device",
+                    patchNumber: 1,
+                    sizeBytes: unwrappedReport.uploadedFile.size,
+                    appliedDate: 2_000
+                )
+            ]
+        )
+        XCTAssertEqual(stateStore.progressState(for: .readingPlans).lastPatchWritten, 2_000)
+        XCTAssertEqual(logEntryStore.entries(for: .readingPlans).count, 2)
+
+        let secondReport = try await service.uploadPendingPatch(
+            bootstrapState: RemoteSyncBootstrapState(deviceFolderID: "/org.andbible.ios-sync-readingplans/ios-device"),
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+        XCTAssertNil(secondReport)
+        let finalUploadedFiles = await adapter.uploadedFilesSnapshot()
+        XCTAssertEqual(finalUploadedFiles.count, 1)
+    }
+
+    /// Verifies that reading-plan initial restore refreshes the outbound fingerprint baseline so later local deletes emit delete patches.
+    func testRemoteSyncReadingPlanPatchUploadDetectsDeleteAfterInitialRestoreRefresh() async throws {
+        let container = try makeReadingPlanRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        let settingsStore = SettingsStore(modelContext: modelContext)
+        let metadataRestoreService = RemoteSyncInitialBackupMetadataRestoreService()
+        let restoreDispatcher = RemoteSyncInitialBackupRestoreService()
+
+        let planID = UUID(uuidString: "d9000000-0000-0000-0000-000000000001")!
+        let databaseURL = try makeAndroidReadingPlansDatabase(
+            plans: [
+                .init(
+                    id: planID,
+                    planCode: "y1ot1nt1_OTthenNT",
+                    startDate: Date(timeIntervalSince1970: 1_735_689_600),
+                    currentDay: 3
+                )
+            ],
+            statuses: [],
+            logEntries: [
+                .init(
+                    tableName: "ReadingPlan",
+                    entityID1: .blob(uuidBlob(planID)),
+                    entityID2: .text(""),
+                    type: .upsert,
+                    lastUpdated: 1_500,
+                    sourceDevice: "pixel"
+                )
+            ]
+        )
+        defer { try? FileManager.default.removeItem(at: databaseURL) }
+
+        let stagedBackup = RemoteSyncStagedInitialBackup(
+            remoteFile: RemoteSyncFile(
+                id: "/org.andbible.ios-sync-readingplans/initial.sqlite3.gz",
+                name: "initial.sqlite3.gz",
+                size: 1,
+                timestamp: 1_500,
+                parentID: "/org.andbible.ios-sync-readingplans",
+                mimeType: "application/gzip"
+            ),
+            databaseFileURL: databaseURL,
+            schemaVersion: 1
+        )
+
+        _ = try restoreDispatcher.restoreInitialBackup(
+            stagedBackup,
+            category: .readingPlans,
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+
+        let plans = try modelContext.fetch(FetchDescriptor<ReadingPlan>())
+        XCTAssertEqual(plans.count, 1)
+        modelContext.delete(plans[0])
+        try modelContext.save()
+
+        let adapter = MockRemoteSyncAdapter()
+        await adapter.enqueueUploadResult(
+            RemoteSyncFile(
+                id: "/org.andbible.ios-sync-readingplans/ios-device/1.1.sqlite3.gz",
+                name: "1.1.sqlite3.gz",
+                size: 0,
+                timestamp: 2_500,
+                parentID: "/org.andbible.ios-sync-readingplans/ios-device",
+                mimeType: "application/gzip"
+            )
+        )
+        let uploadService = RemoteSyncReadingPlanPatchUploadService(
+            adapter: adapter,
+            nowProvider: { 2_500 }
+        )
+
+        let report = try await uploadService.uploadPendingPatch(
+            bootstrapState: RemoteSyncBootstrapState(deviceFolderID: "/org.andbible.ios-sync-readingplans/ios-device"),
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+
+        let unwrappedReport = try XCTUnwrap(report)
+        XCTAssertEqual(unwrappedReport.upsertedPlanCount, 0)
+        XCTAssertEqual(unwrappedReport.upsertedStatusCount, 0)
+        XCTAssertEqual(unwrappedReport.deletedRowCount, 1)
+        XCTAssertEqual(unwrappedReport.logEntryCount, 1)
+
+        let uploadedFiles = await adapter.uploadedFilesSnapshot()
+        let uploadedArchive = try XCTUnwrap(uploadedFiles.first)
+        let archiveURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("uploaded-readingplan-delete-\(UUID().uuidString).sqlite3.gz")
+        let databaseURL2 = archiveURL.deletingPathExtension()
+        defer {
+            try? FileManager.default.removeItem(at: archiveURL)
+            try? FileManager.default.removeItem(at: databaseURL2)
+        }
+        try uploadedArchive.data.write(to: archiveURL, options: .atomic)
+        let patchDatabaseData = try gunzipTestData(uploadedArchive.data)
+        try patchDatabaseData.write(to: databaseURL2, options: .atomic)
+
+        let metadataSnapshot = try metadataRestoreService.readSnapshot(from: databaseURL2)
+        XCTAssertEqual(metadataSnapshot.logEntries.count, 1)
+        XCTAssertEqual(metadataSnapshot.logEntries[0].type, .delete)
+        XCTAssertEqual(metadataSnapshot.logEntries[0].tableName, "ReadingPlan")
+    }
+
     func testWebDAVSyncConfigurationRejectsLoginPageURLs() {
         let configuration = WebDAVSyncConfiguration(
             serverURL: "https://nextcloud.example.com/login",
@@ -4834,10 +5132,12 @@ private actor MockRemoteSyncAdapter: RemoteSyncAdapting {
     private var fallbackListFilesResult: [RemoteSyncFile] = []
     private var listFilesResultsQueue: [[RemoteSyncFile]] = []
     private var createFolderResults: [RemoteSyncFile] = []
+    private var uploadResults: [RemoteSyncFile] = []
     private var downloadDataByID: [String: Data] = [:]
     private var knownResponses: [String: Bool] = [:]
     private var makeKnownResponse = "device-known-default"
     private var events: [MockRemoteSyncAdapterEvent] = []
+    private var uploadedFiles: [MockRemoteSyncUploadedFile] = []
 
     func setListFilesResult(_ result: [RemoteSyncFile]) {
         fallbackListFilesResult = result
@@ -4849,6 +5149,10 @@ private actor MockRemoteSyncAdapter: RemoteSyncAdapting {
 
     func enqueueCreateFolderResult(_ result: RemoteSyncFile) {
         createFolderResults.append(result)
+    }
+
+    func enqueueUploadResult(_ result: RemoteSyncFile) {
+        uploadResults.append(result)
     }
 
     func setDownloadData(_ data: Data, forID id: String) {
@@ -4865,6 +5169,10 @@ private actor MockRemoteSyncAdapter: RemoteSyncAdapting {
 
     func eventsSnapshot() -> [MockRemoteSyncAdapterEvent] {
         events
+    }
+
+    func uploadedFilesSnapshot() -> [MockRemoteSyncUploadedFile] {
+        uploadedFiles
     }
 
     func listFiles(
@@ -4907,6 +5215,43 @@ private actor MockRemoteSyncAdapter: RemoteSyncAdapting {
         return downloadDataByID[id] ?? Data()
     }
 
+    func upload(
+        name: String,
+        fileURL: URL,
+        parentID: String,
+        contentType: String
+    ) async throws -> RemoteSyncFile {
+        events.append(.upload(name: name, parentID: parentID, contentType: contentType))
+        let data = try Data(contentsOf: fileURL)
+        uploadedFiles.append(
+            MockRemoteSyncUploadedFile(
+                name: name,
+                parentID: parentID,
+                contentType: contentType,
+                data: data
+            )
+        )
+        if !uploadResults.isEmpty {
+            let result = uploadResults.removeFirst()
+            return RemoteSyncFile(
+                id: result.id,
+                name: result.name,
+                size: Int64(data.count),
+                timestamp: result.timestamp,
+                parentID: result.parentID,
+                mimeType: result.mimeType
+            )
+        }
+        return RemoteSyncFile(
+            id: [parentID, name].joined(separator: "/"),
+            name: name,
+            size: Int64(data.count),
+            timestamp: 0,
+            parentID: parentID,
+            mimeType: contentType
+        )
+    }
+
     func delete(id: String) async throws {
         events.append(.delete(id: id))
     }
@@ -4926,9 +5271,37 @@ private enum MockRemoteSyncAdapterEvent: Equatable {
     case listFiles(parentIDs: [String]?, name: String?, mimeType: String?, modifiedAtLeast: Date?)
     case createFolder(name: String, parentID: String?)
     case download(id: String)
+    case upload(name: String, parentID: String, contentType: String)
     case delete(id: String)
     case isSyncFolderKnown(syncFolderID: String, secretFileName: String)
     case makeKnown(syncFolderID: String, deviceIdentifier: String)
+}
+
+private struct MockRemoteSyncUploadedFile: Equatable {
+    let name: String
+    let parentID: String
+    let contentType: String
+    let data: Data
+}
+
+private func gunzipTestData(_ data: Data) throws -> Data {
+    try data.withUnsafeBytes { (ptr: UnsafeRawBufferPointer) -> Data in
+        guard let baseAddress = ptr.baseAddress else {
+            throw RemoteSyncArchiveStagingError.decompressionFailed
+        }
+
+        var outputLength: UInt = 0
+        guard let output = gunzip_data(
+            baseAddress.assumingMemoryBound(to: UInt8.self),
+            UInt(data.count),
+            &outputLength
+        ) else {
+            throw RemoteSyncArchiveStagingError.decompressionFailed
+        }
+
+        defer { gunzip_free(output) }
+        return Data(bytes: output, count: Int(outputLength))
+    }
 }
 
 private func makeTemporarySQLiteDatabase(userVersion: Int) throws -> URL {

@@ -57,6 +57,7 @@ public final class RemoteSyncInitialBackupRestoreService {
     private let readingPlanRestoreService: RemoteSyncReadingPlanRestoreService
     private let workspaceRestoreService: RemoteSyncWorkspaceRestoreService
     private let metadataRestoreService: RemoteSyncInitialBackupMetadataRestoreService
+    private let readingPlanSnapshotService: RemoteSyncReadingPlanSnapshotService
 
     /**
      Creates a category-level initial-backup restore dispatcher.
@@ -66,7 +67,9 @@ public final class RemoteSyncInitialBackupRestoreService {
        - readingPlanRestoreService: Restore service used for the reading-plan category.
        - workspaceRestoreService: Restore service used for the workspace category.
        - metadataRestoreService: Restore service used to preserve Android `LogEntry` and `SyncStatus`
-        rows after content restore succeeds.
+         rows after content restore succeeds.
+       - readingPlanSnapshotService: Snapshot service used to refresh outbound reading-plan
+         fingerprint baselines after successful remote restores.
      - Side effects: none.
      - Failure modes: This initializer cannot fail.
      */
@@ -74,12 +77,14 @@ public final class RemoteSyncInitialBackupRestoreService {
         bookmarkRestoreService: RemoteSyncBookmarkRestoreService = RemoteSyncBookmarkRestoreService(),
         readingPlanRestoreService: RemoteSyncReadingPlanRestoreService = RemoteSyncReadingPlanRestoreService(),
         workspaceRestoreService: RemoteSyncWorkspaceRestoreService = RemoteSyncWorkspaceRestoreService(),
-        metadataRestoreService: RemoteSyncInitialBackupMetadataRestoreService = RemoteSyncInitialBackupMetadataRestoreService()
+        metadataRestoreService: RemoteSyncInitialBackupMetadataRestoreService = RemoteSyncInitialBackupMetadataRestoreService(),
+        readingPlanSnapshotService: RemoteSyncReadingPlanSnapshotService = RemoteSyncReadingPlanSnapshotService()
     ) {
         self.bookmarkRestoreService = bookmarkRestoreService
         self.readingPlanRestoreService = readingPlanRestoreService
         self.workspaceRestoreService = workspaceRestoreService
         self.metadataRestoreService = metadataRestoreService
+        self.readingPlanSnapshotService = readingPlanSnapshotService
     }
 
     /**
@@ -95,6 +100,7 @@ public final class RemoteSyncInitialBackupRestoreService {
        - mutates live SwiftData state for the supported category
        - may persist local-only helper state needed to preserve Android-only fidelity
        - replaces local Android sync metadata rows for the category after the content restore succeeds
+       - refreshes outbound reading-plan fingerprint baselines after a successful reading-plan restore
      - Failure modes:
        - rethrows category-specific snapshot and restore errors from the selected service
        - rethrows staged sync-metadata read errors when present Android metadata tables are malformed
@@ -141,6 +147,12 @@ public final class RemoteSyncInitialBackupRestoreService {
             category: category,
             settingsStore: settingsStore
         )
+        if category == .readingPlans {
+            readingPlanSnapshotService.refreshBaselineFingerprints(
+                modelContext: modelContext,
+                settingsStore: settingsStore
+            )
+        }
         return report
     }
 }

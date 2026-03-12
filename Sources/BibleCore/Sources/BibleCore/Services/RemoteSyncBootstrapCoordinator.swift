@@ -53,6 +53,25 @@ public protocol RemoteSyncAdapting: Sendable {
     func download(id: String) async throws -> Data
 
     /**
+     Uploads one local file into a remote folder.
+
+     - Parameters:
+       - name: Destination file name to create remotely.
+       - fileURL: Local file URL whose contents should be uploaded.
+       - parentID: Remote parent folder identifier that should receive the file.
+       - contentType: MIME type sent with the upload request.
+     - Returns: Metadata for the uploaded remote file.
+     - Side effects: performs a remote file-upload request.
+     - Throws: Backend-specific transport or local-file read errors.
+     */
+    func upload(
+        name: String,
+        fileURL: URL,
+        parentID: String,
+        contentType: String
+    ) async throws -> RemoteSyncFile
+
+    /**
      Deletes a remote file or folder tree.
 
      - Parameter id: Backend-specific identifier to delete.
