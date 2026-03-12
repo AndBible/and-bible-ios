@@ -2,6 +2,99 @@
 
 This document closes the last repo-local gap for the Google Drive sync backend: how to supply real iOS OAuth values to the existing code without committing environment-specific configuration.
 
+## UX Contract
+
+There are two separate audiences here, and they must not be conflated.
+
+### Developer / Release-Engineering Responsibility
+
+Developers provide the app-level Google OAuth configuration once for the AndBible iOS bundle.
+
+That is what this document covers:
+
+- `GOOGLE_DRIVE_CLIENT_ID`
+- `GOOGLE_DRIVE_SERVER_CLIENT_ID`
+- `GOOGLE_DRIVE_REVERSED_CLIENT_ID`
+
+Those are build-time application settings, not user-entered data.
+
+### End-User Responsibility
+
+End users should only perform the normal Google account sign-in flow inside the app.
+
+The intended user-facing flow is:
+
+1. Open `Settings > Sync`
+2. Choose `Google Drive`
+3. Tap `Sign In to Google Drive`
+4. Choose a Google account
+5. Grant access
+6. Enable one or more sync categories
+
+End users must never be asked to:
+
+- look up an OAuth client ID
+- enter a callback URL scheme
+- paste Google Cloud Console values into the app
+
+If the app shows `Google Drive sign-in is not configured for this build.`, that is a build/release problem, not a user workflow.
+
+## iOS Deviation From Android
+
+The user-facing UX target remains Android-aligned:
+
+- the user taps a Google Drive sign-in action
+- the app presents Google account/consent UI
+- the app receives Drive-authorized access
+- the app syncs against Google Drive `appDataFolder`
+
+The implementation detail differs across platforms.
+
+### Android
+
+Android already uses Google OAuth and Drive APIs. It does not ask the user for a Google username/password for direct API login.
+
+In the current Android code:
+
+- the app starts Google sign-in through One Tap
+- the adapter is built with a compiled client ID constant
+- Drive access is authorized with `DriveScopes.DRIVE_APPDATA`
+- all sync file operations run through the Google Drive API
+
+### iOS
+
+iOS uses the same high-level model:
+
+- app-level Google OAuth registration
+- interactive Google sign-in
+- Drive API access with the `drive.appdata` scope
+
+But iOS requires one additional bundle-time constraint:
+
+- the OAuth client ID and reversed callback scheme must be present in the app bundle so Google Sign-In can return control to the app
+
+That is why iOS needs:
+
+- `GIDClientID`
+- optional `GIDServerClientID`
+- `CFBundleURLTypes` entry for the reversed client ID
+
+### Practical Disposition
+
+This is an implementation deviation, not a UX deviation.
+
+The intended shipped behavior is:
+
+- Android: user taps sign-in and approves Google access
+- iOS: user taps sign-in and approves Google access
+
+The internal setup differs:
+
+- Android currently carries its Google client configuration in the shipped app code/resources
+- iOS must carry its Google client configuration in bundle settings and URL-scheme metadata
+
+The iOS app should therefore never expose OAuth setup to end users. That setup belongs to the app build.
+
 ## Current Code State
 
 The app already has the Google Drive runtime pieces wired:
@@ -72,6 +165,11 @@ In Xcode:
    - `GOOGLE_DRIVE_REVERSED_CLIENT_ID`
 
 The committed project keeps empty defaults on purpose so repo builds stay secret-free and unconfigured builds fail safely instead of attempting a broken OAuth flow.
+
+Release expectation:
+
+- development and CI builds may remain intentionally unconfigured
+- user-facing builds that advertise Google Drive sync should ship with real values populated
 
 ## Expected Runtime Behavior
 
