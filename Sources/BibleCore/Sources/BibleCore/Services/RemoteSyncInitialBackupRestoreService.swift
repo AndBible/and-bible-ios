@@ -32,16 +32,22 @@ Data dependencies:
 - `RemoteSyncBookmarkRestoreService` restores staged Android `bookmarks.sqlite3` backups
 - `RemoteSyncReadingPlanRestoreService` restores staged Android `readingplans.sqlite3` backups
 - `RemoteSyncWorkspaceRestoreService` restores staged Android `workspaces.sqlite3` backups
+- `RemoteSyncInitialBackupMetadataRestoreService` preserves staged Android `LogEntry` and
+  `SyncStatus` rows needed for later patch replay
 - `SettingsStore` provides local-only persistence for fidelity-preserving side stores such as
   `RemoteSyncReadingPlanStatusStore`, `RemoteSyncBookmarkPlaybackSettingsStore`, and
-  `RemoteSyncBookmarkLabelAliasStore`, and `RemoteSyncWorkspaceFidelityStore`
+  `RemoteSyncBookmarkLabelAliasStore`, `RemoteSyncWorkspaceFidelityStore`,
+  `RemoteSyncLogEntryStore`, and `RemoteSyncPatchStatusStore`
 
  Side effects:
  - mutates live local SwiftData records for the supported category
  - may write local-only settings rows needed to preserve Android-only fidelity
+ - replaces local Android sync metadata rows for the category after content restore succeeds
 
  Failure modes:
  - rethrows category-specific restore errors from the selected restore service
+ - rethrows staged sync-metadata read errors when Android `LogEntry` or `SyncStatus` tables are
+   present but malformed
 
  Concurrency:
  - this type inherits the confinement rules of the supplied `ModelContext` and `SettingsStore`
@@ -50,6 +56,7 @@ public final class RemoteSyncInitialBackupRestoreService {
     private let bookmarkRestoreService: RemoteSyncBookmarkRestoreService
     private let readingPlanRestoreService: RemoteSyncReadingPlanRestoreService
     private let workspaceRestoreService: RemoteSyncWorkspaceRestoreService
+    private let metadataRestoreService: RemoteSyncInitialBackupMetadataRestoreService
 
     /**
      Creates a category-level initial-backup restore dispatcher.
@@ -58,17 +65,21 @@ public final class RemoteSyncInitialBackupRestoreService {
        - bookmarkRestoreService: Restore service used for the bookmark category.
        - readingPlanRestoreService: Restore service used for the reading-plan category.
        - workspaceRestoreService: Restore service used for the workspace category.
+       - metadataRestoreService: Restore service used to preserve Android `LogEntry` and `SyncStatus`
+        rows after content restore succeeds.
      - Side effects: none.
      - Failure modes: This initializer cannot fail.
      */
     public init(
         bookmarkRestoreService: RemoteSyncBookmarkRestoreService = RemoteSyncBookmarkRestoreService(),
         readingPlanRestoreService: RemoteSyncReadingPlanRestoreService = RemoteSyncReadingPlanRestoreService(),
-        workspaceRestoreService: RemoteSyncWorkspaceRestoreService = RemoteSyncWorkspaceRestoreService()
+        workspaceRestoreService: RemoteSyncWorkspaceRestoreService = RemoteSyncWorkspaceRestoreService(),
+        metadataRestoreService: RemoteSyncInitialBackupMetadataRestoreService = RemoteSyncInitialBackupMetadataRestoreService()
     ) {
         self.bookmarkRestoreService = bookmarkRestoreService
         self.readingPlanRestoreService = readingPlanRestoreService
         self.workspaceRestoreService = workspaceRestoreService
+        self.metadataRestoreService = metadataRestoreService
     }
 
     /**
@@ -83,8 +94,10 @@ public final class RemoteSyncInitialBackupRestoreService {
      - Side effects:
        - mutates live SwiftData state for the supported category
        - may persist local-only helper state needed to preserve Android-only fidelity
+       - replaces local Android sync metadata rows for the category after the content restore succeeds
      - Failure modes:
        - rethrows category-specific snapshot and restore errors from the selected service
+       - rethrows staged sync-metadata read errors when present Android metadata tables are malformed
      */
     public func restoreInitialBackup(
         _ stagedBackup: RemoteSyncStagedInitialBackup,
@@ -92,32 +105,42 @@ public final class RemoteSyncInitialBackupRestoreService {
         modelContext: ModelContext,
         settingsStore: SettingsStore
     ) throws -> RemoteSyncInitialBackupRestoreReport {
+        let metadataSnapshot = try metadataRestoreService.readSnapshot(from: stagedBackup.databaseFileURL)
+
+        let report: RemoteSyncInitialBackupRestoreReport
         switch category {
         case .bookmarks:
             let snapshot = try bookmarkRestoreService.readSnapshot(from: stagedBackup.databaseFileURL)
-            let report = try bookmarkRestoreService.replaceLocalBookmarks(
+            let bookmarkReport = try bookmarkRestoreService.replaceLocalBookmarks(
                 from: snapshot,
                 modelContext: modelContext,
                 settingsStore: settingsStore
             )
-            return .bookmarks(report)
+            report = .bookmarks(bookmarkReport)
         case .readingPlans:
             let snapshot = try readingPlanRestoreService.readSnapshot(from: stagedBackup.databaseFileURL)
             let statusStore = RemoteSyncReadingPlanStatusStore(settingsStore: settingsStore)
-            let report = try readingPlanRestoreService.replaceLocalReadingPlans(
+            let readingPlanReport = try readingPlanRestoreService.replaceLocalReadingPlans(
                 from: snapshot,
                 modelContext: modelContext,
                 statusStore: statusStore
             )
-            return .readingPlans(report)
+            report = .readingPlans(readingPlanReport)
         case .workspaces:
             let snapshot = try workspaceRestoreService.readSnapshot(from: stagedBackup.databaseFileURL)
-            let report = try workspaceRestoreService.replaceLocalWorkspaces(
+            let workspaceReport = try workspaceRestoreService.replaceLocalWorkspaces(
                 from: snapshot,
                 modelContext: modelContext,
                 settingsStore: settingsStore
             )
-            return .workspaces(report)
+            report = .workspaces(workspaceReport)
         }
+
+        _ = metadataRestoreService.replaceLocalMetadata(
+            from: metadataSnapshot,
+            category: category,
+            settingsStore: settingsStore
+        )
+        return report
     }
 }

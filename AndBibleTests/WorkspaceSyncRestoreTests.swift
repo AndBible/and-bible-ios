@@ -27,6 +27,53 @@ private let workspaceSQLiteTransient = unsafeBitCast(-1, to: sqlite3_destructor_
    SQLite databases
  */
 final class WorkspaceSyncRestoreTests: XCTestCase {
+    /**
+     Verifies that preserved Android `LogEntry` rows can be queried and cleared per category.
+     */
+    func testRemoteSyncLogEntryStorePersistsAndClearsEntries() throws {
+        let container = try makeWorkspaceRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        let settingsStore = SettingsStore(modelContext: modelContext)
+        let store = RemoteSyncLogEntryStore(settingsStore: settingsStore)
+
+        let workspaceEntry = RemoteSyncLogEntry(
+            tableName: "Workspace",
+            entityID1: .blob(uuidBlob(UUID(uuidString: "c0500000-0000-0000-0000-000000000001")!)),
+            entityID2: .text(""),
+            type: .upsert,
+            lastUpdated: 1_735_689_600_000,
+            sourceDevice: "pixel"
+        )
+        let bookmarkEntry = RemoteSyncLogEntry(
+            tableName: "Label",
+            entityID1: .blob(uuidBlob(UUID(uuidString: "c0500000-0000-0000-0000-000000000002")!)),
+            entityID2: .text(""),
+            type: .delete,
+            lastUpdated: 1_735_689_700_000,
+            sourceDevice: "tablet"
+        )
+
+        store.addEntry(workspaceEntry, for: .workspaces)
+        store.addEntry(bookmarkEntry, for: .bookmarks)
+
+        XCTAssertEqual(
+            store.entry(
+                for: .workspaces,
+                tableName: "Workspace",
+                entityID1: workspaceEntry.entityID1,
+                entityID2: workspaceEntry.entityID2
+            ),
+            workspaceEntry
+        )
+        XCTAssertEqual(store.entries(for: .workspaces), [workspaceEntry])
+        XCTAssertEqual(store.entries(for: .bookmarks), [bookmarkEntry])
+
+        store.clearCategory(.workspaces)
+
+        XCTAssertTrue(store.entries(for: .workspaces).isEmpty)
+        XCTAssertEqual(store.entries(for: .bookmarks), [bookmarkEntry])
+    }
+
     func testRemoteSyncWorkspaceFidelityStorePersistsAndClearsEntries() throws {
         let container = try makeWorkspaceRestoreModelContainer()
         let modelContext = ModelContext(container)
@@ -508,6 +555,132 @@ final class WorkspaceSyncRestoreTests: XCTestCase {
         XCTAssertEqual(settingsStore.activeWorkspaceId, restoredWorkspaceID)
     }
 
+    /**
+     Verifies that Android `LogEntry` and `SyncStatus` rows are read faithfully and replace only the targeted category metadata.
+     */
+    func testRemoteSyncInitialBackupMetadataRestoreReadsAndReplacesAndroidMetadata() throws {
+        let container = try makeWorkspaceRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        let settingsStore = SettingsStore(modelContext: modelContext)
+        let service = RemoteSyncInitialBackupMetadataRestoreService()
+
+        let workspaceID = UUID(uuidString: "c4500000-0000-0000-0000-000000000001")!
+        let windowID = UUID(uuidString: "c4500000-0000-0000-0000-000000000002")!
+        let logEntries: [AndroidLogEntryRow] = [
+            .init(
+                tableName: "Workspace",
+                entityID1: .blob(uuidBlob(workspaceID)),
+                entityID2: .text(""),
+                type: "UPSERT",
+                lastUpdated: 1_735_689_600_000,
+                sourceDevice: "pixel"
+            ),
+            .init(
+                tableName: "Window",
+                entityID1: .blob(uuidBlob(windowID)),
+                entityID2: .integer(7),
+                type: "DELETE",
+                lastUpdated: 1_735_689_700_000,
+                sourceDevice: "pixel"
+            ),
+        ]
+        let syncStatuses: [AndroidSyncStatusRow] = [
+            .init(sourceDevice: "pixel", patchNumber: 3, sizeBytes: 2_048, appliedDate: 1_735_689_800_000),
+            .init(sourceDevice: "tablet", patchNumber: 1, sizeBytes: 4_096, appliedDate: 1_735_689_900_000),
+        ]
+
+        let databaseURL = try makeAndroidWorkspacesDatabase(
+            workspaces: [],
+            windows: [],
+            pageManagers: [],
+            historyItems: [],
+            logEntries: logEntries,
+            syncStatuses: syncStatuses
+        )
+        defer { try? FileManager.default.removeItem(at: databaseURL) }
+
+        let snapshot = try service.readSnapshot(from: databaseURL)
+
+        XCTAssertEqual(
+            snapshot.logEntries,
+            [
+                .init(
+                    tableName: "Workspace",
+                    entityID1: .blob(uuidBlob(workspaceID)),
+                    entityID2: .text(""),
+                    type: .upsert,
+                    lastUpdated: 1_735_689_600_000,
+                    sourceDevice: "pixel"
+                ),
+                .init(
+                    tableName: "Window",
+                    entityID1: .blob(uuidBlob(windowID)),
+                    entityID2: .integer(7),
+                    type: .delete,
+                    lastUpdated: 1_735_689_700_000,
+                    sourceDevice: "pixel"
+                ),
+            ]
+        )
+        XCTAssertEqual(
+            snapshot.patchStatuses,
+            [
+                .init(sourceDevice: "pixel", patchNumber: 3, sizeBytes: 2_048, appliedDate: 1_735_689_800_000),
+                .init(sourceDevice: "tablet", patchNumber: 1, sizeBytes: 4_096, appliedDate: 1_735_689_900_000),
+            ]
+        )
+
+        let logEntryStore = RemoteSyncLogEntryStore(settingsStore: settingsStore)
+        let patchStatusStore = RemoteSyncPatchStatusStore(settingsStore: settingsStore)
+        logEntryStore.addEntry(
+            .init(
+                tableName: "Workspace",
+                entityID1: .blob(uuidBlob(UUID(uuidString: "c4500000-0000-0000-0000-000000000010")!)),
+                entityID2: .text(""),
+                type: .upsert,
+                lastUpdated: 10,
+                sourceDevice: "old-phone"
+            ),
+            for: .workspaces
+        )
+        logEntryStore.addEntry(
+            .init(
+                tableName: "Label",
+                entityID1: .blob(uuidBlob(UUID(uuidString: "c4500000-0000-0000-0000-000000000011")!)),
+                entityID2: .text(""),
+                type: .upsert,
+                lastUpdated: 11,
+                sourceDevice: "bookmark-device"
+            ),
+            for: .bookmarks
+        )
+        patchStatusStore.addStatus(
+            .init(sourceDevice: "old-phone", patchNumber: 1, sizeBytes: 111, appliedDate: 222),
+            for: .workspaces
+        )
+        patchStatusStore.addStatus(
+            .init(sourceDevice: "bookmark-device", patchNumber: 9, sizeBytes: 333, appliedDate: 444),
+            for: .bookmarks
+        )
+
+        let report = service.replaceLocalMetadata(
+            from: snapshot,
+            category: .workspaces,
+            settingsStore: settingsStore
+        )
+
+        XCTAssertEqual(
+            report,
+            .init(importedLogEntryCount: 2, importedPatchStatusCount: 2)
+        )
+        XCTAssertEqual(logEntryStore.entries(for: .workspaces), snapshot.logEntries)
+        XCTAssertEqual(patchStatusStore.statuses(for: .workspaces), snapshot.patchStatuses)
+        XCTAssertEqual(logEntryStore.entries(for: .bookmarks).count, 1)
+        XCTAssertEqual(patchStatusStore.statuses(for: .bookmarks), [
+            .init(sourceDevice: "bookmark-device", patchNumber: 9, sizeBytes: 333, appliedDate: 444)
+        ])
+    }
+
     func testRemoteSyncWorkspaceRestoreRejectsOrphanReferencesWithoutMutation() throws {
         let container = try makeWorkspaceRestoreModelContainer()
         let modelContext = ModelContext(container)
@@ -565,6 +738,20 @@ final class WorkspaceSyncRestoreTests: XCTestCase {
         let service = RemoteSyncInitialBackupRestoreService()
         let workspaceID = UUID(uuidString: "c5000000-0000-0000-0000-000000000001")!
         let windowID = UUID(uuidString: "c5000000-0000-0000-0000-000000000002")!
+        let stagedLogEntry = AndroidLogEntryRow(
+            tableName: "Workspace",
+            entityID1: .blob(uuidBlob(workspaceID)),
+            entityID2: .text(""),
+            type: "UPSERT",
+            lastUpdated: 1_735_689_600_000,
+            sourceDevice: "pixel"
+        )
+        let stagedPatchStatus = AndroidSyncStatusRow(
+            sourceDevice: "pixel",
+            patchNumber: 4,
+            sizeBytes: 8_192,
+            appliedDate: 1_735_689_650_000
+        )
 
         let databaseURL = try makeAndroidWorkspacesDatabase(
             workspaces: [
@@ -604,7 +791,9 @@ final class WorkspaceSyncRestoreTests: XCTestCase {
                     key: "Gen.1.1",
                     anchorOrdinal: 301
                 )
-            ]
+            ],
+            logEntries: [stagedLogEntry],
+            syncStatuses: [stagedPatchStatus]
         )
         defer { try? FileManager.default.removeItem(at: databaseURL) }
 
@@ -649,6 +838,32 @@ final class WorkspaceSyncRestoreTests: XCTestCase {
         XCTAssertEqual(fidelityStore.speakSettingsJSON(for: workspaceID), #"{"sleepTimer":5}"#)
         XCTAssertEqual(fidelityStore.pageManagerEntry(for: windowID)?.rawCurrentCategoryName, "BIBLE")
         XCTAssertEqual(fidelityStore.localHistoryItemID(for: 501) != nil, true)
+        let logEntryStore = RemoteSyncLogEntryStore(settingsStore: settingsStore)
+        let patchStatusStore = RemoteSyncPatchStatusStore(settingsStore: settingsStore)
+        XCTAssertEqual(
+            logEntryStore.entries(for: .workspaces),
+            [
+                .init(
+                    tableName: "Workspace",
+                    entityID1: .blob(uuidBlob(workspaceID)),
+                    entityID2: .text(""),
+                    type: .upsert,
+                    lastUpdated: 1_735_689_600_000,
+                    sourceDevice: "pixel"
+                )
+            ]
+        )
+        XCTAssertEqual(
+            patchStatusStore.statuses(for: .workspaces),
+            [
+                .init(
+                    sourceDevice: "pixel",
+                    patchNumber: 4,
+                    sizeBytes: 8_192,
+                    appliedDate: 1_735_689_650_000
+                )
+            ]
+        )
         XCTAssertEqual(settingsStore.activeWorkspaceId, workspaceID)
     }
 
@@ -867,6 +1082,48 @@ final class WorkspaceSyncRestoreTests: XCTestCase {
     }
 
     /**
+     One typed SQLite scalar fixture used when building Android sync-metadata rows.
+     */
+    private enum AndroidSQLiteFixtureValue: Equatable {
+        /// SQLite `NULL` fixture payload.
+        case null
+
+        /// SQLite signed integer fixture payload.
+        case integer(Int64)
+
+        /// SQLite floating-point fixture payload.
+        case real(Double)
+
+        /// SQLite UTF-8 text fixture payload.
+        case text(String)
+
+        /// SQLite raw blob fixture payload.
+        case blob(Data)
+    }
+
+    /**
+     One Android `LogEntry` fixture row used to build temporary SQLite backups.
+     */
+    private struct AndroidLogEntryRow {
+        let tableName: String
+        let entityID1: AndroidSQLiteFixtureValue
+        let entityID2: AndroidSQLiteFixtureValue
+        let type: String
+        let lastUpdated: Int64
+        let sourceDevice: String
+    }
+
+    /**
+     One Android `SyncStatus` fixture row used to build temporary SQLite backups.
+     */
+    private struct AndroidSyncStatusRow {
+        let sourceDevice: String
+        let patchNumber: Int64
+        let sizeBytes: Int64
+        let appliedDate: Int64
+    }
+
+    /**
      Creates an in-memory SwiftData container containing only the models needed for workspace restore tests.
 
      - Returns: Isolated in-memory model container for workspace restore assertions.
@@ -894,10 +1151,12 @@ final class WorkspaceSyncRestoreTests: XCTestCase {
      still observe the required tables before returning the file URL.
 
      - Parameters:
-       - workspaces: Android workspace rows to insert.
-       - windows: Android window rows to insert.
-       - pageManagers: Android page-manager rows to insert.
-       - historyItems: Android history rows to insert.
+     - workspaces: Android workspace rows to insert.
+     - windows: Android window rows to insert.
+     - pageManagers: Android page-manager rows to insert.
+     - historyItems: Android history rows to insert.
+      - logEntries: Optional Android `LogEntry` rows to insert when testing sync metadata import.
+      - syncStatuses: Optional Android `SyncStatus` rows to insert when testing applied-patch metadata import.
      - Returns: Temporary SQLite file URL containing the requested Android fixture graph.
      - Side effects:
        - creates and writes a temporary SQLite file
@@ -910,7 +1169,9 @@ final class WorkspaceSyncRestoreTests: XCTestCase {
         workspaces: [AndroidWorkspaceRow],
         windows: [AndroidWorkspaceWindowRow],
         pageManagers: [AndroidWorkspacePageManagerRow],
-        historyItems: [AndroidWorkspaceHistoryItemRow]
+        historyItems: [AndroidWorkspaceHistoryItemRow],
+        logEntries: [AndroidLogEntryRow] = [],
+        syncStatuses: [AndroidSyncStatusRow] = []
     ) throws -> URL {
         let databaseURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("android-workspaces-\(UUID().uuidString).sqlite3")
@@ -1055,7 +1316,43 @@ final class WorkspaceSyncRestoreTests: XCTestCase {
                 )
             """#,
         ]
-        for statement in schemaStatements {
+        var allSchemaStatements = schemaStatements
+        if !logEntries.isEmpty {
+            allSchemaStatements.append(
+                #"""
+                    CREATE TABLE "LogEntry" (
+                        tableName TEXT NOT NULL,
+                        entityId1 BLOB NOT NULL,
+                        entityId2 BLOB NOT NULL DEFAULT '',
+                        type TEXT NOT NULL,
+                        lastUpdated INTEGER NOT NULL,
+                        sourceDevice TEXT NOT NULL,
+                        PRIMARY KEY(tableName, entityId1, entityId2)
+                    )
+                """#
+            )
+            allSchemaStatements.append(
+                #"CREATE INDEX "index_LogEntry_tableName_entityId1" ON "LogEntry" (tableName, entityId1)"#
+            )
+            allSchemaStatements.append(
+                #"CREATE INDEX "index_LogEntry_lastUpdated" ON "LogEntry" (lastUpdated)"#
+            )
+        }
+        if !syncStatuses.isEmpty {
+            allSchemaStatements.append(
+                #"""
+                    CREATE TABLE "SyncStatus" (
+                        sourceDevice TEXT NOT NULL,
+                        patchNumber INTEGER NOT NULL,
+                        sizeBytes INTEGER NOT NULL,
+                        appliedDate INTEGER NOT NULL,
+                        PRIMARY KEY(sourceDevice, patchNumber)
+                    )
+                """#
+            )
+        }
+
+        for statement in allSchemaStatements {
             XCTAssertEqual(
                 sqlite3_exec(db, statement, nil, nil, nil),
                 SQLITE_OK,
@@ -1202,7 +1499,55 @@ final class WorkspaceSyncRestoreTests: XCTestCase {
             sqlite3_finalize(statement)
         }
 
-        let expectedTableNames: Set<String> = ["HistoryItem", "PageManager", "Window", "Workspace"]
+        for logEntry in logEntries {
+            var statement: OpaquePointer?
+            XCTAssertEqual(
+                sqlite3_prepare_v2(
+                    db,
+                    "INSERT INTO \"LogEntry\" (tableName, entityId1, entityId2, type, lastUpdated, sourceDevice) VALUES (?, ?, ?, ?, ?, ?)",
+                    -1,
+                    &statement,
+                    nil
+                ),
+                SQLITE_OK
+            )
+            sqlite3_bind_text(statement, 1, logEntry.tableName, -1, workspaceSQLiteTransient)
+            bindSQLiteFixtureValue(logEntry.entityID1, to: statement, index: 2)
+            bindSQLiteFixtureValue(logEntry.entityID2, to: statement, index: 3)
+            sqlite3_bind_text(statement, 4, logEntry.type, -1, workspaceSQLiteTransient)
+            sqlite3_bind_int64(statement, 5, logEntry.lastUpdated)
+            sqlite3_bind_text(statement, 6, logEntry.sourceDevice, -1, workspaceSQLiteTransient)
+            XCTAssertEqual(sqlite3_step(statement), SQLITE_DONE)
+            sqlite3_finalize(statement)
+        }
+
+        for syncStatus in syncStatuses {
+            var statement: OpaquePointer?
+            XCTAssertEqual(
+                sqlite3_prepare_v2(
+                    db,
+                    "INSERT INTO \"SyncStatus\" (sourceDevice, patchNumber, sizeBytes, appliedDate) VALUES (?, ?, ?, ?)",
+                    -1,
+                    &statement,
+                    nil
+                ),
+                SQLITE_OK
+            )
+            sqlite3_bind_text(statement, 1, syncStatus.sourceDevice, -1, workspaceSQLiteTransient)
+            sqlite3_bind_int64(statement, 2, syncStatus.patchNumber)
+            sqlite3_bind_int64(statement, 3, syncStatus.sizeBytes)
+            sqlite3_bind_int64(statement, 4, syncStatus.appliedDate)
+            XCTAssertEqual(sqlite3_step(statement), SQLITE_DONE)
+            sqlite3_finalize(statement)
+        }
+
+        var expectedTableNames: Set<String> = ["HistoryItem", "PageManager", "Window", "Workspace"]
+        if !logEntries.isEmpty {
+            expectedTableNames.insert("LogEntry")
+        }
+        if !syncStatuses.isEmpty {
+            expectedTableNames.insert("SyncStatus")
+        }
         XCTAssertEqual(Set(try sqliteTableNames(in: db)).intersection(expectedTableNames), expectedTableNames)
 
         var verificationDB: OpaquePointer?
@@ -1375,9 +1720,24 @@ final class WorkspaceSyncRestoreTests: XCTestCase {
        - SQLite bind failures are surfaced later by the surrounding `sqlite3_step` assertions
      */
     private func bindUUIDBlob(_ uuid: UUID, to statement: OpaquePointer?, index: Int32) {
-        let blob = uuidBlob(uuid)
-        _ = blob.withUnsafeBytes { bytes in
-            sqlite3_bind_blob(statement, index, bytes.baseAddress, Int32(blob.count), workspaceSQLiteTransient)
+        bindBlob(uuidBlob(uuid), to: statement, index: index)
+    }
+
+    /**
+     Binds one raw blob payload into SQLite.
+
+     - Parameters:
+       - value: Raw blob payload to encode.
+       - statement: Prepared SQLite statement receiving the bound value.
+       - index: Placeholder index that should receive the BLOB.
+     - Side effects:
+       - mutates the SQLite bind state for the supplied statement
+     - Failure modes:
+       - SQLite bind failures are surfaced later by the surrounding `sqlite3_step` assertions
+     */
+    private func bindBlob(_ value: Data, to statement: OpaquePointer?, index: Int32) {
+        _ = value.withUnsafeBytes { bytes in
+            sqlite3_bind_blob(statement, index, bytes.baseAddress, Int32(value.count), workspaceSQLiteTransient)
         }
     }
 
@@ -1495,6 +1855,33 @@ final class WorkspaceSyncRestoreTests: XCTestCase {
             return
         }
         sqlite3_bind_double(statement, index, value)
+    }
+
+    /**
+     Binds one typed SQLite fixture value while preserving its explicit storage class.
+
+     - Parameters:
+       - value: SQLite fixture payload to encode.
+       - statement: Prepared SQLite statement receiving the bound value.
+       - index: Placeholder index that should receive the value.
+     - Side effects:
+       - mutates the SQLite bind state for the supplied statement
+     - Failure modes:
+       - SQLite bind failures are surfaced later by the surrounding `sqlite3_step` assertions
+     */
+    private func bindSQLiteFixtureValue(_ value: AndroidSQLiteFixtureValue, to statement: OpaquePointer?, index: Int32) {
+        switch value {
+        case .null:
+            sqlite3_bind_null(statement, index)
+        case .integer(let value):
+            sqlite3_bind_int64(statement, index, value)
+        case .real(let value):
+            sqlite3_bind_double(statement, index, value)
+        case .text(let value):
+            sqlite3_bind_text(statement, index, value, -1, workspaceSQLiteTransient)
+        case .blob(let value):
+            bindBlob(value, to: statement, index: index)
+        }
     }
 
     /**
