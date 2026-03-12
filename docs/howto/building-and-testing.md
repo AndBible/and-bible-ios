@@ -88,6 +88,10 @@ Use `xcodebuild` when you need:
 - scripted simulator runs
 - fast verification of a branch before commit
 
+## Related Docs
+
+- For live Google Drive sign-in setup, see `docs/howto/google-drive-oauth-setup.md`.
+
 ## Vue.js Bundle Notes
 
 The native app hosts a packaged web bundle through `BibleWebView`.
