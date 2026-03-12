@@ -507,3 +507,15 @@
 "sync_disabling" = "Отключение синхронизации для %s на данный момент.";
 "sync_update_app" = "Пожалуйста, обновите приложение, чтобы продолжить синхронизацию.";
 "last_updated" = "Последнее обновление: %s";
+
+/* Google Drive Sync */
+"prefs_sync_introduction_summary2" = "При использовании Google Диска, %@ предоставляется доступ только к файлам приложений, а не к личным файлам.";
+"sync_confirmation" = "Вы уверены, что хотите выйти и сбросить синхронизацию?";
+"google_drive_account" = "Google Drive Account";
+"google_drive_sign_in" = "Sign In to Google Drive";
+"google_drive_sign_out" = "Sign Out and Reset Synchronization";
+"google_drive_not_configured" = "Google Drive sign-in is not configured for this build.";
+"google_drive_missing_url_scheme" = "Google Drive sign-in callback is not configured for this build.";
+"google_drive_missing_presenter" = "Google Drive sign-in could not present authentication UI.";
+"google_drive_not_signed_in" = "Not signed in";
+"google_drive_permission_required" = "Google Drive permission is required";

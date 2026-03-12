@@ -7,29 +7,36 @@ import BibleCore
 /**
  Configures the active sync backend and surfaces backend-specific settings.
 
- The screen now acts as the entry point for both the existing CloudKit implementation and the
- in-progress NextCloud/WebDAV path. It preserves the current iCloud toggle/status flow while also
- allowing Android-compatible WebDAV credentials to be edited and connection-tested without changing
- the active CloudKit runtime mid-session.
+ The screen now acts as the entry point for the existing CloudKit implementation plus the Android-
+ aligned NextCloud/WebDAV and Google Drive backends. It preserves the current iCloud toggle/status
+ flow while allowing the remote backends to edit credentials, restore cached auth state, and
+ perform category-scoped synchronization without changing the active CloudKit runtime mid-session.
 
  Data dependencies:
  - `SyncService` provides the effective iCloud sync mode, account description, runtime state, and
    last known sync timestamp
  - SwiftData's environment `modelContext` provides access to `SettingsStore` through
    `RemoteSyncSettingsStore`
+ - `GoogleDriveAuthService` provides Google OAuth session state, scope readiness, and access tokens
  - localized strings provide backend labels, field titles, status text, and warnings
 
  Side effects:
  - changing the selected backend persists `sync_adapter` through `RemoteSyncSettingsStore`
- - editing WebDAV credentials updates local state and can be persisted to SwiftData + Keychain
+ - editing WebDAV credentials updates local state and can be persisted to SwiftData plus Keychain
  - testing a NextCloud/WebDAV connection builds a transient `WebDAVClient` and performs a network
    request against the configured server
+ - switching to Google Drive can trigger best-effort cached-session restoration through
+   `GoogleDriveAuthService`
+ - starting Google Drive sync can present interactive Google Sign-In or scope-consent UI
  - toggling iCloud sync calls back into `SyncService` and can persist a restart-required sync mode
  - disabling iCloud sync first presents a confirmation dialog before mutating the service state
  */
 public struct SyncSettingsView: View {
     /// Shared CloudKit sync service injected from the app environment.
     @Environment(SyncService.self) private var syncService
+
+    /// Shared Google Drive auth/session service injected from the app environment.
+    @Environment(GoogleDriveAuthService.self) private var googleDriveAuthService
 
     /// SwiftData context used to materialize the local settings store.
     @Environment(\.modelContext) private var modelContext
@@ -75,6 +82,9 @@ public struct SyncSettingsView: View {
 
     /// Pending destructive confirmation after the user chose adopt or replace.
     @State private var pendingRemoteConfirmation: PendingRemoteConfirmation?
+
+    /// Whether the Android-aligned Google Drive sign-out/reset confirmation is presented.
+    @State private var showGoogleDriveResetConfirmation = false
 
     /// Global remote-sync error message shown in an alert after a category sync failure.
     @State private var remoteSyncErrorMessage: String?
@@ -149,7 +159,7 @@ public struct SyncSettingsView: View {
     public init() {}
 
     /**
-     Builds backend selection, iCloud controls, and NextCloud/WebDAV configuration sections.
+     Builds backend selection, iCloud controls, and remote-backend configuration sections.
      */
     public var body: some View {
         Form {
@@ -159,6 +169,8 @@ public struct SyncSettingsView: View {
                 iCloudSections
             } else if selectedBackend == .nextCloud {
                 nextCloudSections
+            } else if selectedBackend == .googleDrive {
+                googleDriveSections
             }
         }
         .navigationTitle(String(localized: "sync_adapter"))
@@ -174,6 +186,11 @@ public struct SyncSettingsView: View {
         .onChange(of: selectedBackend) { _, newValue in
             remoteSettingsStore.selectedBackend = newValue
             remoteConnectionStatus = nil
+            if newValue == .googleDrive {
+                Task {
+                    await googleDriveAuthService.restorePreviousSignInIfNeeded()
+                }
+            }
         }
         .alert(
             String(localized: "cloud_sync_title"),
@@ -250,6 +267,18 @@ public struct SyncSettingsView: View {
         } message: {
             Text(String(localized: "restart_to_apply_sync"))
         }
+        .confirmationDialog(
+            String(localized: "cloud_sync_title"),
+            isPresented: $showGoogleDriveResetConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button(String(localized: "google_drive_sign_out"), role: .destructive) {
+                resetGoogleDriveSynchronization()
+            }
+            Button(String(localized: "cancel"), role: .cancel) {}
+        } message: {
+            Text(String(localized: "sync_confirmation"))
+        }
         .alert(
             String(localized: "cloud_sync_title"),
             isPresented: Binding(
@@ -279,10 +308,20 @@ public struct SyncSettingsView: View {
                     .tag(RemoteSyncBackend.iCloud)
                 Text(String(localized: "adapters_next_cloud"))
                     .tag(RemoteSyncBackend.nextCloud)
+                Text(String(localized: "adapters_google_drive"))
+                    .tag(RemoteSyncBackend.googleDrive)
             }
         } footer: {
             VStack(alignment: .leading, spacing: 6) {
                 Text(String(localized: "prefs_sync_introduction_summary1"))
+                if selectedBackend == .googleDrive {
+                    Text(
+                        String(
+                            format: String(localized: "prefs_sync_introduction_summary2"),
+                            appDisplayName
+                        )
+                    )
+                }
                 Text(String(format: String(localized: "sync_adapter_summary"), selectedBackendTitle))
             }
         }
@@ -406,26 +445,79 @@ public struct SyncSettingsView: View {
             }
 
             Section {
-                ForEach(RemoteSyncCategory.allCases, id: \.self) { category in
-                    Toggle(isOn: remoteCategoryBinding(for: category)) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(remoteCategoryTitle(for: category))
-                            Text(remoteCategoryContentDescription(for: category))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-
-                            if let supplementalText = remoteCategorySupplementalText(for: category) {
-                                Text(supplementalText)
-                                    .font(.caption)
-                                    .foregroundStyle(remoteCategorySupplementalColor(for: category))
-                            }
-                        }
-                    }
-                    .disabled(isRemoteSyncInteractionLocked)
-                }
+                remoteCategoryList
             } header: {
                 Text(String(localized: "synchronization_categories"))
             }
+        }
+    }
+
+    /**
+     Groups Google Drive auth status and Android-style category toggles.
+     */
+    private var googleDriveSections: some View {
+        Group {
+            Section {
+                HStack(alignment: .top) {
+                    Text(String(localized: "status"))
+                    Spacer()
+                    googleDriveStatusView
+                }
+
+                if let accountLabel = googleDriveAuthService.currentAccountLabel {
+                    HStack {
+                        Text(String(localized: "google_drive_account"))
+                        Spacer()
+                        Text(accountLabel)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.trailing)
+                    }
+                }
+
+                Button(String(localized: "google_drive_sign_in")) {
+                    Task {
+                        await signInToGoogleDrive()
+                    }
+                }
+                .disabled(isGoogleDriveSignInButtonDisabled)
+
+                if case .signedIn = googleDriveAuthService.state {
+                    Button(String(localized: "google_drive_sign_out"), role: .destructive) {
+                        showGoogleDriveResetConfirmation = true
+                    }
+                }
+            } header: {
+                Text(String(localized: "adapters_google_drive"))
+            }
+
+            Section {
+                remoteCategoryList
+            } header: {
+                Text(String(localized: "synchronization_categories"))
+            }
+        }
+    }
+
+    /**
+     Shared Android-style remote category toggle list used by supported remote backends.
+     */
+    private var remoteCategoryList: some View {
+        ForEach(RemoteSyncCategory.allCases, id: \.self) { category in
+            Toggle(isOn: remoteCategoryBinding(for: category)) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(remoteCategoryTitle(for: category))
+                    Text(remoteCategoryContentDescription(for: category))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    if let supplementalText = remoteCategorySupplementalText(for: category) {
+                        Text(supplementalText)
+                            .font(.caption)
+                            .foregroundStyle(remoteCategorySupplementalColor(for: category))
+                    }
+                }
+            }
+            .disabled(isRemoteSyncInteractionLocked)
         }
     }
 
@@ -484,11 +576,47 @@ public struct SyncSettingsView: View {
     }
 
     /**
-     Binding used by the Android-style category toggles in the NextCloud section.
+     Builds the trailing auth/session state for the Google Drive section.
+     */
+    @ViewBuilder
+    private var googleDriveStatusView: some View {
+        switch googleDriveAuthService.state {
+        case .notConfigured(let message):
+            SwiftUI.Label(message, systemImage: "exclamationmark.triangle.fill")
+                .foregroundStyle(.orange)
+                .multilineTextAlignment(.trailing)
+        case .signedOut:
+            SwiftUI.Label(String(localized: "google_drive_not_signed_in"), systemImage: "person.crop.circle.badge.xmark")
+                .foregroundStyle(.secondary)
+        case .authenticating:
+            HStack(spacing: 8) {
+                ProgressView()
+                Text(String(localized: "loading"))
+                    .foregroundStyle(.secondary)
+            }
+        case .signedIn(_, let driveAccessGranted):
+            if driveAccessGranted {
+                SwiftUI.Label(String(localized: "ok"), systemImage: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+            } else {
+                SwiftUI.Label(String(localized: "google_drive_permission_required"), systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                    .multilineTextAlignment(.trailing)
+            }
+        case .error(let message):
+            SwiftUI.Label(message, systemImage: "exclamationmark.triangle.fill")
+                .foregroundStyle(.orange)
+                .multilineTextAlignment(.trailing)
+        }
+    }
+
+    /**
+     Binding used by the Android-style category toggles in the remote-backend sections.
 
      Side effects:
-     - enabling a category persists the Android `gdrive_*` toggle and starts synchronization
-     - disabling a category persists the Android `gdrive_*` toggle immediately and clears transient UI state
+       - enabling a category persists the Android `gdrive_*` toggle and starts synchronization
+       - disabling a category persists the Android `gdrive_*` toggle immediately and clears
+         transient UI state
      */
     private func remoteCategoryBinding(for category: RemoteSyncCategory) -> Binding<Bool> {
         Binding(
@@ -526,11 +654,30 @@ public struct SyncSettingsView: View {
     }
 
     /**
-     Human-readable backend name used in the backend summary footer.
+     Whether the Google Drive sign-in button should be disabled.
+     *
+     * Failure modes:
+     * - returns `true` while remote sync is already in flight or the auth service is authenticating
+     */
+    private var isGoogleDriveSignInButtonDisabled: Bool {
+        if isRemoteSyncInteractionLocked {
+            return true
+        }
 
-     Failure modes:
-     - `.googleDrive` falls back to the Android display name even though that backend is not yet
-       exposed in the picker on iOS
+        switch googleDriveAuthService.state {
+        case .notConfigured:
+            return true
+        case .authenticating:
+            return true
+        case .signedIn(_, let driveAccessGranted):
+            return driveAccessGranted
+        default:
+            return false
+        }
+    }
+
+    /**
+     Human-readable backend name used in the backend summary footer.
      */
     private var selectedBackendTitle: String {
         switch selectedBackend {
@@ -541,6 +688,17 @@ public struct SyncSettingsView: View {
         case .googleDrive:
             return String(localized: "adapters_google_drive")
         }
+    }
+
+    /**
+     Display name used in Android's Google Drive permission-summary footer.
+     */
+    private var appDisplayName: String {
+        let displayName = Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String
+        let bundleName = Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String
+        let resolved = displayName ?? bundleName ?? "AndBible"
+        let trimmed = resolved.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "AndBible" : trimmed
     }
 
     /**
@@ -563,22 +721,14 @@ public struct SyncSettingsView: View {
      - mutates view state for the picker and credential fields
 
      Failure modes:
-     - if a not-yet-supported backend such as `.googleDrive` was previously stored, the view falls
-       back to `.iCloud` for presentation without deleting the persisted value until the user makes
-       a new selection
+     - missing credential fields simply leave the corresponding local form fields empty
      */
     private func loadPersistedSettingsIfNeeded() {
         guard !hasLoadedSettings else {
             return
         }
 
-        let persistedBackend = remoteSettingsStore.selectedBackend
-        switch persistedBackend {
-        case .iCloud, .nextCloud:
-            selectedBackend = persistedBackend
-        case .googleDrive:
-            selectedBackend = .iCloud
-        }
+        selectedBackend = remoteSettingsStore.selectedBackend
 
         if let configuration = remoteSettingsStore.loadWebDAVConfiguration() {
             serverURL = configuration.serverURL
@@ -620,7 +770,51 @@ public struct SyncSettingsView: View {
     }
 
     /**
-     Starts Android-style synchronization for one enabled NextCloud category.
+     Starts an interactive Google Drive sign-in or scope-consent flow.
+     *
+     * Side effects:
+     * - may present Google Sign-In or scope-consent UI
+     * - updates the global remote-sync alert state when sign-in fails
+     *
+     * Failure modes:
+     * - sign-in failures surface their localized description through `remoteSyncErrorMessage`
+     */
+    @MainActor
+    private func signInToGoogleDrive() async {
+        do {
+            try await googleDriveAuthService.signInInteractively()
+        } catch {
+            let message = error.localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines)
+            remoteSyncErrorMessage = message.isEmpty ? String(localized: "sign_in_failed") : message
+        }
+    }
+
+    /**
+     Signs out of Google Drive and clears Android-aligned local sync bookkeeping.
+     *
+     * Side effects:
+     * - signs the Google account out through `GoogleDriveAuthService`
+     * - clears local remote-sync metadata through `RemoteSyncResetService`
+     * - resets transient category UI state and pending prompts
+     *
+     * Failure modes:
+     * - local bookkeeping clears are best-effort through the underlying settings-backed stores
+     */
+    @MainActor
+    private func resetGoogleDriveSynchronization() {
+        googleDriveAuthService.signOut()
+        RemoteSyncResetService(settingsStore: SettingsStore(modelContext: modelContext))
+            .resetAllCategories()
+        remoteCategoryEnabled = [:]
+        remoteCategoryStatuses = [:]
+        pendingRemoteAdoption = nil
+        pendingRemoteConfirmation = nil
+        remoteConnectionStatus = nil
+        remoteSyncErrorMessage = nil
+    }
+
+    /**
+     Starts Android-style synchronization for one enabled remote category.
 
      The first pass mirrors Android's `setupDrivePref()` path:
      - persist the category toggle as enabled
@@ -630,11 +824,12 @@ public struct SyncSettingsView: View {
 
      - Parameter category: Logical sync category the user just enabled.
      - Side effects:
-       - persists the WebDAV form and category toggle before synchronization starts
+       - persists the current backend configuration before synchronization starts
+       - may present interactive Google sign-in when Google Drive is selected and no ready session exists
        - may perform remote bootstrap validation, initial-backup restore, or sparse patch sync
        - may present adopt-versus-create alerts by mutating view state
      - Failure modes:
-       - invalid or incomplete WebDAV configuration disables the category again and surfaces an error
+       - invalid or incomplete backend configuration disables the category again and surfaces an error
        - transport or synchronization failures leave the category enabled to match Android's retry semantics, while surfacing the latest error
      */
     @MainActor
@@ -642,6 +837,10 @@ public struct SyncSettingsView: View {
         persistRemoteSettings()
 
         do {
+            if selectedBackend == .googleDrive && !googleDriveAuthService.isReadyForSync {
+                try await googleDriveAuthService.signInInteractively()
+            }
+
             let service = try makeRemoteSynchronizationService()
             let settingsStore = SettingsStore(modelContext: modelContext)
 
@@ -785,6 +984,14 @@ public struct SyncSettingsView: View {
         switch error {
         case WebDAVClientError.invalidURL:
             message = String(localized: "invalid_url_message")
+        case RemoteSyncSynchronizationServiceFactoryError.invalidWebDAVConfiguration:
+            message = String(localized: "invalid_url_message")
+        case RemoteSyncSynchronizationServiceFactoryError.missingWebDAVPassword:
+            message = String(localized: "sign_in_failed")
+        case RemoteSyncSynchronizationServiceFactoryError.googleDriveAuthenticationRequired:
+            message = String(localized: "google_drive_not_signed_in")
+        case let authError as GoogleDriveAuthServiceError:
+            message = authError.localizedDescription
         case RemoteSyncPatchDiscoveryError.incompatiblePatchVersion:
             disableRemoteSync(for: category)
             message = [
@@ -809,37 +1016,29 @@ public struct SyncSettingsView: View {
     }
 
     /**
-     Creates a NextCloud synchronization coordinator from the current form values.
+     Creates a backend-specific synchronization coordinator from the current settings state.
 
-     - Returns: Configured synchronization service bound to the current WebDAV settings.
+     - Returns: Configured synchronization service bound to the currently selected remote backend.
      - Side effects:
        - reads and may generate the stable remote device identifier through `RemoteSyncSettingsStore`
      - Failure modes:
-       - throws `WebDAVClientError.invalidURL` when the configured server URL cannot be normalized
-       - throws `WebDAVClientError.invalidURL` when required credentials are missing
+       - throws `RemoteSyncSynchronizationServiceFactoryError` when the selected backend is missing
+         required local configuration or authentication state
+       - throws `WebDAVClientError.invalidURL` when the stored NextCloud server URL cannot be normalized
      */
     private func makeRemoteSynchronizationService() throws -> RemoteSyncSynchronizationService {
-        guard let configuration = remoteSettingsStore.loadWebDAVConfiguration() else {
-            throw WebDAVClientError.invalidURL
-        }
-
-        let trimmedPassword = password.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedPassword.isEmpty else {
-            throw WebDAVClientError.invalidURL
-        }
-
-        let adapter = try NextCloudSyncAdapter(configuration: configuration, password: trimmedPassword)
         let bundleIdentifier = Bundle.main.bundleIdentifier ?? "org.andbible.ios"
-        let deviceIdentifier = remoteSettingsStore.deviceIdentifier()
-        return RemoteSyncSynchronizationService(
-            adapter: adapter,
+        let factory = RemoteSyncSynchronizationServiceFactory(
             bundleIdentifier: bundleIdentifier,
-            deviceIdentifier: deviceIdentifier
+            googleDriveAccessTokenProvider: { [googleDriveAuthService] in
+                try await googleDriveAuthService.accessToken()
+            }
         )
+        return try factory.makeSynchronizationService(using: remoteSettingsStore)
     }
 
     /**
-     Returns the localized category title used by the Android-style NextCloud toggles.
+     Returns the localized category title used by the Android-style remote sync toggles.
 
      - Parameter category: Logical sync category to label.
      - Returns: Localized category title.

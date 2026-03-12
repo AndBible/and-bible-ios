@@ -1,4 +1,4 @@
-// RemoteSyncLifecycleService.swift — Foreground/background orchestration for NextCloud sync
+// RemoteSyncLifecycleService.swift — Foreground/background orchestration for remote sync backends
 
 import Foundation
 import SwiftData
@@ -7,7 +7,7 @@ import SwiftData
  Abstraction over the category-scoped synchronization coordinator used by lifecycle-driven sync.
 
  The production implementation is `RemoteSyncSynchronizationService`. Tests inject lightweight
- fakes so lifecycle policy can be exercised without touching WebDAV transport or SQLite staging.
+ fakes so lifecycle policy can be exercised without touching remote transport or SQLite staging.
  */
 @MainActor
 public protocol RemoteSyncCategorySynchronizing: AnyObject {
@@ -152,21 +152,22 @@ extension RemoteSyncSynchronizationService: RemoteSyncCategorySynchronizing {
 }
 
 /**
- Coordinates Android-style NextCloud sync from app lifecycle events instead of only from settings.
+ Coordinates Android-style remote sync from app lifecycle events instead of only from settings.
 
  Android starts a forced sync when the main activity comes to the foreground, stops periodic sync
  when the app backgrounds, and performs one final forced sync while backgrounding. This service
- mirrors that policy for iOS's NextCloud/WebDAV path while leaving CloudKit untouched.
+ mirrors that policy for iOS's remote sync backends while leaving CloudKit untouched.
 
  Data dependencies:
  - `ModelContainer` supplies fresh `ModelContext` instances for each sync pass
- - `RemoteSyncSettingsStore` supplies the active backend, WebDAV configuration, enabled categories,
-   device identifier, global throttling timestamp, and sync interval
- - `RemoteSyncCategorySynchronizing` performs the actual category download/apply/upload work
+ - `RemoteSyncSettingsStore` supplies the active backend, backend-specific credentials, enabled
+   categories, device identifier, global throttling timestamp, and sync interval
+ - `SynchronizationServiceFactory` turns persisted backend settings into a concrete category
+   synchronizer for the currently selected remote backend
 
  Side effects:
  - starts and stops an in-process periodic polling task while the app scene is active
- - performs forced and throttled synchronization passes for enabled NextCloud categories
+ - performs forced and throttled synchronization passes for enabled remote-sync categories
  - updates Android's `globalLastSynchronized` key after successful lifecycle-driven passes
  - invokes optional callbacks when categories synchronize, require user interaction, or fail
 
@@ -185,7 +186,7 @@ extension RemoteSyncSynchronizationService: RemoteSyncCategorySynchronizing {
 public final class RemoteSyncLifecycleService {
     /// Factory used to build the concrete synchronization service from persisted remote settings.
     public typealias SynchronizationServiceFactory =
-        (_ configuration: WebDAVSyncConfiguration, _ password: String, _ deviceIdentifier: String) throws -> any RemoteSyncCategorySynchronizing
+        (_ remoteSettingsStore: RemoteSyncSettingsStore) throws -> any RemoteSyncCategorySynchronizing
 
     /// Factory used to build remote-sync settings stores for fresh per-pass `SettingsStore` instances.
     public typealias RemoteSettingsStoreFactory = (_ settingsStore: SettingsStore) -> RemoteSyncSettingsStore
@@ -212,13 +213,14 @@ public final class RemoteSyncLifecycleService {
     public var onCategoryError: ((RemoteSyncCategory, Error) -> Void)?
 
     /**
-     Creates a lifecycle-driven NextCloud sync orchestrator.
+     Creates a lifecycle-driven remote-sync orchestrator.
 
      - Parameters:
        - modelContainer: Model container used to create fresh `ModelContext` instances per pass.
        - bundleIdentifier: App bundle identifier used for Android-style remote folder naming.
        - synchronizationServiceFactory: Optional factory used to build the concrete synchronization
-         coordinator. Tests can inject fakes; production defaults to `RemoteSyncSynchronizationService`.
+         coordinator from persisted backend settings. Tests can inject fakes; production defaults to
+         `RemoteSyncSynchronizationServiceFactory`.
        - remoteSettingsStoreFactory: Optional factory used to build `RemoteSyncSettingsStore`
          instances for each fresh `SettingsStore`. Tests can inject a shared secret store while
          production defaults to the standard persisted settings plus Keychain-backed secrets.
@@ -245,13 +247,11 @@ public final class RemoteSyncLifecycleService {
     ) {
         self.modelContainer = modelContainer
         self.bundleIdentifier = bundleIdentifier
-        self.synchronizationServiceFactory = synchronizationServiceFactory ?? { configuration, password, deviceIdentifier in
-            let adapter = try NextCloudSyncAdapter(configuration: configuration, password: password)
-            return RemoteSyncSynchronizationService(
-                adapter: adapter,
-                bundleIdentifier: bundleIdentifier,
-                deviceIdentifier: deviceIdentifier
+        self.synchronizationServiceFactory = synchronizationServiceFactory ?? { remoteSettingsStore in
+            try RemoteSyncSynchronizationServiceFactory(
+                bundleIdentifier: bundleIdentifier
             )
+            .makeSynchronizationService(using: remoteSettingsStore)
         }
         self.remoteSettingsStoreFactory = remoteSettingsStoreFactory ?? { settingsStore in
             RemoteSyncSettingsStore(settingsStore: settingsStore)
@@ -290,7 +290,7 @@ public final class RemoteSyncLifecycleService {
      - Returns: `true` when at least one category finished a successful synchronization pass.
      - Side Effects:
        - cancels the periodic foreground sync loop
-       - performs a forced synchronization pass for enabled NextCloud categories
+       - performs a forced synchronization pass for enabled remote-sync categories
      - Failure modes:
        - invalid or incomplete remote configuration causes the background pass to short-circuit
          without failing app backgrounding
@@ -335,7 +335,7 @@ public final class RemoteSyncLifecycleService {
         let settingsStore = SettingsStore(modelContext: modelContext)
         let remoteSettingsStore = remoteSettingsStoreFactory(settingsStore)
 
-        guard remoteSettingsStore.selectedBackend == .nextCloud,
+        guard remoteSettingsStore.selectedBackend != .iCloud,
               networkAvailableProvider() else {
             return false
         }
@@ -409,7 +409,7 @@ public final class RemoteSyncLifecycleService {
        - updates Android's `globalLastSynchronized` key on success
        - invokes the standard success or error callbacks
      - Failure modes:
-       - invalid or incomplete NextCloud configuration returns `false`
+       - invalid or incomplete remote-backend configuration returns `false`
        - overlapping sync operations return `false` instead of re-entering synchronization
        - transport or restore failures are reported through `onCategoryError` and return `false`
      */
@@ -438,7 +438,7 @@ public final class RemoteSyncLifecycleService {
        - updates Android's `globalLastSynchronized` key on success
        - invokes the standard success or error callbacks
      - Failure modes:
-       - invalid or incomplete NextCloud configuration returns `false`
+       - invalid or incomplete remote-backend configuration returns `false`
        - overlapping sync operations return `false` instead of re-entering synchronization
        - bootstrap, upload, or synchronization failures are reported through `onCategoryError` and return `false`
      */
@@ -480,7 +480,7 @@ public final class RemoteSyncLifecycleService {
     }
 
     /**
-     Returns the enabled NextCloud sync categories from local settings.
+     Returns the enabled remote-sync categories from local settings.
 
      - Parameter remoteSettingsStore: Local remote-sync settings store.
      - Returns: Enabled categories in Android's declared `allCases` order.
@@ -525,7 +525,7 @@ public final class RemoteSyncLifecycleService {
         let settingsStore = SettingsStore(modelContext: modelContext)
         let remoteSettingsStore = remoteSettingsStoreFactory(settingsStore)
 
-        guard remoteSettingsStore.selectedBackend == .nextCloud,
+        guard remoteSettingsStore.selectedBackend != .iCloud,
               networkAvailableProvider(),
               remoteSettingsStore.isSyncEnabled(for: category),
               let synchronizer = makeSynchronizer(using: remoteSettingsStore) else {
@@ -568,33 +568,22 @@ public final class RemoteSyncLifecycleService {
     }
 
     /**
-     Builds the concrete synchronization coordinator from persisted NextCloud settings.
+     Builds the concrete synchronization coordinator from persisted remote-backend settings.
 
      - Parameter remoteSettingsStore: Local remote-sync settings store.
      - Returns: Concrete synchronization coordinator, or `nil` when configuration is incomplete.
      - Side Effects:
-       - reads persisted WebDAV configuration and password
+       - reads persisted backend-specific configuration and credentials
        - may generate and persist a stable remote device identifier on first use
      - Failure modes:
-       - malformed or incomplete configuration returns `nil` instead of throwing because lifecycle
-         sync should quietly defer until the user fixes settings
+       - malformed, incomplete, or unauthenticated configuration returns `nil` instead of throwing
+         because lifecycle sync should quietly defer until the user fixes settings or signs in
      */
     private func makeSynchronizer(
         using remoteSettingsStore: RemoteSyncSettingsStore
     ) -> (any RemoteSyncCategorySynchronizing)? {
-        guard let configuration = remoteSettingsStore.loadWebDAVConfiguration(),
-              let password = remoteSettingsStore.webDAVPassword()?
-                .trimmingCharacters(in: .whitespacesAndNewlines),
-              !password.isEmpty else {
-            return nil
-        }
-
         do {
-            return try synchronizationServiceFactory(
-                configuration,
-                password,
-                remoteSettingsStore.deviceIdentifier()
-            )
+            return try synchronizationServiceFactory(remoteSettingsStore)
         } catch {
             return nil
         }
@@ -603,15 +592,15 @@ public final class RemoteSyncLifecycleService {
     /**
      Returns whether foreground polling should remain active for the current app configuration.
 
-     - Returns: `true` when NextCloud is selected, at least one category is enabled, and the
-       persisted WebDAV settings are complete enough for lifecycle sync to build a synchronizer.
-     - Side Effects: Reads backend selection, category toggles, WebDAV fields, and Keychain-backed password state.
+     - Returns: `true` when a remote backend is selected, at least one category is enabled, and the
+       persisted backend settings are complete enough for lifecycle sync to build a synchronizer.
+     - Side Effects: Reads backend selection, category toggles, and backend-specific auth/config state.
      - Failure modes: Incomplete or malformed configuration returns `false`.
      */
     private func isLifecycleSyncConfigured() -> Bool {
         let modelContext = ModelContext(modelContainer)
         let remoteSettingsStore = remoteSettingsStoreFactory(SettingsStore(modelContext: modelContext))
-        guard remoteSettingsStore.selectedBackend == .nextCloud,
+        guard remoteSettingsStore.selectedBackend != .iCloud,
               !enabledCategories(using: remoteSettingsStore).isEmpty else {
             return false
         }

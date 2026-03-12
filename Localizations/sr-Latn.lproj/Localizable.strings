@@ -507,3 +507,16 @@
 "sync_disabling" = "Onemogućivanje usklađivanja za %s za sada.";
 "sync_update_app" = "Molimo ažurirajte aplikaciju kako biste nastavili sa usklađivanjem.";
 "last_updated" = "Poslednji put ažurirano: %s";
+
+/* Google Drive Sync */
+"prefs_sync_introduction_summary2" = "
+Kada koristite Google Drive, %@ dat je pristup samo fajlovima aplikacije, ne ličnim fajlovima.";
+"sync_confirmation" = "Da li ste sigurni da želite da se odjavite i resetujete usklađivanje?";
+"google_drive_account" = "Google Drive Account";
+"google_drive_sign_in" = "Sign In to Google Drive";
+"google_drive_sign_out" = "Sign Out and Reset Synchronization";
+"google_drive_not_configured" = "Google Drive sign-in is not configured for this build.";
+"google_drive_missing_url_scheme" = "Google Drive sign-in callback is not configured for this build.";
+"google_drive_missing_presenter" = "Google Drive sign-in could not present authentication UI.";
+"google_drive_not_signed_in" = "Not signed in";
+"google_drive_permission_required" = "Google Drive permission is required";

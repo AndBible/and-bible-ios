@@ -507,3 +507,15 @@
 "sync_disabling" = "Nateraz vypínam synchronizáciu pre %s.";
 "sync_update_app" = "Ak chcete pokračovať v synchronizácii, aktualizujte aplikáciu.";
 "last_updated" = "Posledná aktualizácia: %s";
+
+/* Google Drive Sync */
+"prefs_sync_introduction_summary2" = "Pri používaní Disku Google, %@ má udelený prístup iba k súborom aplikácií, nie k osobným súborom.";
+"sync_confirmation" = "Ste si istý, že sa chcete odhlásiť a reštartovať synchronizáciu?";
+"google_drive_account" = "Google Drive Account";
+"google_drive_sign_in" = "Sign In to Google Drive";
+"google_drive_sign_out" = "Sign Out and Reset Synchronization";
+"google_drive_not_configured" = "Google Drive sign-in is not configured for this build.";
+"google_drive_missing_url_scheme" = "Google Drive sign-in callback is not configured for this build.";
+"google_drive_missing_presenter" = "Google Drive sign-in could not present authentication UI.";
+"google_drive_not_signed_in" = "Not signed in";
+"google_drive_permission_required" = "Google Drive permission is required";

@@ -536,3 +536,16 @@
 "sync_disabling" = "暂时关闭与%s的同步。";
 "sync_update_app" = "继续同步前，请先更新软件。";
 "last_updated" = "最后更新：%s";
+
+/* Google Drive Sync */
+"prefs_sync_introduction_summary2" = "
+当使用Google Drive时，仅授权%@访问应用程序，不包括个人文件。";
+"sync_confirmation" = "请确认你要注销登陆，并重置同步功能？";
+"google_drive_account" = "Google Drive Account";
+"google_drive_sign_in" = "Sign In to Google Drive";
+"google_drive_sign_out" = "Sign Out and Reset Synchronization";
+"google_drive_not_configured" = "Google Drive sign-in is not configured for this build.";
+"google_drive_missing_url_scheme" = "Google Drive sign-in callback is not configured for this build.";
+"google_drive_missing_presenter" = "Google Drive sign-in could not present authentication UI.";
+"google_drive_not_signed_in" = "Not signed in";
+"google_drive_permission_required" = "Google Drive permission is required";

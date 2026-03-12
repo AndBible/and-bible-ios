@@ -536,3 +536,16 @@
 "sync_disabling" = "আপাতত%s সিঙ্ক্রোনাইজিং অক্ষম করা হচ্ছে।";
 "sync_update_app" = "সিঙ্ক্রোনাইজেশন চালিয়ে যেতে অ্যাপ আপডেট করুন।";
 "last_updated" = "সর্বশেষ আপডেট:%s";
+
+/* Google Drive Sync */
+"prefs_sync_introduction_summary2" = "
+Google ড্রাইভ ব্যবহার করার সময়, %@শুধুমাত্র অ্যাপ্লিকেশন ফাইলগুলিতে অ্যাক্সেস দেওয়া হয়, কোনো ব্যক্তিগত ফাইল নয়।";
+"sync_confirmation" = "আপনি কি নিশ্চিত যে আপনি সাইন আউট এবং সিঙ্ক্রোনাইজেশন রিসেট করতে চান?";
+"google_drive_account" = "Google Drive Account";
+"google_drive_sign_in" = "Sign In to Google Drive";
+"google_drive_sign_out" = "Sign Out and Reset Synchronization";
+"google_drive_not_configured" = "Google Drive sign-in is not configured for this build.";
+"google_drive_missing_url_scheme" = "Google Drive sign-in callback is not configured for this build.";
+"google_drive_missing_presenter" = "Google Drive sign-in could not present authentication UI.";
+"google_drive_not_signed_in" = "Not signed in";
+"google_drive_permission_required" = "Google Drive permission is required";

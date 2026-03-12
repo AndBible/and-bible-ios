@@ -5,6 +5,9 @@ import SwordKit
 import SwiftData
 import SQLite3
 @testable import BibleUI
+#if os(iOS)
+import UIKit
+#endif
 
 private let sqliteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
@@ -5707,7 +5710,7 @@ final class AndBibleTests: XCTestCase {
         let lifecycleService = RemoteSyncLifecycleService(
             modelContainer: container,
             bundleIdentifier: "org.andbible.ios",
-            synchronizationServiceFactory: { _, _, _ in synchronizer },
+            synchronizationServiceFactory: { _ in synchronizer },
             remoteSettingsStoreFactory: { RemoteSyncSettingsStore(settingsStore: $0, secretStore: secretStore) },
             nowProvider: { 50_000 }
         )
@@ -5752,7 +5755,7 @@ final class AndBibleTests: XCTestCase {
         let lifecycleService = RemoteSyncLifecycleService(
             modelContainer: container,
             bundleIdentifier: "org.andbible.ios",
-            synchronizationServiceFactory: { _, _, _ in synchronizer },
+            synchronizationServiceFactory: { _ in synchronizer },
             remoteSettingsStoreFactory: { RemoteSyncSettingsStore(settingsStore: $0, secretStore: secretStore) },
             nowProvider: { 100_000 + 60_000 }
         )
@@ -5788,7 +5791,7 @@ final class AndBibleTests: XCTestCase {
         let lifecycleService = RemoteSyncLifecycleService(
             modelContainer: container,
             bundleIdentifier: "org.andbible.ios",
-            synchronizationServiceFactory: { _, _, _ in synchronizer },
+            synchronizationServiceFactory: { _ in synchronizer },
             remoteSettingsStoreFactory: { RemoteSyncSettingsStore(settingsStore: $0, secretStore: secretStore) },
             networkAvailableProvider: { false },
             nowProvider: { 75_000 }
@@ -5833,7 +5836,7 @@ final class AndBibleTests: XCTestCase {
         let lifecycleService = RemoteSyncLifecycleService(
             modelContainer: container,
             bundleIdentifier: "org.andbible.ios",
-            synchronizationServiceFactory: { _, _, _ in synchronizer },
+            synchronizationServiceFactory: { _ in synchronizer },
             remoteSettingsStoreFactory: { RemoteSyncSettingsStore(settingsStore: $0, secretStore: secretStore) },
             nowProvider: { 88_000 }
         )
@@ -5877,7 +5880,7 @@ final class AndBibleTests: XCTestCase {
         let lifecycleService = RemoteSyncLifecycleService(
             modelContainer: container,
             bundleIdentifier: "org.andbible.ios",
-            synchronizationServiceFactory: { _, _, _ in synchronizer },
+            synchronizationServiceFactory: { _ in synchronizer },
             remoteSettingsStoreFactory: { RemoteSyncSettingsStore(settingsStore: $0, secretStore: secretStore) },
             nowProvider: { 99_000 }
         )
@@ -5926,7 +5929,7 @@ final class AndBibleTests: XCTestCase {
         let lifecycleService = RemoteSyncLifecycleService(
             modelContainer: container,
             bundleIdentifier: "org.andbible.ios",
-            synchronizationServiceFactory: { _, _, _ in synchronizer },
+            synchronizationServiceFactory: { _ in synchronizer },
             remoteSettingsStoreFactory: { RemoteSyncSettingsStore(settingsStore: $0, secretStore: secretStore) },
             nowProvider: { 123_000 }
         )
@@ -5969,7 +5972,7 @@ final class AndBibleTests: XCTestCase {
         let lifecycleService = RemoteSyncLifecycleService(
             modelContainer: container,
             bundleIdentifier: "org.andbible.ios",
-            synchronizationServiceFactory: { _, _, _ in synchronizer },
+            synchronizationServiceFactory: { _ in synchronizer },
             remoteSettingsStoreFactory: { RemoteSyncSettingsStore(settingsStore: $0, secretStore: secretStore) },
             nowProvider: { 144_000 }
         )
@@ -5979,6 +5982,222 @@ final class AndBibleTests: XCTestCase {
         XCTAssertTrue(didSynchronize)
         XCTAssertEqual(synchronizer.createCalls, [.bookmarks])
         XCTAssertEqual(remoteSettingsStore.globalLastSynchronized, 144_000)
+    }
+
+    func testGoogleDriveOAuthConfigurationParsesValidInfoDictionary() throws {
+        let clientID = "1234567890-abcdefg.apps.googleusercontent.com"
+        let reversedScheme = GoogleDriveOAuthConfiguration.reversedClientIDScheme(from: clientID)
+        let infoDictionary: [String: Any] = [
+            "GIDClientID": clientID,
+            "GIDServerClientID": "server-123.apps.googleusercontent.com",
+            "CFBundleURLTypes": [
+                [
+                    "CFBundleURLSchemes": [
+                        reversedScheme,
+                        "org.andbible.ios",
+                    ],
+                ],
+            ],
+        ]
+
+        let configuration = try GoogleDriveOAuthConfiguration.from(infoDictionary: infoDictionary)
+
+        XCTAssertEqual(configuration.clientID, clientID)
+        XCTAssertEqual(configuration.serverClientID, "server-123.apps.googleusercontent.com")
+        XCTAssertEqual(configuration.reversedClientIDScheme, reversedScheme)
+    }
+
+    func testGoogleDriveOAuthConfigurationRejectsMissingURLScheme() {
+        let clientID = "1234567890-abcdefg.apps.googleusercontent.com"
+        let infoDictionary: [String: Any] = [
+            "GIDClientID": clientID,
+            "CFBundleURLTypes": [
+                [
+                    "CFBundleURLSchemes": [
+                        "org.andbible.ios",
+                    ],
+                ],
+            ],
+        ]
+
+        XCTAssertThrowsError(
+            try GoogleDriveOAuthConfiguration.from(infoDictionary: infoDictionary)
+        ) { error in
+            XCTAssertEqual(
+                error as? GoogleDriveAuthServiceError,
+                .missingURLScheme(
+                    GoogleDriveOAuthConfiguration.reversedClientIDScheme(from: clientID)
+                )
+            )
+        }
+    }
+
+    @MainActor
+    func testGoogleDriveAuthServiceRestoresPreviousSignInOnceAndBecomesReadyForSync() async {
+        let clientID = "1234567890-abcdefg.apps.googleusercontent.com"
+        let reversedScheme = GoogleDriveOAuthConfiguration.reversedClientIDScheme(from: clientID)
+        let infoDictionary: [String: Any] = [
+            "GIDClientID": clientID,
+            "CFBundleURLTypes": [
+                [
+                    "CFBundleURLSchemes": [
+                        reversedScheme,
+                    ],
+                ],
+            ],
+        ]
+        let restoredUser = FakeGoogleDriveUser(
+            emailAddress: "alice@example.com",
+            displayName: "Alice",
+            grantedScopes: [GoogleDriveAuthService.driveAppDataScope],
+            accessTokenString: "token-1"
+        )
+        let signInClient = FakeGoogleDriveSignInClient()
+        signInClient.hasPreviousSignIn = true
+        signInClient.restoreResult = .success(restoredUser)
+
+        #if os(iOS)
+        let service = GoogleDriveAuthService(
+            signInClient: signInClient,
+            infoDictionary: infoDictionary,
+            presentingViewControllerProvider: { UIViewController() }
+        )
+        #else
+        let service = GoogleDriveAuthService(
+            signInClient: signInClient,
+            infoDictionary: infoDictionary
+        )
+        #endif
+
+        await service.restorePreviousSignInIfNeeded()
+        await service.restorePreviousSignInIfNeeded()
+
+        XCTAssertTrue(service.isConfigured)
+        XCTAssertTrue(service.isReadyForSync)
+        XCTAssertEqual(service.currentAccountLabel, "Alice")
+        XCTAssertEqual(signInClient.restoreCallCount, 1)
+        XCTAssertEqual(signInClient.configuredClientID, clientID)
+    }
+
+    @MainActor
+    func testGoogleDriveAuthServiceAccessTokenThrowsWhenDriveScopeMissing() async {
+        let clientID = "1234567890-abcdefg.apps.googleusercontent.com"
+        let reversedScheme = GoogleDriveOAuthConfiguration.reversedClientIDScheme(from: clientID)
+        let infoDictionary: [String: Any] = [
+            "GIDClientID": clientID,
+            "CFBundleURLTypes": [
+                [
+                    "CFBundleURLSchemes": [
+                        reversedScheme,
+                    ],
+                ],
+            ],
+        ]
+        let currentUser = FakeGoogleDriveUser(
+            emailAddress: "alice@example.com",
+            displayName: "Alice",
+            grantedScopes: [],
+            accessTokenString: "token-1"
+        )
+        let signInClient = FakeGoogleDriveSignInClient()
+        signInClient.currentUser = currentUser
+
+        #if os(iOS)
+        let service = GoogleDriveAuthService(
+            signInClient: signInClient,
+            infoDictionary: infoDictionary,
+            presentingViewControllerProvider: { UIViewController() }
+        )
+        #else
+        let service = GoogleDriveAuthService(
+            signInClient: signInClient,
+            infoDictionary: infoDictionary
+        )
+        #endif
+
+        do {
+            _ = try await service.accessToken()
+            XCTFail("Expected missingDriveScope error")
+        } catch {
+            XCTAssertEqual(error as? GoogleDriveAuthServiceError, .missingDriveScope)
+        }
+
+        XCTAssertFalse(service.isReadyForSync)
+    }
+
+    func testRemoteSyncSynchronizationServiceFactoryRequiresGoogleDriveAuthProvider() throws {
+        let settingsStore = try makeInMemorySettingsStore()
+        let remoteSettingsStore = RemoteSyncSettingsStore(
+            settingsStore: settingsStore,
+            secretStore: InMemorySecretStore()
+        )
+        remoteSettingsStore.selectedBackend = .googleDrive
+
+        let factory = RemoteSyncSynchronizationServiceFactory(bundleIdentifier: "org.andbible.ios")
+
+        XCTAssertThrowsError(
+            try factory.makeAdapter(using: remoteSettingsStore)
+        ) { error in
+            XCTAssertEqual(
+                error as? RemoteSyncSynchronizationServiceFactoryError,
+                .googleDriveAuthenticationRequired
+            )
+        }
+    }
+
+    func testRemoteSyncSynchronizationServiceFactoryBuildsGoogleDriveAdapter() throws {
+        let settingsStore = try makeInMemorySettingsStore()
+        let remoteSettingsStore = RemoteSyncSettingsStore(
+            settingsStore: settingsStore,
+            secretStore: InMemorySecretStore()
+        )
+        remoteSettingsStore.selectedBackend = .googleDrive
+
+        let factory = RemoteSyncSynchronizationServiceFactory(
+            bundleIdentifier: "org.andbible.ios",
+            googleDriveAccessTokenProvider: {
+                "access-token"
+            }
+        )
+
+        let adapter = try factory.makeAdapter(using: remoteSettingsStore)
+
+        XCTAssertTrue(adapter is GoogleDriveSyncAdapter)
+    }
+
+    @MainActor
+    func testRemoteSyncLifecycleServiceSynchronizesEnabledGoogleDriveCategories() async throws {
+        let container = try makeInMemorySettingsContainer()
+        let settingsStore = SettingsStore(modelContext: ModelContext(container))
+        let secretStore = InMemorySecretStore()
+        let remoteSettingsStore = RemoteSyncSettingsStore(
+            settingsStore: settingsStore,
+            secretStore: secretStore
+        )
+        remoteSettingsStore.selectedBackend = .googleDrive
+        remoteSettingsStore.setSyncEnabled(true, for: .readingPlans)
+
+        let synchronizer = MockRemoteSyncLifecycleSynchronizer()
+        synchronizer.synchronizeResults[.readingPlans] = .synchronized(
+            makeLifecycleSyncReport(for: .readingPlans)
+        )
+
+        let lifecycleService = RemoteSyncLifecycleService(
+            modelContainer: container,
+            bundleIdentifier: "org.andbible.ios",
+            synchronizationServiceFactory: { remoteSettingsStore in
+                XCTAssertEqual(remoteSettingsStore.selectedBackend, .googleDrive)
+                return synchronizer
+            },
+            remoteSettingsStoreFactory: { RemoteSyncSettingsStore(settingsStore: $0, secretStore: secretStore) },
+            nowProvider: { 166_000 }
+        )
+
+        let didSynchronize = await lifecycleService.synchronizeIfNeeded(force: true)
+
+        XCTAssertTrue(didSynchronize)
+        XCTAssertEqual(synchronizer.synchronizeCalls, [.readingPlans])
+        XCTAssertEqual(remoteSettingsStore.globalLastSynchronized, 166_000)
     }
 
     private func makeTemporaryBundledSwordPath() throws -> String {
@@ -7351,6 +7570,212 @@ private final class MockRemoteSyncLifecycleSynchronizer: RemoteSyncCategorySynch
             preconditionFailure("Missing create result for \(category)")
         }
         return result
+    }
+}
+
+/**
+ Lightweight Google user double for `GoogleDriveAuthService` tests.
+
+ The auth service only depends on profile identity, granted scopes, and token refresh behavior, so
+ the fake keeps those fields mutable and lets tests preload refresh results without invoking the
+ real Google Sign-In SDK.
+ */
+@MainActor
+private final class FakeGoogleDriveUser: GoogleDriveAuthenticatedUser {
+    /// Signed-in user's primary email address.
+    var emailAddress: String?
+
+    /// Signed-in user's display name.
+    var displayName: String?
+
+    /// OAuth scopes currently granted to the fake account.
+    var grantedScopes: [String]
+
+    /// Current access token string returned by the fake user.
+    var accessTokenString: String
+
+    /// Optional user snapshot returned after refresh completes.
+    var refreshedUser: (any GoogleDriveAuthenticatedUser)?
+
+    /// Optional error thrown from token refresh.
+    var refreshError: Error?
+
+    /// Number of times `refreshTokensIfNeeded()` was invoked.
+    private(set) var refreshCallCount = 0
+
+    /**
+     Creates a fake Google user snapshot.
+
+     - Parameters:
+       - emailAddress: Signed-in user's primary email address.
+       - displayName: Signed-in user's display name.
+       - grantedScopes: OAuth scopes currently granted to the fake account.
+       - accessTokenString: Current access token string returned by the fake user.
+     - Side effects: none.
+     - Failure modes: This initializer cannot fail.
+     */
+    init(
+        emailAddress: String?,
+        displayName: String?,
+        grantedScopes: [String],
+        accessTokenString: String
+    ) {
+        self.emailAddress = emailAddress
+        self.displayName = displayName
+        self.grantedScopes = grantedScopes
+        self.accessTokenString = accessTokenString
+    }
+
+    /**
+     Returns the preloaded refresh result and records the refresh attempt.
+
+     - Returns: `refreshedUser` when one was preloaded, otherwise `self`.
+     - Side Effects: Increments `refreshCallCount`.
+     - Failure modes: Re-throws `refreshError` when one was preloaded.
+     */
+    func refreshTokensIfNeeded() async throws -> any GoogleDriveAuthenticatedUser {
+        refreshCallCount += 1
+        if let refreshError {
+            throw refreshError
+        }
+        return refreshedUser ?? self
+    }
+}
+
+/**
+ Lightweight Google Sign-In client double for `GoogleDriveAuthService` tests.
+
+ Tests preload restore/sign-in/scope-consent outcomes so the auth service can be exercised without
+ talking to Keychain, Safari, or the Google SDK singleton.
+ */
+@MainActor
+private final class FakeGoogleDriveSignInClient: GoogleDriveSignInClient {
+    /// Currently signed-in fake user, if any.
+    var currentUser: (any GoogleDriveAuthenticatedUser)?
+
+    /// Whether the fake client should report a previously saved sign-in.
+    var hasPreviousSignIn = false
+
+    /// Client ID most recently passed into `configure(clientID:serverClientID:)`.
+    private(set) var configuredClientID: String?
+
+    /// Server client ID most recently passed into `configure(clientID:serverClientID:)`.
+    private(set) var configuredServerClientID: String?
+
+    /// Preloaded result returned from `restorePreviousSignIn()`.
+    var restoreResult: Result<(any GoogleDriveAuthenticatedUser)?, Error> = .success(nil)
+
+    #if os(iOS)
+    /// Preloaded result returned from `signIn(presentingViewController:additionalScopes:)`.
+    var signInResult: Result<any GoogleDriveAuthenticatedUser, Error> = .failure(
+        GoogleDriveAuthServiceError.notSignedIn
+    )
+
+    /// Preloaded result returned from `addScopes(_:presentingViewController:)`.
+    var addScopesResult: Result<any GoogleDriveAuthenticatedUser, Error> = .failure(
+        GoogleDriveAuthServiceError.notSignedIn
+    )
+    #endif
+
+    /// Number of times `restorePreviousSignIn()` was invoked.
+    private(set) var restoreCallCount = 0
+
+    /// URLs passed through `handle(url:)`.
+    private(set) var handledURLs: [URL] = []
+
+    /// Number of times `signOut()` was invoked.
+    private(set) var signOutCallCount = 0
+
+    /**
+     Stores the configured client identifiers for later assertions.
+
+     - Parameters:
+       - clientID: OAuth client identifier supplied by the auth service.
+       - serverClientID: Optional server client identifier supplied by the auth service.
+     - Side Effects: Stores the supplied identifiers for later assertions.
+     - Failure modes: This helper cannot fail.
+     */
+    func configure(clientID: String, serverClientID: String?) {
+        configuredClientID = clientID
+        configuredServerClientID = serverClientID
+    }
+
+    /**
+     Returns the preloaded restore result and records the attempt.
+
+     - Returns: Preloaded previous-sign-in result.
+     - Side Effects: Increments `restoreCallCount`.
+     - Failure modes: Re-throws the error stored in `restoreResult`.
+     */
+    func restorePreviousSignIn() async throws -> (any GoogleDriveAuthenticatedUser)? {
+        restoreCallCount += 1
+        return try restoreResult.get()
+    }
+
+    #if os(iOS)
+    /**
+     Returns the preloaded interactive sign-in result.
+
+     - Parameters:
+       - presentingViewController: Unused test presenter supplied by the auth service.
+       - additionalScopes: Unused scope list supplied by the auth service.
+     - Returns: Preloaded interactive sign-in result.
+     - Side Effects: Updates `currentUser` when sign-in succeeds.
+     - Failure modes: Re-throws the error stored in `signInResult`.
+     */
+    func signIn(
+        presentingViewController: UIViewController,
+        additionalScopes: [String]
+    ) async throws -> any GoogleDriveAuthenticatedUser {
+        let user = try signInResult.get()
+        currentUser = user
+        return user
+    }
+
+    /**
+     Returns the preloaded scope-consent result.
+
+     - Parameters:
+       - scopes: Unused additional-scope list supplied by the auth service.
+       - presentingViewController: Unused test presenter supplied by the auth service.
+     - Returns: Preloaded scope-consent result.
+     - Side Effects: Updates `currentUser` when scope consent succeeds.
+     - Failure modes: Re-throws the error stored in `addScopesResult`.
+     */
+    func addScopes(
+        _ scopes: [String],
+        presentingViewController: UIViewController
+    ) async throws -> any GoogleDriveAuthenticatedUser {
+        let user = try addScopesResult.get()
+        currentUser = user
+        return user
+    }
+    #endif
+
+    /**
+     Records one handled callback URL.
+
+     - Parameter url: OAuth callback URL supplied by the test.
+     - Returns: Always `true` so the auth service can treat the URL as handled.
+     - Side Effects: Appends the URL to `handledURLs`.
+     - Failure modes: This helper cannot fail.
+     */
+    func handle(url: URL) -> Bool {
+        handledURLs.append(url)
+        return true
+    }
+
+    /**
+     Records sign-out and clears the cached fake user.
+
+     - Side Effects:
+       - increments `signOutCallCount`
+       - sets `currentUser` to `nil`
+     - Failure modes: This helper cannot fail.
+     */
+    func signOut() {
+        signOutCallCount += 1
+        currentUser = nil
     }
 }
 

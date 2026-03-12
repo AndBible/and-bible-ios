@@ -507,3 +507,15 @@
 "sync_disabling" = "Наразі синхронізація відключається для %s.";
 "sync_update_app" = "Оновіть додаток, щоб продовжити синхронізацію.";
 "last_updated" = "Останнє оновлення: %s";
+
+/* Google Drive Sync */
+"prefs_sync_introduction_summary2" = "Під час використання Диска Google, %@ надається доступ лише до файлів додатку, а не до особистих файлів.";
+"sync_confirmation" = "Ви впевнені, що бажаєте вийти та скинути синхронізацію?";
+"google_drive_account" = "Google Drive Account";
+"google_drive_sign_in" = "Sign In to Google Drive";
+"google_drive_sign_out" = "Sign Out and Reset Synchronization";
+"google_drive_not_configured" = "Google Drive sign-in is not configured for this build.";
+"google_drive_missing_url_scheme" = "Google Drive sign-in callback is not configured for this build.";
+"google_drive_missing_presenter" = "Google Drive sign-in could not present authentication UI.";
+"google_drive_not_signed_in" = "Not signed in";
+"google_drive_permission_required" = "Google Drive permission is required";

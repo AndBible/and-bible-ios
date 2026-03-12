@@ -14,11 +14,11 @@ import Network
 ///
 /// Universal SwiftUI app for iPhone, iPad, and Mac.
 /**
- Tracks best-effort network availability for lifecycle-driven NextCloud sync.
+ Tracks best-effort network availability for lifecycle-driven remote sync.
 
- Android suppresses cloud sync when the network is unavailable. iOS uses `NWPathMonitor` to mirror
- that guard so lifecycle-triggered WebDAV sync does not immediately fail and surface avoidable
- transport errors while offline.
+ Android suppresses remote sync when the network is unavailable. iOS uses `NWPathMonitor` to
+ mirror that guard so lifecycle-triggered NextCloud or Google Drive sync does not immediately fail
+ and surface avoidable transport errors while offline.
 
  Side effects:
  - starts `NWPathMonitor` updates on a dedicated background queue at initialization time
@@ -140,6 +140,7 @@ struct AndBibleApp: App {
     private let speakService = SpeakService()
     @State private var syncService: SyncService
     @State private var searchIndexService = SearchIndexService()
+    @State private var googleDriveAuthService: GoogleDriveAuthService
     @State private var remoteSyncLifecycleService: RemoteSyncLifecycleService
     @State private var pendingRemoteAdoption: RemoteSyncBootstrapCandidate?
     @State private var queuedRemoteAdoptions: [RemoteSyncBootstrapCandidate] = []
@@ -232,9 +233,21 @@ struct AndBibleApp: App {
             let workspaceStore = WorkspaceStore(modelContext: context)
             let windowMgr = WindowManager(workspaceStore: workspaceStore)
             self._windowManager = State(initialValue: windowMgr)
+            let googleDriveAuthService = GoogleDriveAuthService()
+            self._googleDriveAuthService = State(initialValue: googleDriveAuthService)
+
             let remoteSyncLifecycleService = RemoteSyncLifecycleService(
                 modelContainer: container,
                 bundleIdentifier: Bundle.main.bundleIdentifier ?? "org.andbible.ios",
+                synchronizationServiceFactory: { remoteSettingsStore in
+                    try RemoteSyncSynchronizationServiceFactory(
+                        bundleIdentifier: Bundle.main.bundleIdentifier ?? "org.andbible.ios",
+                        googleDriveAccessTokenProvider: { [googleDriveAuthService] in
+                            try await googleDriveAuthService.accessToken()
+                        }
+                    )
+                    .makeSynchronizationService(using: remoteSettingsStore)
+                },
                 networkAvailableProvider: { [networkMonitor] in
                     networkMonitor.isNetworkAvailable
                 }
@@ -283,10 +296,12 @@ struct AndBibleApp: App {
                         .environment(windowManager)
                         .environment(syncService)
                         .environment(searchIndexService)
+                        .environment(googleDriveAuthService)
                 }
             }
             .task {
                 configureRemoteSyncLifecycleCallbacks()
+                await googleDriveAuthService.restorePreviousSignInIfNeeded()
             }
             .onChange(of: scenePhase) { _, newPhase in
                 if newPhase == .active {
@@ -310,6 +325,9 @@ struct AndBibleApp: App {
                 if !newValue {
                     isUnlocked = false
                 }
+            }
+            .onOpenURL { url in
+                _ = googleDriveAuthService.handle(url: url)
             }
             .alert(
                 String(localized: "cloud_sync_title"),
@@ -413,10 +431,11 @@ struct AndBibleApp: App {
     }
 
     /**
-     Runs one best-effort lifecycle-driven NextCloud sync pass while the scene is backgrounding.
+     Runs one best-effort lifecycle-driven remote-sync pass while the scene is backgrounding.
      *
      * - Side effects:
-       - begins a finite iOS background task so WebDAV sync has time to finish after the scene backgrounds
+       - begins a finite iOS background task so remote sync has time to finish after the scene
+         backgrounds
        - delegates the actual sync work to `RemoteSyncLifecycleService`
      * - Failure modes:
        - if iOS terminates the background task early, the pass is simply cancelled on the next launch/foreground cycle
@@ -510,7 +529,7 @@ struct AndBibleApp: App {
      *
      * - Parameter confirmation: Destructive action the user confirmed.
      * - Side effects:
-       - resumes lifecycle-driven NextCloud sync through `RemoteSyncLifecycleService`
+       - resumes lifecycle-driven remote sync through `RemoteSyncLifecycleService`
        - may update `remoteSyncErrorMessage` when the confirmed sync action fails silently
        - advances the prompt queue after the confirmed action completes
      * - Failure modes:
@@ -535,7 +554,7 @@ struct AndBibleApp: App {
     }
 
     /**
-     Disables one NextCloud sync category immediately from app-shell lifecycle prompts.
+     Disables one remote-sync category immediately from app-shell lifecycle prompts.
      *
      * - Parameter category: Logical sync category to disable.
      * - Side effects:

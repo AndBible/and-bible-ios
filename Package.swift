@@ -14,6 +14,9 @@ let package = Package(
         .library(name: "BibleView", targets: ["BibleView"]),
         .library(name: "BibleUI", targets: ["BibleUI"]),
     ],
+    dependencies: [
+        .package(url: "https://github.com/google/GoogleSignIn-iOS", from: "9.0.0"),
+    ],
     targets: [
         // Pre-built libsword C++ library (SWORD project)
         .binaryTarget(
@@ -52,7 +55,11 @@ let package = Package(
         // BibleCore: Domain models, persistence, business logic
         .target(
             name: "BibleCore",
-            dependencies: ["SwordKit", "CLibSword"],
+            dependencies: [
+                "SwordKit",
+                "CLibSword",
+                .product(name: "GoogleSignIn", package: "GoogleSignIn-iOS"),
+            ],
             path: "Sources/BibleCore/Sources/BibleCore",
             resources: [
                 .copy("Resources"),

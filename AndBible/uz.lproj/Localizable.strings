@@ -536,3 +536,15 @@
 "sync_disabling" = "Disabling synchronizing for %s for now.";
 "sync_update_app" = "Please update the app to continue synchronization.";
 "last_updated" = "Last updated: %s";
+
+/* Google Drive Sync */
+"prefs_sync_introduction_summary2" = "When using Google Drive, %@ is granted access only to applications files, not any personal files.";
+"sync_confirmation" = "Are you sure that you want to sign out and reset synchronization?";
+"google_drive_account" = "Google Drive Account";
+"google_drive_sign_in" = "Sign In to Google Drive";
+"google_drive_sign_out" = "Sign Out and Reset Synchronization";
+"google_drive_not_configured" = "Google Drive sign-in is not configured for this build.";
+"google_drive_missing_url_scheme" = "Google Drive sign-in callback is not configured for this build.";
+"google_drive_missing_presenter" = "Google Drive sign-in could not present authentication UI.";
+"google_drive_not_signed_in" = "Not signed in";
+"google_drive_permission_required" = "Google Drive permission is required";

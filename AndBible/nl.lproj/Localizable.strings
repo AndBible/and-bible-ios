@@ -536,3 +536,16 @@
 "sync_disabling" = "Uitzetten synchronisatie voor %s voor dit moment.";
 "sync_update_app" = "Graag de app updaten om synchronisatie voort te zetten.";
 "last_updated" = "Laatst bijgewerkt: %s";
+
+/* Google Drive Sync */
+"prefs_sync_introduction_summary2" = "
+        Bij gebruik van Google drive krijgt %@ alleen toegang tot applicatiebestanden, en niet tot persoonlijke bestanden.";
+"sync_confirmation" = "Weet u zeker dat u uit wilt loggen en de synchronisatie resetten?";
+"google_drive_account" = "Google Drive Account";
+"google_drive_sign_in" = "Sign In to Google Drive";
+"google_drive_sign_out" = "Sign Out and Reset Synchronization";
+"google_drive_not_configured" = "Google Drive sign-in is not configured for this build.";
+"google_drive_missing_url_scheme" = "Google Drive sign-in callback is not configured for this build.";
+"google_drive_missing_presenter" = "Google Drive sign-in could not present authentication UI.";
+"google_drive_not_signed_in" = "Not signed in";
+"google_drive_permission_required" = "Google Drive permission is required";
