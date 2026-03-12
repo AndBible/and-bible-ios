@@ -92,6 +92,7 @@ public struct RemoteSyncBookmarkPatchApplyReport: Sendable, Equatable {
  - `RemoteSyncInitialBackupMetadataRestoreService` reads Android `LogEntry` rows from staged patch files
  - `RemoteSyncLogEntryStore` provides the local Android conflict baseline for timestamp comparison
  - `RemoteSyncPatchStatusStore` records successfully applied patch archives per source device
+ - `RemoteSyncBookmarkSnapshotService` refreshes outbound bookmark fingerprint baselines after replay
  - `RemoteSyncBookmarkPlaybackSettingsStore` supplies preserved raw Android playback JSON while the
    current local graph is projected into remote-ID working rows
  - `RemoteSyncBookmarkLabelAliasStore` supplies Android-to-iOS reserved-label aliases for the same
@@ -102,6 +103,7 @@ public struct RemoteSyncBookmarkPatchApplyReport: Sendable, Equatable {
  - creates and removes temporary decompressed SQLite files beneath the configured temporary directory
  - rewrites the local bookmark-category SwiftData graph after the full batch succeeds
  - replaces local Android `LogEntry` metadata for `.bookmarks`
+ - refreshes outbound bookmark fingerprint baselines after successful replay
  - appends applied-patch bookkeeping rows to `RemoteSyncPatchStatusStore`
 
  Failure modes:
@@ -300,6 +302,7 @@ public final class RemoteSyncBookmarkPatchApplyService {
 
     private let restoreService: RemoteSyncBookmarkRestoreService
     private let metadataRestoreService: RemoteSyncInitialBackupMetadataRestoreService
+    private let snapshotService: RemoteSyncBookmarkSnapshotService
     private let fileManager: FileManager
     private let temporaryDirectory: URL
 
@@ -309,6 +312,7 @@ public final class RemoteSyncBookmarkPatchApplyService {
      - Parameters:
        - restoreService: Centralized bookmark restore service used for the final SwiftData rewrite.
        - metadataRestoreService: Reader used for staged Android `LogEntry` rows.
+       - snapshotService: Snapshot service used to refresh outbound fingerprint baselines after replay.
        - fileManager: File manager used for temporary-file cleanup.
        - temporaryDirectory: Scratch directory for temporary decompressed patch databases. Defaults to the process temporary directory.
      - Side effects: none.
@@ -317,11 +321,13 @@ public final class RemoteSyncBookmarkPatchApplyService {
     public init(
         restoreService: RemoteSyncBookmarkRestoreService = RemoteSyncBookmarkRestoreService(),
         metadataRestoreService: RemoteSyncInitialBackupMetadataRestoreService = RemoteSyncInitialBackupMetadataRestoreService(),
+        snapshotService: RemoteSyncBookmarkSnapshotService = RemoteSyncBookmarkSnapshotService(),
         fileManager: FileManager = .default,
         temporaryDirectory: URL? = nil
     ) {
         self.restoreService = restoreService
         self.metadataRestoreService = metadataRestoreService
+        self.snapshotService = snapshotService
         self.fileManager = fileManager
         self.temporaryDirectory = temporaryDirectory ?? fileManager.temporaryDirectory
     }
@@ -342,6 +348,7 @@ public final class RemoteSyncBookmarkPatchApplyService {
        - creates and removes temporary decompressed SQLite files
        - rewrites local bookmark-category SwiftData rows after the full batch succeeds
        - replaces local Android `LogEntry` metadata for `.bookmarks`
+       - refreshes outbound bookmark fingerprint baselines after the final replay state is accepted
        - appends applied-patch rows to `RemoteSyncPatchStatusStore`
      - Failure modes:
        - rethrows patch-archive decompression failures
@@ -482,6 +489,10 @@ public final class RemoteSyncBookmarkPatchApplyService {
             for: .bookmarks
         )
         patchStatusStore.addStatuses(appliedPatchStatuses, for: .bookmarks)
+        snapshotService.refreshBaselineFingerprints(
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
 
         return RemoteSyncBookmarkPatchApplyReport(
             appliedPatchCount: appliedPatchStatuses.count,

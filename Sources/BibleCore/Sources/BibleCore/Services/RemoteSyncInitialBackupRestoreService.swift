@@ -28,13 +28,15 @@ different schemas. This dispatcher preserves that boundary on iOS: it selects th
 category restore implementation for a staged backup instead of forcing unrelated categories
 through one generic SQLite importer.
 
-Data dependencies:
-- `RemoteSyncBookmarkRestoreService` restores staged Android `bookmarks.sqlite3` backups
-- `RemoteSyncReadingPlanRestoreService` restores staged Android `readingplans.sqlite3` backups
-- `RemoteSyncWorkspaceRestoreService` restores staged Android `workspaces.sqlite3` backups
-- `RemoteSyncInitialBackupMetadataRestoreService` preserves staged Android `LogEntry` and
-  `SyncStatus` rows needed for later patch replay
-- `SettingsStore` provides local-only persistence for fidelity-preserving side stores such as
+ Data dependencies:
+ - `RemoteSyncBookmarkRestoreService` restores staged Android `bookmarks.sqlite3` backups
+ - `RemoteSyncReadingPlanRestoreService` restores staged Android `readingplans.sqlite3` backups
+ - `RemoteSyncWorkspaceRestoreService` restores staged Android `workspaces.sqlite3` backups
+ - `RemoteSyncInitialBackupMetadataRestoreService` preserves staged Android `LogEntry` and
+   `SyncStatus` rows needed for later patch replay
+ - `RemoteSyncBookmarkSnapshotService` refreshes outbound bookmark fingerprint baselines after
+   successful bookmark restores
+ - `SettingsStore` provides local-only persistence for fidelity-preserving side stores such as
   `RemoteSyncReadingPlanStatusStore`, `RemoteSyncBookmarkPlaybackSettingsStore`, and
   `RemoteSyncBookmarkLabelAliasStore`, `RemoteSyncWorkspaceFidelityStore`,
   `RemoteSyncLogEntryStore`, and `RemoteSyncPatchStatusStore`
@@ -43,6 +45,8 @@ Data dependencies:
  - mutates live local SwiftData records for the supported category
  - may write local-only settings rows needed to preserve Android-only fidelity
  - replaces local Android sync metadata rows for the category after content restore succeeds
+ - refreshes outbound bookmark and reading-plan fingerprint baselines after successful restores for
+   those categories
 
  Failure modes:
  - rethrows category-specific restore errors from the selected restore service
@@ -57,6 +61,7 @@ public final class RemoteSyncInitialBackupRestoreService {
     private let readingPlanRestoreService: RemoteSyncReadingPlanRestoreService
     private let workspaceRestoreService: RemoteSyncWorkspaceRestoreService
     private let metadataRestoreService: RemoteSyncInitialBackupMetadataRestoreService
+    private let bookmarkSnapshotService: RemoteSyncBookmarkSnapshotService
     private let readingPlanSnapshotService: RemoteSyncReadingPlanSnapshotService
 
     /**
@@ -68,6 +73,8 @@ public final class RemoteSyncInitialBackupRestoreService {
        - workspaceRestoreService: Restore service used for the workspace category.
        - metadataRestoreService: Restore service used to preserve Android `LogEntry` and `SyncStatus`
          rows after content restore succeeds.
+       - bookmarkSnapshotService: Snapshot service used to refresh outbound bookmark fingerprint
+         baselines after successful bookmark restores.
        - readingPlanSnapshotService: Snapshot service used to refresh outbound reading-plan
          fingerprint baselines after successful remote restores.
      - Side effects: none.
@@ -78,12 +85,14 @@ public final class RemoteSyncInitialBackupRestoreService {
         readingPlanRestoreService: RemoteSyncReadingPlanRestoreService = RemoteSyncReadingPlanRestoreService(),
         workspaceRestoreService: RemoteSyncWorkspaceRestoreService = RemoteSyncWorkspaceRestoreService(),
         metadataRestoreService: RemoteSyncInitialBackupMetadataRestoreService = RemoteSyncInitialBackupMetadataRestoreService(),
+        bookmarkSnapshotService: RemoteSyncBookmarkSnapshotService = RemoteSyncBookmarkSnapshotService(),
         readingPlanSnapshotService: RemoteSyncReadingPlanSnapshotService = RemoteSyncReadingPlanSnapshotService()
     ) {
         self.bookmarkRestoreService = bookmarkRestoreService
         self.readingPlanRestoreService = readingPlanRestoreService
         self.workspaceRestoreService = workspaceRestoreService
         self.metadataRestoreService = metadataRestoreService
+        self.bookmarkSnapshotService = bookmarkSnapshotService
         self.readingPlanSnapshotService = readingPlanSnapshotService
     }
 
@@ -100,7 +109,7 @@ public final class RemoteSyncInitialBackupRestoreService {
        - mutates live SwiftData state for the supported category
        - may persist local-only helper state needed to preserve Android-only fidelity
        - replaces local Android sync metadata rows for the category after the content restore succeeds
-       - refreshes outbound reading-plan fingerprint baselines after a successful reading-plan restore
+       - refreshes outbound bookmark or reading-plan fingerprint baselines after successful restores
      - Failure modes:
        - rethrows category-specific snapshot and restore errors from the selected service
        - rethrows staged sync-metadata read errors when present Android metadata tables are malformed
@@ -147,7 +156,12 @@ public final class RemoteSyncInitialBackupRestoreService {
             category: category,
             settingsStore: settingsStore
         )
-        if category == .readingPlans {
+        if category == .bookmarks {
+            bookmarkSnapshotService.refreshBaselineFingerprints(
+                modelContext: modelContext,
+                settingsStore: settingsStore
+            )
+        } else if category == .readingPlans {
             readingPlanSnapshotService.refreshBaselineFingerprints(
                 modelContext: modelContext,
                 settingsStore: settingsStore

@@ -41,6 +41,9 @@ public enum RemoteSyncCategoryPatchReplayReport: Sendable, Equatable {
  of the synchronization contract on unfinished categories.
  */
 public enum RemoteSyncCategoryPatchUploadReport: Sendable, Equatable {
+    /// Bookmark-category outbound patch upload summary.
+    case bookmarks(RemoteSyncBookmarkPatchUploadReport)
+
     /// Reading-plan-category outbound patch upload summary.
     case readingPlans(RemoteSyncReadingPlanPatchUploadReport)
 }
@@ -149,8 +152,8 @@ public enum RemoteSyncSynchronizationOutcome: Sendable, Equatable {
  - after remote replay, upload one outbound sparse patch when the category supports local export
  - persist Android-aligned `lastPatchWritten` and `lastSynchronized` bookkeeping
 
- Bookmark and workspace upload orchestration are intentionally left to follow-up work because iOS
- does not yet have outbound patch-export services for those categories.
+ Workspace upload orchestration is intentionally left to follow-up work because iOS does not yet
+ have an outbound patch-export service for that category.
 
  Data dependencies:
  - `RemoteSyncBootstrapCoordinator` validates or creates ready bootstrap state
@@ -158,6 +161,7 @@ public enum RemoteSyncSynchronizationOutcome: Sendable, Equatable {
  - `RemoteSyncArchiveStagingService` downloads initial-backup and patch archives into temporary files
  - `RemoteSyncInitialBackupRestoreService` restores staged initial backups into local SwiftData
  - category-specific patch apply services replay staged Android patch archives into local SwiftData
+ - `RemoteSyncBookmarkPatchUploadService` exports and uploads outbound sparse bookmark patches
  - `RemoteSyncReadingPlanPatchUploadService` exports and uploads outbound sparse reading-plan patches
  - `RemoteSyncStateStore` persists Android-aligned bootstrap and progress metadata locally
  - `RemoteSyncPatchStatusStore` records patch zero after remote initial-backup adoption, matching Android
@@ -166,7 +170,7 @@ public enum RemoteSyncSynchronizationOutcome: Sendable, Equatable {
  - performs remote backend listing, download, marker, and device-folder creation requests
  - may restore a full staged initial backup into local SwiftData
  - may replay staged remote patches into local SwiftData and local-only fidelity stores
- - may upload one outbound sparse reading-plan patch and rewrite local baseline metadata after success
+ - may upload one outbound sparse bookmark or reading-plan patch and rewrite local baseline metadata after success
  - persists bootstrap, patch-status, and progress metadata through `SettingsStore`
  - creates and removes temporary staged archive files beneath the configured temporary directory
 
@@ -188,6 +192,7 @@ public final class RemoteSyncSynchronizationService {
     private let readingPlanPatchApplyService: RemoteSyncReadingPlanPatchApplyService
     private let readingPlanPatchUploadService: RemoteSyncReadingPlanPatchUploadService
     private let bookmarkPatchApplyService: RemoteSyncBookmarkPatchApplyService
+    private let bookmarkPatchUploadService: RemoteSyncBookmarkPatchUploadService
     private let workspacePatchApplyService: RemoteSyncWorkspacePatchApplyService
     private let fileManager: FileManager
     private let temporaryDirectory: URL?
@@ -204,6 +209,7 @@ public final class RemoteSyncSynchronizationService {
        - readingPlanPatchApplyService: Reading-plan patch replay service.
        - readingPlanPatchUploadService: Reading-plan outbound patch upload service.
        - bookmarkPatchApplyService: Bookmark patch replay service.
+       - bookmarkPatchUploadService: Bookmark outbound patch upload service.
        - workspacePatchApplyService: Workspace patch replay service.
        - fileManager: File manager used for staging cleanup.
        - temporaryDirectory: Optional staging directory override.
@@ -219,6 +225,7 @@ public final class RemoteSyncSynchronizationService {
         readingPlanPatchApplyService: RemoteSyncReadingPlanPatchApplyService = RemoteSyncReadingPlanPatchApplyService(),
         readingPlanPatchUploadService: RemoteSyncReadingPlanPatchUploadService? = nil,
         bookmarkPatchApplyService: RemoteSyncBookmarkPatchApplyService = RemoteSyncBookmarkPatchApplyService(),
+        bookmarkPatchUploadService: RemoteSyncBookmarkPatchUploadService? = nil,
         workspacePatchApplyService: RemoteSyncWorkspacePatchApplyService = RemoteSyncWorkspacePatchApplyService(),
         fileManager: FileManager = .default,
         temporaryDirectory: URL? = nil,
@@ -237,6 +244,11 @@ public final class RemoteSyncSynchronizationService {
                 nowProvider: nowProvider
             )
         self.bookmarkPatchApplyService = bookmarkPatchApplyService
+        self.bookmarkPatchUploadService = bookmarkPatchUploadService
+            ?? RemoteSyncBookmarkPatchUploadService(
+                adapter: adapter,
+                nowProvider: nowProvider
+            )
         self.workspacePatchApplyService = workspacePatchApplyService
         self.fileManager = fileManager
         self.temporaryDirectory = temporaryDirectory
@@ -580,9 +592,8 @@ public final class RemoteSyncSynchronizationService {
     /**
      Uploads one outbound sparse patch when the category already has a local export pipeline.
 
-     Reading plans are currently the only category with a finished outbound exporter. Bookmark and
-     workspace uploads remain follow-up work, so those categories intentionally return `nil` here
-     even when local state has diverged.
+     Bookmark and reading-plan uploads are currently supported. Workspace upload remains follow-up
+     work, so that category intentionally returns `nil` here even when local state has diverged.
 
      - Parameters:
        - category: Logical sync category whose outbound exporter should run.
@@ -594,7 +605,7 @@ public final class RemoteSyncSynchronizationService {
        - may upload one outbound sparse patch and rewrite local sync bookkeeping
      - Failure modes:
        - rethrows category-specific patch-upload failures from the lower layers
-       - bookmark and workspace categories intentionally return `nil`
+       - workspace category intentionally returns `nil`
      */
     private func uploadPendingPatchIfSupported(
         for category: RemoteSyncCategory,
@@ -603,6 +614,15 @@ public final class RemoteSyncSynchronizationService {
         settingsStore: SettingsStore
     ) async throws -> RemoteSyncCategoryPatchUploadReport? {
         switch category {
+        case .bookmarks:
+            if let report = try await bookmarkPatchUploadService.uploadPendingPatch(
+                bootstrapState: bootstrapState,
+                modelContext: modelContext,
+                settingsStore: settingsStore
+            ) {
+                return .bookmarks(report)
+            }
+            return nil
         case .readingPlans:
             if let report = try await readingPlanPatchUploadService.uploadPendingPatch(
                 bootstrapState: bootstrapState,
@@ -612,7 +632,7 @@ public final class RemoteSyncSynchronizationService {
                 return .readingPlans(report)
             }
             return nil
-        case .bookmarks, .workspaces:
+        case .workspaces:
             return nil
         }
     }

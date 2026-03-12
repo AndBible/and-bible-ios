@@ -1912,6 +1912,470 @@ final class AndBibleTests: XCTestCase {
         XCTAssertTrue(try modelContext.fetch(FetchDescriptor<StudyPadTextEntry>()).isEmpty)
     }
 
+    /// Verifies that bookmark initial restore refreshes the outbound fingerprint baseline so later local deletes emit delete patches.
+    func testRemoteSyncBookmarkPatchUploadDetectsDeleteAfterInitialRestoreRefresh() async throws {
+        let container = try makeBookmarkRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        let settingsStore = SettingsStore(modelContext: modelContext)
+        let metadataRestoreService = RemoteSyncInitialBackupMetadataRestoreService()
+        let restoreDispatcher = RemoteSyncInitialBackupRestoreService()
+
+        let remoteLabelID = UUID(uuidString: "bc100000-0000-0000-0000-000000000001")!
+        let bookmarkID = UUID(uuidString: "bc100000-0000-0000-0000-000000000010")!
+        let databaseURL = try makeAndroidBookmarksDatabase(
+            labels: [
+                .init(id: remoteLabelID, name: "Prayer", colour: Int(Int32(bitPattern: 0xFF00AA00)))
+            ],
+            bibleBookmarks: [
+                .init(
+                    id: bookmarkID,
+                    kjvOrdinalStart: 50,
+                    kjvOrdinalEnd: 50,
+                    ordinalStart: 50,
+                    ordinalEnd: 50,
+                    createdAt: Date(timeIntervalSince1970: 1_735_689_600),
+                    primaryLabelID: remoteLabelID,
+                    lastUpdatedOn: Date(timeIntervalSince1970: 1_735_689_650)
+                )
+            ],
+            logEntries: [
+                .init(
+                    tableName: "Label",
+                    entityID1: .blob(uuidBlob(remoteLabelID)),
+                    entityID2: .null(),
+                    type: .upsert,
+                    lastUpdated: 1_500,
+                    sourceDevice: "pixel"
+                ),
+                .init(
+                    tableName: "BibleBookmark",
+                    entityID1: .blob(uuidBlob(bookmarkID)),
+                    entityID2: .null(),
+                    type: .upsert,
+                    lastUpdated: 1_500,
+                    sourceDevice: "pixel"
+                )
+            ]
+        )
+        defer { try? FileManager.default.removeItem(at: databaseURL) }
+
+        let stagedBackup = RemoteSyncStagedInitialBackup(
+            remoteFile: RemoteSyncFile(
+                id: "/org.andbible.ios-sync-bookmarks/initial.sqlite3.gz",
+                name: "initial.sqlite3.gz",
+                size: 1,
+                timestamp: 1_500,
+                parentID: "/org.andbible.ios-sync-bookmarks",
+                mimeType: "application/gzip"
+            ),
+            databaseFileURL: databaseURL,
+            schemaVersion: 1
+        )
+
+        _ = try restoreDispatcher.restoreInitialBackup(
+            stagedBackup,
+            category: .bookmarks,
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+
+        let bookmarks = try modelContext.fetch(FetchDescriptor<BibleBookmark>())
+        XCTAssertEqual(bookmarks.count, 1)
+        modelContext.delete(bookmarks[0])
+        try modelContext.save()
+
+        let adapter = MockRemoteSyncAdapter()
+        await adapter.enqueueUploadResult(
+            RemoteSyncFile(
+                id: "/org.andbible.ios-sync-bookmarks/ios-device/1.1.sqlite3.gz",
+                name: "1.1.sqlite3.gz",
+                size: 0,
+                timestamp: 2_500,
+                parentID: "/org.andbible.ios-sync-bookmarks/ios-device",
+                mimeType: "application/gzip"
+            )
+        )
+        let uploadService = RemoteSyncBookmarkPatchUploadService(
+            adapter: adapter,
+            nowProvider: { 2_500 }
+        )
+
+        let report = try await uploadService.uploadPendingPatch(
+            bootstrapState: RemoteSyncBootstrapState(deviceFolderID: "/org.andbible.ios-sync-bookmarks/ios-device"),
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+
+        let unwrappedReport = try XCTUnwrap(report)
+        XCTAssertEqual(unwrappedReport.upsertedLabelCount, 0)
+        XCTAssertEqual(unwrappedReport.upsertedBibleBookmarkCount, 0)
+        XCTAssertEqual(unwrappedReport.upsertedGenericBookmarkCount, 0)
+        XCTAssertEqual(unwrappedReport.upsertedStudyPadEntryCount, 0)
+        XCTAssertEqual(unwrappedReport.upsertedAuxiliaryRowCount, 0)
+        XCTAssertEqual(unwrappedReport.deletedRowCount, 1)
+        XCTAssertEqual(unwrappedReport.logEntryCount, 1)
+
+        let uploadedFiles = await adapter.uploadedFilesSnapshot()
+        let uploadedArchive = try XCTUnwrap(uploadedFiles.first)
+        let archiveURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("uploaded-bookmark-delete-\(UUID().uuidString).sqlite3.gz")
+        let databaseURL2 = archiveURL.deletingPathExtension()
+        defer {
+            try? FileManager.default.removeItem(at: archiveURL)
+            try? FileManager.default.removeItem(at: databaseURL2)
+        }
+        try uploadedArchive.data.write(to: archiveURL, options: .atomic)
+        let patchDatabaseData = try gunzipTestData(uploadedArchive.data)
+        try patchDatabaseData.write(to: databaseURL2, options: .atomic)
+
+        let metadataSnapshot = try metadataRestoreService.readSnapshot(from: databaseURL2)
+        XCTAssertEqual(metadataSnapshot.logEntries.count, 1)
+        XCTAssertEqual(metadataSnapshot.logEntries[0].type, .delete)
+        XCTAssertEqual(metadataSnapshot.logEntries[0].tableName, "BibleBookmark")
+    }
+
+    /// Verifies that bookmark upload emits a replayable sparse patch and refreshes the local baseline after success.
+    func testRemoteSyncBookmarkPatchUploadWritesAndUploadsSparsePatch() async throws {
+        let container = try makeBookmarkRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        let settingsStore = SettingsStore(modelContext: modelContext)
+        let restoreDispatcher = RemoteSyncInitialBackupRestoreService()
+        let patchApplyService = RemoteSyncBookmarkPatchApplyService()
+        let patchStatusStore = RemoteSyncPatchStatusStore(settingsStore: settingsStore)
+        let stateStore = RemoteSyncStateStore(settingsStore: settingsStore)
+
+        let remoteLabelID = UUID(uuidString: "bc200000-0000-0000-0000-000000000001")!
+        let bookmarkID = UUID(uuidString: "bc200000-0000-0000-0000-000000000010")!
+        let initialDatabaseURL = try makeAndroidBookmarksDatabase(
+            labels: [
+                .init(id: remoteLabelID, name: "Prayer", colour: Int(Int32(bitPattern: 0xFF008800)))
+            ],
+            bibleBookmarks: [
+                .init(
+                    id: bookmarkID,
+                    kjvOrdinalStart: 70,
+                    kjvOrdinalEnd: 71,
+                    ordinalStart: 70,
+                    ordinalEnd: 71,
+                    playbackSettingsJSON: #"{"bookId":"KJV","speed":120}"#,
+                    createdAt: Date(timeIntervalSince1970: 1_735_689_700),
+                    book: "Numbers",
+                    primaryLabelID: remoteLabelID,
+                    lastUpdatedOn: Date(timeIntervalSince1970: 1_735_689_750)
+                )
+            ],
+            bibleNotes: [
+                .init(bookmarkID: bookmarkID, notes: "Initial note")
+            ],
+            logEntries: [
+                .init(
+                    tableName: "Label",
+                    entityID1: .blob(uuidBlob(remoteLabelID)),
+                    entityID2: .null(),
+                    type: .upsert,
+                    lastUpdated: 1_000,
+                    sourceDevice: "pixel"
+                ),
+                .init(
+                    tableName: "BibleBookmark",
+                    entityID1: .blob(uuidBlob(bookmarkID)),
+                    entityID2: .null(),
+                    type: .upsert,
+                    lastUpdated: 1_000,
+                    sourceDevice: "pixel"
+                ),
+                .init(
+                    tableName: "BibleBookmarkNotes",
+                    entityID1: .blob(uuidBlob(bookmarkID)),
+                    entityID2: .null(),
+                    type: .upsert,
+                    lastUpdated: 1_000,
+                    sourceDevice: "pixel"
+                )
+            ]
+        )
+        defer { try? FileManager.default.removeItem(at: initialDatabaseURL) }
+
+        let stagedBackup = RemoteSyncStagedInitialBackup(
+            remoteFile: RemoteSyncFile(
+                id: "/org.andbible.ios-sync-bookmarks/initial.sqlite3.gz",
+                name: "initial.sqlite3.gz",
+                size: 1,
+                timestamp: 1_000,
+                parentID: "/org.andbible.ios-sync-bookmarks",
+                mimeType: "application/gzip"
+            ),
+            databaseFileURL: initialDatabaseURL,
+            schemaVersion: 1
+        )
+
+        _ = try restoreDispatcher.restoreInitialBackup(
+            stagedBackup,
+            category: .bookmarks,
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+
+        let label = try XCTUnwrap(try modelContext.fetch(FetchDescriptor<Label>()).first(where: { $0.name == "Prayer" }))
+        label.name = "Prayer renamed"
+        let bookmark = try XCTUnwrap(try modelContext.fetch(FetchDescriptor<BibleBookmark>()).first)
+        bookmark.notes?.notes = "Updated note"
+        try modelContext.save()
+
+        let adapter = MockRemoteSyncAdapter()
+        await adapter.enqueueUploadResult(
+            RemoteSyncFile(
+                id: "/org.andbible.ios-sync-bookmarks/ios-device/1.1.sqlite3.gz",
+                name: "1.1.sqlite3.gz",
+                size: 0,
+                timestamp: 2_000,
+                parentID: "/org.andbible.ios-sync-bookmarks/ios-device",
+                mimeType: "application/gzip"
+            )
+        )
+        let uploadService = RemoteSyncBookmarkPatchUploadService(
+            adapter: adapter,
+            nowProvider: { 2_000 }
+        )
+
+        let report = try await uploadService.uploadPendingPatch(
+            bootstrapState: RemoteSyncBootstrapState(deviceFolderID: "/org.andbible.ios-sync-bookmarks/ios-device"),
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+
+        let unwrappedReport = try XCTUnwrap(report)
+        XCTAssertEqual(unwrappedReport.patchNumber, 1)
+        XCTAssertEqual(unwrappedReport.upsertedLabelCount, 1)
+        XCTAssertEqual(unwrappedReport.upsertedBibleBookmarkCount, 0)
+        XCTAssertEqual(unwrappedReport.upsertedGenericBookmarkCount, 0)
+        XCTAssertEqual(unwrappedReport.upsertedStudyPadEntryCount, 0)
+        XCTAssertEqual(unwrappedReport.upsertedAuxiliaryRowCount, 1)
+        XCTAssertEqual(unwrappedReport.deletedRowCount, 0)
+        XCTAssertEqual(unwrappedReport.logEntryCount, 2)
+
+        XCTAssertEqual(
+            patchStatusStore.statuses(for: .bookmarks),
+            [
+                RemoteSyncPatchStatus(
+                    sourceDevice: "ios-device",
+                    patchNumber: 1,
+                    sizeBytes: unwrappedReport.uploadedFile.size,
+                    appliedDate: 2_000
+                )
+            ]
+        )
+        XCTAssertEqual(stateStore.progressState(for: .bookmarks).lastPatchWritten, 2_000)
+
+        let uploadedFiles = await adapter.uploadedFilesSnapshot()
+        let uploadedArchive = try XCTUnwrap(uploadedFiles.first)
+        let archiveURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("uploaded-bookmark-\(UUID().uuidString).sqlite3.gz")
+        defer { try? FileManager.default.removeItem(at: archiveURL) }
+        try uploadedArchive.data.write(to: archiveURL, options: .atomic)
+
+        let replayContainer = try makeBookmarkRestoreModelContainer()
+        let replayContext = ModelContext(replayContainer)
+        let replaySettingsStore = SettingsStore(modelContext: replayContext)
+        _ = try restoreDispatcher.restoreInitialBackup(
+            stagedBackup,
+            category: .bookmarks,
+            modelContext: replayContext,
+            settingsStore: replaySettingsStore
+        )
+
+        let stagedArchive = RemoteSyncStagedPatchArchive(
+            patch: RemoteSyncDiscoveredPatch(
+                sourceDevice: "ios-device",
+                patchNumber: 1,
+                schemaVersion: 1,
+                file: unwrappedReport.uploadedFile
+            ),
+            archiveFileURL: archiveURL
+        )
+        let replayReport = try patchApplyService.applyPatchArchives(
+            [stagedArchive],
+            modelContext: replayContext,
+            settingsStore: replaySettingsStore
+        )
+
+        XCTAssertEqual(replayReport.appliedPatchCount, 1)
+        XCTAssertEqual(replayReport.appliedLogEntryCount, 2)
+        XCTAssertEqual(replayReport.skippedLogEntryCount, 0)
+
+        let replayLabel = try XCTUnwrap(try replayContext.fetch(FetchDescriptor<Label>()).first(where: { $0.id == remoteLabelID }))
+        XCTAssertEqual(replayLabel.name, "Prayer renamed")
+        let replayBookmark = try XCTUnwrap(try replayContext.fetch(FetchDescriptor<BibleBookmark>()).first(where: { $0.id == bookmarkID }))
+        XCTAssertEqual(replayBookmark.notes?.notes, "Updated note")
+
+        let secondReport = try await uploadService.uploadPendingPatch(
+            bootstrapState: RemoteSyncBootstrapState(deviceFolderID: "/org.andbible.ios-sync-bookmarks/ios-device"),
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+        XCTAssertNil(secondReport)
+        let uploadedFilesAfterSecondPass = await adapter.uploadedFilesSnapshot()
+        XCTAssertEqual(uploadedFilesAfterSecondPass.count, 1)
+    }
+
+    /// Verifies that a ready bookmark category uploads one sparse local patch when no newer remote patches exist.
+    func testRemoteSyncSynchronizationServiceUploadsLocalBookmarkChangesWhenNoRemotePatchesExist() async throws {
+        let container = try makeBookmarkRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        let settingsStore = SettingsStore(modelContext: modelContext)
+        let restoreDispatcher = RemoteSyncInitialBackupRestoreService()
+        let stateStore = RemoteSyncStateStore(settingsStore: settingsStore)
+        let patchStatusStore = RemoteSyncPatchStatusStore(settingsStore: settingsStore)
+
+        let syncFolderID = "/org.andbible.ios-sync-bookmarks"
+        let deviceFolderID = "/org.andbible.ios-sync-bookmarks/ios-device"
+        stateStore.setBootstrapState(
+            RemoteSyncBootstrapState(
+                syncFolderID: syncFolderID,
+                deviceFolderID: deviceFolderID,
+                secretFileName: "device-known-ios-device-secret"
+            ),
+            for: .bookmarks
+        )
+
+        let remoteLabelID = UUID(uuidString: "bc300000-0000-0000-0000-000000000001")!
+        let initialDatabaseURL = try makeAndroidBookmarksDatabase(
+            labels: [
+                .init(id: remoteLabelID, name: "Prayer", colour: Int(Int32(bitPattern: 0xFF006600)))
+            ],
+            logEntries: [
+                .init(
+                    tableName: "Label",
+                    entityID1: .blob(uuidBlob(remoteLabelID)),
+                    entityID2: .null(),
+                    type: .upsert,
+                    lastUpdated: 1_000,
+                    sourceDevice: "pixel"
+                )
+            ]
+        )
+        defer { try? FileManager.default.removeItem(at: initialDatabaseURL) }
+
+        let stagedBackup = RemoteSyncStagedInitialBackup(
+            remoteFile: RemoteSyncFile(
+                id: "\(syncFolderID)/initial.sqlite3.gz",
+                name: "initial.sqlite3.gz",
+                size: 1,
+                timestamp: 1_000,
+                parentID: syncFolderID,
+                mimeType: "application/gzip"
+            ),
+            databaseFileURL: initialDatabaseURL,
+            schemaVersion: 1
+        )
+        _ = try restoreDispatcher.restoreInitialBackup(
+            stagedBackup,
+            category: .bookmarks,
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+
+        let label = try XCTUnwrap(try modelContext.fetch(FetchDescriptor<Label>()).first(where: { $0.id == remoteLabelID }))
+        label.name = "Prayer synced"
+        try modelContext.save()
+
+        let adapter = MockRemoteSyncAdapter()
+        await adapter.setKnownResponse(
+            true,
+            forSyncFolderID: syncFolderID,
+            secretFileName: "device-known-ios-device-secret"
+        )
+        await adapter.enqueueListFilesResult([
+            RemoteSyncFile(
+                id: deviceFolderID,
+                name: "ios-device",
+                size: 0,
+                timestamp: 1_735_689_700_000,
+                parentID: syncFolderID,
+                mimeType: NextCloudSyncAdapter.folderMimeType
+            )
+        ])
+        await adapter.enqueueListFilesResult([])
+
+        let service = RemoteSyncSynchronizationService(
+            adapter: adapter,
+            bundleIdentifier: "org.andbible.ios",
+            deviceIdentifier: "ios-device",
+            nowProvider: { 4_500_000 }
+        )
+
+        let outcome = try await service.synchronize(
+            .bookmarks,
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+
+        guard case .synchronized(let report) = outcome else {
+            return XCTFail("Expected synchronized outcome")
+        }
+
+        XCTAssertEqual(report.category, .bookmarks)
+        XCTAssertNil(report.initialRestoreReport)
+        XCTAssertNil(report.patchReplayReport)
+        XCTAssertEqual(report.discoveredPatchCount, 0)
+        XCTAssertEqual(report.lastPatchWritten, 4_500_000)
+        XCTAssertEqual(report.lastSynchronized, 4_500_000)
+
+        guard case .bookmarks(let uploadReport)? = report.patchUploadReport else {
+            return XCTFail("Expected bookmark patch upload report")
+        }
+
+        XCTAssertEqual(uploadReport.patchNumber, 1)
+        XCTAssertEqual(uploadReport.upsertedLabelCount, 1)
+        XCTAssertEqual(uploadReport.upsertedBibleBookmarkCount, 0)
+        XCTAssertEqual(uploadReport.upsertedGenericBookmarkCount, 0)
+        XCTAssertEqual(uploadReport.upsertedStudyPadEntryCount, 0)
+        XCTAssertEqual(uploadReport.upsertedAuxiliaryRowCount, 0)
+        XCTAssertEqual(uploadReport.deletedRowCount, 0)
+        XCTAssertEqual(uploadReport.logEntryCount, 1)
+        XCTAssertEqual(uploadReport.uploadedFile.name, "1.1.sqlite3.gz")
+        XCTAssertEqual(uploadReport.uploadedFile.parentID, deviceFolderID)
+
+        XCTAssertEqual(
+            patchStatusStore.statuses(for: .bookmarks),
+            [
+                RemoteSyncPatchStatus(
+                    sourceDevice: "ios-device",
+                    patchNumber: 1,
+                    sizeBytes: uploadReport.uploadedFile.size,
+                    appliedDate: 4_500_000
+                )
+            ]
+        )
+        XCTAssertEqual(stateStore.progressState(for: .bookmarks).lastPatchWritten, 4_500_000)
+        XCTAssertEqual(stateStore.progressState(for: .bookmarks).lastSynchronized, 4_500_000)
+
+        let events = await adapter.eventsSnapshot()
+        XCTAssertEqual(events, [
+            .isSyncFolderKnown(
+                syncFolderID: syncFolderID,
+                secretFileName: "device-known-ios-device-secret"
+            ),
+            .listFiles(
+                parentIDs: [syncFolderID],
+                name: nil,
+                mimeType: NextCloudSyncAdapter.folderMimeType,
+                modifiedAtLeast: nil
+            ),
+            .listFiles(
+                parentIDs: [deviceFolderID],
+                name: nil,
+                mimeType: nil,
+                modifiedAtLeast: nil
+            ),
+            .upload(
+                name: "1.1.sqlite3.gz",
+                parentID: deviceFolderID,
+                contentType: NextCloudSyncAdapter.gzipMimeType
+            ),
+        ])
+    }
+
     func testWebDAVSearchBuildsSearchRequestBody() async throws {
         let modifiedAfter = Date(timeIntervalSince1970: 1_730_000_000)
 
