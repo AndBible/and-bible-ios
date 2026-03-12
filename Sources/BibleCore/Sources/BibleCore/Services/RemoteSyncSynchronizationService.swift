@@ -34,12 +34,25 @@ public enum RemoteSyncCategoryPatchReplayReport: Sendable, Equatable {
 }
 
 /**
+ Category-specific outbound patch upload summary returned after one synchronization run.
+
+ Upload support is landing incrementally by category. This wrapper lets the coordinator surface
+ upload results for categories that already have a local export pipeline without blocking the rest
+ of the synchronization contract on unfinished categories.
+ */
+public enum RemoteSyncCategoryPatchUploadReport: Sendable, Equatable {
+    /// Reading-plan-category outbound patch upload summary.
+    case readingPlans(RemoteSyncReadingPlanPatchUploadReport)
+}
+
+/**
  Summary of one successful category synchronization pass.
 
  A synchronization pass may include:
  - no local mutation when bootstrap still needs a user decision
  - a remote initial-backup restore immediately after remote-folder adoption
  - incremental patch download and replay for an already ready category
+ - an outbound sparse patch upload when the category supports local export and local state changed
 
  This report captures only the successful ready-state path after any required bootstrap choice has
  already been made.
@@ -56,6 +69,9 @@ public struct RemoteSyncCategorySynchronizationReport: Sendable, Equatable {
 
     /// Category-specific patch replay summary when pending patches were applied.
     public let patchReplayReport: RemoteSyncCategoryPatchReplayReport?
+
+    /// Category-specific outbound patch upload summary when the pass emitted a local patch.
+    public let patchUploadReport: RemoteSyncCategoryPatchUploadReport?
 
     /// Number of pending remote patches discovered for this synchronization pass.
     public let discoveredPatchCount: Int
@@ -74,6 +90,7 @@ public struct RemoteSyncCategorySynchronizationReport: Sendable, Equatable {
        - bootstrapState: Ready bootstrap state used for the synchronization pass.
        - initialRestoreReport: Initial-backup restore summary when the pass restored a remote backup first.
        - patchReplayReport: Category-specific patch replay summary when pending patches were applied.
+       - patchUploadReport: Category-specific outbound patch upload summary when the pass emitted a local patch.
        - discoveredPatchCount: Number of pending remote patches discovered for the pass.
        - lastPatchWritten: Persisted `lastPatchWritten` value after synchronization completed.
        - lastSynchronized: Persisted `lastSynchronized` value after synchronization completed.
@@ -85,6 +102,7 @@ public struct RemoteSyncCategorySynchronizationReport: Sendable, Equatable {
         bootstrapState: RemoteSyncBootstrapState,
         initialRestoreReport: RemoteSyncInitialBackupRestoreReport?,
         patchReplayReport: RemoteSyncCategoryPatchReplayReport?,
+        patchUploadReport: RemoteSyncCategoryPatchUploadReport?,
         discoveredPatchCount: Int,
         lastPatchWritten: Int64?,
         lastSynchronized: Int64?
@@ -93,6 +111,7 @@ public struct RemoteSyncCategorySynchronizationReport: Sendable, Equatable {
         self.bootstrapState = bootstrapState
         self.initialRestoreReport = initialRestoreReport
         self.patchReplayReport = patchReplayReport
+        self.patchUploadReport = patchUploadReport
         self.discoveredPatchCount = discoveredPatchCount
         self.lastPatchWritten = lastPatchWritten
         self.lastSynchronized = lastSynchronized
@@ -119,17 +138,19 @@ public enum RemoteSyncSynchronizationOutcome: Sendable, Equatable {
 }
 
 /**
- Coordinates Android-aligned remote bootstrap inspection, initial-backup restore, and patch replay.
+ Coordinates Android-aligned remote bootstrap inspection, initial-backup restore, patch replay, and
+ outbound patch upload where a category exporter exists.
 
- This service mirrors the non-upload half of Android's `CloudSync.synchronize()` flow:
+ This service mirrors Android's synchronization flow as far as the current category exporters allow:
  - inspect or validate the category bootstrap state
  - surface adopt-versus-create decisions without mutating local data
  - after remote adoption, download and restore `initial.sqlite3.gz`
  - for ready categories, discover, stage, download, and replay incremental remote patches
+ - after remote replay, upload one outbound sparse patch when the category supports local export
  - persist Android-aligned `lastPatchWritten` and `lastSynchronized` bookkeeping
 
- Upload orchestration is intentionally left to follow-up work because iOS does not yet have the
- local Android-shaped patch export pipeline needed to create outbound patch archives correctly.
+ Bookmark and workspace upload orchestration are intentionally left to follow-up work because iOS
+ does not yet have outbound patch-export services for those categories.
 
  Data dependencies:
  - `RemoteSyncBootstrapCoordinator` validates or creates ready bootstrap state
@@ -137,6 +158,7 @@ public enum RemoteSyncSynchronizationOutcome: Sendable, Equatable {
  - `RemoteSyncArchiveStagingService` downloads initial-backup and patch archives into temporary files
  - `RemoteSyncInitialBackupRestoreService` restores staged initial backups into local SwiftData
  - category-specific patch apply services replay staged Android patch archives into local SwiftData
+ - `RemoteSyncReadingPlanPatchUploadService` exports and uploads outbound sparse reading-plan patches
  - `RemoteSyncStateStore` persists Android-aligned bootstrap and progress metadata locally
  - `RemoteSyncPatchStatusStore` records patch zero after remote initial-backup adoption, matching Android
 
@@ -144,6 +166,7 @@ public enum RemoteSyncSynchronizationOutcome: Sendable, Equatable {
  - performs remote backend listing, download, marker, and device-folder creation requests
  - may restore a full staged initial backup into local SwiftData
  - may replay staged remote patches into local SwiftData and local-only fidelity stores
+ - may upload one outbound sparse reading-plan patch and rewrite local baseline metadata after success
  - persists bootstrap, patch-status, and progress metadata through `SettingsStore`
  - creates and removes temporary staged archive files beneath the configured temporary directory
 
@@ -163,6 +186,7 @@ public final class RemoteSyncSynchronizationService {
     private let deviceIdentifier: String
     private let initialBackupRestoreService: RemoteSyncInitialBackupRestoreService
     private let readingPlanPatchApplyService: RemoteSyncReadingPlanPatchApplyService
+    private let readingPlanPatchUploadService: RemoteSyncReadingPlanPatchUploadService
     private let bookmarkPatchApplyService: RemoteSyncBookmarkPatchApplyService
     private let workspacePatchApplyService: RemoteSyncWorkspacePatchApplyService
     private let fileManager: FileManager
@@ -178,6 +202,7 @@ public final class RemoteSyncSynchronizationService {
        - deviceIdentifier: Stable device identifier used for device folders and patch-zero bookkeeping.
        - initialBackupRestoreService: Service used to restore staged initial backups.
        - readingPlanPatchApplyService: Reading-plan patch replay service.
+       - readingPlanPatchUploadService: Reading-plan outbound patch upload service.
        - bookmarkPatchApplyService: Bookmark patch replay service.
        - workspacePatchApplyService: Workspace patch replay service.
        - fileManager: File manager used for staging cleanup.
@@ -192,6 +217,7 @@ public final class RemoteSyncSynchronizationService {
         deviceIdentifier: String,
         initialBackupRestoreService: RemoteSyncInitialBackupRestoreService = RemoteSyncInitialBackupRestoreService(),
         readingPlanPatchApplyService: RemoteSyncReadingPlanPatchApplyService = RemoteSyncReadingPlanPatchApplyService(),
+        readingPlanPatchUploadService: RemoteSyncReadingPlanPatchUploadService? = nil,
         bookmarkPatchApplyService: RemoteSyncBookmarkPatchApplyService = RemoteSyncBookmarkPatchApplyService(),
         workspacePatchApplyService: RemoteSyncWorkspacePatchApplyService = RemoteSyncWorkspacePatchApplyService(),
         fileManager: FileManager = .default,
@@ -205,6 +231,11 @@ public final class RemoteSyncSynchronizationService {
         self.deviceIdentifier = deviceIdentifier
         self.initialBackupRestoreService = initialBackupRestoreService
         self.readingPlanPatchApplyService = readingPlanPatchApplyService
+        self.readingPlanPatchUploadService = readingPlanPatchUploadService
+            ?? RemoteSyncReadingPlanPatchUploadService(
+                adapter: adapter,
+                nowProvider: nowProvider
+            )
         self.bookmarkPatchApplyService = bookmarkPatchApplyService
         self.workspacePatchApplyService = workspacePatchApplyService
         self.fileManager = fileManager
@@ -428,9 +459,11 @@ public final class RemoteSyncSynchronizationService {
      - Side effects:
        - persists `lastSynchronized` before remote discovery
        - stages, downloads, and replays remote patches when discovery finds any
+       - may upload one outbound sparse patch after replay when the category supports local export
+         and the pass did not just restore remote baseline state from `initial.sqlite3.gz`
        - removes staged patch archives after application or failure
      - Failure modes:
-       - rethrows discovery, staging, and patch-apply failures from the lower layers
+       - rethrows discovery, staging, patch-apply, and patch-upload failures from the lower layers
      */
     private func synchronizeReadyAttempt(
         _ category: RemoteSyncCategory,
@@ -471,12 +504,25 @@ public final class RemoteSyncSynchronizationService {
             )
         }
 
+        let patchUploadReport: RemoteSyncCategoryPatchUploadReport?
+        if initialRestoreReport == nil {
+            patchUploadReport = try await uploadPendingPatchIfSupported(
+                for: category,
+                bootstrapState: bootstrapState,
+                modelContext: modelContext,
+                settingsStore: settingsStore
+            )
+        } else {
+            patchUploadReport = nil
+        }
+
         let finalProgressState = stateStore.progressState(for: category)
         return RemoteSyncCategorySynchronizationReport(
             category: category,
             bootstrapState: bootstrapState,
             initialRestoreReport: initialRestoreReport,
             patchReplayReport: patchReplayReport,
+            patchUploadReport: patchUploadReport,
             discoveredPatchCount: discoveryResult.pendingPatches.count,
             lastPatchWritten: finalProgressState.lastPatchWritten,
             lastSynchronized: finalProgressState.lastSynchronized
@@ -528,6 +574,46 @@ public final class RemoteSyncSynchronizationService {
                     settingsStore: settingsStore
                 )
             )
+        }
+    }
+
+    /**
+     Uploads one outbound sparse patch when the category already has a local export pipeline.
+
+     Reading plans are currently the only category with a finished outbound exporter. Bookmark and
+     workspace uploads remain follow-up work, so those categories intentionally return `nil` here
+     even when local state has diverged.
+
+     - Parameters:
+       - category: Logical sync category whose outbound exporter should run.
+       - bootstrapState: Ready bootstrap identifiers for the category.
+       - modelContext: SwiftData context whose category-specific models define the local snapshot.
+       - settingsStore: Local-only settings store backing preserved sync metadata.
+     - Returns: Category-specific outbound upload summary when one patch was emitted; otherwise `nil`.
+     - Side effects:
+       - may upload one outbound sparse patch and rewrite local sync bookkeeping
+     - Failure modes:
+       - rethrows category-specific patch-upload failures from the lower layers
+       - bookmark and workspace categories intentionally return `nil`
+     */
+    private func uploadPendingPatchIfSupported(
+        for category: RemoteSyncCategory,
+        bootstrapState: RemoteSyncBootstrapState,
+        modelContext: ModelContext,
+        settingsStore: SettingsStore
+    ) async throws -> RemoteSyncCategoryPatchUploadReport? {
+        switch category {
+        case .readingPlans:
+            if let report = try await readingPlanPatchUploadService.uploadPendingPatch(
+                bootstrapState: bootstrapState,
+                modelContext: modelContext,
+                settingsStore: settingsStore
+            ) {
+                return .readingPlans(report)
+            }
+            return nil
+        case .bookmarks, .workspaces:
+            return nil
         }
     }
 

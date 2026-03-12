@@ -107,6 +107,33 @@ public final class RemoteSyncRowFingerprintStore {
     }
 
     /**
+     Reads one stored row fingerprint using the canonical Android log-entry key.
+
+     Outbound diffing sometimes starts from a preserved composite key before it has resolved a full
+     `RemoteSyncLogEntry`. This helper lets callers reuse the same fingerprint namespace without
+     reconstructing the individual SQLite value components first.
+
+     - Parameters:
+       - logKey: Canonical Android log-entry key built by `RemoteSyncLogEntryStore`.
+       - category: Logical sync category that owns the row.
+     - Returns: Stored fingerprint when present; otherwise `nil`.
+     - Side effects: reads local `Setting` rows.
+     - Failure modes:
+       - returns `nil` when the supplied key does not belong to the category or no fingerprint exists
+     */
+    public func fingerprint(
+        forLogKey logKey: String,
+        category: RemoteSyncCategory
+    ) -> String? {
+        let logPrefix = keyBuilder.prefix(for: category)
+        guard logKey.hasPrefix(logPrefix) else {
+            return nil
+        }
+        let suffix = String(logKey.dropFirst(logPrefix.count))
+        return settingsStore.getString("\(prefix(for: category))\(suffix)")
+    }
+
+    /**
      Removes one stored row fingerprint.
 
      - Parameters:

@@ -95,6 +95,7 @@ public struct RemoteSyncReadingPlanPatchUploadReport: Sendable, Equatable {
  - `RemoteSyncAdapting` performs the remote file upload
  - `RemoteSyncReadingPlanSnapshotService` projects live SwiftData and local-only status metadata into Android-shaped rows
  - `RemoteSyncLogEntryStore` provides the Android conflict baseline and is updated after successful upload
+ - `RemoteSyncReadingPlanStatusStore` preserves the accepted Android status payloads for later local diffs
  - `RemoteSyncPatchStatusStore` tracks the highest uploaded patch number for the local device folder
  - `RemoteSyncStateStore` persists Android-aligned `lastPatchWritten` bookkeeping
  - `RemoteSyncArchiveStagingService` provides gzip compression for the generated SQLite patch file
@@ -103,6 +104,7 @@ public struct RemoteSyncReadingPlanPatchUploadReport: Sendable, Equatable {
  - reads live `ReadingPlan` state from SwiftData and preserved status/log metadata from `SettingsStore`
  - creates and removes temporary SQLite and gzip files beneath the configured temporary directory
  - uploads a gzip patch archive into the ready device folder
+ - rewrites preserved Android status payloads for uploaded or deleted reading-plan status rows
  - rewrites local Android `LogEntry` and fingerprint baselines for `.readingPlans` after successful upload
  - appends one local patch status row and updates `lastPatchWritten`
 
@@ -214,6 +216,7 @@ public final class RemoteSyncReadingPlanPatchUploadService {
         )
 
         let logEntryStore = RemoteSyncLogEntryStore(settingsStore: settingsStore)
+        let statusStore = RemoteSyncReadingPlanStatusStore(settingsStore: settingsStore)
         let patchStatusStore = RemoteSyncPatchStatusStore(settingsStore: settingsStore)
         let stateStore = RemoteSyncStateStore(settingsStore: settingsStore)
 
@@ -284,6 +287,8 @@ public final class RemoteSyncReadingPlanPatchUploadService {
             contentType: NextCloudSyncAdapter.gzipMimeType
         )
 
+        persistAcceptedStatuses(changeSet.statusRowsByKey.values, to: statusStore)
+        removeDeletedStatuses(changeSet.logEntries, from: statusStore)
         logEntryStore.replaceEntries(
             changeSet.updatedEntriesByKey.values.sorted(by: Self.logEntrySort),
             for: .readingPlans
@@ -417,6 +422,59 @@ public final class RemoteSyncReadingPlanPatchUploadService {
     }
 
     /**
+     Persists the accepted Android status payloads emitted by a successful upload.
+
+     - Parameters:
+       - rows: Uploaded Android-shaped status rows.
+       - statusStore: Local-only reading-plan status store to update.
+     - Side effects:
+       - writes preserved Android status payloads for the uploaded rows
+     - Failure modes:
+       - underlying status-store persistence failures are swallowed by `SettingsStore`
+     */
+    private func persistAcceptedStatuses(
+        _ rows: some Sequence<RemoteSyncCurrentReadingPlanStatusRow>,
+        to statusStore: RemoteSyncReadingPlanStatusStore
+    ) {
+        for row in rows {
+            statusStore.setStatus(
+                row.readingStatusJSON,
+                planCode: row.planCode,
+                dayNumber: row.planDay,
+                remoteStatusID: row.id
+            )
+        }
+    }
+
+    /**
+     Removes preserved Android status payloads for rows deleted by the current upload.
+
+     - Parameters:
+       - logEntries: Log entries emitted by the current upload.
+       - statusStore: Local-only reading-plan status store to update.
+     - Side effects:
+       - deletes preserved Android status payloads when the upload emitted matching `DELETE` rows
+     - Failure modes:
+       - malformed or non-UUID `entityId1` values are ignored
+       - underlying status-store persistence failures are swallowed by `SettingsStore`
+     */
+    private func removeDeletedStatuses(
+        _ logEntries: some Sequence<RemoteSyncLogEntry>,
+        from statusStore: RemoteSyncReadingPlanStatusStore
+    ) {
+        for entry in logEntries where entry.type == .delete && entry.tableName == "ReadingPlanStatus" {
+            guard let remoteStatusID = Self.uuid(from: entry.entityID1),
+                  let storedStatus = statusStore.status(remoteStatusID: remoteStatusID) else {
+                continue
+            }
+            statusStore.removeStatus(
+                planCode: storedStatus.planCode,
+                dayNumber: storedStatus.dayNumber
+            )
+        }
+    }
+
+    /**
      Returns whether one current snapshot row should be emitted as an outbound `UPSERT`.
 
      Missing fingerprints are intentionally treated as unchanged when the row already has a
@@ -443,6 +501,12 @@ public final class RemoteSyncReadingPlanPatchUploadService {
         }
 
         guard let existingEntry = existingEntriesByKey[key] else {
+            if let existingFingerprint = fingerprintStore.fingerprint(
+                forLogKey: key,
+                category: .readingPlans
+            ) {
+                return existingFingerprint != currentFingerprint
+            }
             return true
         }
 
@@ -727,6 +791,29 @@ public final class RemoteSyncReadingPlanPatchUploadService {
                 )
             }
         }
+    }
+
+    /**
+     Decodes one UUID from a typed SQLite scalar when the payload is a 16-byte BLOB.
+
+     - Parameter value: Typed SQLite scalar value to decode.
+     - Returns: UUID represented by the blob, or `nil` when the value is not a 16-byte blob.
+     - Side effects: none.
+     - Failure modes: This helper cannot fail.
+     */
+    private static func uuid(from value: RemoteSyncSQLiteValue) -> UUID? {
+        guard value.kind == .blob,
+              let data = value.blobData,
+              data.count == 16 else {
+            return nil
+        }
+        let bytes = Array(data)
+        return UUID(uuid: (
+            bytes[0], bytes[1], bytes[2], bytes[3],
+            bytes[4], bytes[5], bytes[6], bytes[7],
+            bytes[8], bytes[9], bytes[10], bytes[11],
+            bytes[12], bytes[13], bytes[14], bytes[15]
+        ))
     }
 
     /**
