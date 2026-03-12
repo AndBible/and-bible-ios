@@ -562,46 +562,6 @@ final class AndBibleTests: XCTestCase {
         )
     }
 
-    func testRemoteSyncInitialBackupRestoreRejectsUnsupportedCategoriesWithoutMutation() throws {
-        let container = try makeReadingPlanRestoreModelContainer()
-        let modelContext = ModelContext(container)
-        let settingsStore = SettingsStore(modelContext: modelContext)
-        let service = RemoteSyncInitialBackupRestoreService()
-
-        let databaseURL = try makeAndroidReadingPlansDatabase(plans: [], statuses: [])
-        defer { try? FileManager.default.removeItem(at: databaseURL) }
-
-        let stagedBackup = RemoteSyncStagedInitialBackup(
-            remoteFile: RemoteSyncFile(
-                id: "/org.andbible.ios-sync-bookmarks/initial.sqlite3.gz",
-                name: "initial.sqlite3.gz",
-                size: 512,
-                timestamp: 1_735_689_600_000,
-                parentID: "/org.andbible.ios-sync-bookmarks",
-                mimeType: "application/gzip"
-            ),
-            databaseFileURL: databaseURL,
-            schemaVersion: 1
-        )
-
-        XCTAssertThrowsError(
-            try service.restoreInitialBackup(
-                stagedBackup,
-                category: .workspaces,
-                modelContext: modelContext,
-                settingsStore: settingsStore
-            )
-        ) { error in
-            XCTAssertEqual(
-                error as? RemoteSyncInitialBackupRestoreError,
-                .unsupportedCategory(.workspaces)
-            )
-        }
-
-        XCTAssertTrue(try modelContext.fetch(FetchDescriptor<ReadingPlan>()).isEmpty)
-        XCTAssertTrue(RemoteSyncReadingPlanStatusStore(settingsStore: settingsStore).allStatuses().isEmpty)
-    }
-
     func testRemoteSyncBookmarkPlaybackSettingsStorePersistsAndClearsEntries() throws {
         let container = try makeBookmarkRestoreModelContainer()
         let modelContext = ModelContext(container)

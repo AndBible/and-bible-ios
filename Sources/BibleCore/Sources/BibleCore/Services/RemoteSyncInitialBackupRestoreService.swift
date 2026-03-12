@@ -4,17 +4,6 @@ import Foundation
 import SwiftData
 
 /**
- Errors emitted while restoring a staged remote initial backup into live local data.
-
- The dispatcher currently supports bookmark and reading-plan backups. Workspace restores are still
- intentionally rejected until their schema mapping and fidelity-preservation rules are implemented.
- */
-public enum RemoteSyncInitialBackupRestoreError: Error, Equatable {
-    /// The requested sync category does not yet have an implemented initial-backup restore path.
-    case unsupportedCategory(RemoteSyncCategory)
-}
-
-/**
  Summary payload returned after a staged initial backup is restored.
 
  The enum preserves category-specific report shapes without erasing the details needed by higher
@@ -26,6 +15,9 @@ public enum RemoteSyncInitialBackupRestoreReport: Sendable, Equatable {
 
     /// Successful restore report for the reading-plan sync category.
     case readingPlans(RemoteSyncReadingPlanRestoreReport)
+
+    /// Successful restore report for the workspace sync category.
+    case workspaces(RemoteSyncWorkspaceRestoreReport)
 }
 
 /**
@@ -39,17 +31,16 @@ through one generic SQLite importer.
 Data dependencies:
 - `RemoteSyncBookmarkRestoreService` restores staged Android `bookmarks.sqlite3` backups
 - `RemoteSyncReadingPlanRestoreService` restores staged Android `readingplans.sqlite3` backups
+- `RemoteSyncWorkspaceRestoreService` restores staged Android `workspaces.sqlite3` backups
 - `SettingsStore` provides local-only persistence for fidelity-preserving side stores such as
   `RemoteSyncReadingPlanStatusStore`, `RemoteSyncBookmarkPlaybackSettingsStore`, and
-  `RemoteSyncBookmarkLabelAliasStore`
+  `RemoteSyncBookmarkLabelAliasStore`, and `RemoteSyncWorkspaceFidelityStore`
 
  Side effects:
  - mutates live local SwiftData records for the supported category
  - may write local-only settings rows needed to preserve Android-only fidelity
 
  Failure modes:
- - throws `RemoteSyncInitialBackupRestoreError.unsupportedCategory` for categories whose restore
-   mapping has not been implemented yet
  - rethrows category-specific restore errors from the selected restore service
 
  Concurrency:
@@ -58,6 +49,7 @@ Data dependencies:
 public final class RemoteSyncInitialBackupRestoreService {
     private let bookmarkRestoreService: RemoteSyncBookmarkRestoreService
     private let readingPlanRestoreService: RemoteSyncReadingPlanRestoreService
+    private let workspaceRestoreService: RemoteSyncWorkspaceRestoreService
 
     /**
      Creates a category-level initial-backup restore dispatcher.
@@ -65,15 +57,18 @@ public final class RemoteSyncInitialBackupRestoreService {
      - Parameters:
        - bookmarkRestoreService: Restore service used for the bookmark category.
        - readingPlanRestoreService: Restore service used for the reading-plan category.
+       - workspaceRestoreService: Restore service used for the workspace category.
      - Side effects: none.
      - Failure modes: This initializer cannot fail.
      */
     public init(
         bookmarkRestoreService: RemoteSyncBookmarkRestoreService = RemoteSyncBookmarkRestoreService(),
-        readingPlanRestoreService: RemoteSyncReadingPlanRestoreService = RemoteSyncReadingPlanRestoreService()
+        readingPlanRestoreService: RemoteSyncReadingPlanRestoreService = RemoteSyncReadingPlanRestoreService(),
+        workspaceRestoreService: RemoteSyncWorkspaceRestoreService = RemoteSyncWorkspaceRestoreService()
     ) {
         self.bookmarkRestoreService = bookmarkRestoreService
         self.readingPlanRestoreService = readingPlanRestoreService
+        self.workspaceRestoreService = workspaceRestoreService
     }
 
     /**
@@ -89,8 +84,6 @@ public final class RemoteSyncInitialBackupRestoreService {
        - mutates live SwiftData state for the supported category
        - may persist local-only helper state needed to preserve Android-only fidelity
      - Failure modes:
-       - throws `RemoteSyncInitialBackupRestoreError.unsupportedCategory` for categories without an
-         implemented restore path
        - rethrows category-specific snapshot and restore errors from the selected service
      */
     public func restoreInitialBackup(
@@ -118,7 +111,13 @@ public final class RemoteSyncInitialBackupRestoreService {
             )
             return .readingPlans(report)
         case .workspaces:
-            throw RemoteSyncInitialBackupRestoreError.unsupportedCategory(category)
+            let snapshot = try workspaceRestoreService.readSnapshot(from: stagedBackup.databaseFileURL)
+            let report = try workspaceRestoreService.replaceLocalWorkspaces(
+                from: snapshot,
+                modelContext: modelContext,
+                settingsStore: settingsStore
+            )
+            return .workspaces(report)
         }
     }
 }
