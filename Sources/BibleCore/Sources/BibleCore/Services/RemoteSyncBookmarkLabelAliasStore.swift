@@ -115,6 +115,19 @@ public final class RemoteSyncBookmarkLabelAliasStore {
     }
 
     /**
+     Removes one preserved Android-to-iOS label identifier alias.
+
+     - Parameter remoteLabelID: Label identifier found in Android sync payloads.
+     - Side effects:
+       - deletes one namespaced local `Setting` row when present
+     - Failure modes:
+       - persistence failures are swallowed by `SettingsStore`
+     */
+    public func removeAlias(forRemoteLabelID remoteLabelID: UUID) {
+        settingsStore.remove(scopedKey(remoteLabelID: remoteLabelID))
+    }
+
+    /**
      Removes all preserved Android-to-iOS label identifier aliases.
 
      - Side effects:

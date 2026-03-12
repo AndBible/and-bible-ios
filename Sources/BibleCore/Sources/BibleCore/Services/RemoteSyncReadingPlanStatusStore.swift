@@ -25,6 +25,8 @@ import Foundation
  */
 public final class RemoteSyncReadingPlanStatusStore {
     private let settingsStore: SettingsStore
+    private let encoder = JSONEncoder()
+    private let decoder = JSONDecoder()
 
     private enum Keys {
         static let prefix = "remote_sync.readingplans.android_status"
@@ -36,7 +38,7 @@ public final class RemoteSyncReadingPlanStatusStore {
      - Important: `readingStatusJSON` is stored verbatim so future sync work can rehydrate the
        original Android semantics without lossy translation.
      */
-    public struct Status: Sendable, Equatable {
+    public struct Status: Sendable, Equatable, Codable {
         /// Android reading-plan code that owns the status row.
         public let planCode: String
 
@@ -46,6 +48,9 @@ public final class RemoteSyncReadingPlanStatusStore {
         /// Raw Android JSON payload from `ReadingPlanStatus.readingStatus`.
         public let readingStatusJSON: String
 
+        /// Android `ReadingPlanStatus.id` value when preserved during restore or patch replay.
+        public let remoteStatusID: UUID?
+
         /**
          Creates a preserved Android reading-plan status payload.
 
@@ -53,13 +58,20 @@ public final class RemoteSyncReadingPlanStatusStore {
            - planCode: Android reading-plan code that owns the status row.
            - dayNumber: One-based day number within the plan definition.
            - readingStatusJSON: Raw Android JSON payload from `ReadingPlanStatus.readingStatus`.
+           - remoteStatusID: Android `ReadingPlanStatus.id` value when available from restore or patch replay.
          - Side effects: none.
          - Failure modes: This initializer cannot fail.
          */
-        public init(planCode: String, dayNumber: Int, readingStatusJSON: String) {
+        public init(
+            planCode: String,
+            dayNumber: Int,
+            readingStatusJSON: String,
+            remoteStatusID: UUID? = nil
+        ) {
             self.planCode = planCode
             self.dayNumber = dayNumber
             self.readingStatusJSON = readingStatusJSON
+            self.remoteStatusID = remoteStatusID
         }
     }
 
@@ -87,7 +99,44 @@ public final class RemoteSyncReadingPlanStatusStore {
        - persistence failures are swallowed by `SettingsStore`
      */
     public func setStatus(_ readingStatusJSON: String, planCode: String, dayNumber: Int) {
-        settingsStore.setString(scopedKey(planCode: planCode, dayNumber: dayNumber), value: readingStatusJSON)
+        setStatus(
+            readingStatusJSON,
+            planCode: planCode,
+            dayNumber: dayNumber,
+            remoteStatusID: nil
+        )
+    }
+
+    /**
+     Stores or replaces one raw Android reading-plan status payload together with its remote row id.
+
+     - Parameters:
+       - readingStatusJSON: Raw JSON payload to preserve.
+       - planCode: Android reading-plan code that owns the payload.
+       - dayNumber: One-based day number within the plan definition.
+       - remoteStatusID: Android `ReadingPlanStatus.id` value associated with the payload.
+     - Side effects:
+       - writes one namespaced local `Setting` row
+     - Failure modes:
+       - JSON-encoding failures skip the write silently
+       - persistence failures are swallowed by `SettingsStore`
+     */
+    public func setStatus(
+        _ readingStatusJSON: String,
+        planCode: String,
+        dayNumber: Int,
+        remoteStatusID: UUID?
+    ) {
+        let status = Status(
+            planCode: planCode,
+            dayNumber: dayNumber,
+            readingStatusJSON: readingStatusJSON,
+            remoteStatusID: remoteStatusID
+        )
+        if let data = try? encoder.encode(status),
+           let payload = String(data: data, encoding: .utf8) {
+            settingsStore.setString(scopedKey(planCode: planCode, dayNumber: dayNumber), value: payload)
+        }
     }
 
     /**
@@ -102,11 +151,57 @@ public final class RemoteSyncReadingPlanStatusStore {
        - malformed or missing stored keys return `nil`
      */
     public func status(planCode: String, dayNumber: Int) -> String? {
-        let value = settingsStore.getString(scopedKey(planCode: planCode, dayNumber: dayNumber))
-        guard let value, !value.isEmpty else {
+        storedStatus(planCode: planCode, dayNumber: dayNumber)?.readingStatusJSON
+    }
+
+    /**
+     Reads one preserved Android reading-plan status payload together with its remote row id.
+
+     - Parameters:
+       - planCode: Android reading-plan code that owns the payload.
+       - dayNumber: One-based day number within the plan definition.
+     - Returns: Decoded preserved status payload, or `nil` when no usable value has been stored.
+     - Side effects: none.
+     - Failure modes:
+       - malformed or missing stored keys return `nil`
+       - legacy pre-envelope payloads are decoded with `remoteStatusID == nil`
+     */
+    public func storedStatus(planCode: String, dayNumber: Int) -> Status? {
+        let key = scopedKey(planCode: planCode, dayNumber: dayNumber)
+        guard let entry = settingsStore.entries(withPrefix: key).first(where: { $0.key == key }) else {
             return nil
         }
-        return value
+        return decodeEntry(entry)
+    }
+
+    /**
+     Reads one preserved Android reading-plan status payload by Android row id.
+
+     - Parameter remoteStatusID: Android `ReadingPlanStatus.id` value to locate.
+     - Returns: Decoded preserved status payload, or `nil` when no stored payload carries that id.
+     - Side effects:
+       - enumerates local `Setting` rows managed by this store
+     - Failure modes:
+       - malformed stored keys or payloads are skipped during the lookup
+       - legacy pre-envelope payloads are ignored because they do not carry a remote row id
+     */
+    public func status(remoteStatusID: UUID) -> Status? {
+        allStatuses().first { $0.remoteStatusID == remoteStatusID }
+    }
+
+    /**
+     Removes one preserved Android reading-plan status payload.
+
+     - Parameters:
+       - planCode: Android reading-plan code that owns the payload.
+       - dayNumber: One-based day number within the plan definition.
+     - Side effects:
+       - deletes one namespaced local `Setting` row when present
+     - Failure modes:
+       - persistence failures are swallowed by `SettingsStore`
+     */
+    public func removeStatus(planCode: String, dayNumber: Int) {
+        settingsStore.remove(scopedKey(planCode: planCode, dayNumber: dayNumber))
     }
 
     /**
@@ -168,11 +263,17 @@ public final class RemoteSyncReadingPlanStatusStore {
             return nil
         }
 
-        return Status(
-            planCode: planCode,
-            dayNumber: dayNumber,
-            readingStatusJSON: entry.value
-        )
+        if let data = entry.value.data(using: .utf8),
+           let status = try? decoder.decode(Status.self, from: data) {
+            return Status(
+                planCode: planCode,
+                dayNumber: dayNumber,
+                readingStatusJSON: status.readingStatusJSON,
+                remoteStatusID: status.remoteStatusID
+            )
+        }
+
+        return Status(planCode: planCode, dayNumber: dayNumber, readingStatusJSON: entry.value)
     }
 
     /**

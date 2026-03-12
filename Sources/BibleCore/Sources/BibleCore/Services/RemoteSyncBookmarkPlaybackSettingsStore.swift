@@ -143,6 +143,21 @@ public final class RemoteSyncBookmarkPlaybackSettingsStore {
     }
 
     /**
+     Removes one preserved Android bookmark playback-settings payload.
+
+     - Parameters:
+       - bookmarkID: Bookmark identifier that owns the payload.
+       - kind: Android bookmark table that owns the payload.
+     - Side effects:
+       - deletes one namespaced local `Setting` row when present
+     - Failure modes:
+       - persistence failures are swallowed by `SettingsStore`
+     */
+    public func removePlaybackSettings(for bookmarkID: UUID, kind: BookmarkKind) {
+        settingsStore.remove(scopedKey(bookmarkID: bookmarkID, kind: kind))
+    }
+
+    /**
      Removes all preserved Android bookmark playback-settings payloads.
 
      - Side effects:

@@ -250,6 +250,40 @@ final class AndBibleTests: XCTestCase {
         XCTAssertTrue(statusStore.allStatuses().isEmpty)
     }
 
+    func testRemoteSyncReadingPlanStatusStorePreservesRemoteStatusIdentifiers() throws {
+        let container = try makeReadingPlanRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        let settingsStore = SettingsStore(modelContext: modelContext)
+        let statusStore = RemoteSyncReadingPlanStatusStore(settingsStore: settingsStore)
+        let remoteStatusID = UUID(uuidString: "12345678-1234-1234-1234-123456789abc")!
+
+        statusStore.setStatus(
+            #"{"chapterReadArray":[{"readingNumber":1,"isRead":true}]}"#,
+            planCode: "y1ot1nt1_OTthenNT",
+            dayNumber: 1,
+            remoteStatusID: remoteStatusID
+        )
+
+        XCTAssertEqual(
+            statusStore.storedStatus(planCode: "y1ot1nt1_OTthenNT", dayNumber: 1),
+            .init(
+                planCode: "y1ot1nt1_OTthenNT",
+                dayNumber: 1,
+                readingStatusJSON: #"{"chapterReadArray":[{"readingNumber":1,"isRead":true}]}"#,
+                remoteStatusID: remoteStatusID
+            )
+        )
+        XCTAssertEqual(
+            statusStore.status(remoteStatusID: remoteStatusID),
+            .init(
+                planCode: "y1ot1nt1_OTthenNT",
+                dayNumber: 1,
+                readingStatusJSON: #"{"chapterReadArray":[{"readingNumber":1,"isRead":true}]}"#,
+                remoteStatusID: remoteStatusID
+            )
+        )
+    }
+
     func testRemoteSyncReadingPlanRestoreReadsAndroidSnapshot() throws {
         let service = RemoteSyncReadingPlanRestoreService()
         let databaseURL = try makeAndroidReadingPlansDatabase(
@@ -556,10 +590,331 @@ final class AndBibleTests: XCTestCase {
                 .init(
                     planCode: "y1ot1nt1_OTthenNT",
                     dayNumber: 2,
+                    readingStatusJSON: #"{"chapterReadArray":[{"readingNumber":1,"isRead":true}]}"#,
+                    remoteStatusID: UUID(uuidString: "a1000000-0000-0000-0000-000000000011")!
+                )
+            ]
+        )
+    }
+
+    func testRemoteSyncReadingPlanPatchApplyReplaysNewerRowsAndRecordsPatchStatus() throws {
+        let container = try makeReadingPlanRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        let settingsStore = SettingsStore(modelContext: modelContext)
+        let statusStore = RemoteSyncReadingPlanStatusStore(settingsStore: settingsStore)
+        let logEntryStore = RemoteSyncLogEntryStore(settingsStore: settingsStore)
+        let patchStatusStore = RemoteSyncPatchStatusStore(settingsStore: settingsStore)
+        let restoreService = RemoteSyncReadingPlanRestoreService()
+        let patchService = RemoteSyncReadingPlanPatchApplyService()
+
+        let planID = UUID(uuidString: "d1000000-0000-0000-0000-000000000001")!
+        let baselineStatusID = UUID(uuidString: "d1000000-0000-0000-0000-000000000011")!
+        let patchStatusID = UUID(uuidString: "d1000000-0000-0000-0000-000000000022")!
+
+        let initialDatabaseURL = try makeAndroidReadingPlansDatabase(
+            plans: [
+                .init(
+                    id: planID,
+                    planCode: "y1ot1nt1_OTthenNT",
+                    startDate: Date(timeIntervalSince1970: 1_700_000_000),
+                    currentDay: 1
+                )
+            ],
+            statuses: [
+                .init(
+                    id: baselineStatusID,
+                    planCode: "y1ot1nt1_OTthenNT",
+                    dayNumber: 1,
+                    readingStatusJSON: #"{"chapterReadArray":[{"readingNumber":1,"isRead":false}]}"#
+                )
+            ]
+        )
+        defer { try? FileManager.default.removeItem(at: initialDatabaseURL) }
+
+        let initialSnapshot = try restoreService.readSnapshot(from: initialDatabaseURL)
+        _ = try restoreService.replaceLocalReadingPlans(
+            from: initialSnapshot,
+            modelContext: modelContext,
+            statusStore: statusStore
+        )
+
+        logEntryStore.addEntry(
+            .init(
+                tableName: "ReadingPlan",
+                entityID1: .blob(uuidBlob(planID)),
+                entityID2: .text(""),
+                type: .upsert,
+                lastUpdated: 1_000,
+                sourceDevice: "pixel"
+            ),
+            for: .readingPlans
+        )
+        logEntryStore.addEntry(
+            .init(
+                tableName: "ReadingPlanStatus",
+                entityID1: .blob(uuidBlob(baselineStatusID)),
+                entityID2: .text(""),
+                type: .upsert,
+                lastUpdated: 1_000,
+                sourceDevice: "pixel"
+            ),
+            for: .readingPlans
+        )
+
+        let patchDatabaseURL = try makeAndroidReadingPlansDatabase(
+            plans: [
+                .init(
+                    id: planID,
+                    planCode: "y1ot1nt1_OTthenNT",
+                    startDate: Date(timeIntervalSince1970: 1_700_000_000),
+                    currentDay: 2
+                )
+            ],
+            statuses: [
+                .init(
+                    id: patchStatusID,
+                    planCode: "y1ot1nt1_OTthenNT",
+                    dayNumber: 2,
+                    readingStatusJSON: #"{"chapterReadArray":[{"readingNumber":1,"isRead":true}]}"#
+                )
+            ],
+            logEntries: [
+                .init(
+                    tableName: "ReadingPlan",
+                    entityID1: .blob(uuidBlob(planID)),
+                    entityID2: .text(""),
+                    type: .upsert,
+                    lastUpdated: 2_000,
+                    sourceDevice: "pixel"
+                ),
+                .init(
+                    tableName: "ReadingPlanStatus",
+                    entityID1: .blob(uuidBlob(patchStatusID)),
+                    entityID2: .text(""),
+                    type: .upsert,
+                    lastUpdated: 2_000,
+                    sourceDevice: "pixel"
+                ),
+            ]
+        )
+        defer { try? FileManager.default.removeItem(at: patchDatabaseURL) }
+
+        let stagedArchive = try makeReadingPlanPatchArchive(
+            patchDatabaseURL: patchDatabaseURL,
+            sourceDevice: "pixel",
+            patchNumber: 2,
+            fileTimestamp: 1_735_689_800_000
+        )
+        defer { try? FileManager.default.removeItem(at: stagedArchive.archiveFileURL) }
+
+        let report = try patchService.applyPatchArchives(
+            [stagedArchive],
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+
+        XCTAssertEqual(report.appliedPatchCount, 1)
+        XCTAssertEqual(report.appliedLogEntryCount, 2)
+        XCTAssertEqual(report.skippedLogEntryCount, 0)
+        XCTAssertEqual(report.restoredPlanCodes, ["y1ot1nt1_OTthenNT"])
+        XCTAssertEqual(report.preservedStatusCount, 2)
+
+        let plans = try modelContext.fetch(FetchDescriptor<ReadingPlan>())
+        XCTAssertEqual(plans.count, 1)
+        XCTAssertEqual(plans[0].currentDay, 2)
+
+        let days = (plans[0].days ?? []).sorted { $0.dayNumber < $1.dayNumber }
+        XCTAssertTrue(days[0].isCompleted)
+        XCTAssertTrue(days[1].isCompleted)
+
+        XCTAssertEqual(
+            statusStore.storedStatus(planCode: "y1ot1nt1_OTthenNT", dayNumber: 2),
+            .init(
+                planCode: "y1ot1nt1_OTthenNT",
+                dayNumber: 2,
+                readingStatusJSON: #"{"chapterReadArray":[{"readingNumber":1,"isRead":true}]}"#,
+                remoteStatusID: patchStatusID
+            )
+        )
+        XCTAssertEqual(
+            patchStatusStore.statuses(for: .readingPlans),
+            [
+                .init(
+                    sourceDevice: "pixel",
+                    patchNumber: 2,
+                    sizeBytes: Int64((try FileManager.default.attributesOfItem(atPath: stagedArchive.archiveFileURL.path)[.size] as? NSNumber)?.int64Value ?? 0),
+                    appliedDate: 1_735_689_800_000
+                )
+            ]
+        )
+    }
+
+    func testRemoteSyncReadingPlanPatchApplyDeletesStatusesByRemoteIdentifier() throws {
+        let container = try makeReadingPlanRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        let settingsStore = SettingsStore(modelContext: modelContext)
+        let statusStore = RemoteSyncReadingPlanStatusStore(settingsStore: settingsStore)
+        let logEntryStore = RemoteSyncLogEntryStore(settingsStore: settingsStore)
+        let restoreService = RemoteSyncReadingPlanRestoreService()
+        let patchService = RemoteSyncReadingPlanPatchApplyService()
+
+        let planID = UUID(uuidString: "d2000000-0000-0000-0000-000000000001")!
+        let statusID = UUID(uuidString: "d2000000-0000-0000-0000-000000000011")!
+
+        let initialDatabaseURL = try makeAndroidReadingPlansDatabase(
+            plans: [
+                .init(
+                    id: planID,
+                    planCode: "y1ot1nt1_OTthenNT",
+                    startDate: Date(timeIntervalSince1970: 1_700_000_000),
+                    currentDay: 1
+                )
+            ],
+            statuses: [
+                .init(
+                    id: statusID,
+                    planCode: "y1ot1nt1_OTthenNT",
+                    dayNumber: 1,
                     readingStatusJSON: #"{"chapterReadArray":[{"readingNumber":1,"isRead":true}]}"#
                 )
             ]
         )
+        defer { try? FileManager.default.removeItem(at: initialDatabaseURL) }
+
+        let initialSnapshot = try restoreService.readSnapshot(from: initialDatabaseURL)
+        _ = try restoreService.replaceLocalReadingPlans(
+            from: initialSnapshot,
+            modelContext: modelContext,
+            statusStore: statusStore
+        )
+
+        logEntryStore.addEntry(
+            .init(
+                tableName: "ReadingPlanStatus",
+                entityID1: .blob(uuidBlob(statusID)),
+                entityID2: .text(""),
+                type: .upsert,
+                lastUpdated: 1_000,
+                sourceDevice: "tablet"
+            ),
+            for: .readingPlans
+        )
+
+        let patchDatabaseURL = try makeAndroidReadingPlansDatabase(
+            plans: [],
+            statuses: [],
+            logEntries: [
+                .init(
+                    tableName: "ReadingPlanStatus",
+                    entityID1: .blob(uuidBlob(statusID)),
+                    entityID2: .text(""),
+                    type: .delete,
+                    lastUpdated: 2_000,
+                    sourceDevice: "tablet"
+                )
+            ]
+        )
+        defer { try? FileManager.default.removeItem(at: patchDatabaseURL) }
+
+        let stagedArchive = try makeReadingPlanPatchArchive(
+            patchDatabaseURL: patchDatabaseURL,
+            sourceDevice: "tablet",
+            patchNumber: 3,
+            fileTimestamp: 1_735_689_900_000
+        )
+        defer { try? FileManager.default.removeItem(at: stagedArchive.archiveFileURL) }
+
+        let report = try patchService.applyPatchArchives(
+            [stagedArchive],
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+
+        XCTAssertEqual(report.appliedLogEntryCount, 1)
+        XCTAssertNil(statusStore.status(planCode: "y1ot1nt1_OTthenNT", dayNumber: 1))
+
+        let plans = try modelContext.fetch(FetchDescriptor<ReadingPlan>())
+        let days = (plans[0].days ?? []).sorted { $0.dayNumber < $1.dayNumber }
+        XCTAssertFalse(days[0].isCompleted)
+    }
+
+    func testRemoteSyncReadingPlanPatchApplySkipsOlderRows() throws {
+        let container = try makeReadingPlanRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        let settingsStore = SettingsStore(modelContext: modelContext)
+        let statusStore = RemoteSyncReadingPlanStatusStore(settingsStore: settingsStore)
+        let logEntryStore = RemoteSyncLogEntryStore(settingsStore: settingsStore)
+        let patchService = RemoteSyncReadingPlanPatchApplyService()
+
+        let planID = UUID(uuidString: "d3000000-0000-0000-0000-000000000001")!
+        let plan = ReadingPlan(
+            id: planID,
+            planCode: "y1ot1nt1_OTthenNT",
+            planName: "Read the Bible in One Year",
+            startDate: Date(timeIntervalSince1970: 1_700_000_000),
+            currentDay: 1,
+            totalDays: ReadingPlanService.availablePlans.first(where: { $0.code == "y1ot1nt1_OTthenNT" })!.totalDays,
+            isActive: true
+        )
+        modelContext.insert(plan)
+        try modelContext.save()
+
+        logEntryStore.addEntry(
+            .init(
+                tableName: "ReadingPlan",
+                entityID1: .blob(uuidBlob(planID)),
+                entityID2: .text(""),
+                type: .upsert,
+                lastUpdated: 5_000,
+                sourceDevice: "pixel"
+            ),
+            for: .readingPlans
+        )
+
+        let patchDatabaseURL = try makeAndroidReadingPlansDatabase(
+            plans: [
+                .init(
+                    id: planID,
+                    planCode: "y1ot1nt1_OTthenNT",
+                    startDate: Date(timeIntervalSince1970: 1_700_000_000),
+                    currentDay: 9
+                )
+            ],
+            statuses: [],
+            logEntries: [
+                .init(
+                    tableName: "ReadingPlan",
+                    entityID1: .blob(uuidBlob(planID)),
+                    entityID2: .text(""),
+                    type: .upsert,
+                    lastUpdated: 4_000,
+                    sourceDevice: "pixel"
+                )
+            ]
+        )
+        defer { try? FileManager.default.removeItem(at: patchDatabaseURL) }
+
+        let stagedArchive = try makeReadingPlanPatchArchive(
+            patchDatabaseURL: patchDatabaseURL,
+            sourceDevice: "pixel",
+            patchNumber: 4,
+            fileTimestamp: 1_735_690_000_000
+        )
+        defer { try? FileManager.default.removeItem(at: stagedArchive.archiveFileURL) }
+
+        let report = try patchService.applyPatchArchives(
+            [stagedArchive],
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+
+        XCTAssertEqual(report.appliedPatchCount, 0)
+        XCTAssertEqual(report.appliedLogEntryCount, 0)
+        XCTAssertEqual(report.skippedLogEntryCount, 1)
+
+        let plans = try modelContext.fetch(FetchDescriptor<ReadingPlan>())
+        XCTAssertEqual(plans[0].currentDay, 1)
+        XCTAssertTrue(statusStore.allStatuses().isEmpty)
     }
 
     func testRemoteSyncBookmarkPlaybackSettingsStorePersistsAndClearsEntries() throws {
@@ -2422,6 +2777,15 @@ final class AndBibleTests: XCTestCase {
         let readingStatusJSON: String
     }
 
+    private struct AndroidLogEntryRow {
+        let tableName: String
+        let entityID1: RemoteSyncSQLiteValue
+        let entityID2: RemoteSyncSQLiteValue
+        let type: RemoteSyncLogEntryType
+        let lastUpdated: Int64
+        let sourceDevice: String
+    }
+
     private struct AndroidLabelRow {
         let id: UUID
         let name: String
@@ -2632,7 +2996,8 @@ final class AndBibleTests: XCTestCase {
 
     private func makeAndroidReadingPlansDatabase(
         plans: [AndroidReadingPlanRow],
-        statuses: [AndroidReadingPlanStatusRow]
+        statuses: [AndroidReadingPlanStatusRow],
+        logEntries: [AndroidLogEntryRow] = []
     ) throws -> URL {
         let databaseURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("android-readingplans-\(UUID().uuidString).sqlite3")
@@ -2659,6 +3024,14 @@ final class AndBibleTests: XCTestCase {
                     planDay INTEGER NOT NULL,
                     readingStatus TEXT NOT NULL,
                     id BLOB NOT NULL PRIMARY KEY
+                );
+                CREATE TABLE LogEntry (
+                    tableName TEXT NOT NULL,
+                    entityId1 BLOB,
+                    entityId2 BLOB,
+                    type TEXT NOT NULL,
+                    lastUpdated INTEGER NOT NULL,
+                    sourceDevice TEXT NOT NULL
                 );
                 """,
                 nil,
@@ -2716,7 +3089,75 @@ final class AndBibleTests: XCTestCase {
             sqlite3_finalize(statement)
         }
 
+        for entry in logEntries {
+            var statement: OpaquePointer?
+            XCTAssertEqual(
+                sqlite3_prepare_v2(
+                    db,
+                    "INSERT INTO LogEntry (tableName, entityId1, entityId2, type, lastUpdated, sourceDevice) VALUES (?, ?, ?, ?, ?, ?)",
+                    -1,
+                    &statement,
+                    nil
+                ),
+                SQLITE_OK
+            )
+
+            sqlite3_bind_text(statement, 1, entry.tableName, -1, sqliteTransient)
+            bindSQLiteValue(entry.entityID1, to: statement, index: 2)
+            bindSQLiteValue(entry.entityID2, to: statement, index: 3)
+            sqlite3_bind_text(statement, 4, entry.type.rawValue, -1, sqliteTransient)
+            sqlite3_bind_int64(statement, 5, entry.lastUpdated)
+            sqlite3_bind_text(statement, 6, entry.sourceDevice, -1, sqliteTransient)
+            XCTAssertEqual(sqlite3_step(statement), SQLITE_DONE)
+            sqlite3_finalize(statement)
+        }
+
         return databaseURL
+    }
+
+    /**
+     Builds one staged patch-archive fixture for reading-plan replay tests.
+
+     - Parameters:
+       - patchDatabaseURL: Local SQLite database containing Android patch rows.
+       - sourceDevice: Android source-device name owning the patch stream.
+       - patchNumber: Monotonic patch number within the source-device stream.
+       - fileTimestamp: Remote millisecond timestamp that should be recorded on the staged archive.
+     - Returns: Staged patch archive pointing at a temporary gzip file.
+     - Side effects:
+       - reads the supplied SQLite database
+       - writes one temporary gzip archive beneath the process temporary directory
+     - Failure modes:
+       - rethrows filesystem read and write errors
+       - rethrows gzip-compression failures from `RemoteSyncArchiveStagingService`
+     */
+    private func makeReadingPlanPatchArchive(
+        patchDatabaseURL: URL,
+        sourceDevice: String,
+        patchNumber: Int64,
+        fileTimestamp: Int64
+    ) throws -> RemoteSyncStagedPatchArchive {
+        let archiveData = try RemoteSyncArchiveStagingService.gzip(Data(contentsOf: patchDatabaseURL))
+        let archiveURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("android-readingplans-patch-\(UUID().uuidString).sqlite3.gz")
+        try archiveData.write(to: archiveURL, options: .atomic)
+
+        return RemoteSyncStagedPatchArchive(
+            patch: RemoteSyncDiscoveredPatch(
+                sourceDevice: sourceDevice,
+                patchNumber: patchNumber,
+                schemaVersion: 1,
+                file: RemoteSyncFile(
+                    id: "/org.andbible.ios-sync-readingplans/\(sourceDevice)/\(patchNumber).sqlite3.gz",
+                    name: "\(patchNumber).sqlite3.gz",
+                    size: Int64(archiveData.count),
+                    timestamp: fileTimestamp,
+                    parentID: "/org.andbible.ios-sync-readingplans/\(sourceDevice)",
+                    mimeType: "application/gzip"
+                )
+            ),
+            archiveFileURL: archiveURL
+        )
     }
 
     private func makeAndroidBookmarksDatabase(
@@ -3055,6 +3496,35 @@ final class AndBibleTests: XCTestCase {
             return
         }
         sqlite3_bind_int(statement, index, Int32(value))
+    }
+
+    /**
+     Binds one typed Android SQLite scalar into a fixture statement.
+
+     - Parameters:
+       - value: Typed scalar payload that should be bound into SQLite.
+       - statement: SQLite statement receiving the bound parameter.
+       - index: One-based parameter index.
+     - Side effects:
+       - mutates the bound SQLite statement parameter state
+     - Failure modes: This helper cannot fail.
+     */
+    private func bindSQLiteValue(_ value: RemoteSyncSQLiteValue, to statement: OpaquePointer?, index: Int32) {
+        switch value.kind {
+        case .null:
+            sqlite3_bind_null(statement, index)
+        case .integer:
+            sqlite3_bind_int64(statement, index, value.integerValue ?? 0)
+        case .real:
+            sqlite3_bind_double(statement, index, value.realValue ?? 0)
+        case .text:
+            sqlite3_bind_text(statement, index, value.textValue ?? "", -1, sqliteTransient)
+        case .blob:
+            let data = value.blobData ?? Data()
+            _ = data.withUnsafeBytes { bytes in
+                sqlite3_bind_blob(statement, index, bytes.baseAddress, Int32(data.count), sqliteTransient)
+            }
+        }
     }
 
     private func uuidBlob(_ uuid: UUID) -> Data {

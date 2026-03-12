@@ -352,7 +352,8 @@ public final class RemoteSyncReadingPlanRestoreService {
                 statusStore.setStatus(
                     rawStatus.readingStatusJSON,
                     planCode: rawStatus.planCode,
-                    dayNumber: rawStatus.dayNumber
+                    dayNumber: rawStatus.dayNumber,
+                    remoteStatusID: rawStatus.id
                 )
                 preservedStatusCount += 1
             }

@@ -233,6 +233,19 @@ public final class RemoteSyncWorkspaceFidelityStore {
     }
 
     /**
+     Removes one preserved Android workspace speech-settings payload.
+
+     - Parameter workspaceID: Workspace identifier that owns the payload.
+     - Side effects:
+       - deletes one namespaced local `Setting` row when present
+     - Failure modes:
+       - persistence failures are swallowed by `SettingsStore`
+     */
+    public func removeWorkspaceEntry(for workspaceID: UUID) {
+        settingsStore.remove(workspaceScopedKey(workspaceID: workspaceID))
+    }
+
+    /**
      Stores or replaces one Android page-manager fidelity payload.
 
      - Parameter entry: Page-manager fidelity payload to persist.
@@ -291,6 +304,19 @@ public final class RemoteSyncWorkspaceFidelityStore {
     }
 
     /**
+     Removes one preserved Android page-manager fidelity payload.
+
+     - Parameter windowID: Window identifier that owns the payload.
+     - Side effects:
+       - deletes one namespaced local `Setting` row when present
+     - Failure modes:
+       - persistence failures are swallowed by `SettingsStore`
+     */
+    public func removePageManagerEntry(for windowID: UUID) {
+        settingsStore.remove(pageManagerScopedKey(windowID: windowID))
+    }
+
+    /**
      Stores or replaces one Android-to-iOS history-item identifier alias.
 
      - Parameters:
@@ -339,6 +365,19 @@ public final class RemoteSyncWorkspaceFidelityStore {
                 decodeHistoryAlias(entry)
             }
             .sorted { $0.remoteHistoryItemID < $1.remoteHistoryItemID }
+    }
+
+    /**
+     Removes one Android-to-iOS history-item identifier alias.
+
+     - Parameter remoteHistoryItemID: Android `HistoryItem.id` primary-key value.
+     - Side effects:
+       - deletes one namespaced local `Setting` row when present
+     - Failure modes:
+       - persistence failures are swallowed by `SettingsStore`
+     */
+    public func removeHistoryItemAlias(for remoteHistoryItemID: Int64) {
+        settingsStore.remove(historyAliasScopedKey(remoteHistoryItemID: remoteHistoryItemID))
     }
 
     /**
