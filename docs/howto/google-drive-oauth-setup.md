@@ -2,6 +2,28 @@
 
 This document closes the last repo-local gap for the Google Drive sync backend: how to supply real iOS OAuth values to the existing code without committing environment-specific configuration.
 
+## Current Status
+
+Google Drive sync is code-complete enough for local and CI validation, but it is currently parked on one external dependency:
+
+- a real iOS Google OAuth client for the `org.andbible.ios` bundle
+
+Already implemented in the repo:
+
+- Google Drive transport and adapter
+- Google Sign-In auth service
+- settings UI and runtime wiring
+- background refresh scheduling
+- simulator-backed sync and auth coverage
+- secret-free bundle placeholders
+- local xcconfig override path for non-committed credentials
+
+Still outstanding before live end-user validation:
+
+- provision the real iOS OAuth client
+- populate local credential overrides
+- run live sign-in and end-to-end sync validation against a real Google account
+
 ## UX Contract
 
 There are two separate audiences here, and they must not be conflated.
