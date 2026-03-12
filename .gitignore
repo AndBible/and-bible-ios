@@ -36,6 +36,10 @@ Pods/
 bibleview-js/node_modules/
 bibleview-js/dist/
 
+# Python
+__pycache__/
+*.pyc
+
 # libsword build artifacts
 libsword/build/
 libsword/sword-src/

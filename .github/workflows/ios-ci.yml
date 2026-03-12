@@ -11,6 +11,49 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  repo-standards:
+    name: Repo Standards
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Ensure PR base ref is available
+        if: github.event_name == 'pull_request'
+        run: git fetch origin "${{ github.base_ref }}" --depth=1
+
+      - name: Run repo standards unit tests
+        run: python3 -m unittest discover -s scripts -p 'test_*.py'
+
+      - name: Check commit messages (pull request range)
+        if: github.event_name == 'pull_request'
+        run: >-
+          python3 scripts/check_repo_standards.py commits
+          --base-ref "origin/${{ github.base_ref }}"
+          --head-ref HEAD
+
+      - name: Check commit messages (push head commit)
+        if: github.event_name == 'push'
+        run: python3 scripts/check_repo_standards.py commits
+
+      - name: Check Swift docblock style (pull request range)
+        if: github.event_name == 'pull_request'
+        run: >-
+          python3 scripts/check_repo_standards.py docblocks
+          --base-ref "origin/${{ github.base_ref }}"
+          --head-ref HEAD
+
+      - name: Check Swift docblock style (push head commit)
+        if: github.event_name == 'push'
+        run: python3 scripts/check_repo_standards.py docblocks
+
   localization-guardrails:
     name: Localization Guardrails
     runs-on: ubuntu-latest
