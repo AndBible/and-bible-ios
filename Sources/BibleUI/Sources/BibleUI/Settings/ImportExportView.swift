@@ -64,6 +64,28 @@ public struct ImportExportView: View {
     public init() {}
 
     /**
+     Current accessibility-visible presentation state for UI automation.
+
+     The value encodes which modal surface the screen is actively driving so UI tests can assert
+     workflow transitions without depending on private UIKit or SwiftUI picker hierarchy details.
+     */
+    private var accessibilityState: String {
+        if showExportSheet {
+            return "shareSheetPresented"
+        }
+        if showImportPicker {
+            return "importPickerPresented"
+        }
+        if showModuleZipPicker {
+            return "moduleZipPickerPresented"
+        }
+        if showEpubPicker {
+            return "epubPickerPresented"
+        }
+        return "idle"
+    }
+
+    /**
      Builds the export, import, module-install, EPUB-install, and status sections.
      */
     public var body: some View {
@@ -109,6 +131,7 @@ public struct ImportExportView: View {
                         }
                     }
                 }
+                .accessibilityIdentifier("importExportImportButton")
                 .disabled(isImporting)
             } header: {
                 Text(String(localized: "import"))
@@ -166,7 +189,7 @@ public struct ImportExportView: View {
             }
         }
         .accessibilityIdentifier("importExportScreen")
-        .accessibilityValue(showExportSheet ? "shareSheetPresented" : "idle")
+        .accessibilityValue(accessibilityState)
         .navigationTitle(String(localized: "import_export"))
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)

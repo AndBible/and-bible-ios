@@ -229,6 +229,36 @@ final class AndBibleUITests: XCTestCase {
     }
 
     /**
+     Verifies that the import action drives Import and Export into file-picker presentation.
+     *
+     * - Side effects:
+     *   - launches the app with the calculator gate disabled for test determinism
+     *   - navigates through Settings into Import and Export
+     *   - triggers the backup import action, which requests document-picker presentation
+     * - Failure modes:
+     *   - fails if the Import and Export link cannot be reached from Settings
+     *   - fails if the import action is missing from the Import and Export screen
+     *   - fails if the Import and Export screen never reports the import-picker-presented state
+     */
+    func testSettingsImportExportImportPresentsFilePickerState() {
+        let app = makeApp()
+        app.launch()
+
+        openSettings(in: app)
+        tapScrollableElement("settingsImportExportLink", fallbackLabel: "Import & Export", in: app)
+
+        let importExportScreen = requireElement("importExportScreen", in: app, timeout: 10)
+        XCTAssertTrue(importExportScreen.exists)
+
+        let importButton = requireElement("importExportImportButton", in: app, timeout: 10)
+        importButton.tap()
+
+        let valuePredicate = NSPredicate(format: "value == %@", "importPickerPresented")
+        expectation(for: valuePredicate, evaluatedWith: importExportScreen)
+        waitForExpectations(timeout: 15)
+    }
+
+    /**
      Verifies that the label manager can be opened from Settings.
      *
      * - Side effects:
