@@ -130,15 +130,19 @@ struct ContentView: View {
             NavigationLink(value: Tab.bible) {
                 Label("Bible", systemImage: "book")
             }
+            .accessibilityIdentifier("contentTabBible")
             NavigationLink(value: Tab.bookmarks) {
                 Label("Bookmarks", systemImage: "bookmark")
             }
+            .accessibilityIdentifier("contentTabBookmarks")
             NavigationLink(value: Tab.search) {
                 Label("Search", systemImage: "magnifyingglass")
             }
+            .accessibilityIdentifier("contentTabSearch")
             NavigationLink(value: Tab.readingPlan) {
                 Label("Reading Plans", systemImage: "calendar")
             }
+            .accessibilityIdentifier("contentTabReadingPlans")
 
             Section {
                 NavigationLink {
@@ -146,6 +150,7 @@ struct ContentView: View {
                 } label: {
                     Label("Downloads", systemImage: "arrow.down.circle")
                 }
+                .accessibilityIdentifier("contentDownloadsLink")
                 NavigationLink {
                     SettingsView(
                         displaySettings: $displaySettings,
@@ -155,6 +160,7 @@ struct ContentView: View {
                 } label: {
                     Label("Settings", systemImage: "gear")
                 }
+                .accessibilityIdentifier("contentSettingsLink")
             }
         }
         .navigationTitle("AndBible")

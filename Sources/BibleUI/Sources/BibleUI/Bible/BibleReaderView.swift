@@ -1445,6 +1445,7 @@ public struct BibleReaderView: View {
                                     showBookmarks = true
                                 }
                             }
+                            .accessibilityIdentifier("readerOpenBookmarksAction")
                             Button(String(localized: "history"), systemImage: "clock") {
                                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                                     showHistory = true
@@ -1460,22 +1461,26 @@ public struct BibleReaderView: View {
                                     showReadingPlans = true
                                 }
                             }
+                            .accessibilityIdentifier("readerOpenReadingPlansAction")
                             Button(String(localized: "settings"), systemImage: "gear") {
                                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                                     showSettings = true
                                 }
                             }
+                            .accessibilityIdentifier("readerOpenSettingsAction")
                             Divider()
                             Button(String(localized: "workspaces"), systemImage: "square.stack") {
                                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                                     showWorkspaces = true
                                 }
                             }
+                            .accessibilityIdentifier("readerOpenWorkspacesAction")
                             Button(String(localized: "downloads"), systemImage: "arrow.down.circle") {
                                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                                     showDownloads = true
                                 }
                             }
+                            .accessibilityIdentifier("readerOpenDownloadsAction")
                             if !(controller?.installedDictionaryModules.isEmpty ?? true) {
                                 Divider()
                                 Button(String(localized: "dictionary"), systemImage: "character.book.closed") {
@@ -1562,6 +1567,7 @@ public struct BibleReaderView: View {
                                     showAbout = true
                                 }
                             }
+                            .accessibilityIdentifier("readerOpenAboutAction")
                             Button(String(localized: "rate_app"), systemImage: "star") {
                                 #if os(iOS)
                                 if let scene = UIApplication.shared.connectedScenes
@@ -1595,6 +1601,7 @@ public struct BibleReaderView: View {
                             Image(systemName: "ellipsis.circle")
                                 .font(.body)
                         }
+                        .accessibilityIdentifier("readerMoreMenuButton")
                     }
                 }
             }

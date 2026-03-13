@@ -362,6 +362,7 @@ public struct SettingsView: View {
                                 )
                             )
                         }
+                        .accessibilityIdentifier("settingsStrongsGreekDictionaryLink")
                     }
 
                     if !strongsHebrewDictionaries.isEmpty {
@@ -390,6 +391,7 @@ public struct SettingsView: View {
                                 )
                             )
                         }
+                        .accessibilityIdentifier("settingsStrongsHebrewDictionaryLink")
                     }
 
                     if !robinsonMorphologyDictionaries.isEmpty {
@@ -418,6 +420,7 @@ public struct SettingsView: View {
                                 )
                             )
                         }
+                        .accessibilityIdentifier("settingsRobinsonMorphologyLink")
                     }
 
                     if !wordLookupDictionaries.isEmpty {
@@ -446,6 +449,7 @@ public struct SettingsView: View {
                                 )
                             )
                         }
+                        .accessibilityIdentifier("settingsWordLookupDictionariesLink")
                     }
                 }
             }
@@ -832,18 +836,23 @@ public struct SettingsView: View {
                 NavigationLink(String(localized: "downloads")) {
                     ModuleBrowserView()
                 }
+                .accessibilityIdentifier("settingsDownloadsLink")
                 NavigationLink(String(localized: "repositories")) {
                     RepositoryManagerView()
                 }
+                .accessibilityIdentifier("settingsRepositoriesLink")
                 NavigationLink(String(localized: "import_export")) {
                     ImportExportView()
                 }
+                .accessibilityIdentifier("settingsImportExportLink")
                 NavigationLink(String(localized: "icloud_sync")) {
                     SyncSettingsView()
                 }
+                .accessibilityIdentifier("settingsSyncLink")
                 NavigationLink(String(localized: "labels")) {
                     LabelManagerView()
                 }
+                .accessibilityIdentifier("settingsLabelsLink")
             }
 
             Section(String(localized: "settings_about")) {
@@ -855,6 +864,7 @@ public struct SettingsView: View {
                 }
             }
         }
+        .accessibilityIdentifier("settingsForm")
         .navigationTitle(String(localized: "settings"))
         .alert(
             String(localized: "prefs_interface_locale_title", defaultValue: "Application language"),
@@ -1021,9 +1031,11 @@ public struct SettingsView: View {
             NavigationLink(String(localized: "settings_text_display")) {
                 TextDisplaySettingsView(settings: $displaySettings, onChange: onSettingsChanged)
             }
+            .accessibilityIdentifier("settingsTextDisplayLink")
             NavigationLink(String(localized: "settings_colors")) {
                 ColorSettingsView(settings: $displaySettings, onChange: onSettingsChanged)
             }
+            .accessibilityIdentifier("settingsColorsLink")
             Picker(
                 String(localized: "prefs_night_mode_title", defaultValue: "Night mode switching"),
                 selection: Binding(
