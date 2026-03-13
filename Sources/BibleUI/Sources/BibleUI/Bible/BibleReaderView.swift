@@ -89,8 +89,8 @@ func presentCompareView(book: String, chapter: Int, currentModuleName: String, s
  Side effects:
  - `onAppear` loads persisted preferences, wires TTS callbacks, restores speech settings, and
    registers synchronized-scrolling callbacks on `WindowManager`
- - XCUITest launch arguments can present the settings sheet immediately after initial state
-   hydration so automation can target nested settings flows without menu traversal
+ - XCUITest launch arguments can present the settings or import/export sheet immediately after
+   initial state hydration so automation can target nested flows without menu traversal
  - iOS `onAppear` and `onDisappear` start and stop tilt-to-scroll based on workspace settings
  - sheet dismissals reload behavior preferences or refresh installed-module lists where needed
  - toolbar toggles and helper actions mutate SwiftData-backed workspace/settings state and push
@@ -121,8 +121,11 @@ public struct BibleReaderView: View {
     /// Presents the consolidated settings screen.
     @State private var showSettings = false
 
-    /// Ensures the UI-test-only initial settings presentation runs at most once per view lifetime.
-    @State private var hasAppliedUITestInitialSettingsPresentation = false
+    /// Presents import and export management UI.
+    @State private var showImportExport = false
+
+    /// Ensures the UI-test-only initial modal presentation runs at most once per view lifetime.
+    @State private var hasAppliedUITestInitialPresentation = false
 
     /// Presents module download and install management.
     @State private var showDownloads = false
@@ -187,6 +190,9 @@ public struct BibleReaderView: View {
 
     /// Launch-argument override used by XCUITests to present Settings immediately on launch.
     private let uiTestOpensSettingsOnLaunch = ProcessInfo.processInfo.arguments.contains("UITEST_OPEN_SETTINGS")
+
+    /// Launch-argument override used by XCUITests to present Import and Export immediately on launch.
+    private let uiTestOpensImportExportOnLaunch = ProcessInfo.processInfo.arguments.contains("UITEST_OPEN_IMPORT_EXPORT")
 
     /// Stored Android-parity toolbar gesture mode for Bible/commentary buttons.
     @State private var toolbarButtonActionsMode =
@@ -496,9 +502,14 @@ public struct BibleReaderView: View {
                 }
             }
 
-            if uiTestOpensSettingsOnLaunch && !hasAppliedUITestInitialSettingsPresentation {
-                hasAppliedUITestInitialSettingsPresentation = true
-                showSettings = true
+            if !hasAppliedUITestInitialPresentation {
+                if uiTestOpensImportExportOnLaunch {
+                    hasAppliedUITestInitialPresentation = true
+                    showImportExport = true
+                } else if uiTestOpensSettingsOnLaunch {
+                    hasAppliedUITestInitialPresentation = true
+                    showSettings = true
+                }
             }
         }
         #if os(iOS)
@@ -582,6 +593,16 @@ public struct BibleReaderView: View {
                         Button(String(localized: "done")) { showSettings = false }
                     }
                 }
+            }
+        }
+        .sheet(isPresented: $showImportExport) {
+            NavigationStack {
+                ImportExportView()
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button(String(localized: "done")) { showImportExport = false }
+                        }
+                    }
             }
         }
         .onChange(of: showSettings) { _, isPresented in

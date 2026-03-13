@@ -200,24 +200,19 @@ final class AndBibleUITests: XCTestCase {
      Verifies that the full-backup export action drives Import and Export into share-sheet presentation.
      *
      * - Side effects:
-     *   - launches the app directly into Settings with the import/export row pre-scrolled into view
-     *   - navigates from Settings into Import and Export
+     *   - launches the app directly into Import and Export
      *   - triggers a full-backup export, which writes a temporary file and requests share-sheet
      *     presentation
      * - Failure modes:
-     *   - fails if the Import and Export link is missing or never becomes hittable
      *   - fails if the full-backup action is missing from the Import and Export screen
      *   - fails if the Import and Export screen never reports the share-sheet-presented state after
      *     export completes
      */
     func testSettingsImportExportFullBackupPresentsShareSheet() {
-        let app = makeApp(settingsTarget: "settingsImportExportLink")
+        let app = makeApp(openImportExportOnLaunch: true)
         app.launch()
 
-        openSettings(in: app, launchedDirectly: true)
-        tapSettingsElement("settingsImportExportLink", in: app)
-
-        let importExportScreen = requireElement("importExportScreen", in: app, timeout: 10)
+        let importExportScreen = openImportExport(in: app, launchedDirectly: true)
         XCTAssertTrue(importExportScreen.exists)
 
         let fullBackupButton = requireElement("importExportFullBackupButton", in: app, timeout: 10)
@@ -232,22 +227,17 @@ final class AndBibleUITests: XCTestCase {
      Verifies that the import action drives Import and Export into file-picker presentation.
      *
      * - Side effects:
-     *   - launches the app directly into Settings with the import/export row pre-scrolled into view
-     *   - navigates from Settings into Import and Export
+     *   - launches the app directly into Import and Export
      *   - triggers the backup import action, which requests document-picker presentation
      * - Failure modes:
-     *   - fails if the Import and Export link is missing or never becomes hittable
      *   - fails if the import action is missing from the Import and Export screen
      *   - fails if the Import and Export screen never reports the import-picker-presented state
      */
     func testSettingsImportExportImportPresentsFilePickerState() {
-        let app = makeApp(settingsTarget: "settingsImportExportLink")
+        let app = makeApp(openImportExportOnLaunch: true)
         app.launch()
 
-        openSettings(in: app, launchedDirectly: true)
-        tapSettingsElement("settingsImportExportLink", in: app)
-
-        let importExportScreen = requireElement("importExportScreen", in: app, timeout: 10)
+        let importExportScreen = openImportExport(in: app, launchedDirectly: true)
         XCTAssertTrue(importExportScreen.exists)
 
         let importButton = requireElement("importExportImportButton", in: app, timeout: 10)
@@ -341,23 +331,59 @@ final class AndBibleUITests: XCTestCase {
     /**
      Builds the configured XCUIApplication instance used by each smoke test.
      *
-     * - Parameter settingsTarget: Optional settings-row identifier that the app should open and
-     *   pre-scroll into view on launch.
+     * - Parameters:
+     *   - settingsTarget: Optional settings-row identifier that the app should open and pre-scroll
+     *     into view on launch.
+     *   - openImportExportOnLaunch: Whether the app should present Import and Export immediately on
+     *     launch.
      * - Returns: App handle configured with deterministic launch arguments for the smoke suite.
      * - Side effects:
      *   - appends a launch argument that disables the discrete-mode calculator gate during UI tests
      *   - when `settingsTarget` is supplied, configures the app to present Settings immediately and
      *     scroll the requested row into view
+     *   - when `openImportExportOnLaunch` is `true`, configures the app to present Import and
+     *     Export immediately after the reader hydrates
      * - Failure modes: This helper cannot fail.
      */
-    private func makeApp(settingsTarget: String? = nil) -> XCUIApplication {
+    private func makeApp(
+        settingsTarget: String? = nil,
+        openImportExportOnLaunch: Bool = false
+    ) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments += ["UITEST_DISABLE_CALCULATOR_GATE"]
         if let settingsTarget {
             app.launchArguments += ["UITEST_OPEN_SETTINGS"]
             app.launchEnvironment["UITEST_SETTINGS_SCROLL_TARGET"] = settingsTarget
         }
+        if openImportExportOnLaunch {
+            app.launchArguments += ["UITEST_OPEN_IMPORT_EXPORT"]
+        }
         return app
+    }
+
+    /**
+     Opens Import and Export either from Settings navigation or from a direct test-only launch path.
+     *
+     * - Parameters:
+     *   - app: Running application under test.
+     *   - launchedDirectly: Whether the app was launched straight into the Import and Export sheet.
+     * - Returns: The root accessibility-identified Import and Export screen element.
+     * - Side effects:
+     *   - when `launchedDirectly` is `false`, opens Settings and pushes the Import and Export screen
+     *   - when `launchedDirectly` is `true`, waits for the direct-launch Import and Export sheet to
+     *     render
+     * - Failure modes:
+     *   - fails when the Import and Export screen never appears
+     */
+    private func openImportExport(
+        in app: XCUIApplication,
+        launchedDirectly: Bool = false
+    ) -> XCUIElement {
+        if !launchedDirectly {
+            openSettings(in: app)
+            tapSettingsElement("settingsImportExportLink", in: app)
+        }
+        return requireElement("importExportScreen", in: app, timeout: 10)
     }
 
     /**

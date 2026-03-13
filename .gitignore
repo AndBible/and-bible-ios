@@ -5,6 +5,7 @@
 *.xcodeproj/project.xcworkspace/xcshareddata/IDEWorkspaceChecks.plist
 DerivedData/
 /.derivedData/
+/.derivedData-*/
 /.artifacts/
 build/
 *.moved-aside
