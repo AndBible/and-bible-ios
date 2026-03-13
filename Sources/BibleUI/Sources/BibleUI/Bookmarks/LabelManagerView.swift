@@ -45,6 +45,10 @@ public struct LabelManagerView: View {
     /// Optional callback used to open the selected label in StudyPad.
     var onOpenStudyPad: ((UUID) -> Void)?
 
+    /// Optional XCUITest-provided create-name override used to prefill the create-label alert.
+    private let uiTestCreateNameOverride = ProcessInfo.processInfo.environment["UITEST_LABEL_CREATE_NAME"]?
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+
     /**
      Creates the label manager and optionally enables StudyPad handoff actions.
 
@@ -83,6 +87,9 @@ public struct LabelManagerView: View {
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button(String(localized: "add"), systemImage: "plus") {
+                    if let uiTestCreateNameOverride, !uiTestCreateNameOverride.isEmpty {
+                        newLabelName = uiTestCreateNameOverride
+                    }
                     showNewLabel = true
                 }
                 .accessibilityIdentifier("labelManagerAddButton")
@@ -303,6 +310,13 @@ private struct LabelEditView: View {
     /// Dismiss action for the modal edit presentation.
     @Environment(\.dismiss) private var dismiss
 
+    /// Optional XCUITest-provided rename override applied once when the editor appears.
+    private let uiTestRenameNameOverride = ProcessInfo.processInfo.environment["UITEST_LABEL_RENAME_NAME"]?
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+
+    /// Guards the XCUITest rename prefill so it only mutates the bound label once per presentation.
+    @State private var hasAppliedUITestRenameOverride = false
+
     /**
      Canonical Android icon names offered for `Label.customIcon`.
 
@@ -433,6 +447,7 @@ private struct LabelEditView: View {
                 .accessibilityIdentifier("labelEditDoneButton")
             }
         }
+        .onAppear { applyUITestRenameOverrideIfNeeded() }
         .onDisappear { save() }
     }
 
@@ -445,5 +460,26 @@ private struct LabelEditView: View {
      */
     private func save() {
         try? modelContext.save()
+    }
+
+    /**
+     Applies one XCUITest-provided rename override when the editor first appears.
+
+     Side effects:
+     - mutates the bound label name and attempts to persist it when a non-empty override is present
+     - records that the override has already been applied for the current presentation
+
+     Failure modes:
+     - returns without mutation when no override is configured or the override was already applied
+     - save failures are swallowed by `try?`, so the editor does not surface persistence errors
+       directly
+     */
+    private func applyUITestRenameOverrideIfNeeded() {
+        guard !hasAppliedUITestRenameOverride else { return }
+        hasAppliedUITestRenameOverride = true
+
+        guard let uiTestRenameNameOverride, !uiTestRenameNameOverride.isEmpty else { return }
+        label.name = uiTestRenameNameOverride
+        save()
     }
 }

@@ -377,6 +377,8 @@ final class AndBibleUITests: XCTestCase {
         let app = makeApp(openLabelManagerOnLaunch: true)
         let originalName = "L1"
         let renamedName = "L2"
+        app.launchEnvironment["UITEST_LABEL_CREATE_NAME"] = originalName
+        app.launchEnvironment["UITEST_LABEL_RENAME_NAME"] = renamedName
         app.launch()
 
         XCTAssertTrue(openLabelManager(in: app, launchedDirectly: true).exists)
@@ -384,10 +386,6 @@ final class AndBibleUITests: XCTestCase {
         requireElement("labelManagerAddButton", in: app, timeout: 10).tap()
         let newLabelAlert = app.alerts.firstMatch
         XCTAssertTrue(newLabelAlert.waitForExistence(timeout: 10))
-        let newLabelField = newLabelAlert.textFields.firstMatch
-        XCTAssertTrue(newLabelField.waitForExistence(timeout: 10))
-        newLabelField.tap()
-        newLabelField.typeText(originalName)
         let createButton = newLabelAlert.buttons["Create"].firstMatch
         XCTAssertTrue(createButton.waitForExistence(timeout: 10))
         createButton.tap()
@@ -400,8 +398,6 @@ final class AndBibleUITests: XCTestCase {
         ).tap()
 
         XCTAssertTrue(requireElement("labelEditScreen", in: app, timeout: 10).exists)
-        let labelEditNameField = requireElement("labelEditNameField", in: app, timeout: 10)
-        replaceText(in: labelEditNameField, with: renamedName)
         requireElement("labelEditDoneButton", in: app, timeout: 10).tap()
 
         let renamedRow = requireLabelRow(named: renamedName, in: app, timeout: 10)
