@@ -833,25 +833,40 @@ public struct SettingsView: View {
             }
 
             Section(String(localized: "settings_data")) {
-                NavigationLink(String(localized: "downloads")) {
+                NavigationLink {
                     ModuleBrowserView()
+                } label: {
+                    Text(String(localized: "downloads"))
                 }
+                .accessibilityElement(children: .combine)
                 .accessibilityIdentifier("settingsDownloadsLink")
-                NavigationLink(String(localized: "repositories")) {
+                NavigationLink {
                     RepositoryManagerView()
+                } label: {
+                    Text(String(localized: "repositories"))
                 }
+                .accessibilityElement(children: .combine)
                 .accessibilityIdentifier("settingsRepositoriesLink")
-                NavigationLink(String(localized: "import_export")) {
+                NavigationLink {
                     ImportExportView()
+                } label: {
+                    Text(String(localized: "import_export"))
                 }
+                .accessibilityElement(children: .combine)
                 .accessibilityIdentifier("settingsImportExportLink")
-                NavigationLink(String(localized: "icloud_sync")) {
+                NavigationLink {
                     SyncSettingsView()
+                } label: {
+                    Text(String(localized: "icloud_sync"))
                 }
+                .accessibilityElement(children: .combine)
                 .accessibilityIdentifier("settingsSyncLink")
-                NavigationLink(String(localized: "labels")) {
+                NavigationLink {
                     LabelManagerView()
+                } label: {
+                    Text(String(localized: "labels"))
                 }
+                .accessibilityElement(children: .combine)
                 .accessibilityIdentifier("settingsLabelsLink")
             }
 
@@ -1028,13 +1043,19 @@ public struct SettingsView: View {
      */
     private var lookAndFeelSection: some View {
         Section(String(localized: "prefs_display_customization_cat", defaultValue: "Look & feel")) {
-            NavigationLink(String(localized: "settings_text_display")) {
+            NavigationLink {
                 TextDisplaySettingsView(settings: $displaySettings, onChange: onSettingsChanged)
+            } label: {
+                Text(String(localized: "settings_text_display"))
             }
+            .accessibilityElement(children: .combine)
             .accessibilityIdentifier("settingsTextDisplayLink")
-            NavigationLink(String(localized: "settings_colors")) {
+            NavigationLink {
                 ColorSettingsView(settings: $displaySettings, onChange: onSettingsChanged)
+            } label: {
+                Text(String(localized: "settings_colors"))
             }
+            .accessibilityElement(children: .combine)
             .accessibilityIdentifier("settingsColorsLink")
             Picker(
                 String(localized: "prefs_night_mode_title", defaultValue: "Night mode switching"),

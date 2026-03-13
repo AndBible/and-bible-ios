@@ -42,6 +42,26 @@
                ReferencedContainer = "container:AndBible.xcodeproj">
             </BuildableReference>
          </TestableReference>
+         <TestableReference
+            skipped = "NO"
+            parallelizable = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "A1B2C3D4E5F60718293A4B63"
+               BuildableName = "AndBibleUITests.xctest"
+               BlueprintName = "AndBibleUITests"
+               ReferencedContainer = "container:AndBible.xcodeproj">
+            </BuildableReference>
+            <MacroExpansion>
+               <BuildableReference
+                  BuildableIdentifier = "primary"
+                  BlueprintIdentifier = "105CB795998FF5CDD04BF6FF"
+                  BuildableName = "AndBible.app"
+                  BlueprintName = "AndBible"
+                  ReferencedContainer = "container:AndBible.xcodeproj">
+               </BuildableReference>
+            </MacroExpansion>
+         </TestableReference>
       </Testables>
       <CommandLineArguments>
       </CommandLineArguments>

@@ -161,6 +161,8 @@ struct AndBibleApp: App {
     @AppStorage(AppPreferenceKey.showCalculator.rawValue) private var showCalculator = false
     /// Temporary unlock for the current session — does NOT change the persisted setting.
     @State private var isUnlocked = false
+    /// Launch-argument override used by XCUITests to bypass the calculator gate.
+    private let uiTestDisablesCalculatorGate = ProcessInfo.processInfo.arguments.contains("UITEST_DISABLE_CALCULATOR_GATE")
 
     /**
      UserDefaults key for the iCloud sync toggle.
@@ -302,7 +304,7 @@ struct AndBibleApp: App {
     var body: some Scene {
         WindowGroup {
             Group {
-                if showCalculator && !isUnlocked {
+                if showCalculator && !isUnlocked && !uiTestDisablesCalculatorGate {
                     CalculatorView {
                         withAnimation {
                             isUnlocked = true

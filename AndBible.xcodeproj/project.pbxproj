@@ -13,6 +13,7 @@
 		2107085A8D114A50F42310B0 /* BibleCore in Frameworks */ = {isa = PBXBuildFile; productRef = FDFDEF929B7A5ACE42C2B819 /* BibleCore */; };
 		43956CB017A08C141BDA48A8 /* BibleCore in Frameworks */ = {isa = PBXBuildFile; productRef = 3C9AB5341FEDFFF29A3ADAD5 /* BibleCore */; };
 		605562C8D06E0B4B1A1C232B /* AndBibleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC344294A2096586A9E7F9C1 /* AndBibleTests.swift */; };
+		A1B2C3D4E5F60718293A4B5C /* AndBibleUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B5E /* AndBibleUITests.swift */; };
 		8A7E540F7B4E4D0C9E1A2B3C /* WorkspaceSyncRestoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B8F65108C5F5E1DAF2B3C4D /* WorkspaceSyncRestoreTests.swift */; };
 		64688F48FF7396937F81D0B5 /* SwordSetup.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1CA144AB77AEE518F1465DCC /* SwordSetup.swift */; };
 		793CB31DA9E0B8F6F4AC7677 /* AndBibleApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB1FB2406B7E9DD316E296F7 /* AndBibleApp.swift */; };
@@ -27,6 +28,16 @@
 		5126013EC1173F5B6609881C /* Localizable.strings in Resources */ = {isa = PBXBuildFile; fileRef = 451FFBBE453EACF1547FF4B6 /* Localizable.strings */; };
 /* End PBXBuildFile section */
 
+/* Begin PBXContainerItemProxy section */
+		A1B2C3D4E5F60718293A4B64 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 6E0E23974B08DAE9D1AB989D /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 105CB795998FF5CDD04BF6FF;
+			remoteInfo = AndBible;
+		};
+/* End PBXContainerItemProxy section */
+
 /* Begin PBXFileReference section */
 		0ABFA8AEBF4A6CA89CDD4AF5 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		18BBEF9CC00D16220C3B43AB /* sword */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Resources/sword; sourceTree = "<group>"; };
@@ -37,6 +48,8 @@
 		AA0B1C2D3E4F506172839408 /* Secrets.example.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = "Secrets.example.xcconfig"; sourceTree = "<group>"; };
 		6AC3AEB9ADE0BA981610EA58 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		6F16572A9AD36BA967BA4C23 /* AndBibleTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = AndBibleTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		A1B2C3D4E5F60718293A4B5D /* AndBibleUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = AndBibleUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		A1B2C3D4E5F60718293A4B5E /* AndBibleUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AndBibleUITests.swift; sourceTree = "<group>"; };
 		8174AF1F3D15BAFB4EB66A1E /* AndBible.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = AndBible.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		9B8F65108C5F5E1DAF2B3C4D /* WorkspaceSyncRestoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceSyncRestoreTests.swift; sourceTree = "<group>"; };
 		AB1FB2406B7E9DD316E296F7 /* AndBibleApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AndBibleApp.swift; sourceTree = "<group>"; };
@@ -115,6 +128,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		A1B2C3D4E5F60718293A4B60 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -151,8 +171,17 @@
 			children = (
 				8174AF1F3D15BAFB4EB66A1E /* AndBible.app */,
 				6F16572A9AD36BA967BA4C23 /* AndBibleTests.xctest */,
+				A1B2C3D4E5F60718293A4B5D /* AndBibleUITests.xctest */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		A1B2C3D4E5F60718293A4B5F /* AndBibleUITests */ = {
+			isa = PBXGroup;
+			children = (
+				A1B2C3D4E5F60718293A4B5E /* AndBibleUITests.swift */,
+			);
+			path = AndBibleUITests;
 			sourceTree = "<group>";
 		};
 		B5A39C18FE90DC3846D8F361 /* AndBibleTests */ = {
@@ -178,6 +207,7 @@
 				AA0B1C2D3E4F506172839405 /* Config */,
 				7DFD5395D5CEF669AB7C5B80 /* AndBible */,
 				B5A39C18FE90DC3846D8F361 /* AndBibleTests */,
+				A1B2C3D4E5F60718293A4B5F /* AndBibleUITests */,
 				B9FA767A0E84719CAFF44F06 /* Packages */,
 				8302045BDC9ADBE777B65BF3 /* Products */,
 			);
@@ -229,6 +259,26 @@
 			productName = AndBibleTests;
 			productReference = 6F16572A9AD36BA967BA4C23 /* AndBibleTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		A1B2C3D4E5F60718293A4B63 /* AndBibleUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A1B2C3D4E5F60718293A4B68 /* Build configuration list for PBXNativeTarget "AndBibleUITests" */;
+			buildPhases = (
+				A1B2C3D4E5F60718293A4B61 /* Sources */,
+				A1B2C3D4E5F60718293A4B60 /* Frameworks */,
+				A1B2C3D4E5F60718293A4B62 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				A1B2C3D4E5F60718293A4B65 /* PBXTargetDependency */,
+			);
+			name = AndBibleUITests;
+			packageProductDependencies = (
+			);
+			productName = AndBibleUITests;
+			productReference = A1B2C3D4E5F60718293A4B5D /* AndBibleUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
 		};
 /* End PBXNativeTarget section */
 
@@ -308,6 +358,7 @@
 			targets = (
 				105CB795998FF5CDD04BF6FF /* AndBible */,
 				BFE035C24CF3C68C3D31B342 /* AndBibleTests */,
+				A1B2C3D4E5F60718293A4B63 /* AndBibleUITests */,
 			);
 		};
 /* End PBXProject section */
@@ -326,6 +377,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		A1B2C3D4E5F60718293A4B62 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
@@ -335,6 +393,14 @@
 			files = (
 				605562C8D06E0B4B1A1C232B /* AndBibleTests.swift in Sources */,
 				8A7E540F7B4E4D0C9E1A2B3C /* WorkspaceSyncRestoreTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A1B2C3D4E5F60718293A4B61 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A1B2C3D4E5F60718293A4B5C /* AndBibleUITests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -349,6 +415,14 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		A1B2C3D4E5F60718293A4B65 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 105CB795998FF5CDD04BF6FF /* AndBible */;
+			targetProxy = A1B2C3D4E5F60718293A4B64 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin PBXVariantGroup section */
 		451FFBBE453EACF1547FF4B6 /* Localizable.strings */ = {
@@ -611,6 +685,42 @@
 			};
 			name = Release;
 		};
+		A1B2C3D4E5F60718293A4B66 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				PRODUCT_BUNDLE_IDENTIFIER = org.andbible.AndBibleUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.9;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = AndBible;
+			};
+			name = Debug;
+		};
+		A1B2C3D4E5F60718293A4B67 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				PRODUCT_BUNDLE_IDENTIFIER = org.andbible.AndBibleUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.9;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = AndBible;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -637,6 +747,15 @@
 			buildConfigurations = (
 				2C1FD067F5C669FF7EAEE612 /* Debug */,
 				D5F40546F1ED81133FFD89C6 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		A1B2C3D4E5F60718293A4B68 /* Build configuration list for PBXNativeTarget "AndBibleUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A1B2C3D4E5F60718293A4B66 /* Debug */,
+				A1B2C3D4E5F60718293A4B67 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;
