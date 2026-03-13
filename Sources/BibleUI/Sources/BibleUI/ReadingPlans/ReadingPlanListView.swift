@@ -73,6 +73,7 @@ public struct ReadingPlanListView: View {
                 Button(String(localized: "reading_plan_start"), systemImage: "plus") {
                     showAvailablePlans = true
                 }
+                .accessibilityIdentifier("readingPlanStartButton")
             }
         }
         .sheet(isPresented: $showAvailablePlans) {
@@ -100,6 +101,9 @@ public struct ReadingPlanListView: View {
                         } label: {
                             ActivePlanRow(plan: plan)
                         }
+                        .accessibilityIdentifier("readingPlanActivePlanLink")
+                        .accessibilityLabel(plan.planName)
+                        .accessibilityValue(plan.planCode)
                         .swipeActions(edge: .trailing) {
                             Button(String(localized: "delete"), role: .destructive) {
                                 modelContext.delete(plan)
@@ -252,6 +256,9 @@ private struct AvailablePlansView: View {
                         }
                         .padding(.vertical, 4)
                     }
+                    .accessibilityIdentifier("readingPlanTemplateButton")
+                    .accessibilityLabel(template.name)
+                    .accessibilityValue(template.code)
                 }
             } header: {
                 Text(String(localized: "reading_plan_choose"))
@@ -277,6 +284,7 @@ private struct AvailablePlansView: View {
                 }
             }
         }
+        .accessibilityIdentifier("availablePlansScreen")
         .navigationTitle(String(localized: "reading_plan_available"))
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)

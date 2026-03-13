@@ -204,6 +204,9 @@ public struct BibleReaderView: View {
     /// Launch-argument override used by XCUITests to present Label Manager immediately on launch.
     private let uiTestOpensLabelManagerOnLaunch = ProcessInfo.processInfo.arguments.contains("UITEST_OPEN_LABEL_MANAGER")
 
+    /// Launch-argument override used by XCUITests to present Reading Plans immediately on launch.
+    private let uiTestOpensReadingPlansOnLaunch = ProcessInfo.processInfo.arguments.contains("UITEST_OPEN_READING_PLANS")
+
     /// Launch-argument override used by XCUITests to present Workspaces immediately on launch.
     private let uiTestOpensWorkspacesOnLaunch = ProcessInfo.processInfo.arguments.contains("UITEST_OPEN_WORKSPACES")
 
@@ -525,6 +528,10 @@ public struct BibleReaderView: View {
                 } else if uiTestOpensLabelManagerOnLaunch {
                     hasAppliedUITestInitialPresentation = true
                     showLabelManager = true
+                } else if uiTestOpensReadingPlansOnLaunch {
+                    hasAppliedUITestInitialPresentation = true
+                    resetReadingPlansForUITests()
+                    showReadingPlans = true
                 } else if uiTestOpensWorkspacesOnLaunch {
                     hasAppliedUITestInitialPresentation = true
                     showWorkspaces = true
@@ -2074,6 +2081,26 @@ public struct BibleReaderView: View {
         case .none:
             return
         }
+    }
+
+    /**
+     Clears persisted reading plans before a direct XCUITest reading-plan workflow.
+     *
+     * - Side effects:
+     *   - fetches all persisted `ReadingPlan` rows from SwiftData
+     *   - deletes each fetched plan, relying on cascade rules for child `ReadingPlanDay` rows
+     *   - saves the cleared state back to SwiftData
+     * - Failure modes:
+     *   - returns without mutation when the fetch fails
+     *   - silently discards save failures because the reset is only used for test setup
+     */
+    private func resetReadingPlansForUITests() {
+        let descriptor = FetchDescriptor<ReadingPlan>()
+        guard let plans = try? modelContext.fetch(descriptor) else { return }
+        for plan in plans {
+            modelContext.delete(plan)
+        }
+        try? modelContext.save()
     }
 
     #if os(iOS)

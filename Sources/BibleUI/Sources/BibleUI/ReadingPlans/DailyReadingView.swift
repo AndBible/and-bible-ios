@@ -73,8 +73,10 @@ public struct DailyReadingView: View {
                     }
                     .padding()
                 }
+                .accessibilityIdentifier("dailyReadingScreen")
             } else {
                 ProgressView(String(localized: "daily_reading_loading"))
+                    .accessibilityIdentifier("dailyReadingScreen")
             }
         }
         .navigationTitle(plan?.planName ?? String(localized: "daily_reading"))
@@ -135,6 +137,8 @@ public struct DailyReadingView: View {
 
             Text("Day \(currentDayIndex + 1)")
                 .font(.headline)
+                .accessibilityIdentifier("dailyReadingCurrentDayLabel")
+                .accessibilityValue("\(currentDayIndex + 1)")
 
             Spacer()
 
@@ -200,6 +204,7 @@ public struct DailyReadingView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .padding(.top, 4)
+                .accessibilityIdentifier("dailyReadingMarkAsReadButton")
             } else {
                 Button {
                     unmarkDay(day)
@@ -212,6 +217,7 @@ public struct DailyReadingView: View {
                 }
                 .buttonStyle(.bordered)
                 .padding(.top, 4)
+                .accessibilityIdentifier("dailyReadingUnmarkButton")
             }
         }
         .padding()

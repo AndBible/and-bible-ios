@@ -65,11 +65,42 @@ final class AndBibleUITests: XCTestCase {
         let app = makeApp()
         app.launch()
 
-        let moreMenuButton = requireElement("readerMoreMenuButton", in: app)
-        moreMenuButton.tap()
-        requireElement("readerOpenReadingPlansAction", in: app, timeout: 5).tap()
+        XCTAssertTrue(openReadingPlans(in: app).exists)
+    }
 
-        XCTAssertTrue(requireElement("readingPlanListScreen", in: app, timeout: 10).exists)
+    /**
+     Verifies that a built-in reading plan can be started and advanced into day two.
+     *
+     * - Side effects:
+     *   - launches the app directly into Reading Plans with existing plans reset for determinism
+     *   - starts the first visible built-in template, opens the new active plan, and marks the
+     *     first day complete
+     * - Failure modes:
+     *   - fails if the Reading Plans direct-launch route never appears
+     *   - fails if the available-plan entry, active-plan link, or daily-reading controls are
+     *     missing
+     *   - fails if marking day one complete does not advance the daily-reading state to day two
+     */
+    func testReadingPlansStartPlanAndAdvanceDay() {
+        let app = makeApp(openReadingPlansOnLaunch: true)
+        app.launch()
+
+        XCTAssertTrue(openReadingPlans(in: app, launchedDirectly: true).exists)
+        requireElement("readingPlanStartButton", in: app, timeout: 10).tap()
+        XCTAssertTrue(requireElement("availablePlansScreen", in: app, timeout: 10).exists)
+
+        requireElement("readingPlanTemplateButton", in: app, timeout: 10).tap()
+        requireElement("readingPlanActivePlanLink", in: app, timeout: 10).tap()
+
+        XCTAssertTrue(requireElement("dailyReadingScreen", in: app, timeout: 10).exists)
+        let currentDay = requireElement("dailyReadingCurrentDayLabel", in: app, timeout: 10)
+        XCTAssertEqual(currentDay.value as? String, "1")
+
+        requireElement("dailyReadingMarkAsReadButton", in: app, timeout: 10).tap()
+
+        let advancedDayPredicate = NSPredicate(format: "value == %@", "2")
+        expectation(for: advancedDayPredicate, evaluatedWith: currentDay)
+        waitForExpectations(timeout: 10)
     }
 
     /**
@@ -517,6 +548,8 @@ final class AndBibleUITests: XCTestCase {
      *     launch.
      *   - openLabelManagerOnLaunch: Whether the app should present Label Manager immediately on
      *     launch.
+     *   - openReadingPlansOnLaunch: Whether the app should present Reading Plans immediately on
+     *     launch.
      *   - openWorkspacesOnLaunch: Whether the app should present Workspaces immediately on launch.
      * - Returns: App handle configured with deterministic launch arguments for the smoke suite.
      * - Side effects:
@@ -529,6 +562,8 @@ final class AndBibleUITests: XCTestCase {
      *     Export immediately after the reader hydrates
      *   - when `openLabelManagerOnLaunch` is `true`, configures the app to present Label Manager
      *     immediately after the reader hydrates
+     *   - when `openReadingPlansOnLaunch` is `true`, configures the app to present Reading Plans
+     *     immediately after the reader hydrates
      *   - when `openWorkspacesOnLaunch` is `true`, configures the app to present Workspaces
      *     immediately after the reader hydrates
      * - Failure modes: This helper cannot fail.
@@ -538,6 +573,7 @@ final class AndBibleUITests: XCTestCase {
         openTextDisplayOnLaunch: Bool = false,
         openImportExportOnLaunch: Bool = false,
         openLabelManagerOnLaunch: Bool = false,
+        openReadingPlansOnLaunch: Bool = false,
         openWorkspacesOnLaunch: Bool = false
     ) -> XCUIApplication {
         let app = XCUIApplication()
@@ -555,10 +591,41 @@ final class AndBibleUITests: XCTestCase {
         if openLabelManagerOnLaunch {
             app.launchArguments += ["UITEST_OPEN_LABEL_MANAGER"]
         }
+        if openReadingPlansOnLaunch {
+            app.launchArguments += ["UITEST_OPEN_READING_PLANS"]
+        }
         if openWorkspacesOnLaunch {
             app.launchArguments += ["UITEST_OPEN_WORKSPACES"]
         }
         return app
+    }
+
+    /**
+     Opens Reading Plans either from the reader overflow menu or from a direct test-only launch
+     path.
+     *
+     * - Parameters:
+     *   - app: Running application under test.
+     *   - launchedDirectly: Whether the app was launched straight into the Reading Plans sheet.
+     * - Returns: The root accessibility-identified Reading Plans screen element.
+     * - Side effects:
+     *   - when `launchedDirectly` is `false`, opens the reader overflow menu and pushes Reading
+     *     Plans
+     *   - when `launchedDirectly` is `true`, waits for the direct-launch Reading Plans sheet to
+     *     render
+     * - Failure modes:
+     *   - fails when the Reading Plans screen never appears
+     */
+    private func openReadingPlans(
+        in app: XCUIApplication,
+        launchedDirectly: Bool = false
+    ) -> XCUIElement {
+        if !launchedDirectly {
+            let moreMenuButton = requireElement("readerMoreMenuButton", in: app)
+            moreMenuButton.tap()
+            requireElement("readerOpenReadingPlansAction", in: app, timeout: 5).tap()
+        }
+        return requireElement("readingPlanListScreen", in: app, timeout: 10)
     }
 
     /**
