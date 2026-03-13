@@ -197,6 +197,26 @@ final class AndBibleUITests: XCTestCase {
     }
 
     /**
+     Verifies that the label manager can be opened from Settings.
+     *
+     * - Side effects:
+     *   - launches the app with the calculator gate disabled for test determinism
+     *   - navigates from the reader shell into Settings and then into the label manager
+     * - Failure modes:
+     *   - fails if the Settings labels link is missing or cannot be reached by scrolling
+     *   - fails if the label manager screen does not render after navigation completes
+     */
+    func testSettingsLabelsLinkOpensLabelManager() {
+        let app = makeApp()
+        app.launch()
+
+        openSettings(in: app)
+        tapScrollableElement("settingsLabelsLink", fallbackLabel: "Labels", in: app)
+
+        XCTAssertTrue(requireElement("labelManagerScreen", in: app, timeout: 10).exists)
+    }
+
+    /**
      Verifies that the sync settings screen can be opened from Settings.
      *
      * - Side effects:

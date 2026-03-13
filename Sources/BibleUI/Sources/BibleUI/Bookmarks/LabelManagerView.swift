@@ -61,7 +61,7 @@ public struct LabelManagerView: View {
      Builds the label list, create-label alert, and edit-label sheet presentation flow.
      */
     public var body: some View {
-        Group {
+        ZStack {
             if userLabels.isEmpty {
                 ContentUnavailableView(
                     String(localized: "no_labels"),
@@ -72,6 +72,7 @@ public struct LabelManagerView: View {
                 labelList
             }
         }
+        .accessibilityIdentifier("labelManagerScreen")
         .navigationTitle(String(localized: "labels"))
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
