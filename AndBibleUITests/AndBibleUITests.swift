@@ -285,6 +285,41 @@ final class AndBibleUITests: XCTestCase {
     }
 
     /**
+     Verifies that clearing history removes the seeded row and keeps History empty after reopen.
+     *
+     * - Side effects:
+     *   - launches the app with one deterministic persisted history row while staying on the real
+     *     reader shell
+     *   - opens History from the actual reader overflow menu
+     *   - clears the visible history, dismisses the screen, then reopens History to verify the
+     *     persisted row remains deleted
+     * - Failure modes:
+     *   - fails if the reader shell, History action, clear button, or empty state never appears
+     *   - fails if the seeded row still exists after clearing or if reopening History restores the
+     *     deleted row
+     */
+    func testHistoryClearRemovesSeededRowAcrossReopen() {
+        let app = makeApp(seedHistoryWorkflowOnLaunch: true)
+        app.launch()
+
+        openHistoryFromReaderMenu(in: app)
+        let historyRow = app.buttons["historyRow::Exod_2_1"].firstMatch
+        XCTAssertTrue(historyRow.waitForExistence(timeout: 10), "Expected seeded history row button to exist.")
+
+        requireElement("historyClearButton", in: app, timeout: 10).tap()
+        let deletedPredicate = NSPredicate(format: "exists == false")
+        expectation(for: deletedPredicate, evaluatedWith: historyRow)
+        waitForExpectations(timeout: 10)
+        XCTAssertFalse(app.buttons["historyClearButton"].firstMatch.exists)
+
+        requireElement("historyDoneButton", in: app, timeout: 10).tap()
+        openHistoryFromReaderMenu(in: app)
+
+        XCTAssertFalse(app.buttons["historyRow::Exod_2_1"].firstMatch.exists)
+        XCTAssertFalse(app.buttons["historyClearButton"].firstMatch.exists)
+    }
+
+    /**
      Verifies that label assignment can be reached from the real bookmark-list path and still
      toggle the seeded label state.
      *
@@ -1068,6 +1103,25 @@ final class AndBibleUITests: XCTestCase {
         _ = requireElement("bookmarkListScreen", in: app, timeout: 10)
         requireElement("bookmarkListEditLabelsButton::Genesis_1_1", in: app, timeout: 10).tap()
         return requireElement("labelAssignmentScreen", in: app, timeout: 10)
+    }
+
+    /**
+     Opens History from the real reader overflow menu and waits for the screen root to render.
+     *
+     * - Parameter app: Running application whose reader shell should present History.
+     * - Returns: The root accessibility-identified History screen element.
+     * - Side effects:
+     *   - opens the reader overflow menu
+     *   - presents the History sheet from the actual reader action surface
+     * - Failure modes:
+     *   - fails if the reader menu button, History action, or History screen root never appears
+     */
+    @discardableResult
+    private func openHistoryFromReaderMenu(in app: XCUIApplication) -> XCUIElement {
+        let moreMenuButton = requireReaderMoreMenuButton(in: app)
+        moreMenuButton.tap()
+        requireElement("readerOpenHistoryAction", in: app, timeout: 5).tap()
+        return requireElement("historyScreen", in: app, timeout: 10)
     }
 
     /**

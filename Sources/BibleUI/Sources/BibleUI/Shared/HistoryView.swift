@@ -67,6 +67,7 @@ public struct HistoryView: View {
                     systemImage: "clock",
                     description: Text(String(localized: "history_no_history_description"))
                 )
+                .accessibilityIdentifier("historyEmptyState")
             } else {
                 List {
                     ForEach(history) { item in
@@ -104,12 +105,14 @@ public struct HistoryView: View {
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
                 Button(String(localized: "done")) { dismiss() }
+                    .accessibilityIdentifier("historyDoneButton")
             }
             if !history.isEmpty {
                 ToolbarItem(placement: .destructiveAction) {
                     Button(String(localized: "clear"), role: .destructive) {
                         clearHistory()
                     }
+                    .accessibilityIdentifier("historyClearButton")
                 }
             }
         }
