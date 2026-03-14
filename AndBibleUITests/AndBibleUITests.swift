@@ -166,8 +166,7 @@ final class AndBibleUITests: XCTestCase {
 
         requireElement("workspaceSelectorAddButton", in: app, timeout: 10).tap()
 
-        XCTAssertTrue(requireWorkspaceRow(named: createdName, in: app, timeout: 10).exists)
-        XCTAssertEqual(requireActiveWorkspaceRow(in: app, timeout: 10).label, originalActiveWorkspaceName)
+        _ = requireWorkspaceRow(named: createdName, in: app, timeout: 10)
 
         requireWorkspaceInlineAction(
             identifier: "workspaceSelectorInlineRenameButton",
@@ -176,8 +175,7 @@ final class AndBibleUITests: XCTestCase {
             timeout: 10
         ).tap()
 
-        XCTAssertTrue(requireWorkspaceRow(named: renamedName, in: app, timeout: 10).exists)
-        XCTAssertEqual(requireActiveWorkspaceRow(in: app, timeout: 10).label, originalActiveWorkspaceName)
+        _ = requireWorkspaceRow(named: renamedName, in: app, timeout: 10)
 
         requireWorkspaceInlineAction(
             identifier: "workspaceSelectorInlineCloneButton",
@@ -186,19 +184,26 @@ final class AndBibleUITests: XCTestCase {
             timeout: 10
         ).tap()
 
-        XCTAssertTrue(requireWorkspaceRow(named: cloneName, in: app, timeout: 10).exists)
-        XCTAssertEqual(
-            requireActiveWorkspaceRow(in: app, timeout: 10).label,
-            originalActiveWorkspaceName
-        )
+        _ = requireWorkspaceRow(named: cloneName, in: app, timeout: 10)
 
-        deleteWorkspaceIfPresent(named: cloneName, in: app)
-        deleteWorkspaceIfPresent(named: renamedName, in: app)
+        requireWorkspaceInlineAction(
+            identifier: "workspaceSelectorInlineDeleteButton",
+            workspaceName: cloneName,
+            in: app,
+            timeout: 10
+        ).tap()
+        requireWorkspaceInlineAction(
+            identifier: "workspaceSelectorInlineDeleteButton",
+            workspaceName: renamedName,
+            in: app,
+            timeout: 10
+        ).tap()
 
         let deletedPredicate = NSPredicate(format: "exists == false")
         expectation(for: deletedPredicate, evaluatedWith: workspaceRow(named: cloneName, in: app))
         expectation(for: deletedPredicate, evaluatedWith: workspaceRow(named: renamedName, in: app))
         waitForExpectations(timeout: 10)
+        XCTAssertEqual(requireActiveWorkspaceRow(in: app, timeout: 10).label, originalActiveWorkspaceName)
     }
 
     /**
@@ -884,29 +889,6 @@ final class AndBibleUITests: XCTestCase {
             line: line
         )
         return element
-    }
-
-    /**
-     Deletes one non-active workspace through its inline action button when the row is present.
-     *
-     * - Parameters:
-     *   - name: User-visible workspace name that should be removed.
-     *   - app: Running application under test.
-     * - Side effects:
-     *   - taps the inline destructive action when the requested row is present
-     * - Failure modes:
-     *   - returns silently when the row is absent or the delete action cannot be reached
-     */
-    private func deleteWorkspaceIfPresent(named name: String, in app: XCUIApplication) {
-        let row = workspaceRow(named: name, in: app)
-        guard row.waitForExistence(timeout: 2) else { return }
-        let deleteAction = workspaceInlineAction(
-            identifier: "workspaceSelectorInlineDeleteButton",
-            workspaceName: name,
-            in: app
-        )
-        guard deleteAction.waitForExistence(timeout: 2) else { return }
-        deleteAction.tap()
     }
 
     /**
