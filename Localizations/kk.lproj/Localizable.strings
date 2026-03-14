@@ -482,7 +482,7 @@
 "sync_adapter" = "Синхрондау сервері";
 "sync_adapter_summary" = "Ағымдағы: %@";
 "adapters_google_drive" = "Google Drive";
-"adapters_next_cloud" = "Келесі бұлт";
+"adapters_next_cloud" = "NextCloud";
 "auth_server_uri" = "Server URL";
 "auth_username" = "Пайдаланушы аты";
 "auth_password" = "Құпия сөз";

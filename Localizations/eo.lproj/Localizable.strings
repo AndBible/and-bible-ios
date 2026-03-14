@@ -482,7 +482,7 @@
 "sync_adapter" = "Servo de samtempigo";
 "sync_adapter_summary" = "Nuna: %@";
 "adapters_google_drive" = "Google Drive";
-"adapters_next_cloud" = "Nextcloud";
+"adapters_next_cloud" = "NextCloud";
 "auth_server_uri" = "Retadreso de servilo";
 "auth_username" = "Uzantnomo";
 "auth_password" = "Pasvorto";

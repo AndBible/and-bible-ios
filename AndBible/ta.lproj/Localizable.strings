@@ -511,7 +511,7 @@
 "sync_adapter" = "ஒத்திசைவு பின்தளம்";
 "sync_adapter_summary" = "தற்போதையது: %@";
 "adapters_google_drive" = "Google Drive";
-"adapters_next_cloud" = "Next Cloud";
+"adapters_next_cloud" = "NextCloud";
 "auth_server_uri" = "Server URL";
 "auth_username" = "பயனர் பெயர்";
 "auth_password" = "கடவுச்சொல்";

@@ -511,7 +511,7 @@
 "sync_adapter" = "同步功能后端";
 "sync_adapter_summary" = "当前：%@";
 "adapters_google_drive" = "Google网盘";
-"adapters_next_cloud" = "下一个数据云";
+"adapters_next_cloud" = "NextCloud";
 "auth_server_uri" = "Server URL";
 "auth_username" = "用户名";
 "auth_password" = "密码";

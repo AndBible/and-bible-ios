@@ -511,7 +511,7 @@
 "sync_adapter" = "Usklađivanje Server strane";
 "sync_adapter_summary" = "Trenutni: %@";
 "adapters_google_drive" = "Google Drive";
-"adapters_next_cloud" = "Next Cloud";
+"adapters_next_cloud" = "NextCloud";
 "auth_server_uri" = "Server URL";
 "auth_username" = "Korisničko ime";
 "auth_password" = "Lozinka";

@@ -482,7 +482,7 @@
 "sync_adapter" = "সিঙ্ক্রোনাইজেশন ব্যাকএন্ড";
 "sync_adapter_summary" = "বর্তমান:%@";
 "adapters_google_drive" = "গুগল ড্রাইভ";
-"adapters_next_cloud" = "পরবর্তী ক্লাউড";
+"adapters_next_cloud" = "NextCloud";
 "auth_server_uri" = "Server URL";
 "auth_username" = "ব্যবহারকারীর নাম";
 "auth_password" = "পাসওয়ার্ড";

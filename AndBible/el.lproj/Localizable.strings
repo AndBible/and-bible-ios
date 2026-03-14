@@ -511,7 +511,7 @@
 "sync_adapter" = "Συγχρονισμός παρασκηνίου";
 "sync_adapter_summary" = "Τρέχον : %@";
 "adapters_google_drive" = "Google Drive";
-"adapters_next_cloud" = "Next Cloud";
+"adapters_next_cloud" = "NextCloud";
 "auth_server_uri" = "URL Διακομιστή";
 "auth_username" = "Όνομα χρήστη";
 "auth_password" = "Κωδικός";

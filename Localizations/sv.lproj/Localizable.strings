@@ -482,7 +482,7 @@
 "sync_adapter" = "Bakgrundstjänst för synkronisering";
 "sync_adapter_summary" = "Nuvarande: %@";
 "adapters_google_drive" = "Google Drive";
-"adapters_next_cloud" = "Nextcloud";
+"adapters_next_cloud" = "NextCloud";
 "auth_server_uri" = "Serverns URL";
 "auth_username" = "Användarnamn";
 "auth_password" = "Lösenord";

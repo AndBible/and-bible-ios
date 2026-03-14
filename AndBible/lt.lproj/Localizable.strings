@@ -511,7 +511,7 @@
 "sync_adapter" = "Sinchronizavimo vidinė sąsaja";
 "sync_adapter_summary" = "Dabartinis: %@";
 "adapters_google_drive" = "„Google“ diskas";
-"adapters_next_cloud" = "Nextcloud";
+"adapters_next_cloud" = "NextCloud";
 "auth_server_uri" = "Serverio URL";
 "auth_username" = "Naudotojo vardas";
 "auth_password" = "Slaptažodis";

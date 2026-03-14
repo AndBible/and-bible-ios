@@ -511,7 +511,7 @@
 "sync_adapter" = "Сервер синхронізації";
 "sync_adapter_summary" = "Поточний: %@";
 "adapters_google_drive" = "Диск Google";
-"adapters_next_cloud" = "Наступна хмара";
+"adapters_next_cloud" = "NextCloud";
 "auth_server_uri" = "Server URL";
 "auth_username" = "Ім'я користувача";
 "auth_password" = "Пароль";

@@ -511,7 +511,7 @@
 "sync_adapter" = "Sinhronizacija zaledja";
 "sync_adapter_summary" = "Trenutno:%@";
 "adapters_google_drive" = "Google Drive";
-"adapters_next_cloud" = "Naslednji oblak";
+"adapters_next_cloud" = "NextCloud";
 "auth_server_uri" = "URL strežnika";
 "auth_username" = "Uporabniško ime";
 "auth_password" = "Geslo";

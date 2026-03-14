@@ -511,7 +511,7 @@
 "sync_adapter" = "Усклађивање Задњег краја";
 "sync_adapter_summary" = "Тренутни: %@";
 "adapters_google_drive" = "Google Drive";
-"adapters_next_cloud" = "Next Cloud";
+"adapters_next_cloud" = "NextCloud";
 "auth_server_uri" = "Server URL";
 "auth_username" = "Корисничко име";
 "auth_password" = "Лозинка";

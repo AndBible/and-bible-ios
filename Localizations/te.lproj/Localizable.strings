@@ -482,7 +482,7 @@
 "sync_adapter" = "సమకాలీకరణ బ్యాకెండ్";
 "sync_adapter_summary" = "ప్రస్తుత: %@";
 "adapters_google_drive" = "గూగుల్ డ్రైవ్";
-"adapters_next_cloud" = "నెక్స్ట్ క్లౌడ్";
+"adapters_next_cloud" = "NextCloud";
 "auth_server_uri" = "Server URL";
 "auth_username" = "వినియోగదారు పేరు";
 "auth_password" = "పాస్వర్డ్";

@@ -482,7 +482,7 @@
 "sync_adapter" = "Serviciu de sincronizare";
 "sync_adapter_summary" = "Actual: %@";
 "adapters_google_drive" = "Google Drive";
-"adapters_next_cloud" = "Next Cloud";
+"adapters_next_cloud" = "NextCloud";
 "auth_server_uri" = "URL-ul serverului";
 "auth_username" = "Nume de utilizator";
 "auth_password" = "Parola";

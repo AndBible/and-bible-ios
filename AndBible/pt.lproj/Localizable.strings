@@ -511,7 +511,7 @@
 "sync_adapter" = "Backend de sincronização";
 "sync_adapter_summary" = "Atual: %@";
 "adapters_google_drive" = "Google Drive";
-"adapters_next_cloud" = "Nextcloud";
+"adapters_next_cloud" = "NextCloud";
 "auth_server_uri" = "URL do servidor";
 "auth_username" = "Nome de utilizador";
 "auth_password" = "Palavra-passe";
