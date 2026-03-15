@@ -272,6 +272,46 @@ final class AndBibleUITests: XCTestCase {
     }
 
     /**
+     Verifies that deleting one bookmark row from the real bookmark list leaves other bookmarks
+     intact across reopen.
+     *
+     * - Side effects:
+     *   - launches the reader shell with deterministic `Exodus 2:1` and `Matthew 3:1` bookmarks
+     *   - opens the real bookmark list from the reader overflow menu
+     *   - deletes only the Exodus row through the row-level swipe action, dismisses the screen,
+     *     and reopens the list to confirm the Matthew row persists
+     * - Failure modes:
+     *   - fails if the bookmark list or either seeded bookmark row never appears
+     *   - fails if the row-level delete action is missing for the Exodus bookmark
+     *   - fails if deleting the Exodus row also removes the Matthew row or if the Exodus row
+     *     returns after reopening the bookmark list
+     */
+    func testBookmarkRowDeletePreservesOtherRowsAcrossReopen() {
+        let app = makeApp(seedBookmarkMultiRowWorkflowOnLaunch: true)
+        app.launch()
+
+        openBookmarkListFromReaderMenu(in: app)
+        let exodusRow = app.buttons["bookmarkListRowButton::Exodus_2_1"].firstMatch
+        let matthewRow = app.buttons["bookmarkListRowButton::Matthew_3_1"].firstMatch
+        XCTAssertTrue(exodusRow.waitForExistence(timeout: 10), "Expected Exodus bookmark row button to exist.")
+        XCTAssertTrue(matthewRow.waitForExistence(timeout: 10), "Expected Matthew bookmark row button to exist.")
+
+        exodusRow.swipeLeft()
+        requireElement("bookmarkListDeleteButton::Exodus_2_1", in: app, timeout: 10).tap()
+
+        let deletedPredicate = NSPredicate(format: "exists == false")
+        expectation(for: deletedPredicate, evaluatedWith: exodusRow)
+        waitForExpectations(timeout: 10)
+        XCTAssertTrue(matthewRow.exists, "Expected Matthew bookmark row to remain after deleting Exodus.")
+
+        requireElement("bookmarkListDoneButton", in: app, timeout: 10).tap()
+        openBookmarkListFromReaderMenu(in: app)
+
+        XCTAssertFalse(app.buttons["bookmarkListRowButton::Exodus_2_1"].firstMatch.exists)
+        XCTAssertTrue(app.buttons["bookmarkListRowButton::Matthew_3_1"].firstMatch.exists)
+    }
+
+    /**
      Verifies that selecting a seeded bookmark label filter exposes the StudyPad handoff and opens
      the matching StudyPad document in the reader shell.
      *
@@ -964,6 +1004,8 @@ final class AndBibleUITests: XCTestCase {
      *     list.
      *   - seedBookmarkNavigationWorkflowOnLaunch: Whether the app should seed one deterministic
      *     bookmark-navigation target while still landing on the reader shell.
+     *   - seedBookmarkMultiRowWorkflowOnLaunch: Whether the app should seed two deterministic
+     *     bookmark rows while still landing on the reader shell.
      *   - seedHistoryWorkflowOnLaunch: Whether the app should seed one deterministic history row
      *     while still landing on the reader shell.
      *   - openReadingPlansOnLaunch: Whether the app should present Reading Plans immediately on
@@ -1004,6 +1046,8 @@ final class AndBibleUITests: XCTestCase {
      *     bookmark plus label pair that exposes the StudyPad handoff from the real bookmark list
      *   - when `seedBookmarkNavigationWorkflowOnLaunch` is `true`, configures the app to seed one
      *     bookmark-navigation target while leaving navigation at the reader shell
+     *   - when `seedBookmarkMultiRowWorkflowOnLaunch` is `true`, configures the app to seed two
+     *     bookmark rows while leaving navigation at the reader shell
      *   - when `seedHistoryWorkflowOnLaunch` is `true`, configures the app to seed one persisted
      *     history row while leaving navigation at the reader shell
      *   - when `seedHistoryMultiRowWorkflowOnLaunch` is `true`, configures the app to seed two
@@ -1031,6 +1075,7 @@ final class AndBibleUITests: XCTestCase {
         seedBookmarkLabelWorkflowOnLaunch: Bool = false,
         seedBookmarkStudyPadWorkflowOnLaunch: Bool = false,
         seedBookmarkNavigationWorkflowOnLaunch: Bool = false,
+        seedBookmarkMultiRowWorkflowOnLaunch: Bool = false,
         seedHistoryWorkflowOnLaunch: Bool = false,
         seedHistoryMultiRowWorkflowOnLaunch: Bool = false,
         openReadingPlansOnLaunch: Bool = false,
@@ -1085,6 +1130,9 @@ final class AndBibleUITests: XCTestCase {
         }
         if seedBookmarkNavigationWorkflowOnLaunch {
             app.launchArguments += ["UITEST_SEED_BOOKMARK_NAVIGATION_WORKFLOW"]
+        }
+        if seedBookmarkMultiRowWorkflowOnLaunch {
+            app.launchArguments += ["UITEST_SEED_BOOKMARK_MULTIROW_WORKFLOW"]
         }
         if seedHistoryWorkflowOnLaunch {
             app.launchArguments += ["UITEST_SEED_HISTORY_WORKFLOW"]

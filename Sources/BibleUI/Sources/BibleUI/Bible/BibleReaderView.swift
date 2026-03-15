@@ -262,6 +262,10 @@ public struct BibleReaderView: View {
     private let uiTestSeedsBookmarkNavigationWorkflowOnLaunch =
         ProcessInfo.processInfo.arguments.contains("UITEST_SEED_BOOKMARK_NAVIGATION_WORKFLOW")
 
+    /// Launch-argument override used by XCUITests to seed two bookmark rows for delete workflows.
+    private let uiTestSeedsBookmarkMultiRowWorkflowOnLaunch =
+        ProcessInfo.processInfo.arguments.contains("UITEST_SEED_BOOKMARK_MULTIROW_WORKFLOW")
+
     /// Launch-argument override used by XCUITests to seed one persisted history target on launch.
     private let uiTestSeedsHistoryWorkflowOnLaunch =
         ProcessInfo.processInfo.arguments.contains("UITEST_SEED_HISTORY_WORKFLOW")
@@ -2506,6 +2510,32 @@ public struct BibleReaderView: View {
     }
 
     /**
+     Seeds two deterministic bookmark rows for delete-and-reopen XCUITest workflows.
+     *
+     * - Returns: Identifiers of the seeded bookmarks, ordered as `[Exodus 2:1, Matthew 3:1]`.
+     * - Side effects:
+       - inserts one `Exodus 2:1` bookmark and one `Matthew 3:1` bookmark into SwiftData
+       - persists both bookmarks so the real bookmark list can delete one row while the other
+         remains available across reopen
+     * - Failure modes:
+       - returns an empty array when the first insert/save path fails
+       - returns a single-element array when the second insert/save path fails after the first
+         bookmark is already persisted
+     */
+    private func seedBookmarkMultiRowWorkflowForUITests() -> [UUID] {
+        var bookmarkIDs: [UUID] = []
+        if let exodusID = seedBookmarkForUITests(book: "Exodus", ordinalStart: 41) {
+            bookmarkIDs.append(exodusID)
+        } else {
+            return []
+        }
+        if let matthewID = seedBookmarkForUITests(book: "Matthew", ordinalStart: 81) {
+            bookmarkIDs.append(matthewID)
+        }
+        return bookmarkIDs
+    }
+
+    /**
      Seeds non-default theme colors for direct XCUITest color-reset workflows.
 
      Side effects:
@@ -2653,6 +2683,9 @@ public struct BibleReaderView: View {
         } else if uiTestSeedsBookmarkNavigationWorkflowOnLaunch {
             resetBookmarksForUITests()
             _ = seedBookmarkNavigationTargetForUITests()
+        } else if uiTestSeedsBookmarkMultiRowWorkflowOnLaunch {
+            resetBookmarksForUITests()
+            _ = seedBookmarkMultiRowWorkflowForUITests()
         } else if uiTestSeedsHistoryMultiRowWorkflowOnLaunch {
             resetHistoryForUITests()
             seedHistoryForUITests(keys: ["Exod.2.1", "Matt.3.1"])

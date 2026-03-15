@@ -141,6 +141,7 @@ public struct BookmarkListView: View {
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
                 Button(String(localized: "done")) { dismiss() }
+                    .accessibilityIdentifier("bookmarkListDoneButton")
             }
             ToolbarItem(placement: .primaryAction) {
                 HStack(spacing: 12) {
@@ -191,6 +192,16 @@ public struct BookmarkListView: View {
                     onNavigate: onNavigate,
                     onEditLabels: { editingLabelsBookmarkId = bookmark.id }
                 )
+                .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                    Button(role: .destructive) {
+                        deleteBookmark(bookmark)
+                    } label: {
+                        SwiftUI.Label(String(localized: "delete"), systemImage: "trash")
+                    }
+                    .accessibilityIdentifier(
+                        "bookmarkListDeleteButton::\(bookmarkListAccessibilitySegment(Self.verseReference(for: bookmark)))"
+                    )
+                }
                 .contextMenu {
                     Button {
                         editingLabelsBookmarkId = bookmark.id
@@ -198,8 +209,7 @@ public struct BookmarkListView: View {
                         SwiftUI.Label(String(localized: "edit_labels"), systemImage: "tag")
                     }
                     Button(role: .destructive) {
-                        modelContext.delete(bookmark)
-                        try? modelContext.save()
+                        deleteBookmark(bookmark)
                     } label: {
                         SwiftUI.Label(String(localized: "delete"), systemImage: "trash")
                     }
@@ -281,6 +291,21 @@ public struct BookmarkListView: View {
         for bookmark in toDelete {
             modelContext.delete(bookmark)
         }
+        try? modelContext.save()
+    }
+
+    /**
+     Deletes one bookmark from the list and persists the mutation.
+
+     - Parameter bookmark: Bookmark row selected for deletion.
+     - Side effects:
+       - deletes the provided bookmark from SwiftData
+       - saves the resulting bookmark collection immediately
+     - Failure modes:
+       - silently discards save failures because the list has no retry UI for destructive actions
+     */
+    private func deleteBookmark(_ bookmark: BibleBookmark) {
+        modelContext.delete(bookmark)
         try? modelContext.save()
     }
 
