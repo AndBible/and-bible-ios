@@ -297,6 +297,41 @@ final class AndBibleUITests: XCTestCase {
     }
 
     /**
+     Verifies that the seeded bookmark-label flow can open StudyPad and persist one deterministic
+     note through the reader-shell StudyPad harness.
+     *
+     * - Side effects:
+     *   - launches the reader shell with one deterministic `Genesis 1:1` bookmark assigned to the
+     *     seeded `UI Test Seed` label
+     *   - opens the bookmark list from the actual reader overflow menu, filters by the seeded
+     *     label, and opens the real StudyPad handoff
+     *   - triggers the reader-shell XCUITest StudyPad action, which persists one deterministic
+     *     note and reloads the active StudyPad document
+     * - Failure modes:
+     *   - fails if the bookmark list, label filter, StudyPad handoff, or StudyPad shell action
+     *     never appears
+     *   - fails if the exported StudyPad note state never reaches the expected created token
+     */
+    func testBookmarkStudyPadCreateNoteFromLabelWorkflow() {
+        let app = makeApp(seedBookmarkStudyPadWorkflowOnLaunch: true)
+        app.launch()
+
+        _ = openBookmarkListFromReaderMenu(in: app)
+        requireElement("bookmarkListFilterChip::UI_Test_Seed", in: app, timeout: 10).tap()
+        requireElement("bookmarkListOpenStudyPadButton::UI_Test_Seed", in: app, timeout: 10).tap()
+
+        let studyPadTitle = requireElement("readerStudyPadTitle", in: app, timeout: 10)
+        XCTAssertEqual(studyPadTitle.label, "UI Test Seed")
+
+        requireElement("uiTestCreateStudyPadNoteButton", in: app, timeout: 10).tap()
+        waitForElementValue(
+            "uiTestStudyPadNoteState",
+            toEqual: "created:UI_Test_StudyPad_Note",
+            in: app
+        )
+    }
+
+    /**
      Verifies that selecting a seeded history row jumps the active reader to that prior location.
      *
      * - Side effects:
@@ -924,6 +959,9 @@ final class AndBibleUITests: XCTestCase {
      *     sheet immediately on launch.
      *   - seedBookmarkLabelWorkflowOnLaunch: Whether the app should seed one deterministic
      *     bookmark-plus-label workflow while still landing on the reader shell.
+     *   - seedBookmarkStudyPadWorkflowOnLaunch: Whether the app should seed one deterministic
+     *     bookmark-plus-label workflow that can hand off into StudyPad from the real bookmark
+     *     list.
      *   - seedBookmarkNavigationWorkflowOnLaunch: Whether the app should seed one deterministic
      *     bookmark-navigation target while still landing on the reader shell.
      *   - seedHistoryWorkflowOnLaunch: Whether the app should seed one deterministic history row
@@ -962,6 +1000,8 @@ final class AndBibleUITests: XCTestCase {
      *     plus labels and present Label Assignment immediately after the reader hydrates
      *   - when `seedBookmarkLabelWorkflowOnLaunch` is `true`, configures the app to seed one
      *     bookmark plus labels while leaving navigation at the reader shell
+     *   - when `seedBookmarkStudyPadWorkflowOnLaunch` is `true`, configures the app to seed one
+     *     bookmark plus label pair that exposes the StudyPad handoff from the real bookmark list
      *   - when `seedBookmarkNavigationWorkflowOnLaunch` is `true`, configures the app to seed one
      *     bookmark-navigation target while leaving navigation at the reader shell
      *   - when `seedHistoryWorkflowOnLaunch` is `true`, configures the app to seed one persisted

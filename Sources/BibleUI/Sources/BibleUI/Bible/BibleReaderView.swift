@@ -171,6 +171,9 @@ public struct BibleReaderView: View {
     /// Exported XCUITest-only bookmark workflow state used to diagnose reader navigation.
     @State private var uiTestBookmarkNavigationState = "idle"
 
+    /// Exported XCUITest-only StudyPad note workflow state used to diagnose shell-backed note creation.
+    @State private var uiTestStudyPadNoteState = "idle"
+
     /// Presents the expanded speech controls sheet.
     @State private var showSpeakControls = false
 
@@ -492,17 +495,32 @@ public struct BibleReaderView: View {
             }
         }
         .overlay(alignment: .topTrailing) {
-            if uiTestUsesInMemoryStores && uiTestOpensSyncSettingsOnLaunch && !showSyncSettings {
-                Button("Open Sync") {
-                    showSyncSettings = true
+            if uiTestUsesInMemoryStores {
+                VStack(alignment: .trailing, spacing: 8) {
+                    if uiTestOpensSyncSettingsOnLaunch && !showSyncSettings {
+                        Button("Open Sync") {
+                            showSyncSettings = true
+                        }
+                        .font(.caption.weight(.semibold))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(.ultraThinMaterial, in: Capsule())
+                        .accessibilityIdentifier("uiTestReopenSyncSettingsButton")
+                    }
+
+                    if focusedController?.showingStudyPad == true {
+                        Button("Create StudyPad Note") {
+                            createUITestStudyPadNote()
+                        }
+                        .font(.caption.weight(.semibold))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(.ultraThinMaterial, in: Capsule())
+                        .accessibilityIdentifier("uiTestCreateStudyPadNoteButton")
+                    }
                 }
-                .font(.caption.weight(.semibold))
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(.ultraThinMaterial, in: Capsule())
                 .padding(.top, 12)
                 .padding(.trailing, 12)
-                .accessibilityIdentifier("uiTestReopenSyncSettingsButton")
             }
         }
         .animation(.easeInOut(duration: 0.25), value: toastMessage)
@@ -627,6 +645,9 @@ public struct BibleReaderView: View {
                     Text("bookmarkNavigationState")
                         .accessibilityIdentifier("uiTestBookmarkNavigationState")
                         .accessibilityValue(uiTestBookmarkNavigationState)
+                    Text("studyPadNoteState")
+                        .accessibilityIdentifier("uiTestStudyPadNoteState")
+                        .accessibilityValue(uiTestStudyPadNoteState)
                 }
                 .font(.caption2)
                 .foregroundStyle(.clear)
@@ -2414,6 +2435,60 @@ public struct BibleReaderView: View {
             return nil
         }
         return bookmarkId
+    }
+
+    /**
+     Creates or reuses one deterministic StudyPad note inside the active WebView-backed StudyPad.
+     *
+     * - Side effects:
+     *   - inserts one StudyPad text entry for the active StudyPad label when the deterministic note
+     *     does not already exist
+     *   - persists the deterministic note text through `BookmarkService`
+     *   - reloads the active StudyPad document in `BibleReaderController` so the WebView-backed
+     *     StudyPad reflects the saved note
+     *   - exports a tokenized success or failure state through `uiTestStudyPadNoteState`
+     * - Failure modes:
+     *   - exports `failed:missingContext` when no focused StudyPad controller or bookmark service
+     *     is available
+     *   - exports `failed:create` when StudyPad entry creation fails
+     *   - exports `failed:verify` when the saved note cannot be verified after reloading the
+     *     StudyPad document
+     */
+    private func createUITestStudyPadNote() {
+        guard let controller = focusedController,
+              controller.showingStudyPad,
+              let labelId = controller.activeStudyPadLabelId,
+              let service = controller.bookmarkService else {
+            uiTestStudyPadNoteState = "failed:missingContext"
+            return
+        }
+
+        let noteText = "UI Test StudyPad Note"
+        let noteStateToken = "UI_Test_StudyPad_Note"
+
+        if let existingEntry = service.studyPadEntries(labelId: labelId).first(where: { $0.textEntry?.text == noteText }) {
+            controller.loadStudyPadDocument(labelId: labelId)
+            let refreshedEntries = service.studyPadEntries(labelId: labelId)
+            uiTestStudyPadNoteState = refreshedEntries.contains(where: {
+                $0.id == existingEntry.id && $0.textEntry?.text == noteText
+            }) ? "created:\(noteStateToken)" : "failed:verify"
+            return
+        }
+
+        let afterOrderNumber = service.studyPadEntries(labelId: labelId).map(\.orderNumber).max() ?? -1
+        guard let result = service.createStudyPadEntry(labelId: labelId, afterOrderNumber: afterOrderNumber) else {
+            uiTestStudyPadNoteState = "failed:create"
+            return
+        }
+
+        let entry = result.0
+        service.updateStudyPadTextEntryText(id: entry.id, text: noteText)
+        controller.loadStudyPadDocument(labelId: labelId)
+
+        let refreshedEntries = service.studyPadEntries(labelId: labelId)
+        uiTestStudyPadNoteState = refreshedEntries.contains(where: {
+            $0.id == entry.id && $0.textEntry?.text == noteText
+        }) ? "created:\(noteStateToken)" : "failed:verify"
     }
 
     /**
