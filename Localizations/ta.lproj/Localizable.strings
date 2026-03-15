@@ -519,3 +519,6 @@
 "google_drive_missing_presenter" = "Google Drive sign-in could not present authentication UI.";
 "google_drive_not_signed_in" = "Not signed in";
 "google_drive_permission_required" = "Google Drive permission is required";
+
+"help_workspaces_title" = "பணியிடங்கள்";
+"reading_plans_plural" = "வாசிப்பு திட்டங்கள்";

@@ -549,3 +549,6 @@ Wenn Google Drive verwendet wird, hat %@ nur Zugriff auf Dateien der Anwendung, 
 "google_drive_missing_presenter" = "Google Drive sign-in could not present authentication UI.";
 "google_drive_not_signed_in" = "Not signed in";
 "google_drive_permission_required" = "Google Drive permission is required";
+
+"help_workspaces_title" = "Arbeitsbereich";
+"reading_plans_plural" = "Lesepläne";
