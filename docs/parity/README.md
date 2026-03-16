@@ -14,8 +14,12 @@ Current maturity:
 
 - `settings/` is the most complete domain and already includes guardrails,
   verification, regression evidence, and baselines
-- the other domains currently start with `contract.md` and `dispositions.md`
-  so future verification material has a stable home
+- `bridge/` now also includes a verification matrix, regression report, and
+  explicit maintenance guardrails because protocol drift there is especially
+  hard to catch after the fact
+- the remaining domains currently center on contract, dispositions,
+  verification, and regression evidence, with room to add guardrails or
+  baselines where they justify the maintenance cost
 
 Current domains:
 

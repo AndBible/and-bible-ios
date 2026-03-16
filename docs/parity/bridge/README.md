@@ -9,6 +9,7 @@ the Vue.js client and native iOS code.
 2. [dispositions.md](dispositions.md): explicit iOS adaptations and no-op branches
 3. [verification-matrix.md](verification-matrix.md): current status by bridge contract area
 4. [regression-report.md](regression-report.md): focused bridge-adjacent validation evidence
+5. [guardrails.md](guardrails.md): maintenance rules for high-risk bridge changes
 
 Companion reference:
 
