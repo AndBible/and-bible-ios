@@ -11,7 +11,7 @@ BibleView frontend running inside WKWebView.
 This repository is no longer in an early scaffolding state:
 
 - The app builds and runs through `AndBible.xcodeproj`
-- Real `libsword` is provided through `libsword/libsword.xcframework`
+- Real `libsword` is consumed through `libsword/libsword.xcframework`, built locally and in CI via `libsword/build-ios.sh`
 - The repo has active unit and XCUITest coverage
 - Search, bookmarks, history, settings, sync, and reading-plan flows all have
   meaningful native SwiftUI implementation and test coverage
@@ -55,7 +55,7 @@ This repository is no longer in an early scaffolding state:
 
 - Xcode 17 or newer with an iOS 17 simulator available
 - Node.js 20+ and npm for `bibleview-js`
-- The checked-in `libsword/libsword.xcframework`
+- `libsword/libsword.xcframework`, built with `libsword/build-ios.sh` when missing
 
 ### Canonical Build Entry Points
 

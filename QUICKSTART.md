@@ -66,7 +66,7 @@ This repository is not a placeholder scaffold.
 
 Current baseline:
 - the app builds and runs through `AndBible.xcodeproj`
-- real `libsword` is checked in via `libsword/libsword.xcframework`
+- real `libsword` is consumed through `libsword/libsword.xcframework`, which is built locally and in CI via `libsword/build-ios.sh`
 - the repo has active unit and XCUITest coverage
 - native SwiftUI flows exist for settings, sync, bookmarks, history, workspaces, reading plans, downloads, and search
 - Bible content still uses the WKWebView/Vue.js hybrid path where appropriate
@@ -101,6 +101,11 @@ Rebuild the frontend bundle before app validation when frontend assets changed.
 
 ### Package resolution failed
 - Check network connectivity for the initial package fetch
+- If `libsword/libsword.xcframework` is missing, build it with:
+  ```bash
+  cd libsword
+  ./build-ios.sh
+  ```
 - Try Xcode clean build folder
 - Reopen Xcode if resolution gets stuck
 

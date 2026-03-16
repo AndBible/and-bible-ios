@@ -27,8 +27,9 @@ BUILD_DIR="${SCRIPT_DIR}/build"
 OUTPUT_DIR="${SCRIPT_DIR}"
 SWORD_SRC="${SCRIPT_DIR}/sword-src"
 
-# SWORD version to build
-SWORD_SVN_URL="https://crosswire.org/svn/sword/trunk"
+# SWORD source to build
+SWORD_SVN_URL="${SWORD_SVN_URL:-https://crosswire.org/svn/sword/trunk}"
+SWORD_SVN_REVISION="${SWORD_SVN_REVISION:-3914}"
 
 # Minimum deployment targets
 IOS_MIN="17.0"
@@ -40,6 +41,7 @@ JOBS=$(sysctl -n hw.ncpu 2>/dev/null || echo 4)
 echo "=== libsword iOS Build Script ==="
 echo "Build directory: ${BUILD_DIR}"
 echo "Output: ${OUTPUT_DIR}/libsword.xcframework"
+echo "SWORD source: ${SWORD_SVN_URL}@${SWORD_SVN_REVISION}"
 echo ""
 
 # --- Step 1: Get SWORD Source ---
@@ -50,7 +52,7 @@ if [ ! -d "${SWORD_SRC}" ]; then
 
     # Try SVN first, fall back to a mirror
     if command -v svn &>/dev/null; then
-        svn checkout "${SWORD_SVN_URL}" "${SWORD_SRC}" --depth infinity
+        svn checkout -r "${SWORD_SVN_REVISION}" "${SWORD_SVN_URL}" "${SWORD_SRC}" --depth infinity
     else
         echo "ERROR: svn not found. Install with: brew install subversion"
         echo "Alternatively, download SWORD source manually to: ${SWORD_SRC}"
@@ -58,6 +60,13 @@ if [ ! -d "${SWORD_SRC}" ]; then
     fi
 else
     echo ">>> SWORD source found at ${SWORD_SRC}"
+    if command -v svn &>/dev/null; then
+        echo ">>> Updating SWORD source to revision ${SWORD_SVN_REVISION}"
+        svn update -r "${SWORD_SVN_REVISION}" "${SWORD_SRC}"
+    else
+        echo "ERROR: svn not found. Install with: brew install subversion"
+        exit 1
+    fi
 fi
 
 # --- Step 2: CMake Build Function ---

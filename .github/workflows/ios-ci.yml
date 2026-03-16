@@ -25,10 +25,6 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Ensure PR base ref is available
-        if: github.event_name == 'pull_request'
-        run: git fetch origin "${{ github.base_ref }}" --depth=1
-
       - name: Run repo standards unit tests
         run: python3 -m unittest discover -s scripts -p 'test_*.py'
 
@@ -71,7 +67,7 @@ jobs:
         run: python3 scripts/check_settings_localization_guardrails.py
 
   ios-build-and-test:
-    name: Build And Test (Simulator)
+    name: Build And Test (Simulator, Unit + UI)
     runs-on: macos-15
     timeout-minutes: 90
     env:
@@ -80,6 +76,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Select Xcode version
+        uses: maxim-lobanov/setup-xcode@v1.6.0
+        with:
+          xcode-version: '16.4'
 
       - name: Restore SwiftPM and build caches
         uses: actions/cache@v4
@@ -95,11 +96,24 @@ jobs:
       - name: Show Xcode version
         run: xcodebuild -version
 
+      - name: Ensure libsword build prerequisites
+        run: |
+          if ! command -v cmake >/dev/null 2>&1; then
+            brew install cmake
+          fi
+          if ! command -v svn >/dev/null 2>&1; then
+            brew install subversion
+          fi
+
+      - name: Build libsword XCFramework
+        working-directory: libsword
+        run: ./build-ios.sh
+
       - name: Resolve iOS simulator destination
         id: simulator
         run: python3 scripts/resolve_ios_simulator_destination.py --project AndBible.xcodeproj --scheme AndBible
 
-      - name: Build and run unit tests
+      - name: Build and run simulator tests
         run: >-
           mkdir -p .artifacts &&
           xcodebuild
