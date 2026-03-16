@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -56,6 +58,10 @@ def parse_candidates(text: str) -> list[tuple[str, str, str]]:
     return candidates
 
 
+def has_simulator_placeholder(text: str) -> bool:
+    return "Any iOS Simulator Device" in text
+
+
 def choose_candidate(
     candidates: list[tuple[str, str, str]],
     preferred_order: list[str] | None = None,
@@ -69,6 +75,10 @@ def choose_candidate(
             if candidate[0] == preferred_name:
                 return candidate
     return candidates[0]
+
+
+def parse_version(value: str) -> tuple[int, ...]:
+    return tuple(int(part) for part in re.findall(r"\d+", value))
 
 
 def discover_candidates(project: str, scheme: str, retries: int, delay_seconds: float) -> tuple[list[tuple[str, str, str]], str]:
@@ -96,6 +106,117 @@ def discover_candidates(project: str, scheme: str, retries: int, delay_seconds: 
             time.sleep(delay_seconds)
 
     return candidates, output_text
+
+
+def read_simctl_json(*args: str) -> dict[str, object]:
+    command = ["xcrun", "simctl", "list", *args, "-j"]
+    result = subprocess.run(command, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise RuntimeError(f"simctl command failed: {' '.join(command)}\n{result.stdout}\n{result.stderr}")
+    return json.loads(result.stdout)
+
+
+def choose_runtime(runtimes_payload: dict[str, object]) -> dict[str, object] | None:
+    runtimes = [
+        runtime
+        for runtime in runtimes_payload.get("runtimes", [])
+        if isinstance(runtime, dict)
+        and runtime.get("isAvailable") is True
+        and "SimRuntime.iOS-" in str(runtime.get("identifier", ""))
+    ]
+    if not runtimes:
+        return None
+
+    runtimes.sort(
+        key=lambda runtime: parse_version(str(runtime.get("version", runtime.get("identifier", "")))),
+        reverse=True,
+    )
+    return runtimes[0]
+
+
+def choose_device_type(runtime: dict[str, object], preferred_order: list[str] | None = None) -> dict[str, object] | None:
+    supported_types = [
+        device_type
+        for device_type in runtime.get("supportedDeviceTypes", [])
+        if isinstance(device_type, dict)
+        and device_type.get("productFamily") == "iPhone"
+        and str(device_type.get("name", "")).startswith("iPhone")
+    ]
+    if not supported_types:
+        return None
+
+    preferred = preferred_order or DEFAULT_PREFERRED_ORDER
+    for preferred_name in preferred:
+        for device_type in supported_types:
+            if device_type.get("name") == preferred_name:
+                return device_type
+    return supported_types[0]
+
+
+def choose_existing_device(
+    devices_payload: dict[str, object],
+    runtime_identifier: str,
+    preferred_order: list[str] | None = None,
+) -> dict[str, object] | None:
+    devices = [
+        device
+        for device in devices_payload.get("devices", {}).get(runtime_identifier, [])
+        if isinstance(device, dict)
+        and device.get("isAvailable") is True
+        and str(device.get("name", "")).startswith("iPhone")
+    ]
+    if not devices:
+        return None
+
+    preferred = preferred_order or DEFAULT_PREFERRED_ORDER
+    for preferred_name in preferred:
+        for device in devices:
+            if device.get("name") == preferred_name:
+                return device
+    return devices[0]
+
+
+def provision_simulator(preferred_order: list[str] | None = None) -> str | None:
+    runtimes_payload = read_simctl_json("runtimes", "available")
+    runtime = choose_runtime(runtimes_payload)
+    if runtime is None:
+        print("No available iOS simulator runtime was found via simctl.")
+        return None
+
+    runtime_identifier = str(runtime.get("identifier", ""))
+    devices_payload = read_simctl_json("devices", "available")
+    existing_device = choose_existing_device(devices_payload, runtime_identifier, preferred_order)
+    if existing_device is not None:
+        print(
+            "Reusing existing simulator: "
+            f"{existing_device.get('name')} ({runtime.get('name', runtime.get('version', 'unknown runtime'))})"
+        )
+        return str(existing_device.get("udid", ""))
+
+    device_type = choose_device_type(runtime, preferred_order)
+    if device_type is None:
+        print("No supported iPhone device type was available for the installed iOS runtime.")
+        return None
+
+    device_name = f"AndBible CI {device_type['name']}"
+    command = [
+        "xcrun",
+        "simctl",
+        "create",
+        device_name,
+        str(device_type["identifier"]),
+        runtime_identifier,
+    ]
+    result = subprocess.run(command, capture_output=True, text=True)
+    if result.returncode != 0:
+        print("Unable to create a concrete iPhone simulator device via simctl.")
+        print(result.stdout)
+        print(result.stderr)
+        return None
+
+    simulator_id = result.stdout.strip()
+    print(f"Created simulator: {device_name} ({runtime.get('name', runtime.get('version', 'unknown runtime'))})")
+    return simulator_id or None
 
 
 def write_github_output(output_path: Path, destination: str, device_name: str, os_version: str) -> None:
@@ -133,6 +254,17 @@ def main() -> int:
         retries=args.retries,
         delay_seconds=args.delay_seconds,
     )
+
+    if not candidates and has_simulator_placeholder(output_text):
+        print("No concrete iPhone simulator destinations were available; attempting to provision one.")
+        if provision_simulator():
+            time.sleep(args.delay_seconds)
+            candidates, output_text = discover_candidates(
+                project=args.project,
+                scheme=args.scheme,
+                retries=args.retries,
+                delay_seconds=args.delay_seconds,
+            )
 
     if not candidates:
         print("Unable to discover iPhone simulators from xcodebuild -showdestinations output")

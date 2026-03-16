@@ -96,6 +96,15 @@ jobs:
       - name: Show Xcode version
         run: xcodebuild -version
 
+      - name: Ensure iOS simulator runtime is available
+        run: |
+          if xcrun simctl list runtimes available | grep -Fq 'iOS '; then
+            echo "An iOS simulator runtime is already installed."
+          else
+            echo "No iOS simulator runtime was found; downloading it for the selected Xcode."
+            xcodebuild -downloadPlatform iOS
+          fi
+
       - name: Ensure libsword build prerequisites
         run: |
           if ! command -v cmake >/dev/null 2>&1; then
