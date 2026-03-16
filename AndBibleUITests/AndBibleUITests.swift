@@ -154,6 +154,39 @@ final class AndBibleUITests: XCTestCase {
     }
 
     /**
+     Verifies that the downloads browser can open the repository manager and dismiss the add-source
+     sheet back to the repository list.
+     *
+     * - Side effects:
+     *   - launches the reader shell and opens Downloads from the real overflow menu
+     *   - opens the repository manager from the real downloads toolbar button
+     *   - opens the add-source sheet and cancels it
+     * - Failure modes:
+     *   - fails if the downloads browser or repository manager never appears
+     *   - fails if the add-source sheet cannot be presented from the repository manager
+     *   - fails if cancelling the add-source sheet does not return to the repository manager
+     */
+    func testDownloadsRepositoryManagerAddSourceCancelFlow() {
+        let app = makeApp(seedBookmarkLabelWorkflowOnLaunch: true)
+        app.launch()
+
+        let moreMenuButton = requireReaderMoreMenuButton(in: app)
+        moreMenuButton.tap()
+        requireElement("readerOpenDownloadsAction", in: app, timeout: 5).tap()
+
+        XCTAssertTrue(requireElement("moduleBrowserScreen", in: app, timeout: 10).exists)
+        requireElement("moduleBrowserRepositoriesButton", in: app, timeout: 10).tap()
+
+        XCTAssertTrue(requireElement("repositoryManagerScreen", in: app, timeout: 10).exists)
+        requireElement("repositoryManagerAddButton", in: app, timeout: 10).tap()
+
+        XCTAssertTrue(requireElement("repositoryManagerAddSourceScreen", in: app, timeout: 10).exists)
+        requireElement("repositoryManagerAddSourceCancelButton", in: app, timeout: 10).tap()
+
+        XCTAssertTrue(requireElement("repositoryManagerScreen", in: app, timeout: 10).exists)
+    }
+
+    /**
      Verifies that workspaces can be created, renamed, cloned, and deleted from the workspace
      selector.
      *

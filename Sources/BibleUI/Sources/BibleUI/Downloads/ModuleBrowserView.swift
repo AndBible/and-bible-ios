@@ -247,6 +247,7 @@ public struct ModuleBrowserView: View {
                     } label: {
                         Image(systemName: "server.rack")
                     }
+                    .accessibilityIdentifier("moduleBrowserRepositoriesButton")
                     Button("Refresh", systemImage: "arrow.clockwise") {
                         refreshCatalog()
                     }

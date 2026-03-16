@@ -95,11 +95,13 @@ public struct RepositoryManagerView: View {
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
+        .accessibilityIdentifier("repositoryManagerScreen")
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button(String(localized: "add"), systemImage: "plus") {
                     showAddSource = true
                 }
+                .accessibilityIdentifier("repositoryManagerAddButton")
             }
         }
         .sheet(isPresented: $showAddSource) {
@@ -232,12 +234,14 @@ public struct RepositoryManagerView: View {
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
+        .accessibilityIdentifier("repositoryManagerAddSourceScreen")
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
                 Button(String(localized: "cancel")) {
                     clearAddForm()
                     showAddSource = false
                 }
+                .accessibilityIdentifier("repositoryManagerAddSourceCancelButton")
             }
             ToolbarItem(placement: .confirmationAction) {
                 Button(String(localized: "add")) {
