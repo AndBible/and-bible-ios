@@ -261,6 +261,11 @@ public struct SearchView: View {
                 performSearch()
             }
         }
+        .onChange(of: wordMode) { _, _ in
+            if case .ready = viewState, !query.trimmingCharacters(in: .whitespaces).isEmpty {
+                performSearch()
+            }
+        }
     }
 
     /// Navigation title derived from the active state and latest result summary.
@@ -289,7 +294,7 @@ public struct SearchView: View {
         case .creatingIndex: "creatingIndex"
         case .ready: "ready"
         }
-        return "state=\(stateToken);query=\(query);searching=\(isSearching);results=\(results.count);scope=\(searchScopeToken(for: scopeOption))"
+        return "state=\(stateToken);query=\(query);searching=\(isSearching);results=\(results.count);scope=\(searchScopeToken(for: scopeOption));wordMode=\(searchWordModeToken(for: wordMode))"
     }
 
     // MARK: - Index Prompt
@@ -524,6 +529,25 @@ public struct SearchView: View {
             return "newTestament"
         case .currentBook:
             return "currentBook"
+        }
+    }
+
+    /**
+     Returns the stable exported token for one Search word-matching mode.
+     *
+     * - Parameter mode: Word-mode value to serialize for accessibility state.
+     * - Returns: Deterministic lowercase token for the word mode.
+     * - Side effects: none.
+     * - Failure modes: none.
+     */
+    private func searchWordModeToken(for mode: SearchWordMode) -> String {
+        switch mode {
+        case .allWords:
+            return "allWords"
+        case .anyWord:
+            return "anyWord"
+        case .phrase:
+            return "phrase"
         }
     }
 

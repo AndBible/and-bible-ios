@@ -202,6 +202,75 @@ final class AndBibleUITests: XCTestCase {
     }
 
     /**
+     Verifies that changing Search word mode reruns the current query and updates the result set.
+     *
+     * - Side effects:
+     *   - launches the app directly into Search with the initial query `earth void`
+     *   - switches Search word mode from all words to phrase and then to any word
+     *   - waits for Search to rerun after each mode change and inspects the exported Search state
+     * - Failure modes:
+     *   - fails if the visible `Phrase` or `Any Word` Search mode buttons are not accessible
+     *   - fails if phrase mode does not reduce the `earth void` query to zero hits
+     *   - fails if any-word mode does not restore non-zero bundled hits
+     */
+    func testSearchWordModeChangeRerunsQueryAndUpdatesResults() {
+        let app = makeApp(openSearchOnLaunch: true, searchQuery: "earth void")
+        app.launch()
+
+        let searchScreen = openSearch(in: app, launchedDirectly: true)
+        waitForSearchToFinish(on: searchScreen, timeout: 120)
+
+        let allWordsState = searchScreen.value as? String ?? ""
+        XCTAssertTrue(
+            allWordsState.contains("wordMode=allWords"),
+            "Expected Search to start in all-words mode, got '\(allWordsState)'."
+        )
+        XCTAssertGreaterThan(
+            searchResultsCount(from: allWordsState),
+            0,
+            "Expected bundled all-words hits for 'earth void', got '\(allWordsState)'."
+        )
+
+        let phraseButton = app.buttons["Phrase"].firstMatch
+        XCTAssertTrue(
+            phraseButton.waitForExistence(timeout: 10),
+            "Expected the visible Phrase Search mode button to exist."
+        )
+        phraseButton.tap()
+        waitForSearchToFinish(on: searchScreen, timeout: 120)
+
+        let phraseState = searchScreen.value as? String ?? ""
+        XCTAssertTrue(
+            phraseState.contains("wordMode=phrase"),
+            "Expected Search to switch to phrase mode, got '\(phraseState)'."
+        )
+        XCTAssertEqual(
+            searchResultsCount(from: phraseState),
+            0,
+            "Expected no phrase hits for 'earth void', got '\(phraseState)'."
+        )
+
+        let anyWordButton = app.buttons["Any Word"].firstMatch
+        XCTAssertTrue(
+            anyWordButton.waitForExistence(timeout: 10),
+            "Expected the visible Any Word Search mode button to exist."
+        )
+        anyWordButton.tap()
+        waitForSearchToFinish(on: searchScreen, timeout: 120)
+
+        let anyWordState = searchScreen.value as? String ?? ""
+        XCTAssertTrue(
+            anyWordState.contains("wordMode=anyWord"),
+            "Expected Search to switch to any-word mode, got '\(anyWordState)'."
+        )
+        XCTAssertGreaterThan(
+            searchResultsCount(from: anyWordState),
+            0,
+            "Expected bundled any-word hits for 'earth void', got '\(anyWordState)'."
+        )
+    }
+
+    /**
      Verifies that the real reader Search workflow can navigate to a bundled search hit.
      *
      * - Side effects:
