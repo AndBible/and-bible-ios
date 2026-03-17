@@ -67,8 +67,7 @@ final class AndBibleUITests: XCTestCase {
         let app = makeApp(seedBookmarkLabelWorkflowOnLaunch: true)
         app.launch()
 
-        let moreMenuButton = requireReaderMoreMenuButton(in: app)
-        moreMenuButton.tap()
+        tapReaderMoreMenuButton(in: app)
         XCTAssertTrue(requireElement("readerOpenReadingPlansAction", in: app, timeout: 5).exists)
         XCTAssertTrue(requireElement("readerOpenDownloadsAction", in: app, timeout: 5).exists)
         XCTAssertTrue(requireElement("readerOpenWorkspacesAction", in: app, timeout: 5).exists)
@@ -162,13 +161,8 @@ final class AndBibleUITests: XCTestCase {
             "Expected bundled whole-Bible hits for 'jesus', got '\(wholeBibleState)'."
         )
 
-        let oldTestamentButton = app.buttons["OT"].firstMatch
-        XCTAssertTrue(
-            oldTestamentButton.waitForExistence(timeout: 10),
-            "Expected the visible OT Search scope button to exist."
-        )
-        oldTestamentButton.tap()
-        waitForSearchToFinish(on: searchScreen, timeout: 120)
+        tapButtonLabeled("OT", in: app)
+        waitForSearchState(on: searchScreen, containing: "scope=oldTestament", timeout: 120)
 
         let oldTestamentState = searchScreen.value as? String ?? ""
         XCTAssertTrue(
@@ -181,13 +175,8 @@ final class AndBibleUITests: XCTestCase {
             "Expected no Old Testament hits for 'jesus', got '\(oldTestamentState)'."
         )
 
-        let newTestamentButton = app.buttons["NT"].firstMatch
-        XCTAssertTrue(
-            newTestamentButton.waitForExistence(timeout: 10),
-            "Expected the visible NT Search scope button to exist."
-        )
-        newTestamentButton.tap()
-        waitForSearchToFinish(on: searchScreen, timeout: 120)
+        tapButtonLabeled("NT", in: app)
+        waitForSearchState(on: searchScreen, containing: "scope=newTestament", timeout: 120)
 
         let newTestamentState = searchScreen.value as? String ?? ""
         XCTAssertTrue(
@@ -354,8 +343,7 @@ final class AndBibleUITests: XCTestCase {
         let app = makeApp(seedBookmarkLabelWorkflowOnLaunch: true)
         app.launch()
 
-        let moreMenuButton = requireReaderMoreMenuButton(in: app)
-        moreMenuButton.tap()
+        tapReaderMoreMenuButton(in: app)
         requireElement("readerOpenDownloadsAction", in: app, timeout: 5).tap()
 
         XCTAssertTrue(requireElement("moduleBrowserScreen", in: app, timeout: 10).exists)
@@ -378,8 +366,7 @@ final class AndBibleUITests: XCTestCase {
         let app = makeApp(seedBookmarkLabelWorkflowOnLaunch: true)
         app.launch()
 
-        let moreMenuButton = requireReaderMoreMenuButton(in: app)
-        moreMenuButton.tap()
+        tapReaderMoreMenuButton(in: app)
         requireElement("readerOpenDownloadsAction", in: app, timeout: 5).tap()
 
         XCTAssertTrue(requireElement("moduleBrowserScreen", in: app, timeout: 10).exists)
@@ -887,8 +874,7 @@ final class AndBibleUITests: XCTestCase {
         XCTAssertEqual(currentReferenceState.label, "Genesis 1")
         XCTAssertEqual(historyNavigationState.label, "idle")
 
-        let moreMenuButton = requireReaderMoreMenuButton(in: app)
-        moreMenuButton.tap()
+        tapReaderMoreMenuButton(in: app)
         requireElement("readerOpenHistoryAction", in: app, timeout: 5).tap()
 
         XCTAssertTrue(requireElement("historyScreen", in: app, timeout: 10).exists)
@@ -1018,8 +1004,7 @@ final class AndBibleUITests: XCTestCase {
         let app = makeApp(seedBookmarkLabelWorkflowOnLaunch: true)
         app.launch()
 
-        let moreMenuButton = requireReaderMoreMenuButton(in: app)
-        moreMenuButton.tap()
+        tapReaderMoreMenuButton(in: app)
         requireElement("readerOpenAboutAction", in: app, timeout: 5).tap()
 
         XCTAssertTrue(requireElement("aboutScreen", in: app, timeout: 10).exists)
@@ -1857,6 +1842,66 @@ final class AndBibleUITests: XCTestCase {
     }
 
     /**
+     Waits for the Search screen to report a settled state containing one expected semantic token.
+     *
+     * - Parameters:
+     *   - searchScreen: Search root element exporting deterministic state in its accessibility
+     *     value.
+     *   - token: State fragment expected once the current search rerun has completed.
+     *   - timeout: Maximum time to wait for `state=ready;searching=false` with the requested token.
+     * - Side effects:
+     *   - blocks the current XCTest method until the Search state export reports the requested
+     *     token or the timeout expires
+     * - Failure modes:
+     *   - fails the test if the Search screen never reaches the requested settled state
+     */
+    private func waitForSearchState(
+        on searchScreen: XCUIElement,
+        containing token: String,
+        timeout: TimeInterval
+    ) {
+        let predicate = NSPredicate { evaluated, _ in
+            guard let element = evaluated as? XCUIElement,
+                  let value = element.value as? String else {
+                return false
+            }
+            return value.contains("state=ready")
+                && value.contains("searching=false")
+                && value.contains(token)
+        }
+
+        expectation(for: predicate, evaluatedWith: searchScreen)
+        waitForExpectations(timeout: timeout)
+    }
+
+    /**
+     Taps one visible button by its accessibility label and waits for it to become hittable.
+     *
+     * - Parameters:
+     *   - label: Visible accessibility label expected on the target button.
+     *   - app: Running application under test.
+     *   - timeout: Maximum number of seconds to wait for the button to exist and become
+     *     hittable.
+     * - Side effects:
+     *   - resolves the requested button from the visible button hierarchy and taps its center
+     *     point directly
+     * - Failure modes:
+     *   - fails if the button never appears or never becomes hittable within the timeout
+     */
+    private func tapButtonLabeled(
+        _ label: String,
+        in app: XCUIApplication,
+        timeout: TimeInterval = 10
+    ) {
+        let button = app.buttons[label].firstMatch
+        XCTAssertTrue(
+            button.waitForExistence(timeout: timeout),
+            "Expected visible button '\(label)' to exist within \(timeout) seconds."
+        )
+        tapElementReliably(button, timeout: timeout)
+    }
+
+    /**
      Extracts the exported numeric result count from the Search accessibility state token.
      *
      * - Parameter searchState: Semicolon-delimited Search screen state string.
@@ -1925,8 +1970,7 @@ final class AndBibleUITests: XCTestCase {
         launchedDirectly: Bool = false
     ) -> XCUIElement {
         if !launchedDirectly {
-            let moreMenuButton = requireReaderMoreMenuButton(in: app)
-            moreMenuButton.tap()
+            tapReaderMoreMenuButton(in: app)
             requireElement("readerOpenWorkspacesAction", in: app, timeout: 5).tap()
         }
         return requireElement("workspaceSelectorScreen", in: app, timeout: 10)
@@ -2016,8 +2060,7 @@ final class AndBibleUITests: XCTestCase {
      */
     @discardableResult
     private func openBookmarkListFromReaderMenu(in app: XCUIApplication) -> XCUIElement {
-        let moreMenuButton = requireReaderMoreMenuButton(in: app)
-        moreMenuButton.tap()
+        tapReaderMoreMenuButton(in: app)
         requireElement("readerOpenBookmarksAction", in: app, timeout: 5).tap()
         return requireElement("bookmarkListScreen", in: app, timeout: 10)
     }
@@ -2035,8 +2078,7 @@ final class AndBibleUITests: XCTestCase {
      */
     @discardableResult
     private func openHistoryFromReaderMenu(in app: XCUIApplication) -> XCUIElement {
-        let moreMenuButton = requireReaderMoreMenuButton(in: app)
-        moreMenuButton.tap()
+        tapReaderMoreMenuButton(in: app)
         requireElement("readerOpenHistoryAction", in: app, timeout: 5).tap()
         return requireElement("historyScreen", in: app, timeout: 10)
     }
@@ -2165,8 +2207,7 @@ final class AndBibleUITests: XCTestCase {
      */
     private func openSettings(in app: XCUIApplication, launchedDirectly: Bool = false) {
         if !launchedDirectly {
-            let moreMenuButton = requireReaderMoreMenuButton(in: app)
-            moreMenuButton.tap()
+            tapReaderMoreMenuButton(in: app)
             requireElement("readerOpenSettingsAction", in: app, timeout: 5).tap()
         }
         XCTAssertTrue(requireElement("settingsForm", in: app, timeout: 10).exists)
@@ -2208,6 +2249,40 @@ final class AndBibleUITests: XCTestCase {
             line: line
         )
         return element
+    }
+
+    /**
+     Waits for one accessibility-identified button element to exist.
+     *
+     * - Parameters:
+     *   - identifier: Accessibility identifier expected on a button element.
+     *   - app: Running application under test.
+     *   - timeout: Maximum number of seconds to wait before failing.
+     *   - file: Source file used for XCTest failure attribution.
+     *   - line: Source line used for XCTest failure attribution.
+     * - Returns: The resolved button element.
+     * - Side effects:
+     *   - queries the live button hierarchy repeatedly until the identifier resolves or the
+     *     timeout expires
+     * - Failure modes:
+     *   - records an XCTest failure if the requested button never appears within the allotted
+     *     timeout
+     */
+    private func requireButton(
+        _ identifier: String,
+        in app: XCUIApplication,
+        timeout: TimeInterval = 10,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) -> XCUIElement {
+        let button = app.buttons[identifier].firstMatch
+        XCTAssertTrue(
+            button.waitForExistence(timeout: timeout),
+            "Expected button '\(identifier)' to exist within \(timeout) seconds.",
+            file: file,
+            line: line
+        )
+        return button
     }
 
     /**
@@ -2277,13 +2352,80 @@ final class AndBibleUITests: XCTestCase {
         file: StaticString = #filePath,
         line: UInt = #line
     ) -> XCUIElement {
-        requireElement(
+        requireButton(
             "readerMoreMenuButton",
             in: app,
             timeout: timeout,
             file: file,
             line: line
         )
+    }
+
+    /**
+     Opens the reader overflow menu using a direct center-point tap on the toolbar button.
+     *
+     * - Parameters:
+     *   - app: Running application under test.
+     *   - timeout: Maximum number of seconds to wait for the toolbar button to exist and become
+     *     hittable.
+     *   - file: Source file used for XCTest failure attribution.
+     *   - line: Source line used for XCTest failure attribution.
+     * - Side effects:
+     *   - resolves the overflow-menu button from the button hierarchy
+     *   - taps the button's center point directly to avoid hosted-simulator AX scroll-to-visible
+     *     failures on navigation-bar controls
+     * - Failure modes:
+     *   - records an XCTest failure if the overflow-menu button never appears or never becomes
+     *     hittable within the allotted timeout
+     */
+    private func tapReaderMoreMenuButton(
+        in app: XCUIApplication,
+        timeout: TimeInterval = 30,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let button = requireReaderMoreMenuButton(in: app, timeout: timeout, file: file, line: line)
+        tapElementReliably(button, timeout: timeout, file: file, line: line)
+    }
+
+    /**
+     Waits for one resolved element to become hittable, then taps its center point directly.
+     *
+     * - Parameters:
+     *   - element: Resolved XCUI element that should be tapped.
+     *   - timeout: Maximum number of seconds to wait for the element to become hittable.
+     *   - file: Source file used for XCTest failure attribution.
+     *   - line: Source line used for XCTest failure attribution.
+     * - Side effects:
+     *   - waits for the live element to report `hittable == true`
+     *   - performs a coordinate-based center tap that bypasses XCUI's scroll-to-visible path
+     * - Failure modes:
+     *   - records an XCTest failure if the element never becomes hittable
+     *   - records an XCTest failure if the element does not expose a non-empty frame for tapping
+     */
+    private func tapElementReliably(
+        _ element: XCUIElement,
+        timeout: TimeInterval = 10,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let hittablePredicate = NSPredicate(format: "hittable == true")
+        let expectation = XCTNSPredicateExpectation(predicate: hittablePredicate, object: element)
+        let result = XCTWaiter().wait(for: [expectation], timeout: timeout)
+        XCTAssertEqual(
+            result,
+            .completed,
+            "Expected element '\(element.identifier)' to become hittable within \(timeout) seconds.",
+            file: file,
+            line: line
+        )
+        XCTAssertFalse(
+            element.frame.isEmpty,
+            "Expected element '\(element.identifier)' to expose a non-empty frame before tapping.",
+            file: file,
+            line: line
+        )
+        element.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
     }
 
     /**
@@ -2310,17 +2452,7 @@ final class AndBibleUITests: XCTestCase {
         line: UInt = #line
     ) {
         let element = requireElement(identifier, in: app, timeout: timeout, file: file, line: line)
-        let hittablePredicate = NSPredicate(format: "hittable == true")
-        let expectation = XCTNSPredicateExpectation(predicate: hittablePredicate, object: element)
-        let result = XCTWaiter().wait(for: [expectation], timeout: timeout)
-        XCTAssertEqual(
-            result,
-            .completed,
-            "Expected element '\(identifier)' to become hittable within \(timeout) seconds.",
-            file: file,
-            line: line
-        )
-        element.tap()
+        tapElementReliably(element, timeout: timeout, file: file, line: line)
     }
 
     /**
