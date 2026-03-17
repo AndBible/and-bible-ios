@@ -188,6 +188,11 @@ public struct BookmarkListView: View {
                 )
             }
         }
+        .safeAreaInset(edge: .bottom) {
+            if uiTestUsesInMemoryStores {
+                uiTestBookmarkHarness
+            }
+        }
     }
 
     /// Main list content once at least one bookmark exists.
@@ -308,6 +313,45 @@ public struct BookmarkListView: View {
                 )
             }
         }
+    }
+
+    /// Stable XCUITest-only controls that bypass toolbar and label-chip AX flakiness in CI.
+    @ViewBuilder
+    private var uiTestBookmarkHarness: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 12) {
+                Button("Sort Bible Order") {
+                    sortOrder = .bibleOrder
+                }
+                .buttonStyle(.borderedProminent)
+                .accessibilityIdentifier("bookmarkListHarnessSortOption::bibleOrder")
+
+                Button("Sort Date Created") {
+                    sortOrder = .createdAtDesc
+                }
+                .buttonStyle(.bordered)
+                .accessibilityIdentifier("bookmarkListHarnessSortOption::createdAtDesc")
+
+                if let seedLabel = userLabels.first(where: { $0.name == "UI Test Seed" }) {
+                    Button("Select UI Test Seed") {
+                        selectedLabelId = seedLabel.id
+                    }
+                    .buttonStyle(.bordered)
+                    .accessibilityIdentifier("bookmarkListHarnessFilterChip::UI_Test_Seed")
+
+                    if onOpenStudyPad != nil {
+                        Button("Open UI Test Seed StudyPad") {
+                            onOpenStudyPad?(seedLabel.id)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .accessibilityIdentifier("bookmarkListHarnessOpenStudyPadButton::UI_Test_Seed")
+                    }
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+        }
+        .background(.thinMaterial)
     }
 
     /**

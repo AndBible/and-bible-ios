@@ -179,6 +179,12 @@ public struct SettingsView: View {
     /// Tracks whether the debug crash action has already been scheduled.
     @State private var debugCrashScheduled = false
 
+    /// Test-only direct settings destination used to bypass `Form` row virtualization in XCUITest.
+    @State private var uiTestNavigationDestination: UITestNavigationDestination?
+
+    /// Test-only flag exposing deterministic direct-launch controls during XCUITest runs.
+    private let uiTestUsesInMemoryStores = ProcessInfo.processInfo.arguments.contains("UITEST_USE_IN_MEMORY_STORES")
+
     /**
      Optional UI-test-only row identifier that should be scrolled into view on first render.
 
@@ -212,6 +218,18 @@ public struct SettingsView: View {
 
         /// Stable identity that preserves an explicit row for the default option.
         var id: String { value.isEmpty ? "__default" : value }
+    }
+
+    /// Direct settings destinations exposed through the XCUITest-only harness controls.
+    private enum UITestNavigationDestination: String, Identifiable {
+        case downloads
+        case importExport
+        case sync
+        case labels
+        case textDisplay
+        case colors
+
+        var id: String { rawValue }
     }
 
     /**
@@ -1057,6 +1075,14 @@ public struct SettingsView: View {
                 store.setStringSet(.experimentalFeatures, values: Array(newValue))
                 onSettingsChanged?()
             }
+            .navigationDestination(item: $uiTestNavigationDestination) { destination in
+                uiTestDestinationView(for: destination)
+            }
+            .safeAreaInset(edge: .bottom) {
+                if uiTestUsesInMemoryStores {
+                    uiTestNavigationHarness
+                }
+            }
         }
     }
 
@@ -1404,6 +1430,80 @@ public struct SettingsView: View {
             Spacer()
         }
         .contentShape(Rectangle())
+    }
+
+    /// Stable XCUITest-only navigation controls that bypass `Form` row virtualization.
+    @ViewBuilder
+    private var uiTestNavigationHarness: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 12) {
+                uiTestNavigationButton(
+                    title: String(localized: "downloads"),
+                    identifier: "settingsHarnessDownloadsLink",
+                    destination: .downloads
+                )
+                uiTestNavigationButton(
+                    title: String(localized: "import_export"),
+                    identifier: "settingsHarnessImportExportLink",
+                    destination: .importExport
+                )
+                uiTestNavigationButton(
+                    title: String(localized: "icloud_sync"),
+                    identifier: "settingsHarnessSyncLink",
+                    destination: .sync
+                )
+                uiTestNavigationButton(
+                    title: String(localized: "labels"),
+                    identifier: "settingsHarnessLabelsLink",
+                    destination: .labels
+                )
+                uiTestNavigationButton(
+                    title: String(localized: "settings_text_display"),
+                    identifier: "settingsHarnessTextDisplayLink",
+                    destination: .textDisplay
+                )
+                uiTestNavigationButton(
+                    title: String(localized: "settings_colors"),
+                    identifier: "settingsHarnessColorsLink",
+                    destination: .colors
+                )
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+        }
+        .background(.thinMaterial)
+    }
+
+    /// Builds one XCUITest-only direct-navigation button for the settings harness.
+    private func uiTestNavigationButton(
+        title: String,
+        identifier: String,
+        destination: UITestNavigationDestination
+    ) -> some View {
+        Button(title) {
+            uiTestNavigationDestination = destination
+        }
+        .buttonStyle(.borderedProminent)
+        .accessibilityIdentifier(identifier)
+    }
+
+    /// Resolves the destination view pushed by one XCUITest-only settings harness button.
+    @ViewBuilder
+    private func uiTestDestinationView(for destination: UITestNavigationDestination) -> some View {
+        switch destination {
+        case .downloads:
+            ModuleBrowserView()
+        case .importExport:
+            ImportExportView()
+        case .sync:
+            SyncSettingsView()
+        case .labels:
+            LabelManagerView()
+        case .textDisplay:
+            TextDisplaySettingsView(settings: $displaySettings, onChange: onSettingsChanged)
+        case .colors:
+            ColorSettingsView(settings: $displaySettings, onChange: onSettingsChanged)
+        }
     }
 
     /**

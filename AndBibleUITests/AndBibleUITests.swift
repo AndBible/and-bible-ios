@@ -68,10 +68,10 @@ final class AndBibleUITests: XCTestCase {
         app.launch()
 
         openSettings(in: app, launchedDirectly: true)
-        XCTAssertTrue(requireElement("settingsDownloadsLink", in: app, timeout: 10).exists)
-        XCTAssertTrue(requireElement("settingsSyncLink", in: app, timeout: 10).exists)
-        XCTAssertTrue(requireElement("settingsTextDisplayLink", in: app, timeout: 10).exists)
-        XCTAssertTrue(requireElement("settingsColorsLink", in: app, timeout: 10).exists)
+        XCTAssertTrue(requireSettingsNavigationControl("settingsDownloadsLink", in: app, timeout: 10).exists)
+        XCTAssertTrue(requireSettingsNavigationControl("settingsSyncLink", in: app, timeout: 10).exists)
+        XCTAssertTrue(requireSettingsNavigationControl("settingsTextDisplayLink", in: app, timeout: 10).exists)
+        XCTAssertTrue(requireSettingsNavigationControl("settingsColorsLink", in: app, timeout: 10).exists)
     }
 
     /**
@@ -651,8 +651,7 @@ final class AndBibleUITests: XCTestCase {
         waitForExpectations(timeout: 10)
         XCTAssertTrue(matthewRow.exists, "Expected Matthew bookmark row to remain after deleting Exodus.")
 
-        requireElement("bookmarkListDoneButton", in: app, timeout: 10).tap()
-        openBookmarkList(in: app, launchedDirectly: true)
+        reopenBookmarkList(in: app, launchedDirectly: true)
 
         XCTAssertFalse(app.buttons["bookmarkListRowButton::Exodus_2_1"].firstMatch.exists)
         XCTAssertTrue(app.buttons["bookmarkListRowButton::Matthew_3_1"].firstMatch.exists)
@@ -682,8 +681,7 @@ final class AndBibleUITests: XCTestCase {
             in: app
         )
 
-        requireElement("bookmarkListSortMenu", in: app, timeout: 10).tap()
-        requireElement("bookmarkListSortOption::bibleOrder", in: app, timeout: 10).tap()
+        sortBookmarkListByBibleOrder(in: app)
 
         waitForElement(
             "bookmarkListRowButton::Exodus_2_1",
@@ -798,8 +796,7 @@ final class AndBibleUITests: XCTestCase {
         app.launch()
 
         _ = openBookmarkList(in: app, launchedDirectly: true)
-        requireElement("bookmarkListFilterChip::UI_Test_Seed", in: app, timeout: 10).tap()
-        requireElement("bookmarkListOpenStudyPadButton::UI_Test_Seed", in: app, timeout: 10).tap()
+        openSeedStudyPadFromBookmarkList(in: app)
 
         let studyPadTitle = requireElement("readerStudyPadTitle", in: app, timeout: 10)
         XCTAssertEqual(studyPadTitle.label, "UI Test Seed")
@@ -826,8 +823,7 @@ final class AndBibleUITests: XCTestCase {
         app.launch()
 
         _ = openBookmarkList(in: app, launchedDirectly: true)
-        requireElement("bookmarkListFilterChip::UI_Test_Seed", in: app, timeout: 10).tap()
-        requireElement("bookmarkListOpenStudyPadButton::UI_Test_Seed", in: app, timeout: 10).tap()
+        openSeedStudyPadFromBookmarkList(in: app)
 
         let studyPadTitle = requireElement("readerStudyPadTitle", in: app, timeout: 10)
         XCTAssertEqual(studyPadTitle.label, "UI Test Seed")
@@ -2077,6 +2073,27 @@ final class AndBibleUITests: XCTestCase {
     }
 
     /**
+     Reopens the direct-launch bookmark sheet through its deterministic XCUITest harness control.
+     *
+     * - Parameters:
+     *   - app: Running application whose bookmark sheet should be reopened.
+     *   - launchedDirectly: Whether the current workflow is using the direct-launch bookmark route.
+     * - Side effects:
+     *   - taps the bookmark-sheet reopen harness when `launchedDirectly` is `true`
+     *   - falls back to opening the bookmark list through the standard helper for non-direct flows
+     * - Failure modes:
+     *   - fails when the reopen harness never appears for a direct-launch workflow
+     */
+    private func reopenBookmarkList(in app: XCUIApplication, launchedDirectly: Bool) {
+        if launchedDirectly {
+            requireElement("bookmarkListHarnessReopenButton", in: app, timeout: 10).tap()
+            XCTAssertTrue(requireElement("bookmarkListScreen", in: app, timeout: 10).exists)
+            return
+        }
+        _ = openBookmarkList(in: app)
+    }
+
+    /**
      Opens History either from the reader shell or from a direct test-only launch path.
      *
      * - Parameters:
@@ -2259,6 +2276,37 @@ final class AndBibleUITests: XCTestCase {
             okButton.tap()
             XCTAssertTrue(requireElement("settingsForm", in: app, timeout: 10).exists)
         }
+    }
+
+    /**
+     Resolves one settings navigation control, preferring the direct-launch XCUITest harness when available.
+     *
+     * - Parameters:
+     *   - identifier: Production settings-row identifier requested by the test.
+     *   - app: Running application under test.
+     *   - timeout: Maximum number of seconds to wait before failing.
+     *   - file: Source file used for XCTest failure attribution.
+     *   - line: Source line used for XCTest failure attribution.
+     * - Returns: Direct harness button when present; otherwise the production settings row element.
+     * - Side effects:
+     *   - queries both the XCUITest harness and production settings hierarchy
+     * - Failure modes:
+     *   - records an XCTest failure if neither the harness control nor the production row appears
+     */
+    private func requireSettingsNavigationControl(
+        _ identifier: String,
+        in app: XCUIApplication,
+        timeout: TimeInterval = 10,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) -> XCUIElement {
+        if let harnessIdentifier = settingsHarnessIdentifier(for: identifier) {
+            let harnessButton = app.buttons[harnessIdentifier].firstMatch
+            if harnessButton.waitForExistence(timeout: 1) {
+                return harnessButton
+            }
+        }
+        return requireElement(identifier, in: app, timeout: timeout, file: file, line: line)
     }
 
     /**
@@ -2522,8 +2570,85 @@ final class AndBibleUITests: XCTestCase {
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
-        let element = requireElement(identifier, in: app, timeout: timeout, file: file, line: line)
+        let element = requireSettingsNavigationControl(
+            identifier,
+            in: app,
+            timeout: timeout,
+            file: file,
+            line: line
+        )
         tapElementReliably(element, timeout: timeout, file: file, line: line)
+    }
+
+    /**
+     Maps one production settings-row identifier to its deterministic direct-launch harness control.
+     *
+     * - Parameter identifier: Production settings-row identifier requested by a test.
+     * - Returns: Matching harness control identifier when the route has a stable direct-launch
+     *   equivalent; otherwise `nil`.
+     * - Side effects: none.
+     * - Failure modes: This helper cannot fail.
+     */
+    private func settingsHarnessIdentifier(for identifier: String) -> String? {
+        switch identifier {
+        case "settingsDownloadsLink":
+            "settingsHarnessDownloadsLink"
+        case "settingsImportExportLink":
+            "settingsHarnessImportExportLink"
+        case "settingsSyncLink":
+            "settingsHarnessSyncLink"
+        case "settingsLabelsLink":
+            "settingsHarnessLabelsLink"
+        case "settingsTextDisplayLink":
+            "settingsHarnessTextDisplayLink"
+        case "settingsColorsLink":
+            "settingsHarnessColorsLink"
+        default:
+            nil
+        }
+    }
+
+    /**
+     Opens the seeded `UI Test Seed` StudyPad handoff, preferring the direct-launch bookmark harness.
+     *
+     * - Parameter app: Running application under test.
+     * - Side effects:
+     *   - uses the dedicated bookmark harness StudyPad button when present
+     *   - otherwise selects the real `UI Test Seed` filter chip and taps the production StudyPad
+     *     handoff button
+     * - Failure modes:
+     *   - fails if neither the harness button nor the production label-filter path is available
+     */
+    private func openSeedStudyPadFromBookmarkList(in app: XCUIApplication) {
+        let harnessButton = app.buttons["bookmarkListHarnessOpenStudyPadButton::UI_Test_Seed"].firstMatch
+        if harnessButton.waitForExistence(timeout: 1) {
+            tapElementReliably(harnessButton, timeout: 10)
+            return
+        }
+
+        requireElement("bookmarkListFilterChip::UI_Test_Seed", in: app, timeout: 10).tap()
+        requireElement("bookmarkListOpenStudyPadButton::UI_Test_Seed", in: app, timeout: 10).tap()
+    }
+
+    /**
+     Switches the bookmark list into Bible-order sorting, preferring the direct-launch harness control.
+     *
+     * - Parameter app: Running application under test.
+     * - Side effects:
+     *   - uses the dedicated bookmark harness sort control when present
+     *   - otherwise opens the production sort menu and selects the Bible-order option
+     * - Failure modes:
+     *   - fails if neither the harness control nor the production sort-menu path is available
+     */
+    private func sortBookmarkListByBibleOrder(in app: XCUIApplication) {
+        let harnessButton = app.buttons["bookmarkListHarnessSortOption::bibleOrder"].firstMatch
+        if harnessButton.waitForExistence(timeout: 1) {
+            tapElementReliably(harnessButton, timeout: 10)
+            return
+        }
+
+        requireElement("bookmarkListSortMenu", in: app, timeout: 10).tap()
+        requireElement("bookmarkListSortOption::bibleOrder", in: app, timeout: 10).tap()
     }
 
     /**

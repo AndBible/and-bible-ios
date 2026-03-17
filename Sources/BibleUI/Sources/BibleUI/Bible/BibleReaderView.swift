@@ -2548,7 +2548,41 @@ public struct BibleReaderView: View {
      */
     private func waitForUITestActiveWindow(maxAttempts: Int = 40) async {
         for _ in 0..<maxAttempts {
+            windowManager.refreshWindows()
+            if windowManager.activeWindow == nil,
+               let visibleWindow = windowManager.visibleWindows.first {
+                windowManager.activeWindow = visibleWindow
+            }
             if windowManager.activeWindow != nil {
+                return
+            }
+            await Task.yield()
+        }
+    }
+
+    /**
+     Waits for seeded history keys to become queryable before History is presented to XCUITests.
+     *
+     * - Parameter keys: Persisted history keys expected for the active or first visible window.
+     * - Side effects:
+     *   - polls SwiftData until the requested history rows become visible to subsequent `@Query`
+     *     consumers
+     * - Failure modes:
+     *   - returns after the bounded wait even if the requested history rows never materialize
+     */
+    private func waitForUITestHistoryKeys(_ keys: [String], maxAttempts: Int = 40) async {
+        for _ in 0..<maxAttempts {
+            let descriptor = FetchDescriptor<HistoryItem>()
+            let persistedItems = (try? modelContext.fetch(descriptor)) ?? []
+            let targetWindowID = windowManager.activeWindow?.id ?? windowManager.visibleWindows.first?.id
+            let relevantItems: [HistoryItem]
+            if let targetWindowID {
+                relevantItems = persistedItems.filter { $0.window?.id == targetWindowID }
+            } else {
+                relevantItems = persistedItems
+            }
+            let persistedKeys = Set(relevantItems.map(\.key))
+            if keys.allSatisfy(persistedKeys.contains) {
                 return
             }
             await Task.yield()
@@ -3097,10 +3131,12 @@ public struct BibleReaderView: View {
             await waitForUITestActiveWindow()
             resetHistoryForUITests()
             seedHistoryForUITests(keys: ["Exod.2.1", "Matt.3.1"])
+            await waitForUITestHistoryKeys(["Exod.2.1", "Matt.3.1"])
         } else if uiTestSeedsHistoryWorkflowOnLaunch {
             await waitForUITestActiveWindow()
             resetHistoryForUITests()
             seedHistoryForUITests(keys: ["Exod.2.1"])
+            await waitForUITestHistoryKeys(["Exod.2.1"])
         }
 
         if uiTestOpensBookmarksOnLaunch {
