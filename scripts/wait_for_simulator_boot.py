@@ -8,6 +8,14 @@ import subprocess
 import sys
 
 
+def list_available_devices() -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["xcrun", "simctl", "list", "devices", "available"],
+        capture_output=True,
+        text=True,
+    )
+
+
 def dump_diagnostics() -> None:
     diagnostic_commands = [
         ["xcrun", "simctl", "list", "devices", "available"],
@@ -22,11 +30,26 @@ def dump_diagnostics() -> None:
             print(result.stderr)
 
 
+def simulator_is_booted(simulator_id: str) -> bool:
+    result = list_available_devices()
+    if result.stdout:
+        for line in result.stdout.splitlines():
+            if simulator_id in line and "(Booted)" in line:
+                return True
+    return False
+
+
 def wait_for_boot(simulator_id: str, timeout_seconds: int) -> int:
     command = ["xcrun", "simctl", "bootstatus", simulator_id, "-b"]
     try:
         result = subprocess.run(command, capture_output=True, text=True, timeout=timeout_seconds)
     except subprocess.TimeoutExpired:
+        if simulator_is_booted(simulator_id):
+            print(
+                "simctl bootstatus timed out, but the selected simulator is already reported as "
+                f"Booted: {simulator_id}"
+            )
+            return 0
         print(f"Simulator {simulator_id} did not finish booting within {timeout_seconds} seconds.")
         dump_diagnostics()
         return 1
@@ -37,6 +60,12 @@ def wait_for_boot(simulator_id: str, timeout_seconds: int) -> int:
         print(result.stderr)
 
     if result.returncode != 0:
+        if simulator_is_booted(simulator_id):
+            print(
+                "simctl bootstatus returned a non-zero status, but the selected simulator is "
+                f"already reported as Booted: {simulator_id}"
+            )
+            return 0
         print(f"simctl bootstatus exited with status {result.returncode}")
         dump_diagnostics()
         return result.returncode
