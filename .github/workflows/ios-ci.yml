@@ -218,31 +218,29 @@ jobs:
       - name: Build for testing
         run: |
           mkdir -p .artifacts
-          mapfile -t test_selection_args <<< "${TEST_SELECTION_ARGS}"
-          xcodebuild \
-            -project AndBible.xcodeproj \
-            -scheme AndBible \
-            -configuration Debug \
-            -destination "${{ steps.simulator.outputs.destination }}" \
-            -derivedDataPath "${DERIVED_DATA_PATH}" \
-            -resultBundlePath "${BUILD_XCRESULT_BUNDLE_PATH}" \
-            CODE_SIGNING_ALLOWED=NO \
-            "${test_selection_args[@]}" \
-            build-for-testing
+          python3 scripts/run_xcodebuild_with_test_selection.py \
+            --project AndBible.xcodeproj \
+            --scheme AndBible \
+            --configuration Debug \
+            --destination "${{ steps.simulator.outputs.destination }}" \
+            --derived-data-path "${DERIVED_DATA_PATH}" \
+            --result-bundle-path "${BUILD_XCRESULT_BUNDLE_PATH}" \
+            --test-selection-args "${TEST_SELECTION_ARGS}" \
+            --code-signing-allowed NO \
+            --action build-for-testing
 
       - name: Run selected simulator tests without rebuilding
         run: |
-          mapfile -t test_selection_args <<< "${TEST_SELECTION_ARGS}"
-          xcodebuild \
-            -project AndBible.xcodeproj \
-            -scheme AndBible \
-            -configuration Debug \
-            -destination "${{ steps.simulator.outputs.destination }}" \
-            -derivedDataPath "${DERIVED_DATA_PATH}" \
-            -resultBundlePath "${TEST_XCRESULT_BUNDLE_PATH}" \
-            CODE_SIGNING_ALLOWED=NO \
-            "${test_selection_args[@]}" \
-            test-without-building
+          python3 scripts/run_xcodebuild_with_test_selection.py \
+            --project AndBible.xcodeproj \
+            --scheme AndBible \
+            --configuration Debug \
+            --destination "${{ steps.simulator.outputs.destination }}" \
+            --derived-data-path "${DERIVED_DATA_PATH}" \
+            --result-bundle-path "${TEST_XCRESULT_BUNDLE_PATH}" \
+            --test-selection-args "${TEST_SELECTION_ARGS}" \
+            --code-signing-allowed NO \
+            --action test-without-building
 
       - name: Upload xcodebuild test result bundle
         if: always()
