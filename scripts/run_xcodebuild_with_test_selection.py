@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import shlex
 import subprocess
 from typing import Sequence
@@ -59,7 +60,7 @@ def create_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--destination", required=True)
     parser.add_argument("--derived-data-path", required=True)
     parser.add_argument("--result-bundle-path", required=True)
-    parser.add_argument("--test-selection-args", default="")
+    parser.add_argument("--test-selection-args")
     parser.add_argument("--code-signing-allowed", default="NO")
     parser.add_argument(
         "--action",
@@ -73,6 +74,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     """Run the selected xcodebuild action."""
     parser = create_argument_parser()
     args = parser.parse_args(argv)
+    selection_args_text = args.test_selection_args
+    if selection_args_text is None:
+        selection_args_text = os.environ.get("TEST_SELECTION_ARGS", "")
     command = build_xcodebuild_command(
         project=args.project,
         scheme=args.scheme,
@@ -81,7 +85,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         derived_data_path=args.derived_data_path,
         result_bundle_path=args.result_bundle_path,
         code_signing_allowed=args.code_signing_allowed,
-        selection_args_text=args.test_selection_args,
+        selection_args_text=selection_args_text,
         action=args.action,
     )
     print("Running:", shlex.join(command))

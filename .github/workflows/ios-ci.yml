@@ -225,7 +225,6 @@ jobs:
             --destination "${{ steps.simulator.outputs.destination }}" \
             --derived-data-path "${DERIVED_DATA_PATH}" \
             --result-bundle-path "${BUILD_XCRESULT_BUNDLE_PATH}" \
-            --test-selection-args "${TEST_SELECTION_ARGS}" \
             --code-signing-allowed NO \
             --action build-for-testing
 
@@ -238,7 +237,6 @@ jobs:
             --destination "${{ steps.simulator.outputs.destination }}" \
             --derived-data-path "${DERIVED_DATA_PATH}" \
             --result-bundle-path "${TEST_XCRESULT_BUNDLE_PATH}" \
-            --test-selection-args "${TEST_SELECTION_ARGS}" \
             --code-signing-allowed NO \
             --action test-without-building
 
