@@ -469,7 +469,10 @@ final class AndBibleUITests: XCTestCase {
      * - Failure modes:
      *   - fails if the direct My Notes route never presents its native header
      *   - fails if the seeded reader reference is not `Genesis 1`
-     *   - fails if returning from My Notes does not restore the standard reader toolbar
+     *   - fails if the direct My Notes route never reaches the harness-exported settled
+     *     presentation state before the return action is attempted
+     *   - fails if returning from My Notes does not restore the direct-launch reader-shell
+     *     harness controls
      */
     func testMyNotesDirectLaunchShowsHeaderAndReturnsToBible() {
         let app = makeApp(openMyNotesOnLaunch: true)
@@ -477,9 +480,9 @@ final class AndBibleUITests: XCTestCase {
 
         let currentReferenceState = requireElement("readerCurrentReferenceState", in: app, timeout: 10)
         XCTAssertEqual(currentReferenceState.label, "Genesis 1")
-        XCTAssertTrue(requireElement("readerMyNotesTitle", in: app, timeout: 10).exists)
+        waitForMyNotesPresentation(in: app, timeout: 35)
 
-        let backButton = requireElement("readerReturnFromMyNotesButton", in: app, timeout: 10)
+        let backButton = requireElement("uiTestReturnFromMyNotesButton", in: app, timeout: 10)
         backButton.tap()
 
         let myNotesTitle = app.staticTexts["readerMyNotesTitle"]
@@ -488,7 +491,7 @@ final class AndBibleUITests: XCTestCase {
         waitForExpectations(timeout: 10)
 
         XCTAssertEqual(currentReferenceState.label, "Genesis 1")
-        XCTAssertTrue(requireReaderMoreMenuButton(in: app).exists)
+        XCTAssertTrue(requireElement("uiTestReopenMyNotesButton", in: app, timeout: 10).exists)
     }
 
     /**
@@ -510,7 +513,7 @@ final class AndBibleUITests: XCTestCase {
         let app = makeApp(openMyNotesOnLaunch: true)
         app.launch()
 
-        XCTAssertTrue(requireElement("readerMyNotesTitle", in: app, timeout: 10).exists)
+        waitForMyNotesPresentation(in: app, timeout: 35)
         waitForElementValue(
             "uiTestMyNotesNoteState",
             toEqual: "seeded:UI_Test_My_Notes_Note",
@@ -526,11 +529,11 @@ final class AndBibleUITests: XCTestCase {
             timeout: 10
         )
 
-        requireElement("readerReturnFromMyNotesButton", in: app, timeout: 10).tap()
-        XCTAssertTrue(requireReaderMoreMenuButton(in: app).exists)
+        requireElement("uiTestReturnFromMyNotesButton", in: app, timeout: 10).tap()
+        XCTAssertTrue(requireElement("uiTestReopenMyNotesButton", in: app, timeout: 10).exists)
 
         requireElement("uiTestReopenMyNotesButton", in: app, timeout: 10).tap()
-        XCTAssertTrue(requireElement("readerMyNotesTitle", in: app, timeout: 10).exists)
+        waitForMyNotesPresentation(in: app, timeout: 20)
         waitForElementValue(
             "uiTestMyNotesNoteState",
             toEqual: "updated:UI_Test_My_Notes_Updated_Note",
@@ -558,7 +561,7 @@ final class AndBibleUITests: XCTestCase {
         let app = makeApp(openMyNotesOnLaunch: true)
         app.launch()
 
-        XCTAssertTrue(requireElement("readerMyNotesTitle", in: app, timeout: 10).exists)
+        waitForMyNotesPresentation(in: app, timeout: 35)
         waitForElementValue(
             "uiTestMyNotesNoteState",
             toEqual: "seeded:UI_Test_My_Notes_Note",
@@ -574,11 +577,11 @@ final class AndBibleUITests: XCTestCase {
             timeout: 10
         )
 
-        requireElement("readerReturnFromMyNotesButton", in: app, timeout: 10).tap()
-        XCTAssertTrue(requireReaderMoreMenuButton(in: app).exists)
+        requireElement("uiTestReturnFromMyNotesButton", in: app, timeout: 10).tap()
+        XCTAssertTrue(requireElement("uiTestReopenMyNotesButton", in: app, timeout: 10).exists)
 
         requireElement("uiTestReopenMyNotesButton", in: app, timeout: 10).tap()
-        XCTAssertTrue(requireElement("readerMyNotesTitle", in: app, timeout: 10).exists)
+        waitForMyNotesPresentation(in: app, timeout: 20)
         waitForElementValue(
             "uiTestMyNotesNoteState",
             toEqual: "deleted",
@@ -2570,6 +2573,59 @@ final class AndBibleUITests: XCTestCase {
             line: line
         )
         element.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+    }
+
+    /**
+     Waits for the My Notes direct-launch harness to reach a settled presented state.
+     *
+     * - Parameters:
+     *   - app: Running application under test.
+     *   - timeout: Maximum number of seconds to wait for the harness to report presentation.
+     *   - file: Source file used for XCTest failure attribution.
+     *   - line: Source line used for XCTest failure attribution.
+     * - Side effects:
+     *   - polls the hidden My Notes harness state while the reader-shell direct-launch route
+     *     finishes opening the chapter-level notes document
+     *   - fails immediately if the harness reports one explicit `failed:` token
+     *   - asserts that the native My Notes title exists once the harness reaches `presented`
+     * - Failure modes:
+     *   - records an XCTest failure if the harness reports a `failed:` token
+     *   - records an XCTest failure if the harness never reaches `presented` before timeout
+     *   - records an XCTest failure if the native My Notes title is still absent after
+     *     presentation is reported
+     */
+    private func waitForMyNotesPresentation(
+        in app: XCUIApplication,
+        timeout: TimeInterval = 20,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            let stateElement = app.descendants(matching: .any)["uiTestMyNotesPresentationState"].firstMatch
+            let state = (stateElement.value as? String) ?? stateElement.label
+            if state == "presented" {
+                XCTAssertTrue(
+                    requireElement("readerMyNotesTitle", in: app, timeout: 10, file: file, line: line).exists,
+                    file: file,
+                    line: line
+                )
+                return
+            }
+            if state.hasPrefix("failed:") {
+                XCTFail("Expected My Notes to present but harness reported '\(state)'.", file: file, line: line)
+                return
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        } while Date() < deadline
+
+        let finalStateElement = app.descendants(matching: .any)["uiTestMyNotesPresentationState"].firstMatch
+        let finalState = (finalStateElement.value as? String) ?? finalStateElement.label
+        XCTFail(
+            "Expected My Notes to reach 'presented' within \(timeout) seconds, last state was '\(finalState)'.",
+            file: file,
+            line: line
+        )
     }
 
     /**

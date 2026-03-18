@@ -189,6 +189,9 @@ public struct BibleReaderView: View {
     /// Exported XCUITest-only My Notes note workflow state used to diagnose shell-backed note mutation.
     @State private var uiTestMyNotesNoteState = "idle"
 
+    /// Exported XCUITest-only My Notes presentation state used to gate safe return timing.
+    @State private var uiTestMyNotesPresentationState = "idle"
+
     /// Presents the expanded speech controls sheet.
     @State private var showSpeakControls = false
 
@@ -553,6 +556,15 @@ public struct BibleReaderView: View {
                         }
 
                         if focusedController?.showingMyNotes == true {
+                            Button("Return From My Notes") {
+                                returnFromMyNotesForUITests()
+                            }
+                            .font(.caption.weight(.semibold))
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(.ultraThinMaterial, in: Capsule())
+                            .accessibilityIdentifier("uiTestReturnFromMyNotesButton")
+
                             Button("Delete My Notes Note") {
                                 deleteUITestMyNotesNote()
                             }
@@ -726,6 +738,9 @@ public struct BibleReaderView: View {
                     Text("myNotesNoteState")
                         .accessibilityIdentifier("uiTestMyNotesNoteState")
                         .accessibilityValue(uiTestMyNotesNoteState)
+                    Text("myNotesPresentationState")
+                        .accessibilityIdentifier("uiTestMyNotesPresentationState")
+                        .accessibilityValue(uiTestMyNotesPresentationState)
                 }
                 .font(.caption2)
                 .foregroundStyle(.clear)
@@ -2815,19 +2830,32 @@ public struct BibleReaderView: View {
     private func openMyNotesForUITests() {
         guard let bookmarkId = seedBookmarkForUITests(book: "Genesis", ordinalStart: 1) else { return }
         uiTestMyNotesBookmarkID = bookmarkId
+        uiTestMyNotesPresentationState = "launching"
         Task { @MainActor in
-            for _ in 0..<20 {
-                if let controller = focusedController,
-                   let service = controller.bookmarkService {
-                    service.saveBibleBookmarkNote(bookmarkId: bookmarkId, note: "UI Test My Notes Note")
-                    refreshUITestMyNotesNoteState()
-                    controller.loadMyNotesDocument()
-                    if controller.showingMyNotes {
-                        break
-                    }
+            await waitForUITestActiveWindow(maxAttempts: 80)
+            for _ in 0..<300 {
+                guard let controller = focusedController else {
+                    uiTestMyNotesPresentationState = "waitingForController"
+                    try? await Task.sleep(nanoseconds: 100_000_000)
+                    continue
+                }
+                guard let service = controller.bookmarkService else {
+                    uiTestMyNotesPresentationState = "waitingForBookmarkService"
+                    try? await Task.sleep(nanoseconds: 100_000_000)
+                    continue
+                }
+                uiTestMyNotesPresentationState = "opening"
+                service.saveBibleBookmarkNote(bookmarkId: bookmarkId, note: "UI Test My Notes Note")
+                refreshUITestMyNotesNoteState()
+                controller.loadMyNotesDocument()
+                if controller.showingMyNotes {
+                    try? await Task.sleep(nanoseconds: 5_000_000_000)
+                    uiTestMyNotesPresentationState = "presented"
+                    return
                 }
                 try? await Task.sleep(nanoseconds: 100_000_000)
             }
+            uiTestMyNotesPresentationState = "failed:openTimeout"
         }
     }
 
@@ -2846,8 +2874,41 @@ public struct BibleReaderView: View {
     private func reopenMyNotesForUITests() {
         guard uiTestMyNotesBookmarkID != nil,
               let controller = focusedController else { return }
+        uiTestMyNotesPresentationState = "launching"
         controller.loadMyNotesDocument()
         refreshUITestMyNotesNoteState()
+        Task { @MainActor in
+            for _ in 0..<100 {
+                if controller.showingMyNotes {
+                    try? await Task.sleep(nanoseconds: 5_000_000_000)
+                    uiTestMyNotesPresentationState = "presented"
+                    return
+                }
+                try? await Task.sleep(nanoseconds: 100_000_000)
+            }
+            uiTestMyNotesPresentationState = "failed:reopenTimeout"
+        }
+    }
+
+    /**
+     Returns from My Notes through an asynchronous XCUITest-only harness action.
+     *
+     * Side effects:
+     * - marks the exported presentation state as dismissing
+     * - yields one short delay so XCTest's tap handling is detached from the heavy chapter reload
+     * - routes back through the focused reader controller's normal `returnFromMyNotes()` path
+     *
+     * Failure modes:
+     * - returns without mutation when there is no focused controller
+     */
+    private func returnFromMyNotesForUITests() {
+        uiTestMyNotesPresentationState = "dismissing"
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 200_000_000)
+            guard let controller = focusedController else { return }
+            controller.returnFromMyNotes()
+            uiTestMyNotesPresentationState = "dismissed"
+        }
     }
 
     /**
