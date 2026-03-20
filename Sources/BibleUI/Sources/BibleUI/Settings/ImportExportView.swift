@@ -26,9 +26,6 @@ public struct ImportExportView: View {
     /// SwiftData context used by backup import/export services.
     @Environment(\.modelContext) private var modelContext
 
-    /// Whether the screen is running under the deterministic in-memory XCUITest harness.
-    private let uiTestUsesInMemoryStores = ProcessInfo.processInfo.arguments.contains("UITEST_USE_IN_MEMORY_STORES")
-
     /// Controls presentation of the share sheet after a successful export.
     @State private var showExportSheet = false
 
@@ -202,11 +199,6 @@ public struct ImportExportView: View {
                 ShareSheet(items: [url])
             }
         }
-        .safeAreaInset(edge: .bottom) {
-            if uiTestUsesInMemoryStores {
-                uiTestImportExportHarness
-            }
-        }
         .fileImporter(
             isPresented: $showImportPicker,
             allowedContentTypes: [.json, .commaSeparatedText, .data],
@@ -228,38 +220,6 @@ public struct ImportExportView: View {
         ) { result in
             handleEpubImport(result)
         }
-    }
-
-    /// Stable XCUITest-only controls that bypass `List` row tap flakiness for import/export actions.
-    @ViewBuilder
-    private var uiTestImportExportHarness: some View {
-        VStack(spacing: 8) {
-            HStack(spacing: 8) {
-                Button("Export Backup") {
-                    exportFullBackup()
-                }
-                .buttonStyle(.borderedProminent)
-                .frame(maxWidth: .infinity)
-                .accessibilityIdentifier("importExportHarnessFullBackupButton")
-
-                Button("Import") {
-                    showImportPicker = true
-                }
-                .buttonStyle(.bordered)
-                .frame(maxWidth: .infinity)
-                .accessibilityIdentifier("importExportHarnessImportButton")
-            }
-
-            Text(accessibilityState)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .accessibilityIdentifier("importExportHarnessState")
-                .accessibilityValue(accessibilityState)
-        }
-        .font(.caption.weight(.semibold))
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-        .background(.thinMaterial)
     }
 
     /**

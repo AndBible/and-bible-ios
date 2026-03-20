@@ -23,8 +23,6 @@ import UIKit
  Side effects:
  - `onAppear` discovers installed modules, hydrates persisted preferences, sanitizes stale selections,
    and applies keep-screen-on / locale side effects
- - XCUITest launch environment can request an initial scroll to a specific settings row after the
-   form renders
  - many toggles and pickers persist changes immediately through `SettingsStore`
  - dictionary, modal-action, and experimental-feature selections propagate through `onChange`
  - security and advanced actions may update `AppStorage`, open system settings, or schedule a debug crash
@@ -179,30 +177,6 @@ public struct SettingsView: View {
     /// Tracks whether the debug crash action has already been scheduled.
     @State private var debugCrashScheduled = false
 
-    /// Test-only direct settings destination used to bypass `Form` row virtualization in XCUITest.
-    @State private var uiTestNavigationDestination: UITestNavigationDestination?
-
-    /// Test-only flag exposing deterministic direct-launch controls during XCUITest runs.
-    private let uiTestUsesInMemoryStores = ProcessInfo.processInfo.arguments.contains("UITEST_USE_IN_MEMORY_STORES")
-
-    /**
-     Optional UI-test-only row identifier that should be scrolled into view on first render.
-
-     The production app never sets this value. UI automation uses it to avoid brute-force
-     `Form` scrolling when targeting deep settings rows that are otherwise virtualized until they
-     come on-screen.
-
-     - Note: Empty environment values are treated as absent.
-     */
-    private var uiTestScrollTargetIdentifier: String? {
-        let value = ProcessInfo.processInfo.environment["UITEST_SETTINGS_SCROLL_TARGET"]?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let value, !value.isEmpty else {
-            return nil
-        }
-        return value
-    }
-
     /**
      Locale option mirroring one Android `locale_pref` entry.
      */
@@ -218,18 +192,6 @@ public struct SettingsView: View {
 
         /// Stable identity that preserves an explicit row for the default option.
         var id: String { value.isEmpty ? "__default" : value }
-    }
-
-    /// Direct settings destinations exposed through the XCUITest-only harness controls.
-    private enum UITestNavigationDestination: String, Identifiable {
-        case downloads
-        case importExport
-        case sync
-        case labels
-        case textDisplay
-        case colors
-
-        var id: String { rawValue }
     }
 
     /**
@@ -371,8 +333,7 @@ public struct SettingsView: View {
      Builds the full settings form, preference hydration, alerts, and settings-side effects.
      */
     public var body: some View {
-        ScrollViewReader { proxy in
-            Form {
+        Form {
                 if hasDictionaryPreferences {
                     Section(String(localized: "settings_dictionaries")) {
                         if !strongsGreekDictionaries.isEmpty {
@@ -1042,7 +1003,6 @@ public struct SettingsView: View {
                     store.setString(.localePref, value: mapped)
                 }
                 hasLoadedPreferences = true
-                scrollToUITestTarget(using: proxy)
             }
             .onChange(of: selectedStrongsGreekDictionaryNames) { _, newValue in
                 let store = SettingsStore(modelContext: modelContext)
@@ -1075,15 +1035,6 @@ public struct SettingsView: View {
                 store.setStringSet(.experimentalFeatures, values: Array(newValue))
                 onSettingsChanged?()
             }
-            .navigationDestination(item: $uiTestNavigationDestination) { destination in
-                uiTestDestinationView(for: destination)
-            }
-            .safeAreaInset(edge: .bottom) {
-                if uiTestUsesInMemoryStores {
-                    uiTestNavigationHarness
-                }
-            }
-        }
     }
 
     @ViewBuilder
@@ -1432,86 +1383,6 @@ public struct SettingsView: View {
         .contentShape(Rectangle())
     }
 
-    /// Stable XCUITest-only navigation controls that bypass `Form` row virtualization.
-    @ViewBuilder
-    private var uiTestNavigationHarness: some View {
-        VStack(spacing: 8) {
-            HStack(spacing: 8) {
-                uiTestNavigationButton(
-                    title: "Downloads",
-                    identifier: "settingsHarnessDownloadsLink",
-                    destination: .downloads
-                )
-                uiTestNavigationButton(
-                    title: "Import/Export",
-                    identifier: "settingsHarnessImportExportLink",
-                    destination: .importExport
-                )
-                uiTestNavigationButton(
-                    title: "Sync",
-                    identifier: "settingsHarnessSyncLink",
-                    destination: .sync
-                )
-            }
-            HStack(spacing: 8) {
-                uiTestNavigationButton(
-                    title: "Labels",
-                    identifier: "settingsHarnessLabelsLink",
-                    destination: .labels
-                )
-                uiTestNavigationButton(
-                    title: "Text",
-                    identifier: "settingsHarnessTextDisplayLink",
-                    destination: .textDisplay
-                )
-                uiTestNavigationButton(
-                    title: "Colors",
-                    identifier: "settingsHarnessColorsLink",
-                    destination: .colors
-                )
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-        .background(.thinMaterial)
-    }
-
-    /// Builds one XCUITest-only direct-navigation button for the settings harness.
-    private func uiTestNavigationButton(
-        title: String,
-        identifier: String,
-        destination: UITestNavigationDestination
-    ) -> some View {
-        Button(title) {
-            uiTestNavigationDestination = destination
-        }
-        .font(.caption.weight(.semibold))
-        .lineLimit(1)
-        .minimumScaleFactor(0.7)
-        .frame(maxWidth: .infinity)
-        .buttonStyle(.borderedProminent)
-        .accessibilityIdentifier(identifier)
-    }
-
-    /// Resolves the destination view pushed by one XCUITest-only settings harness button.
-    @ViewBuilder
-    private func uiTestDestinationView(for destination: UITestNavigationDestination) -> some View {
-        switch destination {
-        case .downloads:
-            ModuleBrowserView()
-        case .importExport:
-            ImportExportView()
-        case .sync:
-            SyncSettingsView()
-        case .labels:
-            LabelManagerView()
-        case .textDisplay:
-            TextDisplaySettingsView(settings: $displaySettings, onChange: onSettingsChanged)
-        case .colors:
-            ColorSettingsView(settings: $displaySettings, onChange: onSettingsChanged)
-        }
-    }
-
     /**
      Returns whether applying a language selection would change persisted locale state.
 
@@ -1534,33 +1405,6 @@ public struct SettingsView: View {
                 .flatMap(Self.localePrefValue(forAppleLanguage:))
         ) ?? ""
         return normalized != storedLocale || normalized != appleLocale
-    }
-
-    /**
-     Scrolls the settings form to a UI-test-requested target row after the form has rendered.
-
-     The production app never sets a target. UI automation uses this hook to bring deep
-     navigation rows on-screen before XCTest queries them, avoiding repeated swipe attempts
-     against SwiftUI `Form` virtualization.
-
-     - Parameter proxy: Scroll proxy associated with the rendered settings form.
-     - Side effects:
-       - schedules one immediate and one delayed scroll on the main queue when a test target is set
-     - Failure modes:
-       - does nothing when no UI-test scroll target was supplied
-       - if the supplied identifier does not map to a rendered row, the scroll request is ignored
-         by SwiftUI and the view remains at its current offset
-     */
-    private func scrollToUITestTarget(using proxy: ScrollViewProxy) {
-        guard let target = uiTestScrollTargetIdentifier else {
-            return
-        }
-        DispatchQueue.main.async {
-            proxy.scrollTo(target, anchor: .center)
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-            proxy.scrollTo(target, anchor: .center)
-        }
     }
 
     /**

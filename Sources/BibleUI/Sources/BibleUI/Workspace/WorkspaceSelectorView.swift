@@ -57,9 +57,6 @@ public struct WorkspaceSelectorView: View {
     /// Persisted workspaces ordered by `orderNumber`.
     @Query(sort: \Workspace.orderNumber) private var workspaces: [Workspace]
 
-    /// Launch-argument override used by XCUITests to expose inline row actions instead of context menus.
-    private let uiTestShowsInlineActions = ProcessInfo.processInfo.arguments.contains("UITEST_OPEN_WORKSPACES")
-
     /**
      Creates the workspace selector screen.
 
@@ -87,13 +84,7 @@ public struct WorkspaceSelectorView: View {
             } else {
                 Section(String(localized: "workspaces")) {
                     ForEach(workspaces) { workspace in
-                        HStack(spacing: 8) {
-                            workspaceSelectionButton(workspace)
-
-                            if uiTestShowsInlineActions {
-                                workspaceInlineActions(workspace)
-                            }
-                        }
+                        workspaceSelectionButton(workspace)
                     }
                     .onDelete(perform: deleteWorkspaces)
                     .onMove(perform: moveWorkspaces)
@@ -109,11 +100,7 @@ public struct WorkspaceSelectorView: View {
             ToolbarItemGroup(placement: .primaryAction) {
                 EditButton()
                 Button(String(localized: "add"), systemImage: "plus") {
-                    if let overrideName = uiTestWorkspaceOverrideName(for: "UITEST_WORKSPACE_CREATE_NAME") {
-                        createWorkspace(named: overrideName)
-                    } else {
-                        showNewWorkspace = true
-                    }
+                    showNewWorkspace = true
                 }
                 .accessibilityIdentifier("workspaceSelectorAddButton")
             }
@@ -234,48 +221,6 @@ public struct WorkspaceSelectorView: View {
     }
 
     /**
-     Builds test-only inline management actions for one workspace row.
-     *
-     * - Parameter workspace: Workspace whose lifecycle actions should be exposed inline.
-     * - Returns: A compact trailing action cluster for rename, clone, and delete operations.
-     * - Side effects:
-     *   - rename and clone buttons prepare alert presentation state
-     *   - delete mutates persisted workspace state when the target is not currently active
-     * - Failure modes: This helper cannot fail.
-     */
-    private func workspaceInlineActions(_ workspace: Workspace) -> some View {
-        HStack(spacing: 4) {
-            Button {
-                prepareRename(for: workspace)
-            } label: {
-                Image(systemName: "pencil")
-            }
-            .buttonStyle(.borderless)
-            .accessibilityIdentifier("workspaceSelectorInlineRenameButton")
-            .accessibilityLabel(workspaceDisplayName(workspace))
-
-            Button {
-                prepareClone(for: workspace)
-            } label: {
-                Image(systemName: "doc.on.doc")
-            }
-            .buttonStyle(.borderless)
-            .accessibilityIdentifier("workspaceSelectorInlineCloneButton")
-            .accessibilityLabel(workspaceDisplayName(workspace))
-
-            Button(role: .destructive) {
-                deleteWorkspace(workspace)
-            } label: {
-                Image(systemName: "trash")
-            }
-            .buttonStyle(.borderless)
-            .accessibilityIdentifier("workspaceSelectorInlineDeleteButton")
-            .accessibilityLabel(workspaceDisplayName(workspace))
-            .disabled(workspace.id == windowManager.activeWorkspace?.id)
-        }
-    }
-
-    /**
      Resolves the user-visible workspace name used by the row and UI tests.
      *
      * - Parameter workspace: Workspace whose display name should be derived.
@@ -299,10 +244,6 @@ public struct WorkspaceSelectorView: View {
      * - Failure modes: This helper cannot fail.
      */
     private func prepareRename(for workspace: Workspace) {
-        if let overrideName = uiTestWorkspaceOverrideName(for: "UITEST_WORKSPACE_RENAME_NAME") {
-            renameWorkspace(workspace, to: overrideName)
-            return
-        }
         workspaceToRename = workspace
         renameWorkspaceName = workspace.name
         showRenameWorkspace = true
@@ -320,10 +261,6 @@ public struct WorkspaceSelectorView: View {
      * - Failure modes: This helper cannot fail.
      */
     private func prepareClone(for workspace: Workspace) {
-        if let overrideName = uiTestWorkspaceOverrideName(for: "UITEST_WORKSPACE_CLONE_NAME") {
-            cloneWorkspace(workspace, as: overrideName)
-            return
-        }
         workspaceToClone = workspace
         cloneWorkspaceName = String(format: String(localized: "copy_of %@"), workspace.name)
         showCloneWorkspace = true
@@ -343,10 +280,8 @@ public struct WorkspaceSelectorView: View {
         guard !name.isEmpty else { return }
         let store = WorkspaceStore(modelContext: modelContext)
         let workspace = store.createWorkspace(name: name)
-        if !uiTestShowsInlineActions {
-            windowManager.setActiveWorkspace(workspace)
-            dismiss()
-        }
+        windowManager.setActiveWorkspace(workspace)
+        dismiss()
     }
 
     /**
@@ -381,21 +316,6 @@ public struct WorkspaceSelectorView: View {
         guard !name.isEmpty else { return }
         let store = WorkspaceStore(modelContext: modelContext)
         store.cloneWorkspace(workspace, newName: name)
-    }
-
-    /**
-     Resolves one optional workspace-name override from the XCUITest launch environment.
-     *
-     * - Parameter key: Environment variable name containing the requested override.
-     * - Returns: The trimmed override value, or `nil` when the key is absent or blank.
-     * - Side effects: none.
-     * - Failure modes: This helper cannot fail.
-     */
-    private func uiTestWorkspaceOverrideName(for key: String) -> String? {
-        let trimmed = ProcessInfo.processInfo.environment[key]?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let trimmed, !trimmed.isEmpty else { return nil }
-        return trimmed
     }
 
     /**

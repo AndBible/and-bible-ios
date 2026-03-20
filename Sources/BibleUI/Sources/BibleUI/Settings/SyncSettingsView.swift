@@ -176,11 +176,6 @@ public struct SyncSettingsView: View {
         .accessibilityIdentifier("syncSettingsScreen")
         .accessibilityValue(syncSettingsAccessibilityValue)
         .navigationTitle(String(localized: "sync_adapter"))
-        .safeAreaInset(edge: .bottom) {
-            if isUITestHarnessEnabled {
-                uiTestHarnessControls
-            }
-        }
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
@@ -541,79 +536,6 @@ public struct SyncSettingsView: View {
                 .accessibilityValue(remoteCategoryAccessibilityValue(for: category))
                 .disabled(isRemoteSyncInteractionLocked)
 
-                if isUITestHarnessEnabled, isRemoteCategoryEnabled(category) {
-                    Button("Disable") {
-                        disableRemoteSync(for: category)
-                    }
-                    .font(.caption)
-                }
-            }
-        }
-    }
-
-    /**
-     Deterministic XCUITest controls rendered outside the `Form` row hierarchy.
-
-     These controls mirror the existing test-only backend and category mutation actions but avoid the
-     flaky hit-testing behavior seen for nested row buttons on GitHub-hosted simulators.
-
-     - Returns: A bottom inset containing stable backend-switch and category-disable controls.
-     - Side effects: Tapping a control invokes the same persistence helpers used by the inline
-       harness actions or backend picker.
-     - Failure modes: Hidden when the XCUITest harness is not active.
-     */
-    @ViewBuilder
-    private var uiTestHarnessControls: some View {
-        let enabledCategories = RemoteSyncCategory.allCases.filter(isRemoteCategoryEnabled)
-        let alternativeBackends = RemoteSyncBackend.allCases.filter { $0 != selectedBackend }
-        VStack(alignment: .leading, spacing: 8) {
-            if !alternativeBackends.isEmpty {
-                VStack(spacing: 8) {
-                    ForEach(alternativeBackends, id: \.self) { backend in
-                        Button(syncBackendAutomationTitle(for: backend)) {
-                            selectedBackend = backend
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .frame(maxWidth: .infinity)
-                        .accessibilityIdentifier("syncBackendSelect::\(backend.rawValue)")
-                    }
-                }
-                .padding(.horizontal, 16)
-                .padding(.top, 8)
-            }
-
-            if selectedBackend == .nextCloud {
-                Button("Test NextCloud") {
-                    Task {
-                        await testRemoteConnection()
-                    }
-                }
-                .buttonStyle(.bordered)
-                .frame(maxWidth: .infinity)
-                .padding(.horizontal, 16)
-                .accessibilityIdentifier("syncHarnessTestConnectionButton")
-
-                Text(remoteStatusAccessibilityValue)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 16)
-                    .accessibilityIdentifier("syncHarnessRemoteStatus")
-                    .accessibilityValue(remoteStatusAccessibilityValue)
-            }
-
-            if !enabledCategories.isEmpty {
-                HStack(spacing: 8) {
-                    ForEach(enabledCategories, id: \.self) { category in
-                        Button("Disable \(category.rawValue)") {
-                            disableRemoteSync(for: category)
-                        }
-                        .buttonStyle(.bordered)
-                        .frame(maxWidth: .infinity)
-                        .accessibilityIdentifier("syncCategoryDisableButton::\(category.rawValue)")
-                    }
-                }
-                .padding(.horizontal, 16)
-                .padding(.bottom, 8)
             }
         }
     }
@@ -716,25 +638,6 @@ public struct SyncSettingsView: View {
     }
 
     /**
-     Stable button title used by the XCUITest-only backend switch controls.
-
-     - Parameter backend: Backend that should become active when the button is tapped.
-     - Returns: Short deterministic label for the requested backend.
-     - Side effects: none.
-     - Failure modes: This helper cannot fail.
-     */
-    private func syncBackendAutomationTitle(for backend: RemoteSyncBackend) -> String {
-        switch backend {
-        case .iCloud:
-            return "Switch to iCloud"
-        case .nextCloud:
-            return "Switch to NextCloud"
-        case .googleDrive:
-            return "Switch to Google Drive"
-        }
-    }
-
-    /**
      Stable root-screen state exported for Sync UI automation.
 
      The token captures the active backend plus the currently enabled remote categories so UI tests
@@ -763,17 +666,6 @@ public struct SyncSettingsView: View {
      */
     private func isRemoteCategoryEnabled(_ category: RemoteSyncCategory) -> Bool {
         remoteCategoryEnabled[category] ?? remoteSettingsStore.isSyncEnabled(for: category)
-    }
-
-    /**
-     Whether the current process is running under the in-memory XCUITest harness.
-
-     - Returns: `true` when `UITEST_USE_IN_MEMORY_STORES` is present in launch arguments.
-     - Side effects: none.
-     - Failure modes: This helper cannot fail.
-     */
-    private var isUITestHarnessEnabled: Bool {
-        ProcessInfo.processInfo.arguments.contains("UITEST_USE_IN_MEMORY_STORES")
     }
 
     /**

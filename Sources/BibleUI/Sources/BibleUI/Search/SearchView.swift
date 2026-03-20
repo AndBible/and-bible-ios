@@ -245,9 +245,6 @@ public struct SearchView: View {
                 selectedModules = [mod.info.name]
             }
             _ = applyInitialQueryIfNeeded(initialQuery)
-            if query.isEmpty, let uiTestQuery = uiTestInitialQueryOverride {
-                _ = applyInitialQueryIfNeeded(uiTestQuery)
-            }
             checkIndex()
         }
         .onChange(of: initialQuery) { _, newValue in
@@ -833,8 +830,6 @@ public struct SearchView: View {
      - mutates `viewState` to `.ready`, `.needsIndex`, or `.creatingIndex`
      - may trigger `autoSearchIfNeeded()` when the search UI becomes ready
      - reads index availability from `SearchIndexService`
-     - automatically begins index creation for the disposable UI-test harness when the bundled
-       module set is present but not yet indexed
 
      Failure modes:
      - if either `searchIndexService` or `swordModule` is unavailable, the method intentionally
@@ -851,8 +846,6 @@ public struct SearchView: View {
         if service.hasIndex(for: mod.info.name) {
             viewState = .ready
             autoSearchIfNeeded()
-        } else if ProcessInfo.processInfo.arguments.contains("UITEST_USE_IN_MEMORY_STORES") {
-            startIndexCreation()
         } else {
             viewState = .needsIndex(
                 moduleName: mod.info.name,
@@ -863,8 +856,7 @@ public struct SearchView: View {
 
     /// Auto-executes a search when the view was launched with a seeded query.
     private func autoSearchIfNeeded() {
-        let hasSeededQuery = !initialQuery.isEmpty || uiTestInitialQueryOverride != nil
-        if hasSeededQuery && !query.isEmpty {
+        if !initialQuery.isEmpty && !query.isEmpty {
             performSearch()
         }
     }
@@ -884,25 +876,6 @@ public struct SearchView: View {
         guard !value.isEmpty, query != value else { return false }
         query = value
         return true
-    }
-
-    /**
-     Provides a deterministic direct-launch query for the XCUITest search harness only.
-
-     - Returns: Seed query from the UI-test launch environment when the in-memory XCUITest harness
-       is active, otherwise `nil`.
-     - Side effects: none.
-     - Failure modes:
-     *   - ignores missing launch arguments or empty environment values so production launches and
-     *     non-search UI tests never pick up a test-only query
-     */
-    private var uiTestInitialQueryOverride: String? {
-        guard ProcessInfo.processInfo.arguments.contains("UITEST_USE_IN_MEMORY_STORES") else { return nil }
-        guard let query = ProcessInfo.processInfo.environment["UITEST_SEARCH_QUERY"],
-              !query.isEmpty else {
-            return nil
-        }
-        return query
     }
 
     /**

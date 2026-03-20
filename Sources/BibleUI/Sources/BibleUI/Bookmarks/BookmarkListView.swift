@@ -56,29 +56,19 @@ public struct BookmarkListView: View {
     /// Optional callback used to open a study pad for a selected label.
     var onOpenStudyPad: ((UUID) -> Void)?
 
-    /// Optional XCUITest-only callback that dismisses and reopens the bookmark sheet deterministically.
-    var onUITestDismissAndReopen: (() -> Void)?
-
-    /// Test-only flag exposing deterministic in-list dismiss affordances during XCUITest runs.
-    private let uiTestUsesInMemoryStores = ProcessInfo.processInfo.arguments.contains("UITEST_USE_IN_MEMORY_STORES")
-
     /**
      Creates the bookmark list view.
 
      - Parameters:
        - onNavigate: Callback invoked when the user opens a bookmark from the list.
        - onOpenStudyPad: Callback invoked when the user wants to open a selected label's study pad.
-       - onUITestDismissAndReopen: Optional XCUITest-only callback that dismisses and reopens the
-         bookmark sheet without relying on the reader overflow menu.
      */
     public init(
         onNavigate: ((String, Int) -> Void)? = nil,
-        onOpenStudyPad: ((UUID) -> Void)? = nil,
-        onUITestDismissAndReopen: (() -> Void)? = nil
+        onOpenStudyPad: ((UUID) -> Void)? = nil
     ) {
         self.onNavigate = onNavigate
         self.onOpenStudyPad = onOpenStudyPad
-        self.onUITestDismissAndReopen = onUITestDismissAndReopen
     }
 
     /**
@@ -127,25 +117,6 @@ public struct BookmarkListView: View {
     /// User-created labels that should appear in the filter strip.
     private var userLabels: [BibleCore.Label] {
         labels.filter { $0.isRealLabel }
-    }
-
-    /// Stable XCUITest-only export of the currently visible bookmark rows.
-    private var uiTestBookmarkState: String {
-        let refs = filteredBookmarks
-            .map(Self.verseReference(for:))
-            .map(bookmarkListAccessibilitySegment(_:))
-            .sorted()
-        return refs.isEmpty ? "bookmarkState=empty" : "bookmarkState=\(refs.joined(separator: "|"))"
-    }
-
-    /// Seeded `Genesis 1:1` bookmark used by multiple direct-launch bookmark harness workflows.
-    private var uiTestSeedBookmark: BibleBookmark? {
-        filteredBookmarks.first(where: { Self.verseReference(for: $0) == "Genesis 1:1" })
-    }
-
-    /// Seeded `Exodus 2:1` bookmark used by the direct-launch bookmark navigation workflow.
-    private var uiTestNavigationBookmark: BibleBookmark? {
-        filteredBookmarks.first(where: { Self.verseReference(for: $0) == "Exodus 2:1" })
     }
 
     /**
@@ -207,28 +178,11 @@ public struct BookmarkListView: View {
                 )
             }
         }
-        .safeAreaInset(edge: .top) {
-            if uiTestUsesInMemoryStores {
-                uiTestBookmarkHarness
-            }
-        }
     }
 
     /// Main list content once at least one bookmark exists.
     private var bookmarkList: some View {
         List {
-            if uiTestUsesInMemoryStores {
-                Button("Dismiss Bookmark Sheet") { dismiss() }
-                    .accessibilityIdentifier("bookmarkListHarnessDoneButton")
-                if let onUITestDismissAndReopen {
-                    Button("Dismiss and Reopen Bookmark Sheet") {
-                        resetStateForUITestReopen()
-                        onUITestDismissAndReopen()
-                    }
-                        .accessibilityIdentifier("bookmarkListHarnessReopenButton")
-                }
-            }
-
             // Label filter chips
             if !userLabels.isEmpty {
                 labelFilterSection
@@ -337,131 +291,6 @@ public struct BookmarkListView: View {
         }
     }
 
-    /// Stable XCUITest-only controls that bypass toolbar and label-chip AX flakiness in CI.
-    @ViewBuilder
-    private var uiTestBookmarkHarness: some View {
-        VStack(spacing: 8) {
-            HStack(spacing: 8) {
-                uiTestBookmarkHarnessButton(
-                    title: "Bible",
-                    identifier: "bookmarkListHarnessSortOption::bibleOrder",
-                    style: .prominent
-                ) {
-                    sortOrder = .bibleOrder
-                }
-
-                uiTestBookmarkHarnessButton(
-                    title: "Created",
-                    identifier: "bookmarkListHarnessSortOption::createdAtDesc"
-                ) {
-                    sortOrder = .createdAtDesc
-                }
-            }
-
-            if let seedLabel = userLabels.first(where: { $0.name == "UI Test Seed" }) {
-                HStack(spacing: 8) {
-                    uiTestBookmarkHarnessButton(
-                        title: "Seed",
-                        identifier: "bookmarkListHarnessFilterChip::UI_Test_Seed"
-                    ) {
-                        selectedLabelId = seedLabel.id
-                    }
-
-                    if onOpenStudyPad != nil {
-                        uiTestBookmarkHarnessButton(
-                            title: "StudyPad",
-                            identifier: "bookmarkListHarnessOpenStudyPadButton::UI_Test_Seed",
-                            style: .prominent
-                        ) {
-                            onOpenStudyPad?(seedLabel.id)
-                        }
-                    }
-                }
-            }
-
-            HStack(spacing: 8) {
-                if let seedBookmark = uiTestSeedBookmark {
-                    uiTestBookmarkHarnessButton(
-                        title: "Edit Labels",
-                        identifier: "bookmarkListHarnessEditLabelsButton::Genesis_1_1"
-                    ) {
-                        editingLabelsBookmarkId = seedBookmark.id
-                    }
-                }
-
-                if let navigationBookmark = uiTestNavigationBookmark {
-                    uiTestBookmarkHarnessButton(
-                        title: "Open Exodus 2",
-                        identifier: "bookmarkListHarnessNavigateButton::Exodus_2_1",
-                        style: .prominent
-                    ) {
-                        let chapter = navigationBookmark.ordinalStart / 40 + 1
-                        let bookName = navigationBookmark.book ?? "Genesis"
-                        onNavigate?(bookName, chapter)
-                    }
-                }
-            }
-
-            if filteredBookmarks.contains(where: { Self.verseReference(for: $0) == "Exodus 2:1" }) {
-                HStack(spacing: 8) {
-                    uiTestBookmarkHarnessButton(
-                        title: "Delete Exodus 2",
-                        identifier: "bookmarkListHarnessDeleteButton::Exodus_2_1"
-                    ) {
-                        if let exodusBookmark = filteredBookmarks.first(
-                            where: { Self.verseReference(for: $0) == "Exodus 2:1" }
-                        ) {
-                            deleteBookmark(exodusBookmark)
-                        }
-                    }
-                    Spacer(minLength: 0)
-                }
-            }
-
-            Text(uiTestBookmarkState)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .accessibilityIdentifier("bookmarkListHarnessState")
-                .accessibilityValue(uiTestBookmarkState)
-        }
-        .font(.caption.weight(.semibold))
-        .padding(.horizontal, 16)
-        .padding(.top, 10)
-        .padding(.bottom, 6)
-        .background(.thinMaterial)
-    }
-
-    /// Builds one compact XCUITest-only bookmark harness button.
-    @ViewBuilder
-    private func uiTestBookmarkHarnessButton(
-        title: String,
-        identifier: String,
-        style: BorderButtonStyle = .regular,
-        action: @escaping () -> Void
-    ) -> some View {
-        if style == .prominent {
-            Button(title, action: action)
-                .buttonStyle(.borderedProminent)
-                .frame(maxWidth: .infinity)
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
-                .accessibilityIdentifier(identifier)
-        } else {
-            Button(title, action: action)
-                .buttonStyle(.bordered)
-                .frame(maxWidth: .infinity)
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
-                .accessibilityIdentifier(identifier)
-        }
-    }
-
-    /// Visual variants used by the compact bookmark harness buttons.
-    private enum BorderButtonStyle {
-        case regular
-        case prominent
-    }
-
     /**
      Deletes the currently visible bookmarks at the given filtered-list offsets.
 
@@ -488,21 +317,6 @@ public struct BookmarkListView: View {
     private func deleteBookmark(_ bookmark: BibleBookmark) {
         modelContext.delete(bookmark)
         try? modelContext.save()
-    }
-
-    /**
-     Resets in-list filter and search state before the XCUITest harness reopens the sheet.
-     *
-     * Side effects:
-     * - clears the selected label filter and search query so a fresh bookmark-sheet presentation
-     *   starts from the same state as a new user-opened sheet
-     *
-     * Failure modes:
-     * - this helper cannot fail
-     */
-    private func resetStateForUITestReopen() {
-        selectedLabelId = nil
-        searchText = ""
     }
 
     /**
@@ -553,10 +367,6 @@ private struct BookmarkRow: View {
     /// Callback used to open label editing for the bookmark.
     var onEditLabels: (() -> Void)?
 
-    /// Whether XCUITests should expose a dedicated inline label-edit action for this row.
-    private let uiTestShowsInlineEditAction =
-        ProcessInfo.processInfo.arguments.contains("UITEST_SEED_BOOKMARK_LABEL_WORKFLOW")
-
     /// Labels currently assigned to the bookmark, sorted by name.
     private var assignedLabels: [BibleCore.Label] {
         bookmark.bookmarkToLabels?.compactMap { $0.label }.sorted { $0.name < $1.name } ?? []
@@ -564,14 +374,7 @@ private struct BookmarkRow: View {
 
     /// Builds the tappable bookmark row.
     var body: some View {
-        HStack(alignment: .top, spacing: 8) {
-            selectionButton
-
-            if uiTestShowsInlineEditAction {
-                inlineEditLabelsButton
-                    .padding(.top, 4)
-            }
-        }
+        selectionButton
     }
 
     /**
@@ -600,28 +403,6 @@ private struct BookmarkRow: View {
         .buttonStyle(.plain)
         .contentShape(Rectangle())
         .accessibilityIdentifier(bookmarkRowIdentifier())
-    }
-
-    /**
-     Builds the XCUITest-only inline edit-labels control for one bookmark row.
-
-     - Returns: Inline button that opens `LabelAssignmentView` for the bookmark.
-     - Side effects:
-       - invokes `onEditLabels` when tapped
-     - Failure modes: This helper cannot fail.
-     */
-    private var inlineEditLabelsButton: some View {
-        Button {
-            onEditLabels?()
-        } label: {
-            Image(systemName: "tag.circle")
-                .font(.headline)
-                .foregroundStyle(.secondary)
-                .frame(width: 28, height: 28)
-        }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier(bookmarkInlineActionIdentifier("bookmarkListEditLabelsButton"))
-        .accessibilityLabel(BookmarkListView.verseReference(for: bookmark))
     }
 
     /// Header row containing label dots, icon, reference, and created-at date.
@@ -678,21 +459,20 @@ private struct BookmarkRow: View {
                         .background(Color(argbInt: label.color).opacity(0.2))
                         .clipShape(Capsule())
                 }
-                if !uiTestShowsInlineEditAction {
-                    // Tap area to edit labels
-                    Button {
-                        onEditLabels?()
-                    } label: {
-                        Image(systemName: "pencil.circle")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityIdentifier(bookmarkInlineActionIdentifier("bookmarkListEditLabelsButton"))
+                Button {
+                    onEditLabels?()
+                } label: {
+                    Image(systemName: "pencil.circle")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier(bookmarkInlineActionIdentifier("bookmarkListEditLabelsButton"))
             }
         } else {
-            if uiTestShowsInlineEditAction {
+            Button {
+                onEditLabels?()
+            } label: {
                 HStack(spacing: 4) {
                     Image(systemName: "tag")
                         .font(.caption2)
@@ -700,22 +480,9 @@ private struct BookmarkRow: View {
                         .font(.caption2)
                 }
                 .foregroundStyle(.secondary)
-            } else {
-                // No labels — show a button to add some
-                Button {
-                    onEditLabels?()
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "tag")
-                            .font(.caption2)
-                        Text(String(localized: "add_labels"))
-                            .font(.caption2)
-                    }
-                    .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier(bookmarkInlineActionIdentifier("bookmarkListEditLabelsButton"))
             }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier(bookmarkInlineActionIdentifier("bookmarkListEditLabelsButton"))
         }
     }
 
