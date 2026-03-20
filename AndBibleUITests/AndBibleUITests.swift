@@ -1210,15 +1210,10 @@ final class AndBibleUITests: XCTestCase {
         let searchField = app.searchFields.firstMatch
         XCTAssertTrue(searchField.waitForExistence(timeout: 10), "Expected bookmark search field to exist.")
 
-        let seedFilterButton = app.buttons["bookmarkListHarnessFilterChip::UI_Test_Seed"].firstMatch
-        if seedFilterButton.waitForExistence(timeout: 1) {
-            tapElementReliably(seedFilterButton, timeout: 10)
-        } else {
-            tapElementReliably(
-                requireElement("bookmarkListFilterChip::UI_Test_Seed", in: app, timeout: 10),
-                timeout: 10
-            )
-        }
+        tapElementReliably(
+            requireElement("bookmarkListFilterChip::UI_Test_Seed", in: app, timeout: 10),
+            timeout: 10
+        )
         waitForElementValue(
             "bookmarkListHarnessState",
             toEqual: "bookmarkState=Genesis_1_1",
