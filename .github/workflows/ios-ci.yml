@@ -316,17 +316,23 @@ jobs:
             --code-signing-allowed NO \
             --action build-for-testing
 
+      - name: Build host-side UI fixture tool
+        run: swift build --package-path . --product UITestFixtureTool
+
       - name: Run selected simulator tests without rebuilding
         run: |
-          python3 scripts/run_xcodebuild_with_test_selection.py \
+          python3 scripts/run_ui_test_groups.py \
             --project AndBible.xcodeproj \
             --scheme AndBible \
             --configuration Debug \
             --destination "${{ steps.simulator.outputs.destination }}" \
+            --simulator-id "${{ steps.simulator.outputs.simulator_id }}" \
             --derived-data-path "${DERIVED_DATA_PATH}" \
             --result-bundle-path "${TEST_XCRESULT_BUNDLE_PATH}" \
+            --fixture-manifest scripts/ui_test_fixture_manifest.json \
+            --fixture-tool-path .build/debug/UITestFixtureTool \
             --code-signing-allowed NO \
-            --action test-without-building
+            --app-path "${DERIVED_DATA_PATH}/Build/Products/Debug-iphonesimulator/AndBible.app"
 
       - name: Upload xcodebuild test result bundle
         if: always()

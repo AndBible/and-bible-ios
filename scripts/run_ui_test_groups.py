@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import shlex
 import subprocess
@@ -137,6 +138,8 @@ def ensure_app_installed(
         ["xcrun", "simctl", "terminate", simulator_id, bundle_identifier],
         check=False,
         text=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
     )
     run_command(["xcrun", "simctl", "install", simulator_id, str(app_path)])
     container = run_command(
@@ -228,6 +231,8 @@ def run_grouped_ui_tests(
             ["xcrun", "simctl", "terminate", simulator_id, bundle_identifier],
             check=False,
             text=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
         )
         reset_and_seed_fixture(
             fixture_tool_path=fixture_tool_path,
@@ -279,7 +284,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     """Run the requested grouped UI test flow."""
     parser = create_argument_parser()
     args = parser.parse_args(argv)
-    selection_args_text = args.test_selection_args or ""
+    selection_args_text = args.test_selection_args
+    if selection_args_text is None:
+        selection_args_text = os.environ.get("TEST_SELECTION_ARGS", "")
     return run_grouped_ui_tests(
         project=args.project,
         scheme=args.scheme,

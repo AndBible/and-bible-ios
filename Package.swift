@@ -37,8 +37,8 @@ let package = Package(
             linkerSettings: [
                 .linkedLibrary("z"),
                 .linkedLibrary("bz2"),
-                .linkedLibrary("curl"),
-                .linkedLibrary("lzma"),
+                .linkedLibrary("curl", .when(platforms: [.macOS])),
+                .linkedLibrary("lzma", .when(platforms: [.macOS])),
                 .linkedLibrary("c++"),
             ]
         ),

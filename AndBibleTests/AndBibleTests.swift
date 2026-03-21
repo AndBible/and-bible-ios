@@ -6596,6 +6596,49 @@ final class AndBibleTests: XCTestCase {
     }
 
     /**
+     Verifies that saving a second Bible bookmark note replaces the persisted note text instead of
+     creating a duplicate detached note row.
+     *
+     * Data dependencies:
+     * - creates one in-memory Bible bookmark and no pre-existing note row
+     *
+     * Side effects:
+     * - writes an initial note through `BookmarkService`
+     * - writes a replacement note through a fresh `BookmarkService` instance bound to the same
+     *   SwiftData context
+     *
+     * Failure modes:
+     * - throws if the in-memory SwiftData container cannot be created or queried
+     * - fails if the reloaded note text is not updated or if multiple detached note rows exist
+     */
+    func testBookmarkServiceUpdatingBibleBookmarkNoteReusesPersistedNoteRow() throws {
+        let container = try makeBookmarkRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        let bookmarkStore = BookmarkStore(modelContext: modelContext)
+        let bookmarkService = BookmarkService(store: bookmarkStore)
+
+        let bookmark = BibleBookmark(
+            kjvOrdinalStart: 1,
+            kjvOrdinalEnd: 1,
+            ordinalStart: 1,
+            ordinalEnd: 1,
+            v11n: "KJVA"
+        )
+        modelContext.insert(bookmark)
+        try modelContext.save()
+
+        bookmarkService.saveBibleBookmarkNote(bookmarkId: bookmark.id, note: "Seeded note")
+        let replacementService = BookmarkService(store: BookmarkStore(modelContext: modelContext))
+        replacementService.saveBibleBookmarkNote(bookmarkId: bookmark.id, note: "Updated note")
+
+        let reloadedBookmark = try XCTUnwrap(
+            try modelContext.fetch(FetchDescriptor<BibleBookmark>()).first
+        )
+        XCTAssertEqual(reloadedBookmark.notes?.notes, "Updated note")
+        XCTAssertEqual(try modelContext.fetch(FetchDescriptor<BibleBookmarkNotes>()).count, 1)
+    }
+
+    /**
      Verifies that the My Notes rebuild query stops returning a bookmark after its note is deleted
      in the same live SwiftData context.
      *
@@ -6642,6 +6685,48 @@ final class AndBibleTests: XCTestCase {
             .bookmarks(for: 1, endOrdinal: 40, book: "Genesis")
             .filter { $0.notes != nil && !($0.notes?.notes.isEmpty ?? true) }
         XCTAssertTrue(rebuiltMyNotesBookmarks.isEmpty)
+    }
+
+    /**
+     Verifies that creating and editing one StudyPad entry persists its text payload in the backing
+     SwiftData rows.
+     *
+     * Data dependencies:
+     * - creates an in-memory bookmark schema with one real user label and no pre-existing StudyPad
+     *   entries
+     *
+     * Side effects:
+     * - creates one StudyPad entry after order `-1`
+     * - updates the detached StudyPad text payload through a fresh `BookmarkService`
+     *
+     * Failure modes:
+     * - throws if the in-memory SwiftData container cannot be created or queried
+     * - fails if the created entry is missing, if its order number is wrong, or if the persisted
+     *   text row does not contain the updated payload
+     */
+    func testBookmarkServiceCreateAndUpdateStudyPadEntryPersistsText() throws {
+        let container = try makeBookmarkRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        let bookmarkStore = BookmarkStore(modelContext: modelContext)
+        let bookmarkService = BookmarkService(store: bookmarkStore)
+
+        let label = bookmarkService.createLabel(name: "UI Test Seed", color: Label.defaultColor)
+        let creation = try XCTUnwrap(
+            bookmarkService.createStudyPadEntry(labelId: label.id, afterOrderNumber: -1)
+        )
+        XCTAssertEqual(creation.0.orderNumber, 0)
+
+        let updateService = BookmarkService(store: BookmarkStore(modelContext: modelContext))
+        updateService.updateStudyPadTextEntryText(id: creation.0.id, text: "Updated StudyPad note")
+        try modelContext.save()
+
+        let entries = try modelContext.fetch(FetchDescriptor<StudyPadTextEntry>())
+        XCTAssertEqual(entries.count, 1)
+        XCTAssertEqual(entries.first?.label?.id, label.id)
+
+        let texts = try modelContext.fetch(FetchDescriptor<StudyPadTextEntryText>())
+        XCTAssertEqual(texts.count, 1)
+        XCTAssertEqual(texts.first?.text, "Updated StudyPad note")
     }
 
     private func makeInMemorySettingsStore() throws -> SettingsStore {
