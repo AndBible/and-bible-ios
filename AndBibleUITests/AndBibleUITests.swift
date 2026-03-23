@@ -1350,13 +1350,13 @@ final class AndBibleUITests: XCTestCase {
         if let trackedApp, trackedApp.state != .notRunning {
             trackedApp.terminate()
         }
-        prepareFixtureIfRequested()
         let app = XCUIApplication()
         trackedApp = app
         app.launchEnvironment["UITEST_SESSION_ID"] = UUID().uuidString
         if let searchQuery {
             app.launchEnvironment["UITEST_SEARCH_QUERY"] = searchQuery
         }
+        prepareFixtureIfRequested(for: app)
         return app
     }
 
@@ -1372,6 +1372,7 @@ final class AndBibleUITests: XCTestCase {
      *   - records an XCTest failure when the fixture reset or seed subprocess exits non-zero
      */
     private func prepareFixtureIfRequested(
+        for app: XCUIApplication,
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
@@ -1391,7 +1392,8 @@ final class AndBibleUITests: XCTestCase {
             return
         }
         let bundleID = environment["UITEST_BUNDLE_ID"] ?? "org.andbible.ios"
-        guard let dataContainerPath = resolveInstalledAppDataContainerFromFilesystem(
+        guard let dataContainerPath = ensureInstalledAppDataContainer(
+            for: app,
             bundleIdentifier: bundleID,
             file: file,
             line: line
@@ -1445,6 +1447,62 @@ final class AndBibleUITests: XCTestCase {
     }
 
     /**
+     Ensures the app under test has a real simulator data container before fixture seeding runs.
+     *
+     * - Parameters:
+     *   - app: Application under test that will later be launched for the real test body.
+     *   - bundleIdentifier: Bundle identifier of the app under test.
+     *   - file: Source file used for XCTest failure attribution.
+     *   - line: Source line used for XCTest failure attribution.
+     * - Returns: Absolute simulator data-container path for the installed app.
+     * - Side effects:
+     *   - performs one bootstrap launch/terminate cycle when the simulator has not yet created the
+     *     app data container
+     * - Failure modes:
+     *   - records an XCTest failure when the bootstrap launch cannot materialize the data
+     *     container before fixture seeding needs it
+     */
+    private func ensureInstalledAppDataContainer(
+        for app: XCUIApplication,
+        bundleIdentifier: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) -> String? {
+        if let existingPath = findInstalledAppDataContainerFromFilesystem(
+            bundleIdentifier: bundleIdentifier
+        ) {
+            return existingPath
+        }
+
+        print("Bootstrapping app container for bundle '\(bundleIdentifier)' before fixture seeding.")
+        app.launch()
+        XCTAssertTrue(
+            app.wait(for: .runningForeground, timeout: 20),
+            "Expected bootstrap launch to reach the foreground before fixture seeding.",
+            file: file,
+            line: line
+        )
+        app.terminate()
+
+        let deadline = Date().addingTimeInterval(10)
+        while Date() < deadline {
+            if let bootstrappedPath = findInstalledAppDataContainerFromFilesystem(
+                bundleIdentifier: bundleIdentifier
+            ) {
+                return bootstrappedPath
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.25))
+        }
+
+        XCTFail(
+            "Unable to resolve simulator data container for '\(bundleIdentifier)' after bootstrap launch.",
+            file: file,
+            line: line
+        )
+        return nil
+    }
+
+    /**
      Resolves the installed simulator data container by scanning mobile-container metadata on disk.
      *
      * - Parameters:
@@ -1458,10 +1516,8 @@ final class AndBibleUITests: XCTestCase {
      *   - records an XCTest failure when the simulator data root or matching container metadata
      *     cannot be resolved from the installed app bundle path
      */
-    private func resolveInstalledAppDataContainerFromFilesystem(
-        bundleIdentifier: String,
-        file: StaticString = #filePath,
-        line: UInt = #line
+    private func findInstalledAppDataContainerFromFilesystem(
+        bundleIdentifier: String
     ) -> String? {
         let installedAppBundleURL = Bundle.main.bundleURL
         let simulatorDataRootURL = installedAppBundleURL
@@ -1476,11 +1532,6 @@ final class AndBibleUITests: XCTestCase {
             .appendingPathComponent("Application", isDirectory: true)
 
         guard FileManager.default.fileExists(atPath: dataApplicationsURL.path) else {
-            XCTFail(
-                "Unable to resolve simulator data root from installed app bundle '\(installedAppBundleURL.path)'.",
-                file: file,
-                line: line
-            )
             return nil
         }
 
@@ -1502,11 +1553,6 @@ final class AndBibleUITests: XCTestCase {
             return candidateURL.path
         }
 
-        XCTFail(
-            "Unable to resolve simulator data container for '\(bundleIdentifier)' under '\(dataApplicationsURL.path)'.",
-            file: file,
-            line: line
-        )
         return nil
     }
 
