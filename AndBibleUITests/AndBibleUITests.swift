@@ -2364,10 +2364,13 @@ final class AndBibleUITests: XCTestCase {
      *   - fails when the Sync Settings screen never appears
      */
     private func openSyncSettings(in app: XCUIApplication) -> XCUIElement {
-        openSettings(in: app)
-        tapSettingsElement("settingsSyncLink", in: app, timeout: 20)
-        _ = requireElement("syncBackendPicker", in: app, timeout: 20)
-        return requireElement("syncSettingsScreen", in: app, timeout: 20)
+        openSettingsDestination(
+            linkIdentifier: "settingsSyncLink",
+            destinationIdentifier: "syncSettingsScreen",
+            readinessIdentifiers: ["syncBackendPicker", "syncRemoteStatus"],
+            in: app,
+            destinationTimeout: 20
+        )
     }
 
     /**
@@ -3291,9 +3294,9 @@ final class AndBibleUITests: XCTestCase {
         in app: XCUIApplication
     ) -> XCUIElement {
         let title = readerActionTitle(for: identifier)
-        let titledCell = app.collectionViews.cells.containing(.staticText, identifier: title).firstMatch
-        if titledCell.exists {
-            return titledCell
+        let identifierMatch = app.descendants(matching: .any)[identifier].firstMatch
+        if identifierMatch.exists {
+            return identifierMatch
         }
 
         let buttonMatch = app.buttons[title].firstMatch
@@ -3306,9 +3309,13 @@ final class AndBibleUITests: XCTestCase {
             return staticTextMatch
         }
 
-        let identifierMatch = app.descendants(matching: .any)[identifier].firstMatch
-        if identifierMatch.exists {
-            return identifierMatch
+        if let container = largestVisibleReaderActionContainer(in: app) {
+            let titledMatch = container.descendants(matching: .any)
+                .matching(NSPredicate(format: "label == %@", title))
+                .firstMatch
+            if titledMatch.exists {
+                return titledMatch
+            }
         }
 
         return identifierMatch
