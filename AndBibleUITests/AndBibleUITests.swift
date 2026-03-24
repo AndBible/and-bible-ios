@@ -2497,9 +2497,9 @@ final class AndBibleUITests: XCTestCase {
         line: UInt = #line
     ) -> XCUIElement {
         let settingsForm = requireElement("settingsForm", in: app, timeout: timeout, file: file, line: line)
-        let element = app.descendants(matching: .any)[identifier].firstMatch
+        let element = settingsForm.descendants(matching: .any)[identifier].firstMatch
         let title = settingsNavigationTitle(for: identifier)
-        let titledFallback = app.descendants(matching: .any)
+        let titledFallback = settingsForm.descendants(matching: .any)
             .matching(NSPredicate(format: "label == %@", title))
             .firstMatch
 
@@ -3294,22 +3294,25 @@ final class AndBibleUITests: XCTestCase {
         in app: XCUIApplication
     ) -> XCUIElement {
         let title = readerActionTitle(for: identifier)
-        let identifierMatch = app.descendants(matching: .any)[identifier].firstMatch
+        let container = largestVisibleReaderActionContainer(in: app)
+        let containerButtons = container?.descendants(matching: .button)
+
+        let identifierMatch = containerButtons?[identifier].firstMatch ?? app.buttons[identifier].firstMatch
         if identifierMatch.exists {
             return identifierMatch
         }
 
-        let buttonMatch = app.buttons[title].firstMatch
+        let buttonMatch = containerButtons?[title].firstMatch ?? app.buttons[title].firstMatch
         if buttonMatch.exists {
             return buttonMatch
         }
 
-        let staticTextMatch = app.staticTexts[title].firstMatch
+        let staticTextMatch = (container?.staticTexts[title].firstMatch) ?? app.staticTexts[title].firstMatch
         if staticTextMatch.exists {
             return staticTextMatch
         }
 
-        if let container = largestVisibleReaderActionContainer(in: app) {
+        if let container {
             let titledMatch = container.descendants(matching: .any)
                 .matching(NSPredicate(format: "label == %@", title))
                 .firstMatch
@@ -3776,11 +3779,11 @@ final class AndBibleUITests: XCTestCase {
      *   - fails if the create-label alert cannot be presented or completed
      */
     private func createFreshLabelFromAssignment(in app: XCUIApplication) {
-        requireElement("labelAssignmentCreateNewLabelButton", in: app, timeout: 10).tap()
+        tapElementReliably(requireElement("labelAssignmentCreateNewLabelButton", in: app, timeout: 10), timeout: 10)
         let nameField = app.textFields["Label name"].firstMatch
         XCTAssertTrue(nameField.waitForExistence(timeout: 10), "Expected create-label text field to exist.")
         replaceText(in: nameField, with: "UI Test Fresh")
-        app.buttons["Create"].firstMatch.tap()
+        tapElementReliably(app.buttons["Create"].firstMatch, timeout: 10)
     }
 
     /**
@@ -4126,7 +4129,7 @@ final class AndBibleUITests: XCTestCase {
      *     instead of first deleting existing content
      */
     private func replaceText(in element: XCUIElement, with text: String) {
-        element.tap()
+        tapElementReliably(element, timeout: 10)
         if let existingText = element.value as? String {
             let deleteSequence = String(repeating: XCUIKeyboardKey.delete.rawValue, count: existingText.count)
             element.typeText(deleteSequence + text)
