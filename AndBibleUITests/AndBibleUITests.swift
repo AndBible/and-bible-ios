@@ -1512,14 +1512,36 @@ final class AndBibleUITests: XCTestCase {
         }
 
         print("Bootstrapping app container for bundle '\(bundleIdentifier)' before fixture seeding.")
-        app.launch()
-        XCTAssertTrue(
-            app.wait(for: .runningForeground, timeout: 20),
-            "Expected bootstrap launch to reach the foreground before fixture seeding.",
-            file: file,
-            line: line
-        )
-        app.terminate()
+        if let simulatorID {
+            let launchResult = runHostProcess(
+                executablePath: "/usr/bin/xcrun",
+                arguments: ["simctl", "launch", simulatorID, bundleIdentifier],
+                timeout: 20
+            )
+            XCTAssertEqual(
+                launchResult.status,
+                0,
+                "Expected simctl bootstrap launch to succeed before fixture seeding.\nstdout:\n\(launchResult.stdout)\nstderr:\n\(launchResult.stderr)",
+                file: file,
+                line: line
+            )
+            defer {
+                _ = runHostProcess(
+                    executablePath: "/usr/bin/xcrun",
+                    arguments: ["simctl", "terminate", simulatorID, bundleIdentifier],
+                    timeout: 10
+                )
+            }
+        } else {
+            app.launch()
+            XCTAssertTrue(
+                app.wait(for: .runningForeground, timeout: 20),
+                "Expected bootstrap launch to reach the foreground before fixture seeding.",
+                file: file,
+                line: line
+            )
+            app.terminate()
+        }
 
         if let simulatorID,
            let bootstrappedPath = resolveInstalledAppDataContainer(
@@ -3086,7 +3108,9 @@ final class AndBibleUITests: XCTestCase {
         repeat {
             if !button.frame.isEmpty {
                 button.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
-                return
+                if waitForReaderActionSurface(in: app, timeout: min(3, max(1, deadline.timeIntervalSinceNow))) {
+                    return
+                }
             }
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         } while Date() < deadline
@@ -3097,6 +3121,36 @@ final class AndBibleUITests: XCTestCase {
             file: file,
             line: line
         )
+    }
+
+    /**
+     Waits for the real reader overflow menu surface to expose at least one known action button.
+     *
+     * - Parameters:
+     *   - app: Running application under test.
+     *   - timeout: Maximum time to wait for a reader action to appear.
+     * - Returns: `true` when the action surface becomes visible before timeout.
+     * - Side effects:
+     *   - inspects the live visible button hierarchy for known reader action titles/identifiers.
+     * - Failure modes:
+     *   - returns `false` when no known reader action appears before timeout.
+     */
+    private func waitForReaderActionSurface(
+        in app: XCUIApplication,
+        timeout: TimeInterval
+    ) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            let visibleButtons = app.descendants(matching: .button).allElementsBoundByIndex.filter {
+                !$0.frame.isEmpty
+            }
+            if visibleButtons.contains(where: isKnownReaderActionButton) {
+                return true
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        } while Date() < deadline
+
+        return false
     }
 
     /**
@@ -3253,6 +3307,30 @@ final class AndBibleUITests: XCTestCase {
     }
 
     /**
+     Determines whether one visible button matches a production reader overflow action.
+     *
+     * - Parameter element: Live XCUI button candidate.
+     * - Returns: `true` when the button matches one known reader action title or identifier.
+     * - Side effects: none.
+     * - Failure modes: This helper cannot fail.
+     */
+    private func isKnownReaderActionButton(_ element: XCUIElement) -> Bool {
+        let knownIdentifiers = [
+            "readerOpenBookmarksAction",
+            "readerOpenHistoryAction",
+            "readerOpenReadingPlansAction",
+            "readerOpenSettingsAction",
+            "readerOpenWorkspacesAction",
+            "readerOpenDownloadsAction",
+            "readerOpenAboutAction",
+        ]
+        let knownTitles = Set(knownIdentifiers.map(readerActionTitle(for:)))
+        return knownIdentifiers.contains(element.identifier) ||
+            knownTitles.contains(element.label) ||
+            knownTitles.contains(element.identifier)
+    }
+
+    /**
      Resolves the largest currently visible container that can reveal additional reader overflow
      actions when swiped.
      *
@@ -3275,7 +3353,8 @@ final class AndBibleUITests: XCTestCase {
         let candidates = app.scrollViews.allElementsBoundByIndex.filter {
             $0.exists &&
             !$0.frame.isEmpty &&
-            $0.frame.height >= 200
+            $0.frame.height >= 200 &&
+            $0.descendants(matching: .button).allElementsBoundByIndex.contains(where: isKnownReaderActionButton)
         }
 
         return candidates.max { lhs, rhs in
@@ -3371,8 +3450,6 @@ final class AndBibleUITests: XCTestCase {
 
             if let container = largestVisibleReaderActionContainer(in: app) {
                 container.swipeUp()
-            } else {
-                app.swipeUp()
             }
 
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
@@ -3799,10 +3876,9 @@ final class AndBibleUITests: XCTestCase {
      */
     private func createFreshLabelFromAssignment(in app: XCUIApplication) {
         tapElementReliably(requireElement("labelAssignmentCreateNewLabelButton", in: app, timeout: 10), timeout: 10)
-        let nameField = app.textFields["Label name"].firstMatch
-        XCTAssertTrue(nameField.waitForExistence(timeout: 10), "Expected create-label text field to exist.")
+        let nameField = requireLabelManagerNewLabelField(in: app, timeout: 10)
         replaceText(in: nameField, with: "UI Test Fresh")
-        tapElementReliably(app.buttons["Create"].firstMatch, timeout: 10)
+        tapElementReliably(requireLabelManagerCreateButton(in: app, timeout: 10), timeout: 10)
     }
 
     /**
@@ -4148,9 +4224,54 @@ final class AndBibleUITests: XCTestCase {
      *     instead of first deleting existing content
      */
     private func replaceText(in element: XCUIElement, with text: String) {
-        tapElementReliably(element, timeout: 10)
+        focusTextEntryElement(element, timeout: 10)
         let deleteSequence = String(repeating: XCUIKeyboardKey.delete.rawValue, count: 64)
         element.typeText(deleteSequence + text)
+    }
+
+    /**
+     Focuses one text-entry control through XCTest's native tap path without coordinate fallback.
+     *
+     * - Parameters:
+     *   - element: Text field or search field that should receive keyboard focus.
+     *   - timeout: Maximum number of seconds to wait for the control to expose a stable frame.
+     *   - file: Source file used for XCTest failure attribution.
+     *   - line: Source line used for XCTest failure attribution.
+     * - Side effects:
+     *   - waits for the text input to exist, then taps it directly so the software keyboard can
+     *     attach without the slower coordinate-based path
+     * - Failure modes:
+     *   - records an XCTest failure if the text input never exists or never exposes a non-empty
+     *     frame before timeout
+     */
+    private func focusTextEntryElement(
+        _ element: XCUIElement,
+        timeout: TimeInterval = 10,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        XCTAssertTrue(
+            element.waitForExistence(timeout: timeout),
+            "Expected text input '\(element.identifier)' to exist within \(timeout) seconds.",
+            file: file,
+            line: line
+        )
+
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            if !element.frame.isEmpty {
+                element.tap()
+                return
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        } while Date() < deadline
+
+        XCTAssertTrue(
+            !element.frame.isEmpty,
+            "Expected text input '\(element.identifier)' to expose a non-empty frame within \(timeout) seconds.",
+            file: file,
+            line: line
+        )
     }
 
     /**
