@@ -96,6 +96,7 @@ public struct WorkspaceSelectorView: View {
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
                 Button(String(localized: "done")) { dismiss() }
+                    .accessibilityIdentifier("workspaceSelectorDoneButton")
             }
             ToolbarItemGroup(placement: .primaryAction) {
                 EditButton()

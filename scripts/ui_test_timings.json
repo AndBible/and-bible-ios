@@ -37,5 +37,5 @@
   "AndBibleUITests/AndBibleUITests/testSyncSettingsNextCloudInvalidURLShowsValidationStatus": 48.90251803398132,
   "AndBibleUITests/AndBibleUITests/testTextDisplayFontFamilyButtonPresentsFontPicker": 18.99636697769165,
   "AndBibleUITests/AndBibleUITests/testTextDisplayJustifyToggleMutatesControlState": 16.199112057685852,
-  "AndBibleUITests/AndBibleUITests/testWorkspaceSelectorCreateRenameCloneDeleteFlow": 57.1987509727478
+  "AndBibleUITests/AndBibleUITests/testWorkspaceSelectorCreateAndSwitchFlow": 57.1987509727478
 }

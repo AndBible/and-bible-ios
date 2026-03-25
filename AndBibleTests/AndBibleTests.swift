@@ -189,6 +189,44 @@ final class AndBibleTests: XCTestCase {
         XCTAssertEqual(filtered.map(\.id), [matchingBookmark.id])
     }
 
+    func testWorkspaceStoreCreateRenameCloneAndDeleteRoundTripsWorkspaceGraph() throws {
+        let container = try makeWorkspaceModelContainer()
+        let context = ModelContext(container)
+        let store = WorkspaceStore(modelContext: context)
+
+        let source = store.createWorkspace(name: "Original")
+        let later = store.createWorkspace(name: "Later")
+        XCTAssertEqual(store.workspaces().map(\.name), ["Original", "Later"])
+
+        let sourcePrimaryWindow = try XCTUnwrap((source.windows ?? []).first)
+        store.addHistoryItem(to: sourcePrimaryWindow, document: "KJV", key: "Gen.1.1")
+        let secondaryWindow = store.addWindow(to: source, document: "KJV", category: "bible")
+        store.addHistoryItem(to: secondaryWindow, document: "KJV", key: "Gen.1.2")
+
+        store.renameWorkspace(source, to: "Renamed")
+        XCTAssertEqual(source.name, "Renamed")
+
+        let clone = store.cloneWorkspace(source, newName: "Clone")
+
+        XCTAssertEqual(store.workspaces().map(\.name), ["Renamed", "Clone", "Later"])
+        XCTAssertEqual(clone.orderNumber, source.orderNumber + 1)
+        XCTAssertEqual(later.orderNumber, 2)
+        XCTAssertEqual(clone.windows?.count, source.windows?.count)
+
+        let clonedWindows = (clone.windows ?? []).sorted { $0.orderNumber < $1.orderNumber }
+        let sourceWindows = (source.windows ?? []).sorted { $0.orderNumber < $1.orderNumber }
+        XCTAssertEqual(clonedWindows.count, sourceWindows.count)
+        XCTAssertTrue(Set(clonedWindows.map(\.id)).isDisjoint(with: Set(sourceWindows.map(\.id))))
+        XCTAssertEqual(clonedWindows.compactMap(\.pageManager).count, sourceWindows.compactMap(\.pageManager).count)
+        XCTAssertEqual(clonedWindows.reduce(into: 0) { $0 += $1.historyItems?.count ?? 0 },
+                       sourceWindows.reduce(into: 0) { $0 += $1.historyItems?.count ?? 0 })
+
+        store.delete(clone)
+
+        XCTAssertNil(store.workspace(id: clone.id))
+        XCTAssertEqual(store.workspaces().map(\.name), ["Renamed", "Later"])
+    }
+
     func testWebDAVPropfindBuildsAuthenticatedRequestAndParsesMultiStatus() async throws {
         let expectedAuth = "Basic \(Data("alice:secret".utf8).base64EncodedString())"
         MockURLProtocol.requestHandler = { request in
@@ -8443,6 +8481,17 @@ private func readSQLiteUserVersion(at url: URL) throws -> Int {
         throw NSError(domain: "AndBibleTests.SQLite", code: 7)
     }
     return Int(sqlite3_column_int(statement, 0))
+}
+
+private func makeWorkspaceModelContainer() throws -> ModelContainer {
+    let schema = Schema([
+        Workspace.self,
+        Window.self,
+        PageManager.self,
+        HistoryItem.self,
+    ])
+    let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
+    return try ModelContainer(for: schema, configurations: [configuration])
 }
 
 private func XCTAssertThrowsErrorAsync<T>(

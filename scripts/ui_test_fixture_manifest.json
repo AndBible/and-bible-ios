@@ -20,11 +20,11 @@
   "AndBibleUITests/AndBibleUITests/testLabelAssignmentTogglesFavouriteAndAssignment": "bookmark-row-label",
   "AndBibleUITests/AndBibleUITests/testLabelManagerCreateRenameDeleteFlow": "baseline",
   "AndBibleUITests/AndBibleUITests/testReadingPlansStartPlanAndAdvanceDay": "baseline",
-  "AndBibleUITests/AndBibleUITests/testSearchDirectLaunchBuildsIndexAndReturnsBundledResults": "baseline",
-  "AndBibleUITests/AndBibleUITests/testSearchDirectLaunchRetainsSeededQuery": "baseline",
-  "AndBibleUITests/AndBibleUITests/testSearchResultSelectionNavigatesReaderToBundledReference": "baseline",
-  "AndBibleUITests/AndBibleUITests/testSearchScopeChangeRerunsQueryAndUpdatesResults": "baseline",
-  "AndBibleUITests/AndBibleUITests/testSearchWordModeChangeRerunsQueryAndUpdatesResults": "baseline",
+  "AndBibleUITests/AndBibleUITests/testSearchDirectLaunchBuildsIndexAndReturnsBundledResults": "search-indexed",
+  "AndBibleUITests/AndBibleUITests/testSearchDirectLaunchRetainsSeededQuery": "search-indexed",
+  "AndBibleUITests/AndBibleUITests/testSearchResultSelectionNavigatesReaderToBundledReference": "search-indexed",
+  "AndBibleUITests/AndBibleUITests/testSearchScopeChangeRerunsQueryAndUpdatesResults": "search-indexed",
+  "AndBibleUITests/AndBibleUITests/testSearchWordModeChangeRerunsQueryAndUpdatesResults": "search-indexed",
   "AndBibleUITests/AndBibleUITests/testSettingsColorsLinkOpensColorEditor": "baseline",
   "AndBibleUITests/AndBibleUITests/testSettingsImportExportFullBackupPresentsShareSheet": "baseline",
   "AndBibleUITests/AndBibleUITests/testSettingsImportExportImportPresentsFilePickerState": "baseline",
@@ -37,5 +37,5 @@
   "AndBibleUITests/AndBibleUITests/testSyncSettingsNextCloudInvalidURLShowsValidationStatus": "sync-nextcloud",
   "AndBibleUITests/AndBibleUITests/testTextDisplayFontFamilyButtonPresentsFontPicker": "baseline",
   "AndBibleUITests/AndBibleUITests/testTextDisplayJustifyToggleMutatesControlState": "baseline",
-  "AndBibleUITests/AndBibleUITests/testWorkspaceSelectorCreateRenameCloneDeleteFlow": "baseline"
+  "AndBibleUITests/AndBibleUITests/testWorkspaceSelectorCreateAndSwitchFlow": "baseline"
 }

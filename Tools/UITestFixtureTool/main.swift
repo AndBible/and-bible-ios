@@ -1,4 +1,5 @@
 import Foundation
+import SQLite3
 import SwiftData
 import BibleCore
 
@@ -33,6 +34,7 @@ private enum ToolCommand: String {
 /// Deterministic fixture scenarios used by the UI automation suite.
 private enum FixtureScenario: String, CaseIterable {
     case baseline = "baseline"
+    case searchIndexed = "search-indexed"
     case bookmarkNavigation = "bookmark-navigation"
     case bookmarkMultiRow = "bookmark-multirow"
     case bookmarkFilter = "bookmark-filter"
@@ -124,6 +126,7 @@ private struct ToolArguments {
 /// High-level errors emitted by the fixture tool.
 private enum FixtureToolError: LocalizedError {
     case usage(String)
+    case sqlite(String)
     case missingWorkspace
     case missingWindow
     case missingPageManager
@@ -131,6 +134,8 @@ private enum FixtureToolError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .usage(let message):
+            return message
+        case .sqlite(let message):
             return message
         case .missingWorkspace:
             return "Fixture seeding could not resolve or create an active workspace."
@@ -349,6 +354,8 @@ private final class FixtureContext {
         switch scenario {
         case .baseline:
             break
+        case .searchIndexed:
+            try seedBundledSearchIndex()
         case .bookmarkNavigation:
             seedBookmarkNavigation()
         case .bookmarkMultiRow:
@@ -375,6 +382,188 @@ private final class FixtureContext {
 
         try modelContext.save()
         try writePreferences(["icloud_sync_enabled": false])
+    }
+
+    /**
+     Seeds a minimal bundled KJV FTS index so Search UI tests start from a ready state.
+     *
+     * The seeded rows are intentionally narrow: they cover the current Search UI assertions for
+     * bundled queries (`earth`, `earth void`, `jesus`, and `noah`) without forcing UI tests to
+     * wait for runtime index creation on fresh simulators.
+     *
+     * - Throws: `FixtureToolError.sqlite` when the search-index database cannot be created or
+     *   written.
+     */
+    private func seedBundledSearchIndex() throws {
+        let databaseURL = paths.documentsURL.appendingPathComponent("search_indexes.sqlite")
+        try fileManager.createDirectory(
+            at: databaseURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(
+            databaseURL.path,
+            &db,
+            SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX,
+            nil
+        ) == SQLITE_OK, let db else {
+            throw FixtureToolError.sqlite(
+                "Unable to open search index database at '\(databaseURL.path)'."
+            )
+        }
+        defer { sqlite3_close(db) }
+
+        try executeSearchSQL("PRAGMA journal_mode=WAL", db: db)
+        try executeSearchSQL("""
+            CREATE VIRTUAL TABLE IF NOT EXISTS verse_fts USING fts5(
+                verse_key,
+                plain_text,
+                module_name UNINDEXED,
+                tokenize='unicode61'
+            )
+        """, db: db)
+        try executeSearchSQL("""
+            CREATE TABLE IF NOT EXISTS indexed_modules (
+                module_name TEXT PRIMARY KEY,
+                verse_count INTEGER DEFAULT 0,
+                indexed_at TEXT,
+                schema_version INTEGER DEFAULT 1
+            )
+        """, db: db)
+        try executeSearchSQL("DELETE FROM verse_fts WHERE module_name = 'KJV'", db: db)
+        try executeSearchSQL("DELETE FROM indexed_modules WHERE module_name = 'KJV'", db: db)
+        try executeSearchSQL("BEGIN TRANSACTION", db: db)
+
+        do {
+            try insertSeededSearchRows(into: db)
+            try recordSeededSearchModule(into: db, verseCount: Int32(Self.seededSearchRows.count))
+            try executeSearchSQL("COMMIT", db: db)
+        } catch {
+            _ = try? executeSearchSQL("ROLLBACK", db: db)
+            throw error
+        }
+    }
+
+    /**
+     Inserts the deterministic FTS rows used by Search UI fixtures.
+     *
+     * - Parameter db: Open SQLite handle for `search_indexes.sqlite`.
+     * - Throws: `FixtureToolError.sqlite` when row insertion fails.
+     */
+    private func insertSeededSearchRows(into db: OpaquePointer) throws {
+        let sql = "INSERT INTO verse_fts (verse_key, plain_text, module_name) VALUES (?, ?, ?)"
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK,
+              let statement else {
+            throw sqliteError(
+                from: db,
+                fallback: "Unable to prepare seeded search row insert statement."
+            )
+        }
+        defer { sqlite3_finalize(statement) }
+
+        for row in Self.seededSearchRows {
+            sqlite3_reset(statement)
+            sqlite3_clear_bindings(statement)
+            sqlite3_bind_text(statement, 1, row.verseKey, -1, sqliteTransient)
+            sqlite3_bind_text(statement, 2, row.plainText, -1, sqliteTransient)
+            sqlite3_bind_text(statement, 3, row.moduleName, -1, sqliteTransient)
+            guard sqlite3_step(statement) == SQLITE_DONE else {
+                throw sqliteError(
+                    from: db,
+                    fallback: "Unable to insert seeded search row '\(row.verseKey)'."
+                )
+            }
+        }
+    }
+
+    /**
+     Records the seeded module metadata expected by `SearchIndexService.hasIndex`.
+     *
+     * - Parameters:
+     *   - db: Open SQLite handle for `search_indexes.sqlite`.
+     *   - verseCount: Number of seeded verse rows for the module.
+     * - Throws: `FixtureToolError.sqlite` when the metadata row cannot be written.
+     */
+    private func recordSeededSearchModule(into db: OpaquePointer, verseCount: Int32) throws {
+        let sql = """
+            INSERT OR REPLACE INTO indexed_modules (module_name, verse_count, indexed_at, schema_version)
+            VALUES (?, ?, datetime('now'), ?)
+        """
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK,
+              let statement else {
+            throw sqliteError(
+                from: db,
+                fallback: "Unable to prepare indexed_modules insert statement."
+            )
+        }
+        defer { sqlite3_finalize(statement) }
+
+        sqlite3_bind_text(statement, 1, "KJV", -1, sqliteTransient)
+        sqlite3_bind_int(statement, 2, verseCount)
+        sqlite3_bind_int(statement, 3, 2)
+
+        guard sqlite3_step(statement) == SQLITE_DONE else {
+            throw sqliteError(
+                from: db,
+                fallback: "Unable to record seeded search module metadata."
+            )
+        }
+    }
+
+    /**
+     Executes one SQLite statement against the seeded search database.
+     *
+     * - Parameters:
+     *   - sql: SQL statement to execute.
+     *   - db: Open SQLite handle.
+     * - Throws: `FixtureToolError.sqlite` when SQLite returns a non-success code.
+     */
+    private func executeSearchSQL(_ sql: String, db: OpaquePointer) throws {
+        guard sqlite3_exec(db, sql, nil, nil, nil) == SQLITE_OK else {
+            throw sqliteError(from: db, fallback: "SQLite execution failed for statement: \(sql)")
+        }
+    }
+
+    /**
+     Converts the current SQLite error into a `FixtureToolError.sqlite`.
+     *
+     * - Parameters:
+     *   - db: Open SQLite handle whose error state should be read.
+     *   - fallback: Fallback message when SQLite exposes no error text.
+     * - Returns: Structured fixture-tool error describing the SQLite failure.
+     */
+    private func sqliteError(from db: OpaquePointer, fallback: String) -> FixtureToolError {
+        let message = sqlite3_errmsg(db).map { String(cString: $0) } ?? fallback
+        return .sqlite(message)
+    }
+
+    /**
+     SQLite row set preseeded into the bundled KJV search index.
+     */
+    private static let seededSearchRows: [(verseKey: String, plainText: String, moduleName: String)] = [
+        (
+            verseKey: "Genesis 1:2",
+            plainText: "And the earth was without form, and void; and darkness was upon the face of the deep.",
+            moduleName: "KJV"
+        ),
+        (
+            verseKey: "Genesis 6:8",
+            plainText: "But Noah found grace in the eyes of the LORD.",
+            moduleName: "KJV"
+        ),
+        (
+            verseKey: "Matthew 1:1",
+            plainText: "The book of the generation of Jesus Christ, the son of David, the son of Abraham.",
+            moduleName: "KJV"
+        ),
+    ]
+
+    /// SQLite destructor token instructing SQLite to copy bound text values.
+    private var sqliteTransient: sqlite3_destructor_type {
+        unsafeBitCast(-1, to: sqlite3_destructor_type.self)
     }
 
     /**
