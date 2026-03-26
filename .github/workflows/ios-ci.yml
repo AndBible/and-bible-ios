@@ -395,20 +395,20 @@ jobs:
         run: swift build --package-path . --product UITestFixtureTool
 
       - name: Run selected simulator tests without rebuilding
+        env:
+          UITEST_FIXTURE_TOOL_PATH: ${{ github.workspace }}/.build/debug/UITestFixtureTool
+          UITEST_BUNDLE_ID: org.andbible.ios
+          UITEST_SIMULATOR_ID: ${{ steps.simulator.outputs.simulator_id }}
         run: |
-          python3 -u scripts/run_ui_test_groups.py \
+          python3 -u scripts/run_xcodebuild_with_test_selection.py \
             --project AndBible.xcodeproj \
             --scheme AndBible \
             --configuration Debug \
             --destination "${{ steps.simulator.outputs.destination }}" \
-            --simulator-id "${{ steps.simulator.outputs.simulator_id }}" \
             --derived-data-path "${DERIVED_DATA_PATH}" \
             --result-bundle-path "${TEST_XCRESULT_BUNDLE_PATH}" \
-            --fixture-manifest scripts/ui_test_fixture_manifest.json \
-            --fixture-tool-path .build/debug/UITestFixtureTool \
             --code-signing-allowed NO \
-            --fresh-simulator-per-group \
-            --app-path "${DERIVED_DATA_PATH}/Build/Products/Debug-iphonesimulator/AndBible.app"
+            --action test-without-building
 
       - name: Upload xcodebuild test result bundle
         if: always()
