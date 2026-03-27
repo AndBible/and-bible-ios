@@ -3,7 +3,6 @@
   "version": "1.0.0",
   "description": "AndBible iOS Vue.js frontend (forked from Android bibleview-js)",
   "private": true,
-  "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "run-p type-check build-only",

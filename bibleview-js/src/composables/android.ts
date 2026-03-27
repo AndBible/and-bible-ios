@@ -136,6 +136,7 @@ export function clearLog() {
 
 export function patchAndroidConsole() {
     const origConsole = window.console;
+    const android = window.android as BibleJavascriptInterface | undefined;
     window.bibleViewDebug.logEntries = logEntries;
     // Override normal console, so that argument values also propagate to Android logcat
     const enableAndroidLogging = process.env.NODE_ENV !== "development";
@@ -146,24 +147,24 @@ export function patchAndroidConsole() {
             return `${s} ${printableArgs}`
         },
         flog(s, ...args) {
-            if (enableAndroidLogging && errorBox) window.android.console('flog', this._msg(s, args))
+            if (enableAndroidLogging && errorBox && android) android.console('flog', this._msg(s, args))
             origConsole.log(this._msg(s, args))
         },
         log(s, ...args) {
-            if (enableAndroidLogging && errorBox) window.android.console('log', this._msg(s, args))
+            if (enableAndroidLogging && errorBox && android) android.console('log', this._msg(s, args))
             origConsole.log(s, ...args)
         },
         error(s, ...args) {
             if (errorBox) {
                 addLog({type: "ERROR", msg: this._msg(s, args)});
-                if (enableAndroidLogging) window.android.console('error', this._msg(s, args))
+                if (enableAndroidLogging && android) android.console('error', this._msg(s, args))
             }
             origConsole.error(s, ...args)
         },
         warn(s, ...args) {
             if (errorBox) {
                 addLog({type: "WARN", msg: this._msg(s, args)});
-                if (enableAndroidLogging) window.android.console('warn', this._msg(s, args))
+                if (enableAndroidLogging && android) android.console('warn', this._msg(s, args))
             }
             origConsole.warn(s, ...args)
         }
@@ -183,6 +184,10 @@ export type QuerySelection = {
 
 export function useAndroid({bookmarks}: { bookmarks: Ref<BaseBookmark[]> }, config: Config) {
     const responsePromises = new Map();
+    // The production app injects this bridge before the webview boots. Development
+    // mode returns stubs later, so a central assertion is less noisy than optional
+    // checks at every native callsite.
+    const android = window.android as BibleJavascriptInterface;
 
     function response(callId: number, returnValue: any) {
         const val = responsePromises.get(callId);
@@ -273,160 +278,160 @@ export function useAndroid({bookmarks}: { bookmarks: Ref<BaseBookmark[]> }, conf
     }
 
     async function requestPreviousChapter(): Promise<Nullable<AnyDocument>> {
-        return deferredCall((callId) => window.android.requestMoreToBeginning(callId));
+        return deferredCall((callId) => android.requestMoreToBeginning(callId));
     }
 
     async function requestNextChapter(): Promise<Nullable<AnyDocument>> {
-        return deferredCall((callId) => window.android.requestMoreToEnd(callId));
+        return deferredCall((callId) => android.requestMoreToEnd(callId));
     }
 
     async function refChooserDialog(): Promise<string> {
-        return deferredCall((callId) => window.android.refChooserDialog(callId));
+        return deferredCall((callId) => android.refChooserDialog(callId));
     }
 
     function scrolledToOrdinal(key: string, ordinal: Nullable<number>) {
         if (ordinal == null || ordinal < 0) return;
-        window.android.scrolledToOrdinal(key, ordinal)
+        android.scrolledToOrdinal(key, ordinal)
     }
 
     function saveBookmarkNote(bookmark: BaseBookmark, noteText: Nullable<string>) {
         if(isBibleBookmark(bookmark)) {
-            window.android.saveBookmarkNote(bookmark.id, noteText);
+            android.saveBookmarkNote(bookmark.id, noteText);
         } else if(isGenericBookmark(bookmark)) {
-            window.android.saveGenericBookmarkNote(bookmark.id, noteText);
+            android.saveGenericBookmarkNote(bookmark.id, noteText);
         }
     }
 
     function removeBookmark(bookmark: BaseBookmark) {
         if(isBibleBookmark(bookmark)) {
-            window.android.removeBookmark(bookmark.id);
+            android.removeBookmark(bookmark.id);
         } else if(isGenericBookmark(bookmark)) {
-            window.android.removeGenericBookmark(bookmark.id);
+            android.removeGenericBookmark(bookmark.id);
         }
     }
 
     function assignLabels(bookmark: BaseBookmark) {
         if (isBibleBookmark(bookmark)) {
-            window.android.assignLabels(bookmark.id);
+            android.assignLabels(bookmark.id);
         } else if(isGenericBookmark(bookmark)) {
-            window.android.genericAssignLabels(bookmark.id);
+            android.genericAssignLabels(bookmark.id);
         }
     }
 
     function toggleBookmarkLabel(bookmark: BaseBookmark, labelId: IdType) {
         if(isBibleBookmark(bookmark)) {
-            window.android.toggleBookmarkLabel(bookmark.id, labelId);
+            android.toggleBookmarkLabel(bookmark.id, labelId);
         } else if(isGenericBookmark(bookmark)) {
-            window.android.toggleGenericBookmarkLabel(bookmark.id, labelId);
+            android.toggleGenericBookmarkLabel(bookmark.id, labelId);
         }
     }
 
     function setClientReady() {
-        window.android.setClientReady();
+        android.setClientReady();
     }
 
     function reportInputFocus(value: boolean) {
-        window.android.reportInputFocus(value);
+        android.reportInputFocus(value);
     }
 
     function openExternalLink(link: string) {
         console.log('[android.ts] openExternalLink called with:', link);
-        window.android.openExternalLink(link);
+        android.openExternalLink(link);
     }
 
     function openEpubLink(bookInitials: string, toKey: string, toId: string) {
-        window.android.openEpubLink(bookInitials, toKey, toId);
+        android.openEpubLink(bookInitials, toKey, toId);
     }
 
     function setEditing(value: boolean) {
-        window.android.setEditing(value);
+        android.setEditing(value);
     }
 
     function createNewStudyPadEntry(labelId: IdType, afterEntryType: StudyPadEntryType = "none", afterEntryId: IdType = "") {
-        window.android.createNewStudyPadEntry(labelId, afterEntryType, afterEntryId);
+        android.createNewStudyPadEntry(labelId, afterEntryType, afterEntryId);
     }
 
     function deleteStudyPadEntry(studyPadId: IdType) {
-        window.android.deleteStudyPadEntry(studyPadId);
+        android.deleteStudyPadEntry(studyPadId);
     }
 
     function getActiveLanguages(): string[] {
-        return JSON.parse(window.android.getActiveLanguages());
+        return JSON.parse(android.getActiveLanguages());
     }
 
     function removeBookmarkLabel(bookmark: BaseBookmark, labelId: IdType) {
         if(isBibleBookmark(bookmark)) {
-            window.android.removeBookmarkLabel(bookmark.id, labelId);
+            android.removeBookmarkLabel(bookmark.id, labelId);
         } else if(isGenericBookmark(bookmark)) {
-            window.android.removeGenericBookmarkLabel(bookmark.id, labelId);
+            android.removeGenericBookmarkLabel(bookmark.id, labelId);
         }
     }
 
     function shareBookmarkVerse(bookmark: BaseBookmark) {
         if(isBibleBookmark(bookmark)) {
-            window.android.shareBookmarkVerse(bookmark.id);
+            android.shareBookmarkVerse(bookmark.id);
         } else {
             console.error("Only bible bookmarks supported for share feature")
         }
     }
 
     function shareVerse(bookInitials: string, startOrdinal: number, endOrdinal?: number) {
-        window.android.shareVerse(bookInitials, startOrdinal, endOrdinal ? endOrdinal : -1);
+        android.shareVerse(bookInitials, startOrdinal, endOrdinal ? endOrdinal : -1);
     }
 
     function copyVerse(bookInitials: string, startOrdinal: number, endOrdinal?: number) {
-        window.android.copyVerse(bookInitials, startOrdinal, endOrdinal ? endOrdinal : -1);
+        android.copyVerse(bookInitials, startOrdinal, endOrdinal ? endOrdinal : -1);
     }
 
     function addBookmark(bookInitials: string, startOrdinal: number, endOrdinal?: number, addNote: boolean = false) {
-        window.android.addBookmark(bookInitials, startOrdinal, endOrdinal ? endOrdinal : -1, addNote);
+        android.addBookmark(bookInitials, startOrdinal, endOrdinal ? endOrdinal : -1, addNote);
     }
 
     function addGenericBookmark(bookInitials: string, osisRef: string, startOrdinal: number, endOrdinal?: number, addNote: boolean = false) {
-        window.android.addGenericBookmark(bookInitials, osisRef, startOrdinal, endOrdinal ? endOrdinal : -1, addNote);
+        android.addGenericBookmark(bookInitials, osisRef, startOrdinal, endOrdinal ? endOrdinal : -1, addNote);
     }
 
     function addParagraphBreakBookmark(bookInitials: string, startOrdinal: number, endOrdinal?: number) {
-        window.android.addParagraphBreakBookmark(bookInitials, startOrdinal, endOrdinal ? endOrdinal : -1);
+        android.addParagraphBreakBookmark(bookInitials, startOrdinal, endOrdinal ? endOrdinal : -1);
     }
 
     function addGenericParagraphBreakBookmark(bookInitials: string, osisRef: string, startOrdinal: number, endOrdinal?: number) {
-        window.android.addGenericParagraphBreakBookmark(bookInitials, osisRef, startOrdinal, endOrdinal ? endOrdinal : -1);
+        android.addGenericParagraphBreakBookmark(bookInitials, osisRef, startOrdinal, endOrdinal ? endOrdinal : -1);
     }
 
     function compare(bookInitials: string, startOrdinal: number, endOrdinal?: number) {
-        window.android.compare(bookInitials, startOrdinal, endOrdinal ? endOrdinal : -1);
+        android.compare(bookInitials, startOrdinal, endOrdinal ? endOrdinal : -1);
     }
 
     function memorize(bookInitials: string, startOrdinal: number, endOrdinal?: number) {
-        window.android.memorize(bookInitials, startOrdinal, endOrdinal ? endOrdinal : -1);
+        android.memorize(bookInitials, startOrdinal, endOrdinal ? endOrdinal : -1);
     }
 
     function openStudyPad(labelId: IdType, bookmark: BaseBookmark) {
         if(isBibleBookmark(bookmark) || isGenericBookmark(bookmark)) {
             // Exceptionally here bookmark type does not matter
-            window.android.openStudyPad(labelId, bookmark.id);
+            android.openStudyPad(labelId, bookmark.id);
         }
     }
 
     function openMyNotes(v11n: string, ordinal: number) {
-        window.android.openMyNotes(v11n, ordinal);
+        android.openMyNotes(v11n, ordinal);
     }
 
     function speak(bookInitials: string, v11n: string, startOrdinal: number, endOrdinal?: number) {
-        window.android.speak(bookInitials, v11n, startOrdinal, endOrdinal ? endOrdinal : -1);
+        android.speak(bookInitials, v11n, startOrdinal, endOrdinal ? endOrdinal : -1);
     }
 
     function speakGeneric(bookInitials: string, osisRef: string, startOrdinal: number, endOrdinal?: number) {
-        window.android.speakGeneric(bookInitials, osisRef, startOrdinal, endOrdinal ? endOrdinal : -1);
+        android.speakGeneric(bookInitials, osisRef, startOrdinal, endOrdinal ? endOrdinal : -1);
     }
 
     function openDownloads() {
-        window.android.openDownloads();
+        android.openDownloads();
     }
 
     async function parseRef(s: string): Promise<string> {
-        const result = await deferredCall((callId) => window.android.parseRef(callId, s))
+        const result = await deferredCall((callId) => android.parseRef(callId, s))
         return result ?? ""
     }
 
@@ -438,7 +443,7 @@ export function useAndroid({bookmarks}: { bookmarks: Ref<BaseBookmark[]> }, conf
     ) {
         const orderNumberPairs: (l: StudyPadItem[]) => {first: IdType, second: number}[] =
             l => l.map((v: StudyPadItem) => ({first: v.id, second: v.orderNumber}))
-        window.android.updateOrderNumber(labelId, JSON.stringify(
+        android.updateOrderNumber(labelId, JSON.stringify(
             {
                 bookmarks: orderNumberPairs(bookmarks),
                 genericBookmarks: orderNumberPairs(genericBookmarks),
@@ -448,11 +453,11 @@ export function useAndroid({bookmarks}: { bookmarks: Ref<BaseBookmark[]> }, conf
     }
 
     function setStudyPadCursor(labelId: IdType, orderNumber: number) {
-        window.android.setStudyPadCursor(labelId, orderNumber);
+        android.setStudyPadCursor(labelId, orderNumber);
     }
 
     function toast(text: string) {
-        window.android.toast(text);
+        android.toast(text);
     }
 
     function updateStudyPadEntry(entry: StudyPadItem, changes: Partial<StudyPadItem>) {
@@ -460,10 +465,10 @@ export function useAndroid({bookmarks}: { bookmarks: Ref<BaseBookmark[]> }, conf
         if (entry.type === "journal") {
             const {text, ...rest} = changes;
             if(text !== undefined) {
-                window.android.updateStudyPadTextEntryText(entry.id, text);
+                android.updateStudyPadTextEntryText(entry.id, text);
             }
             if(Object.keys(rest).length > 0) {
-                window.android.updateStudyPadTextEntry(JSON.stringify(changedEntry as StudyPadTextItem));
+                android.updateStudyPadTextEntry(JSON.stringify(changedEntry as StudyPadTextItem));
             }
         } else if (entry.type === "bookmark" || entry.type === "generic-bookmark") {
             const changedBookmarkItem = changedEntry as StudyPadBibleBookmarkItem
@@ -475,71 +480,71 @@ export function useAndroid({bookmarks}: { bookmarks: Ref<BaseBookmark[]> }, conf
                 expandContent: changedBookmarkItem.expandContent,
             }
             if(isBibleBookmark(entry)) {
-                window.android.updateBookmarkToLabel(JSON.stringify(e));
+                android.updateBookmarkToLabel(JSON.stringify(e));
             } else if(isGenericBookmark(entry)) {
-                window.android.updateGenericBookmarkToLabel(JSON.stringify(e));
+                android.updateGenericBookmarkToLabel(JSON.stringify(e));
             }
         }
     }
 
     function setAsPrimaryLabel(bookmark: BaseBookmark, labelId: IdType) {
         if(isBibleBookmark(bookmark)) {
-            window.android.setAsPrimaryLabel(bookmark.id, labelId);
+            android.setAsPrimaryLabel(bookmark.id, labelId);
         } else if(isGenericBookmark(bookmark)) {
-            window.android.setAsPrimaryLabelGeneric(bookmark.id, labelId);
+            android.setAsPrimaryLabelGeneric(bookmark.id, labelId);
         }
     }
 
     function setBookmarkWholeVerse(bookmark: BaseBookmark, value: boolean) {
         if(isBibleBookmark(bookmark)) {
-            window.android.setBookmarkWholeVerse(bookmark.id, value);
+            android.setBookmarkWholeVerse(bookmark.id, value);
         } else {
-            window.android.setGenericBookmarkWholeVerse(bookmark.id, value);
+            android.setGenericBookmarkWholeVerse(bookmark.id, value);
         }
     }
 
     function setCustomIcon(bookmark: BaseBookmark, value: Nullable<string>) {
         if(isBibleBookmark(bookmark)) {
-            window.android.setBookmarkCustomIcon(bookmark.id, value);
+            android.setBookmarkCustomIcon(bookmark.id, value);
         } else {
-            window.android.setGenericBookmarkCustomIcon(bookmark.id, value);
+            android.setGenericBookmarkCustomIcon(bookmark.id, value);
         }
     }
 
     function setEditAction(bookmark: BaseBookmark, value: EditAction) {
-        window.android.setBookmarkEditAction(bookmark.id, JSON.stringify(value));
+        android.setBookmarkEditAction(bookmark.id, JSON.stringify(value));
     }
 
     function reportModalState(value: boolean) {
-        window.android.reportModalState(value)
+        android.reportModalState(value)
     }
 
     function toggleCompareDocument(docId: string) {
-        window.android.toggleCompareDocument(docId);
+        android.toggleCompareDocument(docId);
     }
 
     function helpDialog(content: string, title: Nullable<string> = null) {
-        window.android.helpDialog(content, title);
+        android.helpDialog(content, title);
     }
 
     function helpBookmarks() {
-        window.android.helpBookmarks();
+        android.helpBookmarks();
     }
 
     function setLimitAmbiguousModalSize(value: boolean) {
-        window.android.setLimitAmbiguousModalSize(value);
+        android.setLimitAmbiguousModalSize(value);
     }
 
     function shareHtml(value: string) {
-        window.android.shareHtml(value);
+        android.shareHtml(value);
     }
 
     function onKeyDown(key: string) {
-        window.android.onKeyDown(key);
+        android.onKeyDown(key);
     }
 
     function saveState(newState: any) {
-        window.android.saveState(JSON.stringify(newState));
+        android.saveState(JSON.stringify(newState));
     }
 
     const exposed = {
@@ -604,7 +609,7 @@ export function useAndroid({bookmarks}: { bookmarks: Ref<BaseBookmark[]> }, conf
     setupDocumentEventListener("selectionchange", () => {
         const sel = window.getSelection()!;
         if (sel.rangeCount > 0 && sel.getRangeAt(0).collapsed) {
-            window.android.selectionCleared();
+            android.selectionCleared();
         }
     });
 

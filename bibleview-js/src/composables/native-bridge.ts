@@ -11,11 +11,13 @@
  *   window.bibleView.response(callId, returnValue)
  */
 
+import type {BibleJavascriptInterface} from "@/composables/android";
+
 // --- Platform Detection ---
 
 declare global {
     interface Window {
-        android?: any;
+        android?: BibleJavascriptInterface;
         webkit?: {
             messageHandlers?: {
                 bibleView?: {

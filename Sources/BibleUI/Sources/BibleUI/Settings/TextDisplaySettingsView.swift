@@ -27,9 +27,6 @@ public struct TextDisplaySettingsView: View {
     /// Callback invoked after any user-visible settings mutation.
     var onChange: (() -> Void)?
 
-    /// Whether the view is running under the deterministic in-memory XCUITest harness.
-    private let uiTestUsesInMemoryStores = ProcessInfo.processInfo.arguments.contains("UITEST_USE_IN_MEMORY_STORES")
-
     #if os(iOS)
     /// Whether the native iOS font picker sheet is currently presented.
     @State private var showFontPicker = false
@@ -95,7 +92,7 @@ public struct TextDisplaySettingsView: View {
         return family
     }
 
-    /// Accessibility-exported UI-test state for the currently edited justify-text preference.
+    /// Accessibility-exported state for the currently edited justify-text preference.
     private var accessibilityState: String {
         let justifyState = (settings.justifyText ?? false) ? "justifyTextOn" : "justifyTextOff"
         #if os(iOS)
@@ -104,21 +101,6 @@ public struct TextDisplaySettingsView: View {
         #else
         return "\(justifyState)|fontPickerUnavailable"
         #endif
-    }
-
-    /// Rendered justify-text state string exposed only in the XCUITest harness.
-    private var uiTestJustifyStateLabel: String {
-        (settings.justifyText ?? false) ? "justifyTextOn" : "justifyTextOff"
-    }
-
-    /**
-     Flips the justify-text preference in the deterministic XCUITest harness.
-
-     - Side effects: Mutates `settings.justifyText` and forwards the change through `onChange`.
-     */
-    private func toggleJustifyText() {
-        settings.justifyText = !(settings.justifyText ?? false)
-        onChange?()
     }
 
     /**
@@ -168,26 +150,9 @@ public struct TextDisplaySettingsView: View {
                     Text("\(settings.lineSpacing ?? 10)")
                         .monospacedDigit()
                 }
-                if uiTestUsesInMemoryStores {
-                    HStack {
-                        HStack {
-                            Text(String(localized: "justify_text"))
-                            Spacer()
-                            Image(systemName: (settings.justifyText ?? false) ? "checkmark.circle.fill" : "circle")
-                                .foregroundStyle((settings.justifyText ?? false) ? Color.accentColor : Color.secondary)
-                        }
-                    }
-                } else {
-                    Toggle(String(localized: "justify_text"), isOn: boolBinding(\.justifyText, default: false))
-                        .accessibilityIdentifier("textDisplayJustifyTextToggle")
-                        .accessibilityValue((settings.justifyText ?? false) ? "justifyTextOn" : "justifyTextOff")
-                }
-                if uiTestUsesInMemoryStores {
-                    Text(uiTestJustifyStateLabel)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .accessibilityIdentifier("textDisplayJustifyTextState")
-                }
+                Toggle(String(localized: "justify_text"), isOn: boolBinding(\.justifyText, default: false))
+                    .accessibilityIdentifier("textDisplayJustifyTextToggle")
+                    .accessibilityValue((settings.justifyText ?? false) ? "justifyTextOn" : "justifyTextOff")
                 Toggle(String(localized: "verse_per_line"), isOn: boolBinding(\.showVersePerLine, default: false))
                 Toggle(String(localized: "hyphenation"), isOn: boolBinding(\.hyphenation, default: true))
             }
@@ -220,34 +185,6 @@ public struct TextDisplaySettingsView: View {
         .accessibilityIdentifier("textDisplaySettingsScreen")
         .accessibilityValue(accessibilityState)
         .navigationTitle(String(localized: "text_display"))
-        .safeAreaInset(edge: .bottom) {
-            if uiTestUsesInMemoryStores {
-                uiTestHarnessControls
-            }
-        }
-    }
-
-    /**
-     Deterministic XCUITest controls rendered outside the `Form` row hierarchy.
-
-     The in-memory harness uses this bottom inset instead of relying on a nested `Form` button whose
-     tap handling is less reliable on hosted simulators.
-
-     - Returns: A bottom inset containing one stable justify-text toggle action.
-     - Side effects: Tapping the button mutates `settings.justifyText` through `toggleJustifyText()`.
-     - Failure modes: Hidden when the in-memory XCUITest harness is not active.
-     */
-    @ViewBuilder
-    private var uiTestHarnessControls: some View {
-        Button("Toggle Justify Text") {
-            toggleJustifyText()
-        }
-        .buttonStyle(.borderedProminent)
-        .frame(maxWidth: .infinity)
-        .accessibilityIdentifier("textDisplayJustifyTextToggle")
-        .accessibilityValue(uiTestJustifyStateLabel)
-        .padding(.horizontal, 16)
-        .padding(.vertical, 8)
     }
 
     /**

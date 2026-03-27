@@ -13,6 +13,7 @@ let package = Package(
         .library(name: "BibleCore", targets: ["BibleCore"]),
         .library(name: "BibleView", targets: ["BibleView"]),
         .library(name: "BibleUI", targets: ["BibleUI"]),
+        .executable(name: "UITestFixtureTool", targets: ["UITestFixtureTool"]),
     ],
     dependencies: [
         .package(url: "https://github.com/google/GoogleSignIn-iOS", from: "9.0.0"),
@@ -36,6 +37,8 @@ let package = Package(
             linkerSettings: [
                 .linkedLibrary("z"),
                 .linkedLibrary("bz2"),
+                .linkedLibrary("curl", .when(platforms: [.macOS])),
+                .linkedLibrary("lzma", .when(platforms: [.macOS])),
                 .linkedLibrary("c++"),
             ]
         ),
@@ -96,6 +99,11 @@ let package = Package(
             name: "BibleUITests",
             dependencies: ["BibleUI"],
             path: "Sources/BibleUI/Tests/BibleUITests"
+        ),
+        .executableTarget(
+            name: "UITestFixtureTool",
+            dependencies: ["BibleCore"],
+            path: "Tools/UITestFixtureTool"
         ),
     ]
 )

@@ -47,6 +47,28 @@ echo "Output: ${OUTPUT_DIR}/libsword.xcframework"
 echo "SWORD source: ${SWORD_SVN_URL}@${SWORD_SVN_REVISION}"
 echo ""
 
+run_svn_with_retry() {
+    local DESCRIPTION="$1"
+    shift
+    local ATTEMPT=1
+    local MAX_ATTEMPTS=3
+
+    while [ "${ATTEMPT}" -le "${MAX_ATTEMPTS}" ]; do
+        if "$@"; then
+            return 0
+        fi
+
+        if [ "${ATTEMPT}" -eq "${MAX_ATTEMPTS}" ]; then
+            echo "ERROR: ${DESCRIPTION} failed after ${MAX_ATTEMPTS} attempt(s)."
+            return 1
+        fi
+
+        echo "WARNING: ${DESCRIPTION} failed on attempt ${ATTEMPT}; retrying..."
+        ATTEMPT=$((ATTEMPT + 1))
+        sleep 5
+    done
+}
+
 # --- Step 1: Get SWORD Source ---
 
 if [ ! -d "${SWORD_SRC}" ]; then
@@ -55,7 +77,9 @@ if [ ! -d "${SWORD_SRC}" ]; then
 
     # Try SVN first, fall back to a mirror
     if command -v svn &>/dev/null; then
-        svn checkout -r "${SWORD_SVN_REVISION}" "${SWORD_SVN_URL}" "${SWORD_SRC}" --depth infinity
+        run_svn_with_retry \
+            "svn checkout ${SWORD_SVN_URL}@${SWORD_SVN_REVISION}" \
+            svn checkout -r "${SWORD_SVN_REVISION}" "${SWORD_SVN_URL}" "${SWORD_SRC}" --depth infinity
     else
         echo "ERROR: svn not found. Install with: brew install subversion"
         echo "Alternatively, download SWORD source manually to: ${SWORD_SRC}"
@@ -65,7 +89,9 @@ else
     echo ">>> SWORD source found at ${SWORD_SRC}"
     if command -v svn &>/dev/null; then
         echo ">>> Updating SWORD source to revision ${SWORD_SVN_REVISION}"
-        svn update -r "${SWORD_SVN_REVISION}" "${SWORD_SRC}"
+        run_svn_with_retry \
+            "svn update ${SWORD_SRC} to ${SWORD_SVN_REVISION}" \
+            svn update -r "${SWORD_SVN_REVISION}" "${SWORD_SRC}"
     else
         echo "ERROR: svn not found. Install with: brew install subversion"
         exit 1

@@ -72,9 +72,6 @@ public struct ColorSettingsView: View {
     /// Callback invoked after any theme-color mutation.
     var onChange: (() -> Void)?
 
-    /// Enables deterministic accessibility state for the in-memory XCUITest harness.
-    private let uiTestUsesInMemoryStores = ProcessInfo.processInfo.arguments.contains("UITEST_USE_IN_MEMORY_STORES")
-
     /**
      Creates a color settings editor bound to a shared display-settings model.
 
@@ -97,8 +94,8 @@ public struct ColorSettingsView: View {
         settings.nightNoise == 0
     }
 
-    /// Accessibility-exported state label used by XCUITests to detect reset completion.
-    private var uiTestColorStateLabel: String {
+    /// Accessibility-exported state label used to detect reset completion.
+    private var colorStateLabel: String {
         usesDefaultThemeColors ? "colorDefaults" : "colorCustom"
     }
 
@@ -156,17 +153,9 @@ public struct ColorSettingsView: View {
                     .accessibilityIdentifier("colorSettingsResetButton")
             }
 
-            if uiTestUsesInMemoryStores {
-                Section {
-                    Text(uiTestColorStateLabel)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .accessibilityIdentifier("colorSettingsState")
-                }
-            }
         }
         .accessibilityIdentifier("colorSettingsScreen")
-        .accessibilityValue(uiTestColorStateLabel)
+        .accessibilityValue(colorStateLabel)
         .navigationTitle(String(localized: "colors"))
     }
 }

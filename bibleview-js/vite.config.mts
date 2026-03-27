@@ -73,6 +73,10 @@ export const config: UserConfig = {
             "vue": "vue/dist/vue.esm-bundler.js",
         }
     },
+    test: {
+        environment: "jsdom",
+        globals: true,
+    },
 }
 
 export default defineConfig(config)

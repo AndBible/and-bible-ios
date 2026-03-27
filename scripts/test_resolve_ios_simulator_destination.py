@@ -1,4 +1,5 @@
 import io
+import os
 import unittest
 from pathlib import Path
 import sys
@@ -11,7 +12,9 @@ from resolve_ios_simulator_destination import (
     choose_device_type,
     choose_existing_device,
     choose_runtime,
+    find_candidate_by_simulator_id,
     has_simulator_placeholder,
+    main,
     parse_candidates,
     print_resolved_output,
 )
@@ -90,17 +93,53 @@ class ResolveIosSimulatorDestinationTests(unittest.TestCase):
         self.assertIsNotNone(device)
         self.assertEqual(device["udid"], "ID-16P")
 
+    def test_find_candidate_by_simulator_id_matches_created_device(self) -> None:
+        candidates = [
+            ("iPhone 15", "17.5", "ID-15"),
+            ("iPhone 16 Pro", "18.2", "ID-16P"),
+        ]
+
+        self.assertEqual(
+            find_candidate_by_simulator_id(candidates, "ID-16P"),
+            ("iPhone 16 Pro", "18.2", "ID-16P"),
+        )
+        self.assertIsNone(find_candidate_by_simulator_id(candidates, "MISSING"))
+
     def test_print_resolved_output_emits_local_cli_values(self) -> None:
         with patch("sys.stdout", new_callable=io.StringIO) as stdout:
-            print_resolved_output("id=ABC-123", "iPhone 16 Pro", "18.2")
+            print_resolved_output("id=ABC-123", "iPhone 16 Pro", "18.2", simulator_created=True)
 
         self.assertEqual(
             stdout.getvalue(),
             "destination=id=ABC-123\n"
             "simulator_id=ABC-123\n"
             "device_name=iPhone 16 Pro\n"
-            "os_version=18.2\n",
+            "os_version=18.2\n"
+            "simulator_created=true\n",
         )
+
+    def test_main_uses_created_simulator_when_showdestinations_has_not_caught_up(self) -> None:
+        with patch(
+            "resolve_ios_simulator_destination.provision_simulator",
+            return_value=("SIM-1", "iPhone 17", "26.2"),
+        ):
+            with patch(
+                "resolve_ios_simulator_destination.discover_candidates",
+                return_value=([("iPhone 16 Pro", "26.2", "OTHER-SIM")], ""),
+            ):
+                with patch("resolve_ios_simulator_destination.time.sleep"):
+                    with patch.dict(os.environ, {}, clear=True):
+                        with patch("sys.stdout", new_callable=io.StringIO) as stdout:
+                            self.assertEqual(
+                                main(["--create-dedicated-device"]),
+                                0,
+                            )
+
+        self.assertIn(
+            "Created simulator did not appear in xcodebuild -showdestinations output; using the created simulator directly.",
+            stdout.getvalue(),
+        )
+        self.assertIn("destination=id=SIM-1\n", stdout.getvalue())
 
 
 if __name__ == "__main__":

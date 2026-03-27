@@ -35,43 +35,20 @@ public struct HistoryView: View {
     /// Callback invoked when the user chooses a history item to navigate back to.
     var onNavigate: ((String) -> Void)?
 
-    /// Optional XCUITest-only callback that dismisses and reopens the history sheet deterministically.
-    var onUITestDismissAndReopen: (() -> Void)?
-
-    /// Deterministic direct-launch XCUITest history keys that survive sheet reopen within one app launch.
-    @Binding var uiTestHarnessKeys: [String]
-
-    /// Whether the History screen should export and mutate the bound XCUITest harness state.
-    var useUITestHarnessState: Bool
-
     /// Resolves an OSIS book ID to a human-readable name using the active controller's dynamic book list.
     var bookNameResolver: ((String) -> String?)?
-
-    /// Test-only flag exposing deterministic reopen affordances during XCUITest runs.
-    private let uiTestUsesInMemoryStores = ProcessInfo.processInfo.arguments.contains("UITEST_USE_IN_MEMORY_STORES")
 
     /**
      Creates the history screen.
 
      - Parameters:
-       - onUITestDismissAndReopen: Optional XCUITest-only callback that dismisses and reopens the
-         history sheet without relying on the reader overflow menu.
-       - uiTestHarnessKeys: Bound deterministic history keys for direct-launch XCUITests.
-       - useUITestHarnessState: Whether the History screen should export and mutate the bound
-         XCUITest harness state instead of relying only on SwiftData query timing.
        - bookNameResolver: Optional resolver that maps OSIS IDs to dynamic, module-aware book names.
        - onNavigate: Optional callback invoked with the stored history key when a row is selected.
      */
     public init(
-        onUITestDismissAndReopen: (() -> Void)? = nil,
-        uiTestHarnessKeys: Binding<[String]> = .constant([]),
-        useUITestHarnessState: Bool = false,
         bookNameResolver: ((String) -> String?)? = nil,
         onNavigate: ((String) -> Void)? = nil
     ) {
-        self.onUITestDismissAndReopen = onUITestDismissAndReopen
-        self._uiTestHarnessKeys = uiTestHarnessKeys
-        self.useUITestHarnessState = useUITestHarnessState
         self.bookNameResolver = bookNameResolver
         self.onNavigate = onNavigate
     }
@@ -80,26 +57,6 @@ public struct HistoryView: View {
     private var history: [HistoryItem] {
         guard let windowId = windowManager.activeWindow?.id else { return allHistory }
         return allHistory.filter { $0.window?.id == windowId }
-    }
-
-    /// History rows exported through the deterministic in-memory XCUITest harness.
-    private var uiTestHistoryItems: [HistoryItem] {
-        uiTestUsesInMemoryStores ? allHistory : history
-    }
-
-    /// Stable XCUITest-only export of the currently visible history keys.
-    private var uiTestHistoryState: String {
-        let keys: [String]
-        if useUITestHarnessState {
-            keys = uiTestHarnessKeys
-                .map(sanitizedHistoryKey(from:))
-                .sorted()
-        } else {
-            keys = uiTestHistoryItems
-                .map { sanitizedHistoryKey(for: $0) }
-                .sorted()
-        }
-        return keys.isEmpty ? "historyState=empty" : "historyState=\(keys.joined(separator: "|"))"
     }
 
     /**
@@ -151,26 +108,14 @@ public struct HistoryView: View {
             }
         }
         .accessibilityIdentifier("historyScreen")
-        .accessibilityValue(uiTestUsesInMemoryStores ? uiTestHistoryState : "")
         .navigationTitle(String(localized: "history"))
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
-        .safeAreaInset(edge: .bottom) {
-            if uiTestUsesInMemoryStores {
-                uiTestHarness
-            }
-        }
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
                 Button(String(localized: "done")) { dismiss() }
                     .accessibilityIdentifier("historyDoneButton")
-            }
-            if uiTestUsesInMemoryStores, let onUITestDismissAndReopen {
-                ToolbarItem(placement: .primaryAction) {
-                    Button("Reopen") { onUITestDismissAndReopen() }
-                        .accessibilityIdentifier("historyReopenButton")
-                }
             }
             if !history.isEmpty {
                 ToolbarItem(placement: .destructiveAction) {
@@ -181,57 +126,6 @@ public struct HistoryView: View {
                 }
             }
         }
-    }
-
-    /// Stable XCUITest-only controls that bypass toolbar and swipe-action flakiness in CI.
-    @ViewBuilder
-    private var uiTestHarness: some View {
-        VStack(spacing: 8) {
-            HStack(spacing: 8) {
-                Button("Clear") {
-                    clearUITestHistory()
-                }
-                .buttonStyle(.borderedProminent)
-                .accessibilityIdentifier("historyHarnessClearButton")
-
-                if let onUITestDismissAndReopen {
-                    Button("Reopen") {
-                        onUITestDismissAndReopen()
-                    }
-                    .buttonStyle(.bordered)
-                    .accessibilityIdentifier("historyHarnessReopenButton")
-                }
-            }
-
-            if useUITestHarnessState
-                ? uiTestHarnessKeys.contains("Exod.2.1")
-                : uiTestHistoryItems.contains(where: { $0.key == "Exod.2.1" }) {
-                HStack(spacing: 8) {
-                    Button("Go Exodus") {
-                        onNavigate?("Exod.2.1")
-                        dismiss()
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .accessibilityIdentifier("historyHarnessNavigateButton::Exod_2_1")
-
-                    Button("Delete Exodus") {
-                        deleteUITestHistoryItems(matchingKey: "Exod.2.1")
-                    }
-                    .buttonStyle(.bordered)
-                    .accessibilityIdentifier("historyHarnessDeleteButton::Exod_2_1")
-                }
-            }
-
-            Text(uiTestHistoryState)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .accessibilityIdentifier("historyHarnessState")
-                .accessibilityValue(uiTestHistoryState)
-        }
-        .font(.caption.weight(.semibold))
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-        .background(.thinMaterial)
     }
 
     /**
@@ -321,52 +215,13 @@ public struct HistoryView: View {
      *   - saves the mutated history state back to persistence
      * - Failure modes:
      *   - silently discards save failures because this helper only backs deterministic XCUITest
-     *     harness actions
+     *     built-in actions
      */
     private func deleteItems(matchingKey key: String) {
         for item in history where item.key == key {
             modelContext.delete(item)
         }
         try? modelContext.save()
-    }
-
-    /**
-     Deletes every XCUITest-visible history row.
-     *
-     * - Side effects:
-     *   - deletes the deterministic in-memory harness history rows from SwiftData
-     *   - saves the mutated history state back to persistence
-     * - Failure modes:
-     *   - silently discards save failures because this helper only backs XCUITest harness actions
-     */
-    private func clearUITestHistory() {
-        for item in uiTestHistoryItems {
-            modelContext.delete(item)
-        }
-        try? modelContext.save()
-        if useUITestHarnessState {
-            uiTestHarnessKeys.removeAll()
-        }
-    }
-
-    /**
-     Deletes every XCUITest-visible history row whose key matches the requested deterministic test key.
-     *
-     * - Parameter key: Persisted history key to remove from the current deterministic harness scope.
-     * - Side effects:
-     *   - deletes all matching `HistoryItem` rows from SwiftData
-     *   - saves the mutated history state back to persistence
-     * - Failure modes:
-     *   - silently discards save failures because this helper only backs XCUITest harness actions
-     */
-    private func deleteUITestHistoryItems(matchingKey key: String) {
-        for item in uiTestHistoryItems where item.key == key {
-            modelContext.delete(item)
-        }
-        try? modelContext.save()
-        if useUITestHarnessState {
-            uiTestHarnessKeys.removeAll { $0 == key }
-        }
     }
 
     /**
@@ -379,15 +234,4 @@ public struct HistoryView: View {
         try? modelContext.save()
     }
 
-    /**
-     Sanitizes one raw history key such as `Gen.1.1` into the accessibility-safe token `Gen_1_1`.
-     *
-     * - Parameter key: Raw persisted or harness-exported history key.
-     * - Returns: Accessibility-safe token stable across views for the same stored key.
-     * - Side effects: none.
-     * - Failure modes: This helper cannot fail.
-     */
-    private func sanitizedHistoryKey(from key: String) -> String {
-        key.replacingOccurrences(of: ".", with: "_")
-    }
 }

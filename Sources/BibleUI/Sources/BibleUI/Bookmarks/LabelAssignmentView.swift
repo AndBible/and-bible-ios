@@ -53,24 +53,9 @@ struct LabelAssignmentView: View {
     /// Whether the target bookmark is a `GenericBookmark` instead of a `BibleBookmark`.
     @State private var isGenericBookmark = false
 
-    /// Test-only flag exposing deterministic state exports during XCUITest runs.
-    private let uiTestUsesInMemoryStores = ProcessInfo.processInfo.arguments.contains("UITEST_USE_IN_MEMORY_STORES")
-
     /// User-created labels that may be assigned in this UI.
     private var userLabels: [BibleCore.Label] {
         allLabels.filter { $0.isRealLabel }
-    }
-
-    /// Stable XCUITest-only export of the currently assigned user labels.
-    private var uiTestAssignmentState: String {
-        let assignedSegments = userLabels
-            .filter { assignedLabelIds.contains($0.id) }
-            .map(\.name)
-            .map(sanitizedAccessibilitySegment(_:))
-            .sorted()
-        return assignedSegments.isEmpty
-            ? "labelAssignmentState=empty"
-            : "labelAssignmentState=\(assignedSegments.joined(separator: "|"))"
     }
 
     /// Builds the label-assignment list, toolbar, and create-label alert.
@@ -144,27 +129,12 @@ struct LabelAssignmentView: View {
         }
         .alert("New Label", isPresented: $showNewLabel) {
             TextField("Label name", text: $newLabelName)
+                .accessibilityIdentifier("labelManagerNewLabelNameField")
             Button("Create") { createAndAssignLabel() }
+                .accessibilityIdentifier("labelManagerCreateButton")
             Button("Cancel", role: .cancel) { newLabelName = "" }
         }
         .onAppear { loadAssignedLabels() }
-        .safeAreaInset(edge: .bottom) {
-            if uiTestUsesInMemoryStores {
-                VStack(spacing: 8) {
-                    Button("Create Fresh Label") {
-                        createAndAssignLabel(named: "UI Test Fresh")
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .accessibilityIdentifier("labelAssignmentHarnessCreateLabelButton::UI_Test_Fresh")
-
-                    Text(uiTestAssignmentState)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .accessibilityIdentifier("labelAssignmentHarnessState")
-                        .accessibilityValue(uiTestAssignmentState)
-                }
-            }
-        }
     }
 
     /**

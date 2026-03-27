@@ -18,8 +18,8 @@
 import {mount} from "@vue/test-utils";
 import OsisSegment from "@/components/documents/OsisSegment.vue";
 
-import test1Xml from "./testdata/eph.2-kjva.xml";
-import test1Result from "./testdata/eph.2-kjva-result.html";
+import test1Xml from "./testdata/eph.2-kjva.xml?raw";
+import test1Result from "./testdata/eph.2-kjva-result.html?raw";
 
 
 import {useConfig} from "@/composables/config";

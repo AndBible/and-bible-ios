@@ -10,6 +10,13 @@ concurrency:
   group: ios-ci-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+env:
+  XCODE_VERSION: "26.3"
+  UI_TEST_MIN_SHARD_COUNT: "2"
+  UI_TEST_TARGET_SHARD_DURATION_SECONDS: "600"
+  UI_TEST_TIMEOUT_MINUTES: "90"
+  UI_TEST_TIMINGS_FILE: scripts/ui_test_timings.json
+
 jobs:
   repo-standards:
     name: Repo Standards
@@ -66,84 +73,68 @@ jobs:
       - name: Run SETPAR-603 guardrails
         run: python3 scripts/check_settings_localization_guardrails.py
 
-  ios-simulator-tests:
-    name: ${{ matrix.job_name }}
+  bibleview-js:
+    name: BibleView JS
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: bibleview-js/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: bibleview-js
+        run: npm ci
+
+      - name: Run frontend tests
+        working-directory: bibleview-js
+        run: npm run test:ci
+
+      - name: Build frontend debug bundle
+        working-directory: bibleview-js
+        run: npm run build-debug
+
+  ui-shard-plan:
+    name: Plan UI Test Shards
+    runs-on: ubuntu-latest
+    needs:
+      - repo-standards
+      - localization-guardrails
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      shard_count: ${{ steps.plan.outputs.shard_count }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Generate UI shard matrix
+        id: plan
+        run: >-
+          python3 -u scripts/build_ui_test_shards.py
+          --test-file AndBibleUITests/AndBibleUITests.swift
+          --timings-file "${UI_TEST_TIMINGS_FILE}"
+          --shard-count "${UI_TEST_MIN_SHARD_COUNT}"
+          --target-shard-duration-seconds "${UI_TEST_TARGET_SHARD_DURATION_SECONDS}"
+          --timeout-minutes "${UI_TEST_TIMEOUT_MINUTES}"
+          --github-output "${GITHUB_OUTPUT}"
+
+  ios-ui-foundation:
+    name: Prepare UI Test Foundation
     runs-on: macos-15
     needs:
       - repo-standards
       - localization-guardrails
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - job_name: Unit Tests (Simulator)
-            artifact_suffix: unit
-            timeout_minutes: 60
-            build_xcresult_bundle_path: .artifacts/AndBibleBuild-unit.xcresult
-            test_xcresult_bundle_path: .artifacts/AndBibleTests-unit.xcresult
-            test_selection_args: |
-              -skip-testing:AndBibleUITests
-          - job_name: UI Tests (Simulator, Shard 1)
-            artifact_suffix: ui-shard-1
-            timeout_minutes: 90
-            build_xcresult_bundle_path: .artifacts/AndBibleBuild-ui-shard-1.xcresult
-            test_xcresult_bundle_path: .artifacts/AndBibleTests-ui-shard-1.xcresult
-            test_selection_args: |
-              -only-testing:AndBibleUITests/AndBibleUITests/testAboutScreenOpensFromReaderMenu
-              -only-testing:AndBibleUITests/AndBibleUITests/testBookmarkListFilterAndSearchResetAcrossReopen
-              -only-testing:AndBibleUITests/AndBibleUITests/testBookmarkListLabelFilterNarrowsAndClearsVisibleRows
-              -only-testing:AndBibleUITests/AndBibleUITests/testBookmarkListOpensLabelAssignmentForSeededBookmark
-              -only-testing:AndBibleUITests/AndBibleUITests/testBookmarkListOpensStudyPadForSelectedLabel
-              -only-testing:AndBibleUITests/AndBibleUITests/testBookmarkListSortMenuReordersRows
-              -only-testing:AndBibleUITests/AndBibleUITests/testBookmarkRowDeletePreservesOtherRowsAcrossReopen
-              -only-testing:AndBibleUITests/AndBibleUITests/testBookmarkSelectionNavigatesReaderToSeededReference
-              -only-testing:AndBibleUITests/AndBibleUITests/testBookmarkStudyPadCreateNoteFromLabelWorkflow
-              -only-testing:AndBibleUITests/AndBibleUITests/testDownloadsRepositoryManagerAddSourceCancelFlow
-              -only-testing:AndBibleUITests/AndBibleUITests/testHistoryClearRemovesSeededRowAcrossReopen
-              -only-testing:AndBibleUITests/AndBibleUITests/testHistoryRowDeletePreservesOtherRowsAcrossReopen
-              -only-testing:AndBibleUITests/AndBibleUITests/testLabelManagerCreateRenameDeleteFlow
-              -only-testing:AndBibleUITests/AndBibleUITests/testMyNotesDirectLaunchShowsHeaderAndReturnsToBible
-              -only-testing:AndBibleUITests/AndBibleUITests/testMyNotesSeededNoteDeletePersistsAcrossReturnAndReopen
-              -only-testing:AndBibleUITests/AndBibleUITests/testSearchDirectLaunchBuildsIndexAndReturnsBundledResults
-              -only-testing:AndBibleUITests/AndBibleUITests/testSearchScopeChangeRerunsQueryAndUpdatesResults
-              -only-testing:AndBibleUITests/AndBibleUITests/testSearchWordModeChangeRerunsQueryAndUpdatesResults
-              -only-testing:AndBibleUITests/AndBibleUITests/testSettingsSyncLinkOpensSyncSettings
-              -only-testing:AndBibleUITests/AndBibleUITests/testTextDisplayFontFamilyButtonPresentsFontPicker
-              -only-testing:AndBibleUITests/AndBibleUITests/testTextDisplayJustifyToggleMutatesControlState
-          - job_name: UI Tests (Simulator, Shard 2)
-            artifact_suffix: ui-shard-2
-            timeout_minutes: 90
-            build_xcresult_bundle_path: .artifacts/AndBibleBuild-ui-shard-2.xcresult
-            test_xcresult_bundle_path: .artifacts/AndBibleTests-ui-shard-2.xcresult
-            test_selection_args: |
-              -only-testing:AndBibleUITests/AndBibleUITests/testBookmarkListLabelAssignmentCreatesAndAssignsNewLabel
-              -only-testing:AndBibleUITests/AndBibleUITests/testBookmarkListLabelAssignmentRemovalHidesBookmarkUnderFilter
-              -only-testing:AndBibleUITests/AndBibleUITests/testBookmarkListSearchNarrowsAndClearsVisibleRows
-              -only-testing:AndBibleUITests/AndBibleUITests/testBookmarksScreenOpensFromReaderMenu
-              -only-testing:AndBibleUITests/AndBibleUITests/testColorSettingsResetRestoresDefaultThemeColors
-              -only-testing:AndBibleUITests/AndBibleUITests/testDownloadsScreenOpensFromReaderMenu
-              -only-testing:AndBibleUITests/AndBibleUITests/testHistorySelectionNavigatesReaderToSeededReference
-              -only-testing:AndBibleUITests/AndBibleUITests/testLabelAssignmentTogglesFavouriteAndAssignment
-              -only-testing:AndBibleUITests/AndBibleUITests/testMyNotesSeededNoteUpdatePersistsAcrossReturnAndReopen
-              -only-testing:AndBibleUITests/AndBibleUITests/testReadingPlansStartPlanAndAdvanceDay
-              -only-testing:AndBibleUITests/AndBibleUITests/testSearchDirectLaunchRetainsSeededQuery
-              -only-testing:AndBibleUITests/AndBibleUITests/testSearchResultSelectionNavigatesReaderToBundledReference
-              -only-testing:AndBibleUITests/AndBibleUITests/testSettingsColorsLinkOpensColorEditor
-              -only-testing:AndBibleUITests/AndBibleUITests/testSettingsImportExportFullBackupPresentsShareSheet
-              -only-testing:AndBibleUITests/AndBibleUITests/testSettingsImportExportImportPresentsFilePickerState
-              -only-testing:AndBibleUITests/AndBibleUITests/testSettingsScreenShowsPrimaryNavigationRows
-              -only-testing:AndBibleUITests/AndBibleUITests/testSyncSettingsBackendSwitchMutatesVisibleSection
-              -only-testing:AndBibleUITests/AndBibleUITests/testSyncSettingsBackendSwitchPersistsAcrossDirectReopen
-              -only-testing:AndBibleUITests/AndBibleUITests/testSyncSettingsCategoryDisablePersistsAcrossDirectReopen
-              -only-testing:AndBibleUITests/AndBibleUITests/testSyncSettingsCategoryToggleMutatesExportedState
-              -only-testing:AndBibleUITests/AndBibleUITests/testSyncSettingsNextCloudInvalidURLShowsValidationStatus
-              -only-testing:AndBibleUITests/AndBibleUITests/testWorkspaceSelectorCreateRenameCloneDeleteFlow
-    timeout-minutes: ${{ matrix.timeout_minutes }}
-    env:
-      DERIVED_DATA_PATH: .derivedData
-      BUILD_XCRESULT_BUNDLE_PATH: ${{ matrix.build_xcresult_bundle_path }}
-      TEST_XCRESULT_BUNDLE_PATH: ${{ matrix.test_xcresult_bundle_path }}
-      TEST_SELECTION_ARGS: ${{ matrix.test_selection_args }}
+    timeout-minutes: 60
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -151,18 +142,7 @@ jobs:
       - name: Select Xcode version
         uses: maxim-lobanov/setup-xcode@v1.6.0
         with:
-          xcode-version: '16.4'
-
-      - name: Restore SwiftPM and build caches
-        uses: actions/cache@v5
-        with:
-          path: |
-            .derivedData/SourcePackages
-            ~/Library/Caches/org.swift.swiftpm
-            ~/.swiftpm
-          key: ${{ runner.os }}-xcode-spm-${{ hashFiles('Package.swift', 'AndBible.xcodeproj/project.pbxproj') }}
-          restore-keys: |
-            ${{ runner.os }}-xcode-spm-
+          xcode-version: ${{ env.XCODE_VERSION }}
 
       - name: Restore libsword build cache
         uses: actions/cache@v5
@@ -171,7 +151,83 @@ jobs:
             libsword/sword-src
             libsword/build
             libsword/libsword.xcframework
-          key: ${{ runner.os }}-xcode-16.4-libsword-${{ hashFiles('libsword/build-ios.sh') }}
+          key: ${{ runner.os }}-xcode-${{ env.XCODE_VERSION }}-libsword-hosttool-${{ hashFiles('libsword/build-ios.sh') }}
+          restore-keys: |
+            ${{ runner.os }}-xcode-${{ env.XCODE_VERSION }}-libsword-hosttool-
+
+      - name: Show Xcode version
+        run: xcodebuild -version
+
+      - name: Ensure libsword build prerequisites
+        run: |
+          if ! command -v cmake >/dev/null 2>&1; then
+            brew install cmake
+          fi
+          if ! command -v svn >/dev/null 2>&1; then
+            brew install subversion
+          fi
+
+      - name: Build libsword XCFramework
+        working-directory: libsword
+        env:
+          INCLUDE_MACOS_SLICE: "1"
+        run: |
+          if [ -f libsword.xcframework/macos-arm64_x86_64/libsword.a ] && [ -f libsword.xcframework/ios-arm64/libsword.a ] && [ -f libsword.xcframework/ios-arm64_x86_64-simulator/libsword.a ]; then
+            echo "Using cached libsword.xcframework"
+          else
+            ./build-ios.sh
+          fi
+
+      - name: Upload prepared libsword XCFramework
+        uses: actions/upload-artifact@v6
+        with:
+          name: libsword-hosttool-xcframework
+          path: libsword/libsword.xcframework
+          if-no-files-found: error
+          retention-days: 1
+
+  ios-simulator-unit-tests:
+    name: Unit Tests (Simulator)
+    runs-on: macos-15
+    needs:
+      - repo-standards
+      - localization-guardrails
+    timeout-minutes: 60
+    env:
+      DERIVED_DATA_PATH: .derivedData
+      BUILD_XCRESULT_BUNDLE_PATH: .artifacts/AndBibleBuild-unit.xcresult
+      TEST_XCRESULT_BUNDLE_PATH: .artifacts/AndBibleTests-unit.xcresult
+      TEST_SELECTION_ARGS: -skip-testing:AndBibleUITests
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Select Xcode version
+        uses: maxim-lobanov/setup-xcode@v1.6.0
+        with:
+          xcode-version: ${{ env.XCODE_VERSION }}
+
+      - name: Restore SwiftPM and build caches
+        uses: actions/cache@v5
+        with:
+          path: |
+            .derivedData/SourcePackages
+            ~/Library/Caches/org.swift.swiftpm
+            ~/.swiftpm
+          key: ${{ runner.os }}-xcode-${{ env.XCODE_VERSION }}-spm-${{ hashFiles('Package.swift', 'AndBible.xcodeproj/project.pbxproj') }}
+          restore-keys: |
+            ${{ runner.os }}-xcode-${{ env.XCODE_VERSION }}-spm-
+
+      - name: Restore libsword build cache
+        uses: actions/cache@v5
+        with:
+          path: |
+            libsword/sword-src
+            libsword/build
+            libsword/libsword.xcframework
+          key: ${{ runner.os }}-xcode-${{ env.XCODE_VERSION }}-libsword-iosonly-${{ hashFiles('libsword/build-ios.sh') }}
+          restore-keys: |
+            ${{ runner.os }}-xcode-${{ env.XCODE_VERSION }}-libsword-iosonly-
 
       - name: Show Xcode version
         run: xcodebuild -version
@@ -199,7 +255,7 @@ jobs:
         env:
           INCLUDE_MACOS_SLICE: "0"
         run: |
-          if [ -f libsword.xcframework/Info.plist ] && find libsword.xcframework -name libsword.a -print -quit | grep -q .; then
+          if [ -f libsword.xcframework/ios-arm64/libsword.a ] && [ -f libsword.xcframework/ios-arm64_x86_64-simulator/libsword.a ]; then
             echo "Using cached libsword.xcframework"
           else
             ./build-ios.sh
@@ -207,18 +263,18 @@ jobs:
 
       - name: Resolve iOS simulator destination
         id: simulator
-        run: python3 scripts/resolve_ios_simulator_destination.py --project AndBible.xcodeproj --scheme AndBible
+        run: python3 -u scripts/resolve_ios_simulator_destination.py --project AndBible.xcodeproj --scheme AndBible
 
       - name: Boot selected simulator
         run: >-
-          python3 scripts/wait_for_simulator_boot.py
+          python3 -u scripts/wait_for_simulator_boot.py
           --simulator-id "${{ steps.simulator.outputs.simulator_id }}"
           --timeout-seconds 300
 
       - name: Build for testing
         run: |
           mkdir -p .artifacts
-          python3 scripts/run_xcodebuild_with_test_selection.py \
+          python3 -u scripts/run_xcodebuild_with_test_selection.py \
             --project AndBible.xcodeproj \
             --scheme AndBible \
             --configuration Debug \
@@ -230,7 +286,147 @@ jobs:
 
       - name: Run selected simulator tests without rebuilding
         run: |
-          python3 scripts/run_xcodebuild_with_test_selection.py \
+          python3 -u scripts/run_xcodebuild_with_test_selection.py \
+            --project AndBible.xcodeproj \
+            --scheme AndBible \
+            --configuration Debug \
+            --destination "${{ steps.simulator.outputs.destination }}" \
+            --derived-data-path "${DERIVED_DATA_PATH}" \
+            --result-bundle-path "${TEST_XCRESULT_BUNDLE_PATH}" \
+            --code-signing-allowed NO \
+            --action test-without-building
+
+      - name: Upload xcodebuild test result bundle
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: andbible-xcresult-${{ github.run_id }}-unit
+          path: .artifacts/*.xcresult
+          if-no-files-found: warn
+          retention-days: 14
+
+  ios-simulator-ui-tests:
+    name: ${{ matrix.job_name }}
+    runs-on: macos-15
+    needs:
+      - ui-shard-plan
+      - ios-ui-foundation
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.ui-shard-plan.outputs.matrix) }}
+    timeout-minutes: ${{ matrix.timeout_minutes }}
+    env:
+      DERIVED_DATA_PATH: .derivedData
+      BUILD_XCRESULT_BUNDLE_PATH: ${{ matrix.build_xcresult_bundle_path }}
+      TEST_XCRESULT_BUNDLE_PATH: ${{ matrix.test_xcresult_bundle_path }}
+      TEST_SELECTION_ARGS: ${{ matrix.test_selection_args }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Select Xcode version
+        uses: maxim-lobanov/setup-xcode@v1.6.0
+        with:
+          xcode-version: ${{ env.XCODE_VERSION }}
+
+      - name: Restore SwiftPM and build caches
+        uses: actions/cache@v5
+        with:
+          path: |
+            .derivedData/SourcePackages
+            ~/Library/Caches/org.swift.swiftpm
+            ~/.swiftpm
+          key: ${{ runner.os }}-xcode-${{ env.XCODE_VERSION }}-spm-${{ hashFiles('Package.swift', 'AndBible.xcodeproj/project.pbxproj') }}
+          restore-keys: |
+            ${{ runner.os }}-xcode-${{ env.XCODE_VERSION }}-spm-
+
+      - name: Restore libsword build cache
+        uses: actions/cache@v5
+        with:
+          path: |
+            libsword/sword-src
+            libsword/build
+            libsword/libsword.xcframework
+          key: ${{ runner.os }}-xcode-${{ env.XCODE_VERSION }}-libsword-hosttool-${{ hashFiles('libsword/build-ios.sh') }}
+          restore-keys: |
+            ${{ runner.os }}-xcode-${{ env.XCODE_VERSION }}-libsword-hosttool-
+
+      - name: Download prepared libsword XCFramework
+        uses: actions/download-artifact@v5
+        with:
+          name: libsword-hosttool-xcframework
+          path: libsword
+
+      - name: Show Xcode version
+        run: xcodebuild -version
+
+      - name: Ensure iOS simulator runtime is available
+        run: |
+          if xcrun simctl list runtimes available | grep -Fq 'iOS '; then
+            echo "An iOS simulator runtime is already installed."
+          else
+            echo "No iOS simulator runtime was found; downloading it for the selected Xcode."
+            xcodebuild -downloadPlatform iOS
+          fi
+
+      - name: Ensure libsword build prerequisites
+        run: |
+          if ! command -v cmake >/dev/null 2>&1; then
+            brew install cmake
+          fi
+          if ! command -v svn >/dev/null 2>&1; then
+            brew install subversion
+          fi
+
+      - name: Build libsword XCFramework
+        working-directory: libsword
+        env:
+          INCLUDE_MACOS_SLICE: "1"
+        run: |
+          if [ -f libsword.xcframework/macos-arm64_x86_64/libsword.a ] && [ -f libsword.xcframework/ios-arm64/libsword.a ] && [ -f libsword.xcframework/ios-arm64_x86_64-simulator/libsword.a ]; then
+            echo "Using cached libsword.xcframework"
+          else
+            ./build-ios.sh
+          fi
+
+      - name: Resolve iOS simulator destination
+        id: simulator
+        run: >-
+          python3 scripts/resolve_ios_simulator_destination.py
+          --project AndBible.xcodeproj
+          --scheme AndBible
+          --create-dedicated-device
+          --device-name-prefix "AndBible CI UI"
+
+      - name: Boot selected simulator
+        run: >-
+          python3 scripts/wait_for_simulator_boot.py
+          --simulator-id "${{ steps.simulator.outputs.simulator_id }}"
+          --timeout-seconds 300
+
+      - name: Build for testing
+        run: |
+          mkdir -p .artifacts
+          python3 -u scripts/run_xcodebuild_with_test_selection.py \
+            --project AndBible.xcodeproj \
+            --scheme AndBible \
+            --configuration Debug \
+            --destination "${{ steps.simulator.outputs.destination }}" \
+            --derived-data-path "${DERIVED_DATA_PATH}" \
+            --result-bundle-path "${BUILD_XCRESULT_BUNDLE_PATH}" \
+            --code-signing-allowed NO \
+            --action build-for-testing
+
+      - name: Build host-side UI fixture tool
+        run: swift build --package-path . --product UITestFixtureTool
+
+      - name: Run selected simulator tests without rebuilding
+        env:
+          UITEST_FIXTURE_TOOL_PATH: ${{ github.workspace }}/.build/debug/UITestFixtureTool
+          UITEST_BUNDLE_ID: org.andbible.ios
+          UITEST_SIMULATOR_ID: ${{ steps.simulator.outputs.simulator_id }}
+        run: |
+          python3 -u scripts/run_xcodebuild_with_test_selection.py \
             --project AndBible.xcodeproj \
             --scheme AndBible \
             --configuration Debug \
@@ -248,3 +444,7 @@ jobs:
           path: .artifacts/*.xcresult
           if-no-files-found: warn
           retention-days: 14
+
+      - name: Delete dedicated simulator
+        if: always() && steps.simulator.outputs.simulator_created == 'true'
+        run: xcrun simctl delete "${{ steps.simulator.outputs.simulator_id }}"

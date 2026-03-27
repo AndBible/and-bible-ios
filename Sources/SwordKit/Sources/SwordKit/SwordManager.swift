@@ -51,47 +51,16 @@ public final class SwordManager: @unchecked Sendable {
         SWMgr_delete(handle)
     }
 
-    /// Default path for SWORD modules in the app's documents directory or the UI-test temp root.
+    /// Default path for SWORD modules in the app's documents directory.
     public static func defaultModulePath() -> String {
         let fileManager = FileManager.default
-        let swordDir: URL
-
-        if let uiTestSwordDir = uiTestModulePath(fileManager: fileManager) {
-            swordDir = uiTestSwordDir
-        } else {
-            let documents = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first!
-            swordDir = documents.appendingPathComponent("sword", isDirectory: true)
-        }
+        let documents = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first!
+        let swordDir = documents.appendingPathComponent("sword", isDirectory: true)
 
         // Ensure the directory exists
         try? fileManager.createDirectory(at: swordDir, withIntermediateDirectories: true)
 
         return swordDir.path
-    }
-
-    /**
-     Returns the disposable SWORD module root used by one XCUITest app launch.
-
-     - Parameter fileManager: File manager used to resolve the temporary directory.
-     - Returns: Per-launch temporary SWORD root when the in-memory UI-test harness is active,
-       otherwise `nil`.
-     - Side effects: none.
-     - Failure modes:
-       - falls back to the normal documents-backed path when the UI-test launch arguments are absent
-       - uses `UITEST_SESSION_ID` when present and otherwise falls back to the current process ID
-     */
-    private static func uiTestModulePath(fileManager: FileManager) -> URL? {
-        let processInfo = ProcessInfo.processInfo
-        guard processInfo.arguments.contains("UITEST_USE_IN_MEMORY_STORES") else {
-            return nil
-        }
-
-        let sessionID = processInfo.environment["UITEST_SESSION_ID"]
-            ?? "process-\(processInfo.processIdentifier)"
-        return fileManager.temporaryDirectory
-            .appendingPathComponent("andbible-uitests", isDirectory: true)
-            .appendingPathComponent(sessionID, isDirectory: true)
-            .appendingPathComponent("sword", isDirectory: true)
     }
 
     // MARK: - Module Listing

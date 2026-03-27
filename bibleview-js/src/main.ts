@@ -30,7 +30,7 @@ declare global {
     interface Window {
         bibleView: any;
         bibleViewDebug: any,
-        android: BibleJavascriptInterface,
+        android?: BibleJavascriptInterface,
         console: Console & {
             _msg: (s: string, args: string[][]) => string,
             flog: (s: string, args: string[]) => void,
@@ -55,4 +55,3 @@ console.log("main.ts After vue bootstrap. Mounting.");
 app.mount('#app')
 console.log("main.ts After vue mount.");
 console.log("NODE_ENV", process.env.NODE_ENV);
-

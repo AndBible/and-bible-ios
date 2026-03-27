@@ -24,6 +24,11 @@ import BibleCore
  - swipe and context-menu actions can route into the StudyPad flow for a specific label
  */
 public struct LabelManagerView: View {
+    /// Stable selection token used to navigate to one label edit screen across SwiftData refreshes.
+    private struct EditingSelection: Identifiable, Hashable {
+        let id: UUID
+    }
+
     /// SwiftData context used for label creation, deletion, and persistence.
     @Environment(\.modelContext) private var modelContext
 
@@ -36,22 +41,11 @@ public struct LabelManagerView: View {
     /// Pending name for the new label being created from the alert.
     @State private var newLabelName = ""
 
-    /// Label currently being edited in the modal edit sheet.
-    @State private var editingLabel: BibleCore.Label?
-
-    /// Launch-argument override used by XCUITests to expose direct inline label actions.
-    private let uiTestShowsInlineActions = ProcessInfo.processInfo.arguments.contains("UITEST_OPEN_LABEL_MANAGER")
+    /// Label selected for context-menu-driven edit navigation.
+    @State private var editingSelection: EditingSelection?
 
     /// Optional callback used to open the selected label in StudyPad.
     var onOpenStudyPad: ((UUID) -> Void)?
-
-    /// Optional XCUITest-provided create-name override used to prefill the create-label alert.
-    private let uiTestCreateNameOverride = ProcessInfo.processInfo.environment["UITEST_LABEL_CREATE_NAME"]?
-        .trimmingCharacters(in: .whitespacesAndNewlines)
-
-    /// Optional XCUITest-provided rename override used to bypass sheet typing in CRUD automation.
-    private let uiTestRenameNameOverride = ProcessInfo.processInfo.environment["UITEST_LABEL_RENAME_NAME"]?
-        .trimmingCharacters(in: .whitespacesAndNewlines)
 
     /**
      Creates the label manager and optionally enables StudyPad handoff actions.
@@ -69,7 +63,7 @@ public struct LabelManagerView: View {
     }
 
     /**
-     Builds the label list, create-label alert, and edit-label sheet presentation flow.
+     Builds the label list, create-label alert, and edit-label navigation flow.
      */
     public var body: some View {
         ZStack {
@@ -91,15 +85,6 @@ public struct LabelManagerView: View {
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button(String(localized: "add"), systemImage: "plus") {
-                    if uiTestShowsInlineActions,
-                       let uiTestCreateNameOverride,
-                       !uiTestCreateNameOverride.isEmpty {
-                        createLabel(named: uiTestCreateNameOverride)
-                        return
-                    }
-                    if let uiTestCreateNameOverride, !uiTestCreateNameOverride.isEmpty {
-                        newLabelName = uiTestCreateNameOverride
-                    }
                     showNewLabel = true
                 }
                 .accessibilityIdentifier("labelManagerAddButton")
@@ -112,10 +97,11 @@ public struct LabelManagerView: View {
                 .accessibilityIdentifier("labelManagerCreateButton")
             Button(String(localized: "cancel"), role: .cancel) { newLabelName = "" }
         }
-        .sheet(item: $editingLabel) { label in
-            NavigationStack {
-                LabelEditView(label: label)
-            }
+        .navigationDestination(item: $editingSelection) { selection in
+            labelEditDestination(for: selection.id)
+        }
+        .navigationDestination(for: EditingSelection.self) { selection in
+            labelEditDestination(for: selection.id)
         }
     }
 
@@ -125,13 +111,7 @@ public struct LabelManagerView: View {
     private var labelList: some View {
         List {
             ForEach(userLabels) { label in
-                HStack(spacing: 8) {
-                    labelSelectionButton(label)
-
-                    if uiTestShowsInlineActions {
-                        labelInlineActions(label)
-                    }
-                }
+                labelSelectionButton(label)
             }
         }
     }
@@ -142,12 +122,12 @@ public struct LabelManagerView: View {
      * - Parameter label: Label represented by the selectable row body.
      * - Returns: A button that opens the label editor for the requested label.
      * - Side effects:
-     *   - stores the selected label in local state and presents the edit sheet
+     *   - stores the selected label in local state and navigates to the edit destination
      * - Failure modes: This helper cannot fail.
      */
     private func labelSelectionButton(_ label: BibleCore.Label) -> some View {
-        Button {
-            editingLabel = label
+        NavigationLink {
+            labelEditDestination(for: label.id)
         } label: {
             HStack(spacing: 10) {
                 if let icon = label.customIcon, !icon.isEmpty {
@@ -204,7 +184,7 @@ public struct LabelManagerView: View {
         }
         .contextMenu {
             Button {
-                editingLabel = label
+                editingSelection = EditingSelection(id: label.id)
             } label: {
                 SwiftUI.Label(String(localized: "edit"), systemImage: "pencil")
             }
@@ -224,45 +204,13 @@ public struct LabelManagerView: View {
     }
 
     /**
-     Builds XCUITest-only inline label actions for one row.
-     *
-     * - Parameter label: Label whose edit and delete actions should be exposed inline.
-     * - Returns: A compact trailing action cluster for edit and delete operations.
-     * - Side effects:
-     *   - outside XCUITest rename overrides, the edit action presents the label-edit sheet
-     *   - when a XCUITest rename override is configured, the edit action renames the label in
-     *     place and attempts to persist it immediately
-     *   - the delete action mutates SwiftData by deleting the selected label
-     * - Failure modes: This helper cannot fail.
+     Builds the label-edit destination from a stable identifier instead of retaining one live
+     SwiftData object across navigation updates.
      */
-    private func labelInlineActions(_ label: BibleCore.Label) -> some View {
-        HStack(spacing: 4) {
-            Button {
-                if let uiTestRenameNameOverride,
-                   !uiTestRenameNameOverride.isEmpty {
-                    renameLabel(label, to: uiTestRenameNameOverride)
-                    return
-                }
-                editingLabel = label
-            } label: {
-                Image(systemName: "pencil")
-            }
-            .buttonStyle(.borderless)
-            .accessibilityIdentifier(
-                labelInlineActionIdentifier("labelManagerInlineEditButton", label: label)
-            )
-            .accessibilityLabel(label.name)
-
-            Button(role: .destructive) {
-                deleteLabel(label)
-            } label: {
-                Image(systemName: "trash")
-            }
-            .buttonStyle(.borderless)
-            .accessibilityIdentifier(
-                labelInlineActionIdentifier("labelManagerInlineDeleteButton", label: label)
-            )
-            .accessibilityLabel(label.name)
+    @ViewBuilder
+    private func labelEditDestination(for id: UUID) -> some View {
+        if let label = allLabels.first(where: { $0.id == id }) {
+            LabelEditView(label: label)
         }
     }
 
@@ -276,23 +224,6 @@ public struct LabelManagerView: View {
      */
     private func labelRowIdentifier(_ label: BibleCore.Label) -> String {
         "labelManagerRowButton-\(label.name)"
-    }
-
-    /**
-     Resolves the deterministic XCUITest accessibility identifier for one inline label action.
-     *
-     * - Parameters:
-     *   - baseIdentifier: Base action identifier shared by the inline edit or delete button.
-     *   - label: Label whose inline action identifier should be derived.
-     * - Returns: A stable action identifier that incorporates the current label name.
-     * - Side effects: none.
-     * - Failure modes: This helper cannot fail.
-     */
-    private func labelInlineActionIdentifier(
-        _ baseIdentifier: String,
-        label: BibleCore.Label
-    ) -> String {
-        "\(baseIdentifier)-\(label.name)"
     }
 
     /**
@@ -398,13 +329,6 @@ private struct LabelEditView: View {
 
     /// Dismiss action for the modal edit presentation.
     @Environment(\.dismiss) private var dismiss
-
-    /// Optional XCUITest-provided rename override applied once when the editor appears.
-    private let uiTestRenameNameOverride = ProcessInfo.processInfo.environment["UITEST_LABEL_RENAME_NAME"]?
-        .trimmingCharacters(in: .whitespacesAndNewlines)
-
-    /// Guards the XCUITest rename prefill so it only mutates the bound label once per presentation.
-    @State private var hasAppliedUITestRenameOverride = false
 
     /**
      Canonical Android icon names offered for `Label.customIcon`.
@@ -536,7 +460,6 @@ private struct LabelEditView: View {
                 .accessibilityIdentifier("labelEditDoneButton")
             }
         }
-        .onAppear { applyUITestRenameOverrideIfNeeded() }
         .onDisappear { save() }
     }
 
@@ -551,24 +474,4 @@ private struct LabelEditView: View {
         try? modelContext.save()
     }
 
-    /**
-     Applies one XCUITest-provided rename override when the editor first appears.
-
-     Side effects:
-     - mutates the bound label name and attempts to persist it when a non-empty override is present
-     - records that the override has already been applied for the current presentation
-
-     Failure modes:
-     - returns without mutation when no override is configured or the override was already applied
-     - save failures are swallowed by `try?`, so the editor does not surface persistence errors
-       directly
-     */
-    private func applyUITestRenameOverrideIfNeeded() {
-        guard !hasAppliedUITestRenameOverride else { return }
-        hasAppliedUITestRenameOverride = true
-
-        guard let uiTestRenameNameOverride, !uiTestRenameNameOverride.isEmpty else { return }
-        label.name = uiTestRenameNameOverride
-        save()
-    }
 }
