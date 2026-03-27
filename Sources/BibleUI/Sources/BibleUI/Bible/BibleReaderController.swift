@@ -2881,18 +2881,44 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     }
 
     /**
-     Build key variants for looking up a Strong's number in SWORD zLD modules.
-     SWORD uses 5-digit zero-padded keys (e.g. "02532"). We try padded, stripped, and raw.
+     Build Strong's key variants using the same families Android tries for dictionary lookup.
+
+     Android parity matters here because installed Strong's dictionaries do not all expose the same
+     key shape. Some expect zero-padded numeric keys, some want a prefixed category key such as
+     `G1234` / `H1234`, and some zLD modules require a trailing carriage return.
      */
     private func buildKeyOptions(for strongsNumber: String) -> [String] {
-        let numberOnly = String(strongsNumber.drop(while: { $0.isLetter }))
+        let original = strongsNumber.trimmingCharacters(in: .whitespacesAndNewlines)
+        let numberOnly = String(original.drop(while: { $0.isLetter }))
         let stripped = numberOnly.replacingOccurrences(of: "^0+", with: "", options: .regularExpression)
-        let padded = stripped.count < 5
-            ? String(repeating: "0", count: 5 - stripped.count) + stripped
-            : stripped
-        var keys: [String] = [padded]
-        if stripped != padded { keys.append(stripped) }
-        if numberOnly != padded && numberOnly != stripped { keys.append(numberOnly) }
+        let sanitizedBase = stripped.isEmpty ? numberOnly : stripped
+        let padded = sanitizedBase.count < 5
+            ? String(repeating: "0", count: 5 - sanitizedBase.count) + sanitizedBase
+            : sanitizedBase
+
+        let categoryPrefix: String
+        if original.uppercased().hasPrefix("H") {
+            categoryPrefix = "H"
+        } else if original.uppercased().hasPrefix("G") {
+            categoryPrefix = "G"
+        } else {
+            categoryPrefix = (Int(sanitizedBase) ?? 0) > 5624 ? "H" : "G"
+        }
+
+        var keys: [String] = []
+
+        func appendUnique(_ candidate: String) {
+            guard !candidate.isEmpty, !keys.contains(candidate) else { return }
+            keys.append(candidate)
+        }
+
+        appendUnique(original)
+        appendUnique(padded)
+        appendUnique(padded + "\r")
+        appendUnique("\(categoryPrefix)\(sanitizedBase)")
+        appendUnique(sanitizedBase)
+        appendUnique(numberOnly)
+
         return keys
     }
 
