@@ -1009,7 +1009,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             onPersistState?()
         }
 
-        // Build document JSON with isEpub flag (using JSONSerialization for proper escaping)
+        // Build document JSON with isNativeHtml flag (using JSONSerialization for proper escaping)
         let document = buildEpubDocumentJSON(
             bookName: sectionTitle,
             bookInitials: epubTitle,
@@ -1026,9 +1026,9 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     }
 
     /**
-     Build document JSON for EPUB content with isEpub: true.
+     Build document JSON for EPUB content with isNativeHtml: true.
      Uses JSONSerialization for correct escaping of all special characters in HTML content.
-     IMPORTANT: Uses type "osis" (not "bible") because OsisDocument.vue passes isEpub
+     IMPORTANT: Uses type "osis" (not "bible") because OsisDocument.vue passes isNativeHtml
      to OsisFragment, whereas BibleDocument.vue does not — without this, the EPUB HTML
      would go through OSIS template conversion and render as blank.
      */
@@ -1061,7 +1061,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             "annotateRef": "",
             "genericBookmarks": [Any](),
             "ordinalRange": [0, 0],
-            "isEpub": true,
+            "isNativeHtml": true,
             "highlightedOrdinalRange": NSNull()
         ]
 
@@ -4636,7 +4636,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         let initials = bookInitials ?? activeModuleName
 
         return """
-        {"id":"doc-1","type":"bible","osisFragment":{"xml":"\(escapedXml)","key":"\(key)","keyName":"\(bookName) \(chapter)","v11n":"KJVA","bookCategory":"\(bookCategory)","bookInitials":"\(initials)","bookAbbreviation":"\(osisBookId)","osisRef":"\(key)","isNewTestament":\(isNT),"features":{},"ordinalRange":[\(ordinalStart),\(ordinalEnd)],"language":"en","direction":"ltr"},"bookInitials":"\(initials)","bookCategory":"\(bookCategory)","bookAbbreviation":"\(osisBookId)","bookName":"\(bookName)","key":"\(key)","v11n":"KJVA","osisRef":"\(key)","annotateRef":"","genericBookmarks":[],"ordinalRange":[\(ordinalStart),\(ordinalEnd)],"isEpub":false,"bookmarks":\(bookmarksJSON),"bibleBookName":"\(bookName)","addChapter":true,"chapterNumber":\(chapter),"originalOrdinalRange":null}
+        {"id":"doc-1","type":"bible","osisFragment":{"xml":"\(escapedXml)","key":"\(key)","keyName":"\(bookName) \(chapter)","v11n":"KJVA","bookCategory":"\(bookCategory)","bookInitials":"\(initials)","bookAbbreviation":"\(osisBookId)","osisRef":"\(key)","isNewTestament":\(isNT),"features":{},"ordinalRange":[\(ordinalStart),\(ordinalEnd)],"language":"en","direction":"ltr"},"bookInitials":"\(initials)","bookCategory":"\(bookCategory)","bookAbbreviation":"\(osisBookId)","bookName":"\(bookName)","key":"\(key)","v11n":"KJVA","osisRef":"\(key)","annotateRef":"","genericBookmarks":[],"ordinalRange":[\(ordinalStart),\(ordinalEnd)],"isNativeHtml":false,"bookmarks":\(bookmarksJSON),"bibleBookName":"\(bookName)","addChapter":true,"chapterNumber":\(chapter),"originalOrdinalRange":null}
         """
     }
 
