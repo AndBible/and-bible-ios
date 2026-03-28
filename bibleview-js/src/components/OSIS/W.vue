@@ -124,7 +124,7 @@ const showStrongsSeparately = computed(() => !exportMode.value && config.strongs
 }
 
 .w-base {
-  font-size: 0.9em;
+  font-size: 0.6em;
   text-decoration: none;
   color: gray;
 

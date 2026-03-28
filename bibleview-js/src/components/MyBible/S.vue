@@ -61,7 +61,7 @@ function openLink(event: MouseEvent) {
 
 <style>
 .strongs {
-    font-size: 0.9em;
+    font-size: 0.6em;
     text-decoration: none;
     color: coral;
 }
