@@ -137,6 +137,9 @@ public struct BibleReaderView: View {
     /// System color scheme used to resolve automatic night-mode behavior.
     @Environment(\.colorScheme) private var colorScheme
 
+    /// Horizontal size class used to collapse toolbar actions on narrow iPhone layouts.
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+
     /// Presents the book/chapter/verse chooser flow for the focused controller.
     @State private var showBookChooser = false
 
@@ -1478,6 +1481,7 @@ public struct BibleReaderView: View {
                         }
                     }
                     .buttonStyle(.plain)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     .accessibilityIdentifier("bookChooserButton")
                     .accessibilityValue("\(currentToolbarTitle), \(currentToolbarSubtitle)")
 
@@ -1490,47 +1494,9 @@ public struct BibleReaderView: View {
                     .disabled(controller?.hasNext != true)
                     .accessibilityLabel(String(localized: "next_chapter"))
 
-                    Spacer()
-
                     // Action buttons — matching Android toolbar order and collapsing by width.
-                    ViewThatFits(in: .horizontal) {
-                        toolbarActionButtons(
-                            controller: controller,
-                            showSearch: true,
-                            showSpeak: true,
-                            showWorkspace: true
-                        )
-                        toolbarActionButtons(
-                            controller: controller,
-                            showSearch: true,
-                            showSpeak: true,
-                            showWorkspace: false
-                        )
-                        toolbarActionButtons(
-                            controller: controller,
-                            showSearch: preferredSingleToolbarAccessory == .search,
-                            showSpeak: preferredSingleToolbarAccessory == .speak,
-                            showWorkspace: true
-                        )
-                        toolbarActionButtons(
-                            controller: controller,
-                            showSearch: preferredSingleToolbarAccessory == .search,
-                            showSpeak: preferredSingleToolbarAccessory == .speak,
-                            showWorkspace: false
-                        )
-                        toolbarActionButtons(
-                            controller: controller,
-                            showSearch: false,
-                            showSpeak: false,
-                            showWorkspace: true
-                        )
-                        toolbarActionButtons(
-                            controller: controller,
-                            showSearch: false,
-                            showSpeak: false,
-                            showWorkspace: false
-                        )
-                    }
+                    readerToolbarActions(controller: controller)
+                        .layoutPriority(1)
                 }
             }
             .padding(.horizontal)
@@ -1917,18 +1883,66 @@ public struct BibleReaderView: View {
         }
     }
 
-    /// Higher-priority search/speak button used when the toolbar can only fit one of them.
+    /// Deterministic single-button fallback used when the toolbar can only fit one accessory.
     private var preferredSingleToolbarAccessory: ToolbarAccessoryButton? {
-        let ranked = [
-            (button: ToolbarAccessoryButton.speak, lastUsed: speakLastUsed, index: 0),
-            (button: ToolbarAccessoryButton.search, lastUsed: searchLastUsed, index: 1),
-        ].sorted {
-            if $0.lastUsed != $1.lastUsed {
-                return $0.lastUsed > $1.lastUsed
+        .search
+    }
+
+    /// Whether the reader toolbar should collapse to the compact portrait action budget.
+    private var usesCompactReaderToolbar: Bool {
+        horizontalSizeClass == .compact
+    }
+
+    /// Width-aware toolbar action cluster that keeps Search available on compact layouts.
+    @ViewBuilder
+    private func readerToolbarActions(controller: BibleReaderController?) -> some View {
+        if usesCompactReaderToolbar {
+            toolbarActionButtons(
+                controller: controller,
+                showSearch: true,
+                showSpeak: false,
+                showWorkspace: false
+            )
+        } else {
+            ViewThatFits(in: .horizontal) {
+                toolbarActionButtons(
+                    controller: controller,
+                    showSearch: true,
+                    showSpeak: true,
+                    showWorkspace: true
+                )
+                toolbarActionButtons(
+                    controller: controller,
+                    showSearch: true,
+                    showSpeak: true,
+                    showWorkspace: false
+                )
+                toolbarActionButtons(
+                    controller: controller,
+                    showSearch: preferredSingleToolbarAccessory == .search,
+                    showSpeak: preferredSingleToolbarAccessory == .speak,
+                    showWorkspace: true
+                )
+                toolbarActionButtons(
+                    controller: controller,
+                    showSearch: preferredSingleToolbarAccessory == .search,
+                    showSpeak: preferredSingleToolbarAccessory == .speak,
+                    showWorkspace: false
+                )
+                toolbarActionButtons(
+                    controller: controller,
+                    showSearch: false,
+                    showSpeak: false,
+                    showWorkspace: true
+                )
+                toolbarActionButtons(
+                    controller: controller,
+                    showSearch: false,
+                    showSpeak: false,
+                    showWorkspace: false
+                )
             }
-            return $0.index < $1.index
         }
-        return ranked.first?.button
     }
 
     /// Neutral toolbar tint matching Android's white/grey icon-state treatment.
@@ -1943,12 +1957,13 @@ public struct BibleReaderView: View {
         showSpeak: Bool,
         showWorkspace: Bool
     ) -> some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 8) {
             if showSearch {
                 Button(action: { presentSearch() }) {
                     Image(systemName: "magnifyingglass")
                         .font(.body)
                         .foregroundStyle(toolbarIconColor())
+                        .frame(width: 24, height: 22)
                 }
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("readerSearchButton")
@@ -1967,6 +1982,7 @@ public struct BibleReaderView: View {
                     Image(systemName: "headphones")
                         .font(.body)
                         .foregroundStyle(toolbarIconColor())
+                        .frame(width: 24, height: 22)
                 }
                 .buttonStyle(.plain)
             }

@@ -332,7 +332,7 @@ final class AndBibleTests: XCTestCase {
         )
     }
 
-    func testDebugPrintLiveSimulatorNasbChapterSixXml() throws {
+    func debugPrintLiveSimulatorNasbChapterSixXml() throws {
         let modulePath = "/Users/primetheus/Library/Developer/CoreSimulator/Devices/C72E0460-B755-4A5A-ABBC-C6239AD33B55/data/Containers/Data/Application/0D774F08-8389-4B78-A113-6E39F7CA8032/Documents/sword"
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
         print("LIVE_MODULES_BEGIN")
