@@ -386,7 +386,61 @@ final class AndBibleTests: XCTestCase {
             "Expected an opening chapter marker in the emitted document payload, not only a closing tag. Script: \(addDocumentsScript)"
         )
     }
+    @MainActor
+    func testLoadCurrentContentDoesNotHighlightRestoredReadingPosition() throws {
+        let bridge = BibleBridge()
+        let webView = RecordingWebView()
+        bridge.webView = webView
+        let modulePath = try makeTemporaryBundledSwordPath()
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
 
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        let window = Window()
+        let pageManager = PageManager(id: window.id)
+        pageManager.bibleDocument = "KJV"
+        pageManager.bibleBibleBook = 0
+        pageManager.bibleChapterNo = 1
+        pageManager.bibleVerseNo = 5
+        window.pageManager = pageManager
+        controller.activeWindow = window
+
+        controller.restoreSavedPosition()
+        controller.loadCurrentContent()
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.2))
+
+        let addDocumentsScript = try XCTUnwrap(
+            webView.evaluatedScripts.first(where: { $0.contains("emit('add_documents'") })
+        )
+
+        XCTAssertTrue(
+            addDocumentsScript.contains("\"originalOrdinalRange\":null"),
+            "Expected restored reading position to avoid verse highlighting. Script: \(addDocumentsScript)"
+        )
+    }
+
+    @MainActor
+    func testLoadCurrentContentHighlightsExplicitVerseNavigationTarget() throws {
+        let bridge = BibleBridge()
+        let webView = RecordingWebView()
+        bridge.webView = webView
+        let modulePath = try makeTemporaryBundledSwordPath()
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+
+        controller.navigateTo(book: "Genesis", chapter: 1, verse: 5)
+        controller.loadCurrentContent()
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.2))
+
+        let addDocumentsScript = try XCTUnwrap(
+            webView.evaluatedScripts.first(where: { $0.contains("emit('add_documents'") })
+        )
+
+        XCTAssertTrue(
+            addDocumentsScript.contains("\"originalOrdinalRange\":[5,5]"),
+            "Expected explicit verse navigation to preserve the original highlighted target. Script: \(addDocumentsScript)"
+        )
+    }
     #endif
 
     func testNavigateToPersistsSelectedVerseOnPageManager() {

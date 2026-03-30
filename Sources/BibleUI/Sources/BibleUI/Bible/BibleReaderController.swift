@@ -119,6 +119,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     private var shouldRestoreScroll = false
     /// Coalesces intra-chapter scroll persistence so visible-verse updates do not save SwiftData on every tick.
     private var pendingVisibleVersePersistWorkItem: DispatchWorkItem?
+    /// Optional verse range that should render as the explicit navigation target on the next load.
+    private var originalNavigationOrdinalRange: [Int]? = nil
 
     /// Whether the current module has Strong's numbers (matching Android CurrentPageManager.hasStrongs).
     var hasStrongs: Bool {
@@ -1357,6 +1359,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         } else {
             currentVerse = 1
         }
+        originalNavigationOrdinalRange = nil
         lastScrollTarget = currentVerse > 1
             ? .ordinal(ordinal(forChapter: currentChapter, verse: currentVerse))
             : .chapterTop
@@ -1385,6 +1388,12 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         currentChapter = chapter
         let resolvedVerse = max(1, verse ?? 1)
         currentVerse = resolvedVerse
+        if let explicitVerse = verse {
+            let ordinal = ordinal(forChapter: chapter, verse: max(1, explicitVerse))
+            originalNavigationOrdinalRange = [ordinal, ordinal]
+        } else {
+            originalNavigationOrdinalRange = nil
+        }
         if resolvedVerse > 1 {
             lastScrollTarget = .ordinal(ordinal(forChapter: chapter, verse: resolvedVerse))
             shouldRestoreScroll = true
@@ -4003,7 +4012,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             xml: xml,
             bookmarks: chapterBookmarks,
             addChapter: loadedChapter?.addChapter ?? true,
-            originalOrdinalRange: [ordinal(forChapter: currentChapter, verse: currentVerse), ordinal(forChapter: currentChapter, verse: currentVerse)]
+            originalOrdinalRange: originalNavigationOrdinalRange
         )
         bridge.emit(event: "add_documents", data: document)
 
