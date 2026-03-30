@@ -3155,16 +3155,21 @@ final class AndBibleUITests: XCTestCase {
             ]
         case "labelManagerNewLabelNameField":
             return [
+                app.alerts.descendants(matching: .textField)
+                    .matching(identifier: identifier)
+                    .firstMatch,
                 app.textFields[identifier].firstMatch,
+                app.alerts.descendants(matching: .textField)
+                    .matching(identifier: "Label name")
+                    .firstMatch,
                 app.textFields["Label name"].firstMatch,
-                anyIdentifierMatch,
-                app.textFields.firstMatch,
             ]
         case "labelManagerCreateButton":
             return [
+                app.alerts.buttons[identifier].firstMatch,
                 app.buttons[identifier].firstMatch,
+                app.alerts.buttons["Create"].firstMatch,
                 app.buttons["Create"].firstMatch,
-                anyIdentifierMatch,
             ]
         case "aboutScreen":
             return [
@@ -5042,7 +5047,7 @@ final class AndBibleUITests: XCTestCase {
         repeat {
             tapElementReliably(trigger, timeout: 5)
             if waitForAnyElement(
-                ["labelManagerNewLabelNameField", "labelManagerCreateButton"],
+                ["labelManagerNewLabelNameField"],
                 in: app,
                 timeout: 1
             ) != nil {
