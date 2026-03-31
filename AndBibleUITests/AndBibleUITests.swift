@@ -3055,6 +3055,15 @@ final class AndBibleUITests: XCTestCase {
                 app.scrollViews[identifier].firstMatch,
                 anyIdentifierMatch,
             ]
+        case
+            "readerOverflowSectionTitlesToggle",
+            "readerOverflowStrongsModeAction",
+            "readerOverflowVerseNumbersToggle":
+            return [
+                app.buttons[identifier].firstMatch,
+                app.otherElements[identifier].firstMatch,
+                anyIdentifierMatch,
+            ]
         case "labelManagerNewLabelNameField":
             return [
                 app.alerts.descendants(matching: .textField)
