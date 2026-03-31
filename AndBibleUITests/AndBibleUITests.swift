@@ -1929,13 +1929,13 @@ final class AndBibleUITests: XCTestCase {
      *   - app: Running application under test.
      * - Returns: The visible Search screen root element.
      * - Side effects:
-     *   - taps the reader toolbar search button
+     *   - opens Search through the stable reader action surface
      *   - when `makeApp(searchQuery:)` supplied one query, types it into the live Search field
      * - Failure modes:
      *   - fails when the Search screen never appears
      */
     private func openSearch(in app: XCUIApplication) -> XCUIElement {
-        tapElementReliably(requireButton("readerSearchButton", in: app, timeout: 10), timeout: 10)
+        tapReaderAction("readerOpenSearchAction", in: app, timeout: 15)
         let searchScreen = requireSearchScreen(in: app, timeout: 20)
         waitForSearchInteractionReady(on: searchScreen, in: app, timeout: 120)
         if let searchQuery = app.launchEnvironment["UITEST_SEARCH_QUERY"], !searchQuery.isEmpty {
@@ -2311,17 +2311,12 @@ final class AndBibleUITests: XCTestCase {
      *   - silently leaves focus unchanged when the keyboard or control is unavailable
      */
     private func dismissSearchFieldFocusIfNeeded(in app: XCUIApplication) {
-        let keyboard = app.keyboards.firstMatch
-        guard keyboard.exists || keyboard.waitForExistence(timeout: 0.2) else {
-            return
-        }
-
         let dismissalCandidates = [
             app.descendants(matching: .any).matching(identifier: "searchWordModeButton::allWords").firstMatch,
             app.segmentedControls.buttons["All Words"].firstMatch,
             app.buttons["All Words"].firstMatch
         ]
-        for candidate in dismissalCandidates where candidate.exists || candidate.waitForExistence(timeout: 0.2) {
+        for candidate in dismissalCandidates where candidate.exists && !candidate.frame.isEmpty {
             tapElementReliably(candidate, timeout: 5)
             return
         }
@@ -3048,11 +3043,27 @@ final class AndBibleUITests: XCTestCase {
             .firstMatch
 
         switch identifier {
+        case "readerNavigationDrawer":
+            return [
+                app.scrollViews[identifier].firstMatch,
+                app.otherElements[identifier].firstMatch,
+            ]
+        case "readerNavigationDrawerDismissArea":
+            return [
+                app.otherElements[identifier].firstMatch,
+            ]
+        case "readerNavigationDrawerButton":
+            return [
+                app.buttons[identifier].firstMatch,
+            ]
         case "readerOverflowMenu":
             return [
                 app.otherElements[identifier].firstMatch,
                 app.scrollViews[identifier].firstMatch,
-                anyIdentifierMatch,
+            ]
+        case "readerOverflowMenuDismissArea":
+            return [
+                app.otherElements[identifier].firstMatch,
             ]
         case "readerOverflowSectionTitlesToggle":
             return [
@@ -3890,15 +3901,25 @@ final class AndBibleUITests: XCTestCase {
         timeout: TimeInterval
     ) -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
+        let menuCandidates = [
+            app.otherElements["readerOverflowMenu"].firstMatch,
+            app.scrollViews["readerOverflowMenu"].firstMatch,
+        ]
+        let actionCandidates = [
+            app.buttons["readerOpenWorkspacesAction"].firstMatch,
+            app.buttons["readerOverflowNightModeToggle"].firstMatch,
+            app.buttons["readerOverflowSectionTitlesToggle"].firstMatch,
+        ]
         repeat {
-            if let overflowMenu = resolvedElement("readerOverflowMenu", in: app),
-               !overflowMenu.frame.isEmpty {
+            if menuCandidates.contains(where: { $0.exists && !$0.frame.isEmpty }) ||
+                actionCandidates.contains(where: { $0.exists && !$0.frame.isEmpty }) {
                 return true
             }
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         } while Date() < deadline
 
-        return resolvedElement("readerOverflowMenu", in: app) != nil
+        return menuCandidates.contains(where: { $0.exists }) ||
+            actionCandidates.contains(where: { $0.exists })
     }
 
     /**
@@ -3957,15 +3978,25 @@ final class AndBibleUITests: XCTestCase {
         timeout: TimeInterval
     ) -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
+        let drawerCandidates = [
+            app.scrollViews["readerNavigationDrawer"].firstMatch,
+            app.otherElements["readerNavigationDrawer"].firstMatch,
+        ]
+        let actionCandidates = [
+            app.buttons["readerOpenBookmarksAction"].firstMatch,
+            app.buttons["readerOpenSettingsAction"].firstMatch,
+            app.buttons["readerOpenSearchAction"].firstMatch,
+        ]
         repeat {
-            if let drawer = resolvedElement("readerNavigationDrawer", in: app),
-               !drawer.frame.isEmpty {
+            if drawerCandidates.contains(where: { $0.exists && !$0.frame.isEmpty }) ||
+                actionCandidates.contains(where: { $0.exists && !$0.frame.isEmpty }) {
                 return true
             }
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         } while Date() < deadline
 
-        return resolvedElement("readerNavigationDrawer", in: app) != nil
+        return drawerCandidates.contains(where: { $0.exists }) ||
+            actionCandidates.contains(where: { $0.exists })
     }
 
     /**
@@ -4381,6 +4412,14 @@ final class AndBibleUITests: XCTestCase {
             return finalAction
         }
 
+        let directActionCandidates = [
+            app.buttons[identifier].firstMatch,
+            app.buttons[title].firstMatch,
+        ]
+        if let directAction = directActionCandidates.first(where: { $0.exists && !$0.frame.isEmpty }) {
+            return directAction
+        }
+
         let overflowMenu = unresolvedElement(prefersDrawer ? "readerNavigationDrawer" : "readerOverflowMenu", in: app)
         XCTAssertTrue(
             overflowMenu.exists,
@@ -4417,11 +4456,7 @@ final class AndBibleUITests: XCTestCase {
         let deadline = Date().addingTimeInterval(timeout)
         repeat {
             if !element.frame.isEmpty {
-                if element.isHittable {
-                    element.tap()
-                } else {
-                    element.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
-                }
+                element.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
                 return
             }
             let remaining = deadline.timeIntervalSinceNow
