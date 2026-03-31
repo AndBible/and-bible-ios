@@ -1750,6 +1750,7 @@ public struct BibleReaderView: View {
             }
         }
         .fixedSize(horizontal: false, vertical: true)
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("readerOverflowMenu")
         .background(readerOverflowMenuBackground)
     }

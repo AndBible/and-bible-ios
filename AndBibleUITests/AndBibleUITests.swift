@@ -3050,12 +3050,14 @@ final class AndBibleUITests: XCTestCase {
         switch identifier {
         case "readerOverflowMenu":
             return [
+                app.otherElements[identifier].firstMatch,
                 app.scrollViews[identifier].firstMatch,
                 anyIdentifierMatch,
             ]
         case "readerOverflowSectionTitlesToggle":
             return [
                 app.buttons[identifier].firstMatch,
+                app.buttons["Section Titles"].firstMatch,
                 app.buttons["Section titles"].firstMatch,
                 app.otherElements[identifier].firstMatch,
                 anyIdentifierMatch,
@@ -3063,6 +3065,8 @@ final class AndBibleUITests: XCTestCase {
         case "readerOverflowStrongsModeAction":
             return [
                 app.buttons[identifier].firstMatch,
+                app.buttons["Strong's Numbers…"].firstMatch,
+                app.buttons["Strong's Numbers..."].firstMatch,
                 app.buttons["Strong's numbers…"].firstMatch,
                 app.buttons["Strong's numbers..."].firstMatch,
                 app.otherElements[identifier].firstMatch,
@@ -3071,6 +3075,7 @@ final class AndBibleUITests: XCTestCase {
         case "readerOverflowVerseNumbersToggle":
             return [
                 app.buttons[identifier].firstMatch,
+                app.buttons["Chapter & Verse Numbers"].firstMatch,
                 app.buttons["Chapter & verse numbers"].firstMatch,
                 app.otherElements[identifier].firstMatch,
                 anyIdentifierMatch,
