@@ -2464,17 +2464,16 @@ final class AndBibleUITests: XCTestCase {
 
 
     /**
-     Opens the workspace selector from the reader overflow menu.
+     Opens the workspace selector from the reader action surface.
      *
      * - Parameter app: Running application under test.
      * - Returns: The root accessibility-identified workspace selector screen element.
      * - Side effects:
-     *   - opens the reader overflow menu and pushes the workspace selector
+     *   - resolves the production reader action surface and pushes the workspace selector
      * - Failure modes:
      *   - fails when the workspace selector screen never appears
      */
     private func openWorkspaceSelector(in app: XCUIApplication) -> XCUIElement {
-        tapReaderMoreMenuButton(in: app)
         tapReaderAction("readerOpenWorkspacesAction", in: app)
         return requireElement("workspaceSelectorAddButton", in: app, timeout: 15)
     }
@@ -2818,12 +2817,11 @@ final class AndBibleUITests: XCTestCase {
      *     navigation stack
      *   - dismisses the language restart alert only when it is already present after Settings loads
      * - Failure modes:
-     *   - fails when the reader overflow menu or Settings action cannot be found
+     *   - fails when the reader action surface or Settings action cannot be found
      *   - fails when the settings form never appears
      */
     private func openSettings(in app: XCUIApplication) {
         for attempt in 1...2 {
-            tapReaderMoreMenuButton(in: app)
             tapReaderAction("readerOpenSettingsAction", in: app, timeout: 15)
             if waitForSettingsReady(in: app, timeout: 20) {
                 return
@@ -3055,12 +3053,25 @@ final class AndBibleUITests: XCTestCase {
                 app.scrollViews[identifier].firstMatch,
                 anyIdentifierMatch,
             ]
-        case
-            "readerOverflowSectionTitlesToggle",
-            "readerOverflowStrongsModeAction",
-            "readerOverflowVerseNumbersToggle":
+        case "readerOverflowSectionTitlesToggle":
             return [
                 app.buttons[identifier].firstMatch,
+                app.buttons["Section titles"].firstMatch,
+                app.otherElements[identifier].firstMatch,
+                anyIdentifierMatch,
+            ]
+        case "readerOverflowStrongsModeAction":
+            return [
+                app.buttons[identifier].firstMatch,
+                app.buttons["Strong's numbers…"].firstMatch,
+                app.buttons["Strong's numbers..."].firstMatch,
+                app.otherElements[identifier].firstMatch,
+                anyIdentifierMatch,
+            ]
+        case "readerOverflowVerseNumbersToggle":
+            return [
+                app.buttons[identifier].firstMatch,
+                app.buttons["Chapter & verse numbers"].firstMatch,
                 app.otherElements[identifier].firstMatch,
                 anyIdentifierMatch,
             ]
@@ -4097,7 +4108,7 @@ final class AndBibleUITests: XCTestCase {
         case "readerOpenSettingsAction":
             return "Application preferences"
         case "readerOpenWorkspacesAction":
-            return "Workspaces"
+            return "Workspaces…"
         case "readerOpenDownloadsAction":
             return "Download Documents"
         case "readerOpenImportExportAction":
@@ -4142,6 +4153,7 @@ final class AndBibleUITests: XCTestCase {
              "readerOpenHistoryAction",
              "readerOpenReadingPlansAction",
              "readerOpenDownloadsAction",
+             "readerOpenSettingsAction",
              "readerOpenAboutAction",
              "readerChooseDocumentAction",
              "readerOpenSearchAction",
