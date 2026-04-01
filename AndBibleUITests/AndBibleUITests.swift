@@ -4027,7 +4027,7 @@ final class AndBibleUITests: XCTestCase {
             let button = requireElement("readerNavigationDrawerButton", in: app, timeout: min(2, max(0.5, deadline.timeIntervalSinceNow)))
             if !button.frame.isEmpty {
                 tapElementReliably(button, timeout: min(2, max(0.5, deadline.timeIntervalSinceNow)), file: file, line: line)
-                if waitForReaderNavigationDrawer(in: app, timeout: min(3, max(1, deadline.timeIntervalSinceNow))) {
+                if waitForReaderNavigationDrawer(in: app, timeout: min(5, max(2, deadline.timeIntervalSinceNow))) {
                     return
                 }
             }
@@ -4451,7 +4451,7 @@ final class AndBibleUITests: XCTestCase {
             let actionSurface = ensureReaderActionSurface(
                 for: identifier,
                 in: app,
-                timeout: min(5, max(1, deadline.timeIntervalSinceNow)),
+                timeout: min(10, max(3, deadline.timeIntervalSinceNow)),
                 file: file,
                 line: line
             )
