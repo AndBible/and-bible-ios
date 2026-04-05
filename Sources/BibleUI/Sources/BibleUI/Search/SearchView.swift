@@ -329,7 +329,12 @@ public struct SearchView: View {
         case .creatingIndex: "creatingIndex"
         case .ready: "ready"
         }
-        return "state=\(stateToken);query=\(query);searching=\(isSearching);results=\(results.count);scope=\(searchScopeToken(for: scopeOption));wordMode=\(searchWordModeToken(for: wordMode))"
+        return "state=\(stateToken);query=\(query);searching=\(isSearching);results=\(results.count);scope=\(searchScopeToken(for: scopeOption));wordMode=\(searchWordModeToken(for: wordMode));rows=\(searchAccessibilityRowsToken)"
+    }
+
+    /// Stable search-result row tokens exported for UI automation.
+    private var searchAccessibilityRowsToken: String {
+        results.prefix(200).map { "|\(searchResultIdentifier(for: $0))|" }.joined(separator: ",")
     }
 
     // MARK: - Index Prompt
@@ -472,6 +477,7 @@ public struct SearchView: View {
                 }
             }
             .pickerStyle(.segmented)
+            .accessibilityIdentifier("searchWordModePicker")
 
             HStack(spacing: 8) {
                 scopeButton(String(localized: "search_scope_all"), choice: .wholeBible)

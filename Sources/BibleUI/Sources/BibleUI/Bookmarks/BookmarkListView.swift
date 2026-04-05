@@ -131,11 +131,11 @@ public struct BookmarkListView: View {
                     description: Text(String(localized: "no_bookmarks_description"))
                 )
                 .accessibilityIdentifier("bookmarkListScreen")
-                .accessibilityValue(bookmarkListAccessibilityState)
+                .accessibilityValue(bookmarkListAccessibilityValue)
             } else {
                 bookmarkList
                     .accessibilityIdentifier("bookmarkListScreen")
-                    .accessibilityValue(bookmarkListAccessibilityState)
+                    .accessibilityValue(bookmarkListAccessibilityValue)
             }
         }
         .searchable(text: $searchText, prompt: String(localized: "search_bookmarks"))
@@ -182,19 +182,6 @@ public struct BookmarkListView: View {
         }
     }
 
-    /// Exported bookmark-list state used by UI tests to assert visible filtering semantics.
-    private var bookmarkListAccessibilityState: String {
-        let selectedFilter = selectedLabelId
-            .flatMap { id in userLabels.first(where: { $0.id == id })?.name }
-            .map(bookmarkListAccessibilitySegment) ?? "all"
-        let visibleRows = filteredBookmarks
-            .map { bookmarkListAccessibilitySegment(Self.verseReference(for: $0)) }
-            .joined(separator: ",")
-        let normalizedSearch = bookmarkListAccessibilitySegment(searchText)
-
-        return "count=\(filteredBookmarks.count);filter=\(selectedFilter);search=\(normalizedSearch);rows=\(visibleRows)"
-    }
-
     /// Main list content once at least one bookmark exists.
     private var bookmarkList: some View {
         List {
@@ -235,6 +222,24 @@ public struct BookmarkListView: View {
             }
             .onDelete(perform: deleteBookmarks)
         }
+    }
+
+    /// Stable bookmark-list state exported for UI automation.
+    private var bookmarkListAccessibilityValue: String {
+        let rowTokens = filteredBookmarks.map {
+            "|\(bookmarkListAccessibilitySegment(Self.verseReference(for: $0)))|"
+        }.joined(separator: ",")
+        return "count=\(filteredBookmarks.count);selectedLabel=\(bookmarkListSelectedLabelAccessibilityToken);query=\(bookmarkListAccessibilitySegment(searchText));rows=\(rowTokens)"
+    }
+
+    /// Stable token for the currently selected bookmark label filter.
+    private var bookmarkListSelectedLabelAccessibilityToken: String {
+        guard let labelId = selectedLabelId,
+              let label = labels.first(where: { $0.id == labelId })
+        else {
+            return "all"
+        }
+        return bookmarkListAccessibilitySegment(label.name)
     }
 
     /// Sort-order menu shown in the navigation bar.

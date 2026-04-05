@@ -102,10 +102,7 @@ final class AndBibleUITests: XCTestCase {
 
         _ = openSearch(in: app)
         waitForSearchQuery("earth", in: app, timeout: 20)
-        XCTAssertTrue(
-            requireElement("searchResultRow::Genesis_1_2", in: app, timeout: 20).exists,
-            "Expected the seeded Search query to surface the Genesis 1:2 result."
-        )
+        waitForSearchResultRow("searchResultRow::Genesis_1_2", in: app, shouldExist: true, timeout: 20)
     }
 
     /**
@@ -124,10 +121,7 @@ final class AndBibleUITests: XCTestCase {
 
         _ = openSearch(in: app)
         waitForSearchState(containing: "query=earth", in: app, timeout: 20)
-        XCTAssertTrue(
-            requireElement("searchResultRow::Genesis_1_2", in: app, timeout: 20).exists,
-            "Expected bundled Search results for 'earth' to include Genesis 1:2."
-        )
+        waitForSearchResultRow("searchResultRow::Genesis_1_2", in: app, shouldExist: true, timeout: 20)
     }
 
     /**
@@ -149,10 +143,7 @@ final class AndBibleUITests: XCTestCase {
         app.launch()
 
         _ = openSearch(in: app)
-        XCTAssertTrue(
-            requireElement("searchResultRow::Matthew_1_1", in: app, timeout: 20).exists,
-            "Expected whole-Bible Search hits for 'jesus' to include Matthew 1:1."
-        )
+        waitForSearchResultRow("searchResultRow::Matthew_1_1", in: app, shouldExist: true, timeout: 20)
 
         tapSearchScope(.oldTestament, in: app)
         waitForSearchState(containing: "scope=oldTestament", in: app, timeout: 20)
@@ -165,10 +156,7 @@ final class AndBibleUITests: XCTestCase {
 
         tapSearchScope(.newTestament, in: app)
         waitForSearchState(containing: "scope=newTestament", in: app, timeout: 20)
-        XCTAssertTrue(
-            requireElement("searchResultRow::Matthew_1_1", in: app, timeout: 20).exists,
-            "Expected New Testament Search hits for 'jesus' to restore Matthew 1:1."
-        )
+        waitForSearchResultRow("searchResultRow::Matthew_1_1", in: app, shouldExist: true, timeout: 20)
     }
 
     /**
@@ -188,10 +176,7 @@ final class AndBibleUITests: XCTestCase {
         app.launch()
 
         _ = openSearch(in: app)
-        XCTAssertTrue(
-            requireElement("searchResultRow::Genesis_1_2", in: app, timeout: 20).exists,
-            "Expected all-word Search hits for 'earth void' to include Genesis 1:2."
-        )
+        waitForSearchResultRow("searchResultRow::Genesis_1_2", in: app, shouldExist: true, timeout: 20)
 
         tapSearchWordMode("Phrase", in: app, timeout: 10)
         waitForSearchState(containing: "wordMode=phrase", in: app, timeout: 20)
@@ -204,10 +189,7 @@ final class AndBibleUITests: XCTestCase {
 
         tapSearchWordMode("Any Word", in: app, timeout: 10)
         waitForSearchState(containing: "wordMode=anyWord", in: app, timeout: 20)
-        XCTAssertTrue(
-            requireElement("searchResultRow::Genesis_1_2", in: app, timeout: 20).exists,
-            "Expected any-word Search hits for 'earth void' to restore Genesis 1:2."
-        )
+        waitForSearchResultRow("searchResultRow::Genesis_1_2", in: app, shouldExist: true, timeout: 20)
     }
 
     /**
@@ -464,18 +446,18 @@ final class AndBibleUITests: XCTestCase {
         exodusRow.swipeLeft()
         requireElement("bookmarkListDeleteButton::Exodus_2_1", in: app, timeout: 10).tap()
 
-        waitForElementValue("bookmarkListScreen", toContain: "count=1", in: app, timeout: 10)
-        waitForElementValue("bookmarkListScreen", toContain: "rows=Matthew_3_1", in: app, timeout: 10)
-        waitForElementValue("bookmarkListScreen", toNotContain: "Exodus_2_1", in: app, timeout: 10)
+        waitForBookmarkListState(containing: "count=1", in: app, timeout: 10)
+        waitForBookmarkListState(containing: bookmarkListRowStateToken("Matthew_3_1"), in: app, timeout: 10)
+        waitForBookmarkListState(notContaining: bookmarkListRowStateToken("Exodus_2_1"), in: app, timeout: 10)
         XCTAssertTrue(
             requireBookmarkRow("Matthew_3_1", in: app, timeout: 10).exists,
             "Expected Matthew bookmark row to remain after deleting Exodus."
         )
 
         reopenBookmarkList(in: app)
-        waitForElementValue("bookmarkListScreen", toContain: "count=1", in: app, timeout: 10)
-        waitForElementValue("bookmarkListScreen", toContain: "rows=Matthew_3_1", in: app, timeout: 10)
-        waitForElementValue("bookmarkListScreen", toNotContain: "Exodus_2_1", in: app, timeout: 10)
+        waitForBookmarkListState(containing: "count=1", in: app, timeout: 10)
+        waitForBookmarkListState(containing: bookmarkListRowStateToken("Matthew_3_1"), in: app, timeout: 10)
+        waitForBookmarkListState(notContaining: bookmarkListRowStateToken("Exodus_2_1"), in: app, timeout: 10)
         XCTAssertTrue(
             requireBookmarkRow("Matthew_3_1", in: app, timeout: 10).exists,
             "Expected Matthew bookmark row to persist after reopening bookmarks."
@@ -537,15 +519,14 @@ final class AndBibleUITests: XCTestCase {
         let searchField = app.searchFields.firstMatch
         XCTAssertTrue(searchField.waitForExistence(timeout: 10), "Expected bookmark search field to exist.")
 
-        let exodusRow = app.descendants(matching: .any)["bookmarkListRowButton::Exodus_2_1"]
         let matthewRow = app.descendants(matching: .any)["bookmarkListRowButton::Matthew_3_1"]
 
         replaceText(in: searchField, with: "Matthew")
         searchField.typeText("\n")
-
-        waitForElementValue("bookmarkListScreen", toContain: "count=1", in: app, timeout: 10)
-        waitForElementValue("bookmarkListScreen", toContain: "rows=Matthew_3_1", in: app, timeout: 10)
-        waitForElementValue("bookmarkListScreen", toNotContain: "Exodus_2_1", in: app, timeout: 10)
+        waitForBookmarkListState(containing: "count=1", in: app, timeout: 10)
+        waitForBookmarkListState(containing: "query=Matthew", in: app, timeout: 10)
+        waitForBookmarkListState(containing: bookmarkListRowStateToken("Matthew_3_1"), in: app, timeout: 10)
+        waitForBookmarkListState(notContaining: bookmarkListRowStateToken("Exodus_2_1"), in: app, timeout: 10)
 
         XCTAssertTrue(
             matthewRow.waitForExistence(timeout: 10),
@@ -554,10 +535,14 @@ final class AndBibleUITests: XCTestCase {
         XCTAssertTrue(matthewRow.exists, "Expected Matthew bookmark row to remain visible after filtering.")
 
         replaceText(in: searchField, with: "")
-        waitForElementValue("bookmarkListScreen", toContain: "count=2", in: app, timeout: 10)
-        waitForElementValue("bookmarkListScreen", toContain: "Exodus_2_1", in: app, timeout: 10)
-        waitForElementValue("bookmarkListScreen", toContain: "Matthew_3_1", in: app, timeout: 10)
-        XCTAssertTrue(exodusRow.waitForExistence(timeout: 10), "Expected Exodus bookmark row to reappear after clearing search.")
+        waitForBookmarkListState(containing: "count=2", in: app, timeout: 10)
+        waitForBookmarkListState(notContaining: "query=Matthew", in: app, timeout: 10)
+        waitForBookmarkListState(containing: bookmarkListRowStateToken("Exodus_2_1"), in: app, timeout: 10)
+        waitForBookmarkListState(containing: bookmarkListRowStateToken("Matthew_3_1"), in: app, timeout: 10)
+        XCTAssertTrue(
+            requireBookmarkRow("Exodus_2_1", in: app, timeout: 10).exists,
+            "Expected Exodus bookmark row to reappear after clearing search."
+        )
         XCTAssertTrue(matthewRow.waitForExistence(timeout: 10), "Expected Matthew bookmark row to remain visible after clearing search.")
     }
 
@@ -582,29 +567,27 @@ final class AndBibleUITests: XCTestCase {
         app.launch()
 
         _ = openBookmarkList(in: app)
-        tapElementReliably(
-            requireElement("bookmarkListFilterChip::UI_Test_Seed", in: app, timeout: 10),
-            timeout: 10
-        )
+        selectBookmarkListFilterChip("UI_Test_Seed", in: app, timeout: 10)
+        waitForBookmarkListState(containing: "count=1", in: app, timeout: 10)
+        waitForBookmarkListState(containing: bookmarkListRowStateToken("Genesis_1_1"), in: app, timeout: 10)
+        waitForBookmarkListState(notContaining: bookmarkListRowStateToken("Exodus_2_1"), in: app, timeout: 10)
 
         let genesisRow = requireBookmarkRow("Genesis_1_1", in: app, timeout: 10)
-        waitForElementValue("bookmarkListScreen", toContain: "count=1", in: app, timeout: 10)
-        waitForElementValue("bookmarkListScreen", toContain: "filter=UI_Test_Seed", in: app, timeout: 10)
-        waitForElementValue("bookmarkListScreen", toContain: "rows=Genesis_1_1", in: app, timeout: 10)
-        waitForElementValue("bookmarkListScreen", toNotContain: "Exodus_2_1", in: app, timeout: 10)
         XCTAssertTrue(genesisRow.exists, "Expected Genesis bookmark row to remain visible for the selected label.")
         XCTAssertTrue(
             requireElement("bookmarkListOpenStudyPadButton::UI_Test_Seed", in: app, timeout: 10).exists,
             "Expected the seeded label StudyPad handoff to appear while the filter is active."
         )
 
-        requireElement("bookmarkListFilterChip::all", in: app, timeout: 10).tap()
-
-        waitForElementValue("bookmarkListScreen", toContain: "count=2", in: app, timeout: 10)
-        waitForElementValue("bookmarkListScreen", toContain: "filter=all", in: app, timeout: 10)
-        waitForElementValue("bookmarkListScreen", toContain: "Genesis_1_1", in: app, timeout: 10)
-        waitForElementValue("bookmarkListScreen", toContain: "Exodus_2_1", in: app, timeout: 10)
+        selectBookmarkListFilterChip("all", in: app, timeout: 10)
+        waitForBookmarkListState(containing: "count=2", in: app, timeout: 10)
+        waitForBookmarkListState(containing: bookmarkListRowStateToken("Genesis_1_1"), in: app, timeout: 10)
+        waitForBookmarkListState(containing: bookmarkListRowStateToken("Exodus_2_1"), in: app, timeout: 10)
         XCTAssertTrue(genesisRow.waitForExistence(timeout: 10), "Expected Genesis bookmark row to remain visible after clearing the filter.")
+        XCTAssertTrue(
+            requireBookmarkRow("Exodus_2_1", in: app, timeout: 10).exists,
+            "Expected Exodus bookmark row to return after clearing the filter."
+        )
         XCTAssertFalse(
             app.buttons["bookmarkListOpenStudyPadButton::UI_Test_Seed"].firstMatch.exists,
             "Expected the StudyPad handoff to disappear once the label filter is cleared."
@@ -926,10 +909,9 @@ final class AndBibleUITests: XCTestCase {
 
         dismissLabelAssignmentToBookmarkList(in: app)
 
-        requireElement("bookmarkListFilterChip::UI_Test_Seed", in: app, timeout: 10).tap()
-        waitForElementValue("bookmarkListScreen", toContain: "count=0", in: app, timeout: 10)
-        waitForElementValue("bookmarkListScreen", toContain: "filter=UI_Test_Seed", in: app, timeout: 10)
-        waitForElementValue("bookmarkListScreen", toNotContain: "Genesis_1_1", in: app, timeout: 10)
+        selectBookmarkListFilterChip("UI_Test_Seed", in: app, timeout: 10)
+        waitForBookmarkListState(containing: "count=0", in: app, timeout: 10)
+        waitForBookmarkListState(notContaining: bookmarkListRowStateToken("Genesis_1_1"), in: app, timeout: 10)
     }
 
     /**
@@ -956,30 +938,30 @@ final class AndBibleUITests: XCTestCase {
         let searchField = app.searchFields.firstMatch
         XCTAssertTrue(searchField.waitForExistence(timeout: 10), "Expected bookmark search field to exist.")
 
-        tapElementReliably(
-            requireElement("bookmarkListFilterChip::UI_Test_Seed", in: app, timeout: 10),
-            timeout: 10
-        )
+        selectBookmarkListFilterChip("UI_Test_Seed", in: app, timeout: 10)
+        waitForBookmarkListState(containing: "count=1", in: app, timeout: 10)
+        waitForBookmarkListState(containing: bookmarkListRowStateToken("Genesis_1_1"), in: app, timeout: 10)
+        waitForBookmarkListState(notContaining: bookmarkListRowStateToken("Exodus_2_1"), in: app, timeout: 10)
         let genesisRow = requireBookmarkRow("Genesis_1_1", in: app, timeout: 10)
-        waitForElementValue("bookmarkListScreen", toContain: "count=1", in: app, timeout: 10)
-        waitForElementValue("bookmarkListScreen", toContain: "filter=UI_Test_Seed", in: app, timeout: 10)
-        waitForElementValue("bookmarkListScreen", toContain: "Genesis_1_1", in: app, timeout: 10)
-        waitForElementValue("bookmarkListScreen", toNotContain: "Exodus_2_1", in: app, timeout: 10)
         XCTAssertTrue(genesisRow.waitForExistence(timeout: 10), "Expected Genesis bookmark row to remain visible after filtering.")
 
         replaceText(in: searchField, with: "Exodus")
         searchField.typeText("\n")
-        waitForElementValue("bookmarkListScreen", toContain: "count=0", in: app, timeout: 10)
-        waitForElementValue("bookmarkListScreen", toContain: "filter=UI_Test_Seed", in: app, timeout: 10)
-        waitForElementValue("bookmarkListScreen", toContain: "search=Exodus", in: app, timeout: 10)
-        waitForElementValue("bookmarkListScreen", toNotContain: "Genesis_1_1", in: app, timeout: 10)
+        waitForBookmarkListState(containing: "count=0", in: app, timeout: 10)
+        waitForBookmarkListState(containing: "query=Exodus", in: app, timeout: 10)
+        waitForBookmarkListState(notContaining: bookmarkListRowStateToken("Genesis_1_1"), in: app, timeout: 10)
 
         reopenBookmarkList(in: app)
-        waitForElementValue("bookmarkListScreen", toContain: "count=2", in: app, timeout: 10)
-        waitForElementValue("bookmarkListScreen", toContain: "filter=all", in: app, timeout: 10)
-        waitForElementValue("bookmarkListScreen", toContain: "Genesis_1_1", in: app, timeout: 10)
-        waitForElementValue("bookmarkListScreen", toContain: "Exodus_2_1", in: app, timeout: 10)
+        waitForBookmarkListState(containing: "selectedLabel=all", in: app, timeout: 10)
+        waitForBookmarkListState(containing: "count=2", in: app, timeout: 10)
+        waitForBookmarkListState(notContaining: "query=Exodus", in: app, timeout: 10)
+        waitForBookmarkListState(containing: bookmarkListRowStateToken("Genesis_1_1"), in: app, timeout: 10)
+        waitForBookmarkListState(containing: bookmarkListRowStateToken("Exodus_2_1"), in: app, timeout: 10)
         XCTAssertTrue(genesisRow.waitForExistence(timeout: 10), "Expected Genesis bookmark row to reappear after reopening the bookmark list.")
+        XCTAssertTrue(
+            requireBookmarkRow("Exodus_2_1", in: app, timeout: 10).exists,
+            "Expected Exodus bookmark row to reappear after reopening the bookmark list."
+        )
     }
 
     /**
@@ -1042,7 +1024,7 @@ final class AndBibleUITests: XCTestCase {
      Verifies that invalid NextCloud server input surfaces the expected validation status.
      *
      * - Side effects:
-     *   - launches the app on the reader shell and opens Sync Settings
+     *   - launches the app on the reader shell and opens Sync Settings from the reader action
      *   - enters one invalid server URL and triggers the manual connection test
      * - Failure modes:
      *   - fails if the Sync Settings sheet never appears
@@ -1053,7 +1035,7 @@ final class AndBibleUITests: XCTestCase {
         let app = makeApp()
         app.launch()
 
-        _ = openSyncSettings(in: app)
+        _ = openSyncSettingsFromReaderAction(in: app)
         let serverField = requireElement("syncNextCloudServerURLField", in: app, timeout: 10)
 
         replaceText(in: serverField, with: "not-a-url")
@@ -1069,8 +1051,8 @@ final class AndBibleUITests: XCTestCase {
      * - Side effects:
      *   - launches the app on the reader shell with persisted NextCloud settings and bookmarks
      *     already enabled through host-side fixture seeding
-     *   - opens Sync Settings through normal Settings navigation and toggles the production
-     *     bookmarks switch off
+     *   - opens Sync Settings from the reader action and toggles the production bookmarks switch
+     *     off
      * - Failure modes:
      *   - fails if the production bookmarks toggle never appears for the seeded category state
      *   - fails if the Sync screen state does not start with `backend=NEXT_CLOUD;enabled=bookmarks`
@@ -1081,7 +1063,7 @@ final class AndBibleUITests: XCTestCase {
         let app = makeApp()
         app.launch()
 
-        _ = openSyncSettings(in: app)
+        _ = openSyncSettingsFromReaderAction(in: app)
         let syncState = requireElement("syncSettingsState", in: app, timeout: 10)
         XCTAssertEqual(
             syncState.value as? String,
@@ -1103,8 +1085,8 @@ final class AndBibleUITests: XCTestCase {
      *   - launches the app on the reader shell with persisted NextCloud settings and bookmarks
      *     already enabled through host-side fixture seeding
      *   - disables the bookmarks category through the production toggle
-     *   - dismisses the Sync screen, reopens it through normal Settings navigation, and rehydrates
-     *     from persisted settings state
+     *   - dismisses the Sync screen, reopens it from the reader action, and rehydrates from
+     *     persisted settings state
      * - Failure modes:
      *   - fails if the seeded Sync screen does not start with `backend=NEXT_CLOUD;enabled=bookmarks`
      *   - fails if the direct dismiss or reopen controls never appear
@@ -1114,7 +1096,7 @@ final class AndBibleUITests: XCTestCase {
         let app = makeApp()
         app.launch()
 
-        _ = openSyncSettings(in: app)
+        _ = openSyncSettingsFromReaderAction(in: app)
         let syncState = requireElement("syncSettingsState", in: app, timeout: 10)
         XCTAssertEqual(
             syncState.value as? String,
@@ -1128,7 +1110,7 @@ final class AndBibleUITests: XCTestCase {
         )
 
         dismissSyncSettings(in: app)
-        _ = openSyncSettings(in: app)
+        _ = openSyncSettingsFromReaderAction(in: app)
 
         let reopenedSyncState = requireElement("syncSettingsState", in: app, timeout: 10)
         XCTAssertEqual(
@@ -1144,8 +1126,8 @@ final class AndBibleUITests: XCTestCase {
      * - Side effects:
      *   - launches the app on the reader shell with persisted NextCloud settings from host-side
      *     fixture seeding
-     *   - opens Sync Settings through normal Settings navigation and switches the production picker
-     *     from NextCloud to Google Drive
+     *   - opens Sync Settings from the reader action and switches the production picker from
+     *     NextCloud to Google Drive
      * - Failure modes:
      *   - fails if the seeded NextCloud field or the Google Drive sign-in control never appears
      *   - fails if the exported Sync screen state does not move from `backend=NEXT_CLOUD;enabled=none`
@@ -1155,7 +1137,7 @@ final class AndBibleUITests: XCTestCase {
         let app = makeApp()
         app.launch()
 
-        _ = openSyncSettings(in: app)
+        _ = openSyncSettingsFromReaderAction(in: app)
         let syncState = requireElement("syncSettingsState", in: app, timeout: 10)
         XCTAssertEqual(
             syncState.value as? String,
@@ -1180,8 +1162,8 @@ final class AndBibleUITests: XCTestCase {
      * - Side effects:
      *   - launches the app on the reader shell and opens Sync Settings with its persisted backend
      *   - switches the backend from NextCloud to Google Drive through the production picker
-     *   - dismisses and reopens Sync Settings through normal navigation so the sheet rehydrates
-     *     from persisted settings state
+     *   - dismisses and reopens Sync Settings from the reader action so the sheet rehydrates from
+     *     persisted settings state
      * - Failure modes:
      *   - fails if the seeded Sync screen does not start in the NextCloud branch
      *   - fails if the dismiss or reopen controls never appear
@@ -1192,7 +1174,7 @@ final class AndBibleUITests: XCTestCase {
         let app = makeApp()
         app.launch()
 
-        _ = openSyncSettings(in: app)
+        _ = openSyncSettingsFromReaderAction(in: app)
         let syncState = requireElement("syncSettingsState", in: app, timeout: 10)
         XCTAssertEqual(
             syncState.value as? String,
@@ -1209,7 +1191,7 @@ final class AndBibleUITests: XCTestCase {
         XCTAssertTrue(requireElement("syncGoogleDriveSignInButton", in: app, timeout: 10).exists)
 
         dismissSyncSettings(in: app)
-        _ = openSyncSettings(in: app)
+        _ = openSyncSettingsFromReaderAction(in: app)
 
         waitForElementValue(
             "syncSettingsState",
@@ -2294,6 +2276,18 @@ final class AndBibleUITests: XCTestCase {
                 }
             }
 
+            if let segmentIndex = searchWordModeSegmentIndex(forVisibleLabel: label),
+               let picker = resolvedElement("searchWordModePicker", in: app)
+            {
+                tapSegmentedControlSegment(
+                    picker,
+                    index: segmentIndex,
+                    segmentCount: SearchWordModeControl.segmentCount,
+                    timeout: timeout
+                )
+                return
+            }
+
             let fallbackCandidates = [
                 app.segmentedControls.buttons[label].firstMatch,
                 app.buttons[label].firstMatch,
@@ -2329,6 +2323,29 @@ final class AndBibleUITests: XCTestCase {
             return "anyWord"
         case "Phrase":
             return "phrase"
+        default:
+            return nil
+        }
+    }
+
+    /**
+     Maps one visible Search word-mode label to its deterministic segment index within the Search
+     segmented control.
+     *
+     * - Parameter label: Visible segmented-control label used by the UI test.
+     * - Returns: Zero-based segment index for the requested label, or `nil` when the label is
+     *   unknown to the test harness.
+     * - Side effects: none.
+     * - Failure modes: This helper cannot fail.
+     */
+    private func searchWordModeSegmentIndex(forVisibleLabel label: String) -> Int? {
+        switch label {
+        case "All Words":
+            return 0
+        case "Any Word":
+            return 1
+        case "Phrase":
+            return 2
         default:
             return nil
         }
@@ -2390,12 +2407,21 @@ final class AndBibleUITests: XCTestCase {
      *
      * - Parameter app: Running application under test.
      * - Side effects:
-     *   - taps the visible `All Words` Search mode control when the software keyboard is still
-     *     presented after query submission
-     * - Failure modes:
-     *   - silently leaves focus unchanged when the keyboard or control is unavailable
-     */
+    *   - taps the visible `All Words` Search mode control when the software keyboard is still
+    *     presented after query submission
+    * - Failure modes:
+    *   - silently leaves focus unchanged when the keyboard or control is unavailable
+    */
     private func dismissSearchFieldFocusIfNeeded(in app: XCUIApplication) {
+        let keyboard = app.keyboards.firstMatch
+        guard keyboard.exists || keyboard.waitForExistence(timeout: 0.2) else {
+            return
+        }
+
+        dismissKeyboardIfPresent(in: app)
+        guard keyboard.exists else {
+            return
+        }
         let dismissalCandidates = [
             app.descendants(matching: .any).matching(identifier: "searchWordModeButton::allWords").firstMatch,
             app.segmentedControls.buttons["All Words"].firstMatch,
@@ -2404,6 +2430,15 @@ final class AndBibleUITests: XCTestCase {
         for candidate in dismissalCandidates where candidate.exists && !candidate.frame.isEmpty {
             tapElementReliably(candidate, timeout: 5)
             return
+        }
+
+        if let picker = resolvedElement("searchWordModePicker", in: app) {
+            tapSegmentedControlSegment(
+                picker,
+                index: 0,
+                segmentCount: SearchWordModeControl.segmentCount,
+                timeout: 5
+            )
         }
     }
 
@@ -2477,11 +2512,26 @@ final class AndBibleUITests: XCTestCase {
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
-        waitForElementExistence(
-            identifier,
-            in: app,
-            shouldExist: shouldExist,
-            timeout: timeout,
+        let deadline = Date().addingTimeInterval(timeout)
+        let rowToken = "|\(identifier)|"
+
+        repeat {
+            if let searchScreen = resolvedElement("searchScreen", in: app),
+               let value = searchScreen.value as? String,
+               value.contains("state=ready"),
+               value.contains("searching=false"),
+               value.contains(rowToken) == shouldExist {
+                return
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        } while Date() < deadline
+
+        let finalSearchScreen = requireSearchScreen(in: app, timeout: 1)
+        let finalValue = finalSearchScreen.value as? String ?? ""
+        XCTAssertEqual(
+            finalValue.contains(rowToken),
+            shouldExist,
+            "Expected Search result '\(identifier)' existence to become \(shouldExist) within \(timeout) seconds. Final Search state: '\(finalValue)'.",
             file: file,
             line: line
         )
@@ -2648,6 +2698,83 @@ final class AndBibleUITests: XCTestCase {
     }
 
     /**
+     Activates one bookmark-list filter chip and waits for the exported bookmark-list state to
+     report the matching selected label.
+     *
+     * - Parameters:
+     *   - labelToken: Sanitized label token exported in the chip identifier and screen state.
+     *   - app: Running application whose bookmark list should change filters.
+     *   - timeout: Maximum number of seconds to wait for the selected-label state update.
+     * - Side effects:
+     *   - taps the production filter chip and waits for the bookmark-list screen state to settle
+     * - Failure modes:
+     *   - fails if the chip is unavailable or the bookmark-list state never reflects the selection
+     */
+    private func selectBookmarkListFilterChip(
+        _ labelToken: String,
+        in app: XCUIApplication,
+        timeout: TimeInterval = 10
+    ) {
+        tapElementReliably(
+            requireElement("bookmarkListFilterChip::\(labelToken)", in: app, timeout: timeout),
+            timeout: timeout
+        )
+        waitForBookmarkListState(containing: "selectedLabel=\(labelToken)", in: app, timeout: timeout)
+    }
+
+    /**
+     Waits for the bookmark-list screen accessibility state to contain one token.
+     *
+     * - Parameters:
+     *   - token: State fragment expected from the exported bookmark-list accessibility value.
+     *   - app: Running application whose bookmark list should reach the requested state.
+     *   - timeout: Maximum number of seconds to wait before failing.
+     * - Side effects:
+     *   - polls the bookmark-list screen accessibility export until the requested token appears
+     * - Failure modes:
+     *   - records an XCTest failure if the bookmark-list state never contains the token
+     */
+    private func waitForBookmarkListState(
+        containing token: String,
+        in app: XCUIApplication,
+        timeout: TimeInterval = 10
+    ) {
+        waitForElementValue("bookmarkListScreen", toContain: token, in: app, timeout: timeout)
+    }
+
+    /**
+     Waits for the bookmark-list screen accessibility state to stop containing one token.
+     *
+     * - Parameters:
+     *   - token: State fragment that should disappear from the exported bookmark-list value.
+     *   - app: Running application whose bookmark list should drop the requested token.
+     *   - timeout: Maximum number of seconds to wait before failing.
+     * - Side effects:
+     *   - polls the bookmark-list screen accessibility export until the requested token disappears
+     * - Failure modes:
+     *   - records an XCTest failure if the bookmark-list state keeps reporting the token
+     */
+    private func waitForBookmarkListState(
+        notContaining token: String,
+        in app: XCUIApplication,
+        timeout: TimeInterval = 10
+    ) {
+        waitForElementValue("bookmarkListScreen", toNotContain: token, in: app, timeout: timeout)
+    }
+
+    /**
+     Returns one bookmark-row token as serialized by the bookmark-list accessibility state.
+     *
+     * - Parameter referenceToken: Sanitized row reference token, such as `Genesis_1_1`.
+     * - Returns: Bookmark-list row token wrapped in delimiters for exact containment checks.
+     * - Side effects: none.
+     * - Failure modes: This helper cannot fail.
+     */
+    private func bookmarkListRowStateToken(_ referenceToken: String) -> String {
+        "|\(referenceToken)|"
+    }
+
+    /**
      Opens History from the reader shell.
      *
      * - Parameter app: Running application whose reader shell should present History.
@@ -2719,6 +2846,37 @@ final class AndBibleUITests: XCTestCase {
     }
 
     /**
+     Opens Sync Settings directly from the reader action surface.
+     *
+     * - Parameter app: Running application under test.
+     * - Returns: The root accessibility-identified Sync Settings screen element.
+     * - Side effects:
+     *   - opens the reader action surface and presents Sync Settings directly from the reader shell
+     * - Failure modes:
+     *   - fails when the Sync Settings screen never appears
+     */
+    private func openSyncSettingsFromReaderAction(in app: XCUIApplication) -> XCUIElement {
+        tapReaderAction("readerOpenSyncSettingsAction", in: app, timeout: 20)
+        let destination = unresolvedElement("syncSettingsScreen", in: app)
+        let readinessCandidates = ["syncSettingsScreen", "syncBackendPicker", "syncRemoteStatus"]
+
+        if waitForAnyElement(readinessCandidates, in: app, timeout: 20) != nil {
+            if destination.exists || destination.waitForExistence(timeout: 1) {
+                return destination
+            }
+            if let readyElement = waitForAnyElement(["syncBackendPicker", "syncRemoteStatus"], in: app, timeout: 1) {
+                return readyElement
+            }
+        }
+
+        XCTAssertTrue(
+            destination.exists,
+            "Expected Sync Settings to appear after activating 'readerOpenSyncSettingsAction'."
+        )
+        return destination
+    }
+
+    /**
      Dismisses Sync Settings back to the reader shell.
      *
      * - Parameter app: Running application whose Sync sheet should be dismissed.
@@ -2740,6 +2898,25 @@ final class AndBibleUITests: XCTestCase {
         XCTAssertTrue(
             waitForReaderShellReady(in: app, timeout: 20),
             "Expected Sync Settings dismissal to return to the reader shell."
+        )
+    }
+
+    /**
+     Dismisses the Settings sheet back to the reader shell.
+     *
+     * - Parameter app: Running application whose Settings sheet should be dismissed.
+     * - Side effects:
+     *   - drags the production Settings form downward to close the sheet
+     * - Failure modes:
+     *   - fails when the Settings sheet cannot be dismissed back to the reader shell
+     */
+    private func dismissSettings(in app: XCUIApplication) {
+        let settingsForm = requireElement("settingsForm", in: app, timeout: 10)
+        dismissSheetByDraggingDown(settingsForm)
+        waitForElementToDisappear(settingsForm, timeout: 10)
+        XCTAssertTrue(
+            waitForReaderShellReady(in: app, timeout: 20),
+            "Expected Settings dismissal to return to the reader shell."
         )
     }
 
@@ -3079,8 +3256,15 @@ final class AndBibleUITests: XCTestCase {
                 }
             }
 
-            if attempt == 0, waitForSettingsReady(in: app, timeout: 3) {
-                continue
+            if attempt == 0 {
+                let settingsStillVisible =
+                    waitForSettingsReady(in: app, timeout: 3) ||
+                    unresolvedElement("settingsForm", in: app).exists
+                if settingsStillVisible {
+                    dismissSettings(in: app)
+                    openSettings(in: app)
+                    continue
+                }
             }
         }
 
@@ -3273,6 +3457,12 @@ final class AndBibleUITests: XCTestCase {
             return [
                 app.collectionViews[identifier].firstMatch,
                 app.tables[identifier].firstMatch,
+                app.otherElements[identifier].firstMatch,
+                anyIdentifierMatch,
+            ]
+        case "searchWordModePicker":
+            return [
+                app.segmentedControls[identifier].firstMatch,
                 app.otherElements[identifier].firstMatch,
                 anyIdentifierMatch,
             ]
@@ -4249,9 +4439,18 @@ final class AndBibleUITests: XCTestCase {
         _ = waitForReaderShellReady(in: app, timeout: min(10, timeout))
         let deadline = Date().addingTimeInterval(timeout)
         repeat {
-            let button = requireElement("readerNavigationDrawerButton", in: app, timeout: min(2, max(0.5, deadline.timeIntervalSinceNow)))
+            let button = requireElement(
+                "readerNavigationDrawerButton",
+                in: app,
+                timeout: min(2, max(0.5, deadline.timeIntervalSinceNow))
+            )
             if !button.frame.isEmpty {
-                tapElementReliably(button, timeout: min(2, max(0.5, deadline.timeIntervalSinceNow)), file: file, line: line)
+                tapElementReliably(
+                    button,
+                    timeout: min(2, max(0.5, deadline.timeIntervalSinceNow)),
+                    file: file,
+                    line: line
+                )
                 if waitForReaderNavigationDrawer(in: app, timeout: min(5, max(2, deadline.timeIntervalSinceNow))) {
                     return true
                 }
@@ -4668,6 +4867,10 @@ final class AndBibleUITests: XCTestCase {
         let deadline = Date().addingTimeInterval(timeout)
         let title = readerActionTitle(for: identifier)
         let prefersDrawer = readerActionUsesNavigationDrawer(identifier)
+        let directActionCandidates = [
+            app.buttons[identifier].firstMatch,
+            app.buttons[title].firstMatch,
+        ]
         repeat {
             let actionSurface = ensureReaderActionSurface(
                 for: identifier,
@@ -4696,6 +4899,13 @@ final class AndBibleUITests: XCTestCase {
                 }
             }
 
+            if let directAction = directActionCandidates.first(where: { $0.exists && !$0.frame.isEmpty }) {
+                return directAction
+            }
+            if let directAction = directActionCandidates.first(where: { $0.exists }) {
+                return directAction
+            }
+
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         } while Date() < deadline
 
@@ -4713,22 +4923,21 @@ final class AndBibleUITests: XCTestCase {
             return finalAction
         }
 
-        let directActionCandidates = [
-            app.buttons[identifier].firstMatch,
-            app.buttons[title].firstMatch,
-        ]
         if let directAction = directActionCandidates.first(where: { $0.exists && !$0.frame.isEmpty }) {
             return directAction
         }
 
-        let overflowMenu = unresolvedElement(prefersDrawer ? "readerNavigationDrawer" : "readerOverflowMenu", in: app)
+        let actionSurface = unresolvedElement(
+            prefersDrawer ? "readerNavigationDrawer" : "readerOverflowMenu",
+            in: app
+        )
         XCTAssertTrue(
-            overflowMenu.exists,
+            actionSurface.exists,
             "Expected the reader action surface to appear within \(timeout) seconds before resolving '\(identifier)'.",
             file: file,
             line: line
         )
-        return overflowMenu.buttons[identifier].firstMatch
+        return actionSurface.buttons[identifier].firstMatch
     }
 
     /**
@@ -4773,6 +4982,69 @@ final class AndBibleUITests: XCTestCase {
             file: file,
             line: line
         )
+    }
+
+    /**
+     Taps one deterministic segment within a visible segmented control by geometry instead of child
+     button queries, which SwiftUI does not expose consistently across XCTest runtimes.
+     *
+     * - Parameters:
+     *   - control: Segmented control exporting the target segments.
+     *   - index: Zero-based segment index to tap.
+     *   - segmentCount: Total number of visible segments in the control.
+     *   - timeout: Maximum number of seconds to wait for the control to expose a stable frame.
+     *   - file: Source file used for XCTest failure attribution.
+     *   - line: Source line used for XCTest failure attribution.
+     * - Side effects:
+     *   - waits for the segmented control to expose a non-empty frame, then taps the requested
+     *     segment center directly
+     * - Failure modes:
+     *   - records an XCTest failure if the control never appears or the requested segment index is
+     *     out of range
+     */
+    private func tapSegmentedControlSegment(
+        _ control: XCUIElement,
+        index: Int,
+        segmentCount: Int,
+        timeout: TimeInterval = 10,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        XCTAssertTrue(
+            index >= 0 && index < segmentCount,
+            "Expected segmented control segment index \(index) to be within 0..<\(segmentCount).",
+            file: file,
+            line: line
+        )
+        guard index >= 0 && index < segmentCount else {
+            return
+        }
+
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            if !control.frame.isEmpty {
+                let dx = (CGFloat(index) + 0.5) / CGFloat(segmentCount)
+                control.coordinate(withNormalizedOffset: CGVector(dx: dx, dy: 0.5)).tap()
+                return
+            }
+            let remaining = deadline.timeIntervalSinceNow
+            if remaining > 0 {
+                _ = control.waitForExistence(timeout: min(0.2, remaining))
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        } while Date() < deadline
+
+        XCTAssertTrue(
+            !control.frame.isEmpty,
+            "Expected segmented control '\(control.identifier)' to expose a non-empty frame before tapping segment \(index) within \(timeout) seconds.",
+            file: file,
+            line: line
+        )
+    }
+
+    /// Shared geometry constants for the Search word-mode segmented control.
+    private enum SearchWordModeControl {
+        static let segmentCount = 3
     }
 
     /**
@@ -5370,7 +5642,7 @@ final class AndBibleUITests: XCTestCase {
      *   - fails if the production label-filter or StudyPad handoff controls are unavailable
      */
     private func openSeedStudyPadFromBookmarkList(in app: XCUIApplication) {
-        tapElementReliably(requireElement("bookmarkListFilterChip::UI_Test_Seed", in: app, timeout: 10), timeout: 10)
+        selectBookmarkListFilterChip("UI_Test_Seed", in: app, timeout: 10)
         tapElementReliably(requireElement("bookmarkListOpenStudyPadButton::UI_Test_Seed", in: app, timeout: 10), timeout: 10)
     }
 
