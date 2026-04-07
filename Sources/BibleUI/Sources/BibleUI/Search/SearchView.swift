@@ -329,12 +329,18 @@ public struct SearchView: View {
         case .creatingIndex: "creatingIndex"
         case .ready: "ready"
         }
-        return "state=\(stateToken);query=\(query);searching=\(isSearching);results=\(results.count);scope=\(searchScopeToken(for: scopeOption));wordMode=\(searchWordModeToken(for: wordMode));rows=\(searchAccessibilityRowsToken)"
+        let baseState = "state=\(stateToken);query=\(query);searching=\(isSearching);results=\(results.count);scope=\(searchScopeToken(for: scopeOption));wordMode=\(searchWordModeToken(for: wordMode))"
+        guard UITestRuntimeConfiguration.enablesDetailedAccessibilityExports else {
+            return baseState
+        }
+        return "\(baseState);rows=\(searchAccessibilityRowsToken)"
     }
 
     /// Stable search-result row tokens exported for UI automation.
     private var searchAccessibilityRowsToken: String {
-        results.prefix(200).map { "|\(searchResultIdentifier(for: $0))|" }.joined(separator: ",")
+        results.prefix(UITestRuntimeConfiguration.detailedAccessibilityRowTokenLimit)
+            .map { "|\(searchResultIdentifier(for: $0))|" }
+            .joined(separator: ",")
     }
 
     // MARK: - Index Prompt

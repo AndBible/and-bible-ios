@@ -33,7 +33,7 @@ struct BibleChapterDocumentBuilder {
     let includeHeadings: Bool
 
     func loadChapter(osisBookId: String, chapter: Int) -> LoadedChapterContent? {
-        var verses: [VerseEntry] = []
+        var verseCount = 0
         var currentVerseChunk: [VerseEntry] = []
         var xmlParts: [String] = []
         var hasChapterMarker = false
@@ -88,7 +88,7 @@ struct BibleChapterDocumentBuilder {
                     ordinal: Self.ordinal(chapter: chapter, verse: parsedVerse),
                     xml: text
                 )
-                verses.append(verseEntry)
+                verseCount += 1
                 currentVerseChunk.append(verseEntry)
             }
 
@@ -99,16 +99,16 @@ struct BibleChapterDocumentBuilder {
 
         appendCurrentVerseChunk(osisBookId: osisBookId, chapter: chapter, verseChunk: &currentVerseChunk, xmlParts: &xmlParts)
 
-        if verses.isEmpty {
+        if verseCount == 0 {
             chapterBuilderLogger.warning("SWORD: No verses found for \(osisBookId) \(chapter)")
             return nil
         }
 
         let xml = "<div>\(xmlParts.joined())</div>"
-        chapterBuilderLogger.info("SWORD: Loaded \(verses.count) verses for \(osisBookId) \(chapter)")
+        chapterBuilderLogger.info("SWORD: Loaded \(verseCount) verses for \(osisBookId) \(chapter)")
         return LoadedChapterContent(
             xml: xml,
-            verseCount: verses.count,
+            verseCount: verseCount,
             addChapter: !hasChapterMarker
         )
     }

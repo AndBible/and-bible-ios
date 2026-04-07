@@ -1325,6 +1325,8 @@ final class AndBibleUITests: XCTestCase {
         let app = XCUIApplication()
         trackedApp = app
         app.launchEnvironment["UITEST_SESSION_ID"] = UUID().uuidString
+        app.launchEnvironment["UITEST_ENABLE_DETAILED_ACCESSIBILITY_EXPORTS"] = "1"
+        app.launchArguments += ["-UITEST_ENABLE_DETAILED_ACCESSIBILITY_EXPORTS"]
         if let searchQuery {
             app.launchEnvironment["UITEST_SEARCH_QUERY"] = searchQuery
             app.launchArguments += ["-UITEST_SEARCH_QUERY", searchQuery]

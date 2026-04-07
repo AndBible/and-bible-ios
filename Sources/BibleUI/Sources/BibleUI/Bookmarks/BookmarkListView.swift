@@ -226,10 +226,15 @@ public struct BookmarkListView: View {
 
     /// Stable bookmark-list state exported for UI automation.
     private var bookmarkListAccessibilityValue: String {
-        let rowTokens = filteredBookmarks.map {
+        let baseState = "count=\(filteredBookmarks.count);selectedLabel=\(bookmarkListSelectedLabelAccessibilityToken);query=\(bookmarkListAccessibilitySegment(searchText))"
+        guard UITestRuntimeConfiguration.enablesDetailedAccessibilityExports else {
+            return baseState
+        }
+
+        let rowTokens = filteredBookmarks.prefix(UITestRuntimeConfiguration.detailedAccessibilityRowTokenLimit).map {
             "|\(bookmarkListAccessibilitySegment(Self.verseReference(for: $0)))|"
         }.joined(separator: ",")
-        return "count=\(filteredBookmarks.count);selectedLabel=\(bookmarkListSelectedLabelAccessibilityToken);query=\(bookmarkListAccessibilitySegment(searchText));rows=\(rowTokens)"
+        return "\(baseState);rows=\(rowTokens)"
     }
 
     /// Stable token for the currently selected bookmark label filter.
