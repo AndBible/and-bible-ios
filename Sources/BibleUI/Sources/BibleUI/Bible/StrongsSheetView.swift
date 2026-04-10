@@ -381,7 +381,12 @@ final class StrongsSheetDelegate: NSObject, BibleBridgeDelegate {
 
         // Use the controller to look up definitions (it has SwordManager access)
         logger.info("handleStrongsLink: controller is \(self.controller == nil ? "nil" : "alive")")
-        guard let newJSON = self.controller?.buildStrongsMultiDocJSON(strongs: strongs, robinson: robinson) else {
+        let currentStateJSON = extractStateJSON(from: currentDocJSON)
+        guard let newJSON = self.controller?.buildStrongsMultiDocJSON(
+            strongs: strongs,
+            robinson: robinson,
+            stateJSON: currentStateJSON
+        ) else {
             logger.error("handleStrongsLink: buildStrongsMultiDocJSON returned nil")
             return
         }
@@ -433,10 +438,59 @@ final class StrongsSheetDelegate: NSObject, BibleBridgeDelegate {
         }
     }
 
+    /**
+     Extracts the serialized client-side state object from one Strong's document payload.
+
+     - Parameter documentJSON: JSON emitted into the embedded web client.
+     - Returns: Compact serialized JSON object for the `state` field, or `nil` when absent.
+     */
+    private func extractStateJSON(from documentJSON: String) -> String? {
+        guard let data = documentJSON.data(using: .utf8),
+              let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let state = object["state"],
+              !(state is NSNull),
+              JSONSerialization.isValidJSONObject(state),
+              let stateData = try? JSONSerialization.data(withJSONObject: state),
+              let stateJSON = String(data: stateData, encoding: .utf8) else {
+            return nil
+        }
+        return stateJSON
+    }
+
+    /**
+     Rewrites the current document payload with the latest tab-selection state from the web client.
+
+     - Parameters:
+       - documentJSON: Existing rendered document payload.
+       - stateJSON: Serialized state emitted by `android.saveState(JSON.stringify(...))`.
+     - Returns: Updated document payload when parsing succeeds, otherwise the original payload.
+     */
+    private func updatingDocumentJSON(_ documentJSON: String, withStateJSON stateJSON: String?) -> String {
+        guard let data = documentJSON.data(using: .utf8),
+              var object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
+            return documentJSON
+        }
+
+        if let stateJSON,
+           let stateData = stateJSON.data(using: .utf8),
+           let stateObject = try? JSONSerialization.jsonObject(with: stateData) {
+            object["state"] = stateObject
+        } else {
+            object.removeValue(forKey: "state")
+        }
+
+        guard JSONSerialization.isValidJSONObject(object),
+              let updatedData = try? JSONSerialization.data(withJSONObject: object),
+              let updatedJSON = String(data: updatedData, encoding: .utf8) else {
+            return documentJSON
+        }
+        return updatedJSON
+    }
+
     // MARK: - No-op implementations for remaining protocol methods
 
     /// No-op because the Strong's sheet does not react to ordinal-scroll callbacks.
-    func bridge(_ bridge: BibleBridge, didScrollToOrdinal ordinal: Int, key: String) {}
+    func bridge(_ bridge: BibleBridge, didScrollToOrdinal ordinal: Int, key: String, atChapterTop: Bool) {}
 
     /// No-op because the Strong's sheet does not support paged loading toward the beginning.
     func bridge(_ bridge: BibleBridge, requestMoreToBeginning callId: Int) {}
@@ -543,8 +597,10 @@ final class StrongsSheetDelegate: NSObject, BibleBridgeDelegate {
     /// No-op because Study Pad cursor updates are not supported in the Strong's sheet.
     func bridge(_ bridge: BibleBridge, setStudyPadCursor labelId: String, orderNumber: Int) {}
 
-    /// No-op because state persistence is not required for the ephemeral Strong's sheet.
-    func bridge(_ bridge: BibleBridge, saveState state: String) {}
+    /// Persists transient Strong's-sheet tab selection state for recursive navigation and backstack.
+    func bridge(_ bridge: BibleBridge, saveState state: String) {
+        currentDocJSON = updatingDocumentJSON(currentDocJSON, withStateJSON: state)
+    }
 
     /// No-op because the Strong's sheet does not track nested modal state.
     func bridge(_ bridge: BibleBridge, reportModalState isOpen: Bool) {}

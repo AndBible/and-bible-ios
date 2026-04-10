@@ -33,10 +33,16 @@ private let logger = Logger(subsystem: "org.andbible", category: "BibleReaderCon
  */
 @Observable
 public final class BibleReaderController: NSObject, BibleBridgeDelegate {
+    private enum ScrollRestoreTarget {
+        case chapterTop
+        case ordinal(Int)
+    }
+
     let bridge: BibleBridge
     var bookmarkService: BookmarkService?
     private(set) var currentBook: String = "Genesis"
     private(set) var currentChapter: Int = 1
+    private(set) var currentVerse: Int = 1
     private var clientReady = false
     private var configSent = false
 
@@ -107,10 +113,12 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     private var minLoadedBook: String = "Genesis"
     private var maxLoadedBook: String = "Genesis"
 
-    /// Last verse ordinal scrolled to (for restoring scroll position on same-chapter reloads).
-    private var lastScrollOrdinal: Int?
+    /// Last rendered reading position, preserving chapter-top context separately from verse ordinals.
+    private var lastScrollTarget: ScrollRestoreTarget = .chapterTop
     /// Whether the next loadCurrentChapter should restore scroll position (true = settings reload).
     private var shouldRestoreScroll = false
+    /// Coalesces intra-chapter scroll persistence so visible-verse updates do not save SwiftData on every tick.
+    private var pendingVisibleVersePersistWorkItem: DispatchWorkItem?
 
     /// Whether the current module has Strong's numbers (matching Android CurrentPageManager.hasStrongs).
     var hasStrongs: Bool {
@@ -156,6 +164,14 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         initializeSword()
     }
 
+    init(bridge: BibleBridge, bookmarkService: BookmarkService? = nil, swordManagerOverride: SwordManager) {
+        self.bridge = bridge
+        self.bookmarkService = bookmarkService
+        super.init()
+        bridge.delegate = self
+        configureSwordManager(swordManagerOverride)
+    }
+
     /// Callback for showing Strong's definitions in a sheet (multiDocJSON, configJSON).
     var onShowStrongsDefinition: ((String, String) -> Void)?
 
@@ -176,6 +192,23 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
     /// Callback to persist SwiftData changes (called after PageManager updates).
     var onPersistState: (() -> Void)?
+
+    /// Persists the current page-manager state either immediately or after a short debounce for scroll updates.
+    private func persistVisibleVerseState(immediate: Bool) {
+        pendingVisibleVersePersistWorkItem?.cancel()
+        pendingVisibleVersePersistWorkItem = nil
+
+        guard let onPersistState else { return }
+
+        if immediate {
+            onPersistState()
+            return
+        }
+
+        let workItem = DispatchWorkItem(block: onPersistState)
+        pendingVisibleVersePersistWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35, execute: workItem)
+    }
 
     /// Update display settings and re-emit config to Vue.js.
     public func updateDisplaySettings(_ settings: TextDisplaySettings, nightMode: Bool) {
@@ -1009,7 +1042,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             onPersistState?()
         }
 
-        // Build document JSON with isEpub flag (using JSONSerialization for proper escaping)
+        // Build document JSON with isNativeHtml flag (using JSONSerialization for proper escaping)
         let document = buildEpubDocumentJSON(
             bookName: sectionTitle,
             bookInitials: epubTitle,
@@ -1026,9 +1059,9 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     }
 
     /**
-     Build document JSON for EPUB content with isEpub: true.
+     Build document JSON for EPUB content with isNativeHtml: true.
      Uses JSONSerialization for correct escaping of all special characters in HTML content.
-     IMPORTANT: Uses type "osis" (not "bible") because OsisDocument.vue passes isEpub
+     IMPORTANT: Uses type "osis" (not "bible") because OsisDocument.vue passes isNativeHtml
      to OsisFragment, whereas BibleDocument.vue does not — without this, the EPUB HTML
      would go through OSIS template conversion and render as blank.
      */
@@ -1061,7 +1094,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             "annotateRef": "",
             "genericBookmarks": [Any](),
             "ordinalRange": [0, 0],
-            "isEpub": true,
+            "isNativeHtml": true,
             "highlightedOrdinalRange": NSNull()
         ]
 
@@ -1104,48 +1137,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      */
     public func refreshInstalledModules() {
         guard let newMgr = SwordManager() else { return }
-        swordManager = newMgr
-        newMgr.setGlobalOption(.headings, enabled: true)
-        newMgr.setGlobalOption(.redLetterWords, enabled: true)
-        applySwordOptions()
-
-        let allModules = newMgr.installedModules()
-        installedBibleModules = allModules.filter { $0.category == .bible }
-        installedCommentaryModules = allModules.filter { $0.category == .commentary }
-        installedDictionaryModules = allModules.filter { $0.category == .dictionary }
-        installedGeneralBookModules = allModules.filter { $0.category == .generalBook }
-        installedMapModules = allModules.filter { $0.category == .map }
-
-        // Re-acquire the active module handle from the new manager
-        if let mod = newMgr.module(named: activeModuleName) {
-            activeModule = mod
-        } else if let firstBible = installedBibleModules.first {
-            activeModule = newMgr.module(named: firstBible.name)
-            activeModuleName = firstBible.name
-        }
-
-        // Re-acquire commentary module
-        if let name = activeCommentaryModuleName, let mod = newMgr.module(named: name) {
-            activeCommentaryModule = mod
-        } else if let firstComm = installedCommentaryModules.first {
-            activeCommentaryModule = newMgr.module(named: firstComm.name)
-            activeCommentaryModuleName = firstComm.name
-        }
-
-        // Re-acquire dictionary module
-        if let name = activeDictionaryModuleName, let mod = newMgr.module(named: name) {
-            activeDictionaryModule = mod
-        }
-
-        // Re-acquire general book module
-        if let name = activeGeneralBookModuleName, let mod = newMgr.module(named: name) {
-            activeGeneralBookModule = mod
-        }
-
-        // Re-acquire map module
-        if let name = activeMapModuleName, let mod = newMgr.module(named: name) {
-            activeMapModule = mod
-        }
+        configureSwordManager(newMgr)
     }
 
     /// Initialize SWORD and find the first available Bible module.
@@ -1154,14 +1146,17 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             logger.warning("Failed to create SwordManager — using placeholder text")
             return
         }
-        self.swordManager = mgr
+        configureSwordManager(mgr)
+    }
+
+    private func configureSwordManager(_ mgr: SwordManager) {
+        swordManager = mgr
 
         // Enable headings and verse-level rendering
         mgr.setGlobalOption(.headings, enabled: true)
         mgr.setGlobalOption(.redLetterWords, enabled: true)
         applySwordOptions()
 
-        // Look for a Bible module
         let modules = mgr.installedModules()
         logger.info("SWORD found \(modules.count) installed modules")
         for mod in modules {
@@ -1169,15 +1164,15 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             logger.info("  Module: \(mod.name) (\(mod.description)) [\(mod.category.rawValue)] strongs=\(hasStrongs)")
         }
 
-        // Cache module lists for the picker
         installedBibleModules = modules.filter { $0.category == .bible }
         installedCommentaryModules = modules.filter { $0.category == .commentary }
         installedDictionaryModules = modules.filter { $0.category == .dictionary }
         installedGeneralBookModules = modules.filter { $0.category == .generalBook }
         installedMapModules = modules.filter { $0.category == .map }
 
-        // Default to KJV or first available Bible module
-        if let kjv = mgr.module(named: "KJV") {
+        if let mod = mgr.module(named: activeModuleName) {
+            activeModule = mod
+        } else if let kjv = mgr.module(named: "KJV") {
             activeModule = kjv
             activeModuleName = kjv.info.name
             logger.info("Using Bible module: \(kjv.info.name)")
@@ -1186,10 +1181,37 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             activeModuleName = firstBible.name
             logger.info("Using Bible module: \(firstBible.name)")
         } else {
+            activeModule = nil
             logger.warning("No Bible modules installed — using placeholder text")
         }
 
-        // Query the active module's versification for its book list
+        if let name = activeCommentaryModuleName, let mod = mgr.module(named: name) {
+            activeCommentaryModule = mod
+        } else if let firstComm = installedCommentaryModules.first {
+            activeCommentaryModule = mgr.module(named: firstComm.name)
+            activeCommentaryModuleName = firstComm.name
+        } else {
+            activeCommentaryModule = nil
+        }
+
+        if let name = activeDictionaryModuleName, let mod = mgr.module(named: name) {
+            activeDictionaryModule = mod
+        } else {
+            activeDictionaryModule = nil
+        }
+
+        if let name = activeGeneralBookModuleName, let mod = mgr.module(named: name) {
+            activeGeneralBookModule = mod
+        } else {
+            activeGeneralBookModule = nil
+        }
+
+        if let name = activeMapModuleName, let mod = mgr.module(named: name) {
+            activeMapModule = mod
+        } else {
+            activeMapModule = nil
+        }
+
         refreshBookList()
     }
 
@@ -1330,7 +1352,15 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         if let chapter = pm.bibleChapterNo, chapter > 0 {
             currentChapter = chapter
         }
-        logger.info("Restored position: \(self.currentBook) \(self.currentChapter)")
+        if let verse = pm.bibleVerseNo, verse > 0 {
+            currentVerse = verse
+        } else {
+            currentVerse = 1
+        }
+        lastScrollTarget = currentVerse > 1
+            ? .ordinal(ordinal(forChapter: currentChapter, verse: currentVerse))
+            : .chapterTop
+        logger.info("Restored position: \(self.currentBook) \(self.currentChapter):\(self.currentVerse)")
     }
 
     /// Apply SWORD global options based on current display settings.
@@ -1353,24 +1383,27 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     public func navigateTo(book: String, chapter: Int, verse: Int? = nil) {
         currentBook = book
         currentChapter = chapter
-        if let verse, verse > 1 {
-            // Scroll to specific verse using ordinal formula: (chapter-1)*40 + verse
-            lastScrollOrdinal = (chapter - 1) * 40 + verse
+        let resolvedVerse = max(1, verse ?? 1)
+        currentVerse = resolvedVerse
+        if resolvedVerse > 1 {
+            lastScrollTarget = .ordinal(ordinal(forChapter: chapter, verse: resolvedVerse))
             shouldRestoreScroll = true
         } else {
-            lastScrollOrdinal = nil  // New chapter — start at top
+            lastScrollTarget = .chapterTop
+            shouldRestoreScroll = false
         }
 
         // Record history
         if let store = workspaceStore, let window = activeWindow {
             let osisId = osisBookId(for: book)
-            store.addHistoryItem(to: window, document: activeModuleName, key: "\(osisId).\(chapter).1")
+            store.addHistoryItem(to: window, document: activeModuleName, key: "\(osisId).\(chapter).\(resolvedVerse)")
         }
 
         // Persist position to PageManager
         if let pm = activeWindow?.pageManager {
             pm.bibleBibleBook = bookList.firstIndex(where: { $0.name == book })
             pm.bibleChapterNo = chapter
+            pm.bibleVerseNo = resolvedVerse
             onPersistState?()
         }
 
@@ -1522,11 +1555,11 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      - marks the pane as interacted-with, updates scroll-restoration state, persists chapter/book
        changes to the page manager, and notifies the window manager for synchronized scrolling
      */
-    public func bridge(_ bridge: BibleBridge, didScrollToOrdinal ordinal: Int, key: String) {
+    public func bridge(_ bridge: BibleBridge, didScrollToOrdinal ordinal: Int, key: String, atChapterTop: Bool) {
         // Focus-on-interaction: scrolling in a pane makes it the active window
         onInteraction?()
-        // Track scroll position for restoration
-        lastScrollOrdinal = ordinal
+        // Track scroll position for restoration.
+        lastScrollTarget = atChapterTop ? .chapterTop : .ordinal(ordinal)
 
         // Update toolbar header when scrolling into a different chapter/book (infinite scroll)
         if !key.isEmpty, let dotIdx = key.lastIndex(of: ".") {
@@ -1543,7 +1576,10 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
                     if let bookIdx = bookList.firstIndex(where: { $0.name == currentBook }) {
                         pm.bibleBibleBook = bookIdx
                     }
-                    onPersistState?()
+                    let verse = max(1, ordinal - (chapter - 1) * 40)
+                    currentVerse = verse
+                    pm.bibleVerseNo = verse
+                    persistVisibleVerseState(immediate: true)
                 }
             } else if let name = bookName(forOsisId: osisId), name != currentBook {
                 currentBook = name
@@ -1551,8 +1587,16 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
                     if let bookIdx = bookList.firstIndex(where: { $0.name == currentBook }) {
                         pm.bibleBibleBook = bookIdx
                     }
-                    onPersistState?()
+                    let verse = max(1, ordinal - (currentChapter - 1) * 40)
+                    currentVerse = verse
+                    pm.bibleVerseNo = verse
+                    persistVisibleVerseState(immediate: true)
                 }
+            } else if let pm = activeWindow?.pageManager {
+                let verse = max(1, ordinal - (currentChapter - 1) * 40)
+                currentVerse = verse
+                pm.bibleVerseNo = verse
+                persistVisibleVerseState(immediate: false)
             }
         }
 
@@ -2674,7 +2718,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      Build a MultiFragmentDocument JSON from Strong's numbers and Robinson codes.
      Returns nil if no definitions were found.
      */
-    func buildStrongsMultiDocJSON(strongs: [String], robinson: [String]) -> String? {
+    func buildStrongsMultiDocJSON(strongs: [String], robinson: [String], stateJSON: String? = nil) -> String? {
         logger.info("buildStrongsMultiDocJSON: strongs=\(strongs), robinson=\(robinson), swordManager=\(self.swordManager == nil ? "nil" : "alive")")
         var fragments: [(xml: String, key: String, keyName: String, bookInitials: String, bookAbbreviation: String, features: String)] = []
 
@@ -2737,7 +2781,11 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             return nil
         }
 
-        return buildMultiFragmentJSON(fragments: fragments)
+        return buildMultiFragmentJSON(
+            fragments: fragments,
+            contentType: "strongs",
+            stateJSON: stateJSON
+        )
     }
 
     /// Handle "Find all occurrences" links: ab-find-all://?type=hebrew&name=H05775
@@ -2837,8 +2885,12 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         return result
     }
 
-    /// Build a MultiFragmentDocument JSON string for rendering in Vue.js MultiDocument.vue.
-    private func buildMultiFragmentJSON(fragments: [(xml: String, key: String, keyName: String, bookInitials: String, bookAbbreviation: String, features: String)]) -> String {
+    /// Build a MultiFragmentDocument JSON string for rendering in Vue.js document views.
+    private func buildMultiFragmentJSON(
+        fragments: [(xml: String, key: String, keyName: String, bookInitials: String, bookAbbreviation: String, features: String)],
+        contentType: String? = nil,
+        stateJSON: String? = nil
+    ) -> String {
         let id = "strongs-multi-\(UUID().uuidString)"
         var osisFragmentsJSON: [String] = []
 
@@ -2858,7 +2910,10 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             """)
         }
 
-        return "{\"id\":\"\(id)\",\"type\":\"multi\",\"osisFragments\":[\(osisFragmentsJSON.joined(separator: ","))],\"compare\":false}"
+        let escapedContentType = contentType?.replacingOccurrences(of: "\"", with: "\\\"")
+        let contentTypeField = escapedContentType.map { ",\"contentType\":\"\($0)\"" } ?? ""
+        let stateField = stateJSON.map { ",\"state\":\($0)" } ?? ""
+        return "{\"id\":\"\(id)\",\"type\":\"multi\",\"osisFragments\":[\(osisFragmentsJSON.joined(separator: ","))],\"compare\":false\(contentTypeField)\(stateField)}"
     }
 
     /// Escape special XML characters in text content.
@@ -2870,18 +2925,44 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     }
 
     /**
-     Build key variants for looking up a Strong's number in SWORD zLD modules.
-     SWORD uses 5-digit zero-padded keys (e.g. "02532"). We try padded, stripped, and raw.
+     Build Strong's key variants using the same families Android tries for dictionary lookup.
+
+     Android parity matters here because installed Strong's dictionaries do not all expose the same
+     key shape. Some expect zero-padded numeric keys, some want a prefixed category key such as
+     `G1234` / `H1234`, and some zLD modules require a trailing carriage return.
      */
     private func buildKeyOptions(for strongsNumber: String) -> [String] {
-        let numberOnly = String(strongsNumber.drop(while: { $0.isLetter }))
+        let original = strongsNumber.trimmingCharacters(in: .whitespacesAndNewlines)
+        let numberOnly = String(original.drop(while: { $0.isLetter }))
         let stripped = numberOnly.replacingOccurrences(of: "^0+", with: "", options: .regularExpression)
-        let padded = stripped.count < 5
-            ? String(repeating: "0", count: 5 - stripped.count) + stripped
-            : stripped
-        var keys: [String] = [padded]
-        if stripped != padded { keys.append(stripped) }
-        if numberOnly != padded && numberOnly != stripped { keys.append(numberOnly) }
+        let sanitizedBase = stripped.isEmpty ? numberOnly : stripped
+        let padded = sanitizedBase.count < 5
+            ? String(repeating: "0", count: 5 - sanitizedBase.count) + sanitizedBase
+            : sanitizedBase
+
+        let categoryPrefix: String
+        if original.uppercased().hasPrefix("H") {
+            categoryPrefix = "H"
+        } else if original.uppercased().hasPrefix("G") {
+            categoryPrefix = "G"
+        } else {
+            categoryPrefix = (Int(sanitizedBase) ?? 0) > 5624 ? "H" : "G"
+        }
+
+        var keys: [String] = []
+
+        func appendUnique(_ candidate: String) {
+            guard !candidate.isEmpty, !keys.contains(candidate) else { return }
+            keys.append(candidate)
+        }
+
+        appendUnique(original)
+        appendUnique(padded)
+        appendUnique(padded + "\r")
+        appendUnique("\(categoryPrefix)\(sanitizedBase)")
+        appendUnique(sanitizedBase)
+        appendUnique(numberOnly)
+
         return keys
     }
 
@@ -3717,8 +3798,13 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         let isNT = isNewTestament(currentBook)
 
         // Try loading from SWORD module first
-        let (xml, verseCount) = loadChapterFromSword(osisBookId: osisBookId) ??
-            loadPlaceholderChapter(osisBookId: osisBookId, bookName: currentBook)
+        let loadedChapter = loadChapterFromSword(
+            osisBookId: osisBookId,
+            chapter: currentChapter
+        )
+        let fallbackChapter = loadPlaceholderChapter(osisBookId: osisBookId, bookName: currentBook)
+        let xml = loadedChapter?.xml ?? fallbackChapter.0
+        let verseCount = loadedChapter?.verseCount ?? fallbackChapter.1
 
         // Query bookmarks for this chapter
         let chapterBookmarks = bookmarksForCurrentChapter(verseCount: verseCount)
@@ -3736,7 +3822,9 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             verseCount: verseCount,
             isNT: isNT,
             xml: xml,
-            bookmarks: chapterBookmarks
+            bookmarks: chapterBookmarks,
+            addChapter: loadedChapter?.addChapter ?? true,
+            originalOrdinalRange: [ordinal(forChapter: currentChapter, verse: currentVerse), ordinal(forChapter: currentChapter, verse: currentVerse)]
         )
         bridge.emit(event: "add_documents", data: document)
 
@@ -3746,11 +3834,28 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         minLoadedBook = currentBook
         maxLoadedBook = currentBook
 
-        // Restore scroll position only on same-chapter reloads (e.g. display settings change)
-        let jumpOrdinal = shouldRestoreScroll ? (lastScrollOrdinal.map { String($0) } ?? "null") : "null"
+        // Restore either the exact verse anchor or the chapter-top reading context.
+        let restoreTarget: ScrollRestoreTarget
+        if shouldRestoreScroll {
+            restoreTarget = lastScrollTarget
+        } else if currentVerse > 1 {
+            restoreTarget = .ordinal(ordinal(forChapter: currentChapter, verse: currentVerse))
+        } else {
+            restoreTarget = .chapterTop
+        }
         shouldRestoreScroll = false
+        let jumpOrdinal: String
+        let jumpToId: String
+        switch restoreTarget {
+        case .chapterTop:
+            jumpOrdinal = "null"
+            jumpToId = "\"top\""
+        case .ordinal(let ordinal):
+            jumpOrdinal = String(ordinal)
+            jumpToId = "null"
+        }
         bridge.emit(event: "setup_content", data: """
-        {"jumpToOrdinal":\(jumpOrdinal),"jumpToAnchor":null,"jumpToId":null,"topOffset":0,"bottomOffset":0}
+        {"jumpToOrdinal":\(jumpOrdinal),"jumpToAnchor":null,"jumpToId":\(jumpToId),"topOffset":0,"bottomOffset":0}
         """)
         emitActiveState()
 
@@ -3764,68 +3869,13 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      Load chapter text from the active SWORD module.
      Returns (xml, verseCount) or nil if no module is available.
      */
-    private func loadChapterFromSword(osisBookId: String) -> (String, Int)? {
+    private func loadChapterFromSword(osisBookId: String, chapter: Int) -> BibleChapterDocumentBuilder.LoadedChapterContent? {
         guard let module = activeModule else { return nil }
-
-        // Navigate to the first verse of the chapter
-        let startKey = "\(osisBookId) \(currentChapter):1"
-        module.setKey(startKey)
-
-        // Check if the module has content at this position
-        let firstKey = module.currentKey()
-        if firstKey.isEmpty {
-            logger.warning("SWORD: No content at \(startKey)")
-            return nil
-        }
-
-        // Collect verses for this chapter
-        var verses: [(Int, String)] = []
-        let chapter = self.currentChapter
-
-        // Read verses until we leave this chapter
-        while true {
-            let key = module.currentKey()
-
-            // Parse the key to check if we're still in the same chapter
-            // SWORD keys look like "Genesis 1:1" or "Gen 1:1"
-            guard let (_, parsedChapter, parsedVerse) = parseVerseKey(key) else {
-                break
-            }
-
-            if parsedChapter != chapter {
-                break // We've moved to the next chapter
-            }
-
-            // Get the raw OSIS XML for this verse.
-            // Using rawEntry() instead of renderText() preserves OSIS elements
-            // (<note>, <w>, <reference>, etc.) that Vue.js components render natively.
-            let text = module.rawEntry()
-            if !text.isEmpty {
-                verses.append((parsedVerse, text))
-            }
-
-            // Move to next verse
-            if !module.next() {
-                break // End of module
-            }
-        }
-
-        if verses.isEmpty {
-            logger.warning("SWORD: No verses found for \(osisBookId) \(chapter)")
-            return nil
-        }
-
-        logger.info("SWORD: Loaded \(verses.count) verses for \(osisBookId) \(chapter)")
-
-        // Build OSIS XML from the rendered verses
-        let xml = buildSwordChapterXML(
-            osisBookId: osisBookId,
-            bookName: currentBook,
-            chapter: currentChapter,
-            verses: verses
+        let builder = BibleChapterDocumentBuilder(
+            module: module,
+            includeHeadings: shouldIncludeSwordHeadings()
         )
-
-        return (xml, verses.count)
+        return builder.loadChapter(osisBookId: osisBookId, chapter: chapter)
     }
 
     /**
@@ -3838,49 +3888,28 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         let osisBookId = osisBookId(for: book)
         let isNT = isNewTestament(book)
 
-        // Navigate to the first verse of the target chapter
-        let startKey = "\(osisBookId) \(chapter):1"
-        module.setKey(startKey)
-
-        let firstKey = module.currentKey()
-        if firstKey.isEmpty { return nil }
-
-        // Collect verses for this chapter
-        var verses: [(Int, String)] = []
-        while true {
-            let key = module.currentKey()
-            guard let (_, parsedChapter, parsedVerse) = parseVerseKey(key) else { break }
-            if parsedChapter != chapter { break }
-
-            let text = module.rawEntry()
-            if !text.isEmpty {
-                verses.append((parsedVerse, text))
-            }
-            if !module.next() { break }
-        }
-
-        if verses.isEmpty { return nil }
-
-        let xml = buildSwordChapterXML(
+        guard let loadedChapter = loadChapterFromSword(
             osisBookId: osisBookId,
-            bookName: book,
-            chapter: chapter,
-            verses: verses
-        )
+            chapter: chapter
+        ) else {
+            return nil
+        }
 
         // Query bookmarks for this chapter's ordinal range
         let ordinalStart = (chapter - 1) * 40 + 1
-        let ordinalEnd = (chapter - 1) * 40 + verses.count
+        let ordinalEnd = (chapter - 1) * 40 + loadedChapter.verseCount
         let chapterBookmarks = bookmarkService?.bookmarks(for: ordinalStart, endOrdinal: ordinalEnd, book: book) ?? []
 
         let document = buildDocumentJSON(
             osisBookId: osisBookId,
             bookName: book,
             chapter: chapter,
-            verseCount: verses.count,
+            verseCount: loadedChapter.verseCount,
             isNT: isNT,
-            xml: xml,
-            bookmarks: chapterBookmarks
+            xml: loadedChapter.xml,
+            bookmarks: chapterBookmarks,
+            addChapter: loadedChapter.addChapter,
+            originalOrdinalRange: nil
         )
 
         // Restore module position to current chapter so other operations aren't affected
@@ -3906,26 +3935,26 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         return (bookPart, chapter, verse)
     }
 
-    /// Build OSIS XML from raw OSIS verse entries.
+    private func shouldIncludeSwordHeadings() -> Bool {
+        displaySettings.showSectionTitles ?? TextDisplaySettings.appDefaults.showSectionTitles ?? true
+    }
+
+    private func ordinal(forChapter chapter: Int, verse: Int) -> Int {
+        BibleChapterDocumentBuilder.ordinal(chapter: chapter, verse: verse)
+    }
+
     private func buildSwordChapterXML(osisBookId: String, bookName: String, chapter: Int, verses: [(Int, String)]) -> String {
         var xml = "<div>"
         xml += "<title type=\"x-gen\">\(bookName) \(chapter)</title>"
-        xml += "<div type=\"x-milestone\" subType=\"x-preverse\" sID=\"pv1\"/>"
-        xml += "<div sID=\"sec1\" type=\"section\"/>"
-        xml += "<title>\(bookName) \(chapter)</title>"
         xml += "<div sID=\"p1\" type=\"paragraph\"/>"
-        xml += "<div type=\"x-milestone\" subType=\"x-preverse\" eID=\"pv1\"/>"
 
         for (verseNum, text) in verses {
-            let ordinal = (chapter - 1) * 40 + verseNum
             let cleanText = text.trimmingCharacters(in: .whitespacesAndNewlines)
-            xml += "<verse osisID=\"\(osisBookId).\(chapter).\(verseNum)\" verseOrdinal=\"\(ordinal)\">"
+            xml += "<verse osisID=\"\(osisBookId).\(chapter).\(verseNum)\" verseOrdinal=\"\(ordinal(forChapter: chapter, verse: verseNum))\">"
             xml += "\(cleanText) "
             xml += "</verse>"
         }
-
         xml += "<div eID=\"p1\" type=\"paragraph\"/>"
-        xml += "<div eID=\"sec1\" type=\"section\"/>"
         xml += "</div>"
         return xml
     }
@@ -4535,7 +4564,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
        - chapter: Chapter number to render.
        - verseCount: Number of placeholder verses to include.
 
-     - Returns: OSIS XML fragment with generated title, verse, and paragraph structure.
+     - Returns: OSIS XML fragment with generated verse and paragraph structure.
      */
     private func buildChapterXML(osisBookId: String, bookName: String, chapter: Int, verseCount: Int) -> String {
         // For Genesis 1, use the real ESV-like content
@@ -4546,11 +4575,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         // For other chapters, generate placeholder OSIS XML with verse structure
         var xml = "<div>"
         xml += "<title type=\"x-gen\">\(bookName) \(chapter)</title>"
-        xml += "<div type=\"x-milestone\" subType=\"x-preverse\" sID=\"pv1\"/>"
-        xml += "<div sID=\"sec1\" type=\"section\"/>"
-        xml += "<title>\(bookName) \(chapter)</title>"
         xml += "<div sID=\"p1\" type=\"paragraph\"/>"
-        xml += "<div type=\"x-milestone\" subType=\"x-preverse\" eID=\"pv1\"/>"
 
         for verse in 1...verseCount {
             let ordinal = (chapter - 1) * 40 + verse // approximate ordinal
@@ -4582,25 +4607,76 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
      - Returns: JSON string for one Vue.js document record.
      */
-    private func buildDocumentJSON(osisBookId: String, bookName: String, chapter: Int, verseCount: Int, isNT: Bool, xml: String, bookmarks: [BibleBookmark] = [], bookCategory: String = "BIBLE", bookInitials: String? = nil) -> String {
-        let escapedXml = xml
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "\"", with: "\\\"")
-            .replacingOccurrences(of: "\n", with: "\\n")
-            .replacingOccurrences(of: "\r", with: "")
-
+    private func buildDocumentJSON(osisBookId: String,
+                                   bookName: String,
+                                   chapter: Int,
+                                   verseCount: Int,
+                                   isNT: Bool,
+                                   xml: String,
+                                   bookmarks: [BibleBookmark] = [],
+                                   bookCategory: String = "BIBLE",
+                                   bookInitials: String? = nil,
+                                   addChapter: Bool = true,
+                                   originalOrdinalRange: [Int]? = nil) -> String {
         let key = "\(osisBookId).\(chapter)"
         let ordinalStart = (chapter - 1) * 40 + 1
         let ordinalEnd = (chapter - 1) * 40 + verseCount
-
-        // Serialize bookmarks for this chapter
-        let bookmarksJSON = bookmarks.isEmpty ? "[]" : "[" + bookmarks.map { buildBookmarkJSON($0) }.joined(separator: ",") + "]"
-
         let initials = bookInitials ?? activeModuleName
 
-        return """
-        {"id":"doc-1","type":"bible","osisFragment":{"xml":"\(escapedXml)","key":"\(key)","keyName":"\(bookName) \(chapter)","v11n":"KJVA","bookCategory":"\(bookCategory)","bookInitials":"\(initials)","bookAbbreviation":"\(osisBookId)","osisRef":"\(key)","isNewTestament":\(isNT),"features":{},"ordinalRange":[\(ordinalStart),\(ordinalEnd)],"language":"en","direction":"ltr"},"bookInitials":"\(initials)","bookCategory":"\(bookCategory)","bookAbbreviation":"\(osisBookId)","bookName":"\(bookName)","key":"\(key)","v11n":"KJVA","osisRef":"\(key)","annotateRef":"","genericBookmarks":[],"ordinalRange":[\(ordinalStart),\(ordinalEnd)],"isEpub":false,"bookmarks":\(bookmarksJSON),"bibleBookName":"\(bookName)","addChapter":true,"chapterNumber":\(chapter),"originalOrdinalRange":null}
-        """
+        func jsonObject(from string: String) -> Any? {
+            guard let data = string.data(using: .utf8) else { return nil }
+            return try? JSONSerialization.jsonObject(with: data)
+        }
+
+        func osisFragmentObject(xml: String, ordinalRange: [Int], keySuffix: String) -> [String: Any] {
+            [
+                "xml": xml,
+                "key": keySuffix,
+                "keyName": "\(bookName) \(chapter)",
+                "v11n": "KJVA",
+                "bookCategory": bookCategory,
+                "bookInitials": initials,
+                "bookAbbreviation": osisBookId,
+                "osisRef": key,
+                "isNewTestament": isNT,
+                "features": [String: Any](),
+                "ordinalRange": ordinalRange,
+                "language": "en",
+                "direction": "ltr",
+            ]
+        }
+
+        let bookmarkObjects = bookmarks.compactMap { jsonObject(from: buildBookmarkJSON($0)) }
+
+        var doc: [String: Any] = [
+            "id": "doc-1",
+            "type": "bible",
+            "osisFragment": osisFragmentObject(xml: xml, ordinalRange: [ordinalStart, ordinalEnd], keySuffix: key),
+            "bookInitials": initials,
+            "bookCategory": bookCategory,
+            "bookAbbreviation": osisBookId,
+            "bookName": bookName,
+            "key": key,
+            "v11n": "KJVA",
+            "osisRef": key,
+            "annotateRef": "",
+            "genericBookmarks": [Any](),
+            "ordinalRange": [ordinalStart, ordinalEnd],
+            "isNativeHtml": false,
+            "bookmarks": bookmarkObjects,
+            "bibleBookName": bookName,
+            "addChapter": addChapter,
+            "chapterNumber": chapter,
+            "originalOrdinalRange": originalOrdinalRange ?? NSNull(),
+        ]
+
+        guard let data = try? JSONSerialization.data(withJSONObject: doc, options: [.sortedKeys]),
+              let json = String(data: data, encoding: .utf8) else {
+            logger.error("Failed to serialize document JSON for \(osisBookId, privacy: .public) \(chapter)")
+            return "{}"
+        }
+
+        return json
     }
 
     // MARK: - Genesis 1 Real Content

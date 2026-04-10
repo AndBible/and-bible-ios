@@ -131,9 +131,11 @@ public struct BookmarkListView: View {
                     description: Text(String(localized: "no_bookmarks_description"))
                 )
                 .accessibilityIdentifier("bookmarkListScreen")
+                .accessibilityValue(bookmarkListAccessibilityValue)
             } else {
                 bookmarkList
                     .accessibilityIdentifier("bookmarkListScreen")
+                    .accessibilityValue(bookmarkListAccessibilityValue)
             }
         }
         .searchable(text: $searchText, prompt: String(localized: "search_bookmarks"))
@@ -220,6 +222,29 @@ public struct BookmarkListView: View {
             }
             .onDelete(perform: deleteBookmarks)
         }
+    }
+
+    /// Stable bookmark-list state exported for UI automation.
+    private var bookmarkListAccessibilityValue: String {
+        let baseState = "count=\(filteredBookmarks.count);selectedLabel=\(bookmarkListSelectedLabelAccessibilityToken);query=\(bookmarkListAccessibilitySegment(searchText))"
+        guard UITestRuntimeConfiguration.enablesDetailedAccessibilityExports else {
+            return baseState
+        }
+
+        let rowTokens = filteredBookmarks.prefix(UITestRuntimeConfiguration.detailedAccessibilityRowTokenLimit).map {
+            "|\(bookmarkListAccessibilitySegment(Self.verseReference(for: $0)))|"
+        }.joined(separator: ",")
+        return "\(baseState);rows=\(rowTokens)"
+    }
+
+    /// Stable token for the currently selected bookmark label filter.
+    private var bookmarkListSelectedLabelAccessibilityToken: String {
+        guard let labelId = selectedLabelId,
+              let label = labels.first(where: { $0.id == labelId })
+        else {
+            return "all"
+        }
+        return bookmarkListAccessibilitySegment(label.name)
     }
 
     /// Sort-order menu shown in the navigation bar.

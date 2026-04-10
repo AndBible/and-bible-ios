@@ -33,7 +33,14 @@ export function useVerseNotifier(
 ) {
     const currentVerse = ref<number | null>(null);
     const currentKey = ref<string>("")
-    watch(() => currentVerse.value, value => scrolledToOrdinal(currentKey.value!!, value));
+    const currentDocumentId = ref<string | null>(null);
+    const currentAtChapterTop = ref(false);
+    watch(
+        () => [currentVerse.value, currentKey.value, currentAtChapterTop.value] as const,
+        ([value, key, atChapterTop]) => {
+            scrolledToOrdinal(key, value, atChapterTop);
+        }
+    );
 
     let lastDirection = "ltr";
     const step = 10;
@@ -76,6 +83,10 @@ export function useVerseNotifier(
                             currentVerse.value = parseInt(element.dataset.ordinal!)
                             const doc = element.closest(".document") as Nullable<HTMLElement>
                             currentKey.value = doc?.dataset.osisRef || ""
+                            currentDocumentId.value = doc?.id || null
+                            const verseAnchor = document.getElementById(`o-${currentVerse.value}`);
+                            const topBoundary = window.scrollY + calculatedConfig.value.topOffset;
+                            currentAtChapterTop.value = verseAnchor != null && topBoundary + 1 < verseAnchor.offsetTop;
                             return;
                         }
                     }
@@ -86,5 +97,5 @@ export function useVerseNotifier(
     }, 50);
 
     setupWindowEventListener('scroll', onScroll)
-    return {currentVerse}
+    return {currentVerse, currentDocumentId, currentAtChapterTop}
 }

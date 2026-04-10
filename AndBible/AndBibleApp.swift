@@ -2,6 +2,7 @@
 
 import SwiftUI
 import SwiftData
+import Darwin
 import BibleCore
 import BibleUI
 import SwordKit
@@ -294,6 +295,12 @@ struct AndBibleApp: App {
 
             // Start monitoring iCloud account status
             sync.startMonitoring(container: container)
+
+            if ProcessInfo.processInfo.environment["UITEST_EXIT_AFTER_BOOTSTRAP_LAUNCH"] == "1" {
+                DispatchQueue.main.async {
+                    Darwin.exit(EXIT_SUCCESS)
+                }
+            }
         } catch {
             fatalError("Failed to initialize SwiftData: \(error)")
         }

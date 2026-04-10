@@ -44,6 +44,7 @@ export type Config = {
     testMode: boolean,
 
     showAnnotations: boolean,
+    // Legacy bridge field retained for payload compatibility. Chapter separators always render.
     showChapterNumbers: boolean,
     showVerseNumbers: boolean,
     strongsMode: StrongsMode,
@@ -277,7 +278,7 @@ export function useConfig(documentType: Ref<BibleViewDocumentType>) {
     function getNeedBookmarkRefresh(newConfig: Config) {
         // Anything that changes DOM in a significant way needs bookmark refresh
         const keys: (keyof Config)[] = [
-            "showAnnotations", "showChapterNumbers", "showVerseNumbers", "strongsMode", "showMorphology",
+            "showAnnotations", "showVerseNumbers", "strongsMode", "showMorphology",
             "showRedLetters", "showVersePerLine", "showNonCanonical", "makeNonCanonicalItalic", "showSectionTitles",
             "showStrongsSeparately", "showFootNotes", "showFootNotesInline", "showXrefs", "showBookmarks", "showMyNotes", "bookmarksHideLabels"
         ];
@@ -287,7 +288,7 @@ export function useConfig(documentType: Ref<BibleViewDocumentType>) {
     function getNeedRefreshLocation(newConfig: Config) {
         // Anything that changes location of text in a significant way, needs location refresh
         const keys: (keyof Config)[] = [
-            "showAnnotations", "showChapterNumbers", "showVerseNumbers", "strongsMode", "showMorphology",
+            "showAnnotations", "showVerseNumbers", "strongsMode", "showMorphology",
             "showRedLetters", "showVersePerLine", "showNonCanonical", "showSectionTitles",
             "showStrongsSeparately", "showFootNotes", "showFootNotesInline", "showXrefs", "showBookmarks", "showMyNotes",
             "fontSize", "fontFamily", "hyphenation", "justifyText", "marginSize", "topMargin"
@@ -332,7 +333,6 @@ export function useConfig(documentType: Ref<BibleViewDocumentType>) {
                     console.error("Unknown setting", i, newConfig[i]);
                 }
             }
-            config.showChapterNumbers = config.showVerseNumbers;
             for (const j in newAppSettings) {
                 // @ts-ignore
                 if (appSettings[j] !== undefined) {

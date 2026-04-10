@@ -49,6 +49,7 @@ public struct AboutView: View {
 
                     Text("AndBible")
                         .font(.title.bold())
+                        .accessibilityIdentifier("aboutAppTitle")
 
                     Text(String(localized: "version \(appVersion) (\(buildNumber))"))
                         .font(.subheadline)

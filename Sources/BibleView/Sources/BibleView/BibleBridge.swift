@@ -27,7 +27,7 @@ public protocol BibleBridgeDelegate: AnyObject {
      Vue.js sends this when scrolling so native code can persist reading position and history.
      Android equivalent: `BibleJavascriptInterface.scrolledToOrdinal(...)`.
      */
-    func bridge(_ bridge: BibleBridge, didScrollToOrdinal ordinal: Int, key: String)
+    func bridge(_ bridge: BibleBridge, didScrollToOrdinal ordinal: Int, key: String, atChapterTop: Bool)
     /**
      Requests additional content before the currently rendered range.
 
@@ -275,7 +275,8 @@ public final class BibleBridge: NSObject, WKScriptMessageHandler {
         // --- Navigation & scroll position ---
         case "scrolledToOrdinal":
             if let key = args[safe: 0] as? String, let ordinal = args[safe: 1] as? Int {
-                delegate?.bridge(self, didScrollToOrdinal: ordinal, key: key)
+                let atChapterTop = args[safe: 2] as? Bool ?? false
+                delegate?.bridge(self, didScrollToOrdinal: ordinal, key: key, atChapterTop: atChapterTop)
             }
         case "requestMoreToBeginning":
             if let callId = args.first as? Int {
@@ -599,7 +600,7 @@ public final class BibleBridge: NSObject, WKScriptMessageHandler {
     }
 
     private func evaluateJavaScript(_ js: String) {
-        DispatchQueue.main.async { [weak self] in
+        let execute = { [weak self] in
             guard let webView = self?.webView else {
                 NSLog("BRIDGE-JS: webView is nil! Cannot evaluate: %@", String(js.prefix(200)))
                 return
@@ -609,6 +610,12 @@ public final class BibleBridge: NSObject, WKScriptMessageHandler {
                     NSLog("BRIDGE-JS ERROR: %@ for JS: %@", error.localizedDescription, String(js.prefix(200)))
                 }
             }
+        }
+
+        if Thread.isMainThread {
+            execute()
+        } else {
+            DispatchQueue.main.async(execute: execute)
         }
     }
 

@@ -108,6 +108,7 @@ public struct HistoryView: View {
             }
         }
         .accessibilityIdentifier("historyScreen")
+        .accessibilityValue(historyAccessibilityValue)
         .navigationTitle(String(localized: "history"))
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
@@ -170,6 +171,19 @@ public struct HistoryView: View {
      */
     private func historyDeleteButtonIdentifier(for item: HistoryItem) -> String {
         "historyDeleteButton::\(sanitizedHistoryKey(for: item))"
+    }
+
+    /// Stable History screen state exported for UI automation.
+    private var historyAccessibilityValue: String {
+        let baseState = "count=\(history.count)"
+        guard UITestRuntimeConfiguration.enablesDetailedAccessibilityExports else {
+            return baseState
+        }
+
+        let rowTokens = history.prefix(UITestRuntimeConfiguration.detailedAccessibilityRowTokenLimit).map {
+            "|\(sanitizedHistoryKey(for: $0))|"
+        }.joined(separator: ",")
+        return "\(baseState);rows=\(rowTokens)"
     }
 
     /**

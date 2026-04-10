@@ -3,6 +3,21 @@
 import Foundation
 import CLibSword
 
+/// Structured VerseKey metadata for a module's current position.
+public struct VerseKeyChildren: Sendable {
+    public let testament: Int
+    public let book: Int
+    public let chapter: Int
+    public let verse: Int
+    public let chapterMax: Int
+    public let verseMax: Int
+    public let bookName: String
+    public let osisRef: String
+    public let shortText: String
+    public let bookAbbreviation: String
+    public let osisBookName: String
+}
+
 /**
  Swift wrapper around a SWORD SWModule instance.
 
@@ -73,6 +88,87 @@ public final class SwordModule: @unchecked Sendable {
     public func currentKey() -> String {
         queue.sync {
             String(cString: SWModule_getKeyText(handle))
+        }
+    }
+
+    /// Get structured VerseKey data for the current position when the module uses VerseKey.
+    public func currentVerseKeyChildren() -> VerseKeyChildren? {
+        queue.sync {
+            guard let children = SWModule_getKeyChildren(handle) else { return nil }
+
+            var parts: [String] = []
+            var index = 0
+            while index < 11, let ptr = children[index] {
+                parts.append(String(cString: ptr))
+                index += 1
+            }
+
+            guard parts.count >= 11,
+                  let testament = Int(parts[0]),
+                  let book = Int(parts[1]),
+                  let chapter = Int(parts[2]),
+                  let verse = Int(parts[3]),
+                  let chapterMax = Int(parts[4]),
+                  let verseMax = Int(parts[5]) else {
+                return nil
+            }
+
+            return VerseKeyChildren(
+                testament: testament,
+                book: book,
+                chapter: chapter,
+                verse: verse,
+                chapterMax: chapterMax,
+                verseMax: verseMax,
+                bookName: parts[6],
+                osisRef: parts[7],
+                shortText: parts[8],
+                bookAbbreviation: parts[9],
+                osisBookName: parts[10]
+            )
+        }
+    }
+
+    /**
+     Get entry attributes produced by the current render pipeline.
+
+     SWORD populates these attributes after rendering a verse. They expose
+     structural metadata like preverse and interverse headings in a much more
+     stable form than `renderHeader()`, which is only CSS.
+     */
+    public func entryAttributes(level1: String? = nil,
+                                level2: String? = nil,
+                                level3: String? = nil,
+                                filtered: Bool = false) -> [String] {
+        queue.sync {
+            func withOptionalCString<T>(_ value: String?, _ body: (UnsafePointer<CChar>?) -> T) -> T {
+                guard let value else { return body(nil) }
+                return value.withCString(body)
+            }
+
+            return withOptionalCString(level1) { level1Ptr in
+                withOptionalCString(level2) { level2Ptr in
+                    withOptionalCString(level3) { level3Ptr in
+                        guard let values = SWModule_getEntryAttribute(
+                            handle,
+                            level1Ptr,
+                            level2Ptr,
+                            level3Ptr,
+                            filtered ? 1 : 0
+                        ) else {
+                            return []
+                        }
+
+                        var result: [String] = []
+                        var index = 0
+                        while let value = values[index] {
+                            result.append(String(cString: value))
+                            index += 1
+                        }
+                        return result
+                    }
+                }
+            }
         }
     }
 

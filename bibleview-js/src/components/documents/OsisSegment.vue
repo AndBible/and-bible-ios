@@ -44,6 +44,7 @@ import Foreign from "@/components/OSIS/Foreign.vue";
 import Figure from "@/components/OSIS/Figure.vue";
 import A from "@/components/OSIS/A.vue";
 import Abbr from "@/components/OSIS/Abbr.vue";
+import Html from "@/components/OSIS/Html.vue";
 import BibleViewAnchor from "@/components/BibleViewAnchor.vue";
 import AndBibleLink from "@/components/OSIS/AndBibleLink.vue";
 import Pb from "@/components/MyBible/Pb.vue";
@@ -51,6 +52,7 @@ import NoOp from "@/components/OSIS/NoOp.vue";
 import H3 from "@/components/MyBible/H3.vue";
 import I from "@/components/MyBible/I.vue";
 import S from "@/components/MyBible/S.vue";
+import J from "@/components/MyBible/J.vue";
 import B from "@/components/MyBible/B.vue";
 import Br from "@/components/MyBible/Br.vue";
 import Li from "@/components/MyBible/Li.vue";
@@ -63,7 +65,7 @@ import epubRef from "@/components/ePub/EpubRef.vue";
 
 const teiComponents = {
     Ref: Reference, Pron: Hi, Orth: Hi, EntryFree: Div,
-    Rdg: Hi, Def: Div, Etym: Hi,
+    Rdg: Hi, Def: Hi, Etym: Hi,
 }
 
 const andBibleComponents = {
@@ -71,13 +73,14 @@ const andBibleComponents = {
 }
 
 const myBibleComponents = {
-    S, M: NoOp, I, J: Q, N: Note, Pb, F: NoOp, H: Title, E: Hi, H3, B, Br, Li, Ol, Strong,
+    S, M: NoOp, I, J, N: Note, Pb, F: NoOp, H: Title, E: Hi, H3, B, Br, Li, Ol, Strong,
 }
 
 const osisComponents = {
     Verse, W, Div, Chapter, Reference, Note, TransChange,
     DivineName, Seg, Milestone, Title, Q, Hi, CatchWord, List, Item, P,
     Cell, L, Lb, Lg, Row, Table, Foreign, Figure, A, Abbr,
+    Html,
 }
 
 const allComponents = {
@@ -93,8 +96,8 @@ function prefixComponents(components: Record<string, Component>): Record<string,
     return result;
 }
 
-function getComponents(isEpub: boolean): Record<string, Component> {
-    if(isEpub) {
+function getComponents(isNativeHtml: boolean): Record<string, Component> {
+    if(isNativeHtml) {
         return {BVA: BibleViewAnchor, epubRef, reference: Reference, epubA: A, ...andBibleComponents}
     } else {
         return prefixComponents(allComponents)
@@ -106,12 +109,12 @@ export default defineComponent({
     props: {
         osisTemplate: {type: String, required: true},
         convert: {type: Boolean, default: false},
-        isEpub: {type: Boolean, default: false},
+        isNativeHtml: {type: Boolean, default: false},
     },
     render() {
         return h({
             template: this.convert ? osisToTemplateString(this.osisTemplate) : this.osisTemplate,
-            components: getComponents(this.isEpub),
+            components: getComponents(this.isNativeHtml),
             compilerOptions: {
                 whitespace: 'preserve',
             },
@@ -119,4 +122,3 @@ export default defineComponent({
     },
 })
 </script>
-

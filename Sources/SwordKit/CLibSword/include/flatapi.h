@@ -65,6 +65,19 @@ void SWModule_setKeyText(void *module, const char *keyText);
 /// Get the current key text.
 const char *SWModule_getKeyText(void *module);
 
+/// Get parsed entry attributes for the current position.
+/// Returns a NULL-terminated array of strings.
+/// Use "-" to enumerate keys at a level, or NULL/empty to fetch all values.
+const char **SWModule_getEntryAttribute(void *module,
+                                        const char *level1,
+                                        const char *level2,
+                                        const char *level3,
+                                        char filteredBool);
+
+/// Parse a verse key list into concrete OSIS references.
+/// Returns a NULL-terminated array of strings.
+const char **SWModule_parseKeyList(void *module, const char *keyText);
+
 /// Get rendered text at the current position (with markup applied).
 const char *SWModule_getRenderText(void *module);
 

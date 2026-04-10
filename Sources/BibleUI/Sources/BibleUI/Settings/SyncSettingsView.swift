@@ -521,25 +521,35 @@ public struct SyncSettingsView: View {
      */
     private var remoteCategoryList: some View {
         ForEach(RemoteSyncCategory.allCases, id: \.self) { category in
+            let categoryBinding = remoteCategoryBinding(for: category)
             VStack(alignment: .leading, spacing: 8) {
-                Toggle(isOn: remoteCategoryBinding(for: category)) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(remoteCategoryTitle(for: category))
-                        Text(remoteCategoryContentDescription(for: category))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-
-                        if let supplementalText = remoteCategorySupplementalText(for: category) {
-                            Text(supplementalText)
+                HStack(alignment: .top, spacing: 12) {
+                    Button {
+                        categoryBinding.wrappedValue.toggle()
+                    } label: {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(remoteCategoryTitle(for: category))
+                            Text(remoteCategoryContentDescription(for: category))
                                 .font(.caption)
-                                .foregroundStyle(remoteCategorySupplementalColor(for: category))
+                                .foregroundStyle(.secondary)
+
+                            if let supplementalText = remoteCategorySupplementalText(for: category) {
+                                Text(supplementalText)
+                                    .font(.caption)
+                                    .foregroundStyle(remoteCategorySupplementalColor(for: category))
+                            }
                         }
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    .accessibilityIdentifier("syncCategoryState::\(category.rawValue)")
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("syncCategoryToggle::\(category.rawValue)")
                     .accessibilityValue(remoteCategoryAccessibilityValue(for: category))
+
+                    Toggle("", isOn: categoryBinding)
+                        .labelsHidden()
+                        .accessibilityIdentifier("syncCategoryToggleSwitch::\(category.rawValue)")
+                        .accessibilityValue(remoteCategoryAccessibilityValue(for: category))
                 }
-                .accessibilityIdentifier("syncCategoryToggle::\(category.rawValue)")
-                .accessibilityValue(remoteCategoryAccessibilityValue(for: category))
                 .disabled(isRemoteSyncInteractionLocked)
 
             }

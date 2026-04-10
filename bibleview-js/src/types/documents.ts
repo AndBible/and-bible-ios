@@ -36,10 +36,17 @@ export interface BaseDocument {
     type: BibleViewDocumentType
 }
 
+export type StrongsDocumentState = {
+    selectedStrongsDict?: string
+    selectedMorphDict?: string
+}
+
 export interface MultiFragmentDocument extends BaseDocument {
     type: "multi"
     osisFragments: OsisFragment[]
     compare: boolean
+    contentType?: "strongs" | null
+    state?: StrongsDocumentState
 }
 
 
@@ -55,7 +62,7 @@ interface BaseOsisDocument extends BaseDocument {
     annotateRef: string
     genericBookmarks: GenericBookmark[]
     ordinalRange: OrdinalRange
-    isEpub: boolean
+    isNativeHtml: boolean
 }
 
 export interface OsisDocument extends BaseOsisDocument {

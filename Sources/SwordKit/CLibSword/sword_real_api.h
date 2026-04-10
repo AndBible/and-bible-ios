@@ -63,6 +63,11 @@ const char *org_crosswire_sword_SWModule_getCategory(SWHANDLE hSWModule);
 void org_crosswire_sword_SWModule_setKeyText(
     SWHANDLE hSWModule, const char *key);
 const char *org_crosswire_sword_SWModule_getKeyText(SWHANDLE hSWModule);
+const char **org_crosswire_sword_SWModule_getEntryAttribute(
+    SWHANDLE hSWModule, const char *level1, const char *level2, const char *level3,
+    char filteredBool);
+const char **org_crosswire_sword_SWModule_parseKeyList(
+    SWHANDLE hSWModule, const char *keyText);
 const char *org_crosswire_sword_SWModule_renderText(SWHANDLE hSWModule);
 const char *org_crosswire_sword_SWModule_getRawEntry(SWHANDLE hSWModule);
 const char *org_crosswire_sword_SWModule_getRenderHeader(SWHANDLE hSWModule);

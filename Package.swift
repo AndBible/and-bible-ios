@@ -93,7 +93,10 @@ let package = Package(
         .target(
             name: "BibleUI",
             dependencies: ["BibleView", "BibleCore", "SwordKit"],
-            path: "Sources/BibleUI/Sources/BibleUI"
+            path: "Sources/BibleUI/Sources/BibleUI",
+            resources: [
+                .process("Resources"),
+            ]
         ),
         .testTarget(
             name: "BibleUITests",

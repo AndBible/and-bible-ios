@@ -170,6 +170,22 @@ const char *SWModule_getKeyText(void *module) {
         (SWHANDLE)(uintptr_t)module);
 }
 
+const char **SWModule_getEntryAttribute(void *module,
+                                        const char *level1,
+                                        const char *level2,
+                                        const char *level3,
+                                        char filteredBool) {
+    if (!module) return NULL;
+    return org_crosswire_sword_SWModule_getEntryAttribute(
+        (SWHANDLE)(uintptr_t)module, level1, level2, level3, filteredBool);
+}
+
+const char **SWModule_parseKeyList(void *module, const char *keyText) {
+    if (!module || !keyText) return NULL;
+    return org_crosswire_sword_SWModule_parseKeyList(
+        (SWHANDLE)(uintptr_t)module, keyText);
+}
+
 const char *SWModule_getRenderText(void *module) {
     if (!module) return "";
     return org_crosswire_sword_SWModule_renderText(
@@ -476,6 +492,12 @@ const char *SWModule_getType(void *module) { return "Unknown"; }
 const char *SWModule_getLanguage(void *module) { return "en"; }
 void SWModule_setKeyText(void *module, const char *keyText) { }
 const char *SWModule_getKeyText(void *module) { return empty_string; }
+const char **SWModule_getEntryAttribute(void *module,
+                                        const char *level1,
+                                        const char *level2,
+                                        const char *level3,
+                                        char filteredBool) { return NULL; }
+const char **SWModule_parseKeyList(void *module, const char *keyText) { return NULL; }
 const char *SWModule_getRenderText(void *module) { return empty_string; }
 const char *SWModule_getRawEntry(void *module) { return empty_string; }
 const char *SWModule_getRenderHeader(void *module) { return empty_string; }

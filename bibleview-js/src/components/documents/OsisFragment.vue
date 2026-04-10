@@ -18,8 +18,7 @@
 <template>
   <div :id="`frag-${uniqueId}`" :class="`sword-${fragment.bookInitials}`" :lang="fragment.language"
        :dir="fragment.direction">
-    <div v-if="isEpub" class="epub-content" v-html="template" @click="handleEpubClick"/>
-    <OsisSegment v-else :osis-template="template"/>
+    <OsisSegment :is-native-html="isNativeHtml" :osis-template="template"/>
   </div>
 </template>
 
@@ -28,7 +27,7 @@ import {computed, inject, onMounted, provide, ref, toRefs, watch} from "vue";
 import {highlightVerseRange, osisToTemplateString} from "@/utils";
 import OsisSegment from "@/components/documents/OsisSegment.vue";
 import {useCommon} from "@/composables";
-import {customCssKey, osisFragmentKey, hideTitlesKey, androidKey} from "@/types/constants";
+import {customCssKey, osisFragmentKey, hideTitlesKey} from "@/types/constants";
 import {OffsetRange, OrdinalRange, OsisFragment} from "@/types/client-objects";
 
 const props = withDefaults(defineProps<{
@@ -37,8 +36,8 @@ const props = withDefaults(defineProps<{
     highlightOffsetRange?: OffsetRange
     hideTitles?: boolean
     doNotConvert?: boolean
-    isEpub?: boolean
-}>(), {doNotConvert: false, hideTitles: false, isEpub: false})
+    isNativeHtml?: boolean
+}>(), {doNotConvert: false, hideTitles: false, isNativeHtml: false})
 
 const {bookInitials, osisRef} = toRefs(props.fragment);
 const uniqueId = ref(Date.now().toString());
@@ -50,31 +49,6 @@ if (props.hideTitles) {
 provide(osisFragmentKey, props.fragment)
 const {registerBook} = inject(customCssKey)!;
 registerBook(bookInitials.value);
-
-// EPUB link handling via event delegation (v-html doesn't create Vue components)
-const android = inject(androidKey)!;
-function handleEpubClick(event: MouseEvent) {
-    let target = event.target as HTMLElement | null;
-    while (target && target !== event.currentTarget) {
-        const tag = target.tagName.toLowerCase();
-        if (tag === 'epubref') {
-            event.preventDefault();
-            event.stopPropagation();
-            const toKey = target.getAttribute('to-key') || '';
-            const toId = target.getAttribute('to-id') || '';
-            android.openEpubLink(bookInitials.value, toKey, toId);
-            return;
-        }
-        if (tag === 'epuba') {
-            event.preventDefault();
-            event.stopPropagation();
-            const href = target.getAttribute('href') || '';
-            android.openExternalLink(href);
-            return;
-        }
-        target = target.parentElement;
-    }
-}
 
 let undo: () => void = () => {};
 
@@ -98,7 +72,7 @@ onMounted(() => {
 
 const template = computed(() => {
     const xml = props.fragment.xml;
-    return (!props.doNotConvert && !props.isEpub) ? osisToTemplateString(xml) : xml;
+    return (!props.doNotConvert && !props.isNativeHtml) ? osisToTemplateString(xml) : xml;
 });
 
 watch(props, () => refreshHighlight());
@@ -118,13 +92,17 @@ useCommon();
 }
 </style>
 <style lang="scss">
+@use "@/lib/markdown-render" as md;
+
 .highlight {
   font-weight: bold;
-  /*
-  background-color: rgba(130, 130, 130, 0.2);
-  .night & {
-    background-color: rgba(168, 165, 165, 0.7);
-  }
-   */
+}
+
+.mydoc-markdown {
+    @include md.markdown-content;
+}
+
+.night .mydoc-markdown {
+    @include md.markdown-content-night;
 }
 </style>

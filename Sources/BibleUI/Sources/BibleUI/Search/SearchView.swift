@@ -81,6 +81,9 @@ public struct SearchView: View {
     /// Whether the options panel is expanded above the results list.
     @State private var showOptions = true
 
+    /// Whether the system search field currently owns focus.
+    @FocusState private var isSearchFieldFocused: Bool
+
     /// Navigation-title summary of the most recent search results.
     @State private var resultSummary: String = ""
 
@@ -292,7 +295,18 @@ public struct SearchView: View {
         case .creatingIndex: "creatingIndex"
         case .ready: "ready"
         }
-        return "state=\(stateToken);query=\(query);searching=\(isSearching);results=\(results.count);scope=\(searchScopeToken(for: scopeOption));wordMode=\(searchWordModeToken(for: wordMode))"
+        let baseState = "state=\(stateToken);query=\(query);searching=\(isSearching);results=\(results.count);scope=\(searchScopeToken(for: scopeOption));wordMode=\(searchWordModeToken(for: wordMode))"
+        guard UITestRuntimeConfiguration.enablesDetailedAccessibilityExports else {
+            return baseState
+        }
+        return "\(baseState);rows=\(searchAccessibilityRowsToken)"
+    }
+
+    /// Stable search-result row tokens exported for UI automation.
+    private var searchAccessibilityRowsToken: String {
+        results.prefix(UITestRuntimeConfiguration.detailedAccessibilityRowTokenLimit)
+            .map { "|\(searchResultIdentifier(for: $0))|" }
+            .joined(separator: ",")
     }
 
     // MARK: - Index Prompt
@@ -387,6 +401,8 @@ public struct SearchView: View {
     /// Main search UI shown once the view reaches the `.ready` state.
     private var searchContent: some View {
         VStack(spacing: 0) {
+            searchQueryBar
+
             if showOptions {
                 searchOptionsPanel
             }
@@ -416,9 +432,51 @@ public struct SearchView: View {
             }
             .accessibilityIdentifier("searchResultsList")
         }
-        .searchable(text: $query, prompt: String(localized: "search_bible_text"))
-        .onSubmit(of: .search) {
-            performSearch()
+    }
+
+    /// Stable app-owned query field used for both user input and UI automation.
+    private var searchQueryBar: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(.secondary)
+
+            TextField(String(localized: "search_bible_text"), text: $query)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled(true)
+                .submitLabel(.search)
+                .focused($isSearchFieldFocused)
+                .accessibilityIdentifier("searchQueryField")
+                .onSubmit {
+                    isSearchFieldFocused = false
+                    performSearch()
+                }
+
+            if !query.isEmpty {
+                Button {
+                    query = ""
+                    clearSearchResults()
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(String(localized: "clear"))
+                .accessibilityIdentifier("searchClearQueryButton")
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(.quaternary)
+        )
+        .padding(.horizontal)
+        .padding(.top, 10)
+        .padding(.bottom, 8)
+        .onAppear {
+            DispatchQueue.main.async {
+                isSearchFieldFocused = true
+            }
         }
     }
 
@@ -435,14 +493,18 @@ public struct SearchView: View {
                 }
             }
             .pickerStyle(.segmented)
+            .accessibilityIdentifier("searchWordModePicker")
 
-            HStack(spacing: 8) {
-                scopeButton(String(localized: "search_scope_all"), choice: .wholeBible)
-                scopeButton(String(localized: "search_scope_ot"), choice: .oldTestament)
-                scopeButton(String(localized: "search_scope_nt"), choice: .newTestament)
-                scopeButton(currentBook, choice: .currentBook)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    scopeButton(String(localized: "search_scope_all"), choice: .wholeBible)
+                    scopeButton(String(localized: "search_scope_ot"), choice: .oldTestament)
+                    scopeButton(String(localized: "search_scope_nt"), choice: .newTestament)
+                    scopeButton(currentBook, choice: .currentBook)
+                }
+                .font(.subheadline)
             }
-            .font(.subheadline)
+            .accessibilityIdentifier("searchScopeStrip")
 
             if installedBibleModules.count > 1 {
                 Button {
@@ -470,6 +532,7 @@ public struct SearchView: View {
         .padding(.horizontal)
         .padding(.vertical, 10)
         .background(.bar)
+        .accessibilityIdentifier("searchOptionsPanel")
     }
 
     /**
@@ -549,6 +612,14 @@ public struct SearchView: View {
         case .phrase:
             return "phrase"
         }
+    }
+
+    /// Resets Search result state when the visible query is explicitly cleared.
+    private func clearSearchResults() {
+        results = []
+        multiResults = nil
+        resultSummary = ""
+        isSearching = false
     }
 
     // MARK: - Results Sections

@@ -100,9 +100,6 @@ public struct LabelManagerView: View {
         .navigationDestination(item: $editingSelection) { selection in
             labelEditDestination(for: selection.id)
         }
-        .navigationDestination(for: EditingSelection.self) { selection in
-            labelEditDestination(for: selection.id)
-        }
     }
 
     /**
@@ -163,7 +160,7 @@ public struct LabelManagerView: View {
                     .font(.caption)
             }
         }
-        .buttonStyle(.plain)
+        .contentShape(Rectangle())
         .accessibilityIdentifier(labelRowIdentifier(label))
         .accessibilityLabel(label.name)
         .swipeActions(edge: .trailing) {

@@ -36,7 +36,7 @@ import {AnyDocument} from "@/types/documents";
 import {isBibleBookmark, isGenericBookmark} from "@/composables/bookmarks";
 
 export type BibleJavascriptInterface = {
-    scrolledToOrdinal: (key: string, ordinal: number) => void,
+    scrolledToOrdinal: (key: string, ordinal: number, atChapterTop: boolean) => void,
     setClientReady: () => void,
     setLimitAmbiguousModalSize: (value: boolean) => void,
     requestMoreToBeginning: AsyncFunc,
@@ -289,9 +289,9 @@ export function useAndroid({bookmarks}: { bookmarks: Ref<BaseBookmark[]> }, conf
         return deferredCall((callId) => android.refChooserDialog(callId));
     }
 
-    function scrolledToOrdinal(key: string, ordinal: Nullable<number>) {
+    function scrolledToOrdinal(key: string, ordinal: Nullable<number>, atChapterTop = false) {
         if (ordinal == null || ordinal < 0) return;
-        android.scrolledToOrdinal(key, ordinal)
+        android.scrolledToOrdinal(key, ordinal, atChapterTop)
     }
 
     function saveBookmarkNote(bookmark: BaseBookmark, noteText: Nullable<string>) {

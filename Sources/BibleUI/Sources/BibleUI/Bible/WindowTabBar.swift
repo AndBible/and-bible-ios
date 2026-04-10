@@ -83,7 +83,7 @@ struct WindowTabBar: View {
         let isMinimized = window.layoutState == "minimized"
         let isActive = !isMinimized && window.id == windowManager.activeWindow?.id
         let categoryName = window.pageManager?.currentCategoryName ?? "bible"
-        let icon = categoryName == "commentary" ? "text.book.closed.fill" : "book.fill"
+        let icon = categoryName == "commentary" ? "ToolbarCommentary" : "ToolbarBible"
         let moduleName = (categoryName == "commentary"
             ? window.pageManager?.commentaryDocument
             : window.pageManager?.bibleDocument) ?? "KJV"
@@ -109,8 +109,7 @@ struct WindowTabBar: View {
                         .frame(width: 6, height: 6)
                 }
 
-                Image(systemName: icon)
-                    .font(.caption2)
+                ToolbarAssetIcon(name: icon, size: 12)
 
                 Text(moduleName)
                     .font(.caption.weight(isMinimized ? .regular : .semibold))

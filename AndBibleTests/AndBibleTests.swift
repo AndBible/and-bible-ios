@@ -5,13 +5,39 @@ import SwordKit
 import SwiftData
 import SQLite3
 @testable import BibleUI
+@testable import BibleView
 #if os(iOS)
 import UIKit
+import WebKit
 #endif
 
 private let sqliteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
 final class AndBibleTests: XCTestCase {
+    #if os(iOS)
+    private final class RecordingWebView: WKWebView {
+        var evaluatedScripts: [String] = []
+
+        init() {
+            super.init(frame: .zero, configuration: WKWebViewConfiguration())
+        }
+
+        @available(*, unavailable)
+        required init?(coder: NSCoder) {
+            fatalError("init(coder:) has not been implemented")
+        }
+
+        @MainActor
+        override func evaluateJavaScript(
+            _ javaScriptString: String,
+            completionHandler: ((Any?, Error?) -> Void)? = nil
+        ) {
+            evaluatedScripts.append(javaScriptString)
+            completionHandler?(nil, nil)
+        }
+    }
+    #endif
+
     private var temporarySwordModulePaths: [String] = []
 
     override func tearDown() {
@@ -143,6 +169,230 @@ final class AndBibleTests: XCTestCase {
             hits.allSatisfy { !$0.reference.isEmpty },
             "Expected Strong's hits to parse into verse references"
         )
+    }
+
+    func testBibleChapterDocumentBuilderPreservesSecondCorinthiansIntroAndChapterMarker() throws {
+        let modulePath = try makeTemporaryBundledSwordPath()
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let module = try XCTUnwrap(manager.module(named: "KJV"))
+        let builder = BibleChapterDocumentBuilder(module: module, includeHeadings: true)
+
+        let chapter = try XCTUnwrap(builder.loadChapter(osisBookId: "2Cor", chapter: 1))
+
+        XCTAssertFalse(chapter.addChapter)
+        XCTAssertGreaterThan(chapter.verseCount, 0)
+        XCTAssertTrue(chapter.xml.contains("THE SECOND EPISTLE OF PAUL THE APOSTLE TO THE CORINTHIANS"))
+        XCTAssertTrue(chapter.xml.contains("<chapter"))
+        XCTAssertTrue(chapter.xml.contains("CHAPTER 1."))
+    }
+
+    func testBibleChapterDocumentBuilderStillEmitsChapterMarkerWhenSectionTitlesAreDisabled() throws {
+        let modulePath = try makeTemporaryBundledSwordPath()
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let module = try XCTUnwrap(manager.module(named: "KJV"))
+        let builder = BibleChapterDocumentBuilder(module: module, includeHeadings: false)
+
+        let chapter = try XCTUnwrap(builder.loadChapter(osisBookId: "2Cor", chapter: 1))
+
+        XCTAssertFalse(chapter.addChapter)
+        XCTAssertTrue(chapter.xml.contains("<chapter osisID=\"2Cor.1\""))
+        XCTAssertFalse(chapter.xml.contains("THE SECOND EPISTLE OF PAUL THE APOSTLE TO THE CORINTHIANS"))
+    }
+
+    func testBibleChapterDocumentBuilderKeepsRenderableChapterStartMarkers() throws {
+        let modulePath = try makeTemporaryBundledSwordPath()
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let module = try XCTUnwrap(manager.module(named: "KJV"))
+        let builder = BibleChapterDocumentBuilder(module: module, includeHeadings: true)
+
+        let chapter = try XCTUnwrap(builder.loadChapter(osisBookId: "2Cor", chapter: 2))
+        let hasOpeningMarker = chapter.xml.range(
+            of: #"<chapter\b[^>]*osisID="2Cor\.2"[^>]*sID="#,
+            options: .regularExpression
+        ) != nil
+
+        XCTAssertFalse(chapter.addChapter)
+        XCTAssertTrue(
+            hasOpeningMarker || chapter.xml.contains("<chapter n=\"2\""),
+            "Expected a visible chapter start marker, not only a closing chapter tag. XML: \(chapter.xml)"
+        )
+        XCTAssertFalse(
+            chapter.xml.contains("<chapter eID=") && !hasOpeningMarker,
+            "A closing-only chapter tag suppresses Vue's synthetic chapter number without rendering a visible one. XML: \(chapter.xml)"
+        )
+    }
+
+    func testSwordModuleRawChapterKeysExposeIntroStructure() throws {
+        let modulePath = try makeTemporaryBundledSwordPath()
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let module = try XCTUnwrap(manager.module(named: "KJV"))
+
+        module.setKey("=2Cor.0.0")
+        _ = module.currentVerseKeyChildren()
+        let bookIntro = module.rawEntry()
+
+        module.setKey("=2Cor.1.0")
+        let chapterIntroKey = module.currentVerseKeyChildren()
+        let chapterIntro = module.rawEntry()
+
+        module.setKey("=2Cor.2.0")
+        let secondChapterIntroKey = module.currentVerseKeyChildren()
+        let secondChapterIntro = module.rawEntry()
+
+        module.setKey("2Cor 1")
+        let chapterKeyRawEntry = module.rawEntry()
+
+        XCTAssertFalse(bookIntro.isEmpty)
+        XCTAssertFalse(chapterIntro.isEmpty)
+        XCTAssertFalse(secondChapterIntro.isEmpty)
+        XCTAssertEqual(chapterIntroKey?.chapter, 1)
+        XCTAssertEqual(chapterIntroKey?.verse, 0)
+        XCTAssertEqual(secondChapterIntroKey?.chapter, 2)
+        XCTAssertEqual(secondChapterIntroKey?.verse, 0)
+        XCTAssertTrue(
+            bookIntro.contains("THE SECOND EPISTLE OF PAUL THE APOSTLE TO THE CORINTHIANS")
+                || chapterIntro.contains("THE SECOND EPISTLE OF PAUL THE APOSTLE TO THE CORINTHIANS")
+        )
+        XCTAssertTrue(
+            chapterIntro.contains("<chapter")
+                || secondChapterIntro.contains("<chapter")
+                || chapterKeyRawEntry.contains("<chapter"),
+            "Expected libsword to expose a chapter marker somewhere in chapter-intro access paths"
+        )
+    }
+
+    #if os(iOS)
+    @MainActor
+    func testLoadCurrentContentEmitsBookIntroAndChapterMarkerForSecondCorinthiansOne() throws {
+        let bridge = BibleBridge()
+        let webView = RecordingWebView()
+        bridge.webView = webView
+        let modulePath = try makeTemporaryBundledSwordPath()
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        let secondCorinthians = try XCTUnwrap(
+            controller.bookList.first(where: { $0.osisId == "2Cor" })?.name
+        )
+
+        controller.navigateTo(book: secondCorinthians, chapter: 1, verse: 1)
+        controller.loadCurrentContent()
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.2))
+
+        let addDocumentsScript = try XCTUnwrap(
+            webView.evaluatedScripts.first(where: { $0.contains("emit('add_documents'") })
+        )
+        let hasSecondCorinthiansChapterMarker = addDocumentsScript.range(
+            of: #"osisID=\\"2Cor\.1\\""#,
+            options: .regularExpression
+        ) != nil
+
+        XCTAssertTrue(
+            addDocumentsScript.contains("THE SECOND EPISTLE OF PAUL THE APOSTLE TO THE CORINTHIANS"),
+            "Expected emitted payload to contain the book intro title. Script: \(addDocumentsScript)"
+        )
+        XCTAssertTrue(
+            hasSecondCorinthiansChapterMarker,
+            "Expected emitted payload to contain a chapter-start marker for 2Cor.1. Script: \(addDocumentsScript)"
+        )
+    }
+
+    @MainActor
+    func testLoadCurrentContentEmitsRenderableChapterMarkerForSecondCorinthiansTwo() throws {
+        let bridge = BibleBridge()
+        let webView = RecordingWebView()
+        bridge.webView = webView
+        let modulePath = try makeTemporaryBundledSwordPath()
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        let secondCorinthians = try XCTUnwrap(
+            controller.bookList.first(where: { $0.osisId == "2Cor" })?.name
+        )
+
+        controller.navigateTo(book: secondCorinthians, chapter: 2, verse: 1)
+        controller.loadCurrentContent()
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.2))
+
+        let addDocumentsScript = try XCTUnwrap(
+            webView.evaluatedScripts.first(where: { $0.contains("emit('add_documents'") })
+        )
+        let hasSecondCorinthiansChapterMarker = addDocumentsScript.range(
+            of: #"osisID=\\"2Cor\.2\\""#,
+            options: .regularExpression
+        ) != nil
+
+        XCTAssertTrue(
+            hasSecondCorinthiansChapterMarker,
+            "Expected emitted payload to contain a chapter-start marker for 2Cor.2. Script: \(addDocumentsScript)"
+        )
+        XCTAssertFalse(
+            addDocumentsScript.contains("eID\\\":\\\"gen1794") && !addDocumentsScript.contains("sID\\\":\\\"gen1794"),
+            "Expected an opening chapter marker in the emitted document payload, not only a closing tag. Script: \(addDocumentsScript)"
+        )
+    }
+
+    #endif
+
+    func testNavigateToPersistsSelectedVerseOnPageManager() {
+        let bridge = BibleBridge()
+        let controller = BibleReaderController(bridge: bridge)
+        let window = Window()
+        let pageManager = PageManager(id: window.id)
+        window.pageManager = pageManager
+        controller.activeWindow = window
+
+        controller.navigateTo(book: "Genesis", chapter: 1, verse: 5)
+
+        XCTAssertEqual(controller.currentBook, "Genesis")
+        XCTAssertEqual(controller.currentChapter, 1)
+        XCTAssertEqual(controller.currentVerse, 5)
+        XCTAssertEqual(pageManager.bibleChapterNo, 1)
+        XCTAssertEqual(pageManager.bibleVerseNo, 5)
+    }
+
+    func testDidScrollToOrdinalDebouncesPersistenceWithinCurrentChapter() {
+        let bridge = BibleBridge()
+        let controller = BibleReaderController(bridge: bridge)
+        let window = Window()
+        let pageManager = PageManager(id: window.id)
+        window.pageManager = pageManager
+        controller.activeWindow = window
+        controller.navigateTo(book: "Genesis", chapter: 1, verse: 1)
+
+        var persistCount = 0
+        controller.onPersistState = { persistCount += 1 }
+
+        controller.bridge(bridge, didScrollToOrdinal: 5, key: "Gen.1", atChapterTop: false)
+
+        XCTAssertEqual(persistCount, 0)
+        XCTAssertEqual(controller.currentVerse, 5)
+        XCTAssertEqual(pageManager.bibleVerseNo, 5)
+
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.5))
+
+        XCTAssertEqual(persistCount, 1)
+    }
+
+    func testDidScrollToOrdinalPersistsImmediatelyWhenChapterChanges() {
+        let bridge = BibleBridge()
+        let controller = BibleReaderController(bridge: bridge)
+        let window = Window()
+        let pageManager = PageManager(id: window.id)
+        window.pageManager = pageManager
+        controller.activeWindow = window
+        controller.navigateTo(book: "Genesis", chapter: 1, verse: 1)
+
+        var persistCount = 0
+        controller.onPersistState = { persistCount += 1 }
+
+        controller.bridge(bridge, didScrollToOrdinal: 45, key: "Gen.2", atChapterTop: false)
+
+        XCTAssertEqual(persistCount, 1)
+        XCTAssertEqual(controller.currentChapter, 2)
+        XCTAssertEqual(controller.currentVerse, 5)
+        XCTAssertEqual(pageManager.bibleChapterNo, 2)
+        XCTAssertEqual(pageManager.bibleVerseNo, 5)
     }
 
     func testBookmarkStoreBibleBookmarksCanFilterByLabel() throws {

@@ -144,15 +144,29 @@ public struct TextDisplaySettingsView: View {
             }
 
             Section(String(localized: "settings_layout")) {
+                let justifyTextBinding = boolBinding(\.justifyText, default: false)
                 HStack {
                     Text(String(localized: "line_spacing"))
                     Slider(value: lineSpacingBinding, in: 0...20, step: 1)
                     Text("\(settings.lineSpacing ?? 10)")
                         .monospacedDigit()
                 }
-                Toggle(String(localized: "justify_text"), isOn: boolBinding(\.justifyText, default: false))
-                    .accessibilityIdentifier("textDisplayJustifyTextToggle")
-                    .accessibilityValue((settings.justifyText ?? false) ? "justifyTextOn" : "justifyTextOff")
+                HStack {
+                    Button {
+                        justifyTextBinding.wrappedValue.toggle()
+                    } label: {
+                        Text(String(localized: "justify_text"))
+                            .foregroundStyle(.primary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("textDisplayJustifyTextToggleButton")
+
+                    Toggle("", isOn: justifyTextBinding)
+                        .labelsHidden()
+                        .accessibilityIdentifier("textDisplayJustifyTextToggle")
+                        .accessibilityValue((settings.justifyText ?? false) ? "justifyTextOn" : "justifyTextOff")
+                }
                 Toggle(String(localized: "verse_per_line"), isOn: boolBinding(\.showVersePerLine, default: false))
                 Toggle(String(localized: "hyphenation"), isOn: boolBinding(\.hyphenation, default: true))
             }

@@ -119,6 +119,7 @@ import {useSharing} from "@/composables/sharing";
 import {AnyDocument, BibleViewDocumentType} from "@/types/documents";
 import AmbiguousSelection from "@/components/modals/AmbiguousSelection.vue";
 import {FontAwesomeIcon} from "@fortawesome/vue-fontawesome";
+import {configChangeScrollTarget} from "@/composables/reading-position";
 
 console.log("BibleView setup");
 useAddonFonts();
@@ -179,7 +180,7 @@ onMounted(() => {
 })
 onUnmounted(() => mounted.value = false)
 
-const {currentVerse} = useVerseNotifier(config, calculatedConfig, mounted, android, topElement, scroll, lineHeight);
+const {currentVerse, currentDocumentId, currentAtChapterTop} = useVerseNotifier(config, calculatedConfig, mounted, android, topElement, scroll, lineHeight);
 
 const customFeatures = useCustomFeatures(android);
 provide(customFeaturesKey, customFeatures);
@@ -211,9 +212,11 @@ function addDocuments(...docs: AnyDocument[]) {
 }
 
 setupEventBusListener("config_changed", async (deferred: Deferred) => {
-    const verseBeforeConfigChange = currentVerse.value;
+    const scrollTarget = configChangeScrollTarget(currentVerse.value, currentDocumentId.value, currentAtChapterTop.value);
     await deferred.wait();
-    scrollToId(`o-${verseBeforeConfigChange}`, {now: true})
+    if (scrollTarget != null) {
+        scrollToId(scrollTarget, {now: true})
+    }
 })
 
 setupEventBusListener("clear_document", function clearDocument() {

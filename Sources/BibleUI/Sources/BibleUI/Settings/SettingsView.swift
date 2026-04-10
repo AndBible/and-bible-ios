@@ -334,6 +334,8 @@ public struct SettingsView: View {
      */
     public var body: some View {
         Form {
+                settingsUITestShortcutSection
+
                 if hasDictionaryPreferences {
                     Section(String(localized: "settings_dictionaries")) {
                         if !strongsGreekDictionaries.isEmpty {
@@ -833,41 +835,36 @@ public struct SettingsView: View {
                 }
 
                 Section(String(localized: "settings_data")) {
-                    NavigationLink {
+                    settingsNavigationLink(
+                        title: String(localized: "downloads"),
+                        accessibilityIdentifier: "settingsDownloadsLink"
+                    ) {
                         ModuleBrowserView()
-                    } label: {
-                        settingsNavigationRow(title: String(localized: "downloads"))
                     }
-                    .id("settingsDownloadsLink")
-                    .accessibilityIdentifier("settingsDownloadsLink")
-                    NavigationLink {
+                    settingsNavigationLink(
+                        title: String(localized: "repositories"),
+                        accessibilityIdentifier: "settingsRepositoriesLink"
+                    ) {
                         RepositoryManagerView()
-                    } label: {
-                        settingsNavigationRow(title: String(localized: "repositories"))
                     }
-                    .id("settingsRepositoriesLink")
-                    .accessibilityIdentifier("settingsRepositoriesLink")
-                    NavigationLink {
+                    settingsNavigationLink(
+                        title: String(localized: "import_export"),
+                        accessibilityIdentifier: "settingsImportExportLink"
+                    ) {
                         ImportExportView()
-                    } label: {
-                        settingsNavigationRow(title: String(localized: "import_export"))
                     }
-                    .id("settingsImportExportLink")
-                    .accessibilityIdentifier("settingsImportExportLink")
-                    NavigationLink {
+                    settingsNavigationLink(
+                        title: String(localized: "icloud_sync"),
+                        accessibilityIdentifier: "settingsSyncLink"
+                    ) {
                         SyncSettingsView()
-                    } label: {
-                        settingsNavigationRow(title: String(localized: "icloud_sync"))
                     }
-                    .id("settingsSyncLink")
-                    .accessibilityIdentifier("settingsSyncLink")
-                    NavigationLink {
+                    settingsNavigationLink(
+                        title: String(localized: "labels"),
+                        accessibilityIdentifier: "settingsLabelsLink"
+                    ) {
                         LabelManagerView()
-                    } label: {
-                        settingsNavigationRow(title: String(localized: "labels"))
                     }
-                    .id("settingsLabelsLink")
-                    .accessibilityIdentifier("settingsLabelsLink")
                 }
 
                 Section(String(localized: "settings_about")) {
@@ -880,6 +877,7 @@ public struct SettingsView: View {
                 }
             }
             .accessibilityIdentifier("settingsForm")
+            .accessibilityValue(settingsAccessibilityValue)
             .navigationTitle(String(localized: "settings"))
             .alert(
                 String(localized: "prefs_interface_locale_title", defaultValue: "Application language"),
@@ -1043,20 +1041,18 @@ public struct SettingsView: View {
      */
     private var lookAndFeelSection: some View {
         Section(String(localized: "prefs_display_customization_cat", defaultValue: "Look & feel")) {
-            NavigationLink {
+            settingsNavigationLink(
+                title: String(localized: "settings_text_display"),
+                accessibilityIdentifier: "settingsTextDisplayLink"
+            ) {
                 TextDisplaySettingsView(settings: $displaySettings, onChange: onSettingsChanged)
-            } label: {
-                settingsNavigationRow(title: String(localized: "settings_text_display"))
             }
-            .id("settingsTextDisplayLink")
-            .accessibilityIdentifier("settingsTextDisplayLink")
-            NavigationLink {
+            settingsNavigationLink(
+                title: String(localized: "settings_colors"),
+                accessibilityIdentifier: "settingsColorsLink"
+            ) {
                 ColorSettingsView(settings: $displaySettings, onChange: onSettingsChanged)
-            } label: {
-                settingsNavigationRow(title: String(localized: "settings_colors"))
             }
-            .id("settingsColorsLink")
-            .accessibilityIdentifier("settingsColorsLink")
             Picker(
                 String(localized: "prefs_night_mode_title", defaultValue: "Night mode switching"),
                 selection: Binding(
@@ -1368,6 +1364,25 @@ public struct SettingsView: View {
 
     @ViewBuilder
     /**
+     Builds one Settings navigation row using the same `NavigationLink` semantics as production.
+     *
+     * This preserves the native list-row interaction model instead of routing navigation through
+     * test-only state toggles.
+     */
+    private func settingsNavigationLink<Destination: View>(
+        title: String,
+        accessibilityIdentifier: String,
+        @ViewBuilder destination: @escaping () -> Destination
+    ) -> some View {
+        NavigationLink(destination: destination) {
+            settingsNavigationRow(title: title)
+        }
+        .accessibilityLabel(title)
+        .accessibilityIdentifier(accessibilityIdentifier)
+    }
+
+    @ViewBuilder
+    /**
      Builds a single-line navigation row used by nested settings links.
      *
      * - Parameter title: User-visible title shown in the row.
@@ -1379,8 +1394,78 @@ public struct SettingsView: View {
         HStack {
             Text(title)
             Spacer()
+            Image(systemName: "chevron.right")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
+    }
+
+    @ViewBuilder
+    private var settingsUITestShortcutSection: some View {
+        if UITestRuntimeConfiguration.enablesDetailedAccessibilityExports {
+            Section(String(localized: "settings", defaultValue: "Settings")) {
+                settingsNavigationLink(
+                    title: String(localized: "downloads"),
+                    accessibilityIdentifier: "settingsDownloadsLink"
+                ) {
+                    ModuleBrowserView()
+                }
+                settingsNavigationLink(
+                    title: String(localized: "repositories"),
+                    accessibilityIdentifier: "settingsRepositoriesLink"
+                ) {
+                    RepositoryManagerView()
+                }
+                settingsNavigationLink(
+                    title: String(localized: "import_export"),
+                    accessibilityIdentifier: "settingsImportExportLink"
+                ) {
+                    ImportExportView()
+                }
+                settingsNavigationLink(
+                    title: String(localized: "icloud_sync"),
+                    accessibilityIdentifier: "settingsSyncLink"
+                ) {
+                    SyncSettingsView()
+                }
+                settingsNavigationLink(
+                    title: String(localized: "labels"),
+                    accessibilityIdentifier: "settingsLabelsLink"
+                ) {
+                    LabelManagerView()
+                }
+                settingsNavigationLink(
+                    title: String(localized: "settings_text_display"),
+                    accessibilityIdentifier: "settingsTextDisplayLink"
+                ) {
+                    TextDisplaySettingsView(settings: $displaySettings, onChange: onSettingsChanged)
+                }
+                settingsNavigationLink(
+                    title: String(localized: "settings_colors"),
+                    accessibilityIdentifier: "settingsColorsLink"
+                ) {
+                    ColorSettingsView(settings: $displaySettings, onChange: onSettingsChanged)
+                }
+            }
+        }
+    }
+
+    private var settingsAccessibilityValue: String {
+        guard UITestRuntimeConfiguration.enablesDetailedAccessibilityExports else {
+            return ""
+        }
+        let primaryLinks = [
+            "settingsDownloadsLink",
+            "settingsRepositoriesLink",
+            "settingsImportExportLink",
+            "settingsSyncLink",
+            "settingsLabelsLink",
+            "settingsTextDisplayLink",
+            "settingsColorsLink",
+        ].joined(separator: ",")
+        return "primaryLinks=\(primaryLinks)"
     }
 
     /**
