@@ -46,7 +46,7 @@ final class AndBibleUITests: XCTestCase {
      */
     override func tearDownWithError() throws {
         if let trackedApp, trackedApp.state != .notRunning {
-            trackedApp.terminate()
+            _ = terminateAppReliably(trackedApp)
         }
         trackedApp = nil
     }
@@ -1306,7 +1306,7 @@ final class AndBibleUITests: XCTestCase {
      */
     private func makeApp(searchQuery: String? = nil) -> XCUIApplication {
         if let trackedApp, trackedApp.state != .notRunning {
-            trackedApp.terminate()
+            _ = terminateAppReliably(trackedApp)
         }
         let app = XCUIApplication()
         trackedApp = app
@@ -1431,6 +1431,7 @@ final class AndBibleUITests: XCTestCase {
     ) -> String? {
         let environment = ProcessInfo.processInfo.environment
         let simulatorID = environment["UITEST_SIMULATOR_ID"] ?? environment["SIMULATOR_UDID"]
+        let forceXCTestBootstrap = environment["UITEST_FORCE_XCTEST_BOOTSTRAP"] == "1"
 
         if let existingPath = waitForInstalledAppDataContainer(
             simulatorID: simulatorID,
@@ -1441,8 +1442,10 @@ final class AndBibleUITests: XCTestCase {
         }
 
         print("Bootstrapping app container for bundle '\(bundleIdentifier)' before fixture seeding.")
-        var usedXCTestBootstrap = simulatorID == nil
-        if let simulatorID {
+        var usedXCTestBootstrap = simulatorID == nil || forceXCTestBootstrap
+        if forceXCTestBootstrap {
+            print("Forcing XCTest bootstrap launch for bundle '\(bundleIdentifier)'.")
+        } else if let simulatorID {
             let launchResult = runHostProcess(
                 executablePath: "/usr/bin/xcrun",
                 arguments: ["simctl", "launch", simulatorID, bundleIdentifier],
@@ -1481,22 +1484,37 @@ final class AndBibleUITests: XCTestCase {
         }
 
         if usedXCTestBootstrap {
+            app.launchEnvironment["UITEST_EXIT_AFTER_BOOTSTRAP_LAUNCH"] = "1"
             app.launch()
-            XCTAssertTrue(
-                app.wait(for: .runningForeground, timeout: 30),
-                "Expected bootstrap launch to reach the foreground before fixture seeding.",
-                file: file,
-                line: line
-            )
             if let bootstrappedPath = waitForInstalledAppDataContainer(
                 simulatorID: simulatorID,
                 bundleIdentifier: bundleIdentifier,
                 timeout: 45
             ) {
-                app.terminate()
+                XCTAssertTrue(
+                    waitForAppToStop(app, timeout: 30) || terminateAppReliably(
+                        app,
+                        bundleIdentifier: bundleIdentifier,
+                        simulatorID: simulatorID
+                    ),
+                    "Expected bootstrap app '\(bundleIdentifier)' to stop before fixture seeding.",
+                    file: file,
+                    line: line
+                )
+                app.launchEnvironment.removeValue(forKey: "UITEST_EXIT_AFTER_BOOTSTRAP_LAUNCH")
                 return bootstrappedPath
             }
-            app.terminate()
+            XCTAssertTrue(
+                waitForAppToStop(app, timeout: 30) || terminateAppReliably(
+                    app,
+                    bundleIdentifier: bundleIdentifier,
+                    simulatorID: simulatorID
+                ),
+                "Expected bootstrap app '\(bundleIdentifier)' to stop before fixture seeding.",
+                file: file,
+                line: line
+            )
+            app.launchEnvironment.removeValue(forKey: "UITEST_EXIT_AFTER_BOOTSTRAP_LAUNCH")
         }
 
         if let bootstrappedPath = waitForInstalledAppDataContainer(
@@ -1525,6 +1543,121 @@ final class AndBibleUITests: XCTestCase {
             line: line
         )
         return nil
+    }
+
+    /**
+     Terminates the app under test through CoreSimulator instead of XCTest's direct terminate path.
+     *
+     * XCTest's `terminate()` is not reliable for apps launched solely to materialize the simulator
+     * data container during fixture seeding. When that bootstrap launch cannot be terminated cleanly,
+     * the actual problem is not the test flow but the process-lifecycle helper. Host-side
+     * `simctl terminate` is a better source of truth because the fixture tool also runs against the
+     * simulator host, not the XCUIApplication bridge.
+     *
+     * - Parameters:
+     *   - app: Running app handle to stop.
+     *   - bundleIdentifier: Bundle identifier of the app under test.
+     *   - simulatorID: Current simulator UDID when already known.
+     * - Returns: `true` when the app is already stopped or a host-side terminate succeeds.
+     * - Side effects:
+     *   - resolves the simulator UDID from the current test environment when needed
+     *   - retries `xcrun simctl terminate` a small number of times before giving up
+     * - Failure modes: This helper does not record XCTest failures directly.
+     */
+    private func terminateAppReliably(
+        _ app: XCUIApplication,
+        bundleIdentifier: String? = nil,
+        simulatorID: String? = nil
+    ) -> Bool {
+        if app.state == .notRunning {
+            return true
+        }
+
+        let resolvedBundleIdentifier = bundleIdentifier ?? currentUITestBundleIdentifier()
+        let resolvedSimulatorID = simulatorID ?? resolveCurrentSimulatorID()
+
+        guard let resolvedSimulatorID else {
+            return false
+        }
+
+        for _ in 0..<3 {
+            let terminateResult = runHostProcess(
+                executablePath: "/usr/bin/xcrun",
+                arguments: ["simctl", "terminate", resolvedSimulatorID, resolvedBundleIdentifier],
+                timeout: 15
+            )
+            if terminateResult.status == 0 {
+                return true
+            }
+            if app.state == .notRunning {
+                return true
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(1))
+        }
+
+        return app.state == .notRunning
+    }
+
+    /**
+     Waits for one XCUIApplication handle to report a stopped state.
+     *
+     * - Parameters:
+     *   - app: Application handle that should eventually stop.
+     *   - timeout: Maximum time to wait for `.notRunning`.
+     * - Returns: `true` when the app stops within the timeout, otherwise `false`.
+     * - Side effects: Pumps the current run loop while waiting for state propagation.
+     * - Failure modes: This helper does not record XCTest failures directly.
+     */
+    private func waitForAppToStop(_ app: XCUIApplication, timeout: TimeInterval) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            if app.state == .notRunning {
+                return true
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+        } while Date() < deadline
+
+        return app.state == .notRunning
+    }
+
+    /**
+     Resolves the bundle identifier of the app under test for host-side simulator commands.
+     *
+     * - Returns: Explicit UI-test bundle identifier override, or the production app default.
+     * - Side effects: none.
+     * - Failure modes: This helper cannot fail.
+     */
+    private func currentUITestBundleIdentifier() -> String {
+        ProcessInfo.processInfo.environment["UITEST_BUNDLE_ID"] ?? "org.andbible.ios"
+    }
+
+    /**
+     Resolves the current simulator UDID for host-side `simctl` commands.
+     *
+     * Resolution order:
+     * - explicit UI-test host overrides
+     * - the simulator runtime environment
+     * - the `Devices/<UDID>/...` segment in the current bundle path
+     *
+     * - Returns: Current simulator UDID when it can be derived, otherwise `nil`.
+     * - Side effects: none.
+     * - Failure modes: This helper cannot fail.
+     */
+    private func resolveCurrentSimulatorID() -> String? {
+        let environment = ProcessInfo.processInfo.environment
+        if let simulatorID = environment["UITEST_SIMULATOR_ID"], !simulatorID.isEmpty {
+            return simulatorID
+        }
+        if let simulatorID = environment["SIMULATOR_UDID"], !simulatorID.isEmpty {
+            return simulatorID
+        }
+
+        let pathComponents = Bundle.main.bundleURL.pathComponents
+        guard let devicesIndex = pathComponents.firstIndex(of: "Devices"),
+              pathComponents.indices.contains(devicesIndex + 1) else {
+            return nil
+        }
+        return pathComponents[devicesIndex + 1]
     }
 
     /**
