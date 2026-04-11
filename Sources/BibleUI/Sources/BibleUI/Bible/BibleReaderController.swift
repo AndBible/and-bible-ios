@@ -107,6 +107,9 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     private(set) var currentEpubHref: String?
     private(set) var currentEpubTitle: String?
 
+    /// Stable summary of the last content payload emitted to the reader WebView.
+    private(set) var renderedContentState: String = "category=bible;module=KJV;book=Genesis;chapter=1;key=Gen.1"
+
     /// Infinite scroll: tracks the range of chapters/books currently loaded in the WebView.
     private var minLoadedChapter: Int = 0
     private var maxLoadedChapter: Int = 0
@@ -121,6 +124,31 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     private var pendingVisibleVersePersistWorkItem: DispatchWorkItem?
     /// Optional verse range that should render as the explicit navigation target on the next load.
     private var originalNavigationOrdinalRange: [Int]? = nil
+
+    /// Escapes semantically important content-state tokens for accessibility export and tests.
+    private static func contentStateToken(_ raw: String?) -> String {
+        (raw ?? "none")
+            .replacingOccurrences(of: ";", with: "_")
+            .replacingOccurrences(of: ",", with: "_")
+            .replacingOccurrences(of: "\n", with: " ")
+    }
+
+    /// Records the latest content identity that native requested the reader WebView to display.
+    private func setRenderedContentState(
+        category: DocumentCategory,
+        moduleName: String?,
+        book: String,
+        chapter: Int? = nil,
+        key: String? = nil
+    ) {
+        renderedContentState = [
+            "category=\(category.pageManagerKey)",
+            "module=\(Self.contentStateToken(moduleName))",
+            "book=\(Self.contentStateToken(book))",
+            "chapter=\(chapter.map(String.init) ?? "none")",
+            "key=\(Self.contentStateToken(key))",
+        ].joined(separator: ";")
+    }
 
     /// Whether the current module has Strong's numbers (matching Android CurrentPageManager.hasStrongs).
     var hasStrongs: Bool {
@@ -688,6 +716,13 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             bridge.emit(event: "setup_content", data: """
             {"jumpToOrdinal":null,"jumpToAnchor":null,"jumpToId":null,"topOffset":0,"bottomOffset":0}
             """)
+            setRenderedContentState(
+                category: .commentary,
+                moduleName: activeCommentaryModuleName,
+                book: currentBook,
+                chapter: currentChapter,
+                key: "\(osisBookId).\(currentChapter)"
+            )
             applyNightModeBackground()
             return
         }
@@ -748,6 +783,13 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         bridge.emit(event: "setup_content", data: """
         {"jumpToOrdinal":null,"jumpToAnchor":null,"jumpToId":null,"topOffset":0,"bottomOffset":0}
         """)
+        setRenderedContentState(
+            category: .commentary,
+            moduleName: moduleName,
+            book: currentBook,
+            chapter: currentChapter,
+            key: "\(osisBookId).\(currentChapter)"
+        )
         emitActiveState()
 
         bridge.clearSelection()
@@ -778,6 +820,12 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             )
             bridge.emit(event: "add_documents", data: document)
             bridge.emit(event: "setup_content", data: "{\"jumpToOrdinal\":null,\"jumpToAnchor\":null,\"jumpToId\":null,\"topOffset\":0,\"bottomOffset\":0}")
+            setRenderedContentState(
+                category: .dictionary,
+                moduleName: activeDictionaryModuleName,
+                book: "Dictionary",
+                key: "none"
+            )
             applyNightModeBackground()
             return
         }
@@ -794,6 +842,12 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             )
             bridge.emit(event: "add_documents", data: document)
             bridge.emit(event: "setup_content", data: "{\"jumpToOrdinal\":null,\"jumpToAnchor\":null,\"jumpToId\":null,\"topOffset\":0,\"bottomOffset\":0}")
+            setRenderedContentState(
+                category: .dictionary,
+                moduleName: moduleName,
+                book: moduleName,
+                key: "none"
+            )
             applyNightModeBackground()
             return
         }
@@ -824,6 +878,12 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         )
         bridge.emit(event: "add_documents", data: document)
         bridge.emit(event: "setup_content", data: "{\"jumpToOrdinal\":null,\"jumpToAnchor\":null,\"jumpToId\":null,\"topOffset\":0,\"bottomOffset\":0}")
+        setRenderedContentState(
+            category: .dictionary,
+            moduleName: moduleName,
+            book: entryKey,
+            key: entryKey
+        )
         applyNightModeBackground()
     }
 
@@ -846,6 +906,12 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             )
             bridge.emit(event: "add_documents", data: document)
             bridge.emit(event: "setup_content", data: "{\"jumpToOrdinal\":null,\"jumpToAnchor\":null,\"jumpToId\":null,\"topOffset\":0,\"bottomOffset\":0}")
+            setRenderedContentState(
+                category: .generalBook,
+                moduleName: activeGeneralBookModuleName,
+                book: "General Book",
+                key: "none"
+            )
             applyNightModeBackground()
             return
         }
@@ -861,6 +927,12 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             )
             bridge.emit(event: "add_documents", data: document)
             bridge.emit(event: "setup_content", data: "{\"jumpToOrdinal\":null,\"jumpToAnchor\":null,\"jumpToId\":null,\"topOffset\":0,\"bottomOffset\":0}")
+            setRenderedContentState(
+                category: .generalBook,
+                moduleName: moduleName,
+                book: moduleName,
+                key: "none"
+            )
             applyNightModeBackground()
             return
         }
@@ -889,6 +961,12 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         )
         bridge.emit(event: "add_documents", data: document)
         bridge.emit(event: "setup_content", data: "{\"jumpToOrdinal\":null,\"jumpToAnchor\":null,\"jumpToId\":null,\"topOffset\":0,\"bottomOffset\":0}")
+        setRenderedContentState(
+            category: .generalBook,
+            moduleName: moduleName,
+            book: entryKey,
+            key: entryKey
+        )
         applyNightModeBackground()
     }
 
@@ -911,6 +989,12 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             )
             bridge.emit(event: "add_documents", data: document)
             bridge.emit(event: "setup_content", data: "{\"jumpToOrdinal\":null,\"jumpToAnchor\":null,\"jumpToId\":null,\"topOffset\":0,\"bottomOffset\":0}")
+            setRenderedContentState(
+                category: .map,
+                moduleName: activeMapModuleName,
+                book: "Map",
+                key: "none"
+            )
             applyNightModeBackground()
             return
         }
@@ -926,6 +1010,12 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             )
             bridge.emit(event: "add_documents", data: document)
             bridge.emit(event: "setup_content", data: "{\"jumpToOrdinal\":null,\"jumpToAnchor\":null,\"jumpToId\":null,\"topOffset\":0,\"bottomOffset\":0}")
+            setRenderedContentState(
+                category: .map,
+                moduleName: moduleName,
+                book: moduleName,
+                key: "none"
+            )
             applyNightModeBackground()
             return
         }
@@ -954,6 +1044,12 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         )
         bridge.emit(event: "add_documents", data: document)
         bridge.emit(event: "setup_content", data: "{\"jumpToOrdinal\":null,\"jumpToAnchor\":null,\"jumpToId\":null,\"topOffset\":0,\"bottomOffset\":0}")
+        setRenderedContentState(
+            category: .map,
+            moduleName: moduleName,
+            book: entryKey,
+            key: entryKey
+        )
         applyNightModeBackground()
     }
 
@@ -997,6 +1093,12 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             )
             bridge.emit(event: "add_documents", data: document)
             bridge.emit(event: "setup_content", data: "{\"jumpToOrdinal\":null,\"jumpToAnchor\":null,\"jumpToId\":null,\"topOffset\":0,\"bottomOffset\":0}")
+            setRenderedContentState(
+                category: .epub,
+                moduleName: activeEpubTitle,
+                book: "EPUB",
+                key: "none"
+            )
             applyNightModeBackground()
             return
         }
@@ -1013,6 +1115,12 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             )
             bridge.emit(event: "add_documents", data: document)
             bridge.emit(event: "setup_content", data: "{\"jumpToOrdinal\":null,\"jumpToAnchor\":null,\"jumpToId\":null,\"topOffset\":0,\"bottomOffset\":0}")
+            setRenderedContentState(
+                category: .epub,
+                moduleName: title,
+                book: title,
+                key: "none"
+            )
             applyNightModeBackground()
             return
         }
@@ -1057,6 +1165,12 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         // If href has a fragment, jump to it
         let jumpToId = fragment.map { "\"\($0)\"" } ?? "null"
         bridge.emit(event: "setup_content", data: "{\"jumpToOrdinal\":null,\"jumpToAnchor\":null,\"jumpToId\":\(jumpToId),\"topOffset\":0,\"bottomOffset\":0}")
+        setRenderedContentState(
+            category: .epub,
+            moduleName: epubTitle,
+            book: sectionTitle,
+            key: baseHref
+        )
         applyNightModeBackground()
     }
 
@@ -2556,6 +2670,14 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         {"jumpToOrdinal":null,"jumpToAnchor":null,"jumpToId":null,"topOffset":0,"bottomOffset":0}
         """)
 
+        setRenderedContentState(
+            category: .bible,
+            moduleName: "My Notes",
+            book: "My Notes",
+            chapter: currentChapter,
+            key: docId
+        )
+
         showingMyNotes = true
     }
 
@@ -2607,6 +2729,13 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         bridge.emit(event: "setup_content", data: """
         {"jumpToOrdinal":null,"jumpToAnchor":null,"jumpToId":\(jumpToId),"topOffset":0,"bottomOffset":0}
         """)
+
+        setRenderedContentState(
+            category: .bible,
+            moduleName: "StudyPad",
+            book: label.name,
+            key: "journal_\(labelId.uuidString)"
+        )
 
         showingStudyPad = true
         activeStudyPadLabelId = labelId
@@ -2742,7 +2871,11 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
                     let isHebrew = num.hasPrefix("H") || (!num.hasPrefix("G") && (Int(String(num.drop(while: { $0.isLetter || $0 == "0" }))) ?? 0) > 5624)
                     let featureType = isHebrew ? "hebrew" : "greek"
                     let keyName = Self.canonicalStrongsKeyName(requested: num, actualKey: lookup.actualKey, rawEntry: lookup.rawEntry)
-                    let xml = buildDictionaryEntryXML(rawEntry: lookup.rawEntry, renderedText: lookup.renderedText)
+                    let xml = buildDictionaryEntryXML(
+                        rawEntry: lookup.rawEntry,
+                        renderedText: lookup.renderedText,
+                        strongsLinkPrefix: Self.strongsLinkPrefix(for: num)
+                    )
                     let featuresJSON = "{\"type\":\"\(featureType)\",\"keyName\":\"\(keyName)\"}"
 
                     fragments.append((
@@ -2823,18 +2956,10 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      2. Plain text "see HEBREW for 05774" / "see GREEK for 01234" from StrongsHebrew/Greek modules
      3. Plain text "from 05774" / "From H5774" patterns
      */
-    static func linkifyRenderedDictionaryHTML(_ html: String) -> String {
+    static func linkifyRenderedDictionaryHTML(_ html: String, defaultPrefix: String? = nil) -> String {
         var result = html
 
-        // 1. Transform <ref target="ModuleName/key">text</ref> into clickable links
-        let refPattern = try? NSRegularExpression(
-            pattern: #"<ref\s+target="(?:Strongs(?:Hebrew|Greek|RealGreek)|BDB|OSHB|Thayer)[/:](\d+)"[^>]*>(.*?)</ref>"#,
-            options: [.dotMatchesLineSeparators]
-        )
-        if let regex = refPattern {
-            let range = NSRange(result.startIndex..., in: result)
-            result = regex.stringByReplacingMatches(in: result, range: range, withTemplate: "<a href=\"ab-w://?strong=$1\">$2</a>")
-        }
+        result = linkifyStructuredDictionaryRefs(in: result, defaultPrefix: defaultPrefix)
 
         // Handle bare <ref target="key">text</ref> for any remaining ref tags
         let bareRefPattern = try? NSRegularExpression(
@@ -2843,7 +2968,12 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         )
         if let regex = bareRefPattern {
             let range = NSRange(result.startIndex..., in: result)
-            result = regex.stringByReplacingMatches(in: result, range: range, withTemplate: "<a href=\"ab-w://?strong=$1\">$2</a>")
+            let prefix = defaultPrefix.map { "\($0)" } ?? ""
+            result = regex.stringByReplacingMatches(
+                in: result,
+                range: range,
+                withTemplate: "<a href=\"ab-w://?strong=\(prefix)$1\">$2</a>"
+            )
         }
 
         // 2. Plain text: "see HEBREW for 05774" → link the number
@@ -2872,9 +3002,13 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             pattern: #"(?<=[Ff]rom )(\d{4,5})(?=[;,.\s]|$)"#,
             options: []
         )
-        if let regex = fromPattern {
+        if let regex = fromPattern, let defaultPrefix {
             let range = NSRange(result.startIndex..., in: result)
-            result = regex.stringByReplacingMatches(in: result, range: range, withTemplate: "<a href=\"ab-w://?strong=$1\">$1</a>")
+            result = regex.stringByReplacingMatches(
+                in: result,
+                range: range,
+                withTemplate: "<a href=\"ab-w://?strong=\(defaultPrefix)$1\">$1</a>"
+            )
         }
 
         // 5. Remove <br/> tags immediately before <span class="sense"> — redundant when
@@ -2892,21 +3026,10 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     }
 
     /// Transform raw dictionary XML references into clickable links while preserving TEI structure.
-    static func linkifyRawDictionaryXML(_ xml: String) -> String {
+    static func linkifyRawDictionaryXML(_ xml: String, defaultPrefix: String? = nil) -> String {
         var result = xml
 
-        let refPattern = try? NSRegularExpression(
-            pattern: #"<ref\s+target="(?:Strongs(?:Hebrew|Greek|RealGreek)|BDB|OSHB|Thayer)[/:](\d+)"[^>]*>(.*?)</ref>"#,
-            options: [.dotMatchesLineSeparators]
-        )
-        if let regex = refPattern {
-            let range = NSRange(result.startIndex..., in: result)
-            result = regex.stringByReplacingMatches(
-                in: result,
-                range: range,
-                withTemplate: "<a href=\"ab-w://?strong=$1\">$2</a>"
-            )
-        }
+        result = linkifyStructuredDictionaryRefs(in: result, defaultPrefix: defaultPrefix)
 
         let bareRefPattern = try? NSRegularExpression(
             pattern: #"<ref\s+target="[^"]*?/?(\d+)"[^>]*>(.*?)</ref>"#,
@@ -2914,10 +3037,11 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         )
         if let regex = bareRefPattern {
             let range = NSRange(result.startIndex..., in: result)
+            let prefix = defaultPrefix.map { "\($0)" } ?? ""
             result = regex.stringByReplacingMatches(
                 in: result,
                 range: range,
-                withTemplate: "<a href=\"ab-w://?strong=$1\">$2</a>"
+                withTemplate: "<a href=\"ab-w://?strong=\(prefix)$1\">$2</a>"
             )
         }
 
@@ -2951,16 +3075,40 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             pattern: #"(?<=[Ff]rom )(\d{4,5})(?=[;,.\s]|$)"#,
             options: []
         )
-        if let regex = fromPattern {
+        if let regex = fromPattern, let defaultPrefix {
             let range = NSRange(result.startIndex..., in: result)
             result = regex.stringByReplacingMatches(
                 in: result,
                 range: range,
-                withTemplate: "<a href=\"ab-w://?strong=$1\">$1</a>"
+                withTemplate: "<a href=\"ab-w://?strong=\(defaultPrefix)$1\">$1</a>"
             )
         }
 
         return result
+    }
+
+    private static func linkifyStructuredDictionaryRefs(in source: String, defaultPrefix: String?) -> String {
+        let refPattern = try? NSRegularExpression(
+            pattern: #"<ref\s+target="(StrongsHebrew|StrongsGreek|StrongsRealGreek|BDB|OSHB|Thayer)[/:](\d+)"[^>]*>(.*?)</ref>"#,
+            options: [.dotMatchesLineSeparators]
+        )
+        guard let regex = refPattern else { return source }
+
+        let mutable = NSMutableString(string: source)
+        let matches = regex.matches(in: source, range: NSRange(source.startIndex..., in: source))
+        guard !matches.isEmpty else { return source }
+
+        let nsSource = source as NSString
+        for match in matches.reversed() {
+            let moduleName = nsSource.substring(with: match.range(at: 1))
+            let digits = nsSource.substring(with: match.range(at: 2))
+            let text = nsSource.substring(with: match.range(at: 3))
+            let prefix = strongsLinkPrefix(forModuleName: moduleName) ?? defaultPrefix ?? ""
+            let replacement = "<a href=\"ab-w://?strong=\(prefix)\(digits)\">\(text)</a>"
+            mutable.replaceCharacters(in: match.range, with: replacement)
+        }
+
+        return mutable as String
     }
 
     /// Build a MultiFragmentDocument JSON string for rendering in Vue.js document views.
@@ -3010,13 +3158,15 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      `G1234` / `H1234`, and some zLD modules require a trailing carriage return.
      */
     private func buildKeyOptions(for strongsNumber: String) -> [String] {
+        Self.strongsLookupKeyOptions(for: strongsNumber)
+    }
+
+    /// Shared Strong's lookup key variants used by reader dictionary resolution and tests.
+    static func strongsLookupKeyOptions(for strongsNumber: String) -> [String] {
         let original = strongsNumber.trimmingCharacters(in: .whitespacesAndNewlines)
         let numberOnly = String(original.drop(while: { $0.isLetter }))
         let stripped = numberOnly.replacingOccurrences(of: "^0+", with: "", options: .regularExpression)
         let sanitizedBase = stripped.isEmpty ? numberOnly : stripped
-        let padded = sanitizedBase.count < 5
-            ? String(repeating: "0", count: 5 - sanitizedBase.count) + sanitizedBase
-            : sanitizedBase
 
         let categoryPrefix: String
         if original.uppercased().hasPrefix("H") {
@@ -3034,12 +3184,20 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             keys.append(candidate)
         }
 
+        var digitVariants: [String] = [numberOnly]
+        var currentDigits = numberOnly
+        while currentDigits.hasPrefix("0"), currentDigits.count > 1 {
+            currentDigits.removeFirst()
+            digitVariants.append(currentDigits)
+        }
+
         appendUnique(original)
-        appendUnique(padded)
-        appendUnique(padded + "\r")
-        appendUnique("\(categoryPrefix)\(sanitizedBase)")
+        for digits in digitVariants {
+            appendUnique(digits)
+            appendUnique(digits + "\r")
+            appendUnique("\(categoryPrefix)\(digits)")
+        }
         appendUnique(sanitizedBase)
-        appendUnique(numberOnly)
 
         return keys
     }
@@ -3067,31 +3225,28 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             let trimmedKey = actualKey.trimmingCharacters(in: .whitespacesAndNewlines)
             logger.info("lookupInModule: tried key='\(key)', actualKey='\(trimmedKey)', renderLen=\(candidate.count)")
 
-            // Verify the key actually matched. SWORD dictionary modules silently
-            // position to the nearest entry when the exact key doesn't exist.
-            if !trimmedKey.isEmpty {
-                if !keysMatchNormalized(requested: key, actual: trimmedKey) {
-                    logger.info("lookupInModule: key mismatch, skipping")
-                    continue
-                }
-            }
-
-            if let rawEntryKey = Self.dictionaryEntryKey(actualKey: "", rawEntry: inspection.rawEntry),
-               !Self.rawDictionaryEntryMatchesRequestedKey(requested: key, rawEntry: inspection.rawEntry) {
+            switch Self.dictionaryLookupCandidateRejectionReason(
+                requested: key,
+                actualKey: trimmedKey,
+                rawEntry: inspection.rawEntry,
+                renderedText: candidate
+            ) {
+            case .none:
+                break
+            case .actualKeyMismatch:
+                logger.info("lookupInModule: key mismatch, skipping")
+                continue
+            case let .rawEntryMismatch(rawEntryKey):
                 logger.info("lookupInModule: raw entry key mismatch (\(rawEntryKey)), skipping")
                 continue
-            }
-
-            if candidate.isEmpty || candidate.contains("@@@@") { continue }
-
-            // For modules where currentKey() returns empty (some zLD modules like
-            // BDBGlosses), verify the content references the requested Strong's number.
-            // Without this check, these modules return whatever entry they're stuck on.
-            if trimmedKey.isEmpty {
-                let numericKey = Self.normalizeNumericKey(key)
-                if !numericKey.isEmpty && !candidate.contains(numericKey) {
-                    continue
-                }
+            case .emptyRenderedText:
+                continue
+            case .renderedEntryMismatch:
+                logger.info("lookupInModule: rendered entry key mismatch, skipping")
+                continue
+            case .renderedTextMissingRequestedNumericKey:
+                logger.info("lookupInModule: rendered text missing requested numeric key, skipping")
+                continue
             }
 
             return DictionaryLookupResult(
@@ -3103,10 +3258,18 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         return nil
     }
 
-    private func buildDictionaryEntryXML(rawEntry: String, renderedText: String, fallbackTitle: String? = nil) -> String {
+    private func buildDictionaryEntryXML(
+        rawEntry: String,
+        renderedText: String,
+        fallbackTitle: String? = nil,
+        strongsLinkPrefix: String? = nil
+    ) -> String {
         let trimmedRawEntry = rawEntry.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmedRawEntry.hasPrefix("<"), trimmedRawEntry.hasSuffix(">") {
-            let linkifiedRawEntry = Self.linkifyRawDictionaryXML(trimmedRawEntry)
+            let linkifiedRawEntry = Self.linkifyRawDictionaryXML(
+                trimmedRawEntry,
+                defaultPrefix: strongsLinkPrefix
+            )
             if let fallbackTitle, !trimmedRawEntry.localizedCaseInsensitiveContains("<title") {
                 let escapedTitle = escapeXML(fallbackTitle)
                 return "<div><title type=\"x-gen\">\(escapedTitle)</title>\(linkifiedRawEntry)</div>"
@@ -3114,9 +3277,31 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             return "<div>\(linkifiedRawEntry)</div>"
         }
 
-        let linkifiedHtml = Self.linkifyRenderedDictionaryHTML(renderedText)
+        let linkifiedHtml = Self.linkifyRenderedDictionaryHTML(
+            renderedText,
+            defaultPrefix: strongsLinkPrefix
+        )
         let titlePrefix = fallbackTitle.map { "<title type=\"x-gen\">\(escapeXML($0))</title>" } ?? ""
         return "<div>\(titlePrefix)<div type=\"paragraph\">\(linkifiedHtml)</div></div>"
+    }
+
+    private static func strongsLinkPrefix(for value: String) -> String? {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        guard let prefix = trimmed.first, prefix == "H" || prefix == "G" else {
+            return nil
+        }
+        return String(prefix)
+    }
+
+    private static func strongsLinkPrefix(forModuleName moduleName: String) -> String? {
+        switch moduleName {
+        case "StrongsHebrew", "BDB", "OSHB":
+            return "H"
+        case "StrongsGreek", "StrongsRealGreek", "Thayer":
+            return "G"
+        default:
+            return nil
+        }
     }
 
     static func canonicalStrongsKeyName(requested: String, actualKey: String, rawEntry: String) -> String {
@@ -3169,12 +3354,110 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         return !requestedNumeric.isEmpty && requestedNumeric == resolvedNumeric
     }
 
+    enum DictionaryLookupCandidateRejectionReason: Equatable {
+        case actualKeyMismatch
+        case rawEntryMismatch(String)
+        case emptyRenderedText
+        case renderedEntryMismatch
+        case renderedTextMissingRequestedNumericKey
+    }
+
+    static func dictionaryLookupCandidateRejectionReason(
+        requested: String,
+        actualKey: String,
+        rawEntry: String,
+        renderedText: String
+    ) -> DictionaryLookupCandidateRejectionReason? {
+        let trimmedActualKey = actualKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedRenderedText = renderedText.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // Verify the key actually matched. SWORD dictionary modules silently
+        // position to the nearest entry when the exact key doesn't exist.
+        if !trimmedActualKey.isEmpty,
+           !keysMatchNormalized(requested: requested, actual: trimmedActualKey) {
+            return .actualKeyMismatch
+        }
+
+        if let rawEntryKey = dictionaryEntryKey(actualKey: "", rawEntry: rawEntry),
+           !rawDictionaryEntryMatchesRequestedKey(requested: requested, rawEntry: rawEntry) {
+            return .rawEntryMismatch(rawEntryKey)
+        }
+
+        if trimmedRenderedText.isEmpty || trimmedRenderedText.contains("@@@@") {
+            return .emptyRenderedText
+        }
+
+        if !renderedDictionaryEntryMatchesRequestedKey(
+            requested: requested,
+            renderedText: trimmedRenderedText
+        ) {
+            return .renderedEntryMismatch
+        }
+
+        // For modules where currentKey() returns empty (some zLD modules like
+        // BDBGlosses), verify the content references the requested Strong's number.
+        // Without this check, these modules return whatever entry they're stuck on.
+        if trimmedActualKey.isEmpty {
+            let numericKey = normalizeNumericKey(requested)
+            if !numericKey.isEmpty && !trimmedRenderedText.contains(numericKey) {
+                return .renderedTextMissingRequestedNumericKey
+            }
+        }
+
+        return nil
+    }
+
+    static func renderedDictionaryEntryKey(renderedText: String) -> String? {
+        let withoutTags = renderedText.replacingOccurrences(
+            of: #"<[^>]+>"#,
+            with: " ",
+            options: .regularExpression
+        )
+        let normalized = withoutTags
+            .replacingOccurrences(of: "&nbsp;", with: " ")
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !normalized.isEmpty else { return nil }
+
+        let pattern = try? NSRegularExpression(
+            pattern: #"^([HG]?\d{1,5})\b"#,
+            options: [.caseInsensitive]
+        )
+        guard let regex = pattern,
+              let match = regex.firstMatch(
+                in: normalized,
+                range: NSRange(normalized.startIndex..., in: normalized)
+              ),
+              let range = Range(match.range(at: 1), in: normalized) else {
+            return nil
+        }
+
+        return String(normalized[range]).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    static func renderedDictionaryEntryMatchesRequestedKey(requested: String, renderedText: String) -> Bool {
+        guard let resolvedKey = renderedDictionaryEntryKey(renderedText: renderedText) else {
+            return true
+        }
+
+        let trimmedRequested = requested.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedResolvedKey = resolvedKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmedRequested.caseInsensitiveCompare(trimmedResolvedKey) == .orderedSame {
+            return true
+        }
+
+        let requestedNumeric = normalizeNumericKey(trimmedRequested)
+        let resolvedNumeric = normalizeNumericKey(trimmedResolvedKey)
+        return !requestedNumeric.isEmpty && requestedNumeric == resolvedNumeric
+    }
+
     /**
      Compare two dictionary keys by normalizing: strip letter prefixes, leading zeros,
      and compare case-insensitively. Handles Strong's variants ("01121" == "1121" == "H1121")
      and non-numeric keys like Robinson morphology codes ("V-2AAI-3S").
      */
-    private func keysMatchNormalized(requested: String, actual: String) -> Bool {
+    static func keysMatchNormalized(requested: String, actual: String) -> Bool {
         let trimmedRequested = requested.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedActual = actual.trimmingCharacters(in: .whitespacesAndNewlines)
 
@@ -4045,6 +4328,13 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         bridge.emit(event: "setup_content", data: """
         {"jumpToOrdinal":\(jumpOrdinal),"jumpToAnchor":null,"jumpToId":\(jumpToId),"topOffset":0,"bottomOffset":0}
         """)
+        setRenderedContentState(
+            category: .bible,
+            moduleName: activeModuleName,
+            book: currentBook,
+            chapter: currentChapter,
+            key: "\(osisBookId).\(currentChapter)"
+        )
         emitActiveState()
 
         // Clear any accidental text selection and re-apply background

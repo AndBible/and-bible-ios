@@ -67,19 +67,22 @@ enum StrongsSearchSupport {
         let digitsRaw = String(candidate.dropFirst())
         guard !digitsRaw.isEmpty, digitsRaw.allSatisfy(\.isNumber) else { return nil }
 
-        let stripped = String(digitsRaw.drop(while: { $0 == "0" }))
-        let normalizedDigits = stripped.isEmpty ? "0" : stripped
-        // SWORD ENTRYATTR query format: "Word//Lemma./value"
-        // Value is substring-matched (case-insensitive) by SWORD, so
-        // "H08414" matches "strong:H08414" stored in the Lemma attribute.
-        var entryAttributeQueries: [String] = []
-        entryAttributeQueries.append("Word//Lemma./\(prefix)\(digitsRaw)")
-        if normalizedDigits != digitsRaw {
-            entryAttributeQueries.append("Word//Lemma./\(prefix)\(normalizedDigits)")
+        // SWORD lemma storage is inconsistent about zero padding. Some modules use
+        // the fully padded key, some use a partially trimmed key (for example
+        // H00430 -> H0430), and some use the fully stripped form.
+        var digitVariants: [String] = [digitsRaw]
+        var currentDigits = digitsRaw
+        while currentDigits.hasPrefix("0"), currentDigits.count > 1 {
+            currentDigits.removeFirst()
+            digitVariants.append(currentDigits)
         }
 
+        let entryAttributeQueries = orderedUnique(
+            digitVariants.map { "Word//Lemma./\(prefix)\($0)" }
+        )
+
         return NormalizedStrongsQueryOptions(
-            entryAttributeQueries: orderedUnique(entryAttributeQueries)
+            entryAttributeQueries: entryAttributeQueries
         )
     }
 

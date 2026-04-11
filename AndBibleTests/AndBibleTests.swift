@@ -113,7 +113,15 @@ final class AndBibleTests: XCTestCase {
         let options = StrongsSearchSupport.normalizedQueryOptions(for: "lemma:strong:g00123")
         XCTAssertEqual(
             options?.entryAttributeQueries,
-            ["Word//Lemma./G00123", "Word//Lemma./G123"]
+            ["Word//Lemma./G00123", "Word//Lemma./G0123", "Word//Lemma./G123"]
+        )
+    }
+
+    func testStrongsQueryNormalizationIncludesIntermediateZeroTrimVariants() {
+        let options = StrongsSearchSupport.normalizedQueryOptions(for: "H00430")
+        XCTAssertEqual(
+            options?.entryAttributeQueries,
+            ["Word//Lemma./H00430", "Word//Lemma./H0430", "Word//Lemma./H430"]
         )
     }
 
@@ -168,6 +176,29 @@ final class AndBibleTests: XCTestCase {
         XCTAssertTrue(
             hits.allSatisfy { !$0.reference.isEmpty },
             "Expected Strong's hits to parse into verse references"
+        )
+    }
+
+    func testStrongsSearchFindAllOccurrencesSupportsIntermediateZeroTrimVariant() throws {
+        let modulePath = try makeTemporaryBundledSwordPath()
+        let manager = try XCTUnwrap(
+            SwordManager(modulePath: modulePath),
+            "Expected SwordManager to initialize against a temporary bundled sword module path"
+        )
+        let module = try XCTUnwrap(
+            manager.module(named: "KJV"),
+            "Expected bundled KJV module to be available for Strong's regression testing"
+        )
+        let queryOptions = try XCTUnwrap(
+            StrongsSearchSupport.normalizedQueryOptions(for: "H00430"),
+            "Expected H00430 to normalize into Strong's search queries"
+        )
+
+        let hits = StrongsSearchSupport.searchVerseHits(in: module, queryOptions: queryOptions)
+
+        XCTAssertFalse(
+            hits.isEmpty,
+            "Expected the bundled KJV Strong's search for H00430 to return at least one verse"
         )
     }
 
@@ -280,12 +311,46 @@ final class AndBibleTests: XCTestCase {
         <entryFree n="6440"><def>From 6437; see HEBREW for 05774 and <ref target="StrongsHebrew/02421">2421</ref>.</def></entryFree>
         """
 
-        let linkified = BibleReaderController.linkifyRawDictionaryXML(rawEntry)
+        let linkified = BibleReaderController.linkifyRawDictionaryXML(rawEntry, defaultPrefix: "H")
 
         XCTAssertTrue(linkified.contains("<entryFree"))
-        XCTAssertTrue(linkified.contains("<a href=\"ab-w://?strong=6437\">6437</a>"))
+        XCTAssertTrue(linkified.contains("<a href=\"ab-w://?strong=H6437\">6437</a>"))
         XCTAssertTrue(linkified.contains("see HEBREW for <a href=\"ab-w://?strong=H05774\">05774</a>"))
-        XCTAssertTrue(linkified.contains("<a href=\"ab-w://?strong=02421\">2421</a>"))
+        XCTAssertTrue(linkified.contains("<a href=\"ab-w://?strong=H02421\">2421</a>"))
+    }
+
+    func testStrongsLookupKeyOptionsIncludeIntermediateZeroTrimVariants() {
+        XCTAssertEqual(
+            BibleReaderController.strongsLookupKeyOptions(for: "H00430"),
+            ["H00430", "00430", "00430\r", "0430", "0430\r", "H0430", "430", "430\r", "H430"]
+        )
+    }
+
+    func testDictionaryLookupCandidateRejectsNearestEntryLeakForIntermediateZeroTrimKey() {
+        let rawEntry = """
+        <entryFree n="430"><orth>אֱלֹהִים</orth></entryFree>
+        """
+        let renderedText = """
+        <div><p>8674 Tatnay tat-ten-ah'-ee of foreign derivation; Tattenai.</p></div>
+        """
+
+        XCTAssertEqual(
+            BibleReaderController.dictionaryLookupCandidateRejectionReason(
+                requested: "H00430",
+                actualKey: "0430",
+                rawEntry: rawEntry,
+                renderedText: renderedText
+            ),
+            .renderedEntryMismatch
+        )
+        XCTAssertNil(
+            BibleReaderController.dictionaryLookupCandidateRejectionReason(
+                requested: "H00430",
+                actualKey: "0430",
+                rawEntry: rawEntry,
+                renderedText: "<div><p>430 'elohiym gods in the ordinary sense.</p></div>"
+            )
+        )
     }
 
     func testRawDictionaryEntryMatchesRequestedKeyRejectsMisboundRawEntries() {
@@ -308,6 +373,50 @@ final class AndBibleTests: XCTestCase {
                 rawEntry: matchingRawEntry
             )
         )
+    }
+
+    func testRenderedDictionaryEntryKeyExtractsLeadingNumericHeadword() {
+        let rendered = """
+        <div><p>8674 Tatnay tat-ten-ah'-ee of foreign derivation; Tattenai.</p></div>
+        """
+
+        XCTAssertEqual(
+            BibleReaderController.renderedDictionaryEntryKey(renderedText: rendered),
+            "8674"
+        )
+    }
+
+    func testRenderedDictionaryEntryMatchesRequestedKeyRejectsMismatchedRenderedHeadword() {
+        let rendered = """
+        <div><p>8674 Tatnay tat-ten-ah'-ee of foreign derivation; Tattenai.</p></div>
+        """
+
+        XCTAssertFalse(
+            BibleReaderController.renderedDictionaryEntryMatchesRequestedKey(
+                requested: "H00430",
+                renderedText: rendered
+            )
+        )
+        XCTAssertTrue(
+            BibleReaderController.renderedDictionaryEntryMatchesRequestedKey(
+                requested: "H00430",
+                renderedText: "<div><p>430 'elohiym gods in the ordinary sense.</p></div>"
+            )
+        )
+    }
+
+    func testRenderedDictionaryEntryMatchesRequestedKeyIgnoresCrossReferenceOnlyNumbers() {
+        let rendered = """
+        <div><p>From 6437; see HEBREW for 05774 and 02421.</p></div>
+        """
+
+        XCTAssertTrue(
+            BibleReaderController.renderedDictionaryEntryMatchesRequestedKey(
+                requested: "H05774",
+                renderedText: rendered
+            )
+        )
+        XCTAssertNil(BibleReaderController.renderedDictionaryEntryKey(renderedText: rendered))
     }
 
     func testIsSupportedStrongsDictionaryModuleNameMatchesAndroidCuratedPolicy() {

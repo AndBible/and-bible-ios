@@ -20,6 +20,7 @@
   "AndBibleUITests/AndBibleUITests/testLabelAssignmentTogglesFavouriteAndAssignment": "bookmark-row-label",
   "AndBibleUITests/AndBibleUITests/testLabelManagerCreateRenameDeleteFlow": "baseline",
   "AndBibleUITests/AndBibleUITests/testReadingPlansStartPlanAndAdvanceDay": "baseline",
+  "AndBibleUITests/AndBibleUITests/testSearchDirectLaunchStrongsQueryReturnsBundledResults": "search-indexed",
   "AndBibleUITests/AndBibleUITests/testSearchDirectLaunchUsesSeededIndexAndReturnsBundledResults": "search-indexed",
   "AndBibleUITests/AndBibleUITests/testSearchDirectLaunchRetainsSeededQuery": "search-indexed",
   "AndBibleUITests/AndBibleUITests/testSearchResultSelectionNavigatesReaderToBundledReference": "search-indexed",
@@ -35,6 +36,8 @@
   "AndBibleUITests/AndBibleUITests/testSyncSettingsCategoryDisablePersistsAcrossDirectReopen": "sync-nextcloud-bookmarks-enabled",
   "AndBibleUITests/AndBibleUITests/testSyncSettingsCategoryToggleMutatesExportedState": "sync-nextcloud-bookmarks-enabled",
   "AndBibleUITests/AndBibleUITests/testSyncSettingsNextCloudInvalidURLShowsValidationStatus": "sync-nextcloud",
+  "AndBibleUITests/AndBibleUITests/testThirdWindowBookmarkNavigationUpdatesOnlyTargetPaneContent": "bookmark-navigation",
+  "AndBibleUITests/AndBibleUITests/testThirdWindowDocumentSwitchUpdatesOnlyTargetPaneContent": "baseline",
   "AndBibleUITests/AndBibleUITests/testTextDisplayFontFamilyButtonPresentsFontPicker": "baseline",
   "AndBibleUITests/AndBibleUITests/testTextDisplayJustifyToggleMutatesControlState": "baseline",
   "AndBibleUITests/AndBibleUITests/testWorkspaceSelectorCreateAndSwitchFlow": "baseline"

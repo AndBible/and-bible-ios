@@ -949,6 +949,12 @@ public struct SearchView: View {
        skips index inspection, marks the view ready, and continues without indexed search setup
      */
     private func checkIndex() {
+        if StrongsSearchSupport.normalizedQueryOptions(for: query) != nil {
+            viewState = .ready
+            autoSearchIfNeeded()
+            return
+        }
+
         guard let service = searchIndexService, let mod = swordModule else {
             // No service or module — skip index check, go directly to ready
             viewState = .ready

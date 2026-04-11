@@ -37,6 +37,7 @@
 
 <script setup lang="ts">
 import {checkUnsupportedProps, useCommon} from "@/composables";
+import {buildStrongsLinkFromAttributes} from "@/composables/strongs-links";
 import {addEventFunction, EventPriorities, navigateLink} from "@/utils";
 import {computed, inject, ref} from "vue";
 import {strongsModes} from "@/composables/config";
@@ -77,21 +78,7 @@ function formatName(string: string): string {
 }
 
 function formatLink(first?: string, second?: string): string {
-    const linkBodies = [];
-
-    function toArgs(string: string): string {
-        return prep(string).map(s => s.trim().replace(/ /g, "_").replace(/:/g, "=")).join("&");
-    }
-
-    if (first) {
-        linkBodies.push(toArgs(first))
-    }
-    if (second) {
-        linkBodies.push(toArgs(second))
-    }
-    // Link format:
-    // ab-w://?robinson=x&strong=y&strong=z, x and y have ' ' replaced to '_'.
-    return "ab-w://?" + linkBodies.join("&")
+    return buildStrongsLinkFromAttributes(first, second);
 }
 
 function goToLink(event: MouseEvent, url: string) {

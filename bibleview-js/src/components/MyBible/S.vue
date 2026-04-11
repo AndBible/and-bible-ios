@@ -26,6 +26,7 @@
 import {computed, inject, ref} from "vue";
 import {strongsModes} from "@/composables/config";
 import {useCommon} from "@/composables";
+import {buildStrongsLinkFromDisplayValue} from "@/composables/strongs-links";
 import {addEventFunction, EventPriorities, navigateLink} from "@/utils";
 import {exportModeKey, osisFragmentKey} from "@/types/constants";
 import {OsisFragment} from "@/types/client-objects";
@@ -38,7 +39,7 @@ const letter = osisFragment?.isNewTestament ? "G" : "H";
 const link = computed(() => {
     if (slot.value === null) return;
     const strongsNum = slot.value.innerText
-    return `ab-w://?strong=${letter}${strongsNum}`
+    return buildStrongsLinkFromDisplayValue(letter, strongsNum)
 });
 const {config, strings} = useCommon();
 

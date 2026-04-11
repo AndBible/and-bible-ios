@@ -24,6 +24,27 @@ import {Nullable} from "@/types/common";
 
 export type UseScroll = ReturnType<typeof useScroll>;
 
+export function resolveScrollToVerseRequest(
+    {
+        ordinal = null,
+        now = false,
+        highlight = false,
+        force = false,
+        duration = undefined,
+    }: {
+        ordinal: Nullable<number>,
+        now?: boolean,
+        highlight?: boolean,
+        force?: boolean,
+        duration?: number,
+    }
+) {
+    return {
+        targetId: ordinal == null ? null : `o-${ordinal}`,
+        options: {now, highlight, force, duration},
+    };
+}
+
 export function useScroll(
     config: Config,
     appSettings: AppSettings,
@@ -224,8 +245,16 @@ export function useScroll(
     }
 
     setupEventBusListener("set_offsets", setToolbarOffset)
-    setupEventBusListener("scroll_to_verse", scrollToId)
+    setupEventBusListener("scroll_to_verse", (request: {
+        ordinal: Nullable<number>,
+        now?: boolean,
+        highlight?: boolean,
+        force?: boolean,
+        duration?: number,
+    }) => {
+        const {targetId, options} = resolveScrollToVerseRequest(request);
+        scrollToId(targetId, options);
+    })
     setupEventBusListener("setup_content", setupContent)
     return {scrollToId, isScrolling, doScrolling, scrollYAtStart, scrollY}
 }
-

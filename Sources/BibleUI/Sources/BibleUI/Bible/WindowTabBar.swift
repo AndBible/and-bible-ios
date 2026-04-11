@@ -53,10 +53,12 @@ struct WindowTabBar: View {
                         .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
                 }
                 .buttonStyle(.plain)
+                .accessibilityIdentifier("windowTabAddButton")
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
         }
+        .accessibilityIdentifier("windowTabBar")
         .background(.bar)
         .alert(String(localized: "go_to_reference"), isPresented: $showGoToRefAlert) {
             TextField(String(localized: "go_to_reference_placeholder"), text: $goToRefText)
@@ -142,6 +144,14 @@ struct WindowTabBar: View {
             .opacity(isMinimized ? 0.5 : 1.0)
         }
         .buttonStyle(.plain)
+        .accessibilityIdentifier("windowTabButton::\(window.orderNumber)")
+        .accessibilityValue(windowTabAccessibilityValue(
+            isActive: isActive,
+            isMinimized: isMinimized,
+            categoryName: categoryName,
+            moduleName: moduleName,
+            reference: reference
+        ))
         .contextMenu {
             // Content actions
             if !isMinimized {
@@ -237,6 +247,30 @@ struct WindowTabBar: View {
             }
             .disabled(windowManager.allWindows.count <= 1)
         }
+    }
+
+    /// Stable XCUITest summary of one tab's current state.
+    private func windowTabAccessibilityValue(
+        isActive: Bool,
+        isMinimized: Bool,
+        categoryName: String,
+        moduleName: String,
+        reference: String
+    ) -> String {
+        func token(_ raw: String) -> String {
+            raw
+                .replacingOccurrences(of: ";", with: "_")
+                .replacingOccurrences(of: ",", with: "_")
+                .replacingOccurrences(of: "\n", with: " ")
+        }
+
+        return [
+            "state=\(isActive ? "active" : "inactive")",
+            "minimized=\(isMinimized)",
+            "category=\(categoryName)",
+            "module=\(token(moduleName))",
+            "reference=\(token(reference))",
+        ].joined(separator: ";")
     }
 
     /// Returns a compact OSIS-style reference summary for display inside the tab pill.

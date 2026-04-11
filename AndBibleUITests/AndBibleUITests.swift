@@ -231,6 +231,26 @@ final class AndBibleUITests: XCTestCase {
     }
 
     /**
+     Verifies that a bundled Strong's query reaches the direct lemma-search path and returns hits.
+     *
+     * - Side effects:
+     *   - launches the app directly into Search with one deterministic Strong's query
+     *   - waits for Search to bypass any FTS index prompt and settle with non-zero results
+     * - Failure modes:
+     *   - fails if Search never reaches the ready state for the Strong's query
+     *   - fails if the bundled Strong's-capable Bible still reports zero matches
+     */
+    func testSearchDirectLaunchStrongsQueryReturnsBundledResults() {
+        let app = makeApp(searchQuery: "H00430")
+        app.launch()
+
+        _ = openSearch(in: app)
+        XCTAssertTrue(requireElement("searchQueryField", in: app, timeout: 5).exists)
+        waitForSearchState(containing: "query=H00430", in: app, timeout: 20)
+        waitForSearchResultCount(atLeast: 1, in: app, timeout: 20)
+    }
+
+    /**
      Verifies that an active reading plan can advance from day one to day two.
      *
      * - Side effects:
@@ -429,6 +449,126 @@ final class AndBibleUITests: XCTestCase {
         XCTAssertTrue(
             updatedReference.localizedCaseInsensitiveContains("Exodus 2"),
             "Expected selecting the seeded bookmark to navigate to Exodus 2, but saw '\(updatedReference)'."
+        )
+    }
+
+    /**
+     Verifies that bookmark navigation from a third window updates only that pane's rendered content.
+     *
+     * - Side effects:
+     *   - launches the seeded bookmark-navigation fixture on the reader shell
+     *   - creates two additional windows, activates the third one, opens the bookmark list from
+     *     that pane, and selects the seeded `Exodus 2:1` row
+     *   - switches back to the first window to confirm its rendered content stayed on `Genesis 1`
+     * - Failure modes:
+     *   - fails if the extra windows cannot be created or activated
+     *   - fails if the third window does not render `Exodus 2`
+     *   - fails if the first window's rendered content also changes away from `Genesis 1`
+     */
+    func testThirdWindowBookmarkNavigationUpdatesOnlyTargetPaneContent() {
+        let app = makeApp()
+        app.launch()
+
+        waitForReaderRenderedContentState(
+            containing: "windowOrder=0;category=bible;module=KJV;book=Genesis;chapter=1",
+            in: app,
+            timeout: 20
+        )
+
+        tapElementReliably(requireElement("windowTabAddButton", in: app, timeout: 10), timeout: 10)
+        _ = requireElement("windowTabButton::1", in: app, timeout: 10)
+        tapElementReliably(requireElement("windowTabAddButton", in: app, timeout: 10), timeout: 10)
+        _ = requireElement("windowTabButton::2", in: app, timeout: 10)
+
+        tapWindowTab(2, in: app, timeout: 10)
+        waitForReaderRenderedContentState(
+            containing: "windowOrder=2;category=bible;module=KJV;book=Genesis;chapter=1",
+            in: app,
+            timeout: 20
+        )
+
+        _ = openBookmarkList(in: app)
+        tapElementReliably(requireBookmarkRow("Exodus_2_1", in: app, timeout: 10), timeout: 10)
+        waitForReaderRenderedContentState(
+            containing: "windowOrder=2;category=bible;module=KJV;book=Exodus;chapter=2",
+            in: app,
+            timeout: 20
+        )
+
+        tapWindowTab(0, in: app, timeout: 10)
+        waitForReaderRenderedContentState(
+            containing: "windowOrder=0;category=bible;module=KJV;book=Genesis;chapter=1",
+            in: app,
+            timeout: 20
+        )
+    }
+
+    /**
+     Verifies that a third-window document-type switch updates that pane's content instead of only
+     mutating tab chrome.
+     *
+     * - Side effects:
+     *   - launches the baseline reader shell, creates two additional windows, and activates the
+     *     third one
+     *   - switches that third pane into commentary and then back into Bible using the real toolbar
+     *     document controls and, when needed, the real module picker
+     *   - switches back to the first tab to confirm its rendered content never left `Genesis 1`
+     * - Failure modes:
+     *   - fails if the third window cannot be activated
+     *   - fails if the third pane never reports `category=commentary` and then `category=bible`
+     *   - fails if the first pane's rendered content drifts while the third pane is changing modes
+     */
+    func testThirdWindowDocumentSwitchUpdatesOnlyTargetPaneContent() {
+        let app = makeApp()
+        app.launch()
+
+        waitForReaderRenderedContentState(
+            containing: "windowOrder=0;category=bible;module=KJV;book=Genesis;chapter=1",
+            in: app,
+            timeout: 20
+        )
+
+        tapElementReliably(requireElement("windowTabAddButton", in: app, timeout: 10), timeout: 10)
+        _ = requireElement("windowTabButton::1", in: app, timeout: 10)
+        tapElementReliably(requireElement("windowTabAddButton", in: app, timeout: 10), timeout: 10)
+        _ = requireElement("windowTabButton::2", in: app, timeout: 10)
+
+        tapWindowTab(2, in: app, timeout: 10)
+        waitForReaderRenderedContentState(
+            containing: "windowOrder=2;category=bible",
+            in: app,
+            timeout: 20
+        )
+
+        tapElementReliably(requireElement("readerCommentaryToolbarButton", in: app, timeout: 10), timeout: 10)
+        if waitForAnyElement(["modulePickerScreen"], in: app, timeout: 3) != nil {
+            tapFirstModulePickerRow(in: app, timeout: 10)
+        }
+        waitForReaderRenderedContentState(
+            containing: "windowOrder=2;category=commentary",
+            in: app,
+            timeout: 20
+        )
+
+        tapElementReliably(requireElement("readerBibleToolbarButton", in: app, timeout: 10), timeout: 10)
+        if waitForAnyElement(["modulePickerScreen"], in: app, timeout: 3) != nil {
+            if let kjvRow = resolvedElement("modulePickerRow::KJV", in: app) {
+                tapElementReliably(kjvRow, timeout: 10)
+            } else {
+                tapFirstModulePickerRow(in: app, timeout: 10)
+            }
+        }
+        waitForReaderRenderedContentState(
+            containing: "windowOrder=2;category=bible",
+            in: app,
+            timeout: 20
+        )
+
+        tapWindowTab(0, in: app, timeout: 10)
+        waitForReaderRenderedContentState(
+            containing: "windowOrder=0;category=bible;module=KJV;book=Genesis;chapter=1",
+            in: app,
+            timeout: 20
         )
     }
 
@@ -2397,6 +2537,77 @@ final class AndBibleUITests: XCTestCase {
     }
 
     /**
+     Waits for Search to report at least one settled result row count.
+     *
+     * - Parameters:
+     *   - minimumCount: Inclusive lower bound for the exported `results=` count.
+     *   - app: Running application under test.
+     *   - timeout: Maximum time to wait before failing.
+     * - Side effects:
+     *   - polls the Search accessibility export until it reports `state=ready;searching=false`
+     *     with a parsed result count at or above `minimumCount`
+     * - Failure modes:
+     *   - fails the test if Search never publishes a large-enough settled count
+     */
+    private func waitForSearchResultCount(
+        atLeast minimumCount: Int,
+        in app: XCUIApplication,
+        timeout: TimeInterval
+    ) {
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            if let searchScreen = resolvedElement("searchScreen", in: app),
+               let value = searchScreen.value as? String,
+               value.contains("state=ready"),
+               value.contains("searching=false"),
+               let count = searchResultCount(from: value),
+               count >= minimumCount {
+                return
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.25))
+        } while Date() < deadline
+
+        let searchScreen = requireSearchScreen(in: app, timeout: 1)
+        let lastValue = searchScreen.value.map { "\($0)" } ?? "nil"
+        XCTFail(
+            "Expected Search to report at least \(minimumCount) results within \(timeout) seconds; last value was '\(lastValue)'."
+        )
+    }
+
+    /// Parses the deterministic `results=` token from Search accessibility state.
+    private func searchResultCount(from state: String) -> Int? {
+        guard let range = state.range(of: "results=") else { return nil }
+        let suffix = state[range.upperBound...]
+        let digits = suffix.prefix { $0.isNumber }
+        return digits.isEmpty ? nil : Int(digits)
+    }
+
+    /// Taps the first visible module row inside the real module picker sheet.
+    private func tapFirstModulePickerRow(
+        in app: XCUIApplication,
+        timeout: TimeInterval,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let screen = requireElement("modulePickerScreen", in: app, timeout: timeout, file: file, line: line)
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            let button = screen.buttons.element(boundBy: 0)
+            if button.exists {
+                tapElementReliably(button, timeout: timeout, file: file, line: line)
+                return
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        } while Date() < deadline
+
+        XCTFail(
+            "Expected module picker to expose at least one selectable module row within \(timeout) seconds.",
+            file: file,
+            line: line
+        )
+    }
+
+    /**
      Taps one visible button by its accessibility label and waits for it to become hittable.
      *
      * - Parameters:
@@ -3738,6 +3949,13 @@ final class AndBibleUITests: XCTestCase {
             ]
         }
 
+        if identifier.hasPrefix("windowTabButton::") || identifier.hasPrefix("modulePickerRow::") {
+            return [
+                app.buttons[identifier].firstMatch,
+                app.otherElements[identifier].firstMatch,
+            ]
+        }
+
         switch identifier {
         case "readerNavigationDrawer":
             return [
@@ -3756,11 +3974,27 @@ final class AndBibleUITests: XCTestCase {
             return [
                 app.buttons[identifier].firstMatch,
             ]
+        case "readerBibleToolbarButton", "readerCommentaryToolbarButton":
+            return [
+                app.otherElements[identifier].firstMatch,
+                app.images[identifier].firstMatch,
+                anyIdentifierMatch,
+            ]
+        case "windowTabAddButton":
+            return [
+                app.buttons[identifier].firstMatch,
+                app.otherElements[identifier].firstMatch,
+            ]
         case "readerStudyPadTitle", "readerMyNotesTitle":
             return [
                 app.staticTexts[identifier].firstMatch,
                 app.navigationBars.staticTexts[identifier].firstMatch,
                 app.otherElements[identifier].firstMatch,
+            ]
+        case "readerRenderedContentState":
+            return [
+                app.otherElements[identifier].firstMatch,
+                app.staticTexts[identifier].firstMatch,
             ]
         case "readerOverflowMenu":
             return [
@@ -3925,6 +4159,7 @@ final class AndBibleUITests: XCTestCase {
             "textDisplaySettingsScreen",
             "importExportScreen",
             "historyScreen",
+            "modulePickerScreen",
             "moduleBrowserScreen":
             return [
                 app.collectionViews[identifier].firstMatch,
@@ -4306,6 +4541,35 @@ final class AndBibleUITests: XCTestCase {
     }
 
     /**
+     Waits for the active reader pane's rendered-content export to contain one semantic token.
+     */
+    private func waitForReaderRenderedContentState(
+        containing token: String,
+        in app: XCUIApplication,
+        timeout: TimeInterval,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            if let stateElement = resolvedElement("readerRenderedContentState", in: app),
+               let value = stateElement.value as? String,
+               value.contains(token) {
+                return
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        } while Date() < deadline
+
+        let stateElement = requireElement("readerRenderedContentState", in: app, timeout: 1, file: file, line: line)
+        let lastValue = stateElement.value.map { "\($0)" } ?? "nil"
+        XCTFail(
+            "Expected reader rendered-content state to contain '\(token)' within \(timeout) seconds; last value was '\(lastValue)'.",
+            file: file,
+            line: line
+        )
+    }
+
+    /**
      Waits for the reader shell's stable navigation chrome to become interactive again.
      *
      * - Parameters:
@@ -4395,6 +4659,37 @@ final class AndBibleUITests: XCTestCase {
             line: line
         )
         return fallbackValue
+    }
+
+    /**
+     Taps one bottom window-tab pill by order number and waits for its active state to surface.
+     */
+    private func tapWindowTab(
+        _ order: Int,
+        in app: XCUIApplication,
+        timeout: TimeInterval = 10,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let identifier = "windowTabButton::\(order)"
+        let tabButton = requireElement(identifier, in: app, timeout: timeout, file: file, line: line)
+        tapElementReliably(tabButton, timeout: timeout, file: file, line: line)
+
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            if let value = resolvedElement(identifier, in: app)?.value as? String,
+               value.contains("state=active") {
+                return
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        } while Date() < deadline
+
+        let lastValue = resolvedElement(identifier, in: app)?.value.map { "\($0)" } ?? "nil"
+        XCTFail(
+            "Expected window tab \(order) to become active within \(timeout) seconds; last value was '\(lastValue)'.",
+            file: file,
+            line: line
+        )
     }
 
     /**
@@ -4758,24 +5053,24 @@ final class AndBibleUITests: XCTestCase {
                 continue
             }
 
-            let overflowButton = unresolvedElement("readerMoreMenuButton", in: app)
-            if overflowButton.exists && !overflowButton.frame.isEmpty {
-                tapElementReliably(
-                    overflowButton,
-                    timeout: min(3, max(0.5, deadline.timeIntervalSinceNow)),
-                    file: file,
-                    line: line
-                )
+            let dismissArea = unresolvedElement("readerOverflowMenuDismissArea", in: app)
+            if dismissArea.exists && !dismissArea.frame.isEmpty {
+                let backdropTapPoint = dismissArea.coordinate(withNormalizedOffset: CGVector(dx: 0.08, dy: 0.2))
+                backdropTapPoint.tap()
                 if !waitForReaderOverflowMenu(in: app, timeout: 1) &&
                     waitForReaderShellReady(in: app, timeout: min(2, max(0.5, deadline.timeIntervalSinceNow))) {
                     return
                 }
             }
 
-            let dismissArea = unresolvedElement("readerOverflowMenuDismissArea", in: app)
-            if dismissArea.exists && !dismissArea.frame.isEmpty {
-                let backdropTapPoint = dismissArea.coordinate(withNormalizedOffset: CGVector(dx: 0.08, dy: 0.2))
-                backdropTapPoint.tap()
+            let overflowButton = unresolvedElement("readerMoreMenuButton", in: app)
+            if overflowButton.exists &&
+                waitForElementToBecomeHittable(
+                    overflowButton,
+                    timeout: min(1, max(0.25, deadline.timeIntervalSinceNow))
+                )
+            {
+                overflowButton.tap()
                 if !waitForReaderOverflowMenu(in: app, timeout: 1) &&
                     waitForReaderShellReady(in: app, timeout: min(2, max(0.5, deadline.timeIntervalSinceNow))) {
                     return
