@@ -9,6 +9,7 @@ import SQLite3
 #if os(iOS)
 import UIKit
 import WebKit
+import struct SwiftUI.Color
 #endif
 
 private let sqliteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
@@ -96,6 +97,21 @@ final class AndBibleTests: XCTestCase {
     func testTextDisplayAppDefaultsStartWithStrongsDisabled() {
         XCTAssertEqual(TextDisplaySettings.appDefaults.strongsMode, 0)
     }
+
+    #if os(iOS)
+    func testColorARGBByteClampsIntermediatePickerComponents() {
+        XCTAssertEqual(Color.clampedARGBByte(-0.25), 0)
+        XCTAssertEqual(Color.clampedARGBByte(0.5), 128)
+        XCTAssertEqual(Color.clampedARGBByte(1.2), 255)
+        XCTAssertEqual(Color.clampedARGBByte(.nan), 0)
+        XCTAssertEqual(Color.clampedARGBByte(.infinity), 0)
+    }
+
+    func testColorARGBIntClampsOutOfRangeComponents() {
+        let color = Color(.sRGB, red: -0.25, green: 0.5, blue: 1.2, opacity: 1.0)
+        XCTAssertEqual(color.argbInt, Int(Int32(bitPattern: 0xFF0080FF)))
+    }
+    #endif
 
     func testCSVSetEncodingAndDecodingRoundTrip() {
         let encoded = AppPreferenceRegistry.encodeCSVSet(["  KJV  ", "", "ESV", "KJV", "  "])

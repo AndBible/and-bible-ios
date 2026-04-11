@@ -32,6 +32,23 @@ extension Color {
         self.init(.sRGB, red: r, green: g, blue: b, opacity: a)
     }
 
+    /**
+     Clamps one floating-point color component into a byte for ARGB serialization.
+
+     UIKit's color picker can surface transient out-of-range component values while a user edits
+     the hex field. We must sanitize those intermediate values before converting back to `UInt32`
+     or the app can trap on partial input.
+     */
+    static func clampedARGBByte(_ component: CGFloat) -> UInt32 {
+        let boundedComponent: CGFloat
+        if component.isFinite {
+            boundedComponent = min(max(component, 0), 1)
+        } else {
+            boundedComponent = 0
+        }
+        return UInt32((boundedComponent * 255).rounded())
+    }
+
     /// Convert to signed ARGB integer (Vue.js convention).
     var argbInt: Int {
         #if os(iOS)
@@ -42,10 +59,10 @@ extension Color {
         var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
         nsColor.getRed(&r, green: &g, blue: &b, alpha: &a)
         #endif
-        let ai = UInt32(a * 255) & 0xFF
-        let ri = UInt32(r * 255) & 0xFF
-        let gi = UInt32(g * 255) & 0xFF
-        let bi = UInt32(b * 255) & 0xFF
+        let ai = Self.clampedARGBByte(a)
+        let ri = Self.clampedARGBByte(r)
+        let gi = Self.clampedARGBByte(g)
+        let bi = Self.clampedARGBByte(b)
         let uint = (ai << 24) | (ri << 16) | (gi << 8) | bi
         return Int(Int32(bitPattern: uint))
     }
