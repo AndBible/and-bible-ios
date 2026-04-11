@@ -4040,15 +4040,13 @@ final class AndBibleUITests: XCTestCase {
                 app.otherElements[identifier].firstMatch,
             ]
         case "labelManagerNewLabelNameField":
-            let alert = app.alerts.element(boundBy: 0)
-            let sheet = app.sheets.element(boundBy: 0)
             return [
-                alert.descendants(matching: .textField).matching(identifier: identifier).element(boundBy: 0),
-                sheet.descendants(matching: .textField).matching(identifier: identifier).element(boundBy: 0),
-                alert.descendants(matching: .textField).matching(identifier: "Label name").element(boundBy: 0),
-                sheet.descendants(matching: .textField).matching(identifier: "Label name").element(boundBy: 0),
                 app.textFields[identifier].firstMatch,
                 app.textFields["Label name"].firstMatch,
+                app.alerts.textFields[identifier].firstMatch,
+                app.alerts.textFields["Label name"].firstMatch,
+                app.sheets.textFields[identifier].firstMatch,
+                app.sheets.textFields["Label name"].firstMatch,
             ]
         case "labelEditNameField":
             return [
@@ -4057,16 +4055,13 @@ final class AndBibleUITests: XCTestCase {
                 app.otherElements[identifier].firstMatch,
             ]
         case "labelManagerCreateButton":
-            let alert = app.alerts.element(boundBy: 0)
-            let sheet = app.sheets.element(boundBy: 0)
-            let createLabelPredicate = NSPredicate(format: "label == %@", "Create")
             return [
-                alert.descendants(matching: .button).matching(identifier: identifier).element(boundBy: 0),
-                sheet.descendants(matching: .button).matching(identifier: identifier).element(boundBy: 0),
-                alert.descendants(matching: .button).matching(createLabelPredicate).element(boundBy: 0),
-                sheet.descendants(matching: .button).matching(createLabelPredicate).element(boundBy: 0),
                 app.buttons[identifier].firstMatch,
                 app.buttons["Create"].firstMatch,
+                app.alerts.buttons[identifier].firstMatch,
+                app.alerts.buttons["Create"].firstMatch,
+                app.sheets.buttons[identifier].firstMatch,
+                app.sheets.buttons["Create"].firstMatch,
             ]
         case "aboutAppTitle":
             return [
@@ -6617,7 +6612,7 @@ final class AndBibleUITests: XCTestCase {
         repeat {
             tapElementReliably(trigger, timeout: 5)
             if waitForAnyElement(
-                ["labelManagerNewLabelNameField"],
+                ["labelManagerNewLabelNameField", "labelManagerCreateButton"],
                 in: app,
                 timeout: 1
             ) != nil {
