@@ -2944,6 +2944,11 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     ) -> (xml: String, key: String, keyName: String, bookInitials: String, bookAbbreviation: String, features: String) {
         let isHebrew = Self.isHebrewStrongsNumber(strongsNumber)
         let moduleName = isHebrew ? "StrongsHebrew" : "StrongsGreek"
+        let featureType = isHebrew ? "hebrew" : "greek"
+        let numericKey = Self.normalizeNumericKey(strongsNumber)
+        let keyName = numericKey.count < 5
+            ? String(repeating: "0", count: max(0, 5 - numericKey.count)) + numericKey
+            : numericKey
         let message = escapeXML(
             Bundle.main.localizedString(
                 forKey: "no_dictionary_installed",
@@ -2961,16 +2966,16 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         let xml = """
         <div>
         <title type="x-gen">\(message)</title>
-        <p><a href="download://?initials=\(moduleName)">\(downloadsLabel)</a></p>
+        <p><a href="download://">\(downloadsLabel)</a></p>
         </div>
         """
         return (
             xml: xml,
-            key: "\(moduleName)--missing",
-            keyName: moduleName,
+            key: "\(moduleName)--\(keyName)--missing",
+            keyName: keyName,
             bookInitials: moduleName,
             bookAbbreviation: moduleName,
-            features: "{}"
+            features: "{\"type\":\"\(featureType)\",\"keyName\":\"\(keyName)\"}"
         )
     }
 

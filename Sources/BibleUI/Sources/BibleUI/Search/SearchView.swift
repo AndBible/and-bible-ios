@@ -989,7 +989,12 @@ public struct SearchView: View {
         }
     }
 
-    /// Auto-executes a search when the view was launched with a seeded query.
+    /**
+     Auto-executes a search once the view becomes ready and a non-empty query is already present.
+
+     This covers both externally seeded queries and text the user entered while the view was still
+     waiting on index readiness.
+     */
     private func autoSearchIfNeeded() {
         if !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             performSearch()

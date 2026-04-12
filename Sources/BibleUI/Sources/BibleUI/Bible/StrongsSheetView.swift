@@ -334,7 +334,7 @@ final class StrongsSheetDelegate: NSObject, BibleBridgeDelegate {
             handleFindAllLink(link)
             return
         }
-        // Android-style missing-document fallbacks route to Downloads.
+        // Missing-document fallbacks use a generic `download://` route into Downloads.
         if link.hasPrefix("download://") {
             logger.info("StrongsSheet: handling as downloads link")
             if let windowScene = UIApplication.shared.connectedScenes

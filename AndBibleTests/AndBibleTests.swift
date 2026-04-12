@@ -476,7 +476,10 @@ final class AndBibleTests: XCTestCase {
         )
 
         XCTAssertTrue(multiDocJSON.contains("No dictionary module installed"))
-        XCTAssertTrue(multiDocJSON.contains("download://?initials=StrongsHebrew"))
+        XCTAssertTrue(multiDocJSON.contains(#""features":{"type":"hebrew","keyName":"00430"}"#))
+        XCTAssertTrue(multiDocJSON.contains(#""keyName":"00430""#))
+        XCTAssertTrue(multiDocJSON.contains(#"download://"#))
+        XCTAssertFalse(multiDocJSON.contains("initials="))
     }
 
     @MainActor
