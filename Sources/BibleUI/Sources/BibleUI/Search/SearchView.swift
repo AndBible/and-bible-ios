@@ -257,6 +257,11 @@ public struct SearchView: View {
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("searchScreen")
         .accessibilityValue(searchAccessibilityValue)
+        .overlay(alignment: .topLeading) {
+            // Export Search state through a tiny dedicated element so UI tests do not have to
+            // snapshot the full Search container while result lists are changing.
+            searchStateExport
+        }
         .navigationTitle(navigationTitle)
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
@@ -337,6 +342,17 @@ public struct SearchView: View {
             return baseState
         }
         return "\(baseState);rows=\(searchAccessibilityRowsToken)"
+    }
+
+    /// Compact dedicated state export used by the UI harness instead of the full Search container.
+    private var searchStateExport: some View {
+        Rectangle()
+            .fill(.clear)
+            .frame(width: 1, height: 1)
+            .allowsHitTesting(false)
+            .accessibilityElement(children: .ignore)
+            .accessibilityIdentifier("searchStateExport")
+            .accessibilityValue(searchAccessibilityValue)
     }
 
     /// Stable search-result row tokens exported for UI automation.

@@ -2336,8 +2336,8 @@ final class AndBibleUITests: XCTestCase {
         let deadline = Date().addingTimeInterval(timeout)
 
         repeat {
-            if let searchScreen = resolvedElement("searchScreen", in: app) {
-                return searchScreen
+            if let searchState = resolvedSearchStateElement(in: app) {
+                return searchState
             }
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         } while Date() < deadline
@@ -2416,16 +2416,16 @@ final class AndBibleUITests: XCTestCase {
         let deadline = Date().addingTimeInterval(timeout)
 
         repeat {
-            if let screen = resolvedElement("searchScreen", in: app) {
-                return screen
+            if let stateElement = resolvedSearchStateElement(in: app) {
+                return stateElement
             }
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         } while Date() < deadline
 
-        let screen = unresolvedElement("searchScreen", in: app)
+        let screen = unresolvedElement("searchStateExport", in: app)
         XCTAssertTrue(
             screen.exists,
-            "Expected Search to present the root 'searchScreen' element within \(timeout) seconds.",
+            "Expected Search to present the exported Search state element within \(timeout) seconds.",
             file: file,
             line: line
         )
@@ -2477,7 +2477,7 @@ final class AndBibleUITests: XCTestCase {
         let deadline = Date().addingTimeInterval(timeout)
 
         while Date() < deadline {
-            let state = searchScreen.value as? String ?? ""
+            let state = resolvedSearchStateValue(in: app) ?? (searchScreen.value as? String ?? "")
             if state.contains("state=ready") {
                 return
             }
@@ -2519,8 +2519,7 @@ final class AndBibleUITests: XCTestCase {
     ) {
         let deadline = Date().addingTimeInterval(timeout)
         repeat {
-            if let searchScreen = resolvedElement("searchScreen", in: app),
-               let value = searchScreen.value as? String,
+            if let value = resolvedSearchStateValue(in: app),
                value.contains("state=ready"),
                value.contains("searching=false"),
                value.contains(token) {
@@ -2529,8 +2528,7 @@ final class AndBibleUITests: XCTestCase {
             RunLoop.current.run(until: Date().addingTimeInterval(0.25))
         } while Date() < deadline
 
-        let searchScreen = requireSearchScreen(in: app, timeout: 1)
-        let lastValue = searchScreen.value.map { "\($0)" } ?? "nil"
+        let lastValue = resolvedSearchStateValue(in: app) ?? "nil"
         XCTFail(
             "Expected Search state to contain '\(token)' within \(timeout) seconds; last value was '\(lastValue)'."
         )
@@ -2556,8 +2554,7 @@ final class AndBibleUITests: XCTestCase {
     ) {
         let deadline = Date().addingTimeInterval(timeout)
         repeat {
-            if let searchScreen = resolvedElement("searchScreen", in: app),
-               let value = searchScreen.value as? String,
+            if let value = resolvedSearchStateValue(in: app),
                value.contains("state=ready"),
                value.contains("searching=false"),
                let count = searchResultCount(from: value),
@@ -2567,8 +2564,7 @@ final class AndBibleUITests: XCTestCase {
             RunLoop.current.run(until: Date().addingTimeInterval(0.25))
         } while Date() < deadline
 
-        let searchScreen = requireSearchScreen(in: app, timeout: 1)
-        let lastValue = searchScreen.value.map { "\($0)" } ?? "nil"
+        let lastValue = resolvedSearchStateValue(in: app) ?? "nil"
         XCTFail(
             "Expected Search to report at least \(minimumCount) results within \(timeout) seconds; last value was '\(lastValue)'."
         )
@@ -2971,8 +2967,7 @@ final class AndBibleUITests: XCTestCase {
         let rowToken = "|\(identifier)|"
 
         repeat {
-            if let searchScreen = resolvedElement("searchScreen", in: app),
-               let value = searchScreen.value as? String,
+            if let value = resolvedSearchStateValue(in: app),
                value.contains("state=ready"),
                value.contains("searching=false"),
                value.contains(rowToken) == shouldExist {
@@ -2981,8 +2976,7 @@ final class AndBibleUITests: XCTestCase {
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         } while Date() < deadline
 
-        let finalSearchScreen = requireSearchScreen(in: app, timeout: 1)
-        let finalValue = finalSearchScreen.value as? String ?? ""
+        let finalValue = resolvedSearchStateValue(in: app) ?? ""
         XCTAssertEqual(
             finalValue.contains(rowToken),
             shouldExist,
@@ -4091,6 +4085,11 @@ final class AndBibleUITests: XCTestCase {
                 app.otherElements[identifier].firstMatch,
                 app.collectionViews[identifier].firstMatch,
                 app.scrollViews[identifier].firstMatch,
+            ]
+        case "searchStateExport":
+            return [
+                app.otherElements[identifier].firstMatch,
+                app.staticTexts[identifier].firstMatch,
             ]
         case "searchResultsList":
             return [
@@ -5645,6 +5644,57 @@ final class AndBibleUITests: XCTestCase {
         file: StaticString = #filePath,
         line: UInt = #line
     ) -> XCUIElement {
+        if let control = tryResolveReaderActionControl(identifier, in: app, timeout: timeout) {
+            return control
+        }
+
+        let title = readerActionTitle(for: identifier)
+        let prefersDrawer = readerActionUsesNavigationDrawer(identifier)
+        let directActionCandidates = [
+            app.buttons[identifier].firstMatch,
+            app.buttons[title].firstMatch,
+        ]
+
+        if let finalSurface = prefersDrawer
+            ? resolvedElement("readerNavigationDrawer", in: app)
+            : resolvedElement("readerOverflowMenu", in: app)
+        {
+            let finalAction = resolveReaderActionElement(identifier, in: app, actionSurface: finalSurface)
+            XCTAssertTrue(
+                finalAction.exists,
+                "Expected reader action '\(identifier)' to exist within \(timeout) seconds.",
+                file: file,
+                line: line
+            )
+            return finalAction
+        }
+
+        if let directAction = directActionCandidates.first(where: { $0.exists && !$0.frame.isEmpty }) {
+            return directAction
+        }
+
+        let actionSurface = unresolvedElement(
+            prefersDrawer ? "readerNavigationDrawer" : "readerOverflowMenu",
+            in: app
+        )
+        XCTAssertTrue(
+            actionSurface.exists,
+            "Expected the reader action surface to appear within \(timeout) seconds before resolving '\(identifier)'.",
+            file: file,
+            line: line
+        )
+        return resolveReaderActionElement(identifier, in: app, actionSurface: actionSurface)
+    }
+
+    /**
+     Attempts to resolve one reader-shell action without recording an XCTest failure on transient
+     drawer/overflow misses.
+     */
+    private func tryResolveReaderActionControl(
+        _ identifier: String,
+        in app: XCUIApplication,
+        timeout: TimeInterval = 10
+    ) -> XCUIElement? {
         let deadline = Date().addingTimeInterval(timeout)
         let title = readerActionTitle(for: identifier)
         let prefersDrawer = readerActionUsesNavigationDrawer(identifier)
@@ -5656,9 +5706,7 @@ final class AndBibleUITests: XCTestCase {
             if let actionSurface = ensureReaderActionSurface(
                 for: identifier,
                 in: app,
-                timeout: min(10, max(3, deadline.timeIntervalSinceNow)),
-                file: file,
-                line: line
+                timeout: min(10, max(3, deadline.timeIntervalSinceNow))
             ) {
                 for _ in 0..<4 {
                     let action = resolveReaderActionElement(identifier, in: app, actionSurface: actionSurface)
@@ -5685,35 +5733,23 @@ final class AndBibleUITests: XCTestCase {
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         } while Date() < deadline
 
-        let finalSurface = prefersDrawer
+        if let finalSurface = prefersDrawer
             ? resolvedElement("readerNavigationDrawer", in: app)
             : resolvedElement("readerOverflowMenu", in: app)
-        if let finalSurface {
+        {
             let finalAction = resolveReaderActionElement(identifier, in: app, actionSurface: finalSurface)
-            XCTAssertTrue(
-                finalAction.exists,
-                "Expected reader action '\(identifier)' to exist within \(timeout) seconds.",
-                file: file,
-                line: line
-            )
-            return finalAction
+            if finalAction.exists {
+                return finalAction
+            }
         }
 
         if let directAction = directActionCandidates.first(where: { $0.exists && !$0.frame.isEmpty }) {
             return directAction
         }
-
-        let actionSurface = unresolvedElement(
-            prefersDrawer ? "readerNavigationDrawer" : "readerOverflowMenu",
-            in: app
-        )
-        XCTAssertTrue(
-            actionSurface.exists,
-            "Expected the reader action surface to appear within \(timeout) seconds before resolving '\(identifier)'.",
-            file: file,
-            line: line
-        )
-        return resolveReaderActionElement(identifier, in: app, actionSurface: actionSurface)
+        if let directAction = directActionCandidates.first(where: { $0.exists }) {
+            return directAction
+        }
+        return nil
     }
 
     /**
@@ -5901,7 +5937,11 @@ final class AndBibleUITests: XCTestCase {
         for title in ["Done", "Return", "Go", "Search", "OK"] {
             let button = keyboard.buttons[title].firstMatch
             if button.exists || button.waitForExistence(timeout: 0.2) {
-                tapElementReliably(button, timeout: 2)
+                if waitForElementToBecomeHittable(button, timeout: 0.5) {
+                    button.tap()
+                } else if !button.frame.isEmpty {
+                    button.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+                }
                 return
             }
         }
@@ -6159,7 +6199,6 @@ final class AndBibleUITests: XCTestCase {
         let deadline = Date().addingTimeInterval(timeout)
 
         while Date() < deadline {
-            let searchScreen = unresolvedElement("searchScreen", in: app)
             if let identifiedField = resolvedElement("searchQueryField", in: app),
                identifiedField.exists,
                (identifiedField.isHittable || !identifiedField.frame.isEmpty)
@@ -6167,15 +6206,13 @@ final class AndBibleUITests: XCTestCase {
                 return identifiedField
             }
             let fieldCandidates = [
-                searchScreen.textFields["searchQueryField"].firstMatch,
                 app.textFields["searchQueryField"].firstMatch,
-                searchScreen.otherElements["searchQueryField"].firstMatch,
                 app.otherElements["searchQueryField"].firstMatch,
-                searchScreen.searchFields.firstMatch,
+                app.searchFields["searchQueryField"].firstMatch,
                 app.navigationBars.searchFields.firstMatch,
-                searchScreen.textFields.firstMatch,
+                app.searchFields.firstMatch,
                 app.navigationBars.textFields.firstMatch,
-                app.descendants(matching: .any).matching(identifier: "searchQueryField").firstMatch,
+                app.textFields.firstMatch,
             ]
 
             if let field = fieldCandidates.first(where: {
@@ -6271,14 +6308,25 @@ final class AndBibleUITests: XCTestCase {
         timeout: TimeInterval = 10,
         file: StaticString = #filePath,
         line: UInt = #line
-        ) -> XCUIElement {
-        return requireElement(
-            "labelManagerNewLabelNameField",
-            in: app,
-            timeout: timeout,
+    ) -> XCUIElement {
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            if let field = resolveLabelCreationPromptTextField(in: app),
+               field.exists,
+               (field.isHittable || !field.frame.isEmpty) {
+                return field
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        } while Date() < deadline
+
+        let fallback = app.alerts.firstMatch.textFields["labelManagerNewLabelNameField"].firstMatch
+        XCTAssertTrue(
+            fallback.exists,
+            "Expected the Label Manager create prompt text field to appear within \(timeout) seconds.",
             file: file,
             line: line
         )
+        return fallback
     }
 
     /**
@@ -6301,14 +6349,25 @@ final class AndBibleUITests: XCTestCase {
         timeout: TimeInterval = 10,
         file: StaticString = #filePath,
         line: UInt = #line
-        ) -> XCUIElement {
-        return requireElement(
-            "labelManagerCreateButton",
-            in: app,
-            timeout: timeout,
+    ) -> XCUIElement {
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            if let button = resolveLabelCreationPromptCreateButton(in: app),
+               button.exists,
+               (button.isHittable || !button.frame.isEmpty) {
+                return button
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        } while Date() < deadline
+
+        let fallback = app.alerts.firstMatch.buttons["labelManagerCreateButton"].firstMatch
+        XCTAssertTrue(
+            fallback.exists,
+            "Expected the Label Manager create prompt button to appear within \(timeout) seconds.",
             file: file,
             line: line
         )
+        return fallback
     }
 
     /**
@@ -6611,16 +6670,84 @@ final class AndBibleUITests: XCTestCase {
 
         repeat {
             tapElementReliably(trigger, timeout: 5)
-            if waitForAnyElement(
-                ["labelManagerNewLabelNameField", "labelManagerCreateButton"],
-                in: app,
-                timeout: 1
-            ) != nil {
+            if resolvedLabelCreationPrompt(in: app) != nil
+                || resolveLabelCreationPromptTextField(in: app) != nil
+                || resolveLabelCreationPromptCreateButton(in: app) != nil
+            {
                 return
             }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         } while Date() < deadline
 
         XCTFail("Expected the Label Manager create prompt to appear within \(timeout) seconds.")
+    }
+
+    /// Resolves the compact exported Search state element when Search is presented.
+    private func resolvedSearchStateElement(in app: XCUIApplication) -> XCUIElement? {
+        resolvedElement("searchStateExport", in: app) ?? resolvedElement("searchScreen", in: app)
+    }
+
+    /// Reads the current exported Search state without forcing the whole Search container query.
+    private func resolvedSearchStateValue(in app: XCUIApplication) -> String? {
+        if let stateElement = resolvedSearchStateElement(in: app),
+           let value = stateElement.value as? String {
+            return value
+        }
+        return nil
+    }
+
+    /// Returns the visible prompt container used by the create-label flow.
+    private func resolvedLabelCreationPrompt(in app: XCUIApplication) -> XCUIElement? {
+        let alert = app.alerts.firstMatch
+        if alert.exists || alert.waitForExistence(timeout: 0.2) {
+            return alert
+        }
+
+        let sheet = app.sheets.firstMatch
+        if sheet.exists || sheet.waitForExistence(timeout: 0.2) {
+            return sheet
+        }
+
+        return nil
+    }
+
+    /// Resolves the create-label prompt text field by scoping queries to the live prompt first.
+    private func resolveLabelCreationPromptTextField(in app: XCUIApplication) -> XCUIElement? {
+        if let prompt = resolvedLabelCreationPrompt(in: app) {
+            let promptCandidates = [
+                prompt.textFields["labelManagerNewLabelNameField"].firstMatch,
+                prompt.textFields["Label name"].firstMatch,
+                prompt.textFields.firstMatch,
+            ]
+            if let field = promptCandidates.first(where: { $0.exists }) {
+                return field
+            }
+        }
+
+        let appCandidates = [
+            app.textFields["labelManagerNewLabelNameField"].firstMatch,
+            app.textFields["Label name"].firstMatch,
+        ]
+        return appCandidates.first(where: { $0.exists })
+    }
+
+    /// Resolves the create-label prompt action button by scoping queries to the live prompt first.
+    private func resolveLabelCreationPromptCreateButton(in app: XCUIApplication) -> XCUIElement? {
+        if let prompt = resolvedLabelCreationPrompt(in: app) {
+            let promptCandidates = [
+                prompt.buttons["labelManagerCreateButton"].firstMatch,
+                prompt.buttons["Create"].firstMatch,
+            ]
+            if let button = promptCandidates.first(where: { $0.exists }) {
+                return button
+            }
+        }
+
+        let appCandidates = [
+            app.buttons["labelManagerCreateButton"].firstMatch,
+            app.buttons["Create"].firstMatch,
+        ]
+        return appCandidates.first(where: { $0.exists })
     }
 
     /**
