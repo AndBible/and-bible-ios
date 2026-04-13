@@ -346,9 +346,12 @@ public struct SearchView: View {
 
     /// Compact dedicated state export used by the UI harness instead of the full Search container.
     private var searchStateExport: some View {
-        Rectangle()
-            .fill(.clear)
+        Text(verbatim: "search-state")
+            .font(.caption2)
+            .foregroundStyle(.clear)
+            .opacity(0.01)
             .frame(width: 1, height: 1)
+            .clipped()
             .allowsHitTesting(false)
             .accessibilityElement(children: .ignore)
             .accessibilityIdentifier("searchStateExport")

@@ -2719,7 +2719,11 @@ final class AndBibleUITests: XCTestCase {
             let searchScreen = unresolvedElement("searchScreen", in: app)
 
             if let segmentIndex = searchWordModeSegmentIndex(forVisibleLabel: label),
-               let picker = resolvedElement("searchWordModePicker", in: app)
+               let picker = [
+                   searchScreen.segmentedControls["searchWordModePicker"].firstMatch,
+                   searchScreen.segmentedControls.firstMatch,
+                   searchScreen.otherElements["searchWordModePicker"].firstMatch,
+               ].first(where: { $0.exists || $0.waitForExistence(timeout: 0.2) })
             {
                 tapSegmentedControlSegment(
                     picker,
@@ -2813,9 +2817,8 @@ final class AndBibleUITests: XCTestCase {
      *   - falls back to a brief run-loop advance when no visible Search scroll surface exists
      */
     private func revealSearchControls(in app: XCUIApplication) {
-        let optionsPanel = app.descendants(matching: .any)
-            .matching(identifier: "searchOptionsPanel")
-            .firstMatch
+        let searchScreen = unresolvedElement("searchScreen", in: app)
+        let optionsPanel = searchScreen.otherElements["searchOptionsPanel"].firstMatch
         if optionsPanel.exists || optionsPanel.waitForExistence(timeout: 0.2) {
             return
         }
@@ -2830,7 +2833,6 @@ final class AndBibleUITests: XCTestCase {
                 }
             }
         }
-        let searchScreen = unresolvedElement("searchScreen", in: app)
         let scrollableCandidates: [XCUIElement] = [
             unresolvedElement("searchResultsList", in: app),
             searchScreen.collectionViews["searchResultsList"].firstMatch,
@@ -2873,17 +2875,25 @@ final class AndBibleUITests: XCTestCase {
         guard keyboard.exists else {
             return
         }
+        let searchScreen = unresolvedElement("searchScreen", in: app)
         let dismissalCandidates = [
-            app.descendants(matching: .any).matching(identifier: "searchWordModeButton::allWords").firstMatch,
-            app.segmentedControls.buttons["All Words"].firstMatch,
-            app.buttons["All Words"].firstMatch
+            searchScreen.buttons["searchWordModeButton::allWords"].firstMatch,
+            searchScreen.otherElements["searchWordModeButton::allWords"].firstMatch,
+            searchScreen.segmentedControls["searchWordModePicker"].buttons["All Words"].firstMatch,
+            searchScreen.segmentedControls.buttons["All Words"].firstMatch,
+            searchScreen.buttons["All Words"].firstMatch
         ]
         for candidate in dismissalCandidates where candidate.exists && !candidate.frame.isEmpty {
             tapElementReliably(candidate, timeout: 5)
             return
         }
 
-        if let picker = resolvedElement("searchWordModePicker", in: app) {
+        let pickerCandidates = [
+            searchScreen.segmentedControls["searchWordModePicker"].firstMatch,
+            searchScreen.segmentedControls.firstMatch,
+            searchScreen.otherElements["searchWordModePicker"].firstMatch,
+        ]
+        if let picker = pickerCandidates.first(where: { $0.exists || $0.waitForExistence(timeout: 0.2) }) {
             tapSegmentedControlSegment(
                 picker,
                 index: 0,
@@ -4088,8 +4098,8 @@ final class AndBibleUITests: XCTestCase {
             ]
         case "searchStateExport":
             return [
-                app.otherElements[identifier].firstMatch,
                 app.staticTexts[identifier].firstMatch,
+                app.otherElements[identifier].firstMatch,
             ]
         case "searchResultsList":
             return [
