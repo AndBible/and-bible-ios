@@ -573,6 +573,67 @@ final class AndBibleUITests: XCTestCase {
     }
 
     /**
+     Verifies that the reader Strong's quick toggle is scoped to the active window only.
+     *
+     * - Side effects:
+     *   - launches the baseline reader shell, creates two additional windows, and activates the
+     *     third one
+     *   - toggles Strong's on in the third window, confirms the first window stays off, then
+     *     toggles Strong's on in the first window and confirms the third window preserves its own
+     *     state
+     *   - toggles Strong's back off in the third window and confirms the first window stays on
+     * - Failure modes:
+     *   - fails if the Strong's quick-toggle button is unavailable in the active pane
+     *   - fails if toggling one window changes the active Strong's mode seen in a sibling pane
+     *   - fails if re-focusing a window does not restore that window's own persisted Strong's mode
+     */
+    func testThirdWindowStrongsToggleAffectsOnlyActiveWindow() {
+        let app = makeApp()
+        app.launch()
+
+        waitForReaderRenderedContentState(
+            containing: "windowOrder=0;category=bible;module=KJV;book=Genesis;chapter=1",
+            in: app,
+            timeout: 20
+        )
+        waitForReaderRenderedContentState(containing: "strongsMode=0", in: app, timeout: 20)
+
+        tapElementReliably(requireElement("windowTabAddButton", in: app, timeout: 10), timeout: 10)
+        _ = requireElement("windowTabButton::1", in: app, timeout: 10)
+        tapElementReliably(requireElement("windowTabAddButton", in: app, timeout: 10), timeout: 10)
+        _ = requireElement("windowTabButton::2", in: app, timeout: 10)
+
+        tapWindowTab(2, in: app, timeout: 10)
+        waitForReaderRenderedContentState(containing: "windowOrder=2", in: app, timeout: 20)
+        waitForReaderRenderedContentState(containing: "strongsMode=0", in: app, timeout: 20)
+
+        tapElementReliably(requireElement("readerStrongsToolbarButton", in: app, timeout: 10), timeout: 10)
+        waitForReaderRenderedContentState(containing: "windowOrder=2", in: app, timeout: 20)
+        waitForReaderRenderedContentState(containing: "strongsMode=1", in: app, timeout: 20)
+
+        tapWindowTab(0, in: app, timeout: 10)
+        waitForReaderRenderedContentState(containing: "windowOrder=0", in: app, timeout: 20)
+        waitForReaderRenderedContentState(containing: "strongsMode=0", in: app, timeout: 20)
+
+        tapElementReliably(requireElement("readerStrongsToolbarButton", in: app, timeout: 10), timeout: 10)
+        waitForReaderRenderedContentState(containing: "windowOrder=0", in: app, timeout: 20)
+        waitForReaderRenderedContentState(containing: "strongsMode=1", in: app, timeout: 20)
+
+        tapWindowTab(2, in: app, timeout: 10)
+        waitForReaderRenderedContentState(containing: "windowOrder=2", in: app, timeout: 20)
+        waitForReaderRenderedContentState(containing: "strongsMode=1", in: app, timeout: 20)
+
+        tapElementReliably(requireElement("readerStrongsToolbarButton", in: app, timeout: 10), timeout: 10)
+        waitForReaderRenderedContentState(containing: "strongsMode=2", in: app, timeout: 20)
+        tapElementReliably(requireElement("readerStrongsToolbarButton", in: app, timeout: 10), timeout: 10)
+        waitForReaderRenderedContentState(containing: "strongsMode=0", in: app, timeout: 20)
+
+        tapWindowTab(0, in: app, timeout: 10)
+        waitForReaderRenderedContentState(containing: "windowOrder=0", in: app, timeout: 20)
+        waitForReaderRenderedContentState(containing: "strongsMode=1", in: app, timeout: 20)
+    }
+
+    /**
      Verifies that deleting one bookmark row from the real bookmark list leaves other bookmarks
      intact across reopen.
      *
@@ -3977,6 +4038,12 @@ final class AndBibleUITests: XCTestCase {
         case "readerMoreMenuButton", "bookChooserButton":
             return [
                 app.buttons[identifier].firstMatch,
+            ]
+        case "readerStrongsToolbarButton":
+            return [
+                app.buttons[identifier].firstMatch,
+                app.otherElements[identifier].firstMatch,
+                anyIdentifierMatch,
             ]
         case "readerBibleToolbarButton", "readerCommentaryToolbarButton":
             return [

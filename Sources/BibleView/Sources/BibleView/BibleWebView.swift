@@ -154,6 +154,11 @@ extension BibleWebView {
      */
     func createWebView(coordinator: WebViewCoordinator) -> WKWebView {
         let config = WKWebViewConfiguration()
+        #if os(iOS)
+        let iosDeviceClass = UIDevice.current.userInterfaceIdiom == .pad ? "ios-pad" : "ios-phone"
+        #else
+        let iosDeviceClass = "ios-phone"
+        #endif
 
         // Register bridge message handler
         let contentController = WKUserContentController()
@@ -166,8 +171,21 @@ extension BibleWebView {
             source: """
             window.__PLATFORM__ = 'ios';
             window.__activeLanguages__ = '["en"]';
+            window.__IOS_DEVICE_CLASS__ = '\(iosDeviceClass)';
             window.bibleView = {};
             window.bibleViewDebug = {};
+            (function() {
+                function applyPlatformClasses() {
+                    if (!document.documentElement) return;
+                    document.documentElement.classList.add('platform-ios');
+                    document.documentElement.classList.add('\(iosDeviceClass)');
+                }
+                if (document.documentElement) {
+                    applyPlatformClasses();
+                } else {
+                    document.addEventListener('DOMContentLoaded', applyPlatformClasses, { once: true });
+                }
+            })();
             window.android = new Proxy({}, {
                 get: function(target, prop) {
                     if (prop === 'getActiveLanguages') {
