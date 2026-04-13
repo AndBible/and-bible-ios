@@ -77,7 +77,7 @@ public struct HistoryView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 List {
-                    ForEach(Array(historySnapshot.enumerated()), id: \.element.id) { index, item in
+                    ForEach(historySnapshot, id: \.id) { item in
                         Button {
                             navigateTo(item)
                         } label: {
@@ -101,7 +101,7 @@ public struct HistoryView: View {
                         .accessibilityIdentifier(historyRowIdentifier(for: item))
                         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                             Button(role: .destructive) {
-                                deleteItem(at: index)
+                                deleteItem(item)
                             } label: {
                                 SwiftUI.Label(String(localized: "delete"), systemImage: "trash")
                             }
@@ -207,20 +207,18 @@ public struct HistoryView: View {
     }
 
     /**
-     Deletes one visible history row by index from the filtered active-window history list.
+     Deletes one visible history row by model identity from the rendered history snapshot.
      *
-     * - Parameter index: Position of the row in the current `history` snapshot.
+     * - Parameter item: Persisted history row captured by the rendered swipe action.
      * - Side effects:
      *   - deletes the referenced `HistoryItem` from SwiftData
      *   - saves the mutated history state back to persistence
      * - Failure modes:
-     *   - returns without mutation when the index is outside the current filtered history bounds
      *   - silently discards save failures because row deletion is a user-driven destructive action
      *     with no dedicated retry surface in this view
      */
-    private func deleteItem(at index: Int) {
-        guard history.indices.contains(index) else { return }
-        modelContext.delete(history[index])
+    private func deleteItem(_ item: HistoryItem) {
+        modelContext.delete(item)
         try? modelContext.save()
     }
 
