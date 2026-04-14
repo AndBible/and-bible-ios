@@ -626,17 +626,15 @@ final class AndBibleUITests: XCTestCase {
         app.launch()
 
         _ = openBookmarkList(in: app)
-        waitForElement(
-            "bookmarkListRowButton::Matthew_3_1",
-            toAppearAbove: "bookmarkListRowButton::Exodus_2_1",
+        waitForBookmarkListRows(
+            toAppearInOrder: ["Matthew_3_1", "Exodus_2_1"],
             in: app
         )
 
         sortBookmarkListByBibleOrder(in: app)
 
-        waitForElement(
-            "bookmarkListRowButton::Exodus_2_1",
-            toAppearAbove: "bookmarkListRowButton::Matthew_3_1",
+        waitForBookmarkListRows(
+            toAppearInOrder: ["Exodus_2_1", "Matthew_3_1"],
             in: app
         )
     }
@@ -3239,6 +3237,59 @@ final class AndBibleUITests: XCTestCase {
     }
 
     /**
+     Waits for the exported bookmark-list state to report one specific visible row ordering.
+     *
+     * - Parameters:
+     *   - orderedReferenceTokens: Sanitized bookmark reference tokens in the expected visible
+     *     order, such as `["Matthew_3_1", "Exodus_2_1"]`.
+     *   - app: Running application whose bookmark list should publish the requested row order.
+     *   - timeout: Maximum number of seconds to wait before failing.
+     *   - file: Source file used for XCTest failure attribution.
+     *   - line: Source line used for XCTest failure attribution.
+     * - Side effects:
+     *   - polls the bookmark-list accessibility export until all requested row tokens appear in
+     *     the requested sequence
+     * - Failure modes:
+     *   - records an XCTest failure if the bookmark-list export never reaches the requested order
+     */
+    private func waitForBookmarkListRows(
+        toAppearInOrder orderedReferenceTokens: [String],
+        in app: XCUIApplication,
+        timeout: TimeInterval = 10,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let orderedTokens = orderedReferenceTokens.map(bookmarkListRowStateToken)
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            if let state = resolvedElement("bookmarkListScreen", in: app)?.value as? String,
+               bookmarkListRowsAppearInOrder(orderedTokens, within: state) {
+                return
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        } while Date() < deadline
+
+        let finalState = (resolvedElement("bookmarkListScreen", in: app)?.value as? String) ?? "nil"
+        XCTFail(
+            "Expected bookmark-list rows \(orderedReferenceTokens) to appear in order within \(timeout) seconds; last state was '\(finalState)'.",
+            file: file,
+            line: line
+        )
+    }
+
+    /// Returns whether the exported bookmark-list state contains the requested row tokens in order.
+    private func bookmarkListRowsAppearInOrder(_ orderedTokens: [String], within state: String) -> Bool {
+        var searchRange = state.startIndex..<state.endIndex
+        for token in orderedTokens {
+            guard let tokenRange = state.range(of: token, range: searchRange) else {
+                return false
+            }
+            searchRange = tokenRange.upperBound..<state.endIndex
+        }
+        return true
+    }
+
+    /**
      Returns one history-row token as serialized by the History screen accessibility state.
      *
      * - Parameter keyToken: Sanitized history key token, such as `Exod_2_1`.
@@ -3973,10 +4024,12 @@ final class AndBibleUITests: XCTestCase {
         case "readerNavigationDrawerButton":
             return [
                 app.buttons[identifier].firstMatch,
+                app.otherElements[identifier].firstMatch,
             ]
         case "readerMoreMenuButton", "bookChooserButton":
             return [
                 app.buttons[identifier].firstMatch,
+                app.otherElements[identifier].firstMatch,
             ]
         case "readerBibleToolbarButton", "readerCommentaryToolbarButton":
             return [
@@ -4720,14 +4773,13 @@ final class AndBibleUITests: XCTestCase {
         file: StaticString = #filePath,
         line: UInt = #line
     ) -> XCUIElement {
-        let button = app.buttons[identifier].firstMatch
-        XCTAssertTrue(
-            button.waitForExistence(timeout: timeout),
-            "Expected button '\(identifier)' to exist within \(timeout) seconds.",
+        requireElement(
+            identifier,
+            in: app,
+            timeout: timeout,
             file: file,
             line: line
         )
-        return button
     }
 
     /**
@@ -5279,6 +5331,7 @@ final class AndBibleUITests: XCTestCase {
         line: UInt = #line
     ) {
         let deadline = Date().addingTimeInterval(timeout)
+        let usesNavigationDrawer = readerActionUsesNavigationDrawer(identifier)
 
         repeat {
             guard let button = tryResolveReaderActionControl(
@@ -5291,18 +5344,33 @@ final class AndBibleUITests: XCTestCase {
             }
             if waitForElementToBecomeHittable(button, timeout: min(1.5, max(0.5, deadline.timeIntervalSinceNow))) {
                 button.tap()
-            } else if let overflowMenu = resolvedElement("readerOverflowMenu", in: app),
-                      isElementVisible(button, within: overflowMenu)
-            {
-                button.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
             } else {
-                RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-                continue
+                let preferredSurfaceIdentifier = usesNavigationDrawer
+                    ? "readerNavigationDrawer"
+                    : "readerOverflowMenu"
+                let fallbackSurfaceIdentifier = usesNavigationDrawer
+                    ? "readerOverflowMenu"
+                    : "readerNavigationDrawer"
+                let actionSurface = resolvedElement(preferredSurfaceIdentifier, in: app)
+                    ?? resolvedElement(fallbackSurfaceIdentifier, in: app)
+
+                if let actionSurface,
+                   isElementVisible(button, within: actionSurface)
+                {
+                    button.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+                } else {
+                    RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+                    continue
+                }
             }
 
             let settleDeadline = Date().addingTimeInterval(min(2, max(0.5, deadline.timeIntervalSinceNow)))
             repeat {
-                if resolvedElement("readerOverflowMenu", in: app) == nil {
+                if usesNavigationDrawer {
+                    if resolvedElement("readerNavigationDrawer", in: app) == nil {
+                        return
+                    }
+                } else if resolvedElement("readerOverflowMenu", in: app) == nil {
                     return
                 }
                 if let refreshedButton = resolvedElement(identifier, in: app), !refreshedButton.exists {
@@ -5832,6 +5900,13 @@ final class AndBibleUITests: XCTestCase {
             file: file,
             line: line
         )
+        guard exists else {
+            return
+        }
+        if !element.frame.isEmpty {
+            element.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+            return
+        }
         XCTAssertTrue(
             element.isHittable,
             "Expected element '\(element.identifier)' to become hittable before tapping within \(timeout) seconds.",
@@ -6701,7 +6776,17 @@ final class AndBibleUITests: XCTestCase {
 
     /// Resolves the compact exported Search state element when Search is presented.
     private func resolvedSearchStateElement(in app: XCUIApplication) -> XCUIElement? {
-        resolvedElement("searchStateExport", in: app) ?? resolvedElement("searchScreen", in: app)
+        let textCandidate = app.staticTexts["searchStateExport"].firstMatch
+        if textCandidate.exists {
+            return textCandidate
+        }
+
+        let elementCandidate = app.otherElements["searchStateExport"].firstMatch
+        if elementCandidate.exists {
+            return elementCandidate
+        }
+
+        return nil
     }
 
     /// Reads the current exported Search state without forcing the whole Search container query.
