@@ -5268,14 +5268,15 @@ final class AndBibleUITests: XCTestCase {
                 timeout: min(2, max(0.5, deadline.timeIntervalSinceNow))
             )
             if !button.frame.isEmpty {
-                tapElementReliably(
-                    button,
-                    timeout: min(2, max(0.5, deadline.timeIntervalSinceNow)),
-                    file: file,
-                    line: line
-                )
-                if waitForReaderNavigationDrawer(in: app, timeout: min(5, max(2, deadline.timeIntervalSinceNow))) {
-                    return true
+                let tapTimeout = min(3, max(0.5, deadline.timeIntervalSinceNow))
+                if waitForElementToBecomeHittable(button, timeout: tapTimeout) {
+                    button.tap()
+                    if waitForReaderNavigationDrawer(
+                        in: app,
+                        timeout: min(5, max(2, deadline.timeIntervalSinceNow))
+                    ) {
+                        return true
+                    }
                 }
             }
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))

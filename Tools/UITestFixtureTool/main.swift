@@ -377,7 +377,7 @@ private final class FixtureContext {
         case .syncNextCloudBookmarksEnabled:
             seedSyncNextCloud(enabledCategories: [.bookmarks])
         case .displayColorsCustom:
-            seedCustomColorSettings(pageManager: baseline.pageManager)
+            seedCustomColorSettings(workspace: baseline.workspace, pageManager: baseline.pageManager)
         }
 
         try modelContext.save()
@@ -772,15 +772,16 @@ private final class FixtureContext {
      *
      * - Parameter pageManager: Active page manager whose display settings should be overridden.
      */
-    private func seedCustomColorSettings(pageManager: PageManager) {
-        var settings = pageManager.textDisplaySettings ?? TextDisplaySettings()
+    private func seedCustomColorSettings(workspace: Workspace, pageManager: PageManager) {
+        var settings = workspace.textDisplaySettings ?? TextDisplaySettings()
         settings.dayTextColor = 0xFF112233
         settings.dayBackground = 0xFFFAF4E8
         settings.dayNoise = 7
         settings.nightTextColor = 0xFFF1E7D0
         settings.nightBackground = 0xFF101820
         settings.nightNoise = 5
-        pageManager.textDisplaySettings = settings
+        workspace.textDisplaySettings = settings
+        pageManager.textDisplaySettings = nil
     }
 
     /**

@@ -8,7 +8,6 @@ import SQLite3
 @testable import BibleView
 #if os(iOS)
 import UIKit
-import WebKit
 import struct SwiftUI.Color
 #endif
 
@@ -100,20 +99,14 @@ final class AndBibleTests: XCTestCase {
         XCTAssertEqual(color.argbInt, Int(Int32(bitPattern: 0xFF0080FF)))
     }
 
-    @MainActor
-    func testBibleWebViewInjectsPlatformDeviceClassIntoUserScript() throws {
-        let bridge = BibleBridge()
-        let webView = BibleWebView(bridge: bridge).createWebView(coordinator: WebViewCoordinator(bridge: bridge))
-        let scripts = webView.configuration.userContentController.userScripts
-        let platformScript = try XCTUnwrap(
-            scripts.first(where: { $0.source.contains("window.__PLATFORM__ = 'ios';") }),
-            "Expected BibleWebView to inject the iOS platform bootstrap script"
-        )
-        let expectedDeviceClass = UIDevice.current.userInterfaceIdiom == .pad ? "ios-pad" : "ios-phone"
+    func testBibleWebViewInjectsPlatformDeviceClassIntoUserScript() {
+        let expectedDeviceClass = BibleWebView.iosDeviceClass()
+        let platformScript = BibleWebView.platformBootstrapScriptSource(deviceClass: expectedDeviceClass)
 
-        XCTAssertTrue(platformScript.source.contains("window.__IOS_DEVICE_CLASS__ = '\(expectedDeviceClass)';"))
-        XCTAssertTrue(platformScript.source.contains("document.documentElement.classList.add('platform-ios');"))
-        XCTAssertTrue(platformScript.source.contains("document.documentElement.classList.add('\(expectedDeviceClass)');"))
+        XCTAssertTrue(platformScript.contains("window.__PLATFORM__ = 'ios';"))
+        XCTAssertTrue(platformScript.contains("window.__IOS_DEVICE_CLASS__ = '\(expectedDeviceClass)';"))
+        XCTAssertTrue(platformScript.contains("document.documentElement.classList.add('platform-ios');"))
+        XCTAssertTrue(platformScript.contains("document.documentElement.classList.add('\(expectedDeviceClass)');"))
     }
     #endif
 

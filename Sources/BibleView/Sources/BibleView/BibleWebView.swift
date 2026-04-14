@@ -145,6 +145,112 @@ public struct BibleWebView: NSViewRepresentable {
 // MARK: - Shared WebView Creation
 
 extension BibleWebView {
+    /// Returns the iOS device-class token exported to the web client.
+    static func iosDeviceClass() -> String {
+        #if os(iOS)
+        UIDevice.current.userInterfaceIdiom == .pad ? "ios-pad" : "ios-phone"
+        #else
+        "ios-phone"
+        #endif
+    }
+
+    /// Returns the bootstrap script injected into the packaged web client before it loads.
+    static func platformBootstrapScriptSource(deviceClass: String) -> String {
+        """
+        window.__PLATFORM__ = 'ios';
+        window.__activeLanguages__ = '["en"]';
+        window.__IOS_DEVICE_CLASS__ = '\(deviceClass)';
+        window.bibleView = {};
+        window.bibleViewDebug = {};
+        (function() {
+            function applyPlatformClasses() {
+                if (!document.documentElement) return;
+                document.documentElement.classList.add('platform-ios');
+                document.documentElement.classList.add('\(deviceClass)');
+            }
+            if (document.documentElement) {
+                applyPlatformClasses();
+            } else {
+                document.addEventListener('DOMContentLoaded', applyPlatformClasses, { once: true });
+            }
+        })();
+        window.android = new Proxy({}, {
+            get: function(target, prop) {
+                if (prop === 'getActiveLanguages') {
+                    return function() { return window.__activeLanguages__; };
+                }
+                return function() {
+                    var args = Array.prototype.slice.call(arguments);
+                    window.webkit.messageHandlers.bibleView.postMessage({
+                        method: String(prop),
+                        args: args
+                    });
+                };
+            }
+        });
+        // Prevent iOS tap highlight and fix Strong's link colors for night mode
+        var style = document.createElement('style');
+        style.textContent = [
+            '* { -webkit-tap-highlight-color: transparent; }',
+            '::selection { background: rgba(100,149,237,0.3); }',
+            // Make Strong's number links use theme-aware colors.
+            // Must override <a> tag default link/visited colors with pseudo-class selectors.
+            '.w-base { color: var(--verse-number-color, #aaa) !important; }',
+            'a.strongs, a.strongs:link, a.strongs:visited, a.strongs:active { color: var(--verse-number-color, #aaa) !important; }',
+            'a.morph, a.morph:link, a.morph:visited, a.morph:active { color: var(--verse-number-color, #aaa) !important; }',
+        ].join(' ');
+        (document.head || document.documentElement).appendChild(style);
+        // Route console.log/error/warn to native bridge for debugging
+        (function() {
+            var origLog = console.log;
+            var origError = console.error;
+            var origWarn = console.warn;
+            console.log = function() {
+                origLog.apply(console, arguments);
+                try {
+                    var msg = Array.prototype.slice.call(arguments).map(function(a) {
+                        return typeof a === 'object' ? JSON.stringify(a) : String(a);
+                    }).join(' ');
+                    window.webkit.messageHandlers.bibleView.postMessage({
+                        method: 'jsLog', args: ['LOG', msg]
+                    });
+                } catch(e) {}
+            };
+            console.error = function() {
+                origError.apply(console, arguments);
+                try {
+                    var msg = Array.prototype.slice.call(arguments).map(function(a) {
+                        return typeof a === 'object' ? JSON.stringify(a) : String(a);
+                    }).join(' ');
+                    window.webkit.messageHandlers.bibleView.postMessage({
+                        method: 'jsLog', args: ['ERROR', msg]
+                    });
+                } catch(e) {}
+            };
+            console.warn = function() {
+                origWarn.apply(console, arguments);
+                try {
+                    var msg = Array.prototype.slice.call(arguments).map(function(a) {
+                        return typeof a === 'object' ? JSON.stringify(a) : String(a);
+                    }).join(' ');
+                    window.webkit.messageHandlers.bibleView.postMessage({
+                        method: 'jsLog', args: ['WARN', msg]
+                    });
+                } catch(e) {}
+            };
+        })();
+        // Double-click/tap toggles fullscreen mode (matching Android behavior)
+        document.addEventListener('dblclick', function(e) {
+            // Don't toggle fullscreen if clicking on interactive elements
+            if (e.target.closest('a, button, input, textarea, [contenteditable]')) return;
+            window.webkit.messageHandlers.bibleView.postMessage({
+                method: 'toggleFullScreen',
+                args: []
+            });
+        });
+        """
+    }
+
     /**
      Creates and configures the shared `WKWebView` used on both iOS and macOS.
 
@@ -154,11 +260,7 @@ extension BibleWebView {
      */
     func createWebView(coordinator: WebViewCoordinator) -> WKWebView {
         let config = WKWebViewConfiguration()
-        #if os(iOS)
-        let iosDeviceClass = UIDevice.current.userInterfaceIdiom == .pad ? "ios-pad" : "ios-phone"
-        #else
-        let iosDeviceClass = "ios-phone"
-        #endif
+        let iosDeviceClass = Self.iosDeviceClass()
 
         // Register bridge message handler
         let contentController = WKUserContentController()
@@ -168,99 +270,7 @@ extension BibleWebView {
         // The Vue.js code calls window.android.xxx() directly (from android.ts).
         // This Proxy routes those calls to the iOS WKScriptMessageHandler bridge.
         let platformScript = WKUserScript(
-            source: """
-            window.__PLATFORM__ = 'ios';
-            window.__activeLanguages__ = '["en"]';
-            window.__IOS_DEVICE_CLASS__ = '\(iosDeviceClass)';
-            window.bibleView = {};
-            window.bibleViewDebug = {};
-            (function() {
-                function applyPlatformClasses() {
-                    if (!document.documentElement) return;
-                    document.documentElement.classList.add('platform-ios');
-                    document.documentElement.classList.add('\(iosDeviceClass)');
-                }
-                if (document.documentElement) {
-                    applyPlatformClasses();
-                } else {
-                    document.addEventListener('DOMContentLoaded', applyPlatformClasses, { once: true });
-                }
-            })();
-            window.android = new Proxy({}, {
-                get: function(target, prop) {
-                    if (prop === 'getActiveLanguages') {
-                        return function() { return window.__activeLanguages__; };
-                    }
-                    return function() {
-                        var args = Array.prototype.slice.call(arguments);
-                        window.webkit.messageHandlers.bibleView.postMessage({
-                            method: String(prop),
-                            args: args
-                        });
-                    };
-                }
-            });
-            // Prevent iOS tap highlight and fix Strong's link colors for night mode
-            var style = document.createElement('style');
-            style.textContent = [
-                '* { -webkit-tap-highlight-color: transparent; }',
-                '::selection { background: rgba(100,149,237,0.3); }',
-                // Make Strong's number links use theme-aware colors.
-                // Must override <a> tag default link/visited colors with pseudo-class selectors.
-                '.w-base { color: var(--verse-number-color, #aaa) !important; }',
-                'a.strongs, a.strongs:link, a.strongs:visited, a.strongs:active { color: var(--verse-number-color, #aaa) !important; }',
-                'a.morph, a.morph:link, a.morph:visited, a.morph:active { color: var(--verse-number-color, #aaa) !important; }',
-            ].join(' ');
-            (document.head || document.documentElement).appendChild(style);
-            // Route console.log/error/warn to native bridge for debugging
-            (function() {
-                var origLog = console.log;
-                var origError = console.error;
-                var origWarn = console.warn;
-                console.log = function() {
-                    origLog.apply(console, arguments);
-                    try {
-                        var msg = Array.prototype.slice.call(arguments).map(function(a) {
-                            return typeof a === 'object' ? JSON.stringify(a) : String(a);
-                        }).join(' ');
-                        window.webkit.messageHandlers.bibleView.postMessage({
-                            method: 'jsLog', args: ['LOG', msg]
-                        });
-                    } catch(e) {}
-                };
-                console.error = function() {
-                    origError.apply(console, arguments);
-                    try {
-                        var msg = Array.prototype.slice.call(arguments).map(function(a) {
-                            return typeof a === 'object' ? JSON.stringify(a) : String(a);
-                        }).join(' ');
-                        window.webkit.messageHandlers.bibleView.postMessage({
-                            method: 'jsLog', args: ['ERROR', msg]
-                        });
-                    } catch(e) {}
-                };
-                console.warn = function() {
-                    origWarn.apply(console, arguments);
-                    try {
-                        var msg = Array.prototype.slice.call(arguments).map(function(a) {
-                            return typeof a === 'object' ? JSON.stringify(a) : String(a);
-                        }).join(' ');
-                        window.webkit.messageHandlers.bibleView.postMessage({
-                            method: 'jsLog', args: ['WARN', msg]
-                        });
-                    } catch(e) {}
-                };
-            })();
-            // Double-click/tap toggles fullscreen mode (matching Android behavior)
-            document.addEventListener('dblclick', function(e) {
-                // Don't toggle fullscreen if clicking on interactive elements
-                if (e.target.closest('a, button, input, textarea, [contenteditable]')) return;
-                window.webkit.messageHandlers.bibleView.postMessage({
-                    method: 'toggleFullScreen',
-                    args: []
-                });
-            });
-            """,
+            source: Self.platformBootstrapScriptSource(deviceClass: iosDeviceClass),
             injectionTime: .atDocumentStart,
             forMainFrameOnly: true
         )
