@@ -6337,8 +6337,7 @@ final class AndBibleUITests: XCTestCase {
         let deadline = Date().addingTimeInterval(timeout)
         repeat {
             if let field = resolveLabelCreationPromptTextField(in: app),
-               field.exists,
-               (field.isHittable || !field.frame.isEmpty) {
+               field.exists {
                 return field
             }
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
@@ -6378,8 +6377,7 @@ final class AndBibleUITests: XCTestCase {
         let deadline = Date().addingTimeInterval(timeout)
         repeat {
             if let button = resolveLabelCreationPromptCreateButton(in: app),
-               button.exists,
-               (button.isHittable || !button.frame.isEmpty) {
+               button.exists {
                 return button
             }
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
@@ -6741,7 +6739,6 @@ final class AndBibleUITests: XCTestCase {
         if let prompt = resolvedLabelCreationPrompt(in: app) {
             let promptCandidates = [
                 prompt.textFields["labelManagerNewLabelNameField"].firstMatch,
-                prompt.textFields["Label name"].firstMatch,
                 prompt.textFields.firstMatch,
             ]
             if let field = promptCandidates.first(where: { $0.exists }) {
@@ -6751,7 +6748,6 @@ final class AndBibleUITests: XCTestCase {
 
         let appCandidates = [
             app.textFields["labelManagerNewLabelNameField"].firstMatch,
-            app.textFields["Label name"].firstMatch,
         ]
         return appCandidates.first(where: { $0.exists })
     }
