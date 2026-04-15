@@ -81,6 +81,51 @@ private struct ReaderOverflowButtonBoundsPreferenceKey: PreferenceKey {
     }
 }
 
+/// Captures the reader root's live scene size and safe-area insets.
+private struct ReaderSceneMetrics: Equatable {
+    var size: CGSize = .zero
+    var safeAreaInsets: EdgeInsets = .init()
+}
+
+/// Feeds root scene metrics back into the reader so iPad windowed layouts can adapt.
+private struct ReaderSceneMetricsPreferenceKey: PreferenceKey {
+    static var defaultValue = ReaderSceneMetrics()
+
+    static func reduce(value: inout ReaderSceneMetrics, nextValue: () -> ReaderSceneMetrics) {
+        value = nextValue()
+    }
+}
+
+/// Pure layout heuristic for reserving space for iPadOS floating window controls.
+struct ReaderWindowControlsAvoidanceMetrics {
+    static let minimumTopClearance: CGFloat = 34
+    static let minimumLeadingClearance: CGFloat = 56
+
+    static func documentHeaderInsets(
+        isPad: Bool,
+        sceneSize: CGSize,
+        screenWidth: CGFloat,
+        safeAreaInsets: EdgeInsets
+    ) -> EdgeInsets {
+        guard isPad else {
+            return .init()
+        }
+        guard sceneSize.width > 0, screenWidth > 0 else {
+            return .init()
+        }
+        guard sceneSize.width < (screenWidth - 1) else {
+            return .init()
+        }
+
+        return EdgeInsets(
+            top: max(0, minimumTopClearance - safeAreaInsets.top),
+            leading: max(0, minimumLeadingClearance - safeAreaInsets.leading),
+            bottom: 0,
+            trailing: 0
+        )
+    }
+}
+
 /**
  Coordinates the primary reading experience, including panes, toolbars, sheets, and overlays.
 
@@ -245,6 +290,9 @@ public struct BibleReaderView: View {
 
     /// Whether the reader is currently hiding its standard chrome in fullscreen mode.
     @State private var isFullScreen = false
+
+    /// Latest root-scene metrics used to avoid iPadOS floating window controls.
+    @State private var readerSceneMetrics = ReaderSceneMetrics()
 
     /// Android-parity preference controlling whether navigation drills down to verse selection.
     @State private var navigateToVersePref = AppPreferenceRegistry.boolDefault(for: .navigateToVersePref) ?? false
@@ -570,6 +618,17 @@ public struct BibleReaderView: View {
         .animation(.easeInOut(duration: 0.25), value: toastMessage)
         .animation(.easeInOut(duration: 0.2), value: showReaderNavigationDrawer)
         .animation(.easeInOut(duration: 0.16), value: showReaderOverflowMenu)
+        .background {
+            GeometryReader { proxy in
+                Color.clear.preference(
+                    key: ReaderSceneMetricsPreferenceKey.self,
+                    value: ReaderSceneMetrics(size: proxy.size, safeAreaInsets: proxy.safeAreaInsets)
+                )
+            }
+        }
+        .onPreferenceChange(ReaderSceneMetricsPreferenceKey.self) { metrics in
+            readerSceneMetrics = metrics
+        }
         #if os(iOS)
         .toolbar(.hidden, for: .navigationBar)
         #endif
@@ -1551,6 +1610,7 @@ public struct BibleReaderView: View {
      */
     private var documentHeader: some View {
         let controller = focusedController
+        let avoidanceInsets = readerWindowControlsAvoidanceInsets
         return VStack(spacing: 0) {
             HStack {
                 if controller?.showingMyNotes == true {
@@ -1693,10 +1753,26 @@ public struct BibleReaderView: View {
                         .layoutPriority(1)
                 }
             }
-            .padding(.horizontal)
-            .padding(.vertical, 8)
+            .padding(.top, 8 + avoidanceInsets.top)
+            .padding(.bottom, 8)
+            .padding(.leading, 16 + avoidanceInsets.leading)
+            .padding(.trailing, 16)
             .background(.bar)
         }
+    }
+
+    /// Extra document-header padding reserved for iPad windowed layouts with floating controls.
+    private var readerWindowControlsAvoidanceInsets: EdgeInsets {
+        #if os(iOS)
+        ReaderWindowControlsAvoidanceMetrics.documentHeaderInsets(
+            isPad: UIDevice.current.userInterfaceIdiom == .pad,
+            sceneSize: readerSceneMetrics.size,
+            screenWidth: UIScreen.main.bounds.width,
+            safeAreaInsets: readerSceneMetrics.safeAreaInsets
+        )
+        #else
+        .init()
+        #endif
     }
 
     /**

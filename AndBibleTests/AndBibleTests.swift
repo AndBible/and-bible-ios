@@ -6,6 +6,7 @@ import SwiftData
 import SQLite3
 @testable import BibleUI
 @testable import BibleView
+import struct SwiftUI.EdgeInsets
 #if os(iOS)
 import UIKit
 import struct SwiftUI.Color
@@ -83,6 +84,43 @@ final class AndBibleTests: XCTestCase {
 
     func testTextDisplayAppDefaultsStartWithStrongsDisabled() {
         XCTAssertEqual(TextDisplaySettings.appDefaults.strongsMode, 0)
+    }
+
+    func testReaderWindowControlsAvoidanceInsetsStayOffForFullscreenIPad() {
+        let insets = ReaderWindowControlsAvoidanceMetrics.documentHeaderInsets(
+            isPad: true,
+            sceneSize: CGSize(width: 834, height: 1194),
+            screenWidth: 834,
+            safeAreaInsets: EdgeInsets(top: 24, leading: 0, bottom: 20, trailing: 0)
+        )
+
+        XCTAssertEqual(insets, EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
+    }
+
+    func testReaderWindowControlsAvoidanceInsetsReserveSpaceForWindowedIPad() {
+        let insets = ReaderWindowControlsAvoidanceMetrics.documentHeaderInsets(
+            isPad: true,
+            sceneSize: CGSize(width: 700, height: 980),
+            screenWidth: 834,
+            safeAreaInsets: EdgeInsets(top: 24, leading: 0, bottom: 20, trailing: 0)
+        )
+
+        XCTAssertEqual(insets.top, 10)
+        XCTAssertEqual(insets.leading, 56)
+        XCTAssertEqual(insets.bottom, 0)
+        XCTAssertEqual(insets.trailing, 0)
+    }
+
+    func testReaderWindowControlsAvoidanceInsetsOnlyTopUpMissingSafeAreaClearance() {
+        let insets = ReaderWindowControlsAvoidanceMetrics.documentHeaderInsets(
+            isPad: true,
+            sceneSize: CGSize(width: 700, height: 980),
+            screenWidth: 834,
+            safeAreaInsets: EdgeInsets(top: 36, leading: 20, bottom: 20, trailing: 0)
+        )
+
+        XCTAssertEqual(insets.top, 0)
+        XCTAssertEqual(insets.leading, 36)
     }
 
     #if os(iOS)
