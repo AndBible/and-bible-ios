@@ -257,8 +257,11 @@ public struct BibleReaderView: View {
     /// Last speak-toolbar activation timestamp used to mirror Android button prioritization.
     @AppStorage("speak-last-used") private var speakLastUsed = 0.0
 
-    /// Workspace-resolved text and color settings pushed into every visible pane.
+    /// Text and color settings resolved for the currently active pane and toolbar state.
     @State private var displaySettings: TextDisplaySettings = .appDefaults
+
+    /// Workspace-scoped display settings edited from the full Settings/Text Display flows.
+    @State private var settingsDisplaySettings: TextDisplaySettings = .appDefaults
 
     /// Effective night-mode value currently applied to pane controllers and overlays.
     @State private var nightMode = false
@@ -459,7 +462,10 @@ public struct BibleReaderView: View {
         let windowToken = windowManager.activeWindow.map { "windowOrder=\($0.orderNumber)" } ?? "windowOrder=none"
         let contentToken = focusedController?.renderedContentState
             ?? BibleReaderController.emptyRenderedContentState
-        return "\(windowToken);\(contentToken)"
+        let strongsMode = resolvedDisplaySettings(for: windowManager.activeWindow).strongsMode
+            ?? TextDisplaySettings.appDefaults.strongsMode
+            ?? 0
+        return "\(windowToken);\(contentToken);strongsMode=\(strongsMode)"
     }
 
     /// Converts SWORD Roman-numeral book prefixes into Android-style Arabic numerals for toolbar display.
@@ -658,13 +664,8 @@ public struct BibleReaderView: View {
             speakService.settingsStore = store
             speakService.restoreSettings()
 
-            // Resolve display settings from workspace inheritance chain
-            let workspace = windowManager.activeWorkspace
-            let window = windowManager.activeWindow
-            displaySettings = TextDisplaySettings.fullyResolved(
-                window: window?.pageManager?.textDisplaySettings,
-                workspace: workspace?.textDisplaySettings
-            )
+            syncActiveDisplaySettings()
+            prepareWorkspaceDisplaySettingsEditor()
 
             // TTS callbacks — dynamically resolve the focused controller so TTS
             // always operates on the active window (not the last-initialized pane).
@@ -723,6 +724,9 @@ public struct BibleReaderView: View {
 
             presentUITestLaunchSearchIfNeeded()
         }
+        .onChange(of: windowManager.activeWindow?.id) { _, _ in
+            syncActiveDisplaySettings()
+        }
         #if os(iOS)
         .onAppear {
             // Auto-start tilt scroll if workspace has it enabled
@@ -780,10 +784,10 @@ public struct BibleReaderView: View {
             case .settings:
                 NavigationStack {
                     SettingsView(
-                        displaySettings: $displaySettings,
+                        displaySettings: $settingsDisplaySettings,
                         nightMode: $nightMode,
                         nightModeMode: $nightModeMode,
-                        onSettingsChanged: applyDisplaySettingsChange
+                        onSettingsChanged: applyWorkspaceDisplaySettingsChange
                     )
                     .toolbar {
                         ToolbarItem(placement: .cancellationAction) {
@@ -839,7 +843,7 @@ public struct BibleReaderView: View {
         }
         .sheet(isPresented: $showTextDisplaySettings) {
             NavigationStack {
-                TextDisplaySettingsView(settings: $displaySettings, onChange: applyDisplaySettingsChange)
+                TextDisplaySettingsView(settings: $settingsDisplaySettings, onChange: applyWorkspaceDisplaySettingsChange)
                     .toolbar {
                         ToolbarItem(placement: .cancellationAction) {
                             Button(String(localized: "done")) { showTextDisplaySettings = false }
@@ -860,7 +864,7 @@ public struct BibleReaderView: View {
         }
         .sheet(isPresented: $showColorSettings) {
             NavigationStack {
-                ColorSettingsView(settings: $displaySettings, onChange: applyDisplaySettingsChange)
+                ColorSettingsView(settings: $settingsDisplaySettings, onChange: applyWorkspaceDisplaySettingsChange)
                     .toolbar {
                         ToolbarItem(placement: .cancellationAction) {
                             Button(String(localized: "done")) { showColorSettings = false }
@@ -1112,6 +1116,7 @@ public struct BibleReaderView: View {
                     .keyboardShortcut("d", modifiers: .command)
                 Button("") {
                     setPanePresentationTarget(windowManager.activeWindow?.id)
+                    prepareWorkspaceDisplaySettingsEditor()
                     activeReaderSheet = .settings
                 }
                     .keyboardShortcut(",", modifiers: .command)
@@ -1238,6 +1243,7 @@ public struct BibleReaderView: View {
                 activeReaderSheet = .readingPlans
             case .settings:
                 setPanePresentationTarget(windowManager.activeWindow?.id)
+                prepareWorkspaceDisplaySettingsEditor()
                 activeReaderSheet = .settings
             case .workspaces:
                 setPanePresentationTarget(windowManager.activeWindow?.id)
@@ -1284,6 +1290,7 @@ public struct BibleReaderView: View {
     /** Opens Settings from the reader shell. */
     private func openSettingsFromReaderAction() {
         setPanePresentationTarget(windowManager.activeWindow?.id)
+        prepareWorkspaceDisplaySettingsEditor()
         activeReaderSheet = .settings
     }
 
@@ -1316,7 +1323,7 @@ public struct BibleReaderView: View {
         BibleWindowPane(
             window: window,
             isFocused: window.id == windowManager.activeWindow?.id,
-            displaySettings: displaySettings,
+            displaySettings: resolvedDisplaySettings(for: window),
             nightMode: nightMode,
             disableTwoStepBookmarking: disableTwoStepBookmarkingPref,
             hideWindowButtons: hideWindowButtonsPref,
@@ -1332,6 +1339,7 @@ public struct BibleReaderView: View {
             },
             onShowSettings: {
                 setPanePresentationTarget(window.id)
+                prepareWorkspaceDisplaySettingsEditor()
                 activeReaderSheet = .settings
             },
             onShowDownloads: {
@@ -2149,6 +2157,7 @@ public struct BibleReaderView: View {
                     ) {
                         dismissReaderNavigationDrawerAndPerform {
                             setPanePresentationTarget(windowManager.activeWindow?.id)
+                            prepareWorkspaceDisplaySettingsEditor()
                             activeReaderSheet = .settings
                         }
                     }
@@ -2943,6 +2952,7 @@ public struct BibleReaderView: View {
                     let next = (current + 1) % 3
                     applyStrongsMode(next)
                 }
+                .accessibilityIdentifier("readerStrongsToolbarButton")
                 .accessibilityLabel(String(localized: "toggle_strongs_numbers"))
             }
 
@@ -3042,28 +3052,31 @@ public struct BibleReaderView: View {
     }
 
     /**
-     Applies a Strong's display mode, persists it, and refreshes visible pane controllers.
+     Applies a Strong's display mode to the active window only and refreshes that pane.
 
      - Parameter mode: Raw Vue.js/config mode value (`0...3`) matching `StrongsMode`.
-     - Side effects: Mutates the shared `displaySettings` value, persists it to the active
-       workspace when available, and pushes updated display settings into every visible
-       `BibleReaderController`.
-     - Failure modes: If there is no active workspace, persistence is skipped and only in-memory
-       state plus controller refreshes occur. SwiftData save failures are intentionally swallowed
-       via `try?`.
+     - Side effects: Persists the updated Strong's mode into the active window's page-manager
+       overrides, refreshes the active pane controller, and re-syncs the focused toolbar state.
+     - Failure modes: If no active window or page manager exists, the method only updates the
+       in-memory focused settings state. SwiftData save failures are intentionally swallowed.
      */
     private func applyStrongsMode(_ mode: Int) {
-        displaySettings.strongsMode = mode
-        if let workspace = windowManager.activeWorkspace {
-            workspace.textDisplaySettings = displaySettings
+        if let activeWindow = windowManager.activeWindow,
+           let pageManager = activeWindow.pageManager {
+            var windowSettings = pageManager.textDisplaySettings ?? TextDisplaySettings()
+            windowSettings.strongsMode = mode
+            pageManager.textDisplaySettings = windowSettings
             try? modelContext.save()
-        }
-        // Update all visible windows
-        for window in windowManager.visibleWindows {
-            if let ctrl = windowManager.controllers[window.id] as? BibleReaderController {
-                ctrl.updateDisplaySettings(displaySettings, nightMode: nightMode)
+
+            let resolved = resolvedDisplaySettings(for: activeWindow)
+            displaySettings = resolved
+            if let ctrl = controller(for: activeWindow.id) {
+                ctrl.updateDisplaySettings(resolved, nightMode: nightMode)
             }
+            return
         }
+
+        displaySettings.strongsMode = mode
     }
 
     /**
@@ -3077,9 +3090,11 @@ public struct BibleReaderView: View {
         _ keyPath: WritableKeyPath<TextDisplaySettings, Bool?>,
         default defaultValue: Bool
     ) {
-        let currentValue = displaySettings[keyPath: keyPath] ?? defaultValue
-        displaySettings[keyPath: keyPath] = !currentValue
-        applyDisplaySettingsChange()
+        let currentValue = settingsDisplaySettings[keyPath: keyPath]
+            ?? resolvedWorkspaceDisplaySettings()[keyPath: keyPath]
+            ?? defaultValue
+        settingsDisplaySettings[keyPath: keyPath] = !currentValue
+        applyWorkspaceDisplaySettingsChange()
     }
 
     /**
@@ -3115,30 +3130,70 @@ public struct BibleReaderView: View {
     }
 
     /**
-     Persists text-display edits and refreshes visible reader controllers.
+     Persists workspace-scoped text-display edits and refreshes reader controllers per pane.
 
      - Side effects:
-       - writes the current `displaySettings` value into the active workspace when available
-       - attempts to save the updated workspace through `modelContext`
-       - pushes refreshed display settings into every visible `BibleReaderController`
-       - reloads behavior preferences so dependent native toggles stay in sync with the latest
-         persisted values
+       - writes the current editor value into the active workspace
+       - clears window-scoped Strong's overrides when the workspace Strong's mode changes, so the
+         full Settings flow continues to behave workspace-wide
+       - pushes each visible reader its own resolved display settings
+       - reloads behavior preferences so dependent native toggles stay in sync
      - Failure modes:
-       - if no active workspace exists, persistence is skipped and only in-memory controller
-         refreshes occur
+       - if no active workspace exists, persistence is skipped and only controller refreshes occur
        - SwiftData save failures are intentionally swallowed via `try?`
      */
-    private func applyDisplaySettingsChange() {
+    private func applyWorkspaceDisplaySettingsChange() {
+        let previousWorkspaceSettings = resolvedWorkspaceDisplaySettings()
+
         if let workspace = windowManager.activeWorkspace {
-            workspace.textDisplaySettings = displaySettings
+            workspace.textDisplaySettings = settingsDisplaySettings
+            if previousWorkspaceSettings.strongsMode != settingsDisplaySettings.strongsMode {
+                for window in windowManager.allWindows {
+                    window.pageManager?.textDisplaySettings?.strongsMode = nil
+                }
+            }
             try? modelContext.save()
         }
+
+        refreshVisibleControllerDisplaySettings()
+        syncActiveDisplaySettings()
+        prepareWorkspaceDisplaySettingsEditor()
+        reloadBehaviorPreferences()
+    }
+
+    /// Resolves text-display settings for one specific window using the normal inheritance chain.
+    private func resolvedDisplaySettings(for window: Window?) -> TextDisplaySettings {
+        TextDisplaySettings.fullyResolved(
+            window: window?.pageManager?.textDisplaySettings,
+            workspace: windowManager.activeWorkspace?.textDisplaySettings
+        )
+    }
+
+    /// Resolves the workspace-scoped settings editor state without applying window overrides.
+    private func resolvedWorkspaceDisplaySettings() -> TextDisplaySettings {
+        TextDisplaySettings.fullyResolved(
+            window: nil,
+            workspace: windowManager.activeWorkspace?.textDisplaySettings
+        )
+    }
+
+    /// Re-syncs the focused toolbar/settings state from the current active window.
+    private func syncActiveDisplaySettings() {
+        displaySettings = resolvedDisplaySettings(for: windowManager.activeWindow)
+    }
+
+    /// Seeds the workspace settings editor from the current workspace-level values.
+    private func prepareWorkspaceDisplaySettingsEditor() {
+        settingsDisplaySettings = resolvedWorkspaceDisplaySettings()
+    }
+
+    /// Refreshes each visible reader pane using that pane's own resolved display settings.
+    private func refreshVisibleControllerDisplaySettings() {
         for window in windowManager.visibleWindows {
-            if let ctrl = windowManager.controllers[window.id] as? BibleReaderController {
-                ctrl.updateDisplaySettings(displaySettings, nightMode: nightMode)
+            if let ctrl = controller(for: window.id) {
+                ctrl.updateDisplaySettings(resolvedDisplaySettings(for: window), nightMode: nightMode)
             }
         }
-        reloadBehaviorPreferences()
     }
 
     /// Resolved toolbar gesture mode for the Bible and commentary buttons.

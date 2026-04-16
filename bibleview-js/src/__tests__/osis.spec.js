@@ -234,6 +234,27 @@ describe("OsisSegment.vue", () => {
         expect(wrapper.text()).not.toContain("THE SECOND EPISTLE OF PAUL THE APOSTLE TO THE CORINTHIANS");
     });
 
+    it("renders inline Strong's words as clickable decorated spans", () => {
+        const wrapper = mountBibleDocument(buildBibleDocument(
+            "<div><div><verse osisID=\"Gen.1.1\" verseOrdinal=\"1\"><w lemma=\"strong:H00430\">God</w> created.</verse></div></div>",
+            {
+                key: "Gen.1",
+                keyName: "Genesis 1",
+                osisRef: "Gen.1",
+                ordinalRange: [1, 1],
+                originalOrdinalRange: [1, 1],
+            }
+        ), {
+            configure: ({config}) => {
+                config.strongsMode = 1;
+            }
+        });
+
+        const strongsWord = wrapper.find("span.link-style");
+        expect(strongsWord.exists()).toBe(true);
+        expect(strongsWord.text()).toContain("God");
+    });
+
     it("renders TEI sense markers without placeholder dot-only wrappers", () => {
         const {config, appSettings, calculatedConfig} = useConfig(ref("bible"));
         const osisFragment = {

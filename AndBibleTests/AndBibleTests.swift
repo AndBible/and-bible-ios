@@ -179,6 +179,16 @@ final class AndBibleTests: XCTestCase {
         let color = Color(.sRGB, red: -0.25, green: 0.5, blue: 1.2, opacity: 1.0)
         XCTAssertEqual(color.argbInt, Int(Int32(bitPattern: 0xFF0080FF)))
     }
+
+    func testBibleWebViewInjectsPlatformDeviceClassIntoUserScript() {
+        let expectedDeviceClass = BibleWebView.iosDeviceClass()
+        let platformScript = BibleWebView.platformBootstrapScriptSource(deviceClass: expectedDeviceClass)
+
+        XCTAssertTrue(platformScript.contains("window.__PLATFORM__ = 'ios';"))
+        XCTAssertTrue(platformScript.contains("window.__IOS_DEVICE_CLASS__ = '\(expectedDeviceClass)';"))
+        XCTAssertTrue(platformScript.contains("document.documentElement.classList.add('platform-ios');"))
+        XCTAssertTrue(platformScript.contains("document.documentElement.classList.add('\(expectedDeviceClass)');"))
+    }
     #endif
 
     func testCSVSetEncodingAndDecodingRoundTrip() {

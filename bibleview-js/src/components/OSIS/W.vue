@@ -30,7 +30,12 @@
   </template>
   <template v-else>
     <span v-if="(showStrongsHidden && lemma) || (showStrongsHidden && config.showMorphology && morph)" :class="{isHighlighted, 'has-strongs': !!lemma}"  class="highlight-transition" @click="goToLink($event, formatLink(lemma, morph))"><slot/></span>
-    <span v-else-if="(showStrongs && lemma) || (showStrongs && config.showMorphology && morph)" :class="{isHighlighted, 'has-strongs': !!lemma}"  class="highlight-transition link-style" @click="goToLink($event, formatLink(lemma, morph))"><slot/></span>
+    <span
+      v-else-if="(showStrongs && lemma) || (showStrongs && config.showMorphology && morph)"
+      :class="{isHighlighted, 'has-strongs': !!lemma}"
+      class="highlight-transition link-style"
+      @click="goToLink($event, formatLink(lemma, morph))"
+    ><slot/></span>
     <span v-else :class="{'has-strongs': !!lemma}"><slot/></span>
   </template>
 </template>
@@ -102,11 +107,24 @@ const showStrongsSeparately = computed(() => !exportMode.value && config.strongs
 @use "@/common.scss" as *;
 
 .link-style {
+  cursor: pointer;
   text-decoration: underline dotted;
 
-  [lang=he], [lang=hbo] & {
+  .ios-pad & {
+    -webkit-text-decoration: underline dotted;
+    text-decoration-thickness: 1.5px;
+    text-underline-offset: 0.12em;
+    text-decoration-skip-ink: none;
+  }
+
+  [lang=he] &,
+  [lang=hbo] & {
     text-decoration-style: solid;
     text-decoration-color: hsla(var(--text-color-h), var(--text-color-s), var(--text-color-l), 0.5);
+
+    .ios-pad & {
+      -webkit-text-decoration: underline;
+    }
   }
 }
 
