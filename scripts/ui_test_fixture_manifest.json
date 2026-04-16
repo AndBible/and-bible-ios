@@ -38,6 +38,7 @@
   "AndBibleUITests/AndBibleUITests/testSyncSettingsNextCloudInvalidURLShowsValidationStatus": "sync-nextcloud",
   "AndBibleUITests/AndBibleUITests/testThirdWindowBookmarkNavigationUpdatesOnlyTargetPaneContent": "bookmark-navigation",
   "AndBibleUITests/AndBibleUITests/testThirdWindowDocumentSwitchUpdatesOnlyTargetPaneContent": "baseline",
+  "AndBibleUITests/AndBibleUITests/testThirdWindowStrongsToggleAffectsOnlyActiveWindow": "baseline",
   "AndBibleUITests/AndBibleUITests/testTextDisplayFontFamilyButtonPresentsFontPicker": "baseline",
   "AndBibleUITests/AndBibleUITests/testTextDisplayJustifyToggleMutatesControlState": "baseline",
   "AndBibleUITests/AndBibleUITests/testWorkspaceSelectorCreateAndSwitchFlow": "baseline"
