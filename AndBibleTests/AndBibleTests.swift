@@ -99,8 +99,13 @@ final class AndBibleTests: XCTestCase {
         XCTAssertEqual(color.argbInt, Int(Int32(bitPattern: 0xFF0080FF)))
     }
 
+    func testBibleWebViewMapsDeviceClassFromInterfaceIdiom() {
+        XCTAssertEqual(BibleWebView.iosDeviceClass(for: .phone), "ios-phone")
+        XCTAssertEqual(BibleWebView.iosDeviceClass(for: .pad), "ios-pad")
+    }
+
     func testBibleWebViewInjectsPlatformDeviceClassIntoUserScript() {
-        let expectedDeviceClass = BibleWebView.iosDeviceClass()
+        let expectedDeviceClass = "ios-phone"
         let platformScript = BibleWebView.platformBootstrapScriptSource(deviceClass: expectedDeviceClass)
 
         XCTAssertTrue(platformScript.contains("window.__PLATFORM__ = 'ios';"))

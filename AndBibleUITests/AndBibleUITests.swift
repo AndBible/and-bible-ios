@@ -6843,17 +6843,7 @@ final class AndBibleUITests: XCTestCase {
 
     /// Resolves the compact exported Search state element when Search is presented.
     private func resolvedSearchStateElement(in app: XCUIApplication) -> XCUIElement? {
-        let textCandidate = app.staticTexts["searchStateExport"].firstMatch
-        if textCandidate.exists {
-            return textCandidate
-        }
-
-        let elementCandidate = app.otherElements["searchStateExport"].firstMatch
-        if elementCandidate.exists {
-            return elementCandidate
-        }
-
-        return nil
+        resolvedElement("searchStateExport", in: app) ?? resolvedElement("searchScreen", in: app)
     }
 
     /// Reads the current exported Search state without forcing the whole Search container query.
