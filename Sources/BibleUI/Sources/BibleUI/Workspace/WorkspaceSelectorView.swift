@@ -17,7 +17,7 @@ import BibleCore
 
  Side effects:
  - selecting a row switches the active workspace and dismisses the sheet
- - alerts create, rename, or clone workspaces through `WorkspaceStore`
+ - sheet-backed prompts create, rename, or clone workspaces through `WorkspaceStore`
  - swipe deletion, context-menu deletion, and move actions mutate persisted workspace state
  */
 public struct WorkspaceSelectorView: View {
@@ -27,29 +27,14 @@ public struct WorkspaceSelectorView: View {
     /// SwiftData context used by `WorkspaceStore` mutations.
     @Environment(\.modelContext) private var modelContext
 
-    /// Controls presentation of the create-workspace alert.
-    @State private var showNewWorkspace = false
+    /// Current system color scheme used to resolve Android-parity surface colors.
+    @Environment(\.colorScheme) private var colorScheme
 
-    /// Draft name for the create-workspace alert.
-    @State private var newWorkspaceName = ""
+    /// Currently presented workspace-name prompt, if any.
+    @State private var workspacePrompt: WorkspaceNamePrompt?
 
-    /// Controls presentation of the rename-workspace alert.
-    @State private var showRenameWorkspace = false
-
-    /// Draft name for the rename-workspace alert.
-    @State private var renameWorkspaceName = ""
-
-    /// Workspace currently targeted by the rename flow.
-    @State private var workspaceToRename: Workspace?
-
-    /// Controls presentation of the clone-workspace alert.
-    @State private var showCloneWorkspace = false
-
-    /// Draft name for the clone-workspace alert.
-    @State private var cloneWorkspaceName = ""
-
-    /// Workspace currently targeted by the clone flow.
-    @State private var workspaceToClone: Workspace?
+    /// Draft name used by the active workspace prompt.
+    @State private var workspacePromptName = ""
 
     /// Dismiss action for closing the selector screen.
     @Environment(\.dismiss) private var dismiss
@@ -64,6 +49,22 @@ public struct WorkspaceSelectorView: View {
      */
     public init() {}
 
+    private var dialogBackground: Color {
+        AndroidDialogSurfacePalette.background(for: colorScheme)
+    }
+
+    private var dialogPrimaryText: Color {
+        AndroidDialogSurfacePalette.primaryText(for: colorScheme)
+    }
+
+    private var dialogSecondaryText: Color {
+        AndroidDialogSurfacePalette.secondaryText(for: colorScheme)
+    }
+
+    private var dialogAccent: Color {
+        AndroidDialogSurfacePalette.accent(for: colorScheme)
+    }
+
     /**
      Builds the workspace list, management alerts, and toolbar actions.
      */
@@ -73,26 +74,37 @@ public struct WorkspaceSelectorView: View {
                 Section {
                     VStack(spacing: 8) {
                         Text(String(localized: "workspace_no_workspaces"))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(dialogSecondaryText)
                         Text(String(localized: "workspace_create_first"))
                             .font(.caption)
-                            .foregroundStyle(.tertiary)
+                            .foregroundStyle(dialogSecondaryText)
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.vertical)
                 }
+                .listRowBackground(dialogBackground)
             } else {
-                Section(String(localized: "workspaces")) {
+                Section {
                     ForEach(workspaces) { workspace in
                         workspaceSelectionButton(workspace)
                     }
                     .onDelete(perform: deleteWorkspaces)
                     .onMove(perform: moveWorkspaces)
+                } header: {
+                    Text(String(localized: "workspaces"))
+                        .foregroundStyle(dialogSecondaryText)
                 }
             }
         }
         .accessibilityIdentifier("workspaceSelectorScreen")
         .navigationTitle(String(localized: "workspaces"))
+        .scrollContentBackground(.hidden)
+        .background(dialogBackground.ignoresSafeArea())
+        .tint(dialogAccent)
+        #if os(iOS)
+        .toolbarBackground(dialogBackground, for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
+        #endif
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
                 Button(String(localized: "done")) { dismiss() }
@@ -101,44 +113,24 @@ public struct WorkspaceSelectorView: View {
             ToolbarItemGroup(placement: .primaryAction) {
                 EditButton()
                 Button(String(localized: "add"), systemImage: "plus") {
-                    showNewWorkspace = true
+                    prepareCreate()
                 }
                 .accessibilityIdentifier("workspaceSelectorAddButton")
             }
         }
-        .alert(String(localized: "workspace_new"), isPresented: $showNewWorkspace) {
-            TextField(String(localized: "name"), text: $newWorkspaceName)
-            Button(String(localized: "create")) {
-                createWorkspace(named: newWorkspaceName)
-                newWorkspaceName = ""
+        .sheet(item: $workspacePrompt, onDismiss: resetWorkspacePrompt) { prompt in
+            NavigationStack {
+                WorkspaceNamePromptView(
+                    prompt: prompt,
+                    name: $workspacePromptName,
+                    onCancel: dismissWorkspacePrompt,
+                    onConfirm: { submitWorkspacePrompt(prompt) }
+                )
             }
-            Button(String(localized: "cancel"), role: .cancel) { newWorkspaceName = "" }
-        }
-        .alert(String(localized: "rename"), isPresented: $showRenameWorkspace) {
-            TextField(String(localized: "name"), text: $renameWorkspaceName)
-            Button(String(localized: "save")) {
-                guard let workspace = workspaceToRename else { return }
-                renameWorkspace(workspace, to: renameWorkspaceName)
-                workspaceToRename = nil
-                renameWorkspaceName = ""
-            }
-            Button(String(localized: "cancel"), role: .cancel) {
-                workspaceToRename = nil
-                renameWorkspaceName = ""
-            }
-        }
-        .alert(String(localized: "clone"), isPresented: $showCloneWorkspace) {
-            TextField(String(localized: "name"), text: $cloneWorkspaceName)
-            Button(String(localized: "create")) {
-                guard let workspace = workspaceToClone else { return }
-                cloneWorkspace(workspace, as: cloneWorkspaceName)
-                workspaceToClone = nil
-                cloneWorkspaceName = ""
-            }
-            Button(String(localized: "cancel"), role: .cancel) {
-                workspaceToClone = nil
-                cloneWorkspaceName = ""
-            }
+            .tint(dialogAccent)
+            #if os(iOS)
+            .presentationDetents([.medium])
+            #endif
         }
     }
 
@@ -155,21 +147,22 @@ public struct WorkspaceSelectorView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(workspace.name.isEmpty ? String(localized: "untitled") : workspace.name)
                     .font(.body)
+                    .foregroundStyle(dialogPrimaryText)
                 if let contents = workspace.contentsText, !contents.isEmpty {
                     Text(contents)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(dialogSecondaryText)
                 } else {
                     let windowCount = workspace.windows?.count ?? 0
                     Text("\(windowCount) window\(windowCount == 1 ? "" : "s")")
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(dialogSecondaryText)
                 }
             }
             Spacer()
             if workspace.id == windowManager.activeWorkspace?.id {
                 Image(systemName: "checkmark")
-                    .foregroundStyle(.blue)
+                    .foregroundStyle(dialogAccent)
             }
         }
     }
@@ -193,6 +186,7 @@ public struct WorkspaceSelectorView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
         .buttonStyle(.plain)
+        .listRowBackground(dialogBackground)
         .accessibilityIdentifier("workspaceSelectorRowButton")
         .accessibilityLabel(workspaceDisplayName(workspace))
         .accessibilityValue(
@@ -234,37 +228,94 @@ public struct WorkspaceSelectorView: View {
     }
 
     /**
-     Prepares the rename alert for the selected workspace.
+     Prepares the create prompt with an empty workspace name draft.
      *
-     * - Parameter workspace: Workspace that should be renamed.
      * - Side effects:
-     *   - in normal mode, stores the selected workspace in local alert state, pre-fills the
-     *     rename field, and presents the rename alert
-     *   - in XCUITest inline-action mode, renames the workspace immediately when a deterministic
-     *     override name is configured
+     *   - resets the shared prompt draft
+     *   - presents the create-workspace prompt sheet
      * - Failure modes: This helper cannot fail.
      */
-    private func prepareRename(for workspace: Workspace) {
-        workspaceToRename = workspace
-        renameWorkspaceName = workspace.name
-        showRenameWorkspace = true
+    private func prepareCreate() {
+        workspacePromptName = ""
+        workspacePrompt = .create
     }
 
     /**
-     Prepares the clone alert for the selected workspace.
+     Prepares the rename prompt for the selected workspace.
+     *
+     * - Parameter workspace: Workspace that should be renamed.
+     * - Side effects:
+     *   - stores the selected workspace in local prompt state
+     *   - pre-fills the rename field and presents the rename prompt sheet
+     * - Failure modes: This helper cannot fail.
+     */
+    private func prepareRename(for workspace: Workspace) {
+        workspacePromptName = workspace.name
+        workspacePrompt = .rename(workspace)
+    }
+
+    /**
+     Prepares the clone prompt for the selected workspace.
      *
      * - Parameter workspace: Workspace that should be deep-cloned.
      * - Side effects:
-     *   - in normal mode, stores the selected workspace in local alert state, pre-fills the clone
-     *     field, and presents the clone alert
-     *   - in XCUITest inline-action mode, clones the workspace immediately when a deterministic
-     *     override name is configured
+     *   - stores the selected workspace in local prompt state
+     *   - pre-fills the clone field and presents the clone prompt sheet
      * - Failure modes: This helper cannot fail.
      */
     private func prepareClone(for workspace: Workspace) {
-        workspaceToClone = workspace
-        cloneWorkspaceName = String(format: String(localized: "copy_of %@"), workspace.name)
-        showCloneWorkspace = true
+        workspacePromptName = String(format: String(localized: "copy_of %@"), workspace.name)
+        workspacePrompt = .clone(workspace)
+    }
+
+    /**
+     Dismisses the active workspace prompt and clears its draft state.
+     *
+     * - Side effects:
+     *   - closes the presented prompt sheet
+     *   - resets the shared draft name
+     * - Failure modes: This helper cannot fail.
+     */
+    private func dismissWorkspacePrompt() {
+        workspacePrompt = nil
+        workspacePromptName = ""
+    }
+
+    /**
+     Clears the shared prompt draft after sheet dismissal.
+     *
+     * - Side effects:
+     *   - resets the prompt draft text after interactive or programmatic dismissal
+     * - Failure modes: This helper cannot fail.
+     */
+    private func resetWorkspacePrompt() {
+        workspacePromptName = ""
+    }
+
+    /**
+     Commits the active workspace prompt action using the current shared draft name.
+     *
+     * - Parameter prompt: Prompt action being confirmed.
+     * - Side effects:
+     *   - dismisses the prompt sheet before mutating workspace state
+     *   - routes the current draft name into create, rename, or clone flows
+     * - Failure modes:
+     *   - returns without mutation when the current draft name is empty
+     */
+    private func submitWorkspacePrompt(_ prompt: WorkspaceNamePrompt) {
+        let name = workspacePromptName
+        guard !name.isEmpty else { return }
+
+        workspacePrompt = nil
+
+        switch prompt {
+        case .create:
+            createWorkspace(named: name)
+        case .rename(let workspace):
+            renameWorkspace(workspace, to: name)
+        case .clone(let workspace):
+            cloneWorkspace(workspace, as: name)
+        }
     }
 
     /**
@@ -356,5 +407,139 @@ public struct WorkspaceSelectorView: View {
         reordered.move(fromOffsets: source, toOffset: destination)
         let store = WorkspaceStore(modelContext: modelContext)
         store.reorderWorkspaces(reordered)
+    }
+}
+
+/// Supported workspace-name prompt actions shown from the selector sheet.
+private enum WorkspaceNamePrompt: Identifiable {
+    case create
+    case rename(Workspace)
+    case clone(Workspace)
+
+    var id: String {
+        switch self {
+        case .create:
+            "create"
+        case .rename(let workspace):
+            "rename-\(workspace.id.uuidString)"
+        case .clone(let workspace):
+            "clone-\(workspace.id.uuidString)"
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .create:
+            String(localized: "workspace_new")
+        case .rename:
+            String(localized: "rename")
+        case .clone:
+            String(localized: "clone")
+        }
+    }
+
+    var confirmTitle: String {
+        switch self {
+        case .rename:
+            String(localized: "save")
+        case .create, .clone:
+            String(localized: "create")
+        }
+    }
+}
+
+/// Sheet-backed workspace prompt used for create, rename, and clone flows on iOS.
+private struct WorkspaceNamePromptView: View {
+    @Environment(\.colorScheme) private var colorScheme
+
+    let prompt: WorkspaceNamePrompt
+    @Binding var name: String
+    let onCancel: () -> Void
+    let onConfirm: () -> Void
+
+    @FocusState private var isNameFieldFocused: Bool
+
+    private var canConfirm: Bool {
+        !name.isEmpty
+    }
+
+    private var dialogBackground: Color {
+        AndroidDialogSurfacePalette.background(for: colorScheme)
+    }
+
+    private var dialogPrimaryText: Color {
+        AndroidDialogSurfacePalette.primaryText(for: colorScheme)
+    }
+
+    private var dialogSecondaryText: Color {
+        AndroidDialogSurfacePalette.secondaryText(for: colorScheme)
+    }
+
+    private var dialogAccent: Color {
+        AndroidDialogSurfacePalette.accent(for: colorScheme)
+    }
+
+    private var fieldBackground: Color {
+        AndroidDialogSurfacePalette.fieldBackground(for: colorScheme)
+    }
+
+    private var fieldBorder: Color {
+        AndroidDialogSurfacePalette.fieldBorder(for: colorScheme)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text(String(localized: "name"))
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(dialogSecondaryText)
+
+            TextField(String(localized: "name"), text: $name)
+            .textInputAutocapitalization(.words)
+            .submitLabel(.done)
+            .focused($isNameFieldFocused)
+            .foregroundStyle(dialogPrimaryText)
+            .tint(dialogAccent)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .background(fieldBackground, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(fieldBorder, lineWidth: 1)
+            )
+            .accessibilityIdentifier("workspaceNamePromptTextField")
+            .onSubmit {
+                guard canConfirm else { return }
+                onConfirm()
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(24)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(dialogBackground.ignoresSafeArea())
+        .accessibilityIdentifier("workspaceNamePromptScreen")
+        .navigationTitle(prompt.title)
+        .tint(dialogAccent)
+        #if os(iOS)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(dialogBackground, for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
+        #endif
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button(String(localized: "cancel"), action: onCancel)
+                    .accessibilityIdentifier("workspaceNamePromptCancelButton")
+            }
+            ToolbarItem(placement: .confirmationAction) {
+                Button(prompt.confirmTitle, action: onConfirm)
+                    .disabled(!canConfirm)
+                    .accessibilityIdentifier("workspaceNamePromptConfirmButton")
+            }
+        }
+        .task {
+            await MainActor.run {
+                isNameFieldFocused = true
+            }
+        }
     }
 }

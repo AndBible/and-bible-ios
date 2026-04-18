@@ -368,8 +368,9 @@ final class AndBibleUITests: XCTestCase {
         let originalActiveWorkspaceName = requireActiveWorkspaceRow(in: app, timeout: 10).label
 
         tapElementReliably(requireElement("workspaceSelectorAddButton", in: app, timeout: 10), timeout: 10)
-        replaceText(in: requireAlertTextField(in: app, timeout: 10), with: createdName)
-        tapAlertButton("Create", in: app, timeout: 10)
+        XCTAssertTrue(requireElement("workspaceNamePromptScreen", in: app, timeout: 10).exists)
+        replaceText(in: requireElement("workspaceNamePromptTextField", in: app, timeout: 10), with: createdName)
+        tapElementReliably(requireElement("workspaceNamePromptConfirmButton", in: app, timeout: 10), timeout: 10)
 
         XCTAssertTrue(
             waitForReaderShellReady(in: app, timeout: 20),
@@ -388,7 +389,10 @@ final class AndBibleUITests: XCTestCase {
             requireWorkspaceRow(named: originalActiveWorkspaceName, in: app, timeout: 10),
             timeout: 10
         )
-        dismissAlertIfPresent(in: app, timeout: 5)
+        let promptCancelButton = unresolvedElement("workspaceNamePromptCancelButton", in: app)
+        if promptCancelButton.exists || promptCancelButton.waitForExistence(timeout: 1) {
+            tapElementReliably(promptCancelButton, timeout: 5)
+        }
         dismissWorkspaceSelectorIfStillPresented(in: app, timeout: 20)
         XCTAssertTrue(
             waitForReaderShellReady(in: app, timeout: 20),
@@ -4189,6 +4193,22 @@ final class AndBibleUITests: XCTestCase {
                 app.textFields[identifier].firstMatch,
                 app.otherElements[identifier].firstMatch,
             ]
+        case "workspaceNamePromptTextField":
+            return [
+                app.textFields[identifier].firstMatch,
+                app.sheets.textFields[identifier].firstMatch,
+                app.collectionViews.textFields[identifier].firstMatch,
+                app.sheets.textFields.firstMatch,
+                app.collectionViews.textFields.firstMatch,
+                app.textFields.firstMatch,
+                app.otherElements[identifier].firstMatch,
+                anyIdentifierMatch,
+            ]
+        case "workspaceNamePromptConfirmButton", "workspaceNamePromptCancelButton":
+            return [
+                app.buttons[identifier].firstMatch,
+                app.otherElements[identifier].firstMatch,
+            ]
         case
             "settingsDownloadsLink",
             "settingsRepositoriesLink",
@@ -4231,7 +4251,8 @@ final class AndBibleUITests: XCTestCase {
             "importExportScreen",
             "historyScreen",
             "modulePickerScreen",
-            "moduleBrowserScreen":
+            "moduleBrowserScreen",
+            "workspaceNamePromptScreen":
             return [
                 app.collectionViews[identifier].firstMatch,
                 app.otherElements[identifier].firstMatch,
