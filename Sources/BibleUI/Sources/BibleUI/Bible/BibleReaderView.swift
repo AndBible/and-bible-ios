@@ -1551,6 +1551,14 @@ public struct BibleReaderView: View {
 
     // MARK: - Document Header
 
+    /// High-level header layouts shown above the focused pane.
+    private enum DocumentHeaderMode {
+        case myNotes
+        case studyPad
+        case auxiliary
+        case bible
+    }
+
     /**
      Builds the top document header bar for the focused pane state.
 
@@ -1561,149 +1569,192 @@ public struct BibleReaderView: View {
         let controller = focusedController
         return VStack(spacing: 0) {
             HStack {
-                if controller?.showingMyNotes == true {
-                    // My Notes mode: show back button
-                    Button(action: { controller?.returnFromMyNotes() }) {
-                        HStack(spacing: 4) {
-                            Image(systemName: "chevron.left")
-                                .font(.body.weight(.semibold))
-                            Text(currentReference)
-                                .font(.subheadline)
-                        }
-                    }
-                    .accessibilityLabel(String(localized: "back_to_bible"))
-                    .accessibilityIdentifier("readerReturnFromMyNotesButton")
-
-                    Spacer()
-
-                    Text(String(localized: "my_notes"))
-                        .font(.headline)
-                        .accessibilityIdentifier("readerMyNotesTitle")
-
-                    Spacer()
-                    Color.clear.frame(width: 80, height: 1)
-                } else if controller?.showingStudyPad == true {
-                    // StudyPad mode: show back button
-                    Button(action: { controller?.returnFromStudyPad() }) {
-                        HStack(spacing: 4) {
-                            Image(systemName: "chevron.left")
-                                .font(.body.weight(.semibold))
-                            Text(currentReference)
-                                .font(.subheadline)
-                        }
-                    }
-                    .accessibilityLabel(String(localized: "back_to_bible"))
-
-                    Spacer()
-
-                    Text(controller?.activeStudyPadLabelName ?? String(localized: "study_pad"))
-                        .font(.headline)
-                        .lineLimit(1)
-                        .accessibilityIdentifier("readerStudyPadTitle")
-
-                    Spacer()
-                    Color.clear.frame(width: 80, height: 1)
-                } else if controller?.currentCategory == .dictionary ||
-                          controller?.currentCategory == .generalBook ||
-                          controller?.currentCategory == .map ||
-                          controller?.currentCategory == .epub {
-                    // Dictionary/GenBook/Map/EPUB mode: show back button + module/key
-                    Button(action: { controller?.switchCategory(to: .bible) }) {
-                        HStack(spacing: 4) {
-                            Image(systemName: "chevron.left")
-                                .font(.body.weight(.semibold))
-                            Text(currentReference)
-                                .font(.subheadline)
-                        }
-                    }
-                    .accessibilityLabel(String(localized: "back_to_bible"))
-
-                    Spacer()
-
-                    VStack(spacing: 1) {
-                        Text(controller?.activeModuleName(for: controller?.currentCategory ?? .dictionary) ?? "")
-                            .font(.headline)
-                            .lineLimit(1)
-                        if let key = controller?.currentCategory == .dictionary ? controller?.currentDictionaryKey :
-                                      controller?.currentCategory == .generalBook ? controller?.currentGeneralBookKey :
-                                      controller?.currentCategory == .epub ? controller?.currentEpubTitle :
-                                      controller?.currentMapKey {
-                            Text(key)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                        }
-                    }
-
-                    Spacer()
-
-                    // Browse button to open key browser
-                    Button {
-                        setPanePresentationTarget(windowManager.activeWindow?.id)
-                        switch controller?.currentCategory {
-                        case .dictionary: showDictionaryBrowser = true
-                        case .generalBook: showGeneralBookBrowser = true
-                        case .map: showMapBrowser = true
-                        case .epub: showEpubBrowser = true
-                        default: break
-                        }
-                    } label: {
-                        Image(systemName: browseIconName(for: controller?.currentCategory))
-                            .font(.body)
-                    }
-                } else {
-                    // Normal Bible mode — navigation + action buttons in one bar
-                    readerNavigationDrawerButton
-
-                    // Previous chapter
-                    Button(action: { controller?.navigatePrevious() }) {
-                        Image(systemName: "chevron.left")
-                            .font(.body.weight(.semibold))
-                            .foregroundStyle(controller?.hasPrevious == true ? .primary : .tertiary)
-                    }
-                    .disabled(controller?.hasPrevious != true)
-                    .accessibilityLabel(String(localized: "previous_chapter"))
-
-                    Button(action: {
-                        setPanePresentationTarget(windowManager.activeWindow?.id)
-                        showBookChooser = true
-                    }) {
-                        VStack(alignment: .leading, spacing: 1) {
-                            HStack(spacing: 4) {
-                                Text(currentToolbarTitle)
-                                    .font(.headline)
-                                    .lineLimit(1)
-                                Image(systemName: "chevron.down")
-                                    .font(.caption)
-                            }
-                            Text(currentToolbarSubtitle)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                        }
-                    }
-                    .buttonStyle(.plain)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .accessibilityIdentifier("bookChooserButton")
-                    .accessibilityValue("\(currentToolbarTitle), \(currentToolbarSubtitle)")
-
-                    // Next chapter
-                    Button(action: { controller?.navigateNext() }) {
-                        Image(systemName: "chevron.right")
-                            .font(.body.weight(.semibold))
-                            .foregroundStyle(controller?.hasNext == true ? .primary : .tertiary)
-                    }
-                    .disabled(controller?.hasNext != true)
-                    .accessibilityLabel(String(localized: "next_chapter"))
-
-                    // Action buttons — matching Android toolbar order and collapsing by width.
-                    readerToolbarActions(controller: controller)
-                        .layoutPriority(1)
-                }
+                documentHeaderContent(controller: controller)
             }
             .padding(.horizontal)
             .padding(.vertical, 8)
             .background(.bar)
+        }
+    }
+
+    /**
+     Type-erases the active header branch to avoid a device-only SwiftUI EXC_BAD_ACCESS observed
+     on iPad hardware when the full conditional header tree is inlined into one large view body.
+     */
+    private func documentHeaderContent(controller: BibleReaderController?) -> AnyView {
+        switch documentHeaderMode(for: controller) {
+        case .myNotes:
+            return AnyView(myNotesDocumentHeader(controller: controller))
+        case .studyPad:
+            return AnyView(studyPadDocumentHeader(controller: controller))
+        case .auxiliary:
+            return AnyView(auxiliaryDocumentHeader(controller: controller))
+        case .bible:
+            return AnyView(bibleDocumentHeader(controller: controller))
+        }
+    }
+
+    /// Resolves which top-level header layout should be displayed for the focused controller.
+    private func documentHeaderMode(for controller: BibleReaderController?) -> DocumentHeaderMode {
+        if controller?.showingMyNotes == true {
+            return .myNotes
+        }
+        if controller?.showingStudyPad == true {
+            return .studyPad
+        }
+        if controller?.currentCategory == .dictionary ||
+            controller?.currentCategory == .generalBook ||
+            controller?.currentCategory == .map ||
+            controller?.currentCategory == .epub {
+            return .auxiliary
+        }
+        return .bible
+    }
+
+    /// Header shown while browsing My Notes.
+    private func myNotesDocumentHeader(controller: BibleReaderController?) -> some View {
+        Group {
+            Button(action: { controller?.returnFromMyNotes() }) {
+                HStack(spacing: 4) {
+                    Image(systemName: "chevron.left")
+                        .font(.body.weight(.semibold))
+                    Text(currentReference)
+                        .font(.subheadline)
+                }
+            }
+            .accessibilityLabel(String(localized: "back_to_bible"))
+            .accessibilityIdentifier("readerReturnFromMyNotesButton")
+
+            Spacer()
+
+            Text(String(localized: "my_notes"))
+                .font(.headline)
+                .accessibilityIdentifier("readerMyNotesTitle")
+
+            Spacer()
+            Color.clear.frame(width: 80, height: 1)
+        }
+    }
+
+    /// Header shown while browsing the StudyPad.
+    private func studyPadDocumentHeader(controller: BibleReaderController?) -> some View {
+        Group {
+            Button(action: { controller?.returnFromStudyPad() }) {
+                HStack(spacing: 4) {
+                    Image(systemName: "chevron.left")
+                        .font(.body.weight(.semibold))
+                    Text(currentReference)
+                        .font(.subheadline)
+                }
+            }
+            .accessibilityLabel(String(localized: "back_to_bible"))
+
+            Spacer()
+
+            Text(controller?.activeStudyPadLabelName ?? String(localized: "study_pad"))
+                .font(.headline)
+                .lineLimit(1)
+                .accessibilityIdentifier("readerStudyPadTitle")
+
+            Spacer()
+            Color.clear.frame(width: 80, height: 1)
+        }
+    }
+
+    /// Header shown for dictionary, general-book, map, and EPUB categories.
+    private func auxiliaryDocumentHeader(controller: BibleReaderController?) -> some View {
+        Group {
+            Button(action: { controller?.switchCategory(to: .bible) }) {
+                HStack(spacing: 4) {
+                    Image(systemName: "chevron.left")
+                        .font(.body.weight(.semibold))
+                    Text(currentReference)
+                        .font(.subheadline)
+                }
+            }
+            .accessibilityLabel(String(localized: "back_to_bible"))
+
+            Spacer()
+
+            VStack(spacing: 1) {
+                Text(controller?.activeModuleName(for: controller?.currentCategory ?? .dictionary) ?? "")
+                    .font(.headline)
+                    .lineLimit(1)
+                if let key = controller?.currentCategory == .dictionary ? controller?.currentDictionaryKey :
+                                controller?.currentCategory == .generalBook ? controller?.currentGeneralBookKey :
+                                controller?.currentCategory == .epub ? controller?.currentEpubTitle :
+                                controller?.currentMapKey {
+                    Text(key)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+
+            Spacer()
+
+            Button {
+                setPanePresentationTarget(windowManager.activeWindow?.id)
+                switch controller?.currentCategory {
+                case .dictionary: showDictionaryBrowser = true
+                case .generalBook: showGeneralBookBrowser = true
+                case .map: showMapBrowser = true
+                case .epub: showEpubBrowser = true
+                default: break
+                }
+            } label: {
+                Image(systemName: browseIconName(for: controller?.currentCategory))
+                    .font(.body)
+            }
+        }
+    }
+
+    /// Header shown for the normal Bible/commentary reading mode.
+    private func bibleDocumentHeader(controller: BibleReaderController?) -> some View {
+        Group {
+            readerNavigationDrawerButton
+
+            Button(action: { controller?.navigatePrevious() }) {
+                Image(systemName: "chevron.left")
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(controller?.hasPrevious == true ? .primary : .tertiary)
+            }
+            .disabled(controller?.hasPrevious != true)
+            .accessibilityLabel(String(localized: "previous_chapter"))
+
+            Button(action: {
+                setPanePresentationTarget(windowManager.activeWindow?.id)
+                showBookChooser = true
+            }) {
+                VStack(alignment: .leading, spacing: 1) {
+                    HStack(spacing: 4) {
+                        Text(currentToolbarTitle)
+                            .font(.headline)
+                            .lineLimit(1)
+                        Image(systemName: "chevron.down")
+                            .font(.caption)
+                    }
+                    Text(currentToolbarSubtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+            .buttonStyle(.plain)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityIdentifier("bookChooserButton")
+            .accessibilityValue("\(currentToolbarTitle), \(currentToolbarSubtitle)")
+
+            Button(action: { controller?.navigateNext() }) {
+                Image(systemName: "chevron.right")
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(controller?.hasNext == true ? .primary : .tertiary)
+            }
+            .disabled(controller?.hasNext != true)
+            .accessibilityLabel(String(localized: "next_chapter"))
+
+            readerToolbarActions(controller: controller)
+                .layoutPriority(1)
         }
     }
 

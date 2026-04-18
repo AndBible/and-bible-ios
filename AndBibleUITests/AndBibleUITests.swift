@@ -368,7 +368,11 @@ final class AndBibleUITests: XCTestCase {
         let originalActiveWorkspaceName = requireActiveWorkspaceRow(in: app, timeout: 10).label
 
         tapElementReliably(requireElement("workspaceSelectorAddButton", in: app, timeout: 10), timeout: 10)
-        replaceText(in: requireAlertTextField(in: app, timeout: 10), with: createdName)
+        replaceText(
+            in: requireAlertTextField(in: app, timeout: 10),
+            with: createdName,
+            placeholderHints: ["Name"]
+        )
         tapAlertButton("Create", in: app, timeout: 10)
 
         XCTAssertTrue(
@@ -687,17 +691,15 @@ final class AndBibleUITests: XCTestCase {
         app.launch()
 
         _ = openBookmarkList(in: app)
-        waitForElement(
-            "bookmarkListRowButton::Matthew_3_1",
-            toAppearAbove: "bookmarkListRowButton::Exodus_2_1",
+        waitForBookmarkListRows(
+            toAppearInOrder: ["Matthew_3_1", "Exodus_2_1"],
             in: app
         )
 
         sortBookmarkListByBibleOrder(in: app)
 
-        waitForElement(
-            "bookmarkListRowButton::Exodus_2_1",
-            toAppearAbove: "bookmarkListRowButton::Matthew_3_1",
+        waitForBookmarkListRows(
+            toAppearInOrder: ["Exodus_2_1", "Matthew_3_1"],
             in: app
         )
     }
@@ -726,7 +728,7 @@ final class AndBibleUITests: XCTestCase {
 
         let matthewRow = app.descendants(matching: .any)["bookmarkListRowButton::Matthew_3_1"]
 
-        replaceText(in: searchField, with: "Matthew")
+        replaceText(in: searchField, with: "Matthew", placeholderHints: ["Search bookmarks"])
         searchField.typeText("\n")
         waitForBookmarkListState(containing: "count=1", in: app, timeout: 10)
         waitForBookmarkListState(containing: "query=Matthew", in: app, timeout: 10)
@@ -739,7 +741,7 @@ final class AndBibleUITests: XCTestCase {
         )
         XCTAssertTrue(matthewRow.exists, "Expected Matthew bookmark row to remain visible after filtering.")
 
-        replaceText(in: searchField, with: "")
+        replaceText(in: searchField, with: "", placeholderHints: ["Search bookmarks"])
         waitForBookmarkListState(containing: "count=2", in: app, timeout: 10)
         waitForBookmarkListState(notContaining: "query=Matthew", in: app, timeout: 10)
         waitForBookmarkListState(containing: bookmarkListRowStateToken("Exodus_2_1"), in: app, timeout: 10)
@@ -1154,7 +1156,7 @@ final class AndBibleUITests: XCTestCase {
         let genesisRow = requireBookmarkRow("Genesis_1_1", in: app, timeout: 10)
         XCTAssertTrue(genesisRow.waitForExistence(timeout: 10), "Expected Genesis bookmark row to remain visible after filtering.")
 
-        replaceText(in: searchField, with: "Exodus")
+        replaceText(in: searchField, with: "Exodus", placeholderHints: ["Search bookmarks"])
         searchField.typeText("\n")
         waitForBookmarkListState(containing: "count=0", in: app, timeout: 10)
         waitForBookmarkListState(containing: "query=Exodus", in: app, timeout: 10)
@@ -3300,6 +3302,59 @@ final class AndBibleUITests: XCTestCase {
     }
 
     /**
+     Waits for the exported bookmark-list state to report one specific visible row ordering.
+     *
+     * - Parameters:
+     *   - orderedReferenceTokens: Sanitized bookmark reference tokens in the expected visible
+     *     order, such as `["Matthew_3_1", "Exodus_2_1"]`.
+     *   - app: Running application whose bookmark list should publish the requested row order.
+     *   - timeout: Maximum number of seconds to wait before failing.
+     *   - file: Source file used for XCTest failure attribution.
+     *   - line: Source line used for XCTest failure attribution.
+     * - Side effects:
+     *   - polls the bookmark-list accessibility export until all requested row tokens appear in
+     *     the requested sequence
+     * - Failure modes:
+     *   - records an XCTest failure if the bookmark-list export never reaches the requested order
+     */
+    private func waitForBookmarkListRows(
+        toAppearInOrder orderedReferenceTokens: [String],
+        in app: XCUIApplication,
+        timeout: TimeInterval = 10,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let orderedTokens = orderedReferenceTokens.map(bookmarkListRowStateToken)
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            if let state = resolvedElement("bookmarkListScreen", in: app)?.value as? String,
+               bookmarkListRowsAppearInOrder(orderedTokens, within: state) {
+                return
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        } while Date() < deadline
+
+        let finalState = (resolvedElement("bookmarkListScreen", in: app)?.value as? String) ?? "nil"
+        XCTFail(
+            "Expected bookmark-list rows \(orderedReferenceTokens) to appear in order within \(timeout) seconds; last state was '\(finalState)'.",
+            file: file,
+            line: line
+        )
+    }
+
+    /// Returns whether the exported bookmark-list state contains the requested row tokens in order.
+    private func bookmarkListRowsAppearInOrder(_ orderedTokens: [String], within state: String) -> Bool {
+        var searchRange = state.startIndex..<state.endIndex
+        for token in orderedTokens {
+            guard let tokenRange = state.range(of: token, range: searchRange) else {
+                return false
+            }
+            searchRange = tokenRange.upperBound..<state.endIndex
+        }
+        return true
+    }
+
+    /**
      Returns one history-row token as serialized by the History screen accessibility state.
      *
      * - Parameter keyToken: Sanitized history key token, such as `Exod_2_1`.
@@ -4034,10 +4089,12 @@ final class AndBibleUITests: XCTestCase {
         case "readerNavigationDrawerButton":
             return [
                 app.buttons[identifier].firstMatch,
+                app.otherElements[identifier].firstMatch,
             ]
         case "readerMoreMenuButton", "bookChooserButton":
             return [
                 app.buttons[identifier].firstMatch,
+                app.otherElements[identifier].firstMatch,
             ]
         case "readerStrongsToolbarButton":
             return [
@@ -4787,14 +4844,13 @@ final class AndBibleUITests: XCTestCase {
         file: StaticString = #filePath,
         line: UInt = #line
     ) -> XCUIElement {
-        let button = app.buttons[identifier].firstMatch
-        XCTAssertTrue(
-            button.waitForExistence(timeout: timeout),
-            "Expected button '\(identifier)' to exist within \(timeout) seconds.",
+        requireElement(
+            identifier,
+            in: app,
+            timeout: timeout,
             file: file,
             line: line
         )
-        return button
     }
 
     /**
@@ -5347,6 +5403,7 @@ final class AndBibleUITests: XCTestCase {
         line: UInt = #line
     ) {
         let deadline = Date().addingTimeInterval(timeout)
+        let usesNavigationDrawer = readerActionUsesNavigationDrawer(identifier)
 
         repeat {
             guard let button = tryResolveReaderActionControl(
@@ -5359,18 +5416,33 @@ final class AndBibleUITests: XCTestCase {
             }
             if waitForElementToBecomeHittable(button, timeout: min(1.5, max(0.5, deadline.timeIntervalSinceNow))) {
                 button.tap()
-            } else if let overflowMenu = resolvedElement("readerOverflowMenu", in: app),
-                      isElementVisible(button, within: overflowMenu)
-            {
-                button.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
             } else {
-                RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-                continue
+                let preferredSurfaceIdentifier = usesNavigationDrawer
+                    ? "readerNavigationDrawer"
+                    : "readerOverflowMenu"
+                let fallbackSurfaceIdentifier = usesNavigationDrawer
+                    ? "readerOverflowMenu"
+                    : "readerNavigationDrawer"
+                let actionSurface = resolvedElement(preferredSurfaceIdentifier, in: app)
+                    ?? resolvedElement(fallbackSurfaceIdentifier, in: app)
+
+                if let actionSurface,
+                   isElementVisible(button, within: actionSurface)
+                {
+                    button.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+                } else {
+                    RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+                    continue
+                }
             }
 
             let settleDeadline = Date().addingTimeInterval(min(2, max(0.5, deadline.timeIntervalSinceNow)))
             repeat {
-                if resolvedElement("readerOverflowMenu", in: app) == nil {
+                if usesNavigationDrawer {
+                    if resolvedElement("readerNavigationDrawer", in: app) == nil {
+                        return
+                    }
+                } else if resolvedElement("readerOverflowMenu", in: app) == nil {
                     return
                 }
                 if let refreshedButton = resolvedElement(identifier, in: app), !refreshedButton.exists {
@@ -5900,6 +5972,13 @@ final class AndBibleUITests: XCTestCase {
             file: file,
             line: line
         )
+        guard exists else {
+            return
+        }
+        if !element.frame.isEmpty {
+            element.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+            return
+        }
         XCTAssertTrue(
             element.isHittable,
             "Expected element '\(element.identifier)' to become hittable before tapping within \(timeout) seconds.",
@@ -6014,13 +6093,8 @@ final class AndBibleUITests: XCTestCase {
      *   - silently leaves focus unchanged when no software keyboard or dismissal action exists
      */
     private func dismissKeyboardIfPresent(in app: XCUIApplication) {
-        let keyboard = app.keyboards.firstMatch
-        guard keyboard.exists || keyboard.waitForExistence(timeout: 0.2) else {
-            return
-        }
-
         for title in ["Done", "Return", "Go", "Search", "OK"] {
-            let button = keyboard.buttons[title].firstMatch
+            let button = app.keyboards.buttons[title].firstMatch
             if button.exists || button.waitForExistence(timeout: 0.2) {
                 if waitForElementToBecomeHittable(button, timeout: 0.5) {
                     button.tap()
@@ -7178,14 +7252,18 @@ final class AndBibleUITests: XCTestCase {
      *   - if the field reports a non-string value, the helper falls back to appending `text`
      *     instead of first deleting existing content
      */
-    private func replaceText(in element: XCUIElement, with text: String) {
-        let existingText = currentTextEntryValue(in: element)
+    private func replaceText(
+        in element: XCUIElement,
+        with text: String,
+        placeholderHints: [String] = []
+    ) {
+        let existingText = currentTextEntryValue(in: element, placeholderHints: placeholderHints)
         if existingText == text {
             return
         }
 
         let app = trackedApp ?? XCUIApplication()
-        if !clearTextEntryElement(element, app: app) {
+        if !clearTextEntryElement(element, app: app, placeholderHints: placeholderHints) {
             XCTFail("Expected text input '\(element.identifier)' to clear before typing replacement text.")
             return
         }
@@ -7204,26 +7282,43 @@ final class AndBibleUITests: XCTestCase {
      * - Side effects: none.
      * - Failure modes: This helper cannot fail.
      */
-    private func currentTextEntryValue(in element: XCUIElement) -> String {
+    private func currentTextEntryValue(
+        in element: XCUIElement,
+        placeholderHints: [String] = []
+    ) -> String {
         guard let rawValue = element.value as? String else {
             return ""
         }
 
-        let placeholderCandidates = Set(
-            [element.label, element.identifier, element.placeholderValue ?? ""]
-                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-                .filter { !$0.isEmpty }
-        )
         let normalizedValue = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalizedValue.isEmpty else {
             return ""
         }
 
+        let placeholderCandidates = Set(
+            ([element.identifier] + textEntryPlaceholderHints(for: element.identifier) + placeholderHints)
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+        )
         if placeholderCandidates.contains(normalizedValue) {
             return ""
         }
 
         return rawValue
+    }
+
+    /// Returns static placeholder hints for text-entry controls without querying XCUI metadata.
+    private func textEntryPlaceholderHints(for identifier: String) -> [String] {
+        switch identifier {
+        case "searchQueryField":
+            return ["Search"]
+        case "labelManagerNewLabelNameField", "labelEditNameField":
+            return ["Label name"]
+        case "syncNextCloudServerURLField":
+            return ["Server URI"]
+        default:
+            return []
+        }
     }
 
     /**
@@ -7324,9 +7419,10 @@ final class AndBibleUITests: XCTestCase {
      */
     private func clearTextEntryElement(
         _ element: XCUIElement,
-        app: XCUIApplication
+        app: XCUIApplication,
+        placeholderHints: [String] = []
     ) -> Bool {
-        let existingText = currentTextEntryValue(in: element)
+        let existingText = currentTextEntryValue(in: element, placeholderHints: placeholderHints)
         if existingText.isEmpty {
             focusTextEntryElement(element, timeout: 10)
             return true
@@ -7337,33 +7433,33 @@ final class AndBibleUITests: XCTestCase {
         let clearButton = element.buttons["Clear text"].firstMatch
         if waitForElementToBecomeHittable(clearButton, timeout: 0.5) {
             clearButton.tap()
-            if currentTextEntryValue(in: element).isEmpty {
+            if currentTextEntryValue(in: element, placeholderHints: placeholderHints).isEmpty {
                 return true
             }
         }
 
-        var remainingText = currentTextEntryValue(in: element)
+        var remainingText = currentTextEntryValue(in: element, placeholderHints: placeholderHints)
         for _ in 0..<2 where !remainingText.isEmpty {
             let deleteSequence = String(
                 repeating: XCUIKeyboardKey.delete.rawValue,
                 count: remainingText.count
             )
             element.typeText(deleteSequence)
-            remainingText = currentTextEntryValue(in: element)
+            remainingText = currentTextEntryValue(in: element, placeholderHints: placeholderHints)
             if remainingText.isEmpty {
                 return true
             }
         }
 
         if selectAllTextIfAvailable(in: element, app: app) {
-            let selectionLength = max(currentTextEntryValue(in: element).count, 1)
+            let selectionLength = max(currentTextEntryValue(in: element, placeholderHints: placeholderHints).count, 1)
             element.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: selectionLength))
-            if currentTextEntryValue(in: element).isEmpty {
+            if currentTextEntryValue(in: element, placeholderHints: placeholderHints).isEmpty {
                 return true
             }
         }
 
-        return currentTextEntryValue(in: element).isEmpty
+        return currentTextEntryValue(in: element, placeholderHints: placeholderHints).isEmpty
     }
 
     /**
