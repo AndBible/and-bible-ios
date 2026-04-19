@@ -245,7 +245,7 @@ final class AndBibleUITests: XCTestCase {
         app.launch()
 
         _ = openSearch(in: app)
-        XCTAssertTrue(requireElement("searchQueryField", in: app, timeout: 5).exists)
+        XCTAssertTrue(requireSearchInput(in: app, timeout: 5).exists)
         waitForSearchState(containing: "query=H00430", in: app, timeout: 20)
         waitForSearchResultCount(atLeast: 1, in: app, timeout: 20)
     }
@@ -369,7 +369,7 @@ final class AndBibleUITests: XCTestCase {
 
         tapElementReliably(requireElement("workspaceSelectorAddButton", in: app, timeout: 10), timeout: 10)
         replaceText(
-            in: requireAlertTextField(in: app, timeout: 10),
+            in: requireAlertTextField(in: app, titles: ["Name"], timeout: 10),
             with: createdName,
             placeholderHints: ["Name"]
         )
@@ -723,8 +723,7 @@ final class AndBibleUITests: XCTestCase {
         app.launch()
 
         _ = openBookmarkList(in: app)
-        let searchField = app.searchFields.firstMatch
-        XCTAssertTrue(searchField.waitForExistence(timeout: 10), "Expected bookmark search field to exist.")
+        let searchField = requireBookmarkListSearchField(in: app, timeout: 10)
 
         let matthewRow = app.descendants(matching: .any)["bookmarkListRowButton::Matthew_3_1"]
 
@@ -1146,8 +1145,7 @@ final class AndBibleUITests: XCTestCase {
 
         _ = openBookmarkList(in: app)
 
-        let searchField = app.searchFields.firstMatch
-        XCTAssertTrue(searchField.waitForExistence(timeout: 10), "Expected bookmark search field to exist.")
+        let searchField = requireBookmarkListSearchField(in: app, timeout: 10)
 
         selectBookmarkListFilterChip("UI_Test_Seed", in: app, timeout: 10)
         waitForBookmarkListState(containing: "count=1", in: app, timeout: 10)
@@ -3533,7 +3531,7 @@ final class AndBibleUITests: XCTestCase {
                     if let dismissArea = resolvedElement("readerNavigationDrawerDismissArea", in: app) {
                         tapElementReliably(dismissArea, timeout: min(5, timeout))
                     }
-                } else if resolvedElement("readerOverflowMenu", in: app) != nil {
+                } else if isReaderOverflowMenuLikelyVisible(in: app) {
                     dismissReaderOverflowMenu(
                         in: app,
                         timeout: min(8, timeout),
@@ -4223,7 +4221,6 @@ final class AndBibleUITests: XCTestCase {
         case "searchStateExport":
             return [
                 app.staticTexts[identifier].firstMatch,
-                app.otherElements[identifier].firstMatch,
             ]
         case "searchResultsList":
             return [
@@ -4243,7 +4240,12 @@ final class AndBibleUITests: XCTestCase {
             ]
         case "searchQueryField":
             return [
+                app.searchFields[identifier].firstMatch,
                 app.textFields[identifier].firstMatch,
+                app.navigationBars.searchFields["Search"].firstMatch,
+                app.navigationBars.textFields["Search"].firstMatch,
+                app.searchFields["Search"].firstMatch,
+                app.textFields["Search"].firstMatch,
                 app.otherElements[identifier].firstMatch,
             ]
         case
@@ -5445,7 +5447,8 @@ final class AndBibleUITests: XCTestCase {
                 } else if resolvedElement("readerOverflowMenu", in: app) == nil {
                     return
                 }
-                if let refreshedButton = resolvedElement(identifier, in: app), !refreshedButton.exists {
+                let refreshedButton = unresolvedElement(identifier, in: app)
+                if !refreshedButton.exists {
                     return
                 }
                 RunLoop.current.run(until: Date().addingTimeInterval(0.2))
@@ -5696,8 +5699,7 @@ final class AndBibleUITests: XCTestCase {
                    !drawer.frame.isEmpty {
                     return drawer
                 }
-                if let overflowMenu = resolvedElement("readerOverflowMenu", in: app),
-                   !overflowMenu.frame.isEmpty {
+                if isReaderOverflowMenuLikelyVisible(in: app) {
                     dismissReaderOverflowMenu(
                         in: app,
                         timeout: min(8, max(5, deadline.timeIntervalSinceNow)),
@@ -5717,8 +5719,7 @@ final class AndBibleUITests: XCTestCase {
                    !overflowMenu.frame.isEmpty {
                     return overflowMenu
                 }
-                if let drawer = resolvedElement("readerNavigationDrawer", in: app),
-                   drawer.exists {
+                if isReaderNavigationDrawerLikelyVisible(in: app) {
                     let dismissArea = unresolvedElement("readerNavigationDrawerDismissArea", in: app)
                     if dismissArea.exists {
                         tapElementReliably(dismissArea, timeout: 5, file: file, line: line)
@@ -5737,12 +5738,35 @@ final class AndBibleUITests: XCTestCase {
         } while Date() < deadline
 
         if prefersDrawer {
-            let drawer = unresolvedElement("readerNavigationDrawer", in: app)
-            return drawer.exists ? drawer : nil
+            return resolvedElement("readerNavigationDrawer", in: app)
         }
 
-        let overflowMenu = unresolvedElement("readerOverflowMenu", in: app)
-        return overflowMenu.exists ? overflowMenu : nil
+        return resolvedElement("readerOverflowMenu", in: app)
+    }
+
+    /**
+     Returns `true` when drawer-only controls indicate that the left navigation drawer is exposed.
+     */
+    private func isReaderNavigationDrawerLikelyVisible(in app: XCUIApplication) -> Bool {
+        let drawerSignals = [
+            app.buttons["readerOpenBookmarksAction"].firstMatch,
+            app.buttons["readerOpenSettingsAction"].firstMatch,
+            app.buttons["readerOpenSearchAction"].firstMatch,
+        ]
+
+        return drawerSignals.contains(where: { $0.exists && ($0.isHittable || !$0.frame.isEmpty) })
+    }
+
+    /**
+     Returns `true` when overflow-only controls indicate that the reader overflow menu is exposed.
+     */
+    private func isReaderOverflowMenuLikelyVisible(in app: XCUIApplication) -> Bool {
+        let overflowSignals = [
+            app.buttons["readerOpenWorkspacesAction"].firstMatch,
+            app.buttons["readerOverflowSectionTitlesToggle"].firstMatch,
+        ]
+
+        return overflowSignals.contains(where: { $0.exists && ($0.isHittable || !$0.frame.isEmpty) })
     }
 
     /**
@@ -5830,10 +5854,9 @@ final class AndBibleUITests: XCTestCase {
             return directAction
         }
 
-        let actionSurface = unresolvedElement(
-            prefersDrawer ? "readerNavigationDrawer" : "readerOverflowMenu",
-            in: app
-        )
+        let preferredSurfaceIdentifier = prefersDrawer ? "readerNavigationDrawer" : "readerOverflowMenu"
+        let actionSurface = resolvedElement(preferredSurfaceIdentifier, in: app)
+            ?? unresolvedElement(preferredSurfaceIdentifier, in: app)
         XCTAssertTrue(
             actionSurface.exists,
             "Expected the reader action surface to appear within \(timeout) seconds before resolving '\(identifier)'.",
@@ -6123,6 +6146,7 @@ final class AndBibleUITests: XCTestCase {
      */
     private func requireAlertTextField(
         in app: XCUIApplication,
+        titles: [String] = [],
         timeout: TimeInterval = 10,
         file: StaticString = #filePath,
         line: UInt = #line
@@ -6134,9 +6158,30 @@ final class AndBibleUITests: XCTestCase {
             file: file,
             line: line
         )
-        let textField = alert.textFields.firstMatch
+
+        let normalizedTitles = titles
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        let deadline = Date().addingTimeInterval(timeout)
+
+        repeat {
+            let candidates = normalizedTitles.flatMap { title in
+                [
+                    alert.textFields[title].firstMatch,
+                    app.alerts.textFields[title].firstMatch,
+                ]
+            }
+
+            if let textField = candidates.first(where: { $0.exists || $0.waitForExistence(timeout: 0.2) }) {
+                return textField
+            }
+
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        } while Date() < deadline
+
+        let textField = alert.textFields.element(boundBy: 0)
         XCTAssertTrue(
-            textField.waitForExistence(timeout: timeout),
+            textField.exists,
             "Expected the presented alert to expose a text field within \(timeout) seconds.",
             file: file,
             line: line
@@ -6333,6 +6378,74 @@ final class AndBibleUITests: XCTestCase {
         )
     }
 
+    /// Returns the first visible candidate from one explicit XCUI query list.
+    private func firstVisibleCandidate(
+        from candidates: [XCUIElement],
+        waitTimeout: TimeInterval = 0
+    ) -> XCUIElement? {
+        for candidate in candidates {
+            let exists = candidate.exists || (waitTimeout > 0 && candidate.waitForExistence(timeout: waitTimeout))
+            if exists && (candidate.isHittable || !candidate.frame.isEmpty) {
+                return candidate
+            }
+        }
+        return nil
+    }
+
+    /// Resolves the bookmark-list search field through explicit titled queries.
+    private func requireBookmarkListSearchField(
+        in app: XCUIApplication,
+        timeout: TimeInterval = 10,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) -> XCUIElement {
+        let bookmarkListScreen = requireElement("bookmarkListScreen", in: app, timeout: timeout, file: file, line: line)
+        let candidates = [
+            bookmarkListScreen.searchFields["Search bookmarks"].firstMatch,
+            bookmarkListScreen.textFields["Search bookmarks"].firstMatch,
+            app.searchFields["Search bookmarks"].firstMatch,
+            app.textFields["Search bookmarks"].firstMatch,
+        ]
+
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            if let field = firstVisibleCandidate(from: candidates, waitTimeout: 0.2) {
+                return field
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        } while Date() < deadline
+
+        XCTFail(
+            "Expected bookmark search field to exist.",
+            file: file,
+            line: line
+        )
+        return candidates.first ?? app.searchFields["Search bookmarks"].firstMatch
+    }
+
+    /// Returns explicit Search input candidates without falling back to broad first-match scans.
+    private func searchInputCandidates(in app: XCUIApplication) -> [XCUIElement] {
+        var candidates: [XCUIElement] = []
+        if let searchScreen = resolvedElement("searchScreen", in: app) {
+            candidates.append(contentsOf: [
+                searchScreen.searchFields["searchQueryField"].firstMatch,
+                searchScreen.textFields["searchQueryField"].firstMatch,
+                searchScreen.searchFields["Search"].firstMatch,
+                searchScreen.textFields["Search"].firstMatch,
+            ])
+        }
+        candidates.append(contentsOf: elementCandidates(for: "searchQueryField", in: app))
+        return candidates
+    }
+
+    /// Returns the first visible Search input candidate.
+    private func resolveVisibleSearchInput(
+        in app: XCUIApplication,
+        waitTimeout: TimeInterval = 0
+    ) -> XCUIElement? {
+        firstVisibleCandidate(from: searchInputCandidates(in: app), waitTimeout: waitTimeout)
+    }
+
     /**
      Resolves the visible text-entry control for Search across system search-field variants.
      *
@@ -6358,25 +6471,7 @@ final class AndBibleUITests: XCTestCase {
         let deadline = Date().addingTimeInterval(timeout)
 
         while Date() < deadline {
-            if let identifiedField = resolvedElement("searchQueryField", in: app),
-               identifiedField.exists,
-               (identifiedField.isHittable || !identifiedField.frame.isEmpty)
-            {
-                return identifiedField
-            }
-            let fieldCandidates = [
-                app.textFields["searchQueryField"].firstMatch,
-                app.otherElements["searchQueryField"].firstMatch,
-                app.searchFields["searchQueryField"].firstMatch,
-                app.navigationBars.searchFields.firstMatch,
-                app.searchFields.firstMatch,
-                app.navigationBars.textFields.firstMatch,
-                app.textFields.firstMatch,
-            ]
-
-            if let field = fieldCandidates.first(where: {
-                ($0.exists || $0.waitForExistence(timeout: 0.2)) && ($0.isHittable || !$0.frame.isEmpty)
-            }) {
+            if let field = resolveVisibleSearchInput(in: app, waitTimeout: 0.2) {
                 return field
             }
             revealSearchControls(in: app)
@@ -6388,7 +6483,7 @@ final class AndBibleUITests: XCTestCase {
             file: file,
             line: line
         )
-        return unresolvedElement("searchQueryField", in: app)
+        return resolveVisibleSearchInput(in: app) ?? unresolvedElement("searchQueryField", in: app)
     }
 
     /**
@@ -6405,12 +6500,7 @@ final class AndBibleUITests: XCTestCase {
      *     string
      */
     private func resolvedSearchInputValue(in app: XCUIApplication) -> String {
-        let candidates = [
-            app.searchFields.firstMatch,
-            app.textFields.firstMatch,
-        ]
-
-        for candidate in candidates where candidate.exists && !candidate.frame.isEmpty {
+        if let candidate = resolveVisibleSearchInput(in: app) {
             return candidate.value as? String ?? ""
         }
 
@@ -6471,14 +6561,14 @@ final class AndBibleUITests: XCTestCase {
         let deadline = Date().addingTimeInterval(timeout)
         repeat {
             if let field = resolveLabelCreationPromptTextField(in: app),
-               field.exists,
-               (field.isHittable || !field.frame.isEmpty) {
+               field.exists {
                 return field
             }
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         } while Date() < deadline
 
-        let fallback = app.alerts.firstMatch.textFields["labelManagerNewLabelNameField"].firstMatch
+        let fallback = resolvedElement("labelManagerNewLabelNameField", in: app)
+            ?? unresolvedElement("labelManagerNewLabelNameField", in: app)
         XCTAssertTrue(
             fallback.exists,
             "Expected the Label Manager create prompt text field to appear within \(timeout) seconds.",
@@ -6512,8 +6602,7 @@ final class AndBibleUITests: XCTestCase {
         let deadline = Date().addingTimeInterval(timeout)
         repeat {
             if let button = resolveLabelCreationPromptCreateButton(in: app),
-               button.exists,
-               (button.isHittable || !button.frame.isEmpty) {
+               button.exists {
                 return button
             }
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
@@ -6876,18 +6965,14 @@ final class AndBibleUITests: XCTestCase {
             let promptCandidates = [
                 prompt.textFields["labelManagerNewLabelNameField"].firstMatch,
                 prompt.textFields["Label name"].firstMatch,
-                prompt.textFields.firstMatch,
             ]
             if let field = promptCandidates.first(where: { $0.exists }) {
                 return field
             }
         }
 
-        let appCandidates = [
-            app.textFields["labelManagerNewLabelNameField"].firstMatch,
-            app.textFields["Label name"].firstMatch,
-        ]
-        return appCandidates.first(where: { $0.exists })
+        return elementCandidates(for: "labelManagerNewLabelNameField", in: app)
+            .first(where: { $0.exists })
     }
 
     /// Resolves the create-label prompt action button by scoping queries to the live prompt first.
@@ -7269,7 +7354,7 @@ final class AndBibleUITests: XCTestCase {
         }
 
         if !text.isEmpty {
-            element.typeText(text)
+            app.typeText(text)
         }
     }
 
@@ -7296,7 +7381,11 @@ final class AndBibleUITests: XCTestCase {
         }
 
         let placeholderCandidates = Set(
-            ([element.identifier] + textEntryPlaceholderHints(for: element.identifier) + placeholderHints)
+            (
+                [element.identifier]
+                    + textEntryPlaceholderHints(for: element.identifier)
+                    + placeholderHints
+            )
                 .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
                 .filter { !$0.isEmpty }
         )
@@ -7444,7 +7533,7 @@ final class AndBibleUITests: XCTestCase {
                 repeating: XCUIKeyboardKey.delete.rawValue,
                 count: remainingText.count
             )
-            element.typeText(deleteSequence)
+            app.typeText(deleteSequence)
             remainingText = currentTextEntryValue(in: element, placeholderHints: placeholderHints)
             if remainingText.isEmpty {
                 return true
@@ -7453,7 +7542,7 @@ final class AndBibleUITests: XCTestCase {
 
         if selectAllTextIfAvailable(in: element, app: app) {
             let selectionLength = max(currentTextEntryValue(in: element, placeholderHints: placeholderHints).count, 1)
-            element.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: selectionLength))
+            app.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: selectionLength))
             if currentTextEntryValue(in: element, placeholderHints: placeholderHints).isEmpty {
                 return true
             }
