@@ -7312,7 +7312,7 @@ final class AndBibleUITests: XCTestCase {
 
         let placeholderCandidates = Set(
             (
-                [element.identifier, element.placeholderValue ?? ""]
+                [element.identifier]
                     + textEntryPlaceholderHints(for: element.identifier)
                     + placeholderHints
             )
