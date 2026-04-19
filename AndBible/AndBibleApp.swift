@@ -152,6 +152,7 @@ struct AndBibleApp: App {
     private let remoteSyncNetworkMonitor: RemoteSyncNetworkMonitor
     #if os(iOS)
     private let remoteSyncBackgroundRefreshCoordinator: RemoteSyncBackgroundRefreshCoordinator
+    @UIApplicationDelegateAdaptor(AndBibleApplicationDelegate.self) private var appDelegate
     #endif
 
     @Environment(\.scenePhase) private var scenePhase

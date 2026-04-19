@@ -6,6 +6,7 @@ import SwiftData
 import SQLite3
 @testable import BibleUI
 @testable import BibleView
+import struct SwiftUI.EdgeInsets
 #if os(iOS)
 import UIKit
 import struct SwiftUI.Color
@@ -85,7 +86,87 @@ final class AndBibleTests: XCTestCase {
         XCTAssertEqual(TextDisplaySettings.appDefaults.strongsMode, 0)
     }
 
+    func testReaderWindowControlsAvoidanceInsetsStayOffForFullscreenIPad() {
+        let insets = ReaderWindowControlsAvoidanceMetrics.documentHeaderInsets(
+            isPad: true,
+            sceneSize: CGSize(width: 834, height: 1194),
+            screenWidth: 834,
+            safeAreaInsets: EdgeInsets(top: 24, leading: 0, bottom: 20, trailing: 0)
+        )
+
+        XCTAssertEqual(insets, EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
+    }
+
+    func testReaderWindowControlsAvoidanceInsetsReserveSpaceForWindowedIPad() {
+        let insets = ReaderWindowControlsAvoidanceMetrics.documentHeaderInsets(
+            isPad: true,
+            sceneSize: CGSize(width: 700, height: 980),
+            screenWidth: 834,
+            safeAreaInsets: EdgeInsets(top: 24, leading: 0, bottom: 20, trailing: 0)
+        )
+
+        XCTAssertEqual(insets.top, 10)
+        XCTAssertEqual(insets.leading, 56)
+        XCTAssertEqual(insets.bottom, 0)
+        XCTAssertEqual(insets.trailing, 0)
+    }
+
+    func testReaderWindowControlsAvoidanceInsetsOnlyTopUpMissingSafeAreaClearance() {
+        let insets = ReaderWindowControlsAvoidanceMetrics.documentHeaderInsets(
+            isPad: true,
+            sceneSize: CGSize(width: 700, height: 980),
+            screenWidth: 834,
+            safeAreaInsets: EdgeInsets(top: 36, leading: 20, bottom: 20, trailing: 0)
+        )
+
+        XCTAssertEqual(insets.top, 0)
+        XCTAssertEqual(insets.leading, 36)
+    }
+
     #if os(iOS)
+    func testWindowingControlPolicyUsesMinimalStyleOnlyOnIPad() {
+        XCTAssertTrue(
+            AndBibleWindowingControlPolicy.shouldUseMinimalStyle(userInterfaceIdiom: .pad)
+        )
+        XCTAssertFalse(
+            AndBibleWindowingControlPolicy.shouldUseMinimalStyle(userInterfaceIdiom: .phone)
+        )
+    }
+
+    func testApplicationDelegateSceneConfigurationUsesWindowSceneDelegate() {
+        let configuration = AndBibleApplicationDelegate.sceneConfiguration(
+            sessionRole: UISceneSession.Role.windowApplication
+        )
+
+        XCTAssertEqual(
+            ObjectIdentifier(configuration.delegateClass!),
+            ObjectIdentifier(AndBibleWindowSceneDelegate.self)
+        )
+        XCTAssertNil(configuration.name)
+    }
+
+    func testWindowingControlPolicyChoosesMinimalStyleOnlyOnIPad() {
+        XCTAssertEqual(
+            AndBibleWindowingControlPolicy.preferredWindowingControlStyleChoice(userInterfaceIdiom: .pad),
+            .minimal
+        )
+        XCTAssertEqual(
+            AndBibleWindowingControlPolicy.preferredWindowingControlStyleChoice(userInterfaceIdiom: .phone),
+            .automatic
+        )
+    }
+
+    func testWindowSceneDelegateSelectorChoiceChoosesMinimalStyleOnlyOnIPad() {
+        XCTAssertEqual(
+            AndBibleWindowSceneDelegate.preferredWindowingControlStyleSelectorName(userInterfaceIdiom: .pad),
+            "minimalStyle"
+        )
+        XCTAssertEqual(
+            AndBibleWindowSceneDelegate.preferredWindowingControlStyleSelectorName(userInterfaceIdiom: .phone),
+            "automaticStyle"
+        )
+    }
+
     func testColorARGBByteClampsIntermediatePickerComponents() {
         XCTAssertEqual(Color.clampedARGBByte(-0.25), 0)
         XCTAssertEqual(Color.clampedARGBByte(0.5), 128)
@@ -99,8 +180,13 @@ final class AndBibleTests: XCTestCase {
         XCTAssertEqual(color.argbInt, Int(Int32(bitPattern: 0xFF0080FF)))
     }
 
+    func testBibleWebViewMapsDeviceClassFromInterfaceIdiom() {
+        XCTAssertEqual(BibleWebView.iosDeviceClass(for: .phone), "ios-phone")
+        XCTAssertEqual(BibleWebView.iosDeviceClass(for: .pad), "ios-pad")
+    }
+
     func testBibleWebViewInjectsPlatformDeviceClassIntoUserScript() {
-        let expectedDeviceClass = BibleWebView.iosDeviceClass()
+        let expectedDeviceClass = "ios-phone"
         let platformScript = BibleWebView.platformBootstrapScriptSource(deviceClass: expectedDeviceClass)
 
         XCTAssertTrue(platformScript.contains("window.__PLATFORM__ = 'ios';"))

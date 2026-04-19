@@ -81,6 +81,51 @@ private struct ReaderOverflowButtonBoundsPreferenceKey: PreferenceKey {
     }
 }
 
+/// Captures the reader root's live scene size and safe-area insets.
+private struct ReaderSceneMetrics: Equatable {
+    var size: CGSize = .zero
+    var safeAreaInsets: EdgeInsets = .init()
+}
+
+/// Feeds root scene metrics back into the reader so iPad windowed layouts can adapt.
+private struct ReaderSceneMetricsPreferenceKey: PreferenceKey {
+    static var defaultValue = ReaderSceneMetrics()
+
+    static func reduce(value: inout ReaderSceneMetrics, nextValue: () -> ReaderSceneMetrics) {
+        value = nextValue()
+    }
+}
+
+/// Pure layout heuristic for reserving space for iPadOS floating window controls.
+struct ReaderWindowControlsAvoidanceMetrics {
+    static let minimumTopClearance: CGFloat = 34
+    static let minimumLeadingClearance: CGFloat = 56
+
+    static func documentHeaderInsets(
+        isPad: Bool,
+        sceneSize: CGSize,
+        screenWidth: CGFloat,
+        safeAreaInsets: EdgeInsets
+    ) -> EdgeInsets {
+        guard isPad else {
+            return .init()
+        }
+        guard sceneSize.width > 0, screenWidth > 0 else {
+            return .init()
+        }
+        guard sceneSize.width < (screenWidth - 1) else {
+            return .init()
+        }
+
+        return EdgeInsets(
+            top: max(0, minimumTopClearance - safeAreaInsets.top),
+            leading: max(0, minimumLeadingClearance - safeAreaInsets.leading),
+            bottom: 0,
+            trailing: 0
+        )
+    }
+}
+
 /**
  Coordinates the primary reading experience, including panes, toolbars, sheets, and overlays.
 
@@ -248,6 +293,9 @@ public struct BibleReaderView: View {
 
     /// Whether the reader is currently hiding its standard chrome in fullscreen mode.
     @State private var isFullScreen = false
+
+    /// Latest root-scene metrics used to avoid iPadOS floating window controls.
+    @State private var readerSceneMetrics = ReaderSceneMetrics()
 
     /// Android-parity preference controlling whether navigation drills down to verse selection.
     @State private var navigateToVersePref = AppPreferenceRegistry.boolDefault(for: .navigateToVersePref) ?? false
@@ -576,6 +624,17 @@ public struct BibleReaderView: View {
         .animation(.easeInOut(duration: 0.25), value: toastMessage)
         .animation(.easeInOut(duration: 0.2), value: showReaderNavigationDrawer)
         .animation(.easeInOut(duration: 0.16), value: showReaderOverflowMenu)
+        .background {
+            GeometryReader { proxy in
+                Color.clear.preference(
+                    key: ReaderSceneMetricsPreferenceKey.self,
+                    value: ReaderSceneMetrics(size: proxy.size, safeAreaInsets: proxy.safeAreaInsets)
+                )
+            }
+        }
+        .onPreferenceChange(ReaderSceneMetricsPreferenceKey.self) { metrics in
+            readerSceneMetrics = metrics
+        }
         #if os(iOS)
         .toolbar(.hidden, for: .navigationBar)
         #endif
@@ -1551,6 +1610,14 @@ public struct BibleReaderView: View {
 
     // MARK: - Document Header
 
+    /// High-level header layouts shown above the focused pane.
+    private enum DocumentHeaderMode {
+        case myNotes
+        case studyPad
+        case auxiliary
+        case bible
+    }
+
     /**
      Builds the top document header bar for the focused pane state.
 
@@ -1559,151 +1626,211 @@ public struct BibleReaderView: View {
      */
     private var documentHeader: some View {
         let controller = focusedController
+        let avoidanceInsets = readerWindowControlsAvoidanceInsets
         return VStack(spacing: 0) {
             HStack {
-                if controller?.showingMyNotes == true {
-                    // My Notes mode: show back button
-                    Button(action: { controller?.returnFromMyNotes() }) {
-                        HStack(spacing: 4) {
-                            Image(systemName: "chevron.left")
-                                .font(.body.weight(.semibold))
-                            Text(currentReference)
-                                .font(.subheadline)
-                        }
-                    }
-                    .accessibilityLabel(String(localized: "back_to_bible"))
-                    .accessibilityIdentifier("readerReturnFromMyNotesButton")
+                documentHeaderContent(controller: controller)
+            }
+            .padding(.top, 8 + avoidanceInsets.top)
+            .padding(.bottom, 8)
+            .padding(.leading, 16 + avoidanceInsets.leading)
+            .padding(.trailing, 16)
+            .background(.bar)
+        }
+    }
 
-                    Spacer()
+    /// Extra document-header padding reserved for iPad windowed layouts with floating controls.
+    private var readerWindowControlsAvoidanceInsets: EdgeInsets {
+        #if os(iOS)
+        ReaderWindowControlsAvoidanceMetrics.documentHeaderInsets(
+            isPad: UIDevice.current.userInterfaceIdiom == .pad,
+            sceneSize: readerSceneMetrics.size,
+            screenWidth: UIScreen.main.bounds.width,
+            safeAreaInsets: readerSceneMetrics.safeAreaInsets
+        )
+        #else
+        .init()
+        #endif
+    }
 
-                    Text(String(localized: "my_notes"))
-                        .font(.headline)
-                        .accessibilityIdentifier("readerMyNotesTitle")
+    /**
+     Type-erases the active header branch to avoid a device-only SwiftUI EXC_BAD_ACCESS observed
+     on iPad hardware when the full conditional header tree is inlined into one large view body.
+     */
+    private func documentHeaderContent(controller: BibleReaderController?) -> AnyView {
+        switch documentHeaderMode(for: controller) {
+        case .myNotes:
+            return AnyView(myNotesDocumentHeader(controller: controller))
+        case .studyPad:
+            return AnyView(studyPadDocumentHeader(controller: controller))
+        case .auxiliary:
+            return AnyView(auxiliaryDocumentHeader(controller: controller))
+        case .bible:
+            return AnyView(bibleDocumentHeader(controller: controller))
+        }
+    }
 
-                    Spacer()
-                    Color.clear.frame(width: 80, height: 1)
-                } else if controller?.showingStudyPad == true {
-                    // StudyPad mode: show back button
-                    Button(action: { controller?.returnFromStudyPad() }) {
-                        HStack(spacing: 4) {
-                            Image(systemName: "chevron.left")
-                                .font(.body.weight(.semibold))
-                            Text(currentReference)
-                                .font(.subheadline)
-                        }
-                    }
-                    .accessibilityLabel(String(localized: "back_to_bible"))
+    /// Resolves which top-level header layout should be displayed for the focused controller.
+    private func documentHeaderMode(for controller: BibleReaderController?) -> DocumentHeaderMode {
+        if controller?.showingMyNotes == true {
+            return .myNotes
+        }
+        if controller?.showingStudyPad == true {
+            return .studyPad
+        }
+        if controller?.currentCategory == .dictionary ||
+            controller?.currentCategory == .generalBook ||
+            controller?.currentCategory == .map ||
+            controller?.currentCategory == .epub {
+            return .auxiliary
+        }
+        return .bible
+    }
 
-                    Spacer()
-
-                    Text(controller?.activeStudyPadLabelName ?? String(localized: "study_pad"))
-                        .font(.headline)
-                        .lineLimit(1)
-                        .accessibilityIdentifier("readerStudyPadTitle")
-
-                    Spacer()
-                    Color.clear.frame(width: 80, height: 1)
-                } else if controller?.currentCategory == .dictionary ||
-                          controller?.currentCategory == .generalBook ||
-                          controller?.currentCategory == .map ||
-                          controller?.currentCategory == .epub {
-                    // Dictionary/GenBook/Map/EPUB mode: show back button + module/key
-                    Button(action: { controller?.switchCategory(to: .bible) }) {
-                        HStack(spacing: 4) {
-                            Image(systemName: "chevron.left")
-                                .font(.body.weight(.semibold))
-                            Text(currentReference)
-                                .font(.subheadline)
-                        }
-                    }
-                    .accessibilityLabel(String(localized: "back_to_bible"))
-
-                    Spacer()
-
-                    VStack(spacing: 1) {
-                        Text(controller?.activeModuleName(for: controller?.currentCategory ?? .dictionary) ?? "")
-                            .font(.headline)
-                            .lineLimit(1)
-                        if let key = controller?.currentCategory == .dictionary ? controller?.currentDictionaryKey :
-                                      controller?.currentCategory == .generalBook ? controller?.currentGeneralBookKey :
-                                      controller?.currentCategory == .epub ? controller?.currentEpubTitle :
-                                      controller?.currentMapKey {
-                            Text(key)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                        }
-                    }
-
-                    Spacer()
-
-                    // Browse button to open key browser
-                    Button {
-                        setPanePresentationTarget(windowManager.activeWindow?.id)
-                        switch controller?.currentCategory {
-                        case .dictionary: showDictionaryBrowser = true
-                        case .generalBook: showGeneralBookBrowser = true
-                        case .map: showMapBrowser = true
-                        case .epub: showEpubBrowser = true
-                        default: break
-                        }
-                    } label: {
-                        Image(systemName: browseIconName(for: controller?.currentCategory))
-                            .font(.body)
-                    }
-                } else {
-                    // Normal Bible mode — navigation + action buttons in one bar
-                    readerNavigationDrawerButton
-
-                    // Previous chapter
-                    Button(action: { controller?.navigatePrevious() }) {
-                        Image(systemName: "chevron.left")
-                            .font(.body.weight(.semibold))
-                            .foregroundStyle(controller?.hasPrevious == true ? .primary : .tertiary)
-                    }
-                    .disabled(controller?.hasPrevious != true)
-                    .accessibilityLabel(String(localized: "previous_chapter"))
-
-                    Button(action: {
-                        setPanePresentationTarget(windowManager.activeWindow?.id)
-                        showBookChooser = true
-                    }) {
-                        VStack(alignment: .leading, spacing: 1) {
-                            HStack(spacing: 4) {
-                                Text(currentToolbarTitle)
-                                    .font(.headline)
-                                    .lineLimit(1)
-                                Image(systemName: "chevron.down")
-                                    .font(.caption)
-                            }
-                            Text(currentToolbarSubtitle)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                        }
-                    }
-                    .buttonStyle(.plain)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .accessibilityIdentifier("bookChooserButton")
-                    .accessibilityValue("\(currentToolbarTitle), \(currentToolbarSubtitle)")
-
-                    // Next chapter
-                    Button(action: { controller?.navigateNext() }) {
-                        Image(systemName: "chevron.right")
-                            .font(.body.weight(.semibold))
-                            .foregroundStyle(controller?.hasNext == true ? .primary : .tertiary)
-                    }
-                    .disabled(controller?.hasNext != true)
-                    .accessibilityLabel(String(localized: "next_chapter"))
-
-                    // Action buttons — matching Android toolbar order and collapsing by width.
-                    readerToolbarActions(controller: controller)
-                        .layoutPriority(1)
+    /// Header shown while browsing My Notes.
+    private func myNotesDocumentHeader(controller: BibleReaderController?) -> some View {
+        Group {
+            Button(action: { controller?.returnFromMyNotes() }) {
+                HStack(spacing: 4) {
+                    Image(systemName: "chevron.left")
+                        .font(.body.weight(.semibold))
+                    Text(currentReference)
+                        .font(.subheadline)
                 }
             }
-            .padding(.horizontal)
-            .padding(.vertical, 8)
-            .background(.bar)
+            .accessibilityLabel(String(localized: "back_to_bible"))
+            .accessibilityIdentifier("readerReturnFromMyNotesButton")
+
+            Spacer()
+
+            Text(String(localized: "my_notes"))
+                .font(.headline)
+                .accessibilityIdentifier("readerMyNotesTitle")
+
+            Spacer()
+            Color.clear.frame(width: 80, height: 1)
+        }
+    }
+
+    /// Header shown while browsing the StudyPad.
+    private func studyPadDocumentHeader(controller: BibleReaderController?) -> some View {
+        Group {
+            Button(action: { controller?.returnFromStudyPad() }) {
+                HStack(spacing: 4) {
+                    Image(systemName: "chevron.left")
+                        .font(.body.weight(.semibold))
+                    Text(currentReference)
+                        .font(.subheadline)
+                }
+            }
+            .accessibilityLabel(String(localized: "back_to_bible"))
+
+            Spacer()
+
+            Text(controller?.activeStudyPadLabelName ?? String(localized: "study_pad"))
+                .font(.headline)
+                .lineLimit(1)
+                .accessibilityIdentifier("readerStudyPadTitle")
+
+            Spacer()
+            Color.clear.frame(width: 80, height: 1)
+        }
+    }
+
+    /// Header shown for dictionary, general-book, map, and EPUB categories.
+    private func auxiliaryDocumentHeader(controller: BibleReaderController?) -> some View {
+        Group {
+            Button(action: { controller?.switchCategory(to: .bible) }) {
+                HStack(spacing: 4) {
+                    Image(systemName: "chevron.left")
+                        .font(.body.weight(.semibold))
+                    Text(currentReference)
+                        .font(.subheadline)
+                }
+            }
+            .accessibilityLabel(String(localized: "back_to_bible"))
+
+            Spacer()
+
+            VStack(spacing: 1) {
+                Text(controller?.activeModuleName(for: controller?.currentCategory ?? .dictionary) ?? "")
+                    .font(.headline)
+                    .lineLimit(1)
+                if let key = controller?.currentCategory == .dictionary ? controller?.currentDictionaryKey :
+                                controller?.currentCategory == .generalBook ? controller?.currentGeneralBookKey :
+                                controller?.currentCategory == .epub ? controller?.currentEpubTitle :
+                                controller?.currentMapKey {
+                    Text(key)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+
+            Spacer()
+
+            Button {
+                setPanePresentationTarget(windowManager.activeWindow?.id)
+                switch controller?.currentCategory {
+                case .dictionary: showDictionaryBrowser = true
+                case .generalBook: showGeneralBookBrowser = true
+                case .map: showMapBrowser = true
+                case .epub: showEpubBrowser = true
+                default: break
+                }
+            } label: {
+                Image(systemName: browseIconName(for: controller?.currentCategory))
+                    .font(.body)
+            }
+        }
+    }
+
+    /// Header shown for the normal Bible/commentary reading mode.
+    private func bibleDocumentHeader(controller: BibleReaderController?) -> some View {
+        Group {
+            readerNavigationDrawerButton
+
+            Button(action: { controller?.navigatePrevious() }) {
+                Image(systemName: "chevron.left")
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(controller?.hasPrevious == true ? .primary : .tertiary)
+            }
+            .disabled(controller?.hasPrevious != true)
+            .accessibilityLabel(String(localized: "previous_chapter"))
+
+            Button(action: {
+                setPanePresentationTarget(windowManager.activeWindow?.id)
+                showBookChooser = true
+            }) {
+                VStack(alignment: .leading, spacing: 1) {
+                    HStack(spacing: 4) {
+                        Text(currentToolbarTitle)
+                            .font(.headline)
+                            .lineLimit(1)
+                        Image(systemName: "chevron.down")
+                            .font(.caption)
+                    }
+                    Text(currentToolbarSubtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+            .buttonStyle(.plain)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityIdentifier("bookChooserButton")
+            .accessibilityValue("\(currentToolbarTitle), \(currentToolbarSubtitle)")
+
+            Button(action: { controller?.navigateNext() }) {
+                Image(systemName: "chevron.right")
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(controller?.hasNext == true ? .primary : .tertiary)
+            }
+            .disabled(controller?.hasNext != true)
+            .accessibilityLabel(String(localized: "next_chapter"))
+
+            readerToolbarActions(controller: controller)
+                .layoutPriority(1)
         }
     }
 

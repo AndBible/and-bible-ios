@@ -145,10 +145,15 @@ public struct BibleWebView: NSViewRepresentable {
 // MARK: - Shared WebView Creation
 
 extension BibleWebView {
-    /// Returns the iOS device-class token exported to the web client.
+    /// Maps one UIKit idiom to the device-class token exported to the web client.
+    static func iosDeviceClass(for userInterfaceIdiom: UIUserInterfaceIdiom) -> String {
+        userInterfaceIdiom == .pad ? "ios-pad" : "ios-phone"
+    }
+
+    /// Returns the current iOS device-class token exported to the web client.
     static func iosDeviceClass() -> String {
         #if os(iOS)
-        UIDevice.current.userInterfaceIdiom == .pad ? "ios-pad" : "ios-phone"
+        iosDeviceClass(for: UIDevice.current.userInterfaceIdiom)
         #else
         "ios-phone"
         #endif
