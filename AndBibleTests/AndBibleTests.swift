@@ -826,6 +826,70 @@ final class AndBibleTests: XCTestCase {
         XCTAssertEqual(store.workspaces().map(\.name), ["Renamed", "Later"])
     }
 
+    func testWorkspaceStoreCreateWorkspaceInheritsWorkspaceScopedDefaultsWithoutCloningGraph() throws {
+        let container = try makeWorkspaceModelContainer()
+        let context = ModelContext(container)
+        let store = WorkspaceStore(modelContext: context)
+
+        let source = store.createWorkspace(name: "Source")
+        var workspaceDisplaySettings = TextDisplaySettings()
+        workspaceDisplaySettings.fontSize = 19
+        workspaceDisplaySettings.fontFamily = "serif"
+        workspaceDisplaySettings.lineSpacing = 18
+        workspaceDisplaySettings.strongsMode = 2
+        source.textDisplaySettings = workspaceDisplaySettings
+
+        let recentLabelID = UUID()
+        let autoAssignLabelID = UUID()
+        let primaryLabelID = UUID()
+        let studyPadLabelID = UUID()
+        source.workspaceSettings = WorkspaceSettings(
+            enableTiltToScroll: true,
+            enableReverseSplitMode: true,
+            autoPin: true,
+            recentLabels: [RecentLabel(labelId: recentLabelID)],
+            autoAssignLabels: [autoAssignLabelID],
+            autoAssignPrimaryLabel: primaryLabelID,
+            studyPadCursors: [studyPadLabelID: 3],
+            hideCompareDocuments: ["KJV"],
+            limitAmbiguousModalSize: true
+        )
+        source.workspaceColor = Int(Int32(bitPattern: 0xFF335577))
+        source.unPinnedWeight = 0.75
+
+        let sourcePrimaryWindow = try XCTUnwrap((source.windows ?? []).first)
+        var windowDisplaySettings = TextDisplaySettings()
+        windowDisplaySettings.fontSize = 24
+        sourcePrimaryWindow.pageManager?.textDisplaySettings = windowDisplaySettings
+        store.addHistoryItem(to: sourcePrimaryWindow, document: "KJV", key: "Gen.1.1")
+        _ = store.addWindow(to: source, document: "KJV", category: "bible")
+
+        let created = store.createWorkspace(name: "Inherited", inheritingDefaultsFrom: source)
+
+        XCTAssertEqual(created.textDisplaySettings, source.textDisplaySettings)
+        XCTAssertEqual(created.workspaceColor, source.workspaceColor)
+        XCTAssertEqual(created.workspaceSettings?.enableTiltToScroll, true)
+        XCTAssertEqual(created.workspaceSettings?.enableReverseSplitMode, true)
+        XCTAssertEqual(created.workspaceSettings?.autoPin, true)
+        XCTAssertEqual(created.workspaceSettings?.recentLabels.count, 1)
+        XCTAssertEqual(created.workspaceSettings?.recentLabels.first?.labelId, recentLabelID)
+        XCTAssertEqual(created.workspaceSettings?.autoAssignLabels.count, 1)
+        XCTAssertEqual(created.workspaceSettings?.autoAssignLabels.first, autoAssignLabelID)
+        XCTAssertEqual(created.workspaceSettings?.autoAssignPrimaryLabel, primaryLabelID)
+        XCTAssertEqual(created.workspaceSettings?.studyPadCursors.count, 1)
+        XCTAssertEqual(created.workspaceSettings?.studyPadCursors[studyPadLabelID], 3)
+        XCTAssertEqual(created.workspaceSettings?.hideCompareDocuments, ["KJV"])
+        XCTAssertEqual(created.workspaceSettings?.limitAmbiguousModalSize, true)
+        XCTAssertNil(created.unPinnedWeight)
+
+        let createdWindows = created.windows ?? []
+        XCTAssertEqual(createdWindows.count, 1)
+        let createdWindow = try XCTUnwrap(createdWindows.first)
+        XCTAssertTrue(createdWindow.historyItems?.isEmpty ?? true)
+        XCTAssertEqual(createdWindow.pageManager?.currentCategoryName, "bible")
+        XCTAssertNil(createdWindow.pageManager?.textDisplaySettings)
+    }
+
     func testWebDAVPropfindBuildsAuthenticatedRequestAndParsesMultiStatus() async throws {
         let expectedAuth = "Basic \(Data("alice:secret".utf8).base64EncodedString())"
         MockURLProtocol.requestHandler = { request in

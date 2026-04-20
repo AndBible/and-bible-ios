@@ -60,16 +60,21 @@ public final class WorkspaceStore {
 
     /**
      * Creates a new workspace with the default single-Bible-window graph.
-     * - Parameter name: User-visible workspace name.
+     * - Parameters:
+     *   - name: User-visible workspace name.
+     *   - source: Optional workspace whose workspace-scoped defaults should seed the new workspace.
      * - Returns: The newly created workspace.
      * - Side Effects: Inserts a `Workspace`, a child `Window`, a matching `PageManager`, and saves `modelContext`.
      * - Failure: Save errors are swallowed.
      * - Note: The initial `PageManager.id` is set to the new window ID so the one-to-one relationship stays aligned.
      */
     @discardableResult
-    public func createWorkspace(name: String) -> Workspace {
+    public func createWorkspace(name: String, inheritingDefaultsFrom source: Workspace? = nil) -> Workspace {
         let maxOrder = workspaces().map(\.orderNumber).max() ?? -1
         let workspace = Workspace(name: name, orderNumber: maxOrder + 1)
+        workspace.textDisplaySettings = source?.textDisplaySettings
+        workspace.workspaceSettings = source?.workspaceSettings
+        workspace.workspaceColor = source?.workspaceColor
         modelContext.insert(workspace)
 
         // Create a default window with Bible page
