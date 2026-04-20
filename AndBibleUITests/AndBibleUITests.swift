@@ -5660,17 +5660,16 @@ final class AndBibleUITests: XCTestCase {
                 in: app,
                 timeout: min(2, max(0.5, deadline.timeIntervalSinceNow))
             )
-            if !button.frame.isEmpty {
-                let tapTimeout = min(3, max(0.5, deadline.timeIntervalSinceNow))
-                if waitForElementToBecomeHittable(button, timeout: tapTimeout) {
-                    button.tap()
-                    if waitForReaderNavigationDrawer(
-                        in: app,
-                        timeout: min(5, max(2, deadline.timeIntervalSinceNow))
-                    ) {
-                        return true
-                    }
-                }
+            if waitForElementToBecomeHittable(button, timeout: min(2, max(0.5, deadline.timeIntervalSinceNow))) {
+                button.tap()
+            } else if button.exists, !button.frame.isEmpty {
+                button.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+            }
+            if waitForReaderNavigationDrawer(
+                in: app,
+                timeout: min(5, max(2, deadline.timeIntervalSinceNow))
+            ) {
+                return true
             }
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         } while Date() < deadline
