@@ -5223,19 +5223,17 @@ final class AndBibleUITests: XCTestCase {
     ) {
         let deadline = Date().addingTimeInterval(timeout)
         repeat {
-            if let currentElement = resolvedElement(identifier, in: app) {
-                let currentValue = currentElement.value as? String
-                if currentValue == expectedValue || currentElement.label == expectedValue {
-                    return
-                }
+            if let currentValue = resolvedElementSemanticText(identifier, in: app),
+               currentValue == expectedValue
+            {
+                return
             }
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         } while Date() < deadline
 
-        let finalElement = unresolvedElement(identifier, in: app)
-        let finalValue = finalElement.value as? String
+        let finalValue = resolvedElementSemanticText(identifier, in: app) ?? "<missing>"
         XCTAssertEqual(
-            finalValue ?? finalElement.label,
+            finalValue,
             expectedValue,
             "Expected element '\(identifier)' to reach value '\(expectedValue)' within \(timeout) seconds.",
             file: file,
@@ -5269,22 +5267,18 @@ final class AndBibleUITests: XCTestCase {
     ) {
         let deadline = Date().addingTimeInterval(timeout)
         repeat {
-            if let currentElement = resolvedElement(identifier, in: app) {
-                let currentValue = currentElement.value as? String
-                let currentLabel = currentElement.label
-                if currentValue?.contains(expectedToken) == true || currentLabel.contains(expectedToken) {
-                    return
-                }
+            if let currentValue = resolvedElementSemanticText(identifier, in: app),
+               currentValue.contains(expectedToken)
+            {
+                return
             }
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         } while Date() < deadline
 
-        let finalElement = resolvedElement(identifier, in: app)
-        let finalValue = finalElement?.value as? String
-        let finalLabel = finalElement?.label ?? "<missing>"
+        let finalValue = resolvedElementSemanticText(identifier, in: app) ?? "<missing>"
         XCTAssertTrue(
-            (finalValue?.contains(expectedToken) == true || finalLabel.contains(expectedToken)),
-            "Expected element '\(identifier)' to contain token '\(expectedToken)' within \(timeout) seconds. Final value: '\(finalValue ?? finalLabel)'.",
+            finalValue.contains(expectedToken),
+            "Expected element '\(identifier)' to contain token '\(expectedToken)' within \(timeout) seconds. Final value: '\(finalValue)'.",
             file: file,
             line: line
         )
@@ -5316,18 +5310,17 @@ final class AndBibleUITests: XCTestCase {
     ) {
         let deadline = Date().addingTimeInterval(timeout)
         repeat {
-            if let currentElement = resolvedElement(identifier, in: app) {
-                let currentValue = currentElement.value as? String
-                let currentLabel = currentElement.label
-                if currentValue?.contains(unexpectedToken) != true && !currentLabel.contains(unexpectedToken) {
+            if let currentValue = resolvedElementSemanticText(identifier, in: app) {
+                if !currentValue.contains(unexpectedToken) {
                     return
                 }
+            } else {
+                return
             }
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         } while Date() < deadline
 
-        let finalElement = resolvedElement(identifier, in: app)
-        let finalValue = (finalElement?.value as? String) ?? finalElement?.label ?? "<missing>"
+        let finalValue = resolvedElementSemanticText(identifier, in: app) ?? "<missing>"
         XCTAssertFalse(
             finalValue.contains(unexpectedToken),
             "Expected element '\(identifier)' to stop containing '\(unexpectedToken)' within \(timeout) seconds.",
@@ -6090,25 +6083,69 @@ final class AndBibleUITests: XCTestCase {
      Returns `true` when drawer-only controls indicate that the left navigation drawer is exposed.
      */
     private func isReaderNavigationDrawerLikelyVisible(in app: XCUIApplication) -> Bool {
-        let drawerSignals = [
-            app.buttons["readerOpenBookmarksAction"].firstMatch,
-            app.buttons["readerOpenSettingsAction"].firstMatch,
-            app.buttons["readerOpenSearchAction"].firstMatch,
-        ]
+        if let drawer = resolvedElement("readerNavigationDrawer", in: app),
+           !drawer.frame.isEmpty
+        {
+            return true
+        }
 
-        return drawerSignals.contains(where: { $0.exists && ($0.isHittable || !$0.frame.isEmpty) })
+        if let dismissArea = resolvedElement("readerNavigationDrawerDismissArea", in: app),
+           !dismissArea.frame.isEmpty
+        {
+            return true
+        }
+
+        return false
     }
 
     /**
      Returns `true` when overflow-only controls indicate that the reader overflow menu is exposed.
      */
     private func isReaderOverflowMenuLikelyVisible(in app: XCUIApplication) -> Bool {
-        let overflowSignals = [
-            app.buttons["readerOpenWorkspacesAction"].firstMatch,
-            app.buttons["readerOverflowSectionTitlesToggle"].firstMatch,
-        ]
+        if let overflowMenu = resolvedElement("readerOverflowMenu", in: app),
+           !overflowMenu.frame.isEmpty
+        {
+            return true
+        }
 
-        return overflowSignals.contains(where: { $0.exists && ($0.isHittable || !$0.frame.isEmpty) })
+        if let dismissArea = resolvedElement("readerOverflowMenuDismissArea", in: app),
+           !dismissArea.frame.isEmpty
+        {
+            return true
+        }
+
+        return false
+    }
+
+    /**
+     Returns the semantic accessibility text exported for one resolved element.
+     *
+     * - Parameters:
+     *   - identifier: Accessibility identifier under test.
+     *   - app: Running application whose live hierarchy should be sampled.
+     * - Returns: The exported accessibility value when present, otherwise a conservative label
+     *   fallback for simple text-bearing controls.
+     * - Side effects: none.
+     * - Failure modes: returns `nil` when the element is absent or has no safe semantic text.
+     */
+    private func resolvedElementSemanticText(
+        _ identifier: String,
+        in app: XCUIApplication
+    ) -> String? {
+        guard let element = resolvedElement(identifier, in: app) else {
+            return nil
+        }
+
+        if let value = element.value as? String {
+            return value
+        }
+
+        switch element.elementType {
+        case .staticText, .button, .link:
+            return element.label
+        default:
+            return nil
+        }
     }
 
     /**
