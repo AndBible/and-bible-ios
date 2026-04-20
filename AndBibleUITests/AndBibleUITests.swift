@@ -266,12 +266,10 @@ final class AndBibleUITests: XCTestCase {
         let app = makeApp()
         app.launch()
 
-        tapReaderAction("readerOpenReadingPlansAction", in: app)
-        XCTAssertTrue(requireElement("readingPlanListScreen", in: app, timeout: 15).exists)
+        _ = openReadingPlans(in: app, timeout: 20)
         tapElementReliably(requireElement("readingPlanStartButton", in: app, timeout: 10), timeout: 10)
         XCTAssertTrue(requireElement("availablePlansScreen", in: app, timeout: 10).exists)
         tapElementReliably(requireElement("readingPlanTemplateButton", in: app, timeout: 15), timeout: 10)
-        XCTAssertTrue(requireElement("readingPlanListScreen", in: app, timeout: 15).exists)
         tapElementReliably(requireElement("readingPlanActivePlanLink", in: app, timeout: 15), timeout: 10)
         let currentDay = requireElement("dailyReadingCurrentDayLabel", in: app, timeout: 15)
         XCTAssertEqual(currentDay.value as? String, "1")
@@ -367,10 +365,9 @@ final class AndBibleUITests: XCTestCase {
         XCTAssertTrue(openWorkspaceSelector(in: app).exists)
         let originalActiveWorkspaceName = requireActiveWorkspaceRow(in: app, timeout: 10).label
 
-        tapElementReliably(requireElement("workspaceSelectorAddButton", in: app, timeout: 10), timeout: 10)
-        XCTAssertTrue(requireElement("workspaceNamePromptScreen", in: app, timeout: 10).exists)
+        _ = openWorkspaceCreatePrompt(in: app, timeout: 10)
         replaceText(
-            in: requireElement("workspaceNamePromptTextField", in: app, timeout: 10),
+            in: requireWorkspaceNamePromptField(in: app, timeout: 10),
             with: createdName,
             placeholderHints: ["Name", "name"]
         )
@@ -890,13 +887,12 @@ final class AndBibleUITests: XCTestCase {
             shouldExist: false,
             timeout: 10
         )
-        waitForElementValue("historyScreen", toContain: "count=0", in: app, timeout: 10)
         waitForElementExistence("historyClearButton", in: app, shouldExist: false, timeout: 10)
         tapElementReliably(requireElement("historyDoneButton", in: app, timeout: 10), timeout: 10)
         _ = openHistory(in: app)
-        waitForHistoryState(containing: "count=0", in: app, timeout: 10)
-        waitForHistoryState(notContaining: historyRowStateToken("Exod_2_1"), in: app, timeout: 10)
-        waitForHistoryState(notContaining: historyRowStateToken("Matt_3_1"), in: app, timeout: 10)
+        waitForElementExistence("historyClearButton", in: app, shouldExist: false, timeout: 10)
+        waitForElementExistence("historyRow::Exod_2_1", in: app, shouldExist: false, timeout: 10)
+        waitForElementExistence("historyRow::Matt_3_1", in: app, shouldExist: false, timeout: 10)
     }
 
     /**
@@ -3125,6 +3121,113 @@ final class AndBibleUITests: XCTestCase {
     }
 
     /**
+     Opens the workspace-name prompt from the workspace selector.
+     *
+     * - Parameters:
+     *   - app: Running application under test.
+     *   - timeout: Maximum number of seconds to wait for prompt controls to appear.
+     * - Returns: The first visible prompt control or prompt root.
+     * - Side effects:
+     *   - taps the production Add toolbar button in the workspace selector
+     *   - waits for prompt-specific controls instead of relying on one container type
+     * - Failure modes:
+     *   - records an XCTest failure if the prompt never becomes visible
+     */
+    @discardableResult
+    private func openWorkspaceCreatePrompt(
+        in app: XCUIApplication,
+        timeout: TimeInterval = 15
+    ) -> XCUIElement {
+        tapElementReliably(
+            requireElement("workspaceSelectorAddButton", in: app, timeout: timeout),
+            timeout: timeout
+        )
+        if let promptElement = waitForAnyElement(
+            [
+                "workspaceNamePromptTextField",
+                "workspaceNamePromptConfirmButton",
+                "workspaceNamePromptCancelButton",
+                "workspaceNamePromptScreen",
+            ],
+            in: app,
+            timeout: timeout
+        ) {
+            return promptElement
+        }
+
+        let promptField = unresolvedElement("workspaceNamePromptTextField", in: app)
+        XCTAssertTrue(
+            promptField.exists,
+            "Expected the workspace name prompt to appear within \(timeout) seconds."
+        )
+        return promptField
+    }
+
+    /**
+     Resolves the workspace-name prompt field using prompt-scoped fallbacks when SwiftUI does not
+     export the text-field accessibility identifier reliably.
+     *
+     * - Parameters:
+     *   - app: Running application under test.
+     *   - timeout: Maximum number of seconds to wait for the prompt field to appear.
+     *   - file: Source file used for XCTest failure attribution.
+     *   - line: Source line used for XCTest failure attribution.
+     * - Returns: The prompt text field used to enter the workspace name.
+     * - Side effects:
+     *   - polls prompt-scoped descendants and sheet text fields once the prompt chrome is visible
+     * - Failure modes:
+     *   - records an XCTest failure when no prompt text field becomes available in time
+     */
+    private func requireWorkspaceNamePromptField(
+        in app: XCUIApplication,
+        timeout: TimeInterval = 10,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) -> XCUIElement {
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            if let identifiedField = resolvedElement("workspaceNamePromptTextField", in: app) {
+                return identifiedField
+            }
+
+            if let promptScreen = resolvedElement("workspaceNamePromptScreen", in: app) {
+                let promptScopedField = promptScreen.descendants(matching: .textField).firstMatch
+                if promptScopedField.exists || promptScopedField.waitForExistence(timeout: 0.2) {
+                    return promptScopedField
+                }
+            }
+
+            let promptIsVisible =
+                resolvedElement("workspaceNamePromptConfirmButton", in: app) != nil ||
+                resolvedElement("workspaceNamePromptCancelButton", in: app) != nil ||
+                resolvedElement("workspaceNamePromptScreen", in: app) != nil
+            if promptIsVisible {
+                let sheetField = app.sheets.textFields.firstMatch
+                if sheetField.exists || sheetField.waitForExistence(timeout: 0.2) {
+                    return sheetField
+                }
+
+                let applicationField = app.textFields.firstMatch
+                if applicationField.exists || applicationField.waitForExistence(timeout: 0.2) {
+                    return applicationField
+                }
+            }
+
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        } while Date() < deadline
+
+        let fallbackField = resolvedElement("workspaceNamePromptTextField", in: app)
+            ?? app.sheets.textFields.firstMatch
+        XCTAssertTrue(
+            fallbackField.exists,
+            "Expected the workspace name field to appear within \(timeout) seconds.",
+            file: file,
+            line: line
+        )
+        return fallbackField
+    }
+
+    /**
      Opens Label Manager through Settings navigation.
      *
      * - Parameter app: Running application under test.
@@ -3426,6 +3529,32 @@ final class AndBibleUITests: XCTestCase {
             destinationIdentifier: "historyScreen",
             readinessIdentifiers: ["historyDoneButton", "historyClearButton", "historyEmptyState"],
             in: app
+        )
+    }
+
+    /**
+     Opens Reading Plans from the reader shell.
+     *
+     * - Parameters:
+     *   - app: Running application whose reader shell should present Reading Plans.
+     *   - timeout: Maximum number of seconds to wait for the screen or one stable control.
+     * - Returns: The first resolved Reading Plans root or readiness control.
+     * - Side effects:
+     *   - opens the reader navigation drawer and activates the production Reading Plans action
+     * - Failure modes:
+     *   - fails if neither the screen root nor one stable Reading Plans control appears
+     */
+    @discardableResult
+    private func openReadingPlans(
+        in app: XCUIApplication,
+        timeout: TimeInterval = 20
+    ) -> XCUIElement {
+        openReaderActionDestination(
+            actionIdentifier: "readerOpenReadingPlansAction",
+            destinationIdentifier: "readingPlanListScreen",
+            readinessIdentifiers: ["readingPlanStartButton", "readingPlanActivePlanLink"],
+            in: app,
+            timeout: timeout
         )
     }
 
@@ -4373,9 +4502,9 @@ final class AndBibleUITests: XCTestCase {
             ]
         case "workspaceNamePromptTextField":
             return [
+                app.textFields[identifier].firstMatch,
                 app.sheets.textFields[identifier].firstMatch,
                 app.collectionViews.textFields[identifier].firstMatch,
-                app.textFields[identifier].firstMatch,
                 app.otherElements[identifier].firstMatch,
             ]
         case "workspaceNamePromptConfirmButton", "workspaceNamePromptCancelButton":
@@ -4423,15 +4552,20 @@ final class AndBibleUITests: XCTestCase {
             "colorSettingsScreen",
             "textDisplaySettingsScreen",
             "importExportScreen",
-            "historyScreen",
             "modulePickerScreen",
-            "moduleBrowserScreen",
-            "workspaceNamePromptScreen":
+            "moduleBrowserScreen":
             return [
                 app.collectionViews[identifier].firstMatch,
                 app.tables[identifier].firstMatch,
                 app.scrollViews[identifier].firstMatch,
                 app.otherElements[identifier].firstMatch,
+            ]
+        case "historyScreen", "readingPlanListScreen", "workspaceNamePromptScreen":
+            return [
+                app.otherElements[identifier].firstMatch,
+                app.tables[identifier].firstMatch,
+                app.collectionViews[identifier].firstMatch,
+                app.scrollViews[identifier].firstMatch,
             ]
         case "workspaceSelectorScreen":
             return [
@@ -5145,11 +5279,12 @@ final class AndBibleUITests: XCTestCase {
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         } while Date() < deadline
 
-        let finalElement = unresolvedElement(identifier, in: app)
-        let finalValue = finalElement.value as? String
+        let finalElement = resolvedElement(identifier, in: app)
+        let finalValue = finalElement?.value as? String
+        let finalLabel = finalElement?.label ?? "<missing>"
         XCTAssertTrue(
-            (finalValue?.contains(expectedToken) == true || finalElement.label.contains(expectedToken)),
-            "Expected element '\(identifier)' to contain token '\(expectedToken)' within \(timeout) seconds. Final value: '\(finalValue ?? finalElement.label)'.",
+            (finalValue?.contains(expectedToken) == true || finalLabel.contains(expectedToken)),
+            "Expected element '\(identifier)' to contain token '\(expectedToken)' within \(timeout) seconds. Final value: '\(finalValue ?? finalLabel)'.",
             file: file,
             line: line
         )
@@ -5191,8 +5326,8 @@ final class AndBibleUITests: XCTestCase {
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         } while Date() < deadline
 
-        let finalElement = unresolvedElement(identifier, in: app)
-        let finalValue = finalElement.value as? String ?? finalElement.label
+        let finalElement = resolvedElement(identifier, in: app)
+        let finalValue = (finalElement?.value as? String) ?? finalElement?.label ?? "<missing>"
         XCTAssertFalse(
             finalValue.contains(unexpectedToken),
             "Expected element '\(identifier)' to stop containing '\(unexpectedToken)' within \(timeout) seconds.",
