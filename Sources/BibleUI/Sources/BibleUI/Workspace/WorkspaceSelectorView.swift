@@ -494,23 +494,23 @@ private struct WorkspaceNamePromptView: View {
                 .foregroundStyle(dialogSecondaryText)
 
             TextField(String(localized: "name"), text: $name)
-            .textInputAutocapitalization(.words)
-            .submitLabel(.done)
-            .focused($isNameFieldFocused)
-            .foregroundStyle(dialogPrimaryText)
-            .tint(dialogAccent)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 12)
-            .background(fieldBackground, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .stroke(fieldBorder, lineWidth: 1)
-            )
-            .accessibilityIdentifier("workspaceNamePromptTextField")
-            .onSubmit {
-                guard canConfirm else { return }
-                onConfirm()
-            }
+                .textInputAutocapitalization(.words)
+                .submitLabel(.done)
+                .focused($isNameFieldFocused)
+                .foregroundStyle(dialogPrimaryText)
+                .tint(dialogAccent)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+                .background(fieldBackground, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(fieldBorder, lineWidth: 1)
+                )
+                .accessibilityIdentifier("workspaceNamePromptTextField")
+                .onSubmit {
+                    guard canConfirm else { return }
+                    onConfirm()
+                }
 
             Spacer(minLength: 0)
         }

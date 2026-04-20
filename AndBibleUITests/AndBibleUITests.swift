@@ -4376,8 +4376,6 @@ final class AndBibleUITests: XCTestCase {
                 app.sheets.textFields[identifier].firstMatch,
                 app.collectionViews.textFields[identifier].firstMatch,
                 app.textFields[identifier].firstMatch,
-                app.sheets.textFields.firstMatch,
-                app.collectionViews.textFields.firstMatch,
                 app.otherElements[identifier].firstMatch,
             ]
         case "workspaceNamePromptConfirmButton", "workspaceNamePromptCancelButton":
