@@ -1250,15 +1250,16 @@ final class AndBibleUITests: XCTestCase {
 
         _ = openSyncSettingsFromReaderAction(in: app)
         let syncState = requireElement("syncSettingsState", in: app, timeout: 10)
-        XCTAssertEqual(
+        assertSyncState(
             syncState.value as? String,
-            "backend=NEXT_CLOUD;enabled=bookmarks"
+            backend: "NEXT_CLOUD",
+            enabled: "bookmarks"
         )
 
         toggleSyncCategory(
             "syncCategoryToggle::bookmarks",
             in: app,
-            expectedScreenValue: "backend=NEXT_CLOUD;enabled=none"
+            expectedTokens: ["backend": "NEXT_CLOUD", "enabled": "none"]
         )
     }
 
@@ -1283,24 +1284,26 @@ final class AndBibleUITests: XCTestCase {
 
         _ = openSyncSettingsFromReaderAction(in: app)
         let syncState = requireElement("syncSettingsState", in: app, timeout: 10)
-        XCTAssertEqual(
+        assertSyncState(
             syncState.value as? String,
-            "backend=NEXT_CLOUD;enabled=bookmarks"
+            backend: "NEXT_CLOUD",
+            enabled: "bookmarks"
         )
 
         toggleSyncCategory(
             "syncCategoryToggle::bookmarks",
             in: app,
-            expectedScreenValue: "backend=NEXT_CLOUD;enabled=none"
+            expectedTokens: ["backend": "NEXT_CLOUD", "enabled": "none"]
         )
 
         dismissSyncSettings(in: app)
         _ = openSyncSettingsFromReaderAction(in: app)
 
         let reopenedSyncState = requireElement("syncSettingsState", in: app, timeout: 10)
-        XCTAssertEqual(
+        assertSyncState(
             reopenedSyncState.value as? String,
-            "backend=NEXT_CLOUD;enabled=none"
+            backend: "NEXT_CLOUD",
+            enabled: "none"
         )
     }
 
@@ -1324,16 +1327,16 @@ final class AndBibleUITests: XCTestCase {
 
         _ = openSyncSettingsFromReaderAction(in: app)
         let syncState = requireElement("syncSettingsState", in: app, timeout: 10)
-        XCTAssertEqual(
+        assertSyncState(
             syncState.value as? String,
-            "backend=NEXT_CLOUD;enabled=none"
+            backend: "NEXT_CLOUD",
+            enabled: "none"
         )
         XCTAssertTrue(requireElement("syncNextCloudServerURLField", in: app, timeout: 10).exists)
 
         tapSyncBackend("GOOGLE_DRIVE", in: app)
-        waitForElementValue(
-            "syncSettingsState",
-            toEqual: "backend=GOOGLE_DRIVE;enabled=none",
+        waitForSyncState(
+            ["backend": "GOOGLE_DRIVE", "enabled": "none"],
             in: app,
             timeout: 10
         )
@@ -1361,15 +1364,15 @@ final class AndBibleUITests: XCTestCase {
 
         _ = openSyncSettingsFromReaderAction(in: app)
         let syncState = requireElement("syncSettingsState", in: app, timeout: 10)
-        XCTAssertEqual(
+        assertSyncState(
             syncState.value as? String,
-            "backend=NEXT_CLOUD;enabled=none"
+            backend: "NEXT_CLOUD",
+            enabled: "none"
         )
 
         tapSyncBackend("GOOGLE_DRIVE", in: app)
-        waitForElementValue(
-            "syncSettingsState",
-            toEqual: "backend=GOOGLE_DRIVE;enabled=none",
+        waitForSyncState(
+            ["backend": "GOOGLE_DRIVE", "enabled": "none"],
             in: app,
             timeout: 10
         )
@@ -1378,9 +1381,8 @@ final class AndBibleUITests: XCTestCase {
         dismissSyncSettings(in: app)
         _ = openSyncSettingsFromReaderAction(in: app)
 
-        waitForElementValue(
-            "syncSettingsState",
-            toEqual: "backend=GOOGLE_DRIVE;enabled=none",
+        waitForSyncState(
+            ["backend": "GOOGLE_DRIVE", "enabled": "none"],
             in: app,
             timeout: 10
         )
@@ -6928,8 +6930,6 @@ final class AndBibleUITests: XCTestCase {
         file: StaticString = #filePath,
         line: UInt = #line
     ) -> XCUIElement {
-        waitForLabelManagerState(containing: "showNewLabel=true", in: app, timeout: timeout)
-
         let deadline = Date().addingTimeInterval(timeout)
         repeat {
             if let field = resolveLabelCreationPromptTextField(in: app) {
@@ -6967,8 +6967,6 @@ final class AndBibleUITests: XCTestCase {
         file: StaticString = #filePath,
         line: UInt = #line
     ) -> XCUIElement {
-        waitForLabelManagerState(containing: "showNewLabel=true", in: app, timeout: timeout)
-
         let deadline = Date().addingTimeInterval(timeout)
         repeat {
             if let button = resolveLabelCreationPromptCreateButton(in: app) {
@@ -7285,8 +7283,8 @@ final class AndBibleUITests: XCTestCase {
 
         repeat {
             tapElementReliably(trigger, timeout: 5)
-            if resolvedElement("labelManagerNewLabelNameField", in: app) != nil
-                || resolvedElement("labelManagerCreateButton", in: app) != nil
+            if resolveLabelCreationPromptTextField(in: app) != nil
+                || resolveLabelCreationPromptCreateButton(in: app) != nil
             {
                 return
             }
@@ -8045,13 +8043,13 @@ final class AndBibleUITests: XCTestCase {
      * - Parameters:
      *   - identifier: Accessibility identifier of the production Sync category toggle.
      *   - app: Running application under test.
-     *   - expectedScreenValue: Screen accessibility value expected after the toggle.
+     *   - expectedTokens: Sync screen token values expected after the toggle.
      *   - timeout: Maximum time to wait for the switch interaction and screen-state mutation.
      *   - file: Source file used for XCTest failure attribution.
      *   - line: Source line used for XCTest failure attribution.
      * - Side effects:
      *   - repeatedly re-queries the exported Sync screen state and stops once the requested token
-     *     appears
+     *     values appear
      *   - uses the real toggle control for each retry
      * - Failure modes:
      *   - records an XCTest failure if the switch never appears or if the Sync screen state does
@@ -8060,7 +8058,7 @@ final class AndBibleUITests: XCTestCase {
     private func toggleSyncCategory(
         _ identifier: String,
         in app: XCUIApplication,
-        expectedScreenValue: String,
+        expectedTokens: [String: String],
         timeout: TimeInterval = 10,
         file: StaticString = #filePath,
         line: UInt = #line
@@ -8074,11 +8072,12 @@ final class AndBibleUITests: XCTestCase {
         )
         tapElementReliably(toggle, timeout: timeout, file: file, line: line)
 
-        waitForElementValue(
-            "syncSettingsState",
-            toEqual: expectedScreenValue,
+        waitForSyncState(
+            expectedTokens,
             in: app,
-            timeout: timeout
+            timeout: timeout,
+            file: file,
+            line: line
         )
     }
 
@@ -8257,6 +8256,89 @@ final class AndBibleUITests: XCTestCase {
             .dropFirst()
             .first
             .map(String.init)
+    }
+
+    /**
+     Asserts that the compact sync-settings export exposes the expected backend and enabled tokens.
+     *
+     * - Parameters:
+     *   - state: Semicolon-delimited Sync Settings accessibility export.
+     *   - backend: Expected backend token value.
+     *   - enabled: Expected enabled token value.
+     *   - file: Source file used for XCTest failure attribution.
+     *   - line: Source line used for XCTest failure attribution.
+     * - Side effects: none.
+     * - Failure modes:
+     *   - records an XCTest failure if either token is missing or has an unexpected value
+     */
+    private func assertSyncState(
+        _ state: String?,
+        backend: String,
+        enabled: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let resolvedState = state ?? "nil"
+        XCTAssertEqual(
+            syncStateToken(named: "backend", in: resolvedState),
+            backend,
+            "Expected sync backend token '\(backend)' in state '\(resolvedState)'.",
+            file: file,
+            line: line
+        )
+        XCTAssertEqual(
+            syncStateToken(named: "enabled", in: resolvedState),
+            enabled,
+            "Expected sync enabled token '\(enabled)' in state '\(resolvedState)'.",
+            file: file,
+            line: line
+        )
+    }
+
+    /**
+     Waits until the compact sync-settings export matches a set of named token values.
+     *
+     * - Parameters:
+     *   - expectedTokens: Token names and expected values that must all be present.
+     *   - app: Running application under test.
+     *   - timeout: Maximum number of seconds to poll before failing.
+     *   - file: Source file used for XCTest failure attribution.
+     *   - line: Source line used for XCTest failure attribution.
+     * - Side effects:
+     *   - repeatedly reads the Sync Settings accessibility export until all requested token values
+     *     match
+     * - Failure modes:
+     *   - records an XCTest failure if the requested token values never appear before timeout
+     */
+    private func waitForSyncState(
+        _ expectedTokens: [String: String],
+        in app: XCUIApplication,
+        timeout: TimeInterval = 10,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let stateElement = requireElement("syncSettingsState", in: app, timeout: timeout, file: file, line: line)
+        let deadline = Date().addingTimeInterval(timeout)
+
+        repeat {
+            if let state = stateElement.value as? String,
+               expectedTokens.allSatisfy({ syncStateToken(named: $0.key, in: state) == $0.value })
+            {
+                return
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        } while Date() < deadline
+
+        let finalState = stateElement.value as? String ?? "nil"
+        let expectedDescription = expectedTokens
+            .sorted(by: { $0.key < $1.key })
+            .map { "\($0.key)=\($0.value)" }
+            .joined(separator: ";")
+        XCTFail(
+            "Expected syncSettingsState to match '\(expectedDescription)' within \(timeout) seconds. Final state: '\(finalState)'.",
+            file: file,
+            line: line
+        )
     }
 
     /**
