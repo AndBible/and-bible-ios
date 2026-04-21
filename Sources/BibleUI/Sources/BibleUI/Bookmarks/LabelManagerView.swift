@@ -62,6 +62,34 @@ public struct LabelManagerView: View {
         allLabels.filter { $0.isRealLabel }
     }
 
+    /// Deterministic Label Manager state exported for UI automation.
+    private var labelManagerAccessibilityValue: String {
+        let baseState = "count=\(userLabels.count);showNewLabel=\(showNewLabel)"
+        guard UITestRuntimeConfiguration.enablesDetailedAccessibilityExports else {
+            return baseState
+        }
+
+        let rowTokens = userLabels
+            .prefix(UITestRuntimeConfiguration.detailedAccessibilityRowTokenLimit)
+            .map { "|\(labelManagerAccessibilitySegment($0.name))|" }
+            .joined(separator: ",")
+        return "\(baseState);rows=\(rowTokens)"
+    }
+
+    /// Compact hidden state probe used by UI tests instead of snapshotting the live list surface.
+    private var labelManagerStateExport: some View {
+        Text(verbatim: "label-manager-state")
+            .font(.caption2)
+            .foregroundStyle(.clear)
+            .opacity(0.01)
+            .frame(width: 1, height: 1)
+            .clipped()
+            .allowsHitTesting(false)
+            .accessibilityElement(children: .ignore)
+            .accessibilityIdentifier("labelManagerStateExport")
+            .accessibilityValue(labelManagerAccessibilityValue)
+    }
+
     /**
      Builds the label list, create-label alert, and edit-label navigation flow.
      */
@@ -78,6 +106,9 @@ public struct LabelManagerView: View {
             }
         }
         .accessibilityIdentifier("labelManagerScreen")
+        .overlay(alignment: .topLeading) {
+            labelManagerStateExport
+        }
         .navigationTitle(String(localized: "labels"))
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
@@ -221,6 +252,23 @@ public struct LabelManagerView: View {
      */
     private func labelRowIdentifier(_ label: BibleCore.Label) -> String {
         "labelManagerRowButton-\(label.name)"
+    }
+
+    /**
+     Normalizes one label name into the compact token format exported for UI tests.
+     *
+     * - Parameter value: Raw label name shown to the user.
+     * - Returns: A token-safe representation that strips punctuation into underscore separators.
+     * - Side effects: none.
+     * - Failure modes: This helper cannot fail.
+     */
+    private func labelManagerAccessibilitySegment(_ value: String) -> String {
+        let replaced = value.replacingOccurrences(
+            of: "[^A-Za-z0-9]+",
+            with: "_",
+            options: .regularExpression
+        )
+        return replaced.trimmingCharacters(in: CharacterSet(charactersIn: "_"))
     }
 
     /**
@@ -469,6 +517,16 @@ private struct LabelEditView: View {
      */
     private func save() {
         try? modelContext.save()
+    }
+
+    /// Sanitizes Label Manager text into deterministic accessibility state tokens.
+    private func labelManagerAccessibilitySegment(_ value: String) -> String {
+        let collapsed = value.replacingOccurrences(
+            of: "[^A-Za-z0-9]+",
+            with: "_",
+            options: .regularExpression
+        )
+        return collapsed.trimmingCharacters(in: CharacterSet(charactersIn: "_"))
     }
 
 }
