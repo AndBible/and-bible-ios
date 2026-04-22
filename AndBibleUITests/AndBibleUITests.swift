@@ -7739,8 +7739,8 @@ final class AndBibleUITests: XCTestCase {
      Resolves the current user-entered text for one text-entry control.
      *
      * - Parameter element: Focused text field or search field.
-     * - Returns: The editable field contents, excluding placeholder/label text when the control
-     *   is currently empty.
+     * - Returns: The editable field contents, excluding placeholder text inferred from stable
+     *   identifiers and static hints when the control is currently empty.
      * - Side effects: none.
      * - Failure modes: This helper cannot fail.
      */
@@ -7760,7 +7760,6 @@ final class AndBibleUITests: XCTestCase {
         let placeholderCandidates = Set(
             (
                 [element.identifier]
-                    + [element.label]
                     + textEntryPlaceholderHints(for: element.identifier)
                     + placeholderHints
             )
@@ -8143,43 +8142,6 @@ final class AndBibleUITests: XCTestCase {
         default:
             return "1"
         }
-    }
-
-    /**
-     Polls one accessibility-identified element until its value or label contains a token.
-     *
-     * - Parameters:
-     *   - identifier: Accessibility identifier to re-resolve while polling.
-     *   - token: Token expected to appear in the element value or label.
-     *   - app: Running application under test.
-     *   - timeout: Maximum time to keep polling before returning `false`.
-     * - Returns: `true` when the element value or label contains `token`, otherwise `false`.
-     * - Side effects:
-     *   - repeatedly samples the live accessibility hierarchy while delayed SwiftUI updates settle
-     * - Failure modes: This helper cannot fail.
-     */
-    private func waitForElementValueToContain(
-        _ identifier: String,
-        token: String,
-        in app: XCUIApplication,
-        timeout: TimeInterval = 2
-    ) -> Bool {
-        let deadline = Date().addingTimeInterval(timeout)
-        repeat {
-            if let element = resolvedElement(identifier, in: app) {
-                let value = element.value as? String
-                if value?.contains(token) == true || element.label.contains(token) {
-                    return true
-                }
-            }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-        } while Date() < deadline
-
-        if let element = resolvedElement(identifier, in: app) {
-            let value = element.value as? String
-            return value?.contains(token) == true || element.label.contains(token)
-        }
-        return false
     }
 
     /**
