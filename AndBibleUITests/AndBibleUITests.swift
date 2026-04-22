@@ -4480,8 +4480,8 @@ final class AndBibleUITests: XCTestCase {
             ]
         case "searchStateExport", "bookmarkListStateExport", "labelManagerStateExport":
             return [
-                app.staticTexts[identifier].firstMatch,
                 app.otherElements[identifier].firstMatch,
+                app.staticTexts[identifier].firstMatch,
             ]
         case "searchResultsList":
             return [
