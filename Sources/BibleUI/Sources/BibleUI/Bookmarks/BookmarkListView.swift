@@ -138,6 +138,9 @@ public struct BookmarkListView: View {
                     .accessibilityValue(bookmarkListAccessibilityValue)
             }
         }
+        .overlay(alignment: .topLeading) {
+            bookmarkListStateExport
+        }
         .searchable(text: $searchText, prompt: String(localized: "search_bookmarks"))
         .navigationTitle(String(localized: "bookmarks"))
         #if os(iOS)
@@ -235,6 +238,20 @@ public struct BookmarkListView: View {
             "|\(bookmarkListAccessibilitySegment(Self.verseReference(for: $0)))|"
         }.joined(separator: ",")
         return "\(baseState);rows=\(rowTokens)"
+    }
+
+    /// Compact hidden state probe used by UI tests instead of snapshotting the live list surface.
+    @ViewBuilder
+    private var bookmarkListStateExport: some View {
+        if UITestRuntimeConfiguration.enablesDetailedAccessibilityExports {
+            Color.clear
+                .frame(width: 1, height: 1)
+                .allowsHitTesting(false)
+                .accessibilityElement()
+                .accessibilityIdentifier("bookmarkListStateExport")
+                .accessibilityLabel("")
+                .accessibilityValue(bookmarkListAccessibilityValue)
+        }
     }
 
     /// Stable token for the currently selected bookmark label filter.

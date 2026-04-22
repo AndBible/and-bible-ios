@@ -659,7 +659,7 @@ public struct SyncSettingsView: View {
      The token captures the active backend plus the currently enabled remote categories so UI tests
      can assert state changes without relying on localized row text or SwiftUI switch internals.
 
-     - Returns: A deterministic `backend=<raw>;enabled=<csv-or-none>` token.
+     - Returns: A deterministic `backend=<raw>;enabled=<csv-or-none>;remoteStatus=<token>` token.
      - Side effects: none.
      - Failure modes: This helper cannot fail.
      */
@@ -669,7 +669,7 @@ public struct SyncSettingsView: View {
             .map(\.rawValue)
             .sorted()
         let enabledToken = enabledCategories.isEmpty ? "none" : enabledCategories.joined(separator: ",")
-        return "backend=\(selectedBackend.rawValue);enabled=\(enabledToken)"
+        return "backend=\(selectedBackend.rawValue);enabled=\(enabledToken);remoteStatus=\(remoteStatusAccessibilityValue)"
     }
 
     /**

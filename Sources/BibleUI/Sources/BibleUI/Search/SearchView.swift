@@ -530,8 +530,10 @@ public struct SearchView: View {
         .padding(.top, 10)
         .padding(.bottom, 8)
         .onAppear {
-            DispatchQueue.main.async {
-                isSearchFieldFocused = true
+            if UITestRuntimeConfiguration.shouldAutofocusSearchField {
+                DispatchQueue.main.async {
+                    isSearchFieldFocused = true
+                }
             }
         }
     }

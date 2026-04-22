@@ -15,4 +15,12 @@ enum UITestRuntimeConfiguration {
         }
         return ProcessInfo.processInfo.arguments.contains(detailedAccessibilityExportsArgument)
     }
+
+    /**
+     Search autofocus is useful in production, but it forces hosted UI tests to fight the
+     software keyboard before they can reach scope and mode controls.
+     */
+    static var shouldAutofocusSearchField: Bool {
+        !enablesDetailedAccessibilityExports
+    }
 }
