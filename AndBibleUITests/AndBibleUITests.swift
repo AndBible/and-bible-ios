@@ -251,6 +251,28 @@ final class AndBibleUITests: XCTestCase {
     }
 
     /**
+     Guards the shared text-entry placeholder normalization against SwiftUI prompt fields whose
+     placeholder values surface through XCUI as `Optional(...)`.
+     *
+     * - Side effects: none.
+     * - Failure modes:
+     *   - fails if Optional-wrapped placeholder text no longer normalizes to the placeholder value
+     */
+    func testTextEntrySemanticValueCandidatesUnwrapOptionalPlaceholderForms() {
+        let plainOptionalCandidates = textEntrySemanticValueCandidates(from: "Optional(Label name)")
+        XCTAssertTrue(
+            plainOptionalCandidates.contains("label name"),
+            "Expected Optional(Label name) to normalize to the placeholder text."
+        )
+
+        let quotedOptionalCandidates = textEntrySemanticValueCandidates(from: "Optional(\"Name\")")
+        XCTAssertTrue(
+            quotedOptionalCandidates.contains("name"),
+            "Expected Optional(\"Name\") to normalize to the placeholder text."
+        )
+    }
+
+    /**
      Verifies that an active reading plan can advance from day one to day two.
      *
      * - Side effects:
@@ -7241,7 +7263,7 @@ final class AndBibleUITests: XCTestCase {
     private func createFreshLabelFromAssignment(in app: XCUIApplication) {
         presentLabelCreationPrompt(in: app, timeout: 10)
         let nameField = requireLabelManagerNewLabelField(in: app, timeout: 10)
-        replaceText(in: nameField, with: "UI Test Fresh")
+        replaceText(in: nameField, with: "UI Test Fresh", placeholderHints: ["Label name"])
         tapElementReliably(requireLabelManagerCreateButton(in: app, timeout: 10), timeout: 10)
     }
 
@@ -7350,14 +7372,14 @@ final class AndBibleUITests: XCTestCase {
                 return exactField
             }
 
-            let promptField = prompt.textFields.firstMatch
-            if promptField.exists && !promptField.frame.isEmpty {
-                return promptField
-            }
-
             let titledField = prompt.textFields["Label name"].firstMatch
             if titledField.exists && !titledField.frame.isEmpty {
                 return titledField
+            }
+
+            let promptField = prompt.textFields.firstMatch
+            if promptField.exists && !promptField.frame.isEmpty {
+                return promptField
             }
         }
 
@@ -7937,6 +7959,16 @@ final class AndBibleUITests: XCTestCase {
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             if !stripped.isEmpty {
                 candidates.insert(stripped)
+            }
+        }
+
+        if normalized.hasPrefix("optional("), normalized.hasSuffix(")") {
+            let startIndex = normalized.index(normalized.startIndex, offsetBy: "optional(".count)
+            let unwrapped = normalized[startIndex..<normalized.index(before: normalized.endIndex)]
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
+            if !unwrapped.isEmpty {
+                candidates.insert(unwrapped)
             }
         }
 
