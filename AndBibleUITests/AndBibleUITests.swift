@@ -1170,7 +1170,11 @@ final class AndBibleUITests: XCTestCase {
 
         tapElementReliably(requireElement("labelManagerAddButton", in: app, timeout: 10), timeout: 10)
         waitForLabelManagerState(containing: "showNewLabel=true", in: app, timeout: 10)
-        replaceText(in: requireLabelManagerNewLabelField(in: app, timeout: 10), with: originalName)
+        replaceText(
+            in: requireLabelManagerNewLabelField(in: app, timeout: 10),
+            with: originalName,
+            placeholderHints: ["Label name"]
+        )
         tapElementReliably(requireLabelManagerCreateButton(in: app, timeout: 10), timeout: 10)
         waitForLabelManagerState(containing: labelManagerRowStateToken(originalName), in: app, timeout: 10)
 
@@ -3345,7 +3349,15 @@ final class AndBibleUITests: XCTestCase {
         in app: XCUIApplication,
         timeout: TimeInterval = 10
     ) {
-        waitForElementValue("bookmarkListStateExport", toContain: token, in: app, timeout: timeout)
+        waitForResolvedSemanticState(
+            named: "bookmarkListStateExport",
+            timeout: timeout,
+            valueProvider: { resolvedBookmarkListStateValue(in: app) },
+            success: { $0.contains(token) },
+            failureDescription: { finalValue in
+                "Expected element 'bookmarkListStateExport' to contain token '\(token)' within \(timeout) seconds. Final value: '\(finalValue)'."
+            }
+        )
     }
 
     /**
@@ -3365,7 +3377,16 @@ final class AndBibleUITests: XCTestCase {
         in app: XCUIApplication,
         timeout: TimeInterval = 10
     ) {
-        waitForElementValue("bookmarkListStateExport", toNotContain: token, in: app, timeout: timeout)
+        waitForResolvedSemanticState(
+            named: "bookmarkListStateExport",
+            timeout: timeout,
+            valueProvider: { resolvedBookmarkListStateValue(in: app) },
+            success: { !$0.contains(token) },
+            missingCountsAsSuccess: true,
+            failureDescription: { _ in
+                "Expected element 'bookmarkListStateExport' to stop containing '\(token)' within \(timeout) seconds."
+            }
+        )
     }
 
     /**
@@ -3401,7 +3422,15 @@ final class AndBibleUITests: XCTestCase {
         in app: XCUIApplication,
         timeout: TimeInterval = 10
     ) {
-        waitForElementValue("labelManagerStateExport", toContain: token, in: app, timeout: timeout)
+        waitForResolvedSemanticState(
+            named: "labelManagerStateExport",
+            timeout: timeout,
+            valueProvider: { resolvedLabelManagerStateValue(in: app) },
+            success: { $0.contains(token) },
+            failureDescription: { finalValue in
+                "Expected element 'labelManagerStateExport' to contain token '\(token)' within \(timeout) seconds. Final value: '\(finalValue)'."
+            }
+        )
     }
 
     /// Waits for the Label Manager accessibility state to stop containing one token.
@@ -3410,7 +3439,16 @@ final class AndBibleUITests: XCTestCase {
         in app: XCUIApplication,
         timeout: TimeInterval = 10
     ) {
-        waitForElementValue("labelManagerStateExport", toNotContain: token, in: app, timeout: timeout)
+        waitForResolvedSemanticState(
+            named: "labelManagerStateExport",
+            timeout: timeout,
+            valueProvider: { resolvedLabelManagerStateValue(in: app) },
+            success: { !$0.contains(token) },
+            missingCountsAsSuccess: true,
+            failureDescription: { _ in
+                "Expected element 'labelManagerStateExport' to stop containing '\(token)' within \(timeout) seconds."
+            }
+        )
     }
 
     /**
@@ -3439,14 +3477,14 @@ final class AndBibleUITests: XCTestCase {
         let orderedTokens = orderedReferenceTokens.map(bookmarkListRowStateToken)
         let deadline = Date().addingTimeInterval(timeout)
         repeat {
-            if let state = resolvedElement("bookmarkListScreen", in: app)?.value as? String,
+            if let state = resolvedBookmarkListStateValue(in: app),
                bookmarkListRowsAppearInOrder(orderedTokens, within: state) {
                 return
             }
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         } while Date() < deadline
 
-        let finalState = (resolvedElement("bookmarkListScreen", in: app)?.value as? String) ?? "nil"
+        let finalState = resolvedBookmarkListStateValue(in: app) ?? "nil"
         XCTFail(
             "Expected bookmark-list rows \(orderedReferenceTokens) to appear in order within \(timeout) seconds; last state was '\(finalState)'.",
             file: file,
@@ -4431,7 +4469,6 @@ final class AndBibleUITests: XCTestCase {
                 app.alerts.textFields[identifier].firstMatch,
                 app.sheets.textFields[identifier].firstMatch,
                 app.textFields[identifier].firstMatch,
-                app.collectionViews.textFields[identifier].firstMatch,
                 app.otherElements[identifier].firstMatch,
             ]
         case "labelEditNameField":
@@ -4442,12 +4479,12 @@ final class AndBibleUITests: XCTestCase {
             ]
         case "labelManagerCreateButton":
             return [
-                app.buttons[identifier].firstMatch,
-                app.buttons["Create"].firstMatch,
                 app.alerts.buttons[identifier].firstMatch,
-                app.alerts.buttons["Create"].firstMatch,
                 app.sheets.buttons[identifier].firstMatch,
+                app.buttons[identifier].firstMatch,
+                app.alerts.buttons["Create"].firstMatch,
                 app.sheets.buttons["Create"].firstMatch,
+                app.buttons["Create"].firstMatch,
             ]
         case "aboutAppTitle":
             return [
@@ -4562,10 +4599,10 @@ final class AndBibleUITests: XCTestCase {
             "modulePickerScreen",
             "moduleBrowserScreen":
             return [
+                app.otherElements[identifier].firstMatch,
                 app.collectionViews[identifier].firstMatch,
                 app.tables[identifier].firstMatch,
                 app.scrollViews[identifier].firstMatch,
-                app.otherElements[identifier].firstMatch,
             ]
         case "historyScreen", "readingPlanListScreen", "workspaceNamePromptScreen":
             return [
@@ -4608,6 +4645,15 @@ final class AndBibleUITests: XCTestCase {
     ) -> XCUIElement? {
         let candidates = elementCandidates(for: identifier, in: app)
         return candidates.first(where: { $0.exists })
+    }
+
+    /// Resolves a tiny hidden UI-test state export without broad fallbacks into unrelated hierarchies.
+    private func resolvedStateExportElement(
+        _ identifier: String,
+        in app: XCUIApplication
+    ) -> XCUIElement? {
+        let export = app.otherElements[identifier].firstMatch
+        return export.exists ? export : nil
     }
 
     /**
@@ -5014,17 +5060,15 @@ final class AndBibleUITests: XCTestCase {
     ) -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
         repeat {
-            let drawerButton = resolvedElement("readerNavigationDrawerButton", in: app)
-            let referenceButton = resolvedElement("bookChooserButton", in: app)
-            let moreButton = resolvedElement("readerMoreMenuButton", in: app)
-            let referenceValue = referenceButton?.value as? String ?? ""
+            let drawerButton = app.buttons["readerNavigationDrawerButton"].firstMatch
+            let moreButton = app.buttons["readerMoreMenuButton"].firstMatch
+            let renderedContentReady = resolvedElement("readerRenderedContentState", in: app) != nil
             let drawerActionVisible = app.buttons["readerOpenBookmarksAction"].firstMatch.exists
             let overflowActionVisible = app.buttons["readerOpenWorkspacesAction"].firstMatch.exists
 
-            if drawerButton != nil,
-               referenceButton != nil,
-               moreButton != nil,
-               !referenceValue.isEmpty,
+            if renderedContentReady,
+               drawerButton.exists,
+               moreButton.exists,
                !drawerActionVisible,
                !overflowActionVisible {
                 return true
@@ -5464,12 +5508,7 @@ final class AndBibleUITests: XCTestCase {
         file: StaticString = #filePath,
         line: UInt = #line
     ) -> Bool {
-        _ = requireReaderReferenceValue(
-            in: app,
-            timeout: min(15, timeout),
-            file: file,
-            line: line
-        )
+        _ = waitForReaderShellReady(in: app, timeout: min(10, timeout))
         let deadline = Date().addingTimeInterval(timeout)
         repeat {
             let button = requireReaderMoreMenuButton(
@@ -5653,12 +5692,6 @@ final class AndBibleUITests: XCTestCase {
         file: StaticString = #filePath,
         line: UInt = #line
     ) -> Bool {
-        _ = requireReaderReferenceValue(
-            in: app,
-            timeout: min(15, timeout),
-            file: file,
-            line: line
-        )
         _ = waitForReaderShellReady(in: app, timeout: min(10, timeout))
         let deadline = Date().addingTimeInterval(timeout)
         repeat {
@@ -7312,54 +7345,73 @@ final class AndBibleUITests: XCTestCase {
     /// Resolves the create-label prompt text field by scoping queries to the visible prompt.
     private func resolveLabelCreationPromptTextField(in app: XCUIApplication) -> XCUIElement? {
         if let prompt = resolvedLabelCreationPrompt(in: app) {
-            let promptCandidates = [
-                prompt.textFields["labelManagerNewLabelNameField"].firstMatch,
-                prompt.textFields["Label name"].firstMatch,
-                prompt.textFields.firstMatch,
-            ]
-            if let field = promptCandidates.first(where: { $0.exists && !$0.frame.isEmpty }) {
-                return field
+            let exactField = prompt.textFields["labelManagerNewLabelNameField"].firstMatch
+            if exactField.exists && !exactField.frame.isEmpty {
+                return exactField
+            }
+
+            let promptField = prompt.textFields.firstMatch
+            if promptField.exists && !promptField.frame.isEmpty {
+                return promptField
+            }
+
+            let titledField = prompt.textFields["Label name"].firstMatch
+            if titledField.exists && !titledField.frame.isEmpty {
+                return titledField
             }
         }
 
-        let fallbackCandidates = [
-            app.alerts.textFields["labelManagerNewLabelNameField"].firstMatch,
-            app.alerts.textFields["Label name"].firstMatch,
-            app.alerts.textFields.firstMatch,
-            app.sheets.textFields["labelManagerNewLabelNameField"].firstMatch,
-            app.sheets.textFields["Label name"].firstMatch,
-            app.sheets.textFields.firstMatch,
-            app.textFields["labelManagerNewLabelNameField"].firstMatch,
-        ]
-        return fallbackCandidates.first(where: { $0.exists && !$0.frame.isEmpty })
+        let directField = app.textFields["labelManagerNewLabelNameField"].firstMatch
+        if directField.exists && !directField.frame.isEmpty {
+            return directField
+        }
+
+        if let prompt = resolvedLabelCreationPrompt(in: app) {
+            let fallbackCandidates = [
+                prompt.textFields["Label name"].firstMatch,
+                prompt.textFields.firstMatch,
+            ]
+            if let field = fallbackCandidates.first(where: { $0.exists && !$0.frame.isEmpty }) {
+                return field
+            }
+        }
+        return nil
     }
 
     /// Resolves the create-label prompt action button by scoping queries to the visible prompt.
     private func resolveLabelCreationPromptCreateButton(in app: XCUIApplication) -> XCUIElement? {
         if let prompt = resolvedLabelCreationPrompt(in: app) {
-            let promptCandidates = [
-                prompt.buttons["labelManagerCreateButton"].firstMatch,
-                prompt.buttons["Create"].firstMatch,
-            ]
-            if let button = promptCandidates.first(where: { $0.exists && !$0.frame.isEmpty }) {
-                return button
+            let exactButton = prompt.buttons["labelManagerCreateButton"].firstMatch
+            if exactButton.exists && !exactButton.frame.isEmpty {
+                return exactButton
+            }
+
+            let titledButton = prompt.buttons["Create"].firstMatch
+            if titledButton.exists && !titledButton.frame.isEmpty {
+                return titledButton
             }
         }
 
-        let fallbackCandidates = [
-            app.alerts.buttons["labelManagerCreateButton"].firstMatch,
-            app.alerts.buttons["Create"].firstMatch,
-            app.sheets.buttons["labelManagerCreateButton"].firstMatch,
-            app.sheets.buttons["Create"].firstMatch,
-            app.buttons["labelManagerCreateButton"].firstMatch,
-            app.buttons["Create"].firstMatch,
-        ]
-        return fallbackCandidates.first(where: { $0.exists && !$0.frame.isEmpty })
+        let directButton = app.buttons["labelManagerCreateButton"].firstMatch
+        if directButton.exists && !directButton.frame.isEmpty {
+            return directButton
+        }
+
+        if let prompt = resolvedLabelCreationPrompt(in: app) {
+            let fallbackCandidates = [
+                prompt.buttons["Create"].firstMatch,
+                prompt.buttons.firstMatch,
+            ]
+            if let button = fallbackCandidates.first(where: { $0.exists && !$0.frame.isEmpty }) {
+                return button
+            }
+        }
+        return nil
     }
 
     /// Resolves the compact exported Search state element when Search is presented.
     private func resolvedSearchStateElement(in app: XCUIApplication) -> XCUIElement? {
-        resolvedElement("searchStateExport", in: app) ?? resolvedElement("searchScreen", in: app)
+        resolvedStateExportElement("searchStateExport", in: app) ?? resolvedElement("searchScreen", in: app)
     }
 
     /// Reads the current exported Search state without forcing the whole Search container query.
@@ -7369,6 +7421,73 @@ final class AndBibleUITests: XCTestCase {
             return value
         }
         return nil
+    }
+
+    /// Reads the current exported Bookmark List state without walking the full list hierarchy.
+    private func resolvedBookmarkListStateValue(in app: XCUIApplication) -> String? {
+        if let stateElement = resolvedStateExportElement("bookmarkListStateExport", in: app),
+           let value = stateElement.value as? String {
+            return value
+        }
+        if let screen = resolvedElement("bookmarkListScreen", in: app),
+           let value = screen.value as? String {
+            return value
+        }
+        return nil
+    }
+
+    /// Reads the current exported Label Manager state without broad prompt/list queries.
+    private func resolvedLabelManagerStateValue(in app: XCUIApplication) -> String? {
+        if let stateElement = resolvedStateExportElement("labelManagerStateExport", in: app),
+           let value = stateElement.value as? String {
+            return value
+        }
+        if let screen = resolvedElement("labelManagerScreen", in: app),
+           let value = screen.value as? String {
+            return value
+        }
+        return nil
+    }
+
+    /**
+     Waits for a lightweight exported semantic state value instead of re-querying full XCUI surfaces.
+     *
+     * - Parameters:
+     *   - name: Logical identifier used in failure messages.
+     *   - timeout: Maximum time to keep polling before failing.
+     *   - valueProvider: Closure returning the currently exported semantic state.
+     *   - success: Predicate that should become true before the timeout.
+     *   - missingCountsAsSuccess: When true, treats a missing export as success.
+     *   - failureDescription: Closure that formats the final failure message from the last value.
+     * - Side effects:
+     *   - polls a dedicated state export on the main run loop until the predicate succeeds
+     * - Failure modes:
+     *   - records an XCTest failure if the predicate never succeeds before the timeout expires
+     */
+    private func waitForResolvedSemanticState(
+        named name: String,
+        timeout: TimeInterval,
+        valueProvider: () -> String?,
+        success: (String) -> Bool,
+        missingCountsAsSuccess: Bool = false,
+        failureDescription: (String) -> String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            if let currentValue = valueProvider() {
+                if success(currentValue) {
+                    return
+                }
+            } else if missingCountsAsSuccess {
+                return
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        } while Date() < deadline
+
+        let finalValue = valueProvider() ?? "<missing \(name)>"
+        XCTFail(failureDescription(finalValue), file: file, line: line)
     }
 
     /**
@@ -7726,7 +7845,10 @@ final class AndBibleUITests: XCTestCase {
 
         let app = trackedApp ?? XCUIApplication()
         if !clearTextEntryElement(element, app: app, placeholderHints: placeholderHints) {
-            XCTFail("Expected text input '\(element.identifier)' to clear before typing replacement text.")
+            XCTFail(
+                "Expected text input '\(element.identifier)' to clear before typing replacement text. "
+                    + "Label: '\(element.label)'. Value: '\(String(describing: element.value))'."
+            )
             return
         }
 
@@ -7759,18 +7881,66 @@ final class AndBibleUITests: XCTestCase {
 
         let placeholderCandidates = Set(
             (
-                [element.identifier]
+                [element.identifier, element.label]
                     + textEntryPlaceholderHints(for: element.identifier)
                     + placeholderHints
             )
-                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .map { normalizedTextEntrySemanticValue($0) }
                 .filter { !$0.isEmpty }
         )
-        if placeholderCandidates.contains(normalizedValue) {
+        let semanticCandidates = textEntrySemanticValueCandidates(from: rawValue)
+        if semanticCandidates.contains(where: { placeholderCandidates.contains($0) }) {
             return ""
         }
 
         return rawValue
+    }
+
+    /// Normalizes one text-entry value for placeholder comparisons without losing the original text.
+    private func normalizedTextEntrySemanticValue(_ value: String) -> String {
+        value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+
+    /**
+     Builds semantic comparison candidates from one XCUI text-entry value.
+     *
+     * XCUI occasionally decorates empty SwiftUI fields with control metadata such as
+     * "Label name, Text Field" or "Search bookmarks, Search Field". The helper keeps the
+     * original text intact for assertions but derives stable placeholder-comparison variants.
+     */
+    private func textEntrySemanticValueCandidates(from rawValue: String) -> Set<String> {
+        let normalized = normalizedTextEntrySemanticValue(rawValue)
+        guard !normalized.isEmpty else {
+            return []
+        }
+
+        var candidates: Set<String> = [normalized]
+
+        let commaPrefix = normalized
+            .split(separator: ",", maxSplits: 1, omittingEmptySubsequences: true)
+            .first
+            .map(String.init)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if let commaPrefix, !commaPrefix.isEmpty {
+            candidates.insert(commaPrefix)
+        }
+
+        let knownSuffixes = [
+            " text field",
+            " search field",
+            " secure text field",
+            " is editing",
+        ]
+        for suffix in knownSuffixes where normalized.hasSuffix(suffix) {
+            let stripped = normalized
+                .dropLast(suffix.count)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if !stripped.isEmpty {
+                candidates.insert(stripped)
+            }
+        }
+
+        return candidates
     }
 
     /// Returns static placeholder hints for text-entry controls without querying XCUI metadata.
@@ -7906,7 +8076,7 @@ final class AndBibleUITests: XCTestCase {
             }
         }
 
-        var remainingText = currentTextEntryValue(in: element, placeholderHints: placeholderHints)
+        var remainingText = existingText
         for _ in 0..<2 where !remainingText.isEmpty {
             let deleteSequence = String(
                 repeating: XCUIKeyboardKey.delete.rawValue,
