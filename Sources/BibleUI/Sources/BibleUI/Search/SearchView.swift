@@ -345,17 +345,17 @@ public struct SearchView: View {
     }
 
     /// Compact dedicated state export used by the UI harness instead of the full Search container.
+    @ViewBuilder
     private var searchStateExport: some View {
-        Text(verbatim: "search-state")
-            .font(.caption2)
-            .foregroundStyle(.clear)
-            .opacity(0.01)
-            .frame(width: 1, height: 1)
-            .clipped()
-            .allowsHitTesting(false)
-            .accessibilityElement(children: .ignore)
-            .accessibilityIdentifier("searchStateExport")
-            .accessibilityValue(searchAccessibilityValue)
+        if UITestRuntimeConfiguration.enablesDetailedAccessibilityExports {
+            Color.clear
+                .frame(width: 1, height: 1)
+                .allowsHitTesting(false)
+                .accessibilityElement()
+                .accessibilityIdentifier("searchStateExport")
+                .accessibilityLabel("")
+                .accessibilityValue(searchAccessibilityValue)
+        }
     }
 
     /// Stable search-result row tokens exported for UI automation.
