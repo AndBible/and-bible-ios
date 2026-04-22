@@ -241,17 +241,17 @@ public struct BookmarkListView: View {
     }
 
     /// Compact hidden state probe used by UI tests instead of snapshotting the live list surface.
+    @ViewBuilder
     private var bookmarkListStateExport: some View {
-        Text(verbatim: "bookmark-list-state")
-            .font(.caption2)
-            .foregroundStyle(.clear)
-            .opacity(0.01)
-            .frame(width: 1, height: 1)
-            .clipped()
-            .allowsHitTesting(false)
-            .accessibilityElement(children: .ignore)
-            .accessibilityIdentifier("bookmarkListStateExport")
-            .accessibilityValue(bookmarkListAccessibilityValue)
+        if UITestRuntimeConfiguration.enablesDetailedAccessibilityExports {
+            Color.clear
+                .frame(width: 1, height: 1)
+                .allowsHitTesting(false)
+                .accessibilityElement()
+                .accessibilityIdentifier("bookmarkListStateExport")
+                .accessibilityLabel("")
+                .accessibilityValue(bookmarkListAccessibilityValue)
+        }
     }
 
     /// Stable token for the currently selected bookmark label filter.

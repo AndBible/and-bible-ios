@@ -77,17 +77,17 @@ public struct LabelManagerView: View {
     }
 
     /// Compact hidden state probe used by UI tests instead of snapshotting the live list surface.
+    @ViewBuilder
     private var labelManagerStateExport: some View {
-        Text(verbatim: "label-manager-state")
-            .font(.caption2)
-            .foregroundStyle(.clear)
-            .opacity(0.01)
-            .frame(width: 1, height: 1)
-            .clipped()
-            .allowsHitTesting(false)
-            .accessibilityElement(children: .ignore)
-            .accessibilityIdentifier("labelManagerStateExport")
-            .accessibilityValue(labelManagerAccessibilityValue)
+        if UITestRuntimeConfiguration.enablesDetailedAccessibilityExports {
+            Color.clear
+                .frame(width: 1, height: 1)
+                .allowsHitTesting(false)
+                .accessibilityElement()
+                .accessibilityIdentifier("labelManagerStateExport")
+                .accessibilityLabel("")
+                .accessibilityValue(labelManagerAccessibilityValue)
+        }
     }
 
     /**
@@ -518,15 +518,4 @@ private struct LabelEditView: View {
     private func save() {
         try? modelContext.save()
     }
-
-    /// Sanitizes Label Manager text into deterministic accessibility state tokens.
-    private func labelManagerAccessibilitySegment(_ value: String) -> String {
-        let collapsed = value.replacingOccurrences(
-            of: "[^A-Za-z0-9]+",
-            with: "_",
-            options: .regularExpression
-        )
-        return collapsed.trimmingCharacters(in: CharacterSet(charactersIn: "_"))
-    }
-
 }
