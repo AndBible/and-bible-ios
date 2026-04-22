@@ -62,7 +62,8 @@ public final class WorkspaceStore {
      * Creates a new workspace with the default single-Bible-window graph.
      * - Parameters:
      *   - name: User-visible workspace name.
-     *   - source: Optional workspace whose workspace-scoped defaults should seed the new workspace.
+     *   - inheritingDefaultsFrom: Optional workspace whose workspace-scoped defaults should seed
+     *     the new workspace.
      * - Returns: The newly created workspace.
      * - Side Effects: Inserts a `Workspace`, a child `Window`, a matching `PageManager`, and saves `modelContext`.
      * - Failure: Save errors are swallowed.
