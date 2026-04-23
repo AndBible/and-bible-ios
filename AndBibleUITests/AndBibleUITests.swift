@@ -412,9 +412,11 @@ final class AndBibleUITests: XCTestCase {
             requireWorkspaceRow(named: originalActiveWorkspaceName, in: app, timeout: 10),
             timeout: 10
         )
-        let promptCancelButton = unresolvedElement("workspaceNamePromptCancelButton", in: app)
-        if promptCancelButton.exists || promptCancelButton.waitForExistence(timeout: 1) {
-            tapElementReliably(promptCancelButton, timeout: 5)
+        if waitForResolvedElementAppearance("workspaceNamePromptCancelButton", in: app, timeout: 1) {
+            tapElementReliably(
+                requireElement("workspaceNamePromptCancelButton", in: app, timeout: 5),
+                timeout: 5
+            )
         }
         dismissWorkspaceSelectorIfStillPresented(in: app, timeout: 20)
         XCTAssertTrue(
@@ -1470,10 +1472,7 @@ final class AndBibleUITests: XCTestCase {
         XCTAssertTrue(textDisplayScreen.exists)
         let fontFamilyButton = requireElement("textDisplayFontFamilyButton", in: app, timeout: 10)
         tapElementReliably(fontFamilyButton, timeout: 10)
-
-        let valuePredicate = NSPredicate(format: "value CONTAINS %@", "fontPickerPresented")
-        expectation(for: valuePredicate, evaluatedWith: textDisplayScreen)
-        waitForExpectations(timeout: 10)
+        waitForElementValue("textDisplaySettingsScreen", toContain: "fontPickerPresented", in: app, timeout: 10)
     }
 
     /**
@@ -1513,8 +1512,9 @@ final class AndBibleUITests: XCTestCase {
         let app = makeApp()
         app.launch()
 
-        let colorScreen = openColorSettings(in: app)
-        XCTAssertEqual(colorScreen.value as? String, "colorCustom")
+        _ = openColorSettings(in: app)
+        waitForElementValue("colorSettingsScreen", toEqual: "colorCustom", in: app, timeout: 10)
+        XCTAssertEqual(resolvedElementSemanticText("colorSettingsScreen", in: app), "colorCustom")
 
         tapElementReliably(requireElement("colorSettingsResetButton", in: app, timeout: 10), timeout: 10)
         waitForElementValue("colorSettingsScreen", toEqual: "colorDefaults", in: app, timeout: 10)
@@ -5445,6 +5445,35 @@ final class AndBibleUITests: XCTestCase {
         )
     }
 
+    /**
+     Waits for one accessibility-identified element to appear without recording an XCTest failure.
+     *
+     * - Parameters:
+     *   - identifier: Accessibility identifier to resolve while polling.
+     *   - app: Running application under test.
+     *   - timeout: Maximum number of seconds to wait before giving up.
+     * - Returns: `true` when the element appears before the timeout, otherwise `false`.
+     * - Side effects:
+     *   - repeatedly re-resolves the live XCUI hierarchy without triggering `waitForExistence`
+     *     debug capture when the element is legitimately absent
+     * - Failure modes: This helper cannot fail.
+     */
+    private func waitForResolvedElementAppearance(
+        _ identifier: String,
+        in app: XCUIApplication,
+        timeout: TimeInterval = 1
+    ) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            if resolvedElement(identifier, in: app) != nil {
+                return true
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        } while Date() < deadline
+
+        return resolvedElement(identifier, in: app) != nil
+    }
+
 
     /**
      Waits for the reader shell's overflow-menu button, allowing extra time for the first cold app
@@ -8057,12 +8086,34 @@ final class AndBibleUITests: XCTestCase {
         let deadline = Date().addingTimeInterval(timeout)
         repeat {
             if element.exists && waitForElementToBecomeHittable(element, timeout: 0.5) {
-                if preferTrailingEdge, !element.frame.isEmpty {
-                    element.coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.5)).tap()
-                } else {
-                    element.tap()
+                func tapAndWaitForFocus(_ action: () -> Void) -> Bool {
+                    action()
+                    return waitForElementKeyboardFocus(element, timeout: 1)
                 }
-                return
+
+                if preferTrailingEdge, !element.frame.isEmpty {
+                    if tapAndWaitForFocus({
+                        element.coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.5)).tap()
+                    }) {
+                        return
+                    }
+                } else if tapAndWaitForFocus({
+                    element.tap()
+                }) {
+                    return
+                }
+
+                if !element.frame.isEmpty, tapAndWaitForFocus({
+                    element.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+                }) {
+                    return
+                }
+
+                if tapAndWaitForFocus({
+                    element.doubleTap()
+                }) {
+                    return
+                }
             }
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         } while Date() < deadline
@@ -8073,6 +8124,40 @@ final class AndBibleUITests: XCTestCase {
             file: file,
             line: line
         )
+        XCTAssertTrue(
+            waitForElementKeyboardFocus(element, timeout: 0.5),
+            "Expected text input '\(element.identifier)' to gain keyboard focus within \(timeout) seconds.",
+            file: file,
+            line: line
+        )
+    }
+
+    /**
+     Waits for one text-entry control to report keyboard focus.
+     *
+     * - Parameters:
+     *   - element: Text field or search field expected to own keyboard focus.
+     *   - timeout: Maximum time to keep polling before giving up.
+     * - Returns: `true` when the element reports keyboard focus, otherwise `false`.
+     * - Side effects:
+     *   - repeatedly samples the element-scoped `hasKeyboardFocus` predicate so the helper can
+     *     distinguish a visible prompt field from one that is still unfocused
+     * - Failure modes: This helper cannot fail.
+     */
+    private func waitForElementKeyboardFocus(
+        _ element: XCUIElement,
+        timeout: TimeInterval = 1
+    ) -> Bool {
+        let predicate = NSPredicate(format: "hasKeyboardFocus == true")
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            if predicate.evaluate(with: element) {
+                return true
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        } while Date() < deadline
+
+        return predicate.evaluate(with: element)
     }
 
     /**
