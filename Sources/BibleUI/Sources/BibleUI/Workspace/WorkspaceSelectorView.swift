@@ -331,7 +331,10 @@ public struct WorkspaceSelectorView: View {
     private func createWorkspace(named name: String) {
         guard !name.isEmpty else { return }
         let store = WorkspaceStore(modelContext: modelContext)
-        let workspace = store.createWorkspace(name: name)
+        let workspace = store.createWorkspace(
+            name: name,
+            inheritingDefaultsFrom: windowManager.activeWorkspace
+        )
         windowManager.setActiveWorkspace(workspace)
         dismiss()
     }

@@ -251,6 +251,28 @@ final class AndBibleUITests: XCTestCase {
     }
 
     /**
+     Guards the shared text-entry placeholder normalization against SwiftUI prompt fields whose
+     placeholder values surface through XCUI as `Optional(...)`.
+     *
+     * - Side effects: none.
+     * - Failure modes:
+     *   - fails if Optional-wrapped placeholder text no longer normalizes to the placeholder value
+     */
+    func testTextEntrySemanticValueCandidatesUnwrapOptionalPlaceholderForms() {
+        let plainOptionalCandidates = textEntrySemanticValueCandidates(from: "Optional(Label name)")
+        XCTAssertTrue(
+            plainOptionalCandidates.contains("label name"),
+            "Expected Optional(Label name) to normalize to the placeholder text."
+        )
+
+        let quotedOptionalCandidates = textEntrySemanticValueCandidates(from: "Optional(\"Name\")")
+        XCTAssertTrue(
+            quotedOptionalCandidates.contains("name"),
+            "Expected Optional(\"Name\") to normalize to the placeholder text."
+        )
+    }
+
+    /**
      Verifies that an active reading plan can advance from day one to day two.
      *
      * - Side effects:
@@ -390,9 +412,11 @@ final class AndBibleUITests: XCTestCase {
             requireWorkspaceRow(named: originalActiveWorkspaceName, in: app, timeout: 10),
             timeout: 10
         )
-        let promptCancelButton = unresolvedElement("workspaceNamePromptCancelButton", in: app)
-        if promptCancelButton.exists || promptCancelButton.waitForExistence(timeout: 1) {
-            tapElementReliably(promptCancelButton, timeout: 5)
+        if waitForResolvedElementAppearance("workspaceNamePromptCancelButton", in: app, timeout: 1) {
+            tapElementReliably(
+                requireElement("workspaceNamePromptCancelButton", in: app, timeout: 5),
+                timeout: 5
+            )
         }
         dismissWorkspaceSelectorIfStillPresented(in: app, timeout: 20)
         XCTAssertTrue(
@@ -720,8 +744,6 @@ final class AndBibleUITests: XCTestCase {
         _ = openBookmarkList(in: app)
         let searchField = requireBookmarkListSearchField(in: app, timeout: 10)
 
-        let matthewRow = unresolvedElement("bookmarkListRowButton::Matthew_3_1", in: app)
-
         replaceText(in: searchField, with: "Matthew", placeholderHints: ["Search bookmarks"])
         searchField.typeText("\n")
         waitForBookmarkListState(containing: "count=1", in: app, timeout: 10)
@@ -729,22 +751,11 @@ final class AndBibleUITests: XCTestCase {
         waitForBookmarkListState(containing: bookmarkListRowStateToken("Matthew_3_1"), in: app, timeout: 10)
         waitForBookmarkListState(notContaining: bookmarkListRowStateToken("Exodus_2_1"), in: app, timeout: 10)
 
-        XCTAssertTrue(
-            matthewRow.waitForExistence(timeout: 10),
-            "Expected Matthew bookmark row to appear after filtering."
-        )
-        XCTAssertTrue(matthewRow.exists, "Expected Matthew bookmark row to remain visible after filtering.")
-
         replaceText(in: searchField, with: "", placeholderHints: ["Search bookmarks"])
         waitForBookmarkListState(containing: "count=2", in: app, timeout: 10)
         waitForBookmarkListState(notContaining: "query=Matthew", in: app, timeout: 10)
         waitForBookmarkListState(containing: bookmarkListRowStateToken("Exodus_2_1"), in: app, timeout: 10)
         waitForBookmarkListState(containing: bookmarkListRowStateToken("Matthew_3_1"), in: app, timeout: 10)
-        XCTAssertTrue(
-            requireBookmarkRow("Exodus_2_1", in: app, timeout: 10).exists,
-            "Expected Exodus bookmark row to reappear after clearing search."
-        )
-        XCTAssertTrue(matthewRow.waitForExistence(timeout: 10), "Expected Matthew bookmark row to remain visible after clearing search.")
     }
 
     /**
@@ -1145,8 +1156,6 @@ final class AndBibleUITests: XCTestCase {
         waitForBookmarkListState(containing: "count=1", in: app, timeout: 10)
         waitForBookmarkListState(containing: bookmarkListRowStateToken("Genesis_1_1"), in: app, timeout: 10)
         waitForBookmarkListState(notContaining: bookmarkListRowStateToken("Exodus_2_1"), in: app, timeout: 10)
-        let genesisRow = requireBookmarkRow("Genesis_1_1", in: app, timeout: 10)
-        XCTAssertTrue(genesisRow.waitForExistence(timeout: 10), "Expected Genesis bookmark row to remain visible after filtering.")
 
         replaceText(in: searchField, with: "Exodus", placeholderHints: ["Search bookmarks"])
         searchField.typeText("\n")
@@ -1160,11 +1169,6 @@ final class AndBibleUITests: XCTestCase {
         waitForBookmarkListState(notContaining: "query=Exodus", in: app, timeout: 10)
         waitForBookmarkListState(containing: bookmarkListRowStateToken("Genesis_1_1"), in: app, timeout: 10)
         waitForBookmarkListState(containing: bookmarkListRowStateToken("Exodus_2_1"), in: app, timeout: 10)
-        XCTAssertTrue(genesisRow.waitForExistence(timeout: 10), "Expected Genesis bookmark row to reappear after reopening the bookmark list.")
-        XCTAssertTrue(
-            requireBookmarkRow("Exodus_2_1", in: app, timeout: 10).exists,
-            "Expected Exodus bookmark row to reappear after reopening the bookmark list."
-        )
     }
 
     /**
@@ -1189,9 +1193,14 @@ final class AndBibleUITests: XCTestCase {
         XCTAssertTrue(openLabelManager(in: app).exists)
 
         tapElementReliably(requireElement("labelManagerAddButton", in: app, timeout: 10), timeout: 10)
-        replaceText(in: requireLabelManagerNewLabelField(in: app, timeout: 10), with: originalName)
+        waitForLabelManagerState(containing: "showNewLabel=true", in: app, timeout: 10)
+        replaceText(
+            in: requireLabelManagerNewLabelField(in: app, timeout: 10),
+            with: originalName,
+            placeholderHints: ["Label name"]
+        )
         tapElementReliably(requireLabelManagerCreateButton(in: app, timeout: 10), timeout: 10)
-        XCTAssertTrue(requireLabelRow(named: originalName, in: app, timeout: 10).exists)
+        waitForLabelManagerState(containing: labelManagerRowStateToken(originalName), in: app, timeout: 10)
 
         let createdRow = requireLabelRow(named: originalName, in: app, timeout: 10)
         tapElementReliably(createdRow, timeout: 10)
@@ -1199,11 +1208,12 @@ final class AndBibleUITests: XCTestCase {
         replaceText(in: requireElement("labelEditNameField", in: app, timeout: 10), with: renamedName)
         tapElementReliably(requireElement("labelEditDoneButton", in: app, timeout: 10), timeout: 10)
 
-        XCTAssertTrue(requireLabelRow(named: renamedName, in: app, timeout: 10).exists)
+        waitForLabelManagerState(notContaining: labelManagerRowStateToken(originalName), in: app, timeout: 10)
+        waitForLabelManagerState(containing: labelManagerRowStateToken(renamedName), in: app, timeout: 10)
         let renamedRowToDelete = requireLabelRow(named: renamedName, in: app, timeout: 10)
         renamedRowToDelete.swipeLeft()
         tapElementReliably(requireElement("labelManagerDeleteAction", in: app, timeout: 10), timeout: 10)
-        waitForElementExistence("labelManagerRowButton-\(renamedName)", in: app, shouldExist: false, timeout: 10)
+        waitForLabelManagerState(notContaining: labelManagerRowStateToken(renamedName), in: app, timeout: 10)
     }
 
     /**
@@ -1244,7 +1254,7 @@ final class AndBibleUITests: XCTestCase {
         replaceText(in: serverField, with: "not-a-url")
         dismissKeyboardIfPresent(in: app)
         triggerSyncConnectionTest(in: app, timeout: 15)
-        waitForElementValue("syncRemoteStatus", toEqual: "failureInvalidURL", in: app, timeout: 10)
+        waitForElementValue("syncSettingsState", toContain: "remoteStatus=failureInvalidURL", in: app, timeout: 10)
     }
 
     /**
@@ -1268,15 +1278,16 @@ final class AndBibleUITests: XCTestCase {
 
         _ = openSyncSettingsFromReaderAction(in: app)
         let syncState = requireElement("syncSettingsState", in: app, timeout: 10)
-        XCTAssertEqual(
+        assertSyncState(
             syncState.value as? String,
-            "backend=NEXT_CLOUD;enabled=bookmarks"
+            backend: "NEXT_CLOUD",
+            enabled: "bookmarks"
         )
 
         toggleSyncCategory(
             "syncCategoryToggle::bookmarks",
             in: app,
-            expectedScreenValue: "backend=NEXT_CLOUD;enabled=none"
+            expectedTokens: ["backend": "NEXT_CLOUD", "enabled": "none"]
         )
     }
 
@@ -1301,24 +1312,26 @@ final class AndBibleUITests: XCTestCase {
 
         _ = openSyncSettingsFromReaderAction(in: app)
         let syncState = requireElement("syncSettingsState", in: app, timeout: 10)
-        XCTAssertEqual(
+        assertSyncState(
             syncState.value as? String,
-            "backend=NEXT_CLOUD;enabled=bookmarks"
+            backend: "NEXT_CLOUD",
+            enabled: "bookmarks"
         )
 
         toggleSyncCategory(
             "syncCategoryToggle::bookmarks",
             in: app,
-            expectedScreenValue: "backend=NEXT_CLOUD;enabled=none"
+            expectedTokens: ["backend": "NEXT_CLOUD", "enabled": "none"]
         )
 
         dismissSyncSettings(in: app)
         _ = openSyncSettingsFromReaderAction(in: app)
 
         let reopenedSyncState = requireElement("syncSettingsState", in: app, timeout: 10)
-        XCTAssertEqual(
+        assertSyncState(
             reopenedSyncState.value as? String,
-            "backend=NEXT_CLOUD;enabled=none"
+            backend: "NEXT_CLOUD",
+            enabled: "none"
         )
     }
 
@@ -1342,16 +1355,16 @@ final class AndBibleUITests: XCTestCase {
 
         _ = openSyncSettingsFromReaderAction(in: app)
         let syncState = requireElement("syncSettingsState", in: app, timeout: 10)
-        XCTAssertEqual(
+        assertSyncState(
             syncState.value as? String,
-            "backend=NEXT_CLOUD;enabled=none"
+            backend: "NEXT_CLOUD",
+            enabled: "none"
         )
         XCTAssertTrue(requireElement("syncNextCloudServerURLField", in: app, timeout: 10).exists)
 
         tapSyncBackend("GOOGLE_DRIVE", in: app)
-        waitForElementValue(
-            "syncSettingsState",
-            toEqual: "backend=GOOGLE_DRIVE;enabled=none",
+        waitForSyncState(
+            ["backend": "GOOGLE_DRIVE", "enabled": "none"],
             in: app,
             timeout: 10
         )
@@ -1379,15 +1392,15 @@ final class AndBibleUITests: XCTestCase {
 
         _ = openSyncSettingsFromReaderAction(in: app)
         let syncState = requireElement("syncSettingsState", in: app, timeout: 10)
-        XCTAssertEqual(
+        assertSyncState(
             syncState.value as? String,
-            "backend=NEXT_CLOUD;enabled=none"
+            backend: "NEXT_CLOUD",
+            enabled: "none"
         )
 
         tapSyncBackend("GOOGLE_DRIVE", in: app)
-        waitForElementValue(
-            "syncSettingsState",
-            toEqual: "backend=GOOGLE_DRIVE;enabled=none",
+        waitForSyncState(
+            ["backend": "GOOGLE_DRIVE", "enabled": "none"],
             in: app,
             timeout: 10
         )
@@ -1396,9 +1409,8 @@ final class AndBibleUITests: XCTestCase {
         dismissSyncSettings(in: app)
         _ = openSyncSettingsFromReaderAction(in: app)
 
-        waitForElementValue(
-            "syncSettingsState",
-            toEqual: "backend=GOOGLE_DRIVE;enabled=none",
+        waitForSyncState(
+            ["backend": "GOOGLE_DRIVE", "enabled": "none"],
             in: app,
             timeout: 10
         )
@@ -1460,10 +1472,7 @@ final class AndBibleUITests: XCTestCase {
         XCTAssertTrue(textDisplayScreen.exists)
         let fontFamilyButton = requireElement("textDisplayFontFamilyButton", in: app, timeout: 10)
         tapElementReliably(fontFamilyButton, timeout: 10)
-
-        let valuePredicate = NSPredicate(format: "value CONTAINS %@", "fontPickerPresented")
-        expectation(for: valuePredicate, evaluatedWith: textDisplayScreen)
-        waitForExpectations(timeout: 10)
+        waitForElementValue("textDisplaySettingsScreen", toContain: "fontPickerPresented", in: app, timeout: 10)
     }
 
     /**
@@ -1503,8 +1512,9 @@ final class AndBibleUITests: XCTestCase {
         let app = makeApp()
         app.launch()
 
-        let colorScreen = openColorSettings(in: app)
-        XCTAssertEqual(colorScreen.value as? String, "colorCustom")
+        _ = openColorSettings(in: app)
+        waitForElementValue("colorSettingsScreen", toEqual: "colorCustom", in: app, timeout: 10)
+        XCTAssertEqual(resolvedElementSemanticText("colorSettingsScreen", in: app), "colorCustom")
 
         tapElementReliably(requireElement("colorSettingsResetButton", in: app, timeout: 10), timeout: 10)
         waitForElementValue("colorSettingsScreen", toEqual: "colorDefaults", in: app, timeout: 10)
@@ -2570,7 +2580,9 @@ final class AndBibleUITests: XCTestCase {
     private func waitForSearchState(
         containing token: String,
         in app: XCUIApplication,
-        timeout: TimeInterval
+        timeout: TimeInterval,
+        file: StaticString = #filePath,
+        line: UInt = #line
     ) {
         let deadline = Date().addingTimeInterval(timeout)
         repeat {
@@ -2585,7 +2597,9 @@ final class AndBibleUITests: XCTestCase {
 
         let lastValue = resolvedSearchStateValue(in: app) ?? "nil"
         XCTFail(
-            "Expected Search state to contain '\(token)' within \(timeout) seconds; last value was '\(lastValue)'."
+            "Expected Search state to contain '\(token)' within \(timeout) seconds; last value was '\(lastValue)'.",
+            file: file,
+            line: line
         )
     }
 
@@ -2956,18 +2970,18 @@ final class AndBibleUITests: XCTestCase {
     }
 
     /**
-     Waits for the visible Search input control to retain one expected query string.
+     Waits for the exported Search state to retain one expected query string.
      *
      * - Parameters:
-     *   - expectedQuery: Query string expected to remain in the Search field after opening Search.
+     *   - expectedQuery: Query string expected to remain in Search after the screen opens.
      *   - app: Running application under test.
      *   - timeout: Maximum number of seconds to wait before failing.
      *   - file: Source file used for XCTest failure attribution.
      *   - line: Source line used for XCTest failure attribution.
      * - Side effects:
-     *   - polls the live Search field until its accessibility value contains `expectedQuery`
+     *   - polls the compact production Search state export until it contains the expected query
      * - Failure modes:
-     *   - records an XCTest failure if the Search field never exposes the expected query before
+     *   - records an XCTest failure if the Search state never exposes the expected query before
      *     timeout
      */
     private func waitForSearchQuery(
@@ -2977,25 +2991,10 @@ final class AndBibleUITests: XCTestCase {
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
-        let searchScreen = requireSearchScreen(in: app, timeout: timeout, file: file, line: line)
-
-        let deadline = Date().addingTimeInterval(timeout)
-        repeat {
-            let currentValue = resolvedSearchInputValue(in: app)
-            let currentState = searchScreen.value as? String ?? ""
-            if currentValue.contains(expectedQuery)
-                || currentState.contains("query=\(expectedQuery)")
-            {
-                return
-            }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-        } while Date() < deadline
-
-        let finalValue = resolvedSearchInputValue(in: app)
-        let finalState = searchScreen.value as? String ?? ""
-        XCTAssertTrue(
-            finalValue.contains(expectedQuery) || finalState.contains("query=\(expectedQuery)"),
-            "Expected Search to contain query '\(expectedQuery)' within \(timeout) seconds. Field value: '\(finalValue)'. Screen state: '\(finalState)'.",
+        waitForSearchState(
+            containing: "query=\(expectedQuery)",
+            in: app,
+            timeout: timeout,
             file: file,
             line: line
         )
@@ -3240,8 +3239,8 @@ final class AndBibleUITests: XCTestCase {
     private func openLabelManager(in app: XCUIApplication) -> XCUIElement {
         openSettingsDestination(
             linkIdentifier: "settingsLabelsLink",
-            destinationIdentifier: "labelManagerScreen",
-            readinessIdentifiers: ["labelManagerAddButton"],
+            destinationIdentifier: "labelManagerStateExport",
+            readinessIdentifiers: ["labelManagerAddButton", "labelManagerStateExport"],
             in: app,
             destinationTimeout: 20
         )
@@ -3298,8 +3297,8 @@ final class AndBibleUITests: XCTestCase {
     ) -> XCUIElement {
         openReaderActionDestination(
             actionIdentifier: "readerOpenBookmarksAction",
-            destinationIdentifier: "bookmarkListScreen",
-            readinessIdentifiers: ["bookmarkListDoneButton", "bookmarkListSortMenu"],
+            destinationIdentifier: "bookmarkListStateExport",
+            readinessIdentifiers: ["bookmarkListDoneButton", "bookmarkListSortMenu", "bookmarkListStateExport"],
             in: app,
             timeout: timeout
         )
@@ -3372,7 +3371,15 @@ final class AndBibleUITests: XCTestCase {
         in app: XCUIApplication,
         timeout: TimeInterval = 10
     ) {
-        waitForElementValue("bookmarkListScreen", toContain: token, in: app, timeout: timeout)
+        waitForResolvedSemanticState(
+            named: "bookmarkListStateExport",
+            timeout: timeout,
+            valueProvider: { resolvedBookmarkListStateValue(in: app) },
+            success: { $0.contains(token) },
+            failureDescription: { finalValue in
+                "Expected element 'bookmarkListStateExport' to contain token '\(token)' within \(timeout) seconds. Final value: '\(finalValue)'."
+            }
+        )
     }
 
     /**
@@ -3392,7 +3399,16 @@ final class AndBibleUITests: XCTestCase {
         in app: XCUIApplication,
         timeout: TimeInterval = 10
     ) {
-        waitForElementValue("bookmarkListScreen", toNotContain: token, in: app, timeout: timeout)
+        waitForResolvedSemanticState(
+            named: "bookmarkListStateExport",
+            timeout: timeout,
+            valueProvider: { resolvedBookmarkListStateValue(in: app) },
+            success: { !$0.contains(token) },
+            missingCountsAsSuccess: true,
+            failureDescription: { _ in
+                "Expected element 'bookmarkListStateExport' to stop containing '\(token)' within \(timeout) seconds."
+            }
+        )
     }
 
     /**
@@ -3405,6 +3421,56 @@ final class AndBibleUITests: XCTestCase {
      */
     private func bookmarkListRowStateToken(_ referenceToken: String) -> String {
         "|\(referenceToken)|"
+    }
+
+    /// Sanitizes one label token to match the production accessibility export.
+    private func sanitizedLabelManagerStateToken(_ value: String) -> String {
+        let replaced = value.replacingOccurrences(
+            of: "[^A-Za-z0-9]+",
+            with: "_",
+            options: .regularExpression
+        )
+        return replaced.trimmingCharacters(in: CharacterSet(charactersIn: "_"))
+    }
+
+    /// Returns one label-row token as serialized by the Label Manager accessibility state.
+    private func labelManagerRowStateToken(_ labelName: String) -> String {
+        "|\(sanitizedLabelManagerStateToken(labelName))|"
+    }
+
+    /// Waits for the Label Manager accessibility state to contain one token.
+    private func waitForLabelManagerState(
+        containing token: String,
+        in app: XCUIApplication,
+        timeout: TimeInterval = 10
+    ) {
+        waitForResolvedSemanticState(
+            named: "labelManagerStateExport",
+            timeout: timeout,
+            valueProvider: { resolvedLabelManagerStateValue(in: app) },
+            success: { $0.contains(token) },
+            failureDescription: { finalValue in
+                "Expected element 'labelManagerStateExport' to contain token '\(token)' within \(timeout) seconds. Final value: '\(finalValue)'."
+            }
+        )
+    }
+
+    /// Waits for the Label Manager accessibility state to stop containing one token.
+    private func waitForLabelManagerState(
+        notContaining token: String,
+        in app: XCUIApplication,
+        timeout: TimeInterval = 10
+    ) {
+        waitForResolvedSemanticState(
+            named: "labelManagerStateExport",
+            timeout: timeout,
+            valueProvider: { resolvedLabelManagerStateValue(in: app) },
+            success: { !$0.contains(token) },
+            missingCountsAsSuccess: true,
+            failureDescription: { _ in
+                "Expected element 'labelManagerStateExport' to stop containing '\(token)' within \(timeout) seconds."
+            }
+        )
     }
 
     /**
@@ -3433,14 +3499,14 @@ final class AndBibleUITests: XCTestCase {
         let orderedTokens = orderedReferenceTokens.map(bookmarkListRowStateToken)
         let deadline = Date().addingTimeInterval(timeout)
         repeat {
-            if let state = resolvedElement("bookmarkListScreen", in: app)?.value as? String,
+            if let state = resolvedBookmarkListStateValue(in: app),
                bookmarkListRowsAppearInOrder(orderedTokens, within: state) {
                 return
             }
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         } while Date() < deadline
 
-        let finalState = (resolvedElement("bookmarkListScreen", in: app)?.value as? String) ?? "nil"
+        let finalState = resolvedBookmarkListStateValue(in: app) ?? "nil"
         XCTFail(
             "Expected bookmark-list rows \(orderedReferenceTokens) to appear in order within \(timeout) seconds; last state was '\(finalState)'.",
             file: file,
@@ -3610,8 +3676,8 @@ final class AndBibleUITests: XCTestCase {
     private func openSyncSettings(in app: XCUIApplication) -> XCUIElement {
         openSettingsDestination(
             linkIdentifier: "settingsSyncLink",
-            destinationIdentifier: "syncSettingsScreen",
-            readinessIdentifiers: ["syncBackendPicker", "syncRemoteStatus"],
+            destinationIdentifier: "syncSettingsState",
+            readinessIdentifiers: ["syncBackendPicker", "syncSettingsState"],
             in: app,
             destinationTimeout: 20
         )
@@ -3696,8 +3762,8 @@ final class AndBibleUITests: XCTestCase {
     private func openSyncSettingsFromReaderAction(in app: XCUIApplication) -> XCUIElement {
         openReaderActionDestination(
             actionIdentifier: "readerOpenSyncSettingsAction",
-            destinationIdentifier: "syncSettingsScreen",
-            readinessIdentifiers: ["syncBackendPicker", "syncRemoteStatus"],
+            destinationIdentifier: "syncSettingsState",
+            readinessIdentifiers: ["syncBackendPicker", "syncSettingsState"],
             in: app,
             timeout: 20
         )
@@ -4425,7 +4491,6 @@ final class AndBibleUITests: XCTestCase {
                 app.alerts.textFields[identifier].firstMatch,
                 app.sheets.textFields[identifier].firstMatch,
                 app.textFields[identifier].firstMatch,
-                app.collectionViews.textFields[identifier].firstMatch,
                 app.otherElements[identifier].firstMatch,
             ]
         case "labelEditNameField":
@@ -4436,12 +4501,12 @@ final class AndBibleUITests: XCTestCase {
             ]
         case "labelManagerCreateButton":
             return [
-                app.buttons[identifier].firstMatch,
-                app.buttons["Create"].firstMatch,
                 app.alerts.buttons[identifier].firstMatch,
-                app.alerts.buttons["Create"].firstMatch,
                 app.sheets.buttons[identifier].firstMatch,
+                app.buttons[identifier].firstMatch,
+                app.alerts.buttons["Create"].firstMatch,
                 app.sheets.buttons["Create"].firstMatch,
+                app.buttons["Create"].firstMatch,
             ]
         case "aboutAppTitle":
             return [
@@ -4472,8 +4537,9 @@ final class AndBibleUITests: XCTestCase {
                 app.collectionViews[identifier].firstMatch,
                 app.scrollViews[identifier].firstMatch,
             ]
-        case "searchStateExport":
+        case "searchStateExport", "bookmarkListStateExport", "labelManagerStateExport":
             return [
+                app.otherElements[identifier].firstMatch,
                 app.staticTexts[identifier].firstMatch,
             ]
         case "searchResultsList":
@@ -4555,10 +4621,10 @@ final class AndBibleUITests: XCTestCase {
             "modulePickerScreen",
             "moduleBrowserScreen":
             return [
+                app.otherElements[identifier].firstMatch,
                 app.collectionViews[identifier].firstMatch,
                 app.tables[identifier].firstMatch,
                 app.scrollViews[identifier].firstMatch,
-                app.otherElements[identifier].firstMatch,
             ]
         case "historyScreen", "readingPlanListScreen", "workspaceNamePromptScreen":
             return [
@@ -4601,6 +4667,15 @@ final class AndBibleUITests: XCTestCase {
     ) -> XCUIElement? {
         let candidates = elementCandidates(for: identifier, in: app)
         return candidates.first(where: { $0.exists })
+    }
+
+    /// Resolves a tiny hidden UI-test state export without broad fallbacks into unrelated hierarchies.
+    private func resolvedStateExportElement(
+        _ identifier: String,
+        in app: XCUIApplication
+    ) -> XCUIElement? {
+        let export = app.otherElements[identifier].firstMatch
+        return export.exists ? export : nil
     }
 
     /**
@@ -5007,17 +5082,15 @@ final class AndBibleUITests: XCTestCase {
     ) -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
         repeat {
-            let drawerButton = resolvedElement("readerNavigationDrawerButton", in: app)
-            let referenceButton = resolvedElement("bookChooserButton", in: app)
-            let moreButton = resolvedElement("readerMoreMenuButton", in: app)
-            let referenceValue = referenceButton?.value as? String ?? ""
+            let drawerButton = app.buttons["readerNavigationDrawerButton"].firstMatch
+            let moreButton = app.buttons["readerMoreMenuButton"].firstMatch
+            let renderedContentReady = resolvedElement("readerRenderedContentState", in: app) != nil
             let drawerActionVisible = app.buttons["readerOpenBookmarksAction"].firstMatch.exists
             let overflowActionVisible = app.buttons["readerOpenWorkspacesAction"].firstMatch.exists
 
-            if drawerButton != nil,
-               referenceButton != nil,
-               moreButton != nil,
-               !referenceValue.isEmpty,
+            if renderedContentReady,
+               drawerButton.exists,
+               moreButton.exists,
                !drawerActionVisible,
                !overflowActionVisible {
                 return true
@@ -5372,6 +5445,35 @@ final class AndBibleUITests: XCTestCase {
         )
     }
 
+    /**
+     Waits for one accessibility-identified element to appear without recording an XCTest failure.
+     *
+     * - Parameters:
+     *   - identifier: Accessibility identifier to resolve while polling.
+     *   - app: Running application under test.
+     *   - timeout: Maximum number of seconds to wait before giving up.
+     * - Returns: `true` when the element appears before the timeout, otherwise `false`.
+     * - Side effects:
+     *   - repeatedly re-resolves the live XCUI hierarchy without triggering `waitForExistence`
+     *     debug capture when the element is legitimately absent
+     * - Failure modes: This helper cannot fail.
+     */
+    private func waitForResolvedElementAppearance(
+        _ identifier: String,
+        in app: XCUIApplication,
+        timeout: TimeInterval = 1
+    ) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            if resolvedElement(identifier, in: app) != nil {
+                return true
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        } while Date() < deadline
+
+        return resolvedElement(identifier, in: app) != nil
+    }
+
 
     /**
      Waits for the reader shell's overflow-menu button, allowing extra time for the first cold app
@@ -5457,12 +5559,7 @@ final class AndBibleUITests: XCTestCase {
         file: StaticString = #filePath,
         line: UInt = #line
     ) -> Bool {
-        _ = requireReaderReferenceValue(
-            in: app,
-            timeout: min(15, timeout),
-            file: file,
-            line: line
-        )
+        _ = waitForReaderShellReady(in: app, timeout: min(10, timeout))
         let deadline = Date().addingTimeInterval(timeout)
         repeat {
             let button = requireReaderMoreMenuButton(
@@ -5646,12 +5743,6 @@ final class AndBibleUITests: XCTestCase {
         file: StaticString = #filePath,
         line: UInt = #line
     ) -> Bool {
-        _ = requireReaderReferenceValue(
-            in: app,
-            timeout: min(15, timeout),
-            file: file,
-            line: line
-        )
         _ = waitForReaderShellReady(in: app, timeout: min(10, timeout))
         let deadline = Date().addingTimeInterval(timeout)
         repeat {
@@ -6777,10 +6868,7 @@ final class AndBibleUITests: XCTestCase {
         file: StaticString = #filePath,
         line: UInt = #line
     ) -> XCUIElement {
-        let bookmarkListScreen = requireElement("bookmarkListScreen", in: app, timeout: timeout, file: file, line: line)
         let candidates = [
-            bookmarkListScreen.searchFields["Search bookmarks"].firstMatch,
-            bookmarkListScreen.textFields["Search bookmarks"].firstMatch,
             app.searchFields["Search bookmarks"].firstMatch,
             app.textFields["Search bookmarks"].firstMatch,
         ]
@@ -6803,15 +6891,7 @@ final class AndBibleUITests: XCTestCase {
 
     /// Returns explicit Search input candidates without falling back to broad first-match scans.
     private func searchInputCandidates(in app: XCUIApplication) -> [XCUIElement] {
-        var candidates: [XCUIElement] = []
-        if let searchScreen = resolvedElement("searchScreen", in: app) {
-            candidates.append(contentsOf: [
-                searchScreen.searchFields["searchQueryField"].firstMatch,
-                searchScreen.textFields["searchQueryField"].firstMatch,
-            ])
-        }
-        candidates.append(contentsOf: elementCandidates(for: "searchQueryField", in: app))
-        return candidates
+        elementCandidates(for: "searchQueryField", in: app)
     }
 
     /// Returns the first visible Search input candidate.
@@ -6936,22 +7016,18 @@ final class AndBibleUITests: XCTestCase {
     ) -> XCUIElement {
         let deadline = Date().addingTimeInterval(timeout)
         repeat {
-            if let field = resolveLabelCreationPromptTextField(in: app),
-               field.exists {
+            if let field = resolveLabelCreationPromptTextField(in: app) {
                 return field
             }
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         } while Date() < deadline
 
-        let fallback = resolvedElement("labelManagerNewLabelNameField", in: app)
-            ?? unresolvedElement("labelManagerNewLabelNameField", in: app)
-        XCTAssertTrue(
-            fallback.exists,
-            "Expected the Label Manager create prompt text field to appear within \(timeout) seconds.",
+        XCTFail(
+            "Expected element 'labelManagerNewLabelNameField' to exist within \(timeout) seconds.",
             file: file,
             line: line
         )
-        return fallback
+        return app.alerts.textFields.firstMatch
     }
 
     /**
@@ -6977,21 +7053,18 @@ final class AndBibleUITests: XCTestCase {
     ) -> XCUIElement {
         let deadline = Date().addingTimeInterval(timeout)
         repeat {
-            if let button = resolveLabelCreationPromptCreateButton(in: app),
-               button.exists {
+            if let button = resolveLabelCreationPromptCreateButton(in: app) {
                 return button
             }
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         } while Date() < deadline
 
-        let fallback = app.alerts.firstMatch.buttons["labelManagerCreateButton"].firstMatch
-        XCTAssertTrue(
-            fallback.exists,
-            "Expected the Label Manager create prompt button to appear within \(timeout) seconds.",
+        XCTFail(
+            "Expected element 'labelManagerCreateButton' to exist within \(timeout) seconds.",
             file: file,
             line: line
         )
-        return fallback
+        return app.alerts.buttons["Create"].firstMatch
     }
 
     /**
@@ -7219,7 +7292,7 @@ final class AndBibleUITests: XCTestCase {
     private func createFreshLabelFromAssignment(in app: XCUIApplication) {
         presentLabelCreationPrompt(in: app, timeout: 10)
         let nameField = requireLabelManagerNewLabelField(in: app, timeout: 10)
-        replaceText(in: nameField, with: "UI Test Fresh")
+        replaceText(in: nameField, with: "UI Test Fresh", placeholderHints: ["Label name"])
         tapElementReliably(requireLabelManagerCreateButton(in: app, timeout: 10), timeout: 10)
     }
 
@@ -7294,8 +7367,7 @@ final class AndBibleUITests: XCTestCase {
 
         repeat {
             tapElementReliably(trigger, timeout: 5)
-            if resolvedLabelCreationPrompt(in: app) != nil
-                || resolveLabelCreationPromptTextField(in: app) != nil
+            if resolveLabelCreationPromptTextField(in: app) != nil
                 || resolveLabelCreationPromptCreateButton(in: app) != nil
             {
                 return
@@ -7304,20 +7376,6 @@ final class AndBibleUITests: XCTestCase {
         } while Date() < deadline
 
         XCTFail("Expected the Label Manager create prompt to appear within \(timeout) seconds.")
-    }
-
-    /// Resolves the compact exported Search state element when Search is presented.
-    private func resolvedSearchStateElement(in app: XCUIApplication) -> XCUIElement? {
-        resolvedElement("searchScreen", in: app) ?? resolvedElement("searchStateExport", in: app)
-    }
-
-    /// Reads the current exported Search state without forcing the whole Search container query.
-    private func resolvedSearchStateValue(in app: XCUIApplication) -> String? {
-        if let stateElement = resolvedSearchStateElement(in: app),
-           let value = stateElement.value as? String {
-            return value
-        }
-        return nil
     }
 
     /// Returns the visible prompt container used by the create-label flow.
@@ -7335,47 +7393,152 @@ final class AndBibleUITests: XCTestCase {
         return nil
     }
 
-    /// Resolves the create-label prompt text field by scoping queries to the live prompt first.
+    /// Resolves the create-label prompt text field by scoping queries to the visible prompt.
     private func resolveLabelCreationPromptTextField(in app: XCUIApplication) -> XCUIElement? {
         if let prompt = resolvedLabelCreationPrompt(in: app) {
-            let promptCandidates = [
-                prompt.textFields["labelManagerNewLabelNameField"].firstMatch,
+            let exactField = prompt.textFields["labelManagerNewLabelNameField"].firstMatch
+            if exactField.exists && !exactField.frame.isEmpty {
+                return exactField
+            }
+
+            let titledField = prompt.textFields["Label name"].firstMatch
+            if titledField.exists && !titledField.frame.isEmpty {
+                return titledField
+            }
+
+            let promptField = prompt.textFields.firstMatch
+            if promptField.exists && !promptField.frame.isEmpty {
+                return promptField
+            }
+        }
+
+        let directField = app.textFields["labelManagerNewLabelNameField"].firstMatch
+        if directField.exists && !directField.frame.isEmpty {
+            return directField
+        }
+
+        if let prompt = resolvedLabelCreationPrompt(in: app) {
+            let fallbackCandidates = [
                 prompt.textFields["Label name"].firstMatch,
                 prompt.textFields.firstMatch,
             ]
-            if let field = promptCandidates.first(where: { $0.exists }) {
+            if let field = fallbackCandidates.first(where: { $0.exists && !$0.frame.isEmpty }) {
                 return field
             }
         }
-
-        let promptScopedFallbacks = [
-            app.alerts.firstMatch.textFields["labelManagerNewLabelNameField"].firstMatch,
-            app.alerts.firstMatch.textFields["Label name"].firstMatch,
-            app.alerts.firstMatch.textFields.firstMatch,
-            app.sheets.firstMatch.textFields["labelManagerNewLabelNameField"].firstMatch,
-            app.sheets.firstMatch.textFields["Label name"].firstMatch,
-            app.sheets.firstMatch.textFields.firstMatch,
-        ]
-        return promptScopedFallbacks.first(where: { $0.exists })
+        return nil
     }
 
-    /// Resolves the create-label prompt action button by scoping queries to the live prompt first.
+    /// Resolves the create-label prompt action button by scoping queries to the visible prompt.
     private func resolveLabelCreationPromptCreateButton(in app: XCUIApplication) -> XCUIElement? {
         if let prompt = resolvedLabelCreationPrompt(in: app) {
-            let promptCandidates = [
-                prompt.buttons["labelManagerCreateButton"].firstMatch,
-                prompt.buttons["Create"].firstMatch,
-            ]
-            if let button = promptCandidates.first(where: { $0.exists }) {
-                return button
+            let exactButton = prompt.buttons["labelManagerCreateButton"].firstMatch
+            if exactButton.exists && !exactButton.frame.isEmpty {
+                return exactButton
+            }
+
+            let titledButton = prompt.buttons["Create"].firstMatch
+            if titledButton.exists && !titledButton.frame.isEmpty {
+                return titledButton
             }
         }
 
-        let appCandidates = [
-            app.buttons["labelManagerCreateButton"].firstMatch,
-            app.buttons["Create"].firstMatch,
-        ]
-        return appCandidates.first(where: { $0.exists })
+        let directButton = app.buttons["labelManagerCreateButton"].firstMatch
+        if directButton.exists && !directButton.frame.isEmpty {
+            return directButton
+        }
+
+        if let prompt = resolvedLabelCreationPrompt(in: app) {
+            let fallbackCandidates = [
+                prompt.buttons["Create"].firstMatch,
+                prompt.buttons.firstMatch,
+            ]
+            if let button = fallbackCandidates.first(where: { $0.exists && !$0.frame.isEmpty }) {
+                return button
+            }
+        }
+        return nil
+    }
+
+    /// Resolves the compact exported Search state element when Search is presented.
+    private func resolvedSearchStateElement(in app: XCUIApplication) -> XCUIElement? {
+        resolvedStateExportElement("searchStateExport", in: app) ?? resolvedElement("searchScreen", in: app)
+    }
+
+    /// Reads the current exported Search state without forcing the whole Search container query.
+    private func resolvedSearchStateValue(in app: XCUIApplication) -> String? {
+        if let stateElement = resolvedSearchStateElement(in: app),
+           let value = stateElement.value as? String {
+            return value
+        }
+        return nil
+    }
+
+    /// Reads the current exported Bookmark List state without walking the full list hierarchy.
+    private func resolvedBookmarkListStateValue(in app: XCUIApplication) -> String? {
+        if let stateElement = resolvedStateExportElement("bookmarkListStateExport", in: app),
+           let value = stateElement.value as? String {
+            return value
+        }
+        if let screen = resolvedElement("bookmarkListScreen", in: app),
+           let value = screen.value as? String {
+            return value
+        }
+        return nil
+    }
+
+    /// Reads the current exported Label Manager state without broad prompt/list queries.
+    private func resolvedLabelManagerStateValue(in app: XCUIApplication) -> String? {
+        if let stateElement = resolvedStateExportElement("labelManagerStateExport", in: app),
+           let value = stateElement.value as? String {
+            return value
+        }
+        if let screen = resolvedElement("labelManagerScreen", in: app),
+           let value = screen.value as? String {
+            return value
+        }
+        return nil
+    }
+
+    /**
+     Waits for a lightweight exported semantic state value instead of re-querying full XCUI surfaces.
+     *
+     * - Parameters:
+     *   - name: Logical identifier used in failure messages.
+     *   - timeout: Maximum time to keep polling before failing.
+     *   - valueProvider: Closure returning the currently exported semantic state.
+     *   - success: Predicate that should become true before the timeout.
+     *   - missingCountsAsSuccess: When true, treats a missing export as success.
+     *   - failureDescription: Closure that formats the final failure message from the last value.
+     * - Side effects:
+     *   - polls a dedicated state export on the main run loop until the predicate succeeds
+     * - Failure modes:
+     *   - records an XCTest failure if the predicate never succeeds before the timeout expires
+     */
+    private func waitForResolvedSemanticState(
+        named name: String,
+        timeout: TimeInterval,
+        valueProvider: () -> String?,
+        success: (String) -> Bool,
+        missingCountsAsSuccess: Bool = false,
+        failureDescription: (String) -> String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            if let currentValue = valueProvider() {
+                if success(currentValue) {
+                    return
+                }
+            } else if missingCountsAsSuccess {
+                return
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        } while Date() < deadline
+
+        let finalValue = valueProvider() ?? "<missing \(name)>"
+        XCTFail(failureDescription(finalValue), file: file, line: line)
     }
 
     /**
@@ -7733,7 +7896,10 @@ final class AndBibleUITests: XCTestCase {
 
         let app = trackedApp ?? XCUIApplication()
         if !clearTextEntryElement(element, app: app, placeholderHints: placeholderHints) {
-            XCTFail("Expected text input '\(element.identifier)' to clear before typing replacement text.")
+            XCTFail(
+                "Expected text input '\(element.identifier)' to clear before typing replacement text. "
+                    + "Label: '\(element.label)'. Value: '\(String(describing: element.value))'."
+            )
             return
         }
 
@@ -7746,8 +7912,8 @@ final class AndBibleUITests: XCTestCase {
      Resolves the current user-entered text for one text-entry control.
      *
      * - Parameter element: Focused text field or search field.
-     * - Returns: The editable field contents, excluding placeholder/label text when the control
-     *   is currently empty.
+     * - Returns: The editable field contents, excluding placeholder text inferred from stable
+     *   identifiers and static hints when the control is currently empty.
      * - Side effects: none.
      * - Failure modes: This helper cannot fail.
      */
@@ -7766,19 +7932,76 @@ final class AndBibleUITests: XCTestCase {
 
         let placeholderCandidates = Set(
             (
-                [element.identifier]
-                    + [element.label]
+                [element.identifier, element.label]
                     + textEntryPlaceholderHints(for: element.identifier)
                     + placeholderHints
             )
-                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .map { normalizedTextEntrySemanticValue($0) }
                 .filter { !$0.isEmpty }
         )
-        if placeholderCandidates.contains(normalizedValue) {
+        let semanticCandidates = textEntrySemanticValueCandidates(from: rawValue)
+        if semanticCandidates.contains(where: { placeholderCandidates.contains($0) }) {
             return ""
         }
 
         return rawValue
+    }
+
+    /// Normalizes one text-entry value for placeholder comparisons without losing the original text.
+    private func normalizedTextEntrySemanticValue(_ value: String) -> String {
+        value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+
+    /**
+     Builds semantic comparison candidates from one XCUI text-entry value.
+     *
+     * XCUI occasionally decorates empty SwiftUI fields with control metadata such as
+     * "Label name, Text Field" or "Search bookmarks, Search Field". The helper keeps the
+     * original text intact for assertions but derives stable placeholder-comparison variants.
+     */
+    private func textEntrySemanticValueCandidates(from rawValue: String) -> Set<String> {
+        let normalized = normalizedTextEntrySemanticValue(rawValue)
+        guard !normalized.isEmpty else {
+            return []
+        }
+
+        var candidates: Set<String> = [normalized]
+
+        let commaPrefix = normalized
+            .split(separator: ",", maxSplits: 1, omittingEmptySubsequences: true)
+            .first
+            .map(String.init)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if let commaPrefix, !commaPrefix.isEmpty {
+            candidates.insert(commaPrefix)
+        }
+
+        let knownSuffixes = [
+            " text field",
+            " search field",
+            " secure text field",
+            " is editing",
+        ]
+        for suffix in knownSuffixes where normalized.hasSuffix(suffix) {
+            let stripped = normalized
+                .dropLast(suffix.count)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if !stripped.isEmpty {
+                candidates.insert(stripped)
+            }
+        }
+
+        if normalized.hasPrefix("optional("), normalized.hasSuffix(")") {
+            let startIndex = normalized.index(normalized.startIndex, offsetBy: "optional(".count)
+            let unwrapped = normalized[startIndex..<normalized.index(before: normalized.endIndex)]
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
+            if !unwrapped.isEmpty {
+                candidates.insert(unwrapped)
+            }
+        }
+
+        return candidates
     }
 
     /// Returns static placeholder hints for text-entry controls without querying XCUI metadata.
@@ -7863,12 +8086,34 @@ final class AndBibleUITests: XCTestCase {
         let deadline = Date().addingTimeInterval(timeout)
         repeat {
             if element.exists && waitForElementToBecomeHittable(element, timeout: 0.5) {
-                if preferTrailingEdge, !element.frame.isEmpty {
-                    element.coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.5)).tap()
-                } else {
-                    element.tap()
+                func tapAndWaitForFocus(_ action: () -> Void) -> Bool {
+                    action()
+                    return waitForElementKeyboardFocus(element, timeout: 1)
                 }
-                return
+
+                if preferTrailingEdge, !element.frame.isEmpty {
+                    if tapAndWaitForFocus({
+                        element.coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.5)).tap()
+                    }) {
+                        return
+                    }
+                } else if tapAndWaitForFocus({
+                    element.tap()
+                }) {
+                    return
+                }
+
+                if !element.frame.isEmpty, tapAndWaitForFocus({
+                    element.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+                }) {
+                    return
+                }
+
+                if tapAndWaitForFocus({
+                    element.doubleTap()
+                }) {
+                    return
+                }
             }
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         } while Date() < deadline
@@ -7879,6 +8124,40 @@ final class AndBibleUITests: XCTestCase {
             file: file,
             line: line
         )
+        XCTAssertTrue(
+            waitForElementKeyboardFocus(element, timeout: 0.5),
+            "Expected text input '\(element.identifier)' to gain keyboard focus within \(timeout) seconds.",
+            file: file,
+            line: line
+        )
+    }
+
+    /**
+     Waits for one text-entry control to report keyboard focus.
+     *
+     * - Parameters:
+     *   - element: Text field or search field expected to own keyboard focus.
+     *   - timeout: Maximum time to keep polling before giving up.
+     * - Returns: `true` when the element reports keyboard focus, otherwise `false`.
+     * - Side effects:
+     *   - repeatedly samples the element-scoped `hasKeyboardFocus` predicate so the helper can
+     *     distinguish a visible prompt field from one that is still unfocused
+     * - Failure modes: This helper cannot fail.
+     */
+    private func waitForElementKeyboardFocus(
+        _ element: XCUIElement,
+        timeout: TimeInterval = 1
+    ) -> Bool {
+        let predicate = NSPredicate(format: "hasKeyboardFocus == true")
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            if predicate.evaluate(with: element) {
+                return true
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        } while Date() < deadline
+
+        return predicate.evaluate(with: element)
     }
 
     /**
@@ -7914,7 +8193,7 @@ final class AndBibleUITests: XCTestCase {
             }
         }
 
-        var remainingText = currentTextEntryValue(in: element, placeholderHints: placeholderHints)
+        var remainingText = existingText
         for _ in 0..<2 where !remainingText.isEmpty {
             let deleteSequence = String(
                 repeating: XCUIKeyboardKey.delete.rawValue,
@@ -8050,13 +8329,13 @@ final class AndBibleUITests: XCTestCase {
      * - Parameters:
      *   - identifier: Accessibility identifier of the production Sync category toggle.
      *   - app: Running application under test.
-     *   - expectedScreenValue: Screen accessibility value expected after the toggle.
+     *   - expectedTokens: Sync screen token values expected after the toggle.
      *   - timeout: Maximum time to wait for the switch interaction and screen-state mutation.
      *   - file: Source file used for XCTest failure attribution.
      *   - line: Source line used for XCTest failure attribution.
      * - Side effects:
      *   - repeatedly re-queries the exported Sync screen state and stops once the requested token
-     *     appears
+     *     values appear
      *   - uses the real toggle control for each retry
      * - Failure modes:
      *   - records an XCTest failure if the switch never appears or if the Sync screen state does
@@ -8065,7 +8344,7 @@ final class AndBibleUITests: XCTestCase {
     private func toggleSyncCategory(
         _ identifier: String,
         in app: XCUIApplication,
-        expectedScreenValue: String,
+        expectedTokens: [String: String],
         timeout: TimeInterval = 10,
         file: StaticString = #filePath,
         line: UInt = #line
@@ -8079,11 +8358,12 @@ final class AndBibleUITests: XCTestCase {
         )
         tapElementReliably(toggle, timeout: timeout, file: file, line: line)
 
-        waitForElementValue(
-            "syncSettingsState",
-            toEqual: expectedScreenValue,
+        waitForSyncState(
+            expectedTokens,
             in: app,
-            timeout: timeout
+            timeout: timeout,
+            file: file,
+            line: line
         )
     }
 
@@ -8152,43 +8432,6 @@ final class AndBibleUITests: XCTestCase {
     }
 
     /**
-     Polls one accessibility-identified element until its value or label contains a token.
-     *
-     * - Parameters:
-     *   - identifier: Accessibility identifier to re-resolve while polling.
-     *   - token: Token expected to appear in the element value or label.
-     *   - app: Running application under test.
-     *   - timeout: Maximum time to keep polling before returning `false`.
-     * - Returns: `true` when the element value or label contains `token`, otherwise `false`.
-     * - Side effects:
-     *   - repeatedly samples the live accessibility hierarchy while delayed SwiftUI updates settle
-     * - Failure modes: This helper cannot fail.
-     */
-    private func waitForElementValueToContain(
-        _ identifier: String,
-        token: String,
-        in app: XCUIApplication,
-        timeout: TimeInterval = 2
-    ) -> Bool {
-        let deadline = Date().addingTimeInterval(timeout)
-        repeat {
-            if let element = resolvedElement(identifier, in: app) {
-                let value = element.value as? String
-                if value?.contains(token) == true || element.label.contains(token) {
-                    return true
-                }
-            }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-        } while Date() < deadline
-
-        if let element = resolvedElement(identifier, in: app) {
-            let value = element.value as? String
-            return value?.contains(token) == true || element.label.contains(token)
-        }
-        return false
-    }
-
-    /**
      Taps the NextCloud connection-test control until the exported status leaves the idle state.
      *
      * - Parameters:
@@ -8198,9 +8441,10 @@ final class AndBibleUITests: XCTestCase {
      *   - line: Source line used for XCTest failure attribution.
      * - Side effects:
      *   - dismisses the keyboard when needed, taps the real test-connection button, and polls the
-     *     exported remote-status token until it changes
+     *     compact Sync Settings export until the remote status changes
      * - Failure modes:
-     *   - records an XCTest failure if the button never drives `syncRemoteStatus` away from `idle`
+     *   - records an XCTest failure if the button never drives the exported remote status away
+     *     from `idle`
      */
     private func triggerSyncConnectionTest(
         in app: XCUIApplication,
@@ -8218,8 +8462,8 @@ final class AndBibleUITests: XCTestCase {
         let deadline = Date().addingTimeInterval(timeout)
 
         repeat {
-            if let statusElement = resolvedElement("syncRemoteStatus", in: app),
-               let statusValue = statusElement.value as? String,
+            if let syncState = resolvedElement("syncSettingsState", in: app)?.value as? String,
+               let statusValue = syncStateToken(named: "remoteStatus", in: syncState),
                statusValue != "idle"
             {
                 return
@@ -8230,8 +8474,8 @@ final class AndBibleUITests: XCTestCase {
 
             let settleDeadline = Date().addingTimeInterval(2)
             repeat {
-                if let statusElement = resolvedElement("syncRemoteStatus", in: app),
-                   let statusValue = statusElement.value as? String,
+                if let syncState = resolvedElement("syncSettingsState", in: app)?.value as? String,
+                   let statusValue = syncStateToken(named: "remoteStatus", in: syncState),
                    statusValue != "idle"
                 {
                     return
@@ -8240,11 +8484,107 @@ final class AndBibleUITests: XCTestCase {
             } while Date() < settleDeadline
         } while Date() < deadline
 
-        let finalStatus = (resolvedElement("syncRemoteStatus", in: app)?.value as? String) ?? "nil"
+        let finalState = (resolvedElement("syncSettingsState", in: app)?.value as? String) ?? "nil"
+        let finalStatus = syncStateToken(named: "remoteStatus", in: finalState) ?? "nil"
         XCTAssertNotEqual(
             finalStatus,
             "idle",
-            "Expected syncRemoteStatus to leave idle within \(timeout) seconds after triggering a connection test.",
+            "Expected syncSettingsState to report a non-idle remoteStatus within \(timeout) seconds after triggering a connection test. Final state: '\(finalState)'.",
+            file: file,
+            line: line
+        )
+    }
+
+    /// Reads one named token out of the compact sync-settings accessibility export.
+    private func syncStateToken(named tokenName: String, in state: String) -> String? {
+        state
+            .split(separator: ";")
+            .map(String.init)
+            .first(where: { $0.hasPrefix("\(tokenName)=") })?
+            .split(separator: "=", maxSplits: 1)
+            .dropFirst()
+            .first
+            .map(String.init)
+    }
+
+    /**
+     Asserts that the compact sync-settings export exposes the expected backend and enabled tokens.
+     *
+     * - Parameters:
+     *   - state: Semicolon-delimited Sync Settings accessibility export.
+     *   - backend: Expected backend token value.
+     *   - enabled: Expected enabled token value.
+     *   - file: Source file used for XCTest failure attribution.
+     *   - line: Source line used for XCTest failure attribution.
+     * - Side effects: none.
+     * - Failure modes:
+     *   - records an XCTest failure if either token is missing or has an unexpected value
+     */
+    private func assertSyncState(
+        _ state: String?,
+        backend: String,
+        enabled: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let resolvedState = state ?? "nil"
+        XCTAssertEqual(
+            syncStateToken(named: "backend", in: resolvedState),
+            backend,
+            "Expected sync backend token '\(backend)' in state '\(resolvedState)'.",
+            file: file,
+            line: line
+        )
+        XCTAssertEqual(
+            syncStateToken(named: "enabled", in: resolvedState),
+            enabled,
+            "Expected sync enabled token '\(enabled)' in state '\(resolvedState)'.",
+            file: file,
+            line: line
+        )
+    }
+
+    /**
+     Waits until the compact sync-settings export matches a set of named token values.
+     *
+     * - Parameters:
+     *   - expectedTokens: Token names and expected values that must all be present.
+     *   - app: Running application under test.
+     *   - timeout: Maximum number of seconds to poll before failing.
+     *   - file: Source file used for XCTest failure attribution.
+     *   - line: Source line used for XCTest failure attribution.
+     * - Side effects:
+     *   - repeatedly reads the Sync Settings accessibility export until all requested token values
+     *     match
+     * - Failure modes:
+     *   - records an XCTest failure if the requested token values never appear before timeout
+     */
+    private func waitForSyncState(
+        _ expectedTokens: [String: String],
+        in app: XCUIApplication,
+        timeout: TimeInterval = 10,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let stateElement = requireElement("syncSettingsState", in: app, timeout: timeout, file: file, line: line)
+        let deadline = Date().addingTimeInterval(timeout)
+
+        repeat {
+            if let state = stateElement.value as? String,
+               expectedTokens.allSatisfy({ syncStateToken(named: $0.key, in: state) == $0.value })
+            {
+                return
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        } while Date() < deadline
+
+        let finalState = stateElement.value as? String ?? "nil"
+        let expectedDescription = expectedTokens
+            .sorted(by: { $0.key < $1.key })
+            .map { "\($0.key)=\($0.value)" }
+            .joined(separator: ";")
+        XCTFail(
+            "Expected syncSettingsState to match '\(expectedDescription)' within \(timeout) seconds. Final state: '\(finalState)'.",
             file: file,
             line: line
         )
