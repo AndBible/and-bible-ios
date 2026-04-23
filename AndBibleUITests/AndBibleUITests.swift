@@ -4305,6 +4305,75 @@ final class AndBibleUITests: XCTestCase {
         return [app.otherElements[identifier].firstMatch]
     }
 
+    /// Returns the minimal set of root containers that can own one screen-scoped identifier.
+    private func screenRootCandidates(
+        _ identifier: String,
+        in app: XCUIApplication
+    ) -> [XCUIElement] {
+        [
+            app.otherElements[identifier].firstMatch,
+            app.collectionViews[identifier].firstMatch,
+            app.tables[identifier].firstMatch,
+            app.scrollViews[identifier].firstMatch,
+        ]
+    }
+
+    /**
+     Resolves button-like candidates by searching inside one owning screen before falling back to
+     app-wide queries.
+
+     This keeps XCTest from repeatedly snapshotting the full hierarchy for controls that only ever
+     exist inside a known screen, which has been a recurring CI timeout source.
+     */
+    private func screenScopedButtonCandidates(
+        _ identifier: String,
+        within screenIdentifier: String,
+        in app: XCUIApplication
+    ) -> [XCUIElement] {
+        let scopedCandidates = screenRootCandidates(screenIdentifier, in: app).flatMap { root in
+            [
+                root.buttons[identifier].firstMatch,
+                root.cells.buttons[identifier].firstMatch,
+                root.otherElements[identifier].firstMatch,
+            ]
+        }
+
+        return scopedCandidates + [
+            app.buttons[identifier].firstMatch,
+            app.navigationBars.buttons[identifier].firstMatch,
+            app.toolbars.buttons[identifier].firstMatch,
+            app.collectionViews.buttons[identifier].firstMatch,
+            app.cells.buttons[identifier].firstMatch,
+            app.otherElements[identifier].firstMatch,
+        ]
+    }
+
+    /**
+     Resolves row-like candidates by searching inside one owning screen before falling back to
+     app-wide queries.
+     */
+    private func screenScopedRowCandidates(
+        _ identifier: String,
+        within screenIdentifier: String,
+        in app: XCUIApplication
+    ) -> [XCUIElement] {
+        let scopedCandidates = screenRootCandidates(screenIdentifier, in: app).flatMap { root in
+            [
+                root.otherElements[identifier].firstMatch,
+                root.cells[identifier].firstMatch,
+                root.buttons[identifier].firstMatch,
+            ]
+        }
+
+        return scopedCandidates + [
+            app.otherElements[identifier].firstMatch,
+            app.collectionViews.cells[identifier].firstMatch,
+            app.cells[identifier].firstMatch,
+            app.buttons[identifier].firstMatch,
+            app.collectionViews.buttons[identifier].firstMatch,
+        ]
+    }
+
     /**
      Produces the minimal ordered set of XCUI queries for one accessibility identifier.
      *
@@ -4325,50 +4394,27 @@ final class AndBibleUITests: XCTestCase {
         in app: XCUIApplication
     ) -> [XCUIElement] {
         if identifier.hasPrefix("labelAssignmentRow::") {
-            return [
-                app.collectionViews.cells[identifier].firstMatch,
-                app.cells[identifier].firstMatch,
-                app.otherElements[identifier].firstMatch,
-            ]
+            return screenScopedRowCandidates(identifier, within: "labelAssignmentScreen", in: app)
         }
 
         if identifier.hasPrefix("labelAssignmentToggleButton::")
             || identifier.hasPrefix("labelAssignmentFavouriteButton::")
         {
-            return [
-                app.buttons[identifier].firstMatch,
-                app.collectionViews.buttons[identifier].firstMatch,
-                app.otherElements[identifier].firstMatch,
-            ]
+            return screenScopedButtonCandidates(identifier, within: "labelAssignmentScreen", in: app)
         }
 
         if identifier.hasPrefix("bookmarkListFilterChip::") {
-            return [
-                app.buttons[identifier].firstMatch,
-                app.scrollViews.buttons[identifier].firstMatch,
-                app.collectionViews.buttons[identifier].firstMatch,
-                app.otherElements[identifier].firstMatch,
-            ]
+            return screenScopedButtonCandidates(identifier, within: "bookmarkListScreen", in: app)
         }
 
         if identifier.hasPrefix("bookmarkListOpenStudyPadButton::") {
-            return [
-                app.buttons[identifier].firstMatch,
-                app.collectionViews.buttons[identifier].firstMatch,
-                app.otherElements[identifier].firstMatch,
-            ]
+            return screenScopedButtonCandidates(identifier, within: "bookmarkListScreen", in: app)
         }
 
         if identifier.hasPrefix("bookmarkListEditLabelsButton::")
             || identifier.hasPrefix("bookmarkListRowButton::")
         {
-            return [
-                app.buttons[identifier].firstMatch,
-                app.collectionViews.buttons[identifier].firstMatch,
-                app.cells.buttons[identifier].firstMatch,
-                app.cells[identifier].firstMatch,
-                app.otherElements[identifier].firstMatch,
-            ]
+            return screenScopedButtonCandidates(identifier, within: "bookmarkListScreen", in: app)
         }
 
         if identifier.hasPrefix("bookmarkListDeleteButton::")
@@ -4479,13 +4525,7 @@ final class AndBibleUITests: XCTestCase {
                 app.otherElements[identifier].firstMatch,
             ]
         case "labelAssignmentCreateNewLabelButton":
-            return [
-                app.alerts.buttons[identifier].firstMatch,
-                app.sheets.buttons[identifier].firstMatch,
-                app.buttons[identifier].firstMatch,
-                app.collectionViews.buttons[identifier].firstMatch,
-                app.otherElements[identifier].firstMatch,
-            ]
+            return screenScopedButtonCandidates(identifier, within: "labelAssignmentScreen", in: app)
         case "labelManagerNewLabelNameField":
             return [
                 app.alerts.textFields[identifier].firstMatch,
@@ -4508,6 +4548,8 @@ final class AndBibleUITests: XCTestCase {
                 app.sheets.buttons["Create"].firstMatch,
                 app.buttons["Create"].firstMatch,
             ]
+        case "colorSettingsResetButton":
+            return screenScopedButtonCandidates(identifier, within: "colorSettingsScreen", in: app)
         case "aboutAppTitle":
             return [
                 app.staticTexts[identifier].firstMatch,
