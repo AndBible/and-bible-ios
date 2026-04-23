@@ -62,8 +62,8 @@ public final class WorkspaceStore {
      * Creates a new workspace with the default single-Bible-window graph.
      * - Parameters:
      *   - name: User-visible workspace name.
-     *   - inheritingDefaultsFrom: Optional workspace whose workspace-scoped defaults should seed
-     *     the new workspace.
+     *   - inheritingDefaultsFrom: Optional workspace whose workspace-scoped non-theme defaults
+     *     should seed the new workspace.
      * - Returns: The newly created workspace.
      * - Side Effects: Inserts a `Workspace`, a child `Window`, a matching `PageManager`, and saves `modelContext`.
      * - Failure: Save errors are swallowed.
@@ -73,7 +73,7 @@ public final class WorkspaceStore {
     public func createWorkspace(name: String, inheritingDefaultsFrom source: Workspace? = nil) -> Workspace {
         let maxOrder = workspaces().map(\.orderNumber).max() ?? -1
         let workspace = Workspace(name: name, orderNumber: maxOrder + 1)
-        workspace.textDisplaySettings = source?.textDisplaySettings
+        workspace.textDisplaySettings = source?.textDisplaySettings?.clearingThemeColors()
         workspace.workspaceSettings = source?.workspaceSettings
         workspace.workspaceColor = source?.workspaceColor
         modelContext.insert(workspace)

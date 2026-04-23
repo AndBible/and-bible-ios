@@ -86,6 +86,82 @@ final class AndBibleTests: XCTestCase {
         XCTAssertEqual(TextDisplaySettings.appDefaults.strongsMode, 0)
     }
 
+    func testTextDisplaySettingsInheritanceUsesGlobalBeforeDefaults() {
+        var windowSettings = TextDisplaySettings()
+        windowSettings.fontSize = 18
+
+        var workspaceSettings = TextDisplaySettings()
+        workspaceSettings.fontSize = 16
+        workspaceSettings.fontFamily = "serif"
+
+        var globalSettings = TextDisplaySettings()
+        globalSettings.lineSpacing = 125
+
+        var defaults = TextDisplaySettings()
+        defaults.fontSize = 14
+        defaults.fontFamily = "sans-serif"
+        defaults.lineSpacing = 150
+
+        XCTAssertEqual(
+            TextDisplaySettings.resolved(
+                \.fontSize,
+                window: windowSettings,
+                workspace: workspaceSettings,
+                global: globalSettings,
+                defaults: defaults
+            ),
+            18
+        )
+        XCTAssertEqual(
+            TextDisplaySettings.resolved(
+                \.fontFamily,
+                window: windowSettings,
+                workspace: workspaceSettings,
+                global: globalSettings,
+                defaults: defaults
+            ),
+            "serif"
+        )
+        XCTAssertEqual(
+            TextDisplaySettings.resolved(
+                \.lineSpacing,
+                window: windowSettings,
+                workspace: workspaceSettings,
+                global: globalSettings,
+                defaults: defaults
+            ),
+            125
+        )
+        XCTAssertNil(
+            TextDisplaySettings.resolved(
+                \.topMargin,
+                window: windowSettings,
+                workspace: workspaceSettings,
+                global: globalSettings,
+                defaults: defaults
+            )
+        )
+    }
+
+    func testTextDisplaySettingsFullyResolvedUsesGlobalBeforeDefaults() {
+        var globalSettings = TextDisplaySettings()
+        globalSettings.dayBackground = 0xFFFAF4E8
+        globalSettings.nightTextColor = 0xFFF1E7D0
+
+        var workspaceSettings = TextDisplaySettings()
+        workspaceSettings.nightTextColor = 0xFFCCCCCC
+
+        let resolved = TextDisplaySettings.fullyResolved(
+            window: nil,
+            workspace: workspaceSettings,
+            global: globalSettings
+        )
+
+        XCTAssertEqual(resolved.dayBackground, 0xFFFAF4E8)
+        XCTAssertEqual(resolved.nightTextColor, 0xFFCCCCCC)
+        XCTAssertEqual(resolved.dayTextColor, TextDisplaySettings.appDefaults.dayTextColor)
+    }
+
     func testReaderWindowControlsAvoidanceInsetsStayOffForFullscreenIPad() {
         let insets = ReaderWindowControlsAvoidanceMetrics.documentHeaderInsets(
             isPad: true,
@@ -837,6 +913,12 @@ final class AndBibleTests: XCTestCase {
         workspaceDisplaySettings.fontFamily = "serif"
         workspaceDisplaySettings.lineSpacing = 18
         workspaceDisplaySettings.strongsMode = 2
+        workspaceDisplaySettings.dayTextColor = Int(Int32(bitPattern: 0xFF112233))
+        workspaceDisplaySettings.dayBackground = Int(Int32(bitPattern: 0xFFFAF4E8))
+        workspaceDisplaySettings.dayNoise = 7
+        workspaceDisplaySettings.nightTextColor = Int(Int32(bitPattern: 0xFFF1E7D0))
+        workspaceDisplaySettings.nightBackground = Int(Int32(bitPattern: 0xFF101820))
+        workspaceDisplaySettings.nightNoise = 5
         source.textDisplaySettings = workspaceDisplaySettings
 
         let recentLabelID = UUID()
@@ -866,7 +948,13 @@ final class AndBibleTests: XCTestCase {
 
         let created = store.createWorkspace(name: "Inherited", inheritingDefaultsFrom: source)
 
-        XCTAssertEqual(created.textDisplaySettings, source.textDisplaySettings)
+        XCTAssertEqual(created.textDisplaySettings, source.textDisplaySettings?.clearingThemeColors())
+        XCTAssertNil(created.textDisplaySettings?.dayTextColor)
+        XCTAssertNil(created.textDisplaySettings?.dayBackground)
+        XCTAssertNil(created.textDisplaySettings?.dayNoise)
+        XCTAssertNil(created.textDisplaySettings?.nightTextColor)
+        XCTAssertNil(created.textDisplaySettings?.nightBackground)
+        XCTAssertNil(created.textDisplaySettings?.nightNoise)
         XCTAssertEqual(created.workspaceColor, source.workspaceColor)
         XCTAssertEqual(created.workspaceSettings?.enableTiltToScroll, true)
         XCTAssertEqual(created.workspaceSettings?.enableReverseSplitMode, true)

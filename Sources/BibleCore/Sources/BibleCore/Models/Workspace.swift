@@ -273,6 +273,7 @@ public struct TextDisplaySettings: Codable, Sendable, Equatable {
        - keyPath: Property to resolve.
        - window: Window-level overrides, checked first.
        - workspace: Workspace-level overrides, checked second.
+       - global: App-level overrides, checked third.
        - defaults: Fully populated app defaults, checked last.
      - Returns: The first non-nil value in the chain, or `nil` when the default is also nil.
      - Note: This helper is pure and has no persistence or rendering side effects.
@@ -281,9 +282,10 @@ public struct TextDisplaySettings: Codable, Sendable, Equatable {
         _ keyPath: KeyPath<TextDisplaySettings, T?>,
         window: TextDisplaySettings?,
         workspace: TextDisplaySettings?,
+        global: TextDisplaySettings? = nil,
         defaults: TextDisplaySettings
     ) -> T? {
-        window?[keyPath: keyPath] ?? workspace?[keyPath: keyPath] ?? defaults[keyPath: keyPath]
+        window?[keyPath: keyPath] ?? workspace?[keyPath: keyPath] ?? global?[keyPath: keyPath] ?? defaults[keyPath: keyPath]
     }
 
     /**
@@ -334,7 +336,8 @@ public struct TextDisplaySettings: Codable, Sendable, Equatable {
 
      - Parameters:
        - window: Window-level overrides, checked before workspace values.
-       - workspace: Workspace-level overrides, checked before `appDefaults`.
+       - workspace: Workspace-level overrides, checked before global values.
+       - global: App-level overrides, checked before `appDefaults`.
      - Returns: A new `TextDisplaySettings` containing no inherited gaps for the supported
        fields.
      - Note: The method is deterministic and side-effect free. Callers remain responsible for
@@ -342,40 +345,64 @@ public struct TextDisplaySettings: Codable, Sendable, Equatable {
      */
     public static func fullyResolved(
         window: TextDisplaySettings?,
-        workspace: TextDisplaySettings?
+        workspace: TextDisplaySettings?,
+        global: TextDisplaySettings? = nil
     ) -> TextDisplaySettings {
         let d = appDefaults
         var r = TextDisplaySettings()
-        r.fontSize = window?.fontSize ?? workspace?.fontSize ?? d.fontSize
-        r.fontFamily = window?.fontFamily ?? workspace?.fontFamily ?? d.fontFamily
-        r.lineSpacing = window?.lineSpacing ?? workspace?.lineSpacing ?? d.lineSpacing
-        r.marginLeft = window?.marginLeft ?? workspace?.marginLeft ?? d.marginLeft
-        r.marginRight = window?.marginRight ?? workspace?.marginRight ?? d.marginRight
-        r.maxWidth = window?.maxWidth ?? workspace?.maxWidth ?? d.maxWidth
-        r.topMargin = window?.topMargin ?? workspace?.topMargin ?? d.topMargin
-        r.strongsMode = window?.strongsMode ?? workspace?.strongsMode ?? d.strongsMode
-        r.showMorphology = window?.showMorphology ?? workspace?.showMorphology ?? d.showMorphology
-        r.showFootNotes = window?.showFootNotes ?? workspace?.showFootNotes ?? d.showFootNotes
-        r.showFootNotesInline = window?.showFootNotesInline ?? workspace?.showFootNotesInline ?? d.showFootNotesInline
-        r.expandXrefs = window?.expandXrefs ?? workspace?.expandXrefs ?? d.expandXrefs
-        r.showXrefs = window?.showXrefs ?? workspace?.showXrefs ?? d.showXrefs
-        r.showRedLetters = window?.showRedLetters ?? workspace?.showRedLetters ?? d.showRedLetters
-        r.showSectionTitles = window?.showSectionTitles ?? workspace?.showSectionTitles ?? d.showSectionTitles
-        r.showVerseNumbers = window?.showVerseNumbers ?? workspace?.showVerseNumbers ?? d.showVerseNumbers
-        r.showVersePerLine = window?.showVersePerLine ?? workspace?.showVersePerLine ?? d.showVersePerLine
-        r.showBookmarks = window?.showBookmarks ?? workspace?.showBookmarks ?? d.showBookmarks
-        r.showMyNotes = window?.showMyNotes ?? workspace?.showMyNotes ?? d.showMyNotes
-        r.justifyText = window?.justifyText ?? workspace?.justifyText ?? d.justifyText
-        r.hyphenation = window?.hyphenation ?? workspace?.hyphenation ?? d.hyphenation
-        r.showPageNumber = window?.showPageNumber ?? workspace?.showPageNumber ?? d.showPageNumber
-        r.dayTextColor = window?.dayTextColor ?? workspace?.dayTextColor ?? d.dayTextColor
-        r.dayBackground = window?.dayBackground ?? workspace?.dayBackground ?? d.dayBackground
-        r.dayNoise = window?.dayNoise ?? workspace?.dayNoise ?? d.dayNoise
-        r.nightTextColor = window?.nightTextColor ?? workspace?.nightTextColor ?? d.nightTextColor
-        r.nightBackground = window?.nightBackground ?? workspace?.nightBackground ?? d.nightBackground
-        r.nightNoise = window?.nightNoise ?? workspace?.nightNoise ?? d.nightNoise
-        r.bookmarksHideLabels = window?.bookmarksHideLabels ?? workspace?.bookmarksHideLabels ?? d.bookmarksHideLabels
-        r.enableVerseSelection = window?.enableVerseSelection ?? workspace?.enableVerseSelection ?? d.enableVerseSelection
+        r.fontSize = window?.fontSize ?? workspace?.fontSize ?? global?.fontSize ?? d.fontSize
+        r.fontFamily = window?.fontFamily ?? workspace?.fontFamily ?? global?.fontFamily ?? d.fontFamily
+        r.lineSpacing = window?.lineSpacing ?? workspace?.lineSpacing ?? global?.lineSpacing ?? d.lineSpacing
+        r.marginLeft = window?.marginLeft ?? workspace?.marginLeft ?? global?.marginLeft ?? d.marginLeft
+        r.marginRight = window?.marginRight ?? workspace?.marginRight ?? global?.marginRight ?? d.marginRight
+        r.maxWidth = window?.maxWidth ?? workspace?.maxWidth ?? global?.maxWidth ?? d.maxWidth
+        r.topMargin = window?.topMargin ?? workspace?.topMargin ?? global?.topMargin ?? d.topMargin
+        r.strongsMode = window?.strongsMode ?? workspace?.strongsMode ?? global?.strongsMode ?? d.strongsMode
+        r.showMorphology = window?.showMorphology ?? workspace?.showMorphology ?? global?.showMorphology ?? d.showMorphology
+        r.showFootNotes = window?.showFootNotes ?? workspace?.showFootNotes ?? global?.showFootNotes ?? d.showFootNotes
+        r.showFootNotesInline = window?.showFootNotesInline ?? workspace?.showFootNotesInline ?? global?.showFootNotesInline ?? d.showFootNotesInline
+        r.expandXrefs = window?.expandXrefs ?? workspace?.expandXrefs ?? global?.expandXrefs ?? d.expandXrefs
+        r.showXrefs = window?.showXrefs ?? workspace?.showXrefs ?? global?.showXrefs ?? d.showXrefs
+        r.showRedLetters = window?.showRedLetters ?? workspace?.showRedLetters ?? global?.showRedLetters ?? d.showRedLetters
+        r.showSectionTitles = window?.showSectionTitles ?? workspace?.showSectionTitles ?? global?.showSectionTitles ?? d.showSectionTitles
+        r.showVerseNumbers = window?.showVerseNumbers ?? workspace?.showVerseNumbers ?? global?.showVerseNumbers ?? d.showVerseNumbers
+        r.showVersePerLine = window?.showVersePerLine ?? workspace?.showVersePerLine ?? global?.showVersePerLine ?? d.showVersePerLine
+        r.showBookmarks = window?.showBookmarks ?? workspace?.showBookmarks ?? global?.showBookmarks ?? d.showBookmarks
+        r.showMyNotes = window?.showMyNotes ?? workspace?.showMyNotes ?? global?.showMyNotes ?? d.showMyNotes
+        r.justifyText = window?.justifyText ?? workspace?.justifyText ?? global?.justifyText ?? d.justifyText
+        r.hyphenation = window?.hyphenation ?? workspace?.hyphenation ?? global?.hyphenation ?? d.hyphenation
+        r.showPageNumber = window?.showPageNumber ?? workspace?.showPageNumber ?? global?.showPageNumber ?? d.showPageNumber
+        r.dayTextColor = window?.dayTextColor ?? workspace?.dayTextColor ?? global?.dayTextColor ?? d.dayTextColor
+        r.dayBackground = window?.dayBackground ?? workspace?.dayBackground ?? global?.dayBackground ?? d.dayBackground
+        r.dayNoise = window?.dayNoise ?? workspace?.dayNoise ?? global?.dayNoise ?? d.dayNoise
+        r.nightTextColor = window?.nightTextColor ?? workspace?.nightTextColor ?? global?.nightTextColor ?? d.nightTextColor
+        r.nightBackground = window?.nightBackground ?? workspace?.nightBackground ?? global?.nightBackground ?? d.nightBackground
+        r.nightNoise = window?.nightNoise ?? workspace?.nightNoise ?? global?.nightNoise ?? d.nightNoise
+        r.bookmarksHideLabels = window?.bookmarksHideLabels ?? workspace?.bookmarksHideLabels ?? global?.bookmarksHideLabels ?? d.bookmarksHideLabels
+        r.enableVerseSelection = window?.enableVerseSelection ?? workspace?.enableVerseSelection ?? global?.enableVerseSelection ?? d.enableVerseSelection
         return r
+    }
+
+    /**
+     Removes day/night theme color fields so the value inherits theme colors from its parent scope.
+
+     The remaining text-display fields are left untouched. This mirrors Android's split where global
+     text colors are a parent default and workspaces only override them when explicitly edited at the
+     workspace level.
+     */
+    public mutating func clearThemeColors() {
+        dayTextColor = nil
+        dayBackground = nil
+        dayNoise = nil
+        nightTextColor = nil
+        nightBackground = nil
+        nightNoise = nil
+    }
+
+    /// Returns a copy with day/night theme color overrides removed.
+    public func clearingThemeColors() -> TextDisplaySettings {
+        var copy = self
+        copy.clearThemeColors()
+        return copy
     }
 }
