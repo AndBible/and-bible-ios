@@ -168,7 +168,7 @@ public struct RecentLabel: Codable, Sendable {
  Stores optional text-display overrides used by the app's inheritance chain.
 
  Each property is optional by design. `nil` means "inherit from the next level up" using the
- chain `window -> workspace -> app defaults`. The struct itself performs no persistence or UI
+ chain `window -> workspace -> global -> app defaults`. The struct itself performs no persistence or UI
  updates; those side effects occur when a containing `Workspace` or `PageManager` is saved and
  the resolved values are pushed into native/web readers.
  */
@@ -330,6 +330,106 @@ public struct TextDisplaySettings: Codable, Sendable, Equatable {
         s.enableVerseSelection = true
         return s
     }()
+
+    internal struct FieldDescriptor {
+        let changed: (TextDisplaySettings, TextDisplaySettings) -> Bool
+        let clearIfMatchingParent: (inout TextDisplaySettings, TextDisplaySettings) -> Bool
+    }
+
+    private static func field<T: Equatable>(
+        _ keyPath: WritableKeyPath<TextDisplaySettings, T?>
+    ) -> FieldDescriptor {
+        FieldDescriptor(
+            changed: { previous, current in
+                previous[keyPath: keyPath] != current[keyPath: keyPath]
+            },
+            clearIfMatchingParent: { child, parent in
+                guard let childValue = child[keyPath: keyPath],
+                      let parentValue = parent[keyPath: keyPath],
+                      childValue == parentValue else {
+                    return false
+                }
+                child[keyPath: keyPath] = nil
+                return true
+            }
+        )
+    }
+
+    internal static let trackedFields: [FieldDescriptor] = [
+        field(\.fontSize),
+        field(\.fontFamily),
+        field(\.lineSpacing),
+        field(\.marginLeft),
+        field(\.marginRight),
+        field(\.maxWidth),
+        field(\.topMargin),
+        field(\.strongsMode),
+        field(\.showMorphology),
+        field(\.showFootNotes),
+        field(\.showFootNotesInline),
+        field(\.expandXrefs),
+        field(\.showXrefs),
+        field(\.showRedLetters),
+        field(\.showSectionTitles),
+        field(\.showVerseNumbers),
+        field(\.showVersePerLine),
+        field(\.showBookmarks),
+        field(\.showMyNotes),
+        field(\.justifyText),
+        field(\.hyphenation),
+        field(\.showPageNumber),
+        field(\.dayTextColor),
+        field(\.dayBackground),
+        field(\.dayNoise),
+        field(\.nightTextColor),
+        field(\.nightBackground),
+        field(\.nightNoise),
+        field(\.bookmarksHideLabels),
+        field(\.enableVerseSelection),
+    ]
+
+    internal static func changedFields(
+        from previous: TextDisplaySettings,
+        to current: TextDisplaySettings
+    ) -> [FieldDescriptor] {
+        trackedFields.filter { $0.changed(previous, current) }
+    }
+
+    @discardableResult
+    internal mutating func clearOverridesMatchingParent(
+        _ parent: TextDisplaySettings,
+        only fields: [FieldDescriptor]? = nil
+    ) -> Bool {
+        var anyChanged = false
+        for field in fields ?? Self.trackedFields {
+            anyChanged = field.clearIfMatchingParent(&self, parent) || anyChanged
+        }
+        return anyChanged
+    }
+
+    /// Clears overrides that already match the current effective parent value.
+    @discardableResult
+    public mutating func clearRedundantOverrides(matching parent: TextDisplaySettings) -> Bool {
+        clearOverridesMatchingParent(parent)
+    }
+
+    /**
+     Clears overrides that match the current parent for fields changed by another source scope.
+
+     Use this when the fields that changed come from one scope, but the child should be compared
+     against an already-resolved current parent value.
+     */
+    @discardableResult
+    public mutating func clearOverridesMatchingParent(
+        _ parent: TextDisplaySettings,
+        changedFrom previousSource: TextDisplaySettings,
+        to currentSource: TextDisplaySettings
+    ) -> Bool {
+        clearOverridesMatchingParent(
+            parent,
+            only: Self.changedFields(from: previousSource, to: currentSource)
+        )
+    }
 
     /**
      Resolves every display property into a fully populated settings struct.

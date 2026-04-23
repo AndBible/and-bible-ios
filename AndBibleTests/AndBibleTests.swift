@@ -162,6 +162,37 @@ final class AndBibleTests: XCTestCase {
         XCTAssertEqual(resolved.dayTextColor, TextDisplaySettings.appDefaults.dayTextColor)
     }
 
+    func testTextDisplaySettingsChangedFieldsOnlyClearMatchingDirtyOverrides() {
+        var previousGlobal = TextDisplaySettings()
+        previousGlobal.fontSize = 18
+        previousGlobal.lineSpacing = 10
+        previousGlobal.showVerseNumbers = true
+
+        var currentGlobal = previousGlobal
+        currentGlobal.fontSize = 20
+        currentGlobal.showVerseNumbers = false
+
+        let changedFields = TextDisplaySettings.changedFields(
+            from: previousGlobal,
+            to: currentGlobal
+        )
+
+        var childOverrides = TextDisplaySettings()
+        childOverrides.fontSize = 20
+        childOverrides.lineSpacing = 10
+        childOverrides.showVerseNumbers = false
+
+        XCTAssertTrue(
+            childOverrides.clearOverridesMatchingParent(
+                currentGlobal,
+                only: changedFields
+            )
+        )
+        XCTAssertNil(childOverrides.fontSize)
+        XCTAssertNil(childOverrides.showVerseNumbers)
+        XCTAssertEqual(childOverrides.lineSpacing, 10)
+    }
+
     func testReaderWindowControlsAvoidanceInsetsStayOffForFullscreenIPad() {
         let insets = ReaderWindowControlsAvoidanceMetrics.documentHeaderInsets(
             isPad: true,
@@ -976,6 +1007,44 @@ final class AndBibleTests: XCTestCase {
         XCTAssertTrue(createdWindow.historyItems?.isEmpty ?? true)
         XCTAssertEqual(createdWindow.pageManager?.currentCategoryName, "bible")
         XCTAssertNil(createdWindow.pageManager?.textDisplaySettings)
+    }
+
+    func testSettingsStoreGlobalTextDisplayPropagationClearsMatchingWorkspaceAndWindowOverrides() throws {
+        let container = try makeWorkspaceModelContainer()
+        let context = ModelContext(container)
+        let workspaceStore = WorkspaceStore(modelContext: context)
+        let settingsStore = SettingsStore(modelContext: context)
+
+        var previousGlobal = TextDisplaySettings.appDefaults
+        previousGlobal.fontSize = 18
+        previousGlobal.showVerseNumbers = true
+        previousGlobal.lineSpacing = 10
+        settingsStore.setGlobalTextDisplaySettings(previousGlobal)
+
+        let workspace = workspaceStore.createWorkspace(name: "Propagation")
+        var workspaceSettings = TextDisplaySettings()
+        workspaceSettings.fontSize = 20
+        workspaceSettings.showVerseNumbers = false
+        workspace.textDisplaySettings = workspaceSettings
+
+        let window = try XCTUnwrap((workspace.windows ?? []).first)
+        var windowSettings = TextDisplaySettings()
+        windowSettings.fontSize = 20
+        windowSettings.showVerseNumbers = false
+        windowSettings.lineSpacing = 10
+        window.pageManager?.textDisplaySettings = windowSettings
+        try context.save()
+
+        var currentGlobal = previousGlobal
+        currentGlobal.fontSize = 20
+        currentGlobal.showVerseNumbers = false
+        settingsStore.setGlobalTextDisplaySettings(currentGlobal)
+
+        XCTAssertNil(workspace.textDisplaySettings?.fontSize)
+        XCTAssertNil(workspace.textDisplaySettings?.showVerseNumbers)
+        XCTAssertNil(window.pageManager?.textDisplaySettings?.fontSize)
+        XCTAssertNil(window.pageManager?.textDisplaySettings?.showVerseNumbers)
+        XCTAssertEqual(window.pageManager?.textDisplaySettings?.lineSpacing, 10)
     }
 
     func testWebDAVPropfindBuildsAuthenticatedRequestAndParsesMultiStatus() async throws {
@@ -9236,6 +9305,7 @@ private func readSQLiteUserVersion(at url: URL) throws -> Int {
 
 private func makeWorkspaceModelContainer() throws -> ModelContainer {
     let schema = Schema([
+        Setting.self,
         Workspace.self,
         Window.self,
         PageManager.self,

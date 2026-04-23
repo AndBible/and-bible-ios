@@ -3184,7 +3184,7 @@ public struct BibleReaderView: View {
 
      - Side effects:
        - writes only workspace-scope overrides into the active workspace
-       - clears window-scoped Strong's overrides when the workspace Strong's mode changes
+       - clears window-scoped overrides that now match the workspace parent values
        - pushes each visible reader its own resolved display settings
        - reloads behavior preferences so dependent native toggles stay in sync
      - Failure modes:
@@ -3209,7 +3209,8 @@ public struct BibleReaderView: View {
         _ workspaceSettings: TextDisplaySettings,
         previousResolvedSettings: TextDisplaySettings
     ) {
-        let workspaceScopedSettings = workspaceSettings.clearingThemeColors()
+        var workspaceScopedSettings = workspaceSettings.clearingThemeColors()
+        _ = workspaceScopedSettings.clearRedundantOverrides(matching: globalDisplaySettings)
 
         if let workspace = windowManager.activeWorkspace {
             workspace.textDisplaySettings = workspaceScopedSettings
@@ -3218,9 +3219,16 @@ public struct BibleReaderView: View {
                 workspace: workspaceScopedSettings,
                 global: globalDisplaySettings
             )
-            if previousResolvedSettings.strongsMode != resolvedSettings.strongsMode {
-                for window in windowManager.allWindows {
-                    window.pageManager?.textDisplaySettings?.strongsMode = nil
+            for window in windowManager.allWindows {
+                guard var windowSettings = window.pageManager?.textDisplaySettings else {
+                    continue
+                }
+                if windowSettings.clearOverridesMatchingParent(
+                    resolvedSettings,
+                    changedFrom: previousResolvedSettings,
+                    to: resolvedSettings
+                ) {
+                    window.pageManager?.textDisplaySettings = windowSettings
                 }
             }
             try? modelContext.save()
