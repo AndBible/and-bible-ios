@@ -104,12 +104,16 @@ final class BookmarkModelTests: XCTestCase {
     }
 
     func testTextDisplaySettingsFullyResolvedUsesGlobalBeforeDefaults() {
+        let dayBackground = Int(Int32(bitPattern: 0xFFFAF4E8))
+        let nightTextColor = Int(Int32(bitPattern: 0xFFF1E7D0))
+        let workspaceNightTextColor = Int(Int32(bitPattern: 0xFFCCCCCC))
+
         var globalSettings = TextDisplaySettings()
-        globalSettings.dayBackground = 0xFFFAF4E8
-        globalSettings.nightTextColor = 0xFFF1E7D0
+        globalSettings.dayBackground = dayBackground
+        globalSettings.nightTextColor = nightTextColor
 
         var workspaceSettings = TextDisplaySettings()
-        workspaceSettings.nightTextColor = 0xFFCCCCCC
+        workspaceSettings.nightTextColor = workspaceNightTextColor
 
         let resolved = TextDisplaySettings.fullyResolved(
             window: nil,
@@ -117,8 +121,8 @@ final class BookmarkModelTests: XCTestCase {
             global: globalSettings
         )
 
-        XCTAssertEqual(resolved.dayBackground, 0xFFFAF4E8)
-        XCTAssertEqual(resolved.nightTextColor, 0xFFCCCCCC)
+        XCTAssertEqual(resolved.dayBackground, dayBackground)
+        XCTAssertEqual(resolved.nightTextColor, workspaceNightTextColor)
         XCTAssertEqual(resolved.dayTextColor, TextDisplaySettings.appDefaults.dayTextColor)
     }
 }

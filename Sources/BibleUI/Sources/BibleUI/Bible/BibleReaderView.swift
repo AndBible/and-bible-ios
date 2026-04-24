@@ -263,9 +263,6 @@ public struct BibleReaderView: View {
     /// App-level text-display defaults edited from the full Application Settings flow.
     @State private var globalDisplaySettings: TextDisplaySettings = .appDefaults
 
-    /// Workspace-scoped display settings edited by reader-level text-display controls.
-    @State private var settingsDisplaySettings: TextDisplaySettings = .appDefaults
-
     /// Effective night-mode value currently applied to pane controllers and overlays.
     @State private var nightMode = false
 
@@ -669,7 +666,6 @@ public struct BibleReaderView: View {
             speakService.restoreSettings()
 
             syncActiveDisplaySettings()
-            prepareWorkspaceDisplaySettingsEditor()
 
             // TTS callbacks — dynamically resolve the focused controller so TTS
             // always operates on the active window (not the last-initialized pane).
@@ -3180,25 +3176,6 @@ public struct BibleReaderView: View {
     }
 
     /**
-     Persists workspace-scoped text-display edits and refreshes reader controllers per pane.
-
-     - Side effects:
-       - writes only workspace-scope overrides into the active workspace
-       - clears window-scoped overrides that now match the workspace parent values
-       - pushes each visible reader its own resolved display settings
-       - reloads behavior preferences so dependent native toggles stay in sync
-     - Failure modes:
-       - if no active workspace exists, persistence is skipped and only controller refreshes occur
-       - SwiftData save failures are intentionally swallowed via `try?`
-     */
-    private func applyWorkspaceDisplaySettingsChange() {
-        persistWorkspaceDisplaySettings(
-            settingsDisplaySettings,
-            previousResolvedSettings: resolvedWorkspaceDisplaySettings()
-        )
-    }
-
-    /**
      Persists one workspace-scope settings value without copying inherited global theme colors.
 
      - Parameters:
@@ -3209,10 +3186,17 @@ public struct BibleReaderView: View {
         _ workspaceSettings: TextDisplaySettings,
         previousResolvedSettings: TextDisplaySettings
     ) {
-        var workspaceScopedSettings = workspaceSettings.clearingThemeColors()
-        _ = workspaceScopedSettings.clearRedundantOverrides(matching: globalDisplaySettings)
-
         if let workspace = windowManager.activeWorkspace {
+            let hadWorkspaceThemeColors = workspace.textDisplaySettings?.hasThemeColorOverrides ?? false
+            var workspaceScopedSettings = workspaceSettings
+            if !hadWorkspaceThemeColors {
+                workspaceScopedSettings.clearThemeColors()
+            }
+            _ = workspaceScopedSettings.clearRedundantOverrides(matching: globalDisplaySettings)
+            if hadWorkspaceThemeColors {
+                workspaceScopedSettings.restoreThemeColors(from: workspaceSettings)
+            }
+
             workspace.textDisplaySettings = workspaceScopedSettings
             let resolvedSettings = TextDisplaySettings.fullyResolved(
                 window: nil,
@@ -3236,7 +3220,6 @@ public struct BibleReaderView: View {
 
         refreshVisibleControllerDisplaySettings()
         syncActiveDisplaySettings()
-        prepareWorkspaceDisplaySettingsEditor()
         reloadBehaviorPreferences()
     }
 
@@ -3259,7 +3242,6 @@ public struct BibleReaderView: View {
         store.setGlobalTextDisplaySettings(globalDisplaySettings)
         refreshVisibleControllerDisplaySettings()
         syncActiveDisplaySettings()
-        prepareWorkspaceDisplaySettingsEditor()
         reloadBehaviorPreferences()
     }
 
@@ -3284,11 +3266,6 @@ public struct BibleReaderView: View {
     /// Re-syncs the focused toolbar/settings state from the current active window.
     private func syncActiveDisplaySettings() {
         displaySettings = resolvedDisplaySettings(for: windowManager.activeWindow)
-    }
-
-    /// Seeds the workspace settings editor from the current workspace-level values.
-    private func prepareWorkspaceDisplaySettingsEditor() {
-        settingsDisplaySettings = resolvedWorkspaceDisplaySettings()
     }
 
     /// Refreshes each visible reader pane using that pane's own resolved display settings.

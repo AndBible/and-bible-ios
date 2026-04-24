@@ -772,11 +772,11 @@ private final class FixtureContext {
      */
     private func seedCustomColorSettings() {
         var settings = settingsStore.globalTextDisplaySettings()
-        settings.dayTextColor = 0xFF112233
-        settings.dayBackground = 0xFFFAF4E8
+        settings.dayTextColor = Int(Int32(bitPattern: 0xFF112233))
+        settings.dayBackground = Int(Int32(bitPattern: 0xFFFAF4E8))
         settings.dayNoise = 7
-        settings.nightTextColor = 0xFFF1E7D0
-        settings.nightBackground = 0xFF101820
+        settings.nightTextColor = Int(Int32(bitPattern: 0xFFF1E7D0))
+        settings.nightBackground = Int(Int32(bitPattern: 0xFF101820))
         settings.nightNoise = 5
         settingsStore.setGlobalTextDisplaySettings(settings)
     }

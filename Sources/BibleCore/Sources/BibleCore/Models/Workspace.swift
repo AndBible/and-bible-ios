@@ -499,6 +499,26 @@ public struct TextDisplaySettings: Codable, Sendable, Equatable {
         nightNoise = nil
     }
 
+    /// Whether this value explicitly overrides any day/night theme color field.
+    public var hasThemeColorOverrides: Bool {
+        dayTextColor != nil ||
+            dayBackground != nil ||
+            dayNoise != nil ||
+            nightTextColor != nil ||
+            nightBackground != nil ||
+            nightNoise != nil
+    }
+
+    /// Copies day/night theme color fields from another settings value.
+    public mutating func restoreThemeColors(from source: TextDisplaySettings) {
+        dayTextColor = source.dayTextColor
+        dayBackground = source.dayBackground
+        dayNoise = source.dayNoise
+        nightTextColor = source.nightTextColor
+        nightBackground = source.nightBackground
+        nightNoise = source.nightNoise
+    }
+
     /// Returns a copy with day/night theme color overrides removed.
     public func clearingThemeColors() -> TextDisplaySettings {
         var copy = self
