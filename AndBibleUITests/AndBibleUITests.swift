@@ -412,12 +412,6 @@ final class AndBibleUITests: XCTestCase {
             requireWorkspaceRow(named: originalActiveWorkspaceName, in: app, timeout: 10),
             timeout: 10
         )
-        if waitForResolvedElementAppearance("workspaceNamePromptCancelButton", in: app, timeout: 1) {
-            tapElementReliably(
-                requireElement("workspaceNamePromptCancelButton", in: app, timeout: 5),
-                timeout: 5
-            )
-        }
         dismissWorkspaceSelectorIfStillPresented(in: app, timeout: 20)
         XCTAssertTrue(
             waitForReaderShellReady(in: app, timeout: 20),
@@ -4451,44 +4445,49 @@ final class AndBibleUITests: XCTestCase {
         return titledCandidates + identifiedCandidates
     }
 
-    /**
-     Returns the concrete surfaces that can own the workspace-name prompt.
-
-     The prompt is a custom sheet on current iOS builds, but older SwiftUI runtimes may expose it
-     like a system modal. Keeping both cases here prevents individual tests from falling back to
-     app-wide text-field queries.
-     */
-    private func workspaceNamePromptCandidates(
-        in app: XCUIApplication,
-        timeout: TimeInterval = 0
-    ) -> [XCUIElement] {
-        let customPromptCandidates = screenRootCandidates("workspaceNamePromptScreen", in: app)
-        if let customPrompt = firstExistingElement(customPromptCandidates, timeout: timeout) {
-            return [customPrompt]
-        }
-        if let systemPrompt = resolvedModalPrompt(in: app, timeout: timeout) {
-            return [systemPrompt]
-        }
-        return []
-    }
-
-    /// Returns workspace-name prompt text-field candidates scoped to the prompt surface.
-    private func workspaceNamePromptTextFieldCandidates(in app: XCUIApplication) -> [XCUIElement] {
-        let promptScopedCandidates = workspaceNamePromptCandidates(in: app).flatMap { prompt in
-            modalTextFieldCandidates(
-                in: prompt,
-                identifiers: ["workspaceNamePromptTextField"],
-                titles: ["Name", "name"]
-            )
-        }
-        return promptScopedCandidates + [
-            app.textFields["workspaceNamePromptTextField"].firstMatch,
-            app.secureTextFields["workspaceNamePromptTextField"].firstMatch,
-            app.otherElements["workspaceNamePromptTextField"].firstMatch,
+    /// Returns the currently focused text-entry candidates for custom prompt sheets.
+    private func focusedTextEntryCandidates(in app: XCUIApplication) -> [XCUIElement] {
+        let focusedPredicate = NSPredicate(format: "hasKeyboardFocus == true")
+        return [
+            app.textFields.matching(focusedPredicate).firstMatch,
+            app.secureTextFields.matching(focusedPredicate).firstMatch,
+            app.descendants(matching: .any).matching(focusedPredicate).firstMatch,
         ]
     }
 
-    /// Returns workspace-name prompt button candidates scoped to the prompt or toolbar surface.
+    /// Returns workspace-name prompt text-field candidates without probing arbitrary fields.
+    private func workspaceNamePromptTextFieldCandidates(in app: XCUIApplication) -> [XCUIElement] {
+        let identifier = "workspaceNamePromptTextField"
+        let customSheetCandidates = ["Name", "name"].flatMap { title in
+            [
+                app.textFields[title].firstMatch,
+                app.collectionViews.textFields[title].firstMatch,
+                app.tables.textFields[title].firstMatch,
+                app.scrollViews.textFields[title].firstMatch,
+                app.secureTextFields[title].firstMatch,
+                app.collectionViews.secureTextFields[title].firstMatch,
+                app.tables.secureTextFields[title].firstMatch,
+                app.scrollViews.secureTextFields[title].firstMatch,
+            ]
+        } + [
+            app.textFields[identifier].firstMatch,
+            app.secureTextFields[identifier].firstMatch,
+            app.otherElements[identifier].firstMatch,
+        ]
+        let systemPromptCandidates: [XCUIElement]
+        if let prompt = resolvedModalPrompt(in: app, timeout: 0) {
+            systemPromptCandidates = modalTextFieldCandidates(
+                in: prompt,
+                identifiers: [identifier],
+                titles: ["Name", "name"]
+            )
+        } else {
+            systemPromptCandidates = []
+        }
+        return customSheetCandidates + focusedTextEntryCandidates(in: app) + systemPromptCandidates
+    }
+
+    /// Returns workspace-name prompt buttons without walking the custom sheet hierarchy.
     private func workspaceNamePromptButtonCandidates(
         _ identifier: String,
         in app: XCUIApplication
@@ -4503,17 +4502,29 @@ final class AndBibleUITests: XCTestCase {
             titles = []
         }
 
-        let toolbarCandidates = [
+        let directIdentifierCandidates = [
             app.navigationBars.buttons[identifier].firstMatch,
             app.toolbars.buttons[identifier].firstMatch,
-        ]
-        let promptCandidates = workspaceNamePromptCandidates(in: app).flatMap { prompt in
-            modalButtonCandidates(in: prompt, identifiers: [identifier], titles: titles)
-        }
-        return toolbarCandidates + promptCandidates + [
             app.buttons[identifier].firstMatch,
+            app.collectionViews.buttons[identifier].firstMatch,
+            app.tables.buttons[identifier].firstMatch,
+            app.scrollViews.buttons[identifier].firstMatch,
             app.otherElements[identifier].firstMatch,
         ]
+        let directTitleCandidates = titles.map { title in
+            app.buttons[title].firstMatch
+        }
+        let systemPromptCandidates: [XCUIElement]
+        if let prompt = resolvedModalPrompt(in: app, timeout: 0) {
+            systemPromptCandidates = modalButtonCandidates(
+                in: prompt,
+                identifiers: [identifier],
+                titles: titles
+            )
+        } else {
+            systemPromptCandidates = []
+        }
+        return directIdentifierCandidates + directTitleCandidates + systemPromptCandidates
     }
 
     /// Returns screen-aware candidates for small exported semantic state controls.
