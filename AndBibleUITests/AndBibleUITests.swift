@@ -3173,7 +3173,7 @@ final class AndBibleUITests: XCTestCase {
      *   - line: Source line used for XCTest failure attribution.
      * - Returns: The prompt text field used to enter the workspace name.
      * - Side effects:
-     *   - polls prompt-scoped descendants and sheet text fields once the prompt chrome is visible
+     *   - polls the custom prompt and system modal surfaces for one owned text field
      * - Failure modes:
      *   - records an XCTest failure when no prompt text field becomes available in time
      */
@@ -3185,38 +3185,17 @@ final class AndBibleUITests: XCTestCase {
     ) -> XCUIElement {
         let deadline = Date().addingTimeInterval(timeout)
         repeat {
-            if let identifiedField = resolvedElement("workspaceNamePromptTextField", in: app) {
-                return identifiedField
-            }
-
-            if let promptScreen = resolvedElement("workspaceNamePromptScreen", in: app) {
-                let promptScopedField = promptScreen.descendants(matching: .textField).firstMatch
-                if promptScopedField.exists || promptScopedField.waitForExistence(timeout: 0.2) {
-                    return promptScopedField
-                }
-            }
-
-            let promptIsVisible =
-                resolvedElement("workspaceNamePromptConfirmButton", in: app) != nil ||
-                resolvedElement("workspaceNamePromptCancelButton", in: app) != nil ||
-                resolvedElement("workspaceNamePromptScreen", in: app) != nil
-            if promptIsVisible {
-                let sheetField = app.sheets.textFields.firstMatch
-                if sheetField.exists || sheetField.waitForExistence(timeout: 0.2) {
-                    return sheetField
-                }
-
-                let applicationField = app.textFields.firstMatch
-                if applicationField.exists || applicationField.waitForExistence(timeout: 0.2) {
-                    return applicationField
-                }
+            if let promptField = firstExistingElement(
+                workspaceNamePromptTextFieldCandidates(in: app),
+                timeout: 0.2
+            ) {
+                return promptField
             }
 
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         } while Date() < deadline
 
-        let fallbackField = resolvedElement("workspaceNamePromptTextField", in: app)
-            ?? app.sheets.textFields.firstMatch
+        let fallbackField = unresolvedElement("workspaceNamePromptTextField", in: app)
         XCTAssertTrue(
             fallbackField.exists,
             "Expected the workspace name field to appear within \(timeout) seconds.",
@@ -4402,6 +4381,141 @@ final class AndBibleUITests: XCTestCase {
         ]
     }
 
+    /// Returns the first modal presentation surface currently visible to XCTest.
+    private func resolvedModalPrompt(
+        in app: XCUIApplication,
+        timeout: TimeInterval = 0.2
+    ) -> XCUIElement? {
+        let candidates = [
+            app.alerts.firstMatch,
+            app.sheets.firstMatch,
+        ]
+        return firstExistingElement(candidates, timeout: timeout)
+    }
+
+    /// Finds the first existing element from a deliberately small candidate list.
+    private func firstExistingElement(
+        _ candidates: [XCUIElement],
+        timeout: TimeInterval = 0
+    ) -> XCUIElement? {
+        let boundedTimeout = max(0, timeout)
+        for candidate in candidates {
+            if candidate.exists {
+                return candidate
+            }
+            if boundedTimeout > 0,
+               candidate.waitForExistence(timeout: boundedTimeout)
+            {
+                return candidate
+            }
+        }
+        return nil
+    }
+
+    /**
+     Returns modal-owned text field candidates in the order XCTest resolves SwiftUI prompts most
+     consistently: visible placeholder/title first, then ordinal field, then accessibility id.
+     */
+    private func modalTextFieldCandidates(
+        in prompt: XCUIElement,
+        identifiers: [String] = [],
+        titles: [String] = []
+    ) -> [XCUIElement] {
+        let titledCandidates = titles.flatMap { title in
+            [
+                prompt.textFields[title].firstMatch,
+                prompt.secureTextFields[title].firstMatch,
+            ]
+        }
+        let ordinalCandidates = [
+            prompt.textFields.element(boundBy: 0),
+            prompt.secureTextFields.element(boundBy: 0),
+        ]
+        let identifiedCandidates = identifiers.flatMap { identifier in
+            [
+                prompt.textFields[identifier].firstMatch,
+                prompt.secureTextFields[identifier].firstMatch,
+            ]
+        }
+        return titledCandidates + ordinalCandidates + identifiedCandidates
+    }
+
+    /// Returns modal-owned button candidates without falling back to the full app hierarchy.
+    private func modalButtonCandidates(
+        in prompt: XCUIElement,
+        identifiers: [String] = [],
+        titles: [String] = []
+    ) -> [XCUIElement] {
+        let titledCandidates = titles.map { prompt.buttons[$0].firstMatch }
+        let identifiedCandidates = identifiers.map { prompt.buttons[$0].firstMatch }
+        return titledCandidates + identifiedCandidates
+    }
+
+    /**
+     Returns the concrete surfaces that can own the workspace-name prompt.
+
+     The prompt is a custom sheet on current iOS builds, but older SwiftUI runtimes may expose it
+     like a system modal. Keeping both cases here prevents individual tests from falling back to
+     app-wide text-field queries.
+     */
+    private func workspaceNamePromptCandidates(
+        in app: XCUIApplication,
+        timeout: TimeInterval = 0
+    ) -> [XCUIElement] {
+        let customPromptCandidates = screenRootCandidates("workspaceNamePromptScreen", in: app)
+        if let customPrompt = firstExistingElement(customPromptCandidates, timeout: timeout) {
+            return [customPrompt]
+        }
+        if let systemPrompt = resolvedModalPrompt(in: app, timeout: timeout) {
+            return [systemPrompt]
+        }
+        return []
+    }
+
+    /// Returns workspace-name prompt text-field candidates scoped to the prompt surface.
+    private func workspaceNamePromptTextFieldCandidates(in app: XCUIApplication) -> [XCUIElement] {
+        let promptScopedCandidates = workspaceNamePromptCandidates(in: app).flatMap { prompt in
+            modalTextFieldCandidates(
+                in: prompt,
+                identifiers: ["workspaceNamePromptTextField"],
+                titles: ["Name", "name"]
+            )
+        }
+        return promptScopedCandidates + [
+            app.textFields["workspaceNamePromptTextField"].firstMatch,
+            app.secureTextFields["workspaceNamePromptTextField"].firstMatch,
+            app.otherElements["workspaceNamePromptTextField"].firstMatch,
+        ]
+    }
+
+    /// Returns workspace-name prompt button candidates scoped to the prompt or toolbar surface.
+    private func workspaceNamePromptButtonCandidates(
+        _ identifier: String,
+        in app: XCUIApplication
+    ) -> [XCUIElement] {
+        let titles: [String]
+        switch identifier {
+        case "workspaceNamePromptConfirmButton":
+            titles = ["Create", "create", "Save", "save"]
+        case "workspaceNamePromptCancelButton":
+            titles = ["Cancel", "cancel"]
+        default:
+            titles = []
+        }
+
+        let toolbarCandidates = [
+            app.navigationBars.buttons[identifier].firstMatch,
+            app.toolbars.buttons[identifier].firstMatch,
+        ]
+        let promptCandidates = workspaceNamePromptCandidates(in: app).flatMap { prompt in
+            modalButtonCandidates(in: prompt, identifiers: [identifier], titles: titles)
+        }
+        return toolbarCandidates + promptCandidates + [
+            app.buttons[identifier].firstMatch,
+            app.otherElements[identifier].firstMatch,
+        ]
+    }
+
     /// Returns screen-aware candidates for small exported semantic state controls.
     private func semanticStateCandidates(
         for identifier: String,
@@ -4577,11 +4691,18 @@ final class AndBibleUITests: XCTestCase {
         case "labelAssignmentCreateNewLabelButton":
             return screenScopedButtonCandidates(identifier, within: "labelAssignmentScreen", in: app)
         case "labelManagerNewLabelNameField":
+            if let prompt = resolvedModalPrompt(in: app, timeout: 0) {
+                return modalTextFieldCandidates(
+                    in: prompt,
+                    identifiers: [identifier],
+                    titles: ["Label name"]
+                )
+            }
             return [
-                app.alerts.textFields[identifier].firstMatch,
-                app.sheets.textFields[identifier].firstMatch,
-                app.textFields[identifier].firstMatch,
-                app.otherElements[identifier].firstMatch,
+                app.alerts.firstMatch.textFields["Label name"].firstMatch,
+                app.sheets.firstMatch.textFields["Label name"].firstMatch,
+                app.alerts.firstMatch.textFields.element(boundBy: 0),
+                app.sheets.firstMatch.textFields.element(boundBy: 0),
             ]
         case "labelEditNameField":
             return [
@@ -4590,13 +4711,16 @@ final class AndBibleUITests: XCTestCase {
                 app.otherElements[identifier].firstMatch,
             ]
         case "labelManagerCreateButton":
+            if let prompt = resolvedModalPrompt(in: app, timeout: 0) {
+                return modalButtonCandidates(
+                    in: prompt,
+                    identifiers: [identifier],
+                    titles: ["Create"]
+                )
+            }
             return [
-                app.alerts.buttons[identifier].firstMatch,
-                app.sheets.buttons[identifier].firstMatch,
-                app.buttons[identifier].firstMatch,
-                app.alerts.buttons["Create"].firstMatch,
-                app.sheets.buttons["Create"].firstMatch,
-                app.buttons["Create"].firstMatch,
+                app.alerts.firstMatch.buttons["Create"].firstMatch,
+                app.sheets.firstMatch.buttons["Create"].firstMatch,
             ]
         case "colorSettingsResetButton":
             return screenScopedButtonCandidates(identifier, within: "colorSettingsScreen", in: app)
@@ -4656,17 +4780,9 @@ final class AndBibleUITests: XCTestCase {
                 app.otherElements[identifier].firstMatch,
             ]
         case "workspaceNamePromptTextField":
-            return [
-                app.textFields[identifier].firstMatch,
-                app.sheets.textFields[identifier].firstMatch,
-                app.collectionViews.textFields[identifier].firstMatch,
-                app.otherElements[identifier].firstMatch,
-            ]
+            return workspaceNamePromptTextFieldCandidates(in: app)
         case "workspaceNamePromptConfirmButton", "workspaceNamePromptCancelButton":
-            return [
-                app.buttons[identifier].firstMatch,
-                app.otherElements[identifier].firstMatch,
-            ]
+            return workspaceNamePromptButtonCandidates(identifier, in: app)
         case
             "settingsDownloadsLink",
             "settingsRepositoriesLink",
@@ -6720,14 +6836,10 @@ final class AndBibleUITests: XCTestCase {
         let deadline = Date().addingTimeInterval(timeout)
 
         repeat {
-            let candidates = normalizedTitles.flatMap { title in
-                [
-                    alert.textFields[title].firstMatch,
-                    app.alerts.textFields[title].firstMatch,
-                ]
-            }
-
-            if let textField = candidates.first(where: { $0.exists || $0.waitForExistence(timeout: 0.2) }) {
+            if let textField = firstExistingElement(
+                modalTextFieldCandidates(in: alert, titles: normalizedTitles),
+                timeout: 0.2
+            ) {
                 return textField
             }
 
@@ -7113,7 +7225,12 @@ final class AndBibleUITests: XCTestCase {
             file: file,
             line: line
         )
-        return app.alerts.textFields.firstMatch
+        if let prompt = resolvedLabelCreationPrompt(in: app),
+           let field = firstExistingElement(modalTextFieldCandidates(in: prompt, titles: ["Label name"]))
+        {
+            return field
+        }
+        return app.alerts.firstMatch.textFields.element(boundBy: 0)
     }
 
     /**
@@ -7150,7 +7267,12 @@ final class AndBibleUITests: XCTestCase {
             file: file,
             line: line
         )
-        return app.alerts.buttons["Create"].firstMatch
+        if let prompt = resolvedLabelCreationPrompt(in: app),
+           let button = firstExistingElement(modalButtonCandidates(in: prompt, titles: ["Create"]))
+        {
+            return button
+        }
+        return app.alerts.firstMatch.buttons["Create"].firstMatch
     }
 
     /**
@@ -7466,51 +7588,20 @@ final class AndBibleUITests: XCTestCase {
 
     /// Returns the visible prompt container used by the create-label flow.
     private func resolvedLabelCreationPrompt(in app: XCUIApplication) -> XCUIElement? {
-        let alert = app.alerts.firstMatch
-        if alert.exists || alert.waitForExistence(timeout: 0.2) {
-            return alert
-        }
-
-        let sheet = app.sheets.firstMatch
-        if sheet.exists || sheet.waitForExistence(timeout: 0.2) {
-            return sheet
-        }
-
-        return nil
+        resolvedModalPrompt(in: app, timeout: 0.2)
     }
 
     /// Resolves the create-label prompt text field by scoping queries to the visible prompt.
     private func resolveLabelCreationPromptTextField(in app: XCUIApplication) -> XCUIElement? {
         if let prompt = resolvedLabelCreationPrompt(in: app) {
-            let exactField = prompt.textFields["labelManagerNewLabelNameField"].firstMatch
-            if exactField.exists && !exactField.frame.isEmpty {
-                return exactField
-            }
-
-            let titledField = prompt.textFields["Label name"].firstMatch
-            if titledField.exists && !titledField.frame.isEmpty {
-                return titledField
-            }
-
-            let promptField = prompt.textFields.firstMatch
-            if promptField.exists && !promptField.frame.isEmpty {
-                return promptField
-            }
-        }
-
-        let directField = app.textFields["labelManagerNewLabelNameField"].firstMatch
-        if directField.exists && !directField.frame.isEmpty {
-            return directField
-        }
-
-        if let prompt = resolvedLabelCreationPrompt(in: app) {
-            let fallbackCandidates = [
-                prompt.textFields["Label name"].firstMatch,
-                prompt.textFields.firstMatch,
-            ]
-            if let field = fallbackCandidates.first(where: { $0.exists && !$0.frame.isEmpty }) {
-                return field
-            }
+            return firstExistingElement(
+                modalTextFieldCandidates(
+                    in: prompt,
+                    identifiers: ["labelManagerNewLabelNameField"],
+                    titles: ["Label name"]
+                ),
+                timeout: 0.2
+            )
         }
         return nil
     }
@@ -7518,30 +7609,14 @@ final class AndBibleUITests: XCTestCase {
     /// Resolves the create-label prompt action button by scoping queries to the visible prompt.
     private func resolveLabelCreationPromptCreateButton(in app: XCUIApplication) -> XCUIElement? {
         if let prompt = resolvedLabelCreationPrompt(in: app) {
-            let exactButton = prompt.buttons["labelManagerCreateButton"].firstMatch
-            if exactButton.exists && !exactButton.frame.isEmpty {
-                return exactButton
-            }
-
-            let titledButton = prompt.buttons["Create"].firstMatch
-            if titledButton.exists && !titledButton.frame.isEmpty {
-                return titledButton
-            }
-        }
-
-        let directButton = app.buttons["labelManagerCreateButton"].firstMatch
-        if directButton.exists && !directButton.frame.isEmpty {
-            return directButton
-        }
-
-        if let prompt = resolvedLabelCreationPrompt(in: app) {
-            let fallbackCandidates = [
-                prompt.buttons["Create"].firstMatch,
-                prompt.buttons.firstMatch,
-            ]
-            if let button = fallbackCandidates.first(where: { $0.exists && !$0.frame.isEmpty }) {
-                return button
-            }
+            return firstExistingElement(
+                modalButtonCandidates(
+                    in: prompt,
+                    identifiers: ["labelManagerCreateButton"],
+                    titles: ["Create"]
+                ),
+                timeout: 0.2
+            )
         }
         return nil
     }
@@ -7852,20 +7927,25 @@ final class AndBibleUITests: XCTestCase {
     private func labelRow(named name: String, in app: XCUIApplication) -> XCUIElement {
         let identifier = "labelManagerRowButton-\(name)"
         if let labelManagerScreen = resolvedElement("labelManagerScreen", in: app) {
-            let scopedLink = labelManagerScreen.links[identifier].firstMatch
-            if scopedLink.exists || scopedLink.waitForExistence(timeout: 0.5) {
-                return scopedLink
-            }
             let scopedButton = labelManagerScreen.buttons[identifier].firstMatch
-            if scopedButton.exists || scopedButton.waitForExistence(timeout: 0.5) {
+            if scopedButton.exists {
                 return scopedButton
             }
+            let scopedLink = labelManagerScreen.links[identifier].firstMatch
+            if scopedLink.exists {
+                return scopedLink
+            }
+        }
+
+        let globalButton = app.buttons[identifier].firstMatch
+        if globalButton.exists {
+            return globalButton
         }
         let globalLink = app.links[identifier].firstMatch
-        if globalLink.exists || globalLink.waitForExistence(timeout: 0.5) {
+        if globalLink.exists {
             return globalLink
         }
-        return app.buttons[identifier].firstMatch
+        return globalButton
     }
 
     /**
