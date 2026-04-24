@@ -3239,8 +3239,8 @@ final class AndBibleUITests: XCTestCase {
     private func openLabelManager(in app: XCUIApplication) -> XCUIElement {
         openSettingsDestination(
             linkIdentifier: "settingsLabelsLink",
-            destinationIdentifier: "labelManagerStateExport",
-            readinessIdentifiers: ["labelManagerAddButton", "labelManagerStateExport"],
+            destinationIdentifier: "labelManagerScreen",
+            readinessIdentifiers: ["labelManagerAddButton"],
             in: app,
             destinationTimeout: 20
         )
@@ -3297,8 +3297,8 @@ final class AndBibleUITests: XCTestCase {
     ) -> XCUIElement {
         openReaderActionDestination(
             actionIdentifier: "readerOpenBookmarksAction",
-            destinationIdentifier: "bookmarkListStateExport",
-            readinessIdentifiers: ["bookmarkListDoneButton", "bookmarkListSortMenu", "bookmarkListStateExport"],
+            destinationIdentifier: "bookmarkListScreen",
+            readinessIdentifiers: ["bookmarkListDoneButton", "bookmarkListSortMenu"],
             in: app,
             timeout: timeout
         )
@@ -3676,8 +3676,8 @@ final class AndBibleUITests: XCTestCase {
     private func openSyncSettings(in app: XCUIApplication) -> XCUIElement {
         openSettingsDestination(
             linkIdentifier: "settingsSyncLink",
-            destinationIdentifier: "syncSettingsState",
-            readinessIdentifiers: ["syncBackendPicker", "syncSettingsState"],
+            destinationIdentifier: "syncSettingsScreen",
+            readinessIdentifiers: ["syncBackendPicker"],
             in: app,
             destinationTimeout: 20
         )
@@ -3762,8 +3762,8 @@ final class AndBibleUITests: XCTestCase {
     private func openSyncSettingsFromReaderAction(in app: XCUIApplication) -> XCUIElement {
         openReaderActionDestination(
             actionIdentifier: "readerOpenSyncSettingsAction",
-            destinationIdentifier: "syncSettingsState",
-            readinessIdentifiers: ["syncBackendPicker", "syncSettingsState"],
+            destinationIdentifier: "syncSettingsScreen",
+            readinessIdentifiers: ["syncBackendPicker"],
             in: app,
             timeout: 20
         )
@@ -4160,6 +4160,9 @@ final class AndBibleUITests: XCTestCase {
                 file: file,
                 line: line
             ) != nil {
+                if let resolvedDestination = resolvedElement(destinationIdentifier, in: app) {
+                    return resolvedDestination
+                }
                 if destination.exists || destination.waitForExistence(timeout: 1) {
                     return destination
                 }
@@ -4375,6 +4378,53 @@ final class AndBibleUITests: XCTestCase {
     }
 
     /**
+     Resolves lightweight state-export or status candidates by searching inside one owning screen
+     before falling back to app-wide queries.
+
+     This keeps value-based polling off the full app hierarchy for controls that only ever exist
+     inside a known screen, which materially reduces snapshot timeout pressure in CI.
+     */
+    private func screenScopedStateCandidates(
+        _ identifier: String,
+        within screenIdentifier: String,
+        in app: XCUIApplication
+    ) -> [XCUIElement] {
+        let scopedCandidates = screenRootCandidates(screenIdentifier, in: app).flatMap { root in
+            [
+                root.otherElements[identifier].firstMatch,
+                root.staticTexts[identifier].firstMatch,
+            ]
+        }
+
+        return scopedCandidates + [
+            app.otherElements[identifier].firstMatch,
+            app.staticTexts[identifier].firstMatch,
+        ]
+    }
+
+    /// Returns screen-aware candidates for small exported semantic state controls.
+    private func semanticStateCandidates(
+        for identifier: String,
+        in app: XCUIApplication
+    ) -> [XCUIElement] {
+        switch identifier {
+        case "searchStateExport":
+            return screenScopedStateCandidates(identifier, within: "searchScreen", in: app)
+        case "bookmarkListStateExport":
+            return screenScopedStateCandidates(identifier, within: "bookmarkListScreen", in: app)
+        case "labelManagerStateExport":
+            return screenScopedStateCandidates(identifier, within: "labelManagerScreen", in: app)
+        case "syncSettingsState":
+            return screenScopedStateCandidates(identifier, within: "syncSettingsScreen", in: app)
+        default:
+            return [
+                app.otherElements[identifier].firstMatch,
+                app.staticTexts[identifier].firstMatch,
+            ]
+        }
+    }
+
+    /**
      Produces the minimal ordered set of XCUI queries for one accessibility identifier.
      *
      * This helper is intentionally explicit for recurring screen/container roots. The earlier
@@ -4580,10 +4630,7 @@ final class AndBibleUITests: XCTestCase {
                 app.scrollViews[identifier].firstMatch,
             ]
         case "searchStateExport", "bookmarkListStateExport", "labelManagerStateExport":
-            return [
-                app.otherElements[identifier].firstMatch,
-                app.staticTexts[identifier].firstMatch,
-            ]
+            return semanticStateCandidates(for: identifier, in: app)
         case "searchResultsList":
             return [
                 app.collectionViews[identifier].firstMatch,
@@ -4635,10 +4682,7 @@ final class AndBibleUITests: XCTestCase {
                 app.otherElements[identifier].firstMatch,
             ]
         case "syncSettingsState":
-            return [
-                app.otherElements[identifier].firstMatch,
-                app.staticTexts[identifier].firstMatch,
-            ]
+            return semanticStateCandidates(for: identifier, in: app)
         case "textDisplayFontFamilyButton":
             return [
                 app.buttons[identifier].firstMatch,
@@ -4716,8 +4760,8 @@ final class AndBibleUITests: XCTestCase {
         _ identifier: String,
         in app: XCUIApplication
     ) -> XCUIElement? {
-        let export = app.otherElements[identifier].firstMatch
-        return export.exists ? export : nil
+        let candidates = semanticStateCandidates(for: identifier, in: app)
+        return candidates.first(where: { $0.exists })
     }
 
     /**
@@ -7504,7 +7548,7 @@ final class AndBibleUITests: XCTestCase {
 
     /// Resolves the compact exported Search state element when Search is presented.
     private func resolvedSearchStateElement(in app: XCUIApplication) -> XCUIElement? {
-        resolvedStateExportElement("searchStateExport", in: app) ?? resolvedElement("searchScreen", in: app)
+        resolvedElement("searchScreen", in: app) ?? resolvedStateExportElement("searchStateExport", in: app)
     }
 
     /// Reads the current exported Search state without forcing the whole Search container query.
@@ -7518,12 +7562,12 @@ final class AndBibleUITests: XCTestCase {
 
     /// Reads the current exported Bookmark List state without walking the full list hierarchy.
     private func resolvedBookmarkListStateValue(in app: XCUIApplication) -> String? {
-        if let stateElement = resolvedStateExportElement("bookmarkListStateExport", in: app),
-           let value = stateElement.value as? String {
-            return value
-        }
         if let screen = resolvedElement("bookmarkListScreen", in: app),
            let value = screen.value as? String {
+            return value
+        }
+        if let stateElement = resolvedStateExportElement("bookmarkListStateExport", in: app),
+           let value = stateElement.value as? String {
             return value
         }
         return nil
