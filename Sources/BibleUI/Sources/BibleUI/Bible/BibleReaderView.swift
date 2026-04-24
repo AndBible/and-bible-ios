@@ -465,7 +465,11 @@ public struct BibleReaderView: View {
         let strongsMode = resolvedDisplaySettings(for: windowManager.activeWindow).strongsMode
             ?? TextDisplaySettings.appDefaults.strongsMode
             ?? 0
-        return "\(windowToken);\(contentToken);strongsMode=\(strongsMode)"
+        let drawerToken = "drawerVisible=\(showReaderNavigationDrawer ? "true" : "false")"
+        let overflowToken = "overflowVisible=\(showReaderOverflowMenu ? "true" : "false")"
+        let sheetToken = "readerSheet=\(activeReaderSheet?.rawValue ?? "none")"
+        let searchToken = "searchVisible=\(showSearch ? "true" : "false")"
+        return "\(windowToken);\(contentToken);strongsMode=\(strongsMode);\(drawerToken);\(overflowToken);\(sheetToken);\(searchToken)"
     }
 
     /// Converts SWORD Roman-numeral book prefixes into Android-style Arabic numerals for toolbar display.

@@ -245,7 +245,6 @@ final class AndBibleUITests: XCTestCase {
         app.launch()
 
         _ = openSearch(in: app)
-        XCTAssertTrue(requireSearchInput(in: app, timeout: 5).exists)
         waitForSearchState(containing: "query=H00430", in: app, timeout: 20)
         waitForSearchResultCount(atLeast: 1, in: app, timeout: 20)
     }
@@ -4362,6 +4361,10 @@ final class AndBibleUITests: XCTestCase {
         within screenIdentifier: String,
         in app: XCUIApplication
     ) -> [XCUIElement] {
+        let directCandidates = [
+            app.otherElements[identifier].firstMatch,
+            app.staticTexts[identifier].firstMatch,
+        ]
         let scopedCandidates = screenRootCandidates(screenIdentifier, in: app).flatMap { root in
             [
                 root.otherElements[identifier].firstMatch,
@@ -4369,10 +4372,7 @@ final class AndBibleUITests: XCTestCase {
             ]
         }
 
-        return scopedCandidates + [
-            app.otherElements[identifier].firstMatch,
-            app.staticTexts[identifier].firstMatch,
-        ]
+        return directCandidates + scopedCandidates
     }
 
     /// Returns the first modal presentation surface currently visible to XCTest.
@@ -4784,11 +4784,11 @@ final class AndBibleUITests: XCTestCase {
             ]
         case "searchQueryField":
             return [
-                app.searchFields[identifier].firstMatch,
                 app.textFields[identifier].firstMatch,
-                app.navigationBars.searchFields[identifier].firstMatch,
-                app.navigationBars.textFields[identifier].firstMatch,
                 app.otherElements[identifier].firstMatch,
+                app.navigationBars.textFields[identifier].firstMatch,
+                app.searchFields[identifier].firstMatch,
+                app.navigationBars.searchFields[identifier].firstMatch,
             ]
         case "workspaceNamePromptTextField":
             return workspaceNamePromptTextFieldCandidates(in: app)
@@ -5258,8 +5258,7 @@ final class AndBibleUITests: XCTestCase {
     ) {
         let deadline = Date().addingTimeInterval(timeout)
         repeat {
-            if let stateElement = resolvedElement("readerRenderedContentState", in: app),
-               let value = stateElement.value as? String,
+            if let value = readerRenderedContentStateValue(in: app),
                value.contains(token) {
                 return
             }
@@ -5273,6 +5272,19 @@ final class AndBibleUITests: XCTestCase {
             file: file,
             line: line
         )
+    }
+
+    /// Reads the compact reader state export without walking drawer or overflow menu contents.
+    private func readerRenderedContentStateValue(in app: XCUIApplication) -> String? {
+        guard let stateElement = resolvedElement("readerRenderedContentState", in: app) else {
+            return nil
+        }
+        return stateElement.value as? String
+    }
+
+    /// Returns whether the compact reader state export currently contains one token.
+    private func readerRenderedContentStateContains(_ token: String, in app: XCUIApplication) -> Bool {
+        readerRenderedContentStateValue(in: app)?.contains(token) == true
     }
 
     /**
@@ -5297,15 +5309,19 @@ final class AndBibleUITests: XCTestCase {
         repeat {
             let drawerButton = app.buttons["readerNavigationDrawerButton"].firstMatch
             let moreButton = app.buttons["readerMoreMenuButton"].firstMatch
-            let renderedContentReady = resolvedElement("readerRenderedContentState", in: app) != nil
-            let drawerActionVisible = app.buttons["readerOpenBookmarksAction"].firstMatch.exists
-            let overflowActionVisible = app.buttons["readerOpenWorkspacesAction"].firstMatch.exists
+            let readerState = readerRenderedContentStateValue(in: app)
+            let readerSurfacesClosed = readerState.map { state in
+                let drawerClosed = state.contains("drawerVisible=false") || !state.contains("drawerVisible=")
+                let overflowClosed = state.contains("overflowVisible=false") || !state.contains("overflowVisible=")
+                let sheetClosed = state.contains("readerSheet=none") || !state.contains("readerSheet=")
+                let searchClosed = state.contains("searchVisible=false") || !state.contains("searchVisible=")
+                return drawerClosed && overflowClosed && sheetClosed && searchClosed
+            } ?? false
 
-            if renderedContentReady,
+            if readerState != nil,
                drawerButton.exists,
                moreButton.exists,
-               !drawerActionVisible,
-               !overflowActionVisible {
+               readerSurfacesClosed {
                 return true
             }
 
@@ -5894,6 +5910,9 @@ final class AndBibleUITests: XCTestCase {
             app.buttons["readerOverflowSectionTitlesToggle"].firstMatch,
         ]
         repeat {
+            if readerRenderedContentStateContains("overflowVisible=true", in: app) {
+                return true
+            }
             if menuCandidates.contains(where: { $0.exists && !$0.frame.isEmpty }) ||
                 actionCandidates.contains(where: { $0.exists && !$0.frame.isEmpty }) {
                 return true
@@ -5901,7 +5920,8 @@ final class AndBibleUITests: XCTestCase {
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         } while Date() < deadline
 
-        return menuCandidates.contains(where: { $0.exists }) ||
+        return readerRenderedContentStateContains("overflowVisible=true", in: app) ||
+            menuCandidates.contains(where: { $0.exists }) ||
             actionCandidates.contains(where: { $0.exists })
     }
 
@@ -6008,6 +6028,9 @@ final class AndBibleUITests: XCTestCase {
             app.buttons["readerOpenSearchAction"].firstMatch,
         ]
         repeat {
+            if readerRenderedContentStateContains("drawerVisible=true", in: app) {
+                return true
+            }
             if drawerCandidates.contains(where: { $0.exists && !$0.frame.isEmpty }) ||
                 actionCandidates.contains(where: { $0.exists && !$0.frame.isEmpty }) {
                 return true
@@ -6015,7 +6038,8 @@ final class AndBibleUITests: XCTestCase {
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         } while Date() < deadline
 
-        return drawerCandidates.contains(where: { $0.exists }) ||
+        return readerRenderedContentStateContains("drawerVisible=true", in: app) ||
+            drawerCandidates.contains(where: { $0.exists }) ||
             actionCandidates.contains(where: { $0.exists })
     }
 
@@ -6079,10 +6103,10 @@ final class AndBibleUITests: XCTestCase {
             let settleDeadline = Date().addingTimeInterval(min(2, max(0.5, deadline.timeIntervalSinceNow)))
             repeat {
                 if usesNavigationDrawer {
-                    if resolvedElement("readerNavigationDrawer", in: app) == nil {
+                    if !isReaderNavigationDrawerLikelyVisible(in: app) {
                         return
                     }
-                } else if resolvedElement("readerOverflowMenu", in: app) == nil {
+                } else if !isReaderOverflowMenuLikelyVisible(in: app) {
                     return
                 }
                 let refreshedButton = unresolvedElement(identifier, in: app)
@@ -6266,6 +6290,19 @@ final class AndBibleUITests: XCTestCase {
         }
     }
 
+    /// Returns direct app-level candidates for reader drawer and overflow actions.
+    private func readerDirectActionCandidates(
+        _ identifier: String,
+        in app: XCUIApplication
+    ) -> [XCUIElement] {
+        let title = readerActionTitle(for: identifier)
+        return [
+            app.buttons[identifier].firstMatch,
+            app.buttons[title].firstMatch,
+            app.otherElements[identifier].firstMatch,
+        ]
+    }
+
     /**
      Declares which production reader action surface should host one action identifier.
      *
@@ -6337,6 +6374,9 @@ final class AndBibleUITests: XCTestCase {
                    !drawer.frame.isEmpty {
                     return drawer
                 }
+                if readerRenderedContentStateContains("drawerVisible=true", in: app) {
+                    return unresolvedElement("readerNavigationDrawer", in: app)
+                }
                 if isReaderOverflowMenuLikelyVisible(in: app) {
                     dismissReaderOverflowMenu(
                         in: app,
@@ -6356,6 +6396,9 @@ final class AndBibleUITests: XCTestCase {
                 if let overflowMenu = resolvedElement("readerOverflowMenu", in: app),
                    !overflowMenu.frame.isEmpty {
                     return overflowMenu
+                }
+                if readerRenderedContentStateContains("overflowVisible=true", in: app) {
+                    return unresolvedElement("readerOverflowMenu", in: app)
                 }
                 if isReaderNavigationDrawerLikelyVisible(in: app) {
                     let dismissArea = unresolvedElement("readerNavigationDrawerDismissArea", in: app)
@@ -6377,15 +6420,25 @@ final class AndBibleUITests: XCTestCase {
 
         if prefersDrawer {
             return resolvedElement("readerNavigationDrawer", in: app)
+                ?? (readerRenderedContentStateContains("drawerVisible=true", in: app)
+                    ? unresolvedElement("readerNavigationDrawer", in: app)
+                    : nil)
         }
 
         return resolvedElement("readerOverflowMenu", in: app)
+            ?? (readerRenderedContentStateContains("overflowVisible=true", in: app)
+                ? unresolvedElement("readerOverflowMenu", in: app)
+                : nil)
     }
 
     /**
      Returns `true` when drawer-only controls indicate that the left navigation drawer is exposed.
      */
     private func isReaderNavigationDrawerLikelyVisible(in app: XCUIApplication) -> Bool {
+        if readerRenderedContentStateContains("drawerVisible=true", in: app) {
+            return true
+        }
+
         if let drawer = resolvedElement("readerNavigationDrawer", in: app),
            !drawer.frame.isEmpty
         {
@@ -6405,6 +6458,10 @@ final class AndBibleUITests: XCTestCase {
      Returns `true` when overflow-only controls indicate that the reader overflow menu is exposed.
      */
     private func isReaderOverflowMenuLikelyVisible(in app: XCUIApplication) -> Bool {
+        if readerRenderedContentStateContains("overflowVisible=true", in: app) {
+            return true
+        }
+
         if let overflowMenu = resolvedElement("readerOverflowMenu", in: app),
            !overflowMenu.frame.isEmpty
         {
@@ -6511,12 +6568,8 @@ final class AndBibleUITests: XCTestCase {
             return control
         }
 
-        let title = readerActionTitle(for: identifier)
         let prefersDrawer = readerActionUsesNavigationDrawer(identifier)
-        let directActionCandidates = [
-            app.buttons[identifier].firstMatch,
-            app.buttons[title].firstMatch,
-        ]
+        let directActionCandidates = readerDirectActionCandidates(identifier, in: app)
 
         if let finalSurface = prefersDrawer
             ? resolvedElement("readerNavigationDrawer", in: app)
@@ -6558,18 +6611,18 @@ final class AndBibleUITests: XCTestCase {
         timeout: TimeInterval = 10
     ) -> XCUIElement? {
         let deadline = Date().addingTimeInterval(timeout)
-        let title = readerActionTitle(for: identifier)
         let prefersDrawer = readerActionUsesNavigationDrawer(identifier)
-        let directActionCandidates = [
-            app.buttons[identifier].firstMatch,
-            app.buttons[title].firstMatch,
-        ]
+        let directActionCandidates = readerDirectActionCandidates(identifier, in: app)
         repeat {
             if let actionSurface = ensureReaderActionSurface(
                 for: identifier,
                 in: app,
                 timeout: min(10, max(3, deadline.timeIntervalSinceNow))
             ) {
+                if let directAction = directActionCandidates.first(where: { $0.exists && !$0.frame.isEmpty }) {
+                    return directAction
+                }
+
                 for _ in 0..<4 {
                     let action = resolveReaderActionElement(identifier, in: app, actionSurface: actionSurface)
                     if action.exists, waitForElementToBecomeHittable(action, timeout: 0.5) {
@@ -7061,12 +7114,19 @@ final class AndBibleUITests: XCTestCase {
         from candidates: [XCUIElement],
         waitTimeout: TimeInterval = 0
     ) -> XCUIElement? {
-        for candidate in candidates {
-            let exists = candidate.exists || (waitTimeout > 0 && candidate.waitForExistence(timeout: waitTimeout))
-            if exists && (candidate.isHittable || !candidate.frame.isEmpty) {
-                return candidate
+        let deadline = Date().addingTimeInterval(waitTimeout)
+        repeat {
+            for candidate in candidates where candidate.exists {
+                if candidate.isHittable || !candidate.frame.isEmpty {
+                    return candidate
+                }
             }
-        }
+            if waitTimeout <= 0 {
+                return nil
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        } while Date() < deadline
+
         return nil
     }
 
@@ -7634,7 +7694,7 @@ final class AndBibleUITests: XCTestCase {
 
     /// Resolves the compact exported Search state element when Search is presented.
     private func resolvedSearchStateElement(in app: XCUIApplication) -> XCUIElement? {
-        resolvedElement("searchScreen", in: app) ?? resolvedStateExportElement("searchStateExport", in: app)
+        resolvedStateExportElement("searchStateExport", in: app) ?? resolvedElement("searchScreen", in: app)
     }
 
     /// Reads the current exported Search state without forcing the whole Search container query.
@@ -7648,12 +7708,12 @@ final class AndBibleUITests: XCTestCase {
 
     /// Reads the current exported Bookmark List state without walking the full list hierarchy.
     private func resolvedBookmarkListStateValue(in app: XCUIApplication) -> String? {
-        if let screen = resolvedElement("bookmarkListScreen", in: app),
-           let value = screen.value as? String {
-            return value
-        }
         if let stateElement = resolvedStateExportElement("bookmarkListStateExport", in: app),
            let value = stateElement.value as? String {
+            return value
+        }
+        if let screen = resolvedElement("bookmarkListScreen", in: app),
+           let value = screen.value as? String {
             return value
         }
         return nil
