@@ -54,21 +54,75 @@ final class BookmarkModelTests: XCTestCase {
         workspaceSettings.fontSize = 16
         workspaceSettings.fontFamily = "serif"
 
+        var globalSettings = TextDisplaySettings()
+        globalSettings.lineSpacing = 125
+
         var defaults = TextDisplaySettings()
         defaults.fontSize = 14
         defaults.fontFamily = "sans-serif"
         defaults.lineSpacing = 150
 
         // Window overrides workspace
-        let resolvedSize = TextDisplaySettings.resolved(\.fontSize, window: windowSettings, workspace: workspaceSettings, defaults: defaults)
+        let resolvedSize = TextDisplaySettings.resolved(
+            \.fontSize,
+            window: windowSettings,
+            workspace: workspaceSettings,
+            global: globalSettings,
+            defaults: defaults
+        )
         XCTAssertEqual(resolvedSize, 18)
 
         // Window nil → falls to workspace
-        let resolvedFamily = TextDisplaySettings.resolved(\.fontFamily, window: windowSettings, workspace: workspaceSettings, defaults: defaults)
+        let resolvedFamily = TextDisplaySettings.resolved(
+            \.fontFamily,
+            window: windowSettings,
+            workspace: workspaceSettings,
+            global: globalSettings,
+            defaults: defaults
+        )
         XCTAssertEqual(resolvedFamily, "serif")
 
-        // Both nil → falls to defaults
-        let resolvedSpacing = TextDisplaySettings.resolved(\.lineSpacing, window: windowSettings, workspace: workspaceSettings, defaults: defaults)
-        XCTAssertEqual(resolvedSpacing, 150)
+        // Window and workspace nil → falls to global
+        let resolvedSpacing = TextDisplaySettings.resolved(
+            \.lineSpacing,
+            window: windowSettings,
+            workspace: workspaceSettings,
+            global: globalSettings,
+            defaults: defaults
+        )
+        XCTAssertEqual(resolvedSpacing, 125)
+
+        // Window, workspace, and global nil → falls to defaults
+        let resolvedTopMargin = TextDisplaySettings.resolved(
+            \.topMargin,
+            window: windowSettings,
+            workspace: workspaceSettings,
+            global: globalSettings,
+            defaults: defaults
+        )
+        XCTAssertNil(resolvedTopMargin)
+    }
+
+    func testTextDisplaySettingsFullyResolvedUsesGlobalBeforeDefaults() {
+        let dayBackground = Int(Int32(bitPattern: 0xFFFAF4E8))
+        let nightTextColor = Int(Int32(bitPattern: 0xFFF1E7D0))
+        let workspaceNightTextColor = Int(Int32(bitPattern: 0xFFCCCCCC))
+
+        var globalSettings = TextDisplaySettings()
+        globalSettings.dayBackground = dayBackground
+        globalSettings.nightTextColor = nightTextColor
+
+        var workspaceSettings = TextDisplaySettings()
+        workspaceSettings.nightTextColor = workspaceNightTextColor
+
+        let resolved = TextDisplaySettings.fullyResolved(
+            window: nil,
+            workspace: workspaceSettings,
+            global: globalSettings
+        )
+
+        XCTAssertEqual(resolved.dayBackground, dayBackground)
+        XCTAssertEqual(resolved.nightTextColor, workspaceNightTextColor)
+        XCTAssertEqual(resolved.dayTextColor, TextDisplaySettings.appDefaults.dayTextColor)
     }
 }

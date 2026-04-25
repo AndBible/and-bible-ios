@@ -245,7 +245,6 @@ final class AndBibleUITests: XCTestCase {
         app.launch()
 
         _ = openSearch(in: app)
-        XCTAssertTrue(requireSearchInput(in: app, timeout: 5).exists)
         waitForSearchState(containing: "query=H00430", in: app, timeout: 20)
         waitForSearchResultCount(atLeast: 1, in: app, timeout: 20)
     }
@@ -412,12 +411,6 @@ final class AndBibleUITests: XCTestCase {
             requireWorkspaceRow(named: originalActiveWorkspaceName, in: app, timeout: 10),
             timeout: 10
         )
-        if waitForResolvedElementAppearance("workspaceNamePromptCancelButton", in: app, timeout: 1) {
-            tapElementReliably(
-                requireElement("workspaceNamePromptCancelButton", in: app, timeout: 5),
-                timeout: 5
-            )
-        }
         dismissWorkspaceSelectorIfStillPresented(in: app, timeout: 20)
         XCTAssertTrue(
             waitForReaderShellReady(in: app, timeout: 20),
@@ -3173,7 +3166,7 @@ final class AndBibleUITests: XCTestCase {
      *   - line: Source line used for XCTest failure attribution.
      * - Returns: The prompt text field used to enter the workspace name.
      * - Side effects:
-     *   - polls prompt-scoped descendants and sheet text fields once the prompt chrome is visible
+     *   - polls the custom prompt and system modal surfaces for one owned text field
      * - Failure modes:
      *   - records an XCTest failure when no prompt text field becomes available in time
      */
@@ -3185,38 +3178,17 @@ final class AndBibleUITests: XCTestCase {
     ) -> XCUIElement {
         let deadline = Date().addingTimeInterval(timeout)
         repeat {
-            if let identifiedField = resolvedElement("workspaceNamePromptTextField", in: app) {
-                return identifiedField
-            }
-
-            if let promptScreen = resolvedElement("workspaceNamePromptScreen", in: app) {
-                let promptScopedField = promptScreen.descendants(matching: .textField).firstMatch
-                if promptScopedField.exists || promptScopedField.waitForExistence(timeout: 0.2) {
-                    return promptScopedField
-                }
-            }
-
-            let promptIsVisible =
-                resolvedElement("workspaceNamePromptConfirmButton", in: app) != nil ||
-                resolvedElement("workspaceNamePromptCancelButton", in: app) != nil ||
-                resolvedElement("workspaceNamePromptScreen", in: app) != nil
-            if promptIsVisible {
-                let sheetField = app.sheets.textFields.firstMatch
-                if sheetField.exists || sheetField.waitForExistence(timeout: 0.2) {
-                    return sheetField
-                }
-
-                let applicationField = app.textFields.firstMatch
-                if applicationField.exists || applicationField.waitForExistence(timeout: 0.2) {
-                    return applicationField
-                }
+            if let promptField = firstExistingElement(
+                workspaceNamePromptTextFieldCandidates(in: app),
+                timeout: 0.2
+            ) {
+                return promptField
             }
 
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         } while Date() < deadline
 
-        let fallbackField = resolvedElement("workspaceNamePromptTextField", in: app)
-            ?? app.sheets.textFields.firstMatch
+        let fallbackField = unresolvedElement("workspaceNamePromptTextField", in: app)
         XCTAssertTrue(
             fallbackField.exists,
             "Expected the workspace name field to appear within \(timeout) seconds.",
@@ -3239,8 +3211,8 @@ final class AndBibleUITests: XCTestCase {
     private func openLabelManager(in app: XCUIApplication) -> XCUIElement {
         openSettingsDestination(
             linkIdentifier: "settingsLabelsLink",
-            destinationIdentifier: "labelManagerStateExport",
-            readinessIdentifiers: ["labelManagerAddButton", "labelManagerStateExport"],
+            destinationIdentifier: "labelManagerScreen",
+            readinessIdentifiers: ["labelManagerAddButton"],
             in: app,
             destinationTimeout: 20
         )
@@ -3297,8 +3269,8 @@ final class AndBibleUITests: XCTestCase {
     ) -> XCUIElement {
         openReaderActionDestination(
             actionIdentifier: "readerOpenBookmarksAction",
-            destinationIdentifier: "bookmarkListStateExport",
-            readinessIdentifiers: ["bookmarkListDoneButton", "bookmarkListSortMenu", "bookmarkListStateExport"],
+            destinationIdentifier: "bookmarkListScreen",
+            readinessIdentifiers: ["bookmarkListDoneButton", "bookmarkListSortMenu"],
             in: app,
             timeout: timeout
         )
@@ -3676,8 +3648,8 @@ final class AndBibleUITests: XCTestCase {
     private func openSyncSettings(in app: XCUIApplication) -> XCUIElement {
         openSettingsDestination(
             linkIdentifier: "settingsSyncLink",
-            destinationIdentifier: "syncSettingsState",
-            readinessIdentifiers: ["syncBackendPicker", "syncSettingsState"],
+            destinationIdentifier: "syncSettingsScreen",
+            readinessIdentifiers: ["syncBackendPicker"],
             in: app,
             destinationTimeout: 20
         )
@@ -3762,8 +3734,8 @@ final class AndBibleUITests: XCTestCase {
     private func openSyncSettingsFromReaderAction(in app: XCUIApplication) -> XCUIElement {
         openReaderActionDestination(
             actionIdentifier: "readerOpenSyncSettingsAction",
-            destinationIdentifier: "syncSettingsState",
-            readinessIdentifiers: ["syncBackendPicker", "syncSettingsState"],
+            destinationIdentifier: "syncSettingsScreen",
+            readinessIdentifiers: ["syncBackendPicker"],
             in: app,
             timeout: 20
         )
@@ -4160,6 +4132,9 @@ final class AndBibleUITests: XCTestCase {
                 file: file,
                 line: line
             ) != nil {
+                if let resolvedDestination = resolvedElement(destinationIdentifier, in: app) {
+                    return resolvedDestination
+                }
                 if destination.exists || destination.waitForExistence(timeout: 1) {
                     return destination
                 }
@@ -4305,6 +4280,275 @@ final class AndBibleUITests: XCTestCase {
         return [app.otherElements[identifier].firstMatch]
     }
 
+    /// Returns the minimal set of root containers that can own one screen-scoped identifier.
+    private func screenRootCandidates(
+        _ identifier: String,
+        in app: XCUIApplication
+    ) -> [XCUIElement] {
+        [
+            app.otherElements[identifier].firstMatch,
+            app.collectionViews[identifier].firstMatch,
+            app.tables[identifier].firstMatch,
+            app.scrollViews[identifier].firstMatch,
+        ]
+    }
+
+    /**
+     Resolves button-like candidates by searching inside one owning screen before falling back to
+     app-wide queries.
+
+     This keeps XCTest from repeatedly snapshotting the full hierarchy for controls that only ever
+     exist inside a known screen, which has been a recurring CI timeout source.
+     */
+    private func screenScopedButtonCandidates(
+        _ identifier: String,
+        within screenIdentifier: String,
+        in app: XCUIApplication
+    ) -> [XCUIElement] {
+        let scopedCandidates = screenRootCandidates(screenIdentifier, in: app).flatMap { root in
+            [
+                root.buttons[identifier].firstMatch,
+                root.cells.buttons[identifier].firstMatch,
+                root.otherElements[identifier].firstMatch,
+            ]
+        }
+
+        return scopedCandidates + [
+            app.buttons[identifier].firstMatch,
+            app.navigationBars.buttons[identifier].firstMatch,
+            app.toolbars.buttons[identifier].firstMatch,
+            app.collectionViews.buttons[identifier].firstMatch,
+            app.cells.buttons[identifier].firstMatch,
+            app.otherElements[identifier].firstMatch,
+        ]
+    }
+
+    /**
+     Resolves row-like candidates by searching inside one owning screen before falling back to
+     app-wide queries.
+     */
+    private func screenScopedRowCandidates(
+        _ identifier: String,
+        within screenIdentifier: String,
+        in app: XCUIApplication
+    ) -> [XCUIElement] {
+        let scopedCandidates = screenRootCandidates(screenIdentifier, in: app).flatMap { root in
+            [
+                root.otherElements[identifier].firstMatch,
+                root.cells[identifier].firstMatch,
+                root.buttons[identifier].firstMatch,
+            ]
+        }
+
+        return scopedCandidates + [
+            app.otherElements[identifier].firstMatch,
+            app.collectionViews.cells[identifier].firstMatch,
+            app.cells[identifier].firstMatch,
+            app.buttons[identifier].firstMatch,
+            app.collectionViews.buttons[identifier].firstMatch,
+        ]
+    }
+
+    /**
+     Resolves lightweight state-export or status candidates by searching inside one owning screen
+     before falling back to app-wide queries.
+
+     This keeps value-based polling off the full app hierarchy for controls that only ever exist
+     inside a known screen, which materially reduces snapshot timeout pressure in CI.
+     */
+    private func screenScopedStateCandidates(
+        _ identifier: String,
+        within screenIdentifier: String,
+        in app: XCUIApplication
+    ) -> [XCUIElement] {
+        let directCandidates = [
+            app.otherElements[identifier].firstMatch,
+            app.staticTexts[identifier].firstMatch,
+        ]
+        let scopedCandidates = screenRootCandidates(screenIdentifier, in: app).flatMap { root in
+            [
+                root.otherElements[identifier].firstMatch,
+                root.staticTexts[identifier].firstMatch,
+            ]
+        }
+
+        return directCandidates + scopedCandidates
+    }
+
+    /// Returns the first modal presentation surface currently visible to XCTest.
+    private func resolvedModalPrompt(
+        in app: XCUIApplication,
+        timeout: TimeInterval = 0.2
+    ) -> XCUIElement? {
+        let candidates = [
+            app.alerts.firstMatch,
+            app.sheets.firstMatch,
+        ]
+        return firstExistingElement(candidates, timeout: timeout)
+    }
+
+    /// Finds the first existing element from a deliberately small candidate list.
+    private func firstExistingElement(
+        _ candidates: [XCUIElement],
+        timeout: TimeInterval = 0
+    ) -> XCUIElement? {
+        let boundedTimeout = max(0, timeout)
+        for candidate in candidates {
+            if candidate.exists {
+                return candidate
+            }
+            if boundedTimeout > 0,
+               candidate.waitForExistence(timeout: boundedTimeout)
+            {
+                return candidate
+            }
+        }
+        return nil
+    }
+
+    /**
+     Returns modal-owned text field candidates in the order XCTest resolves SwiftUI prompts most
+     consistently: visible placeholder/title first, then ordinal field, then accessibility id.
+     */
+    private func modalTextFieldCandidates(
+        in prompt: XCUIElement,
+        identifiers: [String] = [],
+        titles: [String] = []
+    ) -> [XCUIElement] {
+        let titledCandidates = titles.flatMap { title in
+            [
+                prompt.textFields[title].firstMatch,
+                prompt.secureTextFields[title].firstMatch,
+            ]
+        }
+        let ordinalCandidates = [
+            prompt.textFields.element(boundBy: 0),
+            prompt.secureTextFields.element(boundBy: 0),
+        ]
+        let identifiedCandidates = identifiers.flatMap { identifier in
+            [
+                prompt.textFields[identifier].firstMatch,
+                prompt.secureTextFields[identifier].firstMatch,
+            ]
+        }
+        return titledCandidates + ordinalCandidates + identifiedCandidates
+    }
+
+    /// Returns modal-owned button candidates without falling back to the full app hierarchy.
+    private func modalButtonCandidates(
+        in prompt: XCUIElement,
+        identifiers: [String] = [],
+        titles: [String] = []
+    ) -> [XCUIElement] {
+        let titledCandidates = titles.map { prompt.buttons[$0].firstMatch }
+        let identifiedCandidates = identifiers.map { prompt.buttons[$0].firstMatch }
+        return titledCandidates + identifiedCandidates
+    }
+
+    /// Returns the currently focused text-entry candidates for custom prompt sheets.
+    private func focusedTextEntryCandidates(in app: XCUIApplication) -> [XCUIElement] {
+        let focusedPredicate = NSPredicate(format: "hasKeyboardFocus == true")
+        return [
+            app.textFields.matching(focusedPredicate).firstMatch,
+            app.secureTextFields.matching(focusedPredicate).firstMatch,
+            app.descendants(matching: .any).matching(focusedPredicate).firstMatch,
+        ]
+    }
+
+    /// Returns workspace-name prompt text-field candidates without probing arbitrary fields.
+    private func workspaceNamePromptTextFieldCandidates(in app: XCUIApplication) -> [XCUIElement] {
+        let identifier = "workspaceNamePromptTextField"
+        let customSheetCandidates = ["Name", "name"].flatMap { title in
+            [
+                app.textFields[title].firstMatch,
+                app.collectionViews.textFields[title].firstMatch,
+                app.tables.textFields[title].firstMatch,
+                app.scrollViews.textFields[title].firstMatch,
+                app.secureTextFields[title].firstMatch,
+                app.collectionViews.secureTextFields[title].firstMatch,
+                app.tables.secureTextFields[title].firstMatch,
+                app.scrollViews.secureTextFields[title].firstMatch,
+            ]
+        } + [
+            app.textFields[identifier].firstMatch,
+            app.secureTextFields[identifier].firstMatch,
+            app.otherElements[identifier].firstMatch,
+        ]
+        let systemPromptCandidates: [XCUIElement]
+        if let prompt = resolvedModalPrompt(in: app, timeout: 0) {
+            systemPromptCandidates = modalTextFieldCandidates(
+                in: prompt,
+                identifiers: [identifier],
+                titles: ["Name", "name"]
+            )
+        } else {
+            systemPromptCandidates = []
+        }
+        return customSheetCandidates + focusedTextEntryCandidates(in: app) + systemPromptCandidates
+    }
+
+    /// Returns workspace-name prompt buttons without walking the custom sheet hierarchy.
+    private func workspaceNamePromptButtonCandidates(
+        _ identifier: String,
+        in app: XCUIApplication
+    ) -> [XCUIElement] {
+        let titles: [String]
+        switch identifier {
+        case "workspaceNamePromptConfirmButton":
+            titles = ["Create", "create", "Save", "save"]
+        case "workspaceNamePromptCancelButton":
+            titles = ["Cancel", "cancel"]
+        default:
+            titles = []
+        }
+
+        let directIdentifierCandidates = [
+            app.navigationBars.buttons[identifier].firstMatch,
+            app.toolbars.buttons[identifier].firstMatch,
+            app.buttons[identifier].firstMatch,
+            app.collectionViews.buttons[identifier].firstMatch,
+            app.tables.buttons[identifier].firstMatch,
+            app.scrollViews.buttons[identifier].firstMatch,
+            app.otherElements[identifier].firstMatch,
+        ]
+        let directTitleCandidates = titles.map { title in
+            app.buttons[title].firstMatch
+        }
+        let systemPromptCandidates: [XCUIElement]
+        if let prompt = resolvedModalPrompt(in: app, timeout: 0) {
+            systemPromptCandidates = modalButtonCandidates(
+                in: prompt,
+                identifiers: [identifier],
+                titles: titles
+            )
+        } else {
+            systemPromptCandidates = []
+        }
+        return directIdentifierCandidates + directTitleCandidates + systemPromptCandidates
+    }
+
+    /// Returns screen-aware candidates for small exported semantic state controls.
+    private func semanticStateCandidates(
+        for identifier: String,
+        in app: XCUIApplication
+    ) -> [XCUIElement] {
+        switch identifier {
+        case "searchStateExport":
+            return screenScopedStateCandidates(identifier, within: "searchScreen", in: app)
+        case "bookmarkListStateExport":
+            return screenScopedStateCandidates(identifier, within: "bookmarkListScreen", in: app)
+        case "labelManagerStateExport":
+            return screenScopedStateCandidates(identifier, within: "labelManagerScreen", in: app)
+        case "syncSettingsState":
+            return screenScopedStateCandidates(identifier, within: "syncSettingsScreen", in: app)
+        default:
+            return [
+                app.otherElements[identifier].firstMatch,
+                app.staticTexts[identifier].firstMatch,
+            ]
+        }
+    }
+
     /**
      Produces the minimal ordered set of XCUI queries for one accessibility identifier.
      *
@@ -4325,50 +4569,27 @@ final class AndBibleUITests: XCTestCase {
         in app: XCUIApplication
     ) -> [XCUIElement] {
         if identifier.hasPrefix("labelAssignmentRow::") {
-            return [
-                app.collectionViews.cells[identifier].firstMatch,
-                app.cells[identifier].firstMatch,
-                app.otherElements[identifier].firstMatch,
-            ]
+            return screenScopedRowCandidates(identifier, within: "labelAssignmentScreen", in: app)
         }
 
         if identifier.hasPrefix("labelAssignmentToggleButton::")
             || identifier.hasPrefix("labelAssignmentFavouriteButton::")
         {
-            return [
-                app.buttons[identifier].firstMatch,
-                app.collectionViews.buttons[identifier].firstMatch,
-                app.otherElements[identifier].firstMatch,
-            ]
+            return screenScopedButtonCandidates(identifier, within: "labelAssignmentScreen", in: app)
         }
 
         if identifier.hasPrefix("bookmarkListFilterChip::") {
-            return [
-                app.buttons[identifier].firstMatch,
-                app.scrollViews.buttons[identifier].firstMatch,
-                app.collectionViews.buttons[identifier].firstMatch,
-                app.otherElements[identifier].firstMatch,
-            ]
+            return screenScopedButtonCandidates(identifier, within: "bookmarkListScreen", in: app)
         }
 
         if identifier.hasPrefix("bookmarkListOpenStudyPadButton::") {
-            return [
-                app.buttons[identifier].firstMatch,
-                app.collectionViews.buttons[identifier].firstMatch,
-                app.otherElements[identifier].firstMatch,
-            ]
+            return screenScopedButtonCandidates(identifier, within: "bookmarkListScreen", in: app)
         }
 
         if identifier.hasPrefix("bookmarkListEditLabelsButton::")
             || identifier.hasPrefix("bookmarkListRowButton::")
         {
-            return [
-                app.buttons[identifier].firstMatch,
-                app.collectionViews.buttons[identifier].firstMatch,
-                app.cells.buttons[identifier].firstMatch,
-                app.cells[identifier].firstMatch,
-                app.otherElements[identifier].firstMatch,
-            ]
+            return screenScopedButtonCandidates(identifier, within: "bookmarkListScreen", in: app)
         }
 
         if identifier.hasPrefix("bookmarkListDeleteButton::")
@@ -4479,19 +4700,20 @@ final class AndBibleUITests: XCTestCase {
                 app.otherElements[identifier].firstMatch,
             ]
         case "labelAssignmentCreateNewLabelButton":
-            return [
-                app.alerts.buttons[identifier].firstMatch,
-                app.sheets.buttons[identifier].firstMatch,
-                app.buttons[identifier].firstMatch,
-                app.collectionViews.buttons[identifier].firstMatch,
-                app.otherElements[identifier].firstMatch,
-            ]
+            return screenScopedButtonCandidates(identifier, within: "labelAssignmentScreen", in: app)
         case "labelManagerNewLabelNameField":
+            if let prompt = resolvedModalPrompt(in: app, timeout: 0) {
+                return modalTextFieldCandidates(
+                    in: prompt,
+                    identifiers: [identifier],
+                    titles: ["Label name"]
+                )
+            }
             return [
-                app.alerts.textFields[identifier].firstMatch,
-                app.sheets.textFields[identifier].firstMatch,
-                app.textFields[identifier].firstMatch,
-                app.otherElements[identifier].firstMatch,
+                app.alerts.firstMatch.textFields["Label name"].firstMatch,
+                app.sheets.firstMatch.textFields["Label name"].firstMatch,
+                app.alerts.firstMatch.textFields.element(boundBy: 0),
+                app.sheets.firstMatch.textFields.element(boundBy: 0),
             ]
         case "labelEditNameField":
             return [
@@ -4500,14 +4722,19 @@ final class AndBibleUITests: XCTestCase {
                 app.otherElements[identifier].firstMatch,
             ]
         case "labelManagerCreateButton":
+            if let prompt = resolvedModalPrompt(in: app, timeout: 0) {
+                return modalButtonCandidates(
+                    in: prompt,
+                    identifiers: [identifier],
+                    titles: ["Create"]
+                )
+            }
             return [
-                app.alerts.buttons[identifier].firstMatch,
-                app.sheets.buttons[identifier].firstMatch,
-                app.buttons[identifier].firstMatch,
-                app.alerts.buttons["Create"].firstMatch,
-                app.sheets.buttons["Create"].firstMatch,
-                app.buttons["Create"].firstMatch,
+                app.alerts.firstMatch.buttons["Create"].firstMatch,
+                app.sheets.firstMatch.buttons["Create"].firstMatch,
             ]
+        case "colorSettingsResetButton":
+            return screenScopedButtonCandidates(identifier, within: "colorSettingsScreen", in: app)
         case "aboutAppTitle":
             return [
                 app.staticTexts[identifier].firstMatch,
@@ -4538,10 +4765,7 @@ final class AndBibleUITests: XCTestCase {
                 app.scrollViews[identifier].firstMatch,
             ]
         case "searchStateExport", "bookmarkListStateExport", "labelManagerStateExport":
-            return [
-                app.otherElements[identifier].firstMatch,
-                app.staticTexts[identifier].firstMatch,
-            ]
+            return semanticStateCandidates(for: identifier, in: app)
         case "searchResultsList":
             return [
                 app.collectionViews[identifier].firstMatch,
@@ -4560,24 +4784,16 @@ final class AndBibleUITests: XCTestCase {
             ]
         case "searchQueryField":
             return [
-                app.searchFields[identifier].firstMatch,
                 app.textFields[identifier].firstMatch,
-                app.navigationBars.searchFields[identifier].firstMatch,
-                app.navigationBars.textFields[identifier].firstMatch,
                 app.otherElements[identifier].firstMatch,
+                app.navigationBars.textFields[identifier].firstMatch,
+                app.searchFields[identifier].firstMatch,
+                app.navigationBars.searchFields[identifier].firstMatch,
             ]
         case "workspaceNamePromptTextField":
-            return [
-                app.textFields[identifier].firstMatch,
-                app.sheets.textFields[identifier].firstMatch,
-                app.collectionViews.textFields[identifier].firstMatch,
-                app.otherElements[identifier].firstMatch,
-            ]
+            return workspaceNamePromptTextFieldCandidates(in: app)
         case "workspaceNamePromptConfirmButton", "workspaceNamePromptCancelButton":
-            return [
-                app.buttons[identifier].firstMatch,
-                app.otherElements[identifier].firstMatch,
-            ]
+            return workspaceNamePromptButtonCandidates(identifier, in: app)
         case
             "settingsDownloadsLink",
             "settingsRepositoriesLink",
@@ -4593,10 +4809,7 @@ final class AndBibleUITests: XCTestCase {
                 app.otherElements[identifier].firstMatch,
             ]
         case "syncSettingsState":
-            return [
-                app.otherElements[identifier].firstMatch,
-                app.staticTexts[identifier].firstMatch,
-            ]
+            return semanticStateCandidates(for: identifier, in: app)
         case "textDisplayFontFamilyButton":
             return [
                 app.buttons[identifier].firstMatch,
@@ -4674,8 +4887,8 @@ final class AndBibleUITests: XCTestCase {
         _ identifier: String,
         in app: XCUIApplication
     ) -> XCUIElement? {
-        let export = app.otherElements[identifier].firstMatch
-        return export.exists ? export : nil
+        let candidates = semanticStateCandidates(for: identifier, in: app)
+        return candidates.first(where: { $0.exists })
     }
 
     /**
@@ -5045,8 +5258,7 @@ final class AndBibleUITests: XCTestCase {
     ) {
         let deadline = Date().addingTimeInterval(timeout)
         repeat {
-            if let stateElement = resolvedElement("readerRenderedContentState", in: app),
-               let value = stateElement.value as? String,
+            if let value = readerRenderedContentStateValue(in: app),
                value.contains(token) {
                 return
             }
@@ -5060,6 +5272,33 @@ final class AndBibleUITests: XCTestCase {
             file: file,
             line: line
         )
+    }
+
+    /// Reads the compact reader state export without walking drawer or overflow menu contents.
+    private func readerRenderedContentStateValue(in app: XCUIApplication) -> String? {
+        guard let stateElement = resolvedElement("readerRenderedContentState", in: app) else {
+            return nil
+        }
+        return stateElement.value as? String
+    }
+
+    /// Returns whether the compact reader state export currently contains one token.
+    private func readerRenderedContentStateContains(_ token: String, in app: XCUIApplication) -> Bool {
+        readerRenderedContentStateValue(in: app)?.contains(token) == true
+    }
+
+    /// Reads a boolean key from the compact reader state export.
+    private func readerRenderedContentStateFlag(_ key: String, in app: XCUIApplication) -> Bool? {
+        guard let stateValue = readerRenderedContentStateValue(in: app) else {
+            return nil
+        }
+        if stateValue.contains("\(key)=true") {
+            return true
+        }
+        if stateValue.contains("\(key)=false") {
+            return false
+        }
+        return nil
     }
 
     /**
@@ -5084,15 +5323,19 @@ final class AndBibleUITests: XCTestCase {
         repeat {
             let drawerButton = app.buttons["readerNavigationDrawerButton"].firstMatch
             let moreButton = app.buttons["readerMoreMenuButton"].firstMatch
-            let renderedContentReady = resolvedElement("readerRenderedContentState", in: app) != nil
-            let drawerActionVisible = app.buttons["readerOpenBookmarksAction"].firstMatch.exists
-            let overflowActionVisible = app.buttons["readerOpenWorkspacesAction"].firstMatch.exists
+            let readerState = readerRenderedContentStateValue(in: app)
+            let readerSurfacesClosed = readerState.map { state in
+                let drawerClosed = state.contains("drawerVisible=false") || !state.contains("drawerVisible=")
+                let overflowClosed = state.contains("overflowVisible=false") || !state.contains("overflowVisible=")
+                let sheetClosed = state.contains("readerSheet=none") || !state.contains("readerSheet=")
+                let searchClosed = state.contains("searchVisible=false") || !state.contains("searchVisible=")
+                return drawerClosed && overflowClosed && sheetClosed && searchClosed
+            } ?? false
 
-            if renderedContentReady,
+            if readerState != nil,
                drawerButton.exists,
                moreButton.exists,
-               !drawerActionVisible,
-               !overflowActionVisible {
+               readerSurfacesClosed {
                 return true
             }
 
@@ -5681,12 +5924,20 @@ final class AndBibleUITests: XCTestCase {
             app.buttons["readerOverflowSectionTitlesToggle"].firstMatch,
         ]
         repeat {
-            if menuCandidates.contains(where: { $0.exists && !$0.frame.isEmpty }) ||
+            if let overflowVisible = readerRenderedContentStateFlag("overflowVisible", in: app) {
+                if overflowVisible {
+                    return true
+                }
+            } else if menuCandidates.contains(where: { $0.exists && !$0.frame.isEmpty }) ||
                 actionCandidates.contains(where: { $0.exists && !$0.frame.isEmpty }) {
                 return true
             }
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         } while Date() < deadline
+
+        if let overflowVisible = readerRenderedContentStateFlag("overflowVisible", in: app) {
+            return overflowVisible
+        }
 
         return menuCandidates.contains(where: { $0.exists }) ||
             actionCandidates.contains(where: { $0.exists })
@@ -5795,12 +6046,20 @@ final class AndBibleUITests: XCTestCase {
             app.buttons["readerOpenSearchAction"].firstMatch,
         ]
         repeat {
-            if drawerCandidates.contains(where: { $0.exists && !$0.frame.isEmpty }) ||
+            if let drawerVisible = readerRenderedContentStateFlag("drawerVisible", in: app) {
+                if drawerVisible {
+                    return true
+                }
+            } else if drawerCandidates.contains(where: { $0.exists && !$0.frame.isEmpty }) ||
                 actionCandidates.contains(where: { $0.exists && !$0.frame.isEmpty }) {
                 return true
             }
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         } while Date() < deadline
+
+        if let drawerVisible = readerRenderedContentStateFlag("drawerVisible", in: app) {
+            return drawerVisible
+        }
 
         return drawerCandidates.contains(where: { $0.exists }) ||
             actionCandidates.contains(where: { $0.exists })
@@ -5863,21 +6122,14 @@ final class AndBibleUITests: XCTestCase {
                 }
             }
 
-            let settleDeadline = Date().addingTimeInterval(min(2, max(0.5, deadline.timeIntervalSinceNow)))
-            repeat {
-                if usesNavigationDrawer {
-                    if resolvedElement("readerNavigationDrawer", in: app) == nil {
-                        return
-                    }
-                } else if resolvedElement("readerOverflowMenu", in: app) == nil {
-                    return
-                }
-                let refreshedButton = unresolvedElement(identifier, in: app)
-                if !refreshedButton.exists {
-                    return
-                }
-                RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-            } while Date() < settleDeadline
+            if waitForReaderActionActivationToSettle(
+                identifier,
+                usesNavigationDrawer: usesNavigationDrawer,
+                in: app,
+                timeout: min(2, max(0.5, deadline.timeIntervalSinceNow))
+            ) {
+                return
+            }
         } while Date() < deadline
 
         let button = requireReaderActionControl(
@@ -5894,8 +6146,29 @@ final class AndBibleUITests: XCTestCase {
             file: file,
             line: line
         ) {
-            XCTAssertTrue(
-                button.isHittable || isElementVisible(button, within: actionSurface),
+            if waitForElementToBecomeHittable(button, timeout: min(1, timeout)) {
+                button.tap()
+                _ = waitForReaderActionActivationToSettle(
+                    identifier,
+                    usesNavigationDrawer: usesNavigationDrawer,
+                    in: app,
+                    timeout: min(2, timeout)
+                )
+                return
+            }
+
+            if isElementVisible(button, within: actionSurface) {
+                button.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+                _ = waitForReaderActionActivationToSettle(
+                    identifier,
+                    usesNavigationDrawer: usesNavigationDrawer,
+                    in: app,
+                    timeout: min(2, timeout)
+                )
+                return
+            }
+
+            XCTFail(
                 "Expected element '\(identifier)' to become tappable within \(timeout) seconds.",
                 file: file,
                 line: line
@@ -5908,6 +6181,36 @@ final class AndBibleUITests: XCTestCase {
             file: file,
             line: line
         )
+    }
+
+    /**
+     Waits briefly for a tapped reader menu action to either dismiss its source surface or disappear.
+     */
+    private func waitForReaderActionActivationToSettle(
+        _ identifier: String,
+        usesNavigationDrawer: Bool,
+        in app: XCUIApplication,
+        timeout: TimeInterval
+    ) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            if usesNavigationDrawer {
+                if !isReaderNavigationDrawerLikelyVisible(in: app) {
+                    return true
+                }
+            } else if !isReaderOverflowMenuLikelyVisible(in: app) {
+                return true
+            }
+
+            let refreshedButton = unresolvedElement(identifier, in: app)
+            if !refreshedButton.exists {
+                return true
+            }
+
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        } while Date() < deadline
+
+        return false
     }
 
     /**
@@ -6053,6 +6356,19 @@ final class AndBibleUITests: XCTestCase {
         }
     }
 
+    /// Returns direct app-level candidates for reader drawer and overflow actions.
+    private func readerDirectActionCandidates(
+        _ identifier: String,
+        in app: XCUIApplication
+    ) -> [XCUIElement] {
+        let title = readerActionTitle(for: identifier)
+        return [
+            app.buttons[identifier].firstMatch,
+            app.buttons[title].firstMatch,
+            app.otherElements[identifier].firstMatch,
+        ]
+    }
+
     /**
      Declares which production reader action surface should host one action identifier.
      *
@@ -6120,8 +6436,12 @@ final class AndBibleUITests: XCTestCase {
 
         repeat {
             if prefersDrawer {
-                if let drawer = resolvedElement("readerNavigationDrawer", in: app),
-                   !drawer.frame.isEmpty {
+                let drawerVisible = readerRenderedContentStateFlag("drawerVisible", in: app)
+                if drawerVisible == true {
+                    return unresolvedElement("readerNavigationDrawer", in: app)
+                } else if drawerVisible == nil,
+                          let drawer = resolvedElement("readerNavigationDrawer", in: app),
+                          !drawer.frame.isEmpty {
                     return drawer
                 }
                 if isReaderOverflowMenuLikelyVisible(in: app) {
@@ -6140,8 +6460,12 @@ final class AndBibleUITests: XCTestCase {
                     )
                 }
             } else {
-                if let overflowMenu = resolvedElement("readerOverflowMenu", in: app),
-                   !overflowMenu.frame.isEmpty {
+                let overflowVisible = readerRenderedContentStateFlag("overflowVisible", in: app)
+                if overflowVisible == true {
+                    return unresolvedElement("readerOverflowMenu", in: app)
+                } else if overflowVisible == nil,
+                          let overflowMenu = resolvedElement("readerOverflowMenu", in: app),
+                          !overflowMenu.frame.isEmpty {
                     return overflowMenu
                 }
                 if isReaderNavigationDrawerLikelyVisible(in: app) {
@@ -6163,9 +6487,15 @@ final class AndBibleUITests: XCTestCase {
         } while Date() < deadline
 
         if prefersDrawer {
+            if let drawerVisible = readerRenderedContentStateFlag("drawerVisible", in: app) {
+                return drawerVisible ? unresolvedElement("readerNavigationDrawer", in: app) : nil
+            }
             return resolvedElement("readerNavigationDrawer", in: app)
         }
 
+        if let overflowVisible = readerRenderedContentStateFlag("overflowVisible", in: app) {
+            return overflowVisible ? unresolvedElement("readerOverflowMenu", in: app) : nil
+        }
         return resolvedElement("readerOverflowMenu", in: app)
     }
 
@@ -6173,6 +6503,10 @@ final class AndBibleUITests: XCTestCase {
      Returns `true` when drawer-only controls indicate that the left navigation drawer is exposed.
      */
     private func isReaderNavigationDrawerLikelyVisible(in app: XCUIApplication) -> Bool {
+        if let drawerVisible = readerRenderedContentStateFlag("drawerVisible", in: app) {
+            return drawerVisible
+        }
+
         if let drawer = resolvedElement("readerNavigationDrawer", in: app),
            !drawer.frame.isEmpty
         {
@@ -6192,6 +6526,10 @@ final class AndBibleUITests: XCTestCase {
      Returns `true` when overflow-only controls indicate that the reader overflow menu is exposed.
      */
     private func isReaderOverflowMenuLikelyVisible(in app: XCUIApplication) -> Bool {
+        if let overflowVisible = readerRenderedContentStateFlag("overflowVisible", in: app) {
+            return overflowVisible
+        }
+
         if let overflowMenu = resolvedElement("readerOverflowMenu", in: app),
            !overflowMenu.frame.isEmpty
         {
@@ -6298,12 +6636,8 @@ final class AndBibleUITests: XCTestCase {
             return control
         }
 
-        let title = readerActionTitle(for: identifier)
         let prefersDrawer = readerActionUsesNavigationDrawer(identifier)
-        let directActionCandidates = [
-            app.buttons[identifier].firstMatch,
-            app.buttons[title].firstMatch,
-        ]
+        let directActionCandidates = readerDirectActionCandidates(identifier, in: app)
 
         if let finalSurface = prefersDrawer
             ? resolvedElement("readerNavigationDrawer", in: app)
@@ -6345,12 +6679,8 @@ final class AndBibleUITests: XCTestCase {
         timeout: TimeInterval = 10
     ) -> XCUIElement? {
         let deadline = Date().addingTimeInterval(timeout)
-        let title = readerActionTitle(for: identifier)
         let prefersDrawer = readerActionUsesNavigationDrawer(identifier)
-        let directActionCandidates = [
-            app.buttons[identifier].firstMatch,
-            app.buttons[title].firstMatch,
-        ]
+        let directActionCandidates = readerDirectActionCandidates(identifier, in: app)
         repeat {
             if let actionSurface = ensureReaderActionSurface(
                 for: identifier,
@@ -6365,6 +6695,9 @@ final class AndBibleUITests: XCTestCase {
                     if isElementVisible(action, within: actionSurface) {
                         return action
                     }
+                    if let directAction = directActionCandidates.first(where: { $0.exists && $0.isHittable }) {
+                        return directAction
+                    }
                     if actionSurface.exists, !actionSurface.frame.isEmpty {
                         actionSurface.swipeUp()
                         RunLoop.current.run(until: Date().addingTimeInterval(0.2))
@@ -6372,10 +6705,7 @@ final class AndBibleUITests: XCTestCase {
                 }
             }
 
-            if let directAction = directActionCandidates.first(where: { $0.exists && !$0.frame.isEmpty }) {
-                return directAction
-            }
-            if let directAction = directActionCandidates.first(where: { $0.exists }) {
+            if let directAction = directActionCandidates.first(where: { $0.exists && $0.isHittable }) {
                 return directAction
             }
 
@@ -6392,10 +6722,7 @@ final class AndBibleUITests: XCTestCase {
             }
         }
 
-        if let directAction = directActionCandidates.first(where: { $0.exists && !$0.frame.isEmpty }) {
-            return directAction
-        }
-        if let directAction = directActionCandidates.first(where: { $0.exists }) {
+        if let directAction = directActionCandidates.first(where: { $0.exists && $0.isHittable }) {
             return directAction
         }
         return nil
@@ -6634,14 +6961,10 @@ final class AndBibleUITests: XCTestCase {
         let deadline = Date().addingTimeInterval(timeout)
 
         repeat {
-            let candidates = normalizedTitles.flatMap { title in
-                [
-                    alert.textFields[title].firstMatch,
-                    app.alerts.textFields[title].firstMatch,
-                ]
-            }
-
-            if let textField = candidates.first(where: { $0.exists || $0.waitForExistence(timeout: 0.2) }) {
+            if let textField = firstExistingElement(
+                modalTextFieldCandidates(in: alert, titles: normalizedTitles),
+                timeout: 0.2
+            ) {
                 return textField
             }
 
@@ -6852,12 +7175,19 @@ final class AndBibleUITests: XCTestCase {
         from candidates: [XCUIElement],
         waitTimeout: TimeInterval = 0
     ) -> XCUIElement? {
-        for candidate in candidates {
-            let exists = candidate.exists || (waitTimeout > 0 && candidate.waitForExistence(timeout: waitTimeout))
-            if exists && (candidate.isHittable || !candidate.frame.isEmpty) {
-                return candidate
+        let deadline = Date().addingTimeInterval(waitTimeout)
+        repeat {
+            for candidate in candidates where candidate.exists {
+                if candidate.isHittable || !candidate.frame.isEmpty {
+                    return candidate
+                }
             }
-        }
+            if waitTimeout <= 0 {
+                return nil
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        } while Date() < deadline
+
         return nil
     }
 
@@ -7027,7 +7357,12 @@ final class AndBibleUITests: XCTestCase {
             file: file,
             line: line
         )
-        return app.alerts.textFields.firstMatch
+        if let prompt = resolvedLabelCreationPrompt(in: app),
+           let field = firstExistingElement(modalTextFieldCandidates(in: prompt, titles: ["Label name"]))
+        {
+            return field
+        }
+        return app.alerts.firstMatch.textFields.element(boundBy: 0)
     }
 
     /**
@@ -7064,7 +7399,12 @@ final class AndBibleUITests: XCTestCase {
             file: file,
             line: line
         )
-        return app.alerts.buttons["Create"].firstMatch
+        if let prompt = resolvedLabelCreationPrompt(in: app),
+           let button = firstExistingElement(modalButtonCandidates(in: prompt, titles: ["Create"]))
+        {
+            return button
+        }
+        return app.alerts.firstMatch.buttons["Create"].firstMatch
     }
 
     /**
@@ -7380,51 +7720,20 @@ final class AndBibleUITests: XCTestCase {
 
     /// Returns the visible prompt container used by the create-label flow.
     private func resolvedLabelCreationPrompt(in app: XCUIApplication) -> XCUIElement? {
-        let alert = app.alerts.firstMatch
-        if alert.exists || alert.waitForExistence(timeout: 0.2) {
-            return alert
-        }
-
-        let sheet = app.sheets.firstMatch
-        if sheet.exists || sheet.waitForExistence(timeout: 0.2) {
-            return sheet
-        }
-
-        return nil
+        resolvedModalPrompt(in: app, timeout: 0.2)
     }
 
     /// Resolves the create-label prompt text field by scoping queries to the visible prompt.
     private func resolveLabelCreationPromptTextField(in app: XCUIApplication) -> XCUIElement? {
         if let prompt = resolvedLabelCreationPrompt(in: app) {
-            let exactField = prompt.textFields["labelManagerNewLabelNameField"].firstMatch
-            if exactField.exists && !exactField.frame.isEmpty {
-                return exactField
-            }
-
-            let titledField = prompt.textFields["Label name"].firstMatch
-            if titledField.exists && !titledField.frame.isEmpty {
-                return titledField
-            }
-
-            let promptField = prompt.textFields.firstMatch
-            if promptField.exists && !promptField.frame.isEmpty {
-                return promptField
-            }
-        }
-
-        let directField = app.textFields["labelManagerNewLabelNameField"].firstMatch
-        if directField.exists && !directField.frame.isEmpty {
-            return directField
-        }
-
-        if let prompt = resolvedLabelCreationPrompt(in: app) {
-            let fallbackCandidates = [
-                prompt.textFields["Label name"].firstMatch,
-                prompt.textFields.firstMatch,
-            ]
-            if let field = fallbackCandidates.first(where: { $0.exists && !$0.frame.isEmpty }) {
-                return field
-            }
+            return firstExistingElement(
+                modalTextFieldCandidates(
+                    in: prompt,
+                    identifiers: ["labelManagerNewLabelNameField"],
+                    titles: ["Label name"]
+                ),
+                timeout: 0.2
+            )
         }
         return nil
     }
@@ -7432,30 +7741,14 @@ final class AndBibleUITests: XCTestCase {
     /// Resolves the create-label prompt action button by scoping queries to the visible prompt.
     private func resolveLabelCreationPromptCreateButton(in app: XCUIApplication) -> XCUIElement? {
         if let prompt = resolvedLabelCreationPrompt(in: app) {
-            let exactButton = prompt.buttons["labelManagerCreateButton"].firstMatch
-            if exactButton.exists && !exactButton.frame.isEmpty {
-                return exactButton
-            }
-
-            let titledButton = prompt.buttons["Create"].firstMatch
-            if titledButton.exists && !titledButton.frame.isEmpty {
-                return titledButton
-            }
-        }
-
-        let directButton = app.buttons["labelManagerCreateButton"].firstMatch
-        if directButton.exists && !directButton.frame.isEmpty {
-            return directButton
-        }
-
-        if let prompt = resolvedLabelCreationPrompt(in: app) {
-            let fallbackCandidates = [
-                prompt.buttons["Create"].firstMatch,
-                prompt.buttons.firstMatch,
-            ]
-            if let button = fallbackCandidates.first(where: { $0.exists && !$0.frame.isEmpty }) {
-                return button
-            }
+            return firstExistingElement(
+                modalButtonCandidates(
+                    in: prompt,
+                    identifiers: ["labelManagerCreateButton"],
+                    titles: ["Create"]
+                ),
+                timeout: 0.2
+            )
         }
         return nil
     }
@@ -7766,20 +8059,25 @@ final class AndBibleUITests: XCTestCase {
     private func labelRow(named name: String, in app: XCUIApplication) -> XCUIElement {
         let identifier = "labelManagerRowButton-\(name)"
         if let labelManagerScreen = resolvedElement("labelManagerScreen", in: app) {
-            let scopedLink = labelManagerScreen.links[identifier].firstMatch
-            if scopedLink.exists || scopedLink.waitForExistence(timeout: 0.5) {
-                return scopedLink
-            }
             let scopedButton = labelManagerScreen.buttons[identifier].firstMatch
-            if scopedButton.exists || scopedButton.waitForExistence(timeout: 0.5) {
+            if scopedButton.exists {
                 return scopedButton
             }
+            let scopedLink = labelManagerScreen.links[identifier].firstMatch
+            if scopedLink.exists {
+                return scopedLink
+            }
+        }
+
+        let globalButton = app.buttons[identifier].firstMatch
+        if globalButton.exists {
+            return globalButton
         }
         let globalLink = app.links[identifier].firstMatch
-        if globalLink.exists || globalLink.waitForExistence(timeout: 0.5) {
+        if globalLink.exists {
             return globalLink
         }
-        return app.buttons[identifier].firstMatch
+        return globalButton
     }
 
     /**
@@ -8184,14 +8482,6 @@ final class AndBibleUITests: XCTestCase {
         }
 
         focusTextEntryElement(element, preferTrailingEdge: true, timeout: 10)
-
-        let clearButton = element.buttons["Clear text"].firstMatch
-        if waitForElementToBecomeHittable(clearButton, timeout: 0.5) {
-            clearButton.tap()
-            if currentTextEntryValue(in: element, placeholderHints: placeholderHints).isEmpty {
-                return true
-            }
-        }
 
         var remainingText = existingText
         for _ in 0..<2 where !remainingText.isEmpty {

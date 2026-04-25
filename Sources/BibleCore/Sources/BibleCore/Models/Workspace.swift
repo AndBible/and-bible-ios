@@ -168,7 +168,7 @@ public struct RecentLabel: Codable, Sendable {
  Stores optional text-display overrides used by the app's inheritance chain.
 
  Each property is optional by design. `nil` means "inherit from the next level up" using the
- chain `window -> workspace -> app defaults`. The struct itself performs no persistence or UI
+ chain `window -> workspace -> global -> app defaults`. The struct itself performs no persistence or UI
  updates; those side effects occur when a containing `Workspace` or `PageManager` is saved and
  the resolved values are pushed into native/web readers.
  */
@@ -273,6 +273,7 @@ public struct TextDisplaySettings: Codable, Sendable, Equatable {
        - keyPath: Property to resolve.
        - window: Window-level overrides, checked first.
        - workspace: Workspace-level overrides, checked second.
+       - global: App-level overrides, checked third.
        - defaults: Fully populated app defaults, checked last.
      - Returns: The first non-nil value in the chain, or `nil` when the default is also nil.
      - Note: This helper is pure and has no persistence or rendering side effects.
@@ -281,9 +282,10 @@ public struct TextDisplaySettings: Codable, Sendable, Equatable {
         _ keyPath: KeyPath<TextDisplaySettings, T?>,
         window: TextDisplaySettings?,
         workspace: TextDisplaySettings?,
+        global: TextDisplaySettings? = nil,
         defaults: TextDisplaySettings
     ) -> T? {
-        window?[keyPath: keyPath] ?? workspace?[keyPath: keyPath] ?? defaults[keyPath: keyPath]
+        window?[keyPath: keyPath] ?? workspace?[keyPath: keyPath] ?? global?[keyPath: keyPath] ?? defaults[keyPath: keyPath]
     }
 
     /**
@@ -329,12 +331,113 @@ public struct TextDisplaySettings: Codable, Sendable, Equatable {
         return s
     }()
 
+    internal struct FieldDescriptor {
+        let changed: (TextDisplaySettings, TextDisplaySettings) -> Bool
+        let clearIfMatchingParent: (inout TextDisplaySettings, TextDisplaySettings) -> Bool
+    }
+
+    private static func field<T: Equatable>(
+        _ keyPath: WritableKeyPath<TextDisplaySettings, T?>
+    ) -> FieldDescriptor {
+        FieldDescriptor(
+            changed: { previous, current in
+                previous[keyPath: keyPath] != current[keyPath: keyPath]
+            },
+            clearIfMatchingParent: { child, parent in
+                guard let childValue = child[keyPath: keyPath],
+                      let parentValue = parent[keyPath: keyPath],
+                      childValue == parentValue else {
+                    return false
+                }
+                child[keyPath: keyPath] = nil
+                return true
+            }
+        )
+    }
+
+    internal static let trackedFields: [FieldDescriptor] = [
+        field(\.fontSize),
+        field(\.fontFamily),
+        field(\.lineSpacing),
+        field(\.marginLeft),
+        field(\.marginRight),
+        field(\.maxWidth),
+        field(\.topMargin),
+        field(\.strongsMode),
+        field(\.showMorphology),
+        field(\.showFootNotes),
+        field(\.showFootNotesInline),
+        field(\.expandXrefs),
+        field(\.showXrefs),
+        field(\.showRedLetters),
+        field(\.showSectionTitles),
+        field(\.showVerseNumbers),
+        field(\.showVersePerLine),
+        field(\.showBookmarks),
+        field(\.showMyNotes),
+        field(\.justifyText),
+        field(\.hyphenation),
+        field(\.showPageNumber),
+        field(\.dayTextColor),
+        field(\.dayBackground),
+        field(\.dayNoise),
+        field(\.nightTextColor),
+        field(\.nightBackground),
+        field(\.nightNoise),
+        field(\.bookmarksHideLabels),
+        field(\.enableVerseSelection),
+    ]
+
+    internal static func changedFields(
+        from previous: TextDisplaySettings,
+        to current: TextDisplaySettings
+    ) -> [FieldDescriptor] {
+        trackedFields.filter { $0.changed(previous, current) }
+    }
+
+    @discardableResult
+    internal mutating func clearOverridesMatchingParent(
+        _ parent: TextDisplaySettings,
+        only fields: [FieldDescriptor]? = nil
+    ) -> Bool {
+        var anyChanged = false
+        for field in fields ?? Self.trackedFields {
+            anyChanged = field.clearIfMatchingParent(&self, parent) || anyChanged
+        }
+        return anyChanged
+    }
+
+    /// Clears overrides that already match the current effective parent value.
+    @discardableResult
+    public mutating func clearRedundantOverrides(matching parent: TextDisplaySettings) -> Bool {
+        clearOverridesMatchingParent(parent)
+    }
+
+    /**
+     Clears overrides that match the current parent for fields changed by another source scope.
+
+     Use this when the fields that changed come from one scope, but the child should be compared
+     against an already-resolved current parent value.
+     */
+    @discardableResult
+    public mutating func clearOverridesMatchingParent(
+        _ parent: TextDisplaySettings,
+        changedFrom previousSource: TextDisplaySettings,
+        to currentSource: TextDisplaySettings
+    ) -> Bool {
+        clearOverridesMatchingParent(
+            parent,
+            only: Self.changedFields(from: previousSource, to: currentSource)
+        )
+    }
+
     /**
      Resolves every display property into a fully populated settings struct.
 
      - Parameters:
        - window: Window-level overrides, checked before workspace values.
-       - workspace: Workspace-level overrides, checked before `appDefaults`.
+       - workspace: Workspace-level overrides, checked before global values.
+       - global: App-level overrides, checked before `appDefaults`.
      - Returns: A new `TextDisplaySettings` containing no inherited gaps for the supported
        fields.
      - Note: The method is deterministic and side-effect free. Callers remain responsible for
@@ -342,40 +445,84 @@ public struct TextDisplaySettings: Codable, Sendable, Equatable {
      */
     public static func fullyResolved(
         window: TextDisplaySettings?,
-        workspace: TextDisplaySettings?
+        workspace: TextDisplaySettings?,
+        global: TextDisplaySettings? = nil
     ) -> TextDisplaySettings {
         let d = appDefaults
         var r = TextDisplaySettings()
-        r.fontSize = window?.fontSize ?? workspace?.fontSize ?? d.fontSize
-        r.fontFamily = window?.fontFamily ?? workspace?.fontFamily ?? d.fontFamily
-        r.lineSpacing = window?.lineSpacing ?? workspace?.lineSpacing ?? d.lineSpacing
-        r.marginLeft = window?.marginLeft ?? workspace?.marginLeft ?? d.marginLeft
-        r.marginRight = window?.marginRight ?? workspace?.marginRight ?? d.marginRight
-        r.maxWidth = window?.maxWidth ?? workspace?.maxWidth ?? d.maxWidth
-        r.topMargin = window?.topMargin ?? workspace?.topMargin ?? d.topMargin
-        r.strongsMode = window?.strongsMode ?? workspace?.strongsMode ?? d.strongsMode
-        r.showMorphology = window?.showMorphology ?? workspace?.showMorphology ?? d.showMorphology
-        r.showFootNotes = window?.showFootNotes ?? workspace?.showFootNotes ?? d.showFootNotes
-        r.showFootNotesInline = window?.showFootNotesInline ?? workspace?.showFootNotesInline ?? d.showFootNotesInline
-        r.expandXrefs = window?.expandXrefs ?? workspace?.expandXrefs ?? d.expandXrefs
-        r.showXrefs = window?.showXrefs ?? workspace?.showXrefs ?? d.showXrefs
-        r.showRedLetters = window?.showRedLetters ?? workspace?.showRedLetters ?? d.showRedLetters
-        r.showSectionTitles = window?.showSectionTitles ?? workspace?.showSectionTitles ?? d.showSectionTitles
-        r.showVerseNumbers = window?.showVerseNumbers ?? workspace?.showVerseNumbers ?? d.showVerseNumbers
-        r.showVersePerLine = window?.showVersePerLine ?? workspace?.showVersePerLine ?? d.showVersePerLine
-        r.showBookmarks = window?.showBookmarks ?? workspace?.showBookmarks ?? d.showBookmarks
-        r.showMyNotes = window?.showMyNotes ?? workspace?.showMyNotes ?? d.showMyNotes
-        r.justifyText = window?.justifyText ?? workspace?.justifyText ?? d.justifyText
-        r.hyphenation = window?.hyphenation ?? workspace?.hyphenation ?? d.hyphenation
-        r.showPageNumber = window?.showPageNumber ?? workspace?.showPageNumber ?? d.showPageNumber
-        r.dayTextColor = window?.dayTextColor ?? workspace?.dayTextColor ?? d.dayTextColor
-        r.dayBackground = window?.dayBackground ?? workspace?.dayBackground ?? d.dayBackground
-        r.dayNoise = window?.dayNoise ?? workspace?.dayNoise ?? d.dayNoise
-        r.nightTextColor = window?.nightTextColor ?? workspace?.nightTextColor ?? d.nightTextColor
-        r.nightBackground = window?.nightBackground ?? workspace?.nightBackground ?? d.nightBackground
-        r.nightNoise = window?.nightNoise ?? workspace?.nightNoise ?? d.nightNoise
-        r.bookmarksHideLabels = window?.bookmarksHideLabels ?? workspace?.bookmarksHideLabels ?? d.bookmarksHideLabels
-        r.enableVerseSelection = window?.enableVerseSelection ?? workspace?.enableVerseSelection ?? d.enableVerseSelection
+        r.fontSize = window?.fontSize ?? workspace?.fontSize ?? global?.fontSize ?? d.fontSize
+        r.fontFamily = window?.fontFamily ?? workspace?.fontFamily ?? global?.fontFamily ?? d.fontFamily
+        r.lineSpacing = window?.lineSpacing ?? workspace?.lineSpacing ?? global?.lineSpacing ?? d.lineSpacing
+        r.marginLeft = window?.marginLeft ?? workspace?.marginLeft ?? global?.marginLeft ?? d.marginLeft
+        r.marginRight = window?.marginRight ?? workspace?.marginRight ?? global?.marginRight ?? d.marginRight
+        r.maxWidth = window?.maxWidth ?? workspace?.maxWidth ?? global?.maxWidth ?? d.maxWidth
+        r.topMargin = window?.topMargin ?? workspace?.topMargin ?? global?.topMargin ?? d.topMargin
+        r.strongsMode = window?.strongsMode ?? workspace?.strongsMode ?? global?.strongsMode ?? d.strongsMode
+        r.showMorphology = window?.showMorphology ?? workspace?.showMorphology ?? global?.showMorphology ?? d.showMorphology
+        r.showFootNotes = window?.showFootNotes ?? workspace?.showFootNotes ?? global?.showFootNotes ?? d.showFootNotes
+        r.showFootNotesInline = window?.showFootNotesInline ?? workspace?.showFootNotesInline ?? global?.showFootNotesInline ?? d.showFootNotesInline
+        r.expandXrefs = window?.expandXrefs ?? workspace?.expandXrefs ?? global?.expandXrefs ?? d.expandXrefs
+        r.showXrefs = window?.showXrefs ?? workspace?.showXrefs ?? global?.showXrefs ?? d.showXrefs
+        r.showRedLetters = window?.showRedLetters ?? workspace?.showRedLetters ?? global?.showRedLetters ?? d.showRedLetters
+        r.showSectionTitles = window?.showSectionTitles ?? workspace?.showSectionTitles ?? global?.showSectionTitles ?? d.showSectionTitles
+        r.showVerseNumbers = window?.showVerseNumbers ?? workspace?.showVerseNumbers ?? global?.showVerseNumbers ?? d.showVerseNumbers
+        r.showVersePerLine = window?.showVersePerLine ?? workspace?.showVersePerLine ?? global?.showVersePerLine ?? d.showVersePerLine
+        r.showBookmarks = window?.showBookmarks ?? workspace?.showBookmarks ?? global?.showBookmarks ?? d.showBookmarks
+        r.showMyNotes = window?.showMyNotes ?? workspace?.showMyNotes ?? global?.showMyNotes ?? d.showMyNotes
+        r.justifyText = window?.justifyText ?? workspace?.justifyText ?? global?.justifyText ?? d.justifyText
+        r.hyphenation = window?.hyphenation ?? workspace?.hyphenation ?? global?.hyphenation ?? d.hyphenation
+        r.showPageNumber = window?.showPageNumber ?? workspace?.showPageNumber ?? global?.showPageNumber ?? d.showPageNumber
+        r.dayTextColor = window?.dayTextColor ?? workspace?.dayTextColor ?? global?.dayTextColor ?? d.dayTextColor
+        r.dayBackground = window?.dayBackground ?? workspace?.dayBackground ?? global?.dayBackground ?? d.dayBackground
+        r.dayNoise = window?.dayNoise ?? workspace?.dayNoise ?? global?.dayNoise ?? d.dayNoise
+        r.nightTextColor = window?.nightTextColor ?? workspace?.nightTextColor ?? global?.nightTextColor ?? d.nightTextColor
+        r.nightBackground = window?.nightBackground ?? workspace?.nightBackground ?? global?.nightBackground ?? d.nightBackground
+        r.nightNoise = window?.nightNoise ?? workspace?.nightNoise ?? global?.nightNoise ?? d.nightNoise
+        r.bookmarksHideLabels = window?.bookmarksHideLabels ?? workspace?.bookmarksHideLabels ?? global?.bookmarksHideLabels ?? d.bookmarksHideLabels
+        r.enableVerseSelection = window?.enableVerseSelection ?? workspace?.enableVerseSelection ?? global?.enableVerseSelection ?? d.enableVerseSelection
         return r
+    }
+
+    /**
+     Removes day/night theme color fields so the value inherits theme colors from its parent scope.
+
+     The remaining text-display fields are left untouched. This mirrors Android's split where global
+     text colors are a parent default and workspaces only override them when explicitly edited at the
+     workspace level.
+     */
+    public mutating func clearThemeColors() {
+        dayTextColor = nil
+        dayBackground = nil
+        dayNoise = nil
+        nightTextColor = nil
+        nightBackground = nil
+        nightNoise = nil
+    }
+
+    /// Whether this value explicitly overrides any day/night theme color field.
+    public var hasThemeColorOverrides: Bool {
+        dayTextColor != nil ||
+            dayBackground != nil ||
+            dayNoise != nil ||
+            nightTextColor != nil ||
+            nightBackground != nil ||
+            nightNoise != nil
+    }
+
+    /// Copies day/night theme color fields from another settings value.
+    public mutating func restoreThemeColors(from source: TextDisplaySettings) {
+        dayTextColor = source.dayTextColor
+        dayBackground = source.dayBackground
+        dayNoise = source.dayNoise
+        nightTextColor = source.nightTextColor
+        nightBackground = source.nightBackground
+        nightNoise = source.nightNoise
+    }
+
+    /// Returns a copy with day/night theme color overrides removed.
+    public func clearingThemeColors() -> TextDisplaySettings {
+        var copy = self
+        copy.clearThemeColors()
+        return copy
     }
 }

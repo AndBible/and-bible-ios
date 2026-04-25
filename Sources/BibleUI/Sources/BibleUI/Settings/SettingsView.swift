@@ -12,12 +12,12 @@ import UIKit
  Top-level application settings screen covering reader behavior, appearance, security, sync, and
  module-backed preference selection.
 
- The view mixes direct `TextDisplaySettings` bindings with persisted Android-parity preferences
- stored through `SettingsStore` and `UserDefaults`-backed `AppStorage`.
+ The view mixes direct global `TextDisplaySettings` bindings with persisted Android-parity
+ preferences stored through `SettingsStore` and `UserDefaults`-backed `AppStorage`.
 
  Data dependencies:
  - `modelContext` is used to load and persist Android-parity settings through `SettingsStore`
- - `displaySettings`, `nightMode`, and `nightModeMode` are shared reader settings owned by the parent
+ - `displaySettings`, `nightMode`, and `nightModeMode` are shared global settings owned by the parent
  - `colorScheme` and `openURL` influence night-mode resolution and system-settings actions
 
  Side effects:
@@ -37,7 +37,7 @@ public struct SettingsView: View {
     /// URL opener used for system-settings actions.
     @Environment(\.openURL) private var openURL
 
-    /// Shared text display settings edited by nested settings screens.
+    /// Shared global text-display settings edited by nested settings screens.
     @Binding var displaySettings: TextDisplaySettings
 
     /// Shared effective night-mode state used by the reader.

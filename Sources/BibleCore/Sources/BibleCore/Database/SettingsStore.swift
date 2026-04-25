@@ -47,9 +47,9 @@ public final class Setting {
  * - persist global local-only settings such as the active workspace ID
  * - route Android parity preferences to either SwiftData, `UserDefaults`, or no-op action storage
  *
- * Reading-display inheritance is intentionally outside this store. That chain is resolved through:
+ * Reading-display inheritance is resolved through:
  * `PageManager.textDisplaySettings` -> `Workspace.textDisplaySettings` ->
- * `TextDisplaySettings.appDefaults`.
+ * `SettingsStore.globalTextDisplaySettings` -> `TextDisplaySettings.appDefaults`.
  *
  * For Android parity settings keyed by `AppPreferenceKey`, this store routes persistence to the
  * correct backend:
@@ -80,6 +80,9 @@ public final class SettingsStore {
         self.modelContext = modelContext
     }
 
+    /// Local-only singleton setting key used for Android-style global text-display defaults.
+    public static let globalTextDisplaySettingsKey = "global_text_display_settings"
+
     // MARK: - String
 
     /**
@@ -102,6 +105,53 @@ public final class SettingsStore {
      */
     public func setString(_ key: String, value: String) {
         upsert(key: key, value: value)
+    }
+
+    // MARK: - Global Text Display Settings
+
+    /**
+     Reads the persisted app-level text-display defaults when present.
+
+     - Returns: Decoded global settings, or `nil` when the setting has never been saved or cannot
+       be decoded.
+     - Note: Callers that need an effective fallback should use `globalTextDisplaySettings()`.
+     */
+    public func storedGlobalTextDisplaySettings() -> TextDisplaySettings? {
+        guard let rawValue = getString(Self.globalTextDisplaySettingsKey),
+              let data = rawValue.data(using: .utf8) else {
+            return nil
+        }
+        return try? JSONDecoder().decode(TextDisplaySettings.self, from: data)
+    }
+
+    /**
+     Reads app-level text-display defaults, falling back to bundled defaults on first launch.
+
+     - Returns: Persisted global settings when available, otherwise `TextDisplaySettings.appDefaults`.
+     */
+    public func globalTextDisplaySettings() -> TextDisplaySettings {
+        storedGlobalTextDisplaySettings() ?? .appDefaults
+    }
+
+    /**
+     Persists app-level text-display defaults.
+
+     - Parameter settings: Fully or partially populated text-display defaults to store.
+     - Side Effects:
+       - encodes the settings as JSON and upserts the local singleton `Setting` row
+       - clears workspace/window overrides that now match the new effective parent values so they
+         inherit instead, mirroring Android's parent-setting propagation
+     - Failure: Encoding failures are swallowed, matching the soft-failure behavior of other
+       settings writes.
+     */
+    public func setGlobalTextDisplaySettings(_ settings: TextDisplaySettings) {
+        let previousSettings = globalTextDisplaySettings()
+        guard let data = try? JSONEncoder().encode(settings),
+              let rawValue = String(data: data, encoding: .utf8) else {
+            return
+        }
+        setString(Self.globalTextDisplaySettingsKey, value: rawValue)
+        propagateGlobalTextDisplaySettingsChange(from: previousSettings, to: settings)
     }
 
     // MARK: - Bool
@@ -265,6 +315,62 @@ public final class SettingsStore {
             modelContext.insert(Setting(key: key, value: value))
         }
         try? modelContext.save()
+    }
+
+    /**
+     Clears redundant workspace and window overrides after a global-settings change.
+
+     Android nulls child values that now match their effective parent so future parent changes keep
+     flowing through the inheritance chain. iOS needs the same cleanup to avoid stale workspace or
+     page-manager overrides after application Settings edits.
+     */
+    private func propagateGlobalTextDisplaySettingsChange(
+        from previousSettings: TextDisplaySettings,
+        to globalSettings: TextDisplaySettings
+    ) {
+        guard previousSettings != globalSettings else {
+            return
+        }
+
+        let descriptor = FetchDescriptor<Workspace>()
+        let workspaces = (try? modelContext.fetch(descriptor)) ?? []
+        var anyChanged = false
+
+        for workspace in workspaces {
+            let previousWorkspaceSettings = workspace.textDisplaySettings
+            if var workspaceSettings = previousWorkspaceSettings,
+               workspaceSettings.clearOverridesMatchingParent(
+                   globalSettings,
+                   changedFrom: previousSettings,
+                   to: globalSettings
+               ) {
+                workspace.textDisplaySettings = workspaceSettings
+                anyChanged = true
+            }
+
+            let currentWorkspaceParentSettings = TextDisplaySettings.fullyResolved(
+                window: nil,
+                workspace: workspace.textDisplaySettings,
+                global: globalSettings
+            )
+            for window in workspace.windows ?? [] {
+                guard var windowSettings = window.pageManager?.textDisplaySettings else {
+                    continue
+                }
+                if windowSettings.clearOverridesMatchingParent(
+                    currentWorkspaceParentSettings,
+                    changedFrom: previousSettings,
+                    to: globalSettings
+                ) {
+                    window.pageManager?.textDisplaySettings = windowSettings
+                    anyChanged = true
+                }
+            }
+        }
+
+        if anyChanged {
+            try? modelContext.save()
+        }
     }
 }
 

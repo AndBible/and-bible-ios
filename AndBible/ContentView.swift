@@ -17,7 +17,7 @@ struct ContentView: View {
     @State private var showWorkspaces = false
     @Environment(\.modelContext) private var modelContext
     @Environment(\.colorScheme) private var colorScheme
-    @State private var displaySettings: TextDisplaySettings = .appDefaults
+    @State private var globalDisplaySettings: TextDisplaySettings = .appDefaults
     @State private var nightMode = false
     @State private var nightModeMode = AppPreferenceRegistry.stringDefault(for: .nightModePref3) ?? NightModeSetting.system.rawValue
 
@@ -38,6 +38,7 @@ struct ContentView: View {
         }
         .preferredColorScheme(preferredColorSchemeOverride)
         .onAppear {
+            reloadGlobalDisplaySettings()
             reloadNightModePreferences()
         }
         .onChange(of: colorScheme) { _, _ in
@@ -63,6 +64,17 @@ struct ContentView: View {
             manualNightMode: manualNightMode,
             systemIsDark: colorScheme == .dark
         )
+    }
+
+    private func reloadGlobalDisplaySettings() {
+        let store = SettingsStore(modelContext: modelContext)
+        globalDisplaySettings = store.globalTextDisplaySettings()
+    }
+
+    private func applyGlobalDisplaySettingsChange() {
+        let store = SettingsStore(modelContext: modelContext)
+        store.setGlobalTextDisplaySettings(globalDisplaySettings)
+        reloadNightModePreferences()
     }
 
     // MARK: - iOS Layout (adapts for iPhone vs iPad)
@@ -153,9 +165,10 @@ struct ContentView: View {
                 .accessibilityIdentifier("contentDownloadsLink")
                 NavigationLink {
                     SettingsView(
-                        displaySettings: $displaySettings,
+                        displaySettings: $globalDisplaySettings,
                         nightMode: $nightMode,
-                        nightModeMode: $nightModeMode
+                        nightModeMode: $nightModeMode,
+                        onSettingsChanged: applyGlobalDisplaySettingsChange
                     )
                 } label: {
                     Label("Settings", systemImage: "gear")
