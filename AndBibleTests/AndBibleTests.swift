@@ -1013,6 +1013,130 @@ final class AndBibleTests: XCTestCase {
         XCTAssertNil(createdWindow.pageManager?.textDisplaySettings)
     }
 
+    func testWorkspaceSelectionServicePersistsSelectedWorkspace() throws {
+        let container = try makeWorkspaceModelContainer()
+        let context = ModelContext(container)
+        let workspaceStore = WorkspaceStore(modelContext: context)
+        let settingsStore = SettingsStore(modelContext: context)
+        let windowManager = WindowManager(workspaceStore: workspaceStore)
+        let selectionService = WorkspaceSelectionService(
+            workspaceStore: workspaceStore,
+            settingsStore: settingsStore,
+            windowManager: windowManager
+        )
+
+        let first = workspaceStore.createWorkspace(name: "First")
+        let second = workspaceStore.createWorkspace(name: "Second")
+
+        selectionService.activate(first)
+        XCTAssertEqual(settingsStore.activeWorkspaceId, first.id)
+        XCTAssertEqual(windowManager.activeWorkspace?.id, first.id)
+
+        selectionService.activate(second)
+
+        XCTAssertEqual(settingsStore.activeWorkspaceId, second.id)
+        XCTAssertEqual(windowManager.activeWorkspace?.id, second.id)
+        XCTAssertEqual(windowManager.visibleWindows.first?.workspace?.id, second.id)
+    }
+
+    func testWorkspaceSelectionServiceRepairsActiveWorkspaceBeforeDelete() throws {
+        let container = try makeWorkspaceModelContainer()
+        let context = ModelContext(container)
+        let workspaceStore = WorkspaceStore(modelContext: context)
+        let settingsStore = SettingsStore(modelContext: context)
+        let windowManager = WindowManager(workspaceStore: workspaceStore)
+        let selectionService = WorkspaceSelectionService(
+            workspaceStore: workspaceStore,
+            settingsStore: settingsStore,
+            windowManager: windowManager
+        )
+
+        let first = workspaceStore.createWorkspace(name: "First")
+        let second = workspaceStore.createWorkspace(name: "Second")
+        selectionService.activate(first)
+
+        XCTAssertTrue(selectionService.deleteWorkspace(first))
+
+        XCTAssertNil(workspaceStore.workspace(id: first.id))
+        XCTAssertEqual(settingsStore.activeWorkspaceId, second.id)
+        XCTAssertEqual(windowManager.activeWorkspace?.id, second.id)
+        XCTAssertEqual(windowManager.visibleWindows.first?.workspace?.id, second.id)
+    }
+
+    func testWorkspaceSelectionServiceKeepsActiveWorkspaceWhenDeletingInactiveWorkspace() throws {
+        let container = try makeWorkspaceModelContainer()
+        let context = ModelContext(container)
+        let workspaceStore = WorkspaceStore(modelContext: context)
+        let settingsStore = SettingsStore(modelContext: context)
+        let windowManager = WindowManager(workspaceStore: workspaceStore)
+        let selectionService = WorkspaceSelectionService(
+            workspaceStore: workspaceStore,
+            settingsStore: settingsStore,
+            windowManager: windowManager
+        )
+
+        let first = workspaceStore.createWorkspace(name: "First")
+        let second = workspaceStore.createWorkspace(name: "Second")
+        let third = workspaceStore.createWorkspace(name: "Third")
+        selectionService.activate(second)
+
+        XCTAssertTrue(selectionService.deleteWorkspace(first))
+
+        XCTAssertNil(workspaceStore.workspace(id: first.id))
+        XCTAssertEqual(Set(workspaceStore.workspaces().map(\.id)), Set([second.id, third.id]))
+        XCTAssertEqual(settingsStore.activeWorkspaceId, second.id)
+        XCTAssertEqual(windowManager.activeWorkspace?.id, second.id)
+    }
+
+    func testWorkspaceSelectionServiceBatchDeleteRepairsActiveWorkspaceToSurvivor() throws {
+        let container = try makeWorkspaceModelContainer()
+        let context = ModelContext(container)
+        let workspaceStore = WorkspaceStore(modelContext: context)
+        let settingsStore = SettingsStore(modelContext: context)
+        let windowManager = WindowManager(workspaceStore: workspaceStore)
+        let selectionService = WorkspaceSelectionService(
+            workspaceStore: workspaceStore,
+            settingsStore: settingsStore,
+            windowManager: windowManager
+        )
+
+        let first = workspaceStore.createWorkspace(name: "First")
+        let second = workspaceStore.createWorkspace(name: "Second")
+        let third = workspaceStore.createWorkspace(name: "Third")
+        selectionService.activate(first)
+
+        XCTAssertTrue(selectionService.deleteWorkspaces([first, second]))
+
+        XCTAssertNil(workspaceStore.workspace(id: first.id))
+        XCTAssertNil(workspaceStore.workspace(id: second.id))
+        XCTAssertEqual(workspaceStore.workspaces().map(\.id), [third.id])
+        XCTAssertEqual(settingsStore.activeWorkspaceId, third.id)
+        XCTAssertEqual(windowManager.activeWorkspace?.id, third.id)
+        XCTAssertEqual(windowManager.visibleWindows.first?.workspace?.id, third.id)
+    }
+
+    func testWorkspaceSelectionServicePreservesFinalWorkspaceOnDelete() throws {
+        let container = try makeWorkspaceModelContainer()
+        let context = ModelContext(container)
+        let workspaceStore = WorkspaceStore(modelContext: context)
+        let settingsStore = SettingsStore(modelContext: context)
+        let windowManager = WindowManager(workspaceStore: workspaceStore)
+        let selectionService = WorkspaceSelectionService(
+            workspaceStore: workspaceStore,
+            settingsStore: settingsStore,
+            windowManager: windowManager
+        )
+
+        let only = workspaceStore.createWorkspace(name: "Only")
+        selectionService.activate(only)
+
+        XCTAssertFalse(selectionService.deleteWorkspace(only))
+
+        XCTAssertNotNil(workspaceStore.workspace(id: only.id))
+        XCTAssertEqual(settingsStore.activeWorkspaceId, only.id)
+        XCTAssertEqual(windowManager.activeWorkspace?.id, only.id)
+    }
+
     func testSettingsStoreGlobalTextDisplayPropagationClearsMatchingWorkspaceAndWindowOverrides() throws {
         let container = try makeWorkspaceModelContainer()
         let context = ModelContext(container)
