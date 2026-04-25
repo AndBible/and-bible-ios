@@ -13,10 +13,11 @@ import BibleCore
  Data dependencies:
  - `windowManager` provides the active workspace and performs active-workspace switching
  - `modelContext` is used by `WorkspaceStore` for create/update/delete/reorder operations
+ - `WorkspaceSelectionService` keeps active workspace state persisted for launch restore
  - `workspaces` is a live SwiftData query ordered by persisted workspace order
 
  Side effects:
- - selecting a row switches the active workspace and dismisses the sheet
+ - selecting a row switches and persists the active workspace, then dismisses the sheet
  - sheet-backed prompts create, rename, or clone workspaces through `WorkspaceStore`
  - swipe deletion, context-menu deletion, and move actions mutate persisted workspace state
  */
@@ -63,6 +64,18 @@ public struct WorkspaceSelectorView: View {
 
     private var dialogAccent: Color {
         AndroidDialogSurfacePalette.accent(for: colorScheme)
+    }
+
+    private var workspaceStore: WorkspaceStore {
+        WorkspaceStore(modelContext: modelContext)
+    }
+
+    private var workspaceSelectionService: WorkspaceSelectionService {
+        WorkspaceSelectionService(
+            workspaceStore: workspaceStore,
+            settingsStore: SettingsStore(modelContext: modelContext),
+            windowManager: windowManager
+        )
     }
 
     /**
@@ -173,13 +186,14 @@ public struct WorkspaceSelectorView: View {
      * - Parameter workspace: Workspace represented by the selectable row body.
      * - Returns: A button that switches the active workspace and dismisses the selector.
      * - Side effects:
-     *   - switches the active workspace through `WindowManager`
+     *   - switches the active workspace through `WorkspaceSelectionService`
+     *   - persists the selected workspace identifier for launch restore
      *   - dismisses the selector sheet after the switch
      * - Failure modes: This helper cannot fail.
      */
     private func workspaceSelectionButton(_ workspace: Workspace) -> some View {
         Button {
-            windowManager.setActiveWorkspace(workspace)
+            activateWorkspace(workspace)
             dismiss()
         } label: {
             workspaceRow(workspace)
@@ -211,8 +225,20 @@ public struct WorkspaceSelectorView: View {
                 deleteWorkspace(workspace)
             }
             .accessibilityIdentifier("workspaceSelectorDeleteAction")
-            .disabled(workspace.id == windowManager.activeWorkspace?.id)
+            .disabled(workspaces.count <= 1)
         }
+    }
+
+    /**
+     Switches the live and persisted active workspace together.
+
+     - Parameter workspace: Workspace to activate and restore on next launch.
+     - Side effects:
+       - updates `WindowManager.activeWorkspace`
+       - writes `SettingsStore.activeWorkspaceId`
+     */
+    private func activateWorkspace(_ workspace: Workspace) {
+        workspaceSelectionService.activate(workspace)
     }
 
     /**
@@ -324,18 +350,17 @@ public struct WorkspaceSelectorView: View {
      * - Parameter name: User-visible name to assign to the new workspace.
      * - Side effects:
      *   - persists one new workspace through `WorkspaceStore`
-     *   - in normal mode, switches the active workspace and dismisses the selector
+     *   - switches and persists the active workspace before dismissing the selector
      * - Failure modes:
      *   - returns without mutation when `name` is empty
      */
     private func createWorkspace(named name: String) {
         guard !name.isEmpty else { return }
-        let store = WorkspaceStore(modelContext: modelContext)
-        let workspace = store.createWorkspace(
+        let workspace = workspaceStore.createWorkspace(
             name: name,
             inheritingDefaultsFrom: windowManager.activeWorkspace
         )
-        windowManager.setActiveWorkspace(workspace)
+        activateWorkspace(workspace)
         dismiss()
     }
 
@@ -352,8 +377,7 @@ public struct WorkspaceSelectorView: View {
      */
     private func renameWorkspace(_ workspace: Workspace, to name: String) {
         guard !name.isEmpty else { return }
-        let store = WorkspaceStore(modelContext: modelContext)
-        store.renameWorkspace(workspace, to: name)
+        workspaceStore.renameWorkspace(workspace, to: name)
     }
 
     /**
@@ -369,37 +393,30 @@ public struct WorkspaceSelectorView: View {
      */
     private func cloneWorkspace(_ workspace: Workspace, as name: String) {
         guard !name.isEmpty else { return }
-        let store = WorkspaceStore(modelContext: modelContext)
-        store.cloneWorkspace(workspace, newName: name)
+        workspaceStore.cloneWorkspace(workspace, newName: name)
     }
 
     /**
-     Deletes a non-active workspace from the selector.
+     Deletes one workspace from the selector, repairing active selection when needed.
      *
      * - Parameter workspace: Workspace that should be removed.
      * - Side effects:
-     *   - deletes the workspace through `WorkspaceStore` when it is not active
+     *   - refuses to delete the final workspace
+     *   - switches to a surviving workspace before deleting the current active workspace
+     *   - deletes the workspace through `WorkspaceStore`
      * - Failure modes:
-     *   - returns without mutation when the requested workspace is the active workspace
+     *   - returns without mutation when the requested workspace is the only workspace
      */
     private func deleteWorkspace(_ workspace: Workspace) {
-        guard workspace.id != windowManager.activeWorkspace?.id else { return }
-        let store = WorkspaceStore(modelContext: modelContext)
-        store.delete(workspace)
+        workspaceSelectionService.deleteWorkspace(workspace)
     }
 
     /**
-     Deletes the selected workspaces, skipping the currently active workspace.
+     Deletes the selected workspaces, preserving and persisting a valid active workspace.
      */
     private func deleteWorkspaces(at offsets: IndexSet) {
-        let store = WorkspaceStore(modelContext: modelContext)
-        for index in offsets {
-            let workspace = workspaces[index]
-            if workspace.id == windowManager.activeWorkspace?.id {
-                continue
-            }
-            store.delete(workspace)
-        }
+        let selectedWorkspaces = offsets.map { workspaces[$0] }
+        workspaceSelectionService.deleteWorkspaces(selectedWorkspaces)
     }
 
     /**
@@ -408,8 +425,7 @@ public struct WorkspaceSelectorView: View {
     private func moveWorkspaces(from source: IndexSet, to destination: Int) {
         var reordered = Array(workspaces)
         reordered.move(fromOffsets: source, toOffset: destination)
-        let store = WorkspaceStore(modelContext: modelContext)
-        store.reorderWorkspaces(reordered)
+        workspaceStore.reorderWorkspaces(reordered)
     }
 }
 

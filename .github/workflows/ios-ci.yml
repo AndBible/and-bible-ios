@@ -179,12 +179,24 @@ jobs:
           fi
 
       - name: Upload prepared libsword XCFramework
+        id: upload_libsword_xcframework
+        continue-on-error: true
         uses: actions/upload-artifact@v6
         with:
           name: libsword-hosttool-xcframework
           path: libsword/libsword.xcframework
           if-no-files-found: error
           retention-days: 1
+
+      - name: Retry upload prepared libsword XCFramework
+        if: steps.upload_libsword_xcframework.outcome == 'failure'
+        uses: actions/upload-artifact@v6
+        with:
+          name: libsword-hosttool-xcframework
+          path: libsword/libsword.xcframework
+          if-no-files-found: error
+          retention-days: 1
+          overwrite: true
 
   ios-simulator-unit-tests:
     name: Unit Tests (Simulator)
@@ -297,13 +309,25 @@ jobs:
             --action test-without-building
 
       - name: Upload xcodebuild test result bundle
+        id: upload_unit_xcresult
         if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@v6
         with:
           name: andbible-xcresult-${{ github.run_id }}-unit
           path: .artifacts/*.xcresult
           if-no-files-found: warn
           retention-days: 14
+
+      - name: Retry upload xcodebuild test result bundle
+        if: always() && steps.upload_unit_xcresult.outcome == 'failure'
+        uses: actions/upload-artifact@v6
+        with:
+          name: andbible-xcresult-${{ github.run_id }}-unit
+          path: .artifacts/*.xcresult
+          if-no-files-found: warn
+          retention-days: 14
+          overwrite: true
 
   ios-simulator-ui-tests:
     name: ${{ matrix.job_name }}
@@ -437,13 +461,25 @@ jobs:
             --action test-without-building
 
       - name: Upload xcodebuild test result bundle
+        id: upload_ui_xcresult
         if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@v6
         with:
           name: andbible-xcresult-${{ github.run_id }}-${{ matrix.artifact_suffix }}
           path: .artifacts/*.xcresult
           if-no-files-found: warn
           retention-days: 14
+
+      - name: Retry upload xcodebuild test result bundle
+        if: always() && steps.upload_ui_xcresult.outcome == 'failure'
+        uses: actions/upload-artifact@v6
+        with:
+          name: andbible-xcresult-${{ github.run_id }}-${{ matrix.artifact_suffix }}
+          path: .artifacts/*.xcresult
+          if-no-files-found: warn
+          retention-days: 14
+          overwrite: true
 
       - name: Delete dedicated simulator
         if: always() && steps.simulator.outputs.simulator_created == 'true'
