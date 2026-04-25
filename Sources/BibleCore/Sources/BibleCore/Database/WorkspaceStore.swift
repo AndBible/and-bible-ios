@@ -216,6 +216,19 @@ public final class WorkspaceStore {
     }
 
     /**
+     * Deletes multiple workspaces and saves once after all rows are marked for deletion.
+     * - Parameter workspaces: Workspaces to delete.
+     * - Side Effects: Deletes each workspace graph and saves `modelContext` once.
+     * - Failure: Save errors are swallowed.
+     */
+    public func deleteWorkspaces(_ workspaces: [Workspace]) {
+        for workspace in workspaces {
+            modelContext.delete(workspace)
+        }
+        save()
+    }
+
+    /**
      * Rewrites workspace `orderNumber` fields to match the supplied ordering.
      * - Parameter workspaces: Workspaces in their new desired order.
      * - Side Effects: Mutates each workspace's `orderNumber` and saves `modelContext`.

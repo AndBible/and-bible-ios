@@ -96,9 +96,7 @@ public final class WorkspaceSelectionService {
             activate(survivingWorkspaces[0])
         }
 
-        for workspace in persistedWorkspaces where deletableIDs.contains(workspace.id) {
-            workspaceStore.delete(workspace)
-        }
+        workspaceStore.deleteWorkspaces(persistedWorkspaces.filter { deletableIDs.contains($0.id) })
 
         _ = repairActiveWorkspace(preferredFallback: survivingWorkspaces[0])
         return true
