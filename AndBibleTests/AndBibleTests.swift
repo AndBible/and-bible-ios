@@ -354,6 +354,16 @@ final class AndBibleTests: XCTestCase {
         XCTAssertTrue(String(describing: type(of: view)).contains("BibleReaderModulePicker"))
     }
 
+    func testBibleReaderSpeakMiniPlayerBuildsWithSpeakService() {
+        let view = BibleReaderSpeakMiniPlayer(
+            speakService: SpeakService(),
+            currentReference: "Genesis 1",
+            onShowControls: {}
+        )
+
+        XCTAssertTrue(String(describing: type(of: view)).contains("BibleReaderSpeakMiniPlayer"))
+    }
+
     func testBibleReaderNavigationDrawerBuildsWithActionHandler() {
         let view = BibleReaderNavigationDrawer(
             width: 306,
