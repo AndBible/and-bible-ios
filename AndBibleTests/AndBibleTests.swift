@@ -278,6 +278,60 @@ final class AndBibleTests: XCTestCase {
         )
     }
 
+    func testContentViewDoesNotContainLegacyRootSidebarShell() throws {
+        let testFileURL = URL(fileURLWithPath: #filePath)
+        let repoRoot = testFileURL
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let contentViewURL = repoRoot.appendingPathComponent("AndBible/ContentView.swift")
+
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: contentViewURL.path),
+            "Could not locate AndBible/ContentView.swift at expected path: \(contentViewURL.path). Update this regression test if the project layout changes."
+        )
+
+        guard FileManager.default.fileExists(atPath: contentViewURL.path) else {
+            return
+        }
+
+        let source = try String(contentsOf: contentViewURL, encoding: .utf8)
+
+        let searchTerm = "NavigationSplitView"
+        var searchStartIndex = source.startIndex
+        var foundLegacyRootSidebarShell = false
+
+        while searchStartIndex < source.endIndex,
+              let navigationSplitViewRange = source.range(
+                  of: searchTerm,
+                  range: searchStartIndex..<source.endIndex
+              ) {
+            let contextStart = source.index(
+                navigationSplitViewRange.lowerBound,
+                offsetBy: -1200,
+                limitedBy: source.startIndex
+            ) ?? source.startIndex
+            let contextEnd = source.index(
+                navigationSplitViewRange.upperBound,
+                offsetBy: 1200,
+                limitedBy: source.endIndex
+            ) ?? source.endIndex
+            let navigationSplitViewContext = String(source[contextStart..<contextEnd])
+
+            if navigationSplitViewContext.contains("contentTabBible")
+                && navigationSplitViewContext.contains("contentSettingsLink") {
+                foundLegacyRootSidebarShell = true
+                break
+            }
+
+            searchStartIndex = navigationSplitViewRange.upperBound
+        }
+
+        XCTAssertFalse(
+            foundLegacyRootSidebarShell,
+            "ContentView.swift appears to contain the legacy root sidebar shell pattern: NavigationSplitView with contentTabBible/contentSettingsLink in the same root layout region."
+        )
+    }
+
     func testColorARGBByteClampsIntermediatePickerComponents() {
         XCTAssertEqual(Color.clampedARGBByte(-0.25), 0)
         XCTAssertEqual(Color.clampedARGBByte(0.5), 128)
