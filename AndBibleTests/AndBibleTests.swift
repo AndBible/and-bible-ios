@@ -278,6 +278,19 @@ final class AndBibleTests: XCTestCase {
         )
     }
 
+    func testContentViewDoesNotContainLegacyRootSidebarShell() throws {
+        let testFileURL = URL(fileURLWithPath: #filePath)
+        let repoRoot = testFileURL
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let contentViewURL = repoRoot.appendingPathComponent("AndBible/ContentView.swift")
+        let source = try String(contentsOf: contentViewURL, encoding: .utf8)
+
+        XCTAssertFalse(source.contains("NavigationSplitView"))
+        XCTAssertFalse(source.contains("contentTabBible"))
+        XCTAssertFalse(source.contains("contentSettingsLink"))
+    }
+
     func testColorARGBByteClampsIntermediatePickerComponents() {
         XCTAssertEqual(Color.clampedARGBByte(-0.25), 0)
         XCTAssertEqual(Color.clampedARGBByte(0.5), 128)
