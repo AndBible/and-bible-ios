@@ -340,6 +340,20 @@ final class AndBibleTests: XCTestCase {
         XCTAssertTrue(String(describing: type(of: view)).contains("BibleReaderKeyboardShortcuts"))
     }
 
+    func testBibleReaderModulePickerBuildsForBibleCategory() {
+        let view = BibleReaderModulePicker(
+            controller: nil,
+            category: .bible,
+            onDismiss: {},
+            onOpenDownloads: {},
+            onOpenDictionaryBrowser: {},
+            onOpenGeneralBookBrowser: {},
+            onOpenMapBrowser: {}
+        )
+
+        XCTAssertTrue(String(describing: type(of: view)).contains("BibleReaderModulePicker"))
+    }
+
     func testBibleReaderNavigationDrawerBuildsWithActionHandler() {
         let view = BibleReaderNavigationDrawer(
             width: 306,

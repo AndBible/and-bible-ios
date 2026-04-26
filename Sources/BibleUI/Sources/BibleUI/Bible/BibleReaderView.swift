@@ -805,7 +805,15 @@ public struct BibleReaderView: View {
             }
         }
         .sheet(isPresented: $showModulePicker) {
-            modulePicker
+            BibleReaderModulePicker(
+                controller: panePresentationController,
+                category: pickerCategory,
+                onDismiss: { showModulePicker = false },
+                onOpenDownloads: { activeReaderSheet = .downloads },
+                onOpenDictionaryBrowser: { showDictionaryBrowser = true },
+                onOpenGeneralBookBrowser: { showGeneralBookBrowser = true },
+                onOpenMapBrowser: { showMapBrowser = true }
+            )
         }
         .sheet(isPresented: Binding(
             get: { crossReferences != nil },
@@ -1312,130 +1320,6 @@ public struct BibleReaderView: View {
                 handleHorizontalSwipe(from: window, direction: direction)
             }
         )
-    }
-
-    // MARK: - Module Picker
-
-    /**
-     Presents the module picker for the currently requested document category.
-
-     The picker auto-routes dictionary, general-book, map, and EPUB selections into their
-     respective browser sheets after switching the focused controller to the chosen module.
-     */
-    private var modulePicker: some View {
-        NavigationStack {
-            List {
-                let modules = panePresentationController?.installedModules(for: pickerCategory) ?? []
-                let activeNameForCategory = panePresentationController?.activeModuleName(for: pickerCategory)
-                let emptyMessage: String = {
-                    switch pickerCategory {
-                    case .commentary: return String(localized: "picker_no_commentary_modules")
-                    case .dictionary: return String(localized: "picker_no_dictionary_modules")
-                    case .generalBook: return String(localized: "picker_no_general_book_modules")
-                    case .map: return String(localized: "picker_no_map_modules")
-                    default: return String(localized: "picker_no_bible_modules")
-                    }
-                }()
-                if modules.isEmpty {
-                    VStack(spacing: 12) {
-                        Text(emptyMessage)
-                            .foregroundStyle(.secondary)
-                        Button(String(localized: "download_modules")) {
-                            showModulePicker = false
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                                activeReaderSheet = .downloads
-                            }
-                        }
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical)
-                } else {
-                    ForEach(modules, id: \.name) { (module: ModuleInfo) in
-                        Button {
-                            switch pickerCategory {
-                            case .commentary:
-                                panePresentationController?.switchCommentaryModule(to: module.name)
-                                if panePresentationController?.currentCategory != .commentary {
-                                    panePresentationController?.switchCategory(to: .commentary)
-                                }
-                            case .dictionary:
-                                panePresentationController?.switchDictionaryModule(to: module.name)
-                                panePresentationController?.switchCategory(to: .dictionary)
-                                showModulePicker = false
-                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                                    showDictionaryBrowser = true
-                                }
-                                return
-                            case .generalBook:
-                                panePresentationController?.switchGeneralBookModule(to: module.name)
-                                panePresentationController?.switchCategory(to: .generalBook)
-                                showModulePicker = false
-                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                                    showGeneralBookBrowser = true
-                                }
-                                return
-                            case .map:
-                                panePresentationController?.switchMapModule(to: module.name)
-                                panePresentationController?.switchCategory(to: .map)
-                                showModulePicker = false
-                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                                    showMapBrowser = true
-                                }
-                                return
-                            default:
-                                panePresentationController?.switchModule(to: module.name)
-                                if panePresentationController?.currentCategory != .bible {
-                                    panePresentationController?.switchCategory(to: .bible)
-                                }
-                            }
-                            showModulePicker = false
-                        } label: {
-                            HStack {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(module.name)
-                                        .font(.headline)
-                                    Text(module.description)
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                        .lineLimit(2)
-                                    Text(Locale.current.localizedString(forLanguageCode: module.language) ?? module.language)
-                                        .font(.caption2)
-                                        .foregroundStyle(.tertiary)
-                                }
-                                Spacer()
-                                if module.name == activeNameForCategory {
-                                    Image(systemName: "checkmark")
-                                        .foregroundStyle(Color.accentColor)
-                                        .fontWeight(.semibold)
-                                }
-                            }
-                            .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityIdentifier("modulePickerRow::\(module.name)")
-                    }
-                }
-            }
-            .accessibilityIdentifier("modulePickerScreen")
-            .navigationTitle({
-                switch pickerCategory {
-                case .commentary: return String(localized: "picker_select_commentary")
-                case .dictionary: return String(localized: "picker_select_dictionary")
-                case .generalBook: return String(localized: "picker_select_general_book")
-                case .map: return String(localized: "picker_select_map")
-                default: return String(localized: "picker_select_translation")
-                }
-            }())
-            #if os(iOS)
-            .navigationBarTitleDisplayMode(.inline)
-            #endif
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button(String(localized: "done")) { showModulePicker = false }
-                }
-            }
-        }
-        .presentationDetents([.medium, .large])
     }
 
     // MARK: - Speak Mini Player
