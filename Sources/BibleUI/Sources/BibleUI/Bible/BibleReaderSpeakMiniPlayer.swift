@@ -13,58 +13,76 @@ struct BibleReaderSpeakMiniPlayer: View {
     let onShowControls: () -> Void
 
     var body: some View {
-        Button(action: onShowControls) {
-            HStack(spacing: 12) {
-                Image(systemName: "waveform")
-                    .font(.body)
-                    .foregroundStyle(.secondary)
-
-                Text(speakService.currentTitle ?? currentReference)
-                    .font(.subheadline.weight(.medium))
-                    .lineLimit(1)
-
-                Spacer()
-
-                Button {
-                    speakService.skipBackward()
-                } label: {
-                    Image(systemName: "backward.fill")
+        HStack(spacing: 12) {
+            Button(action: onShowControls) {
+                HStack(spacing: 12) {
+                    Image(systemName: "waveform")
                         .font(.body)
-                        .frame(width: 32, height: 32)
-                }
+                        .foregroundStyle(.secondary)
 
-                Button {
-                    if speakService.isPaused {
-                        speakService.resume()
-                    } else {
-                        speakService.pause()
-                    }
-                } label: {
-                    Image(systemName: speakService.isPaused ? "play.fill" : "pause.fill")
-                        .font(.body)
-                        .frame(width: 32, height: 32)
-                }
+                    Text(speakService.currentTitle ?? currentReference)
+                        .font(.subheadline.weight(.medium))
+                        .lineLimit(1)
 
-                Button {
-                    speakService.skipForward()
-                } label: {
-                    Image(systemName: "forward.fill")
-                        .font(.body)
-                        .frame(width: 32, height: 32)
+                    Spacer()
                 }
-
-                Button {
-                    speakService.stop()
-                } label: {
-                    Image(systemName: "stop.fill")
-                        .font(.body)
-                        .frame(width: 32, height: 32)
-                }
+                .contentShape(Rectangle())
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
+            .buttonStyle(.plain)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityLabel(speakService.currentTitle ?? currentReference)
+            .accessibilityHint(String(localized: "speak_open_controls", defaultValue: "Open speech controls"))
+
+            Button {
+                speakService.skipBackward()
+            } label: {
+                Image(systemName: "backward.fill")
+                    .font(.body)
+                    .frame(width: 32, height: 32)
+            }
+            .accessibilityLabel(String(localized: "speak_skip_backward", defaultValue: "Skip backward"))
+
+            Button {
+                if speakService.isPaused {
+                    speakService.resume()
+                } else {
+                    speakService.pause()
+                }
+            } label: {
+                Image(systemName: speakService.isPaused ? "play.fill" : "pause.fill")
+                    .font(.body)
+                    .frame(width: 32, height: 32)
+            }
+            .accessibilityLabel(playPauseAccessibilityLabel)
+
+            Button {
+                speakService.skipForward()
+            } label: {
+                Image(systemName: "forward.fill")
+                    .font(.body)
+                    .frame(width: 32, height: 32)
+            }
+            .accessibilityLabel(String(localized: "speak_skip_forward", defaultValue: "Skip forward"))
+
+            Button {
+                speakService.stop()
+            } label: {
+                Image(systemName: "stop.fill")
+                    .font(.body)
+                    .frame(width: 32, height: 32)
+            }
+            .accessibilityLabel(String(localized: "stop"))
         }
         .buttonStyle(.plain)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
         .background(.ultraThinMaterial)
+    }
+
+    private var playPauseAccessibilityLabel: String {
+        if speakService.isPaused {
+            return String(localized: "speak_resume", defaultValue: "Resume")
+        }
+        return String(localized: "pause")
     }
 }

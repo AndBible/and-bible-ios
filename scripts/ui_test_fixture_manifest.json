@@ -37,7 +37,7 @@
   "AndBibleUITests/AndBibleUITests/testSyncSettingsCategoryToggleMutatesExportedState": "sync-nextcloud-bookmarks-enabled",
   "AndBibleUITests/AndBibleUITests/testSyncSettingsNextCloudInvalidURLShowsValidationStatus": "sync-nextcloud",
   "AndBibleUITests/AndBibleUITests/testThirdWindowBookmarkNavigationUpdatesOnlyTargetPaneContent": "bookmark-navigation",
-  "AndBibleUITests/AndBibleUITests/testThirdWindowDocumentSwitchUpdatesOnlyTargetPaneContent": "baseline",
+  "AndBibleUITests/AndBibleUITests/testThirdWindowDocumentSwitchUpdatesOnlyTargetPaneContent": "commentary-module",
   "AndBibleUITests/AndBibleUITests/testThirdWindowStrongsToggleAffectsOnlyActiveWindow": "baseline",
   "AndBibleUITests/AndBibleUITests/testTextDisplayFontFamilyButtonPresentsFontPicker": "baseline",
   "AndBibleUITests/AndBibleUITests/testTextDisplayJustifyToggleMutatesControlState": "baseline",

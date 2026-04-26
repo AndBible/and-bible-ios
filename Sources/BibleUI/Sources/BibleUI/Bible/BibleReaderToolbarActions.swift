@@ -167,6 +167,7 @@ struct BibleReaderToolbarActions<OverflowButton: View>: View {
                 .contentShape(Rectangle())
                 .accessibilityIdentifier("readerBibleToolbarButton")
                 .accessibilityLabel(String(localized: "bible"))
+                .accessibilityAddTraits(.isButton)
                 .onTapGesture(perform: onBibleTap)
                 .onLongPressGesture(perform: onBibleLongPress)
 
@@ -175,6 +176,7 @@ struct BibleReaderToolbarActions<OverflowButton: View>: View {
                 .contentShape(Rectangle())
                 .accessibilityIdentifier("readerCommentaryToolbarButton")
                 .accessibilityLabel(String(localized: "commentaries"))
+                .accessibilityAddTraits(.isButton)
                 .onTapGesture(perform: onCommentaryTap)
                 .onLongPressGesture(perform: onCommentaryLongPress)
 

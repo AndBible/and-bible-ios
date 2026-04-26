@@ -34,6 +34,7 @@ private enum ToolCommand: String {
 /// Deterministic fixture scenarios used by the UI automation suite.
 private enum FixtureScenario: String, CaseIterable {
     case baseline = "baseline"
+    case commentaryModule = "commentary-module"
     case searchIndexed = "search-indexed"
     case bookmarkNavigation = "bookmark-navigation"
     case bookmarkMultiRow = "bookmark-multirow"
@@ -224,6 +225,7 @@ private struct FixtureTool {
         try removeSQLiteFamily(at: paths.localStoreURL)
         try removeSQLiteFamily(at: paths.applicationSupportURL.appendingPathComponent("CloudStore.store"))
         try removeSQLiteFamily(at: paths.documentsURL.appendingPathComponent("search_indexes.sqlite"))
+        try removeUITestSwordModules(from: paths)
         if fileManager.fileExists(atPath: paths.preferencesURL.path) {
             try fileManager.removeItem(at: paths.preferencesURL)
         }
@@ -257,6 +259,24 @@ private struct FixtureTool {
             if fileManager.fileExists(atPath: candidateURL.path) {
                 try fileManager.removeItem(at: candidateURL)
             }
+        }
+    }
+
+    /**
+     Removes deterministic SWORD modules written by UI-test scenarios.
+
+     Baseline fixture resets intentionally leave bundled KJV in place, but scenario-local modules
+     must not leak into later grouped test runs that use the same simulator.
+     */
+    private func removeUITestSwordModules(from paths: FixturePaths) throws {
+        let fileManager = FileManager.default
+        let swordURL = paths.documentsURL.appendingPathComponent("sword", isDirectory: true)
+        let candidates = [
+            swordURL.appendingPathComponent("mods.d/uitestcomm.conf", isDirectory: false),
+            swordURL.appendingPathComponent("modules/comments/rawcom/uitestcomm", isDirectory: true),
+        ]
+        for candidate in candidates where fileManager.fileExists(atPath: candidate.path) {
+            try fileManager.removeItem(at: candidate)
         }
     }
 }
@@ -354,6 +374,8 @@ private final class FixtureContext {
         switch scenario {
         case .baseline:
             break
+        case .commentaryModule:
+            try seedUITestCommentaryModule()
         case .searchIndexed:
             try seedBundledSearchIndex()
         case .bookmarkNavigation:
@@ -564,6 +586,47 @@ private final class FixtureContext {
     /// SQLite destructor token instructing SQLite to copy bound text values.
     private var sqliteTransient: sqlite3_destructor_type {
         unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+    }
+
+    /**
+     Seeds a minimal SWORD commentary module used by document-switching UI tests.
+
+     The production bundle currently contains only KJV. Tests that exercise commentary switching
+     need a deterministic installed commentary row without redistributing another real module.
+     */
+    private func seedUITestCommentaryModule() throws {
+        let swordURL = paths.documentsURL.appendingPathComponent("sword", isDirectory: true)
+        let modsDURL = swordURL.appendingPathComponent("mods.d", isDirectory: true)
+        let dataURL = swordURL.appendingPathComponent(
+            "modules/comments/rawcom/uitestcomm",
+            isDirectory: true
+        )
+        try fileManager.createDirectory(at: modsDURL, withIntermediateDirectories: true)
+        try fileManager.createDirectory(at: dataURL, withIntermediateDirectories: true)
+
+        let conf = """
+        [UITestComm]
+        Description=UI Test Commentary
+        DataPath=./modules/comments/rawcom/uitestcomm/
+        ModDrv=RawCom
+        SourceType=OSIS
+        Encoding=UTF-8
+        Lang=en
+        Versification=KJV
+        About=Deterministic empty commentary module for iOS UI automation.
+        """
+        try conf.write(
+            to: modsDURL.appendingPathComponent("uitestcomm.conf", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        for fileName in ["ot", "ot.vss", "nt", "nt.vss"] {
+            let url = dataURL.appendingPathComponent(fileName, isDirectory: false)
+            if !fileManager.fileExists(atPath: url.path) {
+                try Data().write(to: url)
+            }
+        }
     }
 
     /**

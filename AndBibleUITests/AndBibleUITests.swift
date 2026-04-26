@@ -2647,19 +2647,26 @@ final class AndBibleUITests: XCTestCase {
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
-        let screen = requireElement("modulePickerScreen", in: app, timeout: timeout, file: file, line: line)
+        _ = requireElement("modulePickerScreen", in: app, timeout: timeout, file: file, line: line)
+        let predicate = NSPredicate(format: "identifier BEGINSWITH %@", "modulePickerRow::")
+        let candidates = [
+            app.buttons.matching(predicate).firstMatch,
+            app.collectionViews.buttons.matching(predicate).firstMatch,
+            app.collectionViews.cells.matching(predicate).firstMatch,
+            app.cells.matching(predicate).firstMatch,
+            app.otherElements.matching(predicate).firstMatch,
+        ]
         let deadline = Date().addingTimeInterval(timeout)
         repeat {
-            let button = screen.buttons.element(boundBy: 0)
-            if button.exists {
-                tapElementReliably(button, timeout: timeout, file: file, line: line)
+            if let row = candidates.first(where: { $0.exists || $0.waitForExistence(timeout: 0.2) }) {
+                tapElementReliably(row, timeout: timeout, file: file, line: line)
                 return
             }
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         } while Date() < deadline
 
         XCTFail(
-            "Expected module picker to expose at least one selectable module row within \(timeout) seconds.",
+            "Expected module picker to expose at least one 'modulePickerRow::' row within \(timeout) seconds.",
             file: file,
             line: line
         )
@@ -4648,6 +4655,7 @@ final class AndBibleUITests: XCTestCase {
             ]
         case "readerBibleToolbarButton", "readerCommentaryToolbarButton":
             return [
+                app.buttons[identifier].firstMatch,
                 app.otherElements[identifier].firstMatch,
                 app.images[identifier].firstMatch,
             ]
