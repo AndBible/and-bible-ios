@@ -162,6 +162,36 @@ public struct BibleReaderView: View {
         var id: String { rawValue }
     }
 
+    /// Coordinator-owned modal flows that do not require payload-backed sheet state.
+    private enum ReaderModal: String, Identifiable {
+        case syncSettings
+        case importExport
+        case compare
+        case speakControls
+        case modulePicker
+        case dictionaryBrowser
+        case generalBookBrowser
+        case mapBrowser
+        case epubLibrary
+        case epubBrowser
+        case epubSearch
+        case labelManager
+        case studyPadSelector
+        case chooseDocument
+        case help
+
+        var id: String { rawValue }
+
+        var shouldCapturePanePresentationTarget: Bool {
+            switch self {
+            case .syncSettings, .importExport, .help:
+                return false
+            default:
+                return true
+            }
+        }
+    }
+
     /// Internal reader-overflow destinations that should run only after the overflow sheet dismisses.
     private enum ReaderOverflowPresentation {
         case labelManager
@@ -203,6 +233,9 @@ public struct BibleReaderView: View {
     /// Presents the current top-level reader sheet driven by the overflow menu and shortcuts.
     @State private var activeReaderSheet: ReaderSheet?
 
+    /// Presents the current coordinator-owned modal flow.
+    @State private var activeReaderModal: ReaderModal?
+
     /// Presents the reader's overflow action sheet.
     @State private var showReaderOverflowMenu = false
 
@@ -217,27 +250,6 @@ public struct BibleReaderView: View {
 
     /// Queues one side-effect-only reader overflow action until the sheet finishes dismissing.
     @State private var pendingReaderOverflowCallback: (() -> Void)?
-
-    /// Presents the sync settings editor directly for focused workflow testing.
-    @State private var showSyncSettings = false
-
-    /// Presents the text-display editor directly for focused workflow testing.
-    @State private var showTextDisplaySettings = false
-
-    /// Presents the color-settings editor directly for focused workflow testing.
-    @State private var showColorSettings = false
-
-    /// Presents import and export management UI.
-    @State private var showImportExport = false
-
-
-
-    /// Presents the compare-translations sheet.
-    @State private var showCompare = false
-
-
-    /// Presents the expanded speech controls sheet.
-    @State private var showSpeakControls = false
 
     /// Last search-toolbar activation timestamp used to mirror Android button prioritization.
     @AppStorage("search-last-used") private var searchLastUsed = 0.0
@@ -265,9 +277,6 @@ public struct BibleReaderView: View {
 
     /// Pending cross-reference payload for modal presentation.
     @State private var crossReferences: [CrossReference]?
-
-    /// Presents the document-category-specific module picker.
-    @State private var showModulePicker = false
 
     /// Active module category that the picker should display.
     @State private var pickerCategory: DocumentCategory = .bible
@@ -330,24 +339,6 @@ public struct BibleReaderView: View {
     /// Accumulated user scroll distance toward the auto-fullscreen threshold.
     @State private var autoFullscreenDistance: Double = 0
 
-    /// Presents the dictionary key browser for the active dictionary module.
-    @State private var showDictionaryBrowser = false
-
-    /// Presents the general-book key browser for the active general-book module.
-    @State private var showGeneralBookBrowser = false
-
-    /// Presents the map browser for the active map module.
-    @State private var showMapBrowser = false
-
-    /// Presents the EPUB library chooser.
-    @State private var showEpubLibrary = false
-
-    /// Presents the current EPUB table-of-contents browser.
-    @State private var showEpubBrowser = false
-
-    /// Presents EPUB full-text search UI.
-    @State private var showEpubSearch = false
-
     /// Initial query forwarded into `SearchView`, usually from Strong's lookups.
     @State private var searchInitialQuery = ""
 
@@ -356,19 +347,6 @@ public struct BibleReaderView: View {
 
     /// Ensures the launch-seeded UI-test Search sheet is only auto-presented once per app session.
     @State private var didPresentUITestLaunchSearch = false
-
-    /// Presents label-management UI from the toolbar ellipsis menu.
-    @State private var showLabelManager = false
-
-    /// Presents the in-app help and tips screen.
-    @State private var showHelp = false
-
-    /// Presents the StudyPad label selector from the Android-style drawer.
-    @State private var showStudyPadSelector = false
-
-    /// Presents the Android-style choose-document surface from the drawer.
-    @State private var showChooseDocumentSheet = false
-
 
     /// Presents the reference chooser used by bridge-driven dialogs.
     @State private var showRefChooser = false
@@ -456,8 +434,9 @@ public struct BibleReaderView: View {
         let drawerToken = "drawerVisible=\(showReaderNavigationDrawer ? "true" : "false")"
         let overflowToken = "overflowVisible=\(showReaderOverflowMenu ? "true" : "false")"
         let sheetToken = "readerSheet=\(activeReaderSheet?.rawValue ?? "none")"
+        let modalToken = "readerModal=\(activeReaderModal?.rawValue ?? "none")"
         let searchToken = "searchVisible=\(showSearch ? "true" : "false")"
-        return "\(windowToken);\(contentToken);strongsMode=\(strongsMode);\(drawerToken);\(overflowToken);\(sheetToken);\(searchToken)"
+        return "\(windowToken);\(contentToken);strongsMode=\(strongsMode);\(drawerToken);\(overflowToken);\(sheetToken);\(modalToken);\(searchToken)"
     }
 
     /// Converts SWORD Roman-numeral book prefixes into Android-style Arabic numerals for toolbar display.
@@ -541,7 +520,7 @@ public struct BibleReaderView: View {
                 BibleReaderSpeakMiniPlayer(
                     speakService: speakService,
                     currentReference: currentReference,
-                    onShowControls: { showSpeakControls = true }
+                    onShowControls: { presentReaderModal(.speakControls) }
                 )
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
@@ -558,10 +537,7 @@ public struct BibleReaderView: View {
                         toastWorkItem = work
                         DispatchQueue.main.asyncAfter(deadline: .now() + 2.5, execute: work)
                     },
-                    onShowBookChooser: {
-                        setPanePresentationTarget(windowManager.activeWindow?.id)
-                        showBookChooser = true
-                    },
+                    onShowBookChooser: { presentBookChooser(from: windowManager.activeWindow?.id) },
                     onGoToTypedRef: { window, text in
                         guard let ctrl = windowManager.controllers[window.id] as? BibleReaderController else { return false }
                         return ctrl.navigateToRef(text)
@@ -658,7 +634,7 @@ public struct BibleReaderView: View {
                     books: panePresentationController?.bookList ?? BibleReaderController.defaultBooks,
                     navigateToVerse: navigateToVersePref
                 ) { book, chapter, verse in
-                    showBookChooser = false
+                    dismissBookChooser()
                     panePresentationController?.navigateTo(book: book, chapter: chapter, verse: verse)
                 }
             }
@@ -687,50 +663,12 @@ public struct BibleReaderView: View {
                 displaySettings: $globalDisplaySettings,
                 nightMode: $nightMode,
                 nightModeMode: $nightModeMode,
-                onDismiss: { activeReaderSheet = nil },
+                onDismiss: dismissReaderSheet,
                 onSettingsChanged: applyGlobalDisplaySettingsChange
             )
         }
-        .sheet(isPresented: $showTextDisplaySettings) {
-            NavigationStack {
-                TextDisplaySettingsView(settings: $globalDisplaySettings, onChange: applyGlobalDisplaySettingsChange)
-                    .toolbar {
-                        ToolbarItem(placement: .cancellationAction) {
-                            Button(String(localized: "done")) { showTextDisplaySettings = false }
-                        }
-                }
-            }
-        }
-        .sheet(isPresented: $showSyncSettings) {
-            NavigationStack {
-                SyncSettingsView()
-                    .toolbar {
-                        ToolbarItem(placement: .cancellationAction) {
-                            Button(String(localized: "done")) { showSyncSettings = false }
-                                .accessibilityIdentifier("syncSettingsDoneButton")
-                        }
-                    }
-            }
-        }
-        .sheet(isPresented: $showColorSettings) {
-            NavigationStack {
-                ColorSettingsView(settings: $globalDisplaySettings, onChange: applyGlobalDisplaySettingsChange)
-                    .toolbar {
-                        ToolbarItem(placement: .cancellationAction) {
-                            Button(String(localized: "done")) { showColorSettings = false }
-                        }
-                    }
-            }
-        }
-        .sheet(isPresented: $showImportExport) {
-            NavigationStack {
-                ImportExportView()
-                    .toolbar {
-                        ToolbarItem(placement: .cancellationAction) {
-                            Button(String(localized: "done")) { showImportExport = false }
-                        }
-                }
-            }
+        .sheet(item: $activeReaderModal) { modal in
+            readerModalContent(modal)
         }
         .confirmationDialog(
             localizedAndroidOverflowString(
@@ -786,20 +724,6 @@ public struct BibleReaderView: View {
                 lastFullScreenByDoubleTap = false
             }
         }
-        .sheet(isPresented: $showCompare) {
-            NavigationStack {
-                CompareView(
-                    book: panePresentationController?.currentBook ?? "Genesis",
-                    chapter: panePresentationController?.currentChapter ?? 1,
-                    currentModuleName: panePresentationController?.activeModuleName ?? "",
-                    resolvedOsisBookId: panePresentationController.flatMap { $0.osisBookId(for: $0.currentBook) }
-                )
-            }
-        }
-        .sheet(isPresented: $showSpeakControls) {
-            SpeakControlView(speakService: speakService)
-                .presentationDetents([.height(400), .large])
-        }
         .sheet(isPresented: Binding(
             get: { shareText != nil },
             set: { if !$0 { shareText = nil } }
@@ -807,17 +731,6 @@ public struct BibleReaderView: View {
             if let text = shareText {
                 ShareSheet(items: [text])
             }
-        }
-        .sheet(isPresented: $showModulePicker) {
-            BibleReaderModulePicker(
-                controller: panePresentationController,
-                category: pickerCategory,
-                onDismiss: { showModulePicker = false },
-                onOpenDownloads: { activeReaderSheet = .downloads },
-                onOpenDictionaryBrowser: { showDictionaryBrowser = true },
-                onOpenGeneralBookBrowser: { showGeneralBookBrowser = true },
-                onOpenMapBrowser: { showMapBrowser = true }
-            )
         }
         .sheet(isPresented: Binding(
             get: { crossReferences != nil },
@@ -829,112 +742,6 @@ public struct BibleReaderView: View {
                     panePresentationController?.navigateTo(book: book, chapter: chapter)
                 }
                 .presentationDetents([.medium, .large])
-            }
-        }
-        .sheet(isPresented: $showDictionaryBrowser) {
-            if let module = panePresentationController?.activeDictionaryModule {
-                DictionaryBrowserView(module: module) { key in
-                    showDictionaryBrowser = false
-                    panePresentationController?.loadDictionaryEntry(key: key)
-                }
-            }
-        }
-        .sheet(isPresented: $showGeneralBookBrowser) {
-            if let module = panePresentationController?.activeGeneralBookModule {
-                GeneralBookBrowserView(
-                    module: module,
-                    title: panePresentationController?.activeGeneralBookModuleName ?? String(localized: "general_book")
-                ) { key in
-                    showGeneralBookBrowser = false
-                    panePresentationController?.loadGeneralBookEntry(key: key)
-                }
-            }
-        }
-        .sheet(isPresented: $showMapBrowser) {
-            if let module = panePresentationController?.activeMapModule {
-                GeneralBookBrowserView(
-                    module: module,
-                    title: panePresentationController?.activeMapModuleName ?? String(localized: "map")
-                ) { key in
-                    showMapBrowser = false
-                    panePresentationController?.loadMapEntry(key: key)
-                }
-            }
-        }
-        .sheet(isPresented: $showEpubLibrary) {
-            EpubLibraryView { identifier in
-                showEpubLibrary = false
-                panePresentationController?.switchEpub(identifier: identifier)
-                panePresentationController?.switchCategory(to: .epub)
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                    showEpubBrowser = true
-                }
-            }
-        }
-        .sheet(isPresented: $showEpubBrowser) {
-            if let reader = panePresentationController?.activeEpubReader {
-                EpubBrowserView(reader: reader) { href in
-                    showEpubBrowser = false
-                    panePresentationController?.loadEpubEntry(href: href)
-                }
-            } else {
-                // No EPUB loaded — redirect to library
-                EpubLibraryView { identifier in
-                    showEpubBrowser = false
-                    panePresentationController?.switchEpub(identifier: identifier)
-                    panePresentationController?.switchCategory(to: .epub)
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                        showEpubBrowser = true
-                    }
-                }
-            }
-        }
-        .sheet(isPresented: $showEpubSearch) {
-            if let reader = panePresentationController?.activeEpubReader {
-                EpubSearchView(reader: reader) { href in
-                    showEpubSearch = false
-                    panePresentationController?.loadEpubEntry(href: href)
-                }
-            } else {
-                // No EPUB loaded — dismiss
-                Text(String(localized: "reader_no_epub_loaded"))
-                    .padding()
-            }
-        }
-        .sheet(isPresented: $showLabelManager) {
-            NavigationStack {
-                LabelManagerView()
-                    .toolbar {
-                        ToolbarItem(placement: .cancellationAction) {
-                            Button(String(localized: "done")) { showLabelManager = false }
-                        }
-                }
-            }
-        }
-        .sheet(isPresented: $showStudyPadSelector) {
-            NavigationStack {
-                LabelManagerView(onOpenStudyPad: { labelId in
-                    showStudyPadSelector = false
-                    panePresentationController?.loadStudyPadDocument(labelId: labelId)
-                })
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button(String(localized: "done")) { showStudyPadSelector = false }
-                    }
-                }
-            }
-        }
-        .sheet(isPresented: $showChooseDocumentSheet) {
-            readerChooseDocumentSheet
-        }
-        .sheet(isPresented: $showHelp) {
-            NavigationStack {
-                HelpView()
-                    .toolbar {
-                        ToolbarItem(placement: .cancellationAction) {
-                            Button(String(localized: "done")) { showHelp = false }
-                        }
-                    }
             }
         }
         .sheet(isPresented: $showRefChooser) {
@@ -952,25 +759,215 @@ public struct BibleReaderView: View {
         .background {
             BibleReaderKeyboardShortcuts(
                 onSearch: { presentSearch(from: windowManager.activeWindow?.id) },
-                onShowBookChooser: {
-                    setPanePresentationTarget(windowManager.activeWindow?.id)
-                    showBookChooser = true
-                },
-                onOpenBookmarks: {
-                    setPanePresentationTarget(windowManager.activeWindow?.id)
-                    activeReaderSheet = .bookmarks
-                },
+                onShowBookChooser: { presentBookChooser(from: windowManager.activeWindow?.id) },
+                onOpenBookmarks: { presentReaderSheet(.bookmarks, from: windowManager.activeWindow?.id) },
                 onNavigatePrevious: { focusedController?.navigatePrevious() },
                 onNavigateNext: { focusedController?.navigateNext() },
-                onOpenDownloads: {
-                    setPanePresentationTarget(windowManager.activeWindow?.id)
-                    activeReaderSheet = .downloads
-                },
-                onOpenSettings: {
-                    setPanePresentationTarget(windowManager.activeWindow?.id)
-                    activeReaderSheet = .settings
-                }
+                onOpenDownloads: { presentReaderSheet(.downloads, from: windowManager.activeWindow?.id) },
+                onOpenSettings: { presentReaderSheet(.settings, from: windowManager.activeWindow?.id) }
             )
+        }
+    }
+
+    // MARK: - Sheet Routing
+
+    /// Presents a top-level reader sheet and captures the pane target that should back it.
+    private func presentReaderSheet(_ sheet: ReaderSheet, from windowId: UUID? = nil) {
+        setPanePresentationTarget(windowId)
+        activeReaderSheet = sheet
+    }
+
+    /// Closes the currently active top-level reader sheet.
+    private func dismissReaderSheet() {
+        activeReaderSheet = nil
+    }
+
+    /// Presents a follow-up top-level sheet after another flow already captured the pane target.
+    private func presentReaderSheetPreservingPane(_ sheet: ReaderSheet) {
+        activeReaderSheet = sheet
+    }
+
+    /// Presents the book chooser for the pane that initiated the navigation.
+    private func presentBookChooser(from windowId: UUID? = nil) {
+        setPanePresentationTarget(windowId)
+        showBookChooser = true
+    }
+
+    /// Closes the book chooser without changing the current pane target.
+    private func dismissBookChooser() {
+        showBookChooser = false
+    }
+
+    // MARK: - Modal Routing
+
+    /// Presents a coordinator-owned modal and captures the pane target when that modal needs one.
+    private func presentReaderModal(_ modal: ReaderModal, from windowId: UUID? = nil) {
+        if modal.shouldCapturePanePresentationTarget {
+            setPanePresentationTarget(windowId)
+        }
+        activeReaderModal = modal
+    }
+
+    /// Closes the currently active coordinator-owned modal.
+    private func dismissReaderModal() {
+        activeReaderModal = nil
+    }
+
+    /// Presents the document-category module picker for a pane-scoped action.
+    private func presentModulePicker(_ category: DocumentCategory, from windowId: UUID? = nil) {
+        pickerCategory = category
+        presentReaderModal(.modulePicker, from: windowId)
+    }
+
+    /// Presents a follow-up modal after another modal already captured its pane target.
+    private func presentReaderModalPreservingPane(_ modal: ReaderModal) {
+        activeReaderModal = modal
+    }
+
+    @ViewBuilder
+    private func readerModalContent(_ modal: ReaderModal) -> some View {
+        switch modal {
+        case .syncSettings:
+            NavigationStack {
+                SyncSettingsView()
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button(String(localized: "done"), action: dismissReaderModal)
+                                .accessibilityIdentifier("syncSettingsDoneButton")
+                        }
+                    }
+            }
+        case .importExport:
+            NavigationStack {
+                ImportExportView()
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button(String(localized: "done"), action: dismissReaderModal)
+                        }
+                    }
+            }
+        case .compare:
+            NavigationStack {
+                CompareView(
+                    book: panePresentationController?.currentBook ?? "Genesis",
+                    chapter: panePresentationController?.currentChapter ?? 1,
+                    currentModuleName: panePresentationController?.activeModuleName ?? "",
+                    resolvedOsisBookId: panePresentationController.flatMap { $0.osisBookId(for: $0.currentBook) }
+                )
+            }
+        case .speakControls:
+            SpeakControlView(speakService: speakService)
+                .presentationDetents([.height(400), .large])
+        case .modulePicker:
+            BibleReaderModulePicker(
+                controller: panePresentationController,
+                category: pickerCategory,
+                onDismiss: dismissReaderModal,
+                onOpenDownloads: { presentReaderSheetPreservingPane(.downloads) },
+                onOpenDictionaryBrowser: { presentReaderModalPreservingPane(.dictionaryBrowser) },
+                onOpenGeneralBookBrowser: { presentReaderModalPreservingPane(.generalBookBrowser) },
+                onOpenMapBrowser: { presentReaderModalPreservingPane(.mapBrowser) }
+            )
+        case .dictionaryBrowser:
+            if let module = panePresentationController?.activeDictionaryModule {
+                DictionaryBrowserView(module: module) { key in
+                    dismissReaderModal()
+                    panePresentationController?.loadDictionaryEntry(key: key)
+                }
+            } else {
+                EmptyView()
+            }
+        case .generalBookBrowser:
+            if let module = panePresentationController?.activeGeneralBookModule {
+                GeneralBookBrowserView(
+                    module: module,
+                    title: panePresentationController?.activeGeneralBookModuleName ?? String(localized: "general_book")
+                ) { key in
+                    dismissReaderModal()
+                    panePresentationController?.loadGeneralBookEntry(key: key)
+                }
+            } else {
+                EmptyView()
+            }
+        case .mapBrowser:
+            if let module = panePresentationController?.activeMapModule {
+                GeneralBookBrowserView(
+                    module: module,
+                    title: panePresentationController?.activeMapModuleName ?? String(localized: "map")
+                ) { key in
+                    dismissReaderModal()
+                    panePresentationController?.loadMapEntry(key: key)
+                }
+            } else {
+                EmptyView()
+            }
+        case .epubLibrary:
+            EpubLibraryView { identifier in
+                dismissReaderModal()
+                panePresentationController?.switchEpub(identifier: identifier)
+                panePresentationController?.switchCategory(to: .epub)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    presentReaderModalPreservingPane(.epubBrowser)
+                }
+            }
+        case .epubBrowser:
+            if let reader = panePresentationController?.activeEpubReader {
+                EpubBrowserView(reader: reader) { href in
+                    dismissReaderModal()
+                    panePresentationController?.loadEpubEntry(href: href)
+                }
+            } else {
+                EpubLibraryView { identifier in
+                    dismissReaderModal()
+                    panePresentationController?.switchEpub(identifier: identifier)
+                    panePresentationController?.switchCategory(to: .epub)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                        presentReaderModalPreservingPane(.epubBrowser)
+                    }
+                }
+            }
+        case .epubSearch:
+            if let reader = panePresentationController?.activeEpubReader {
+                EpubSearchView(reader: reader) { href in
+                    dismissReaderModal()
+                    panePresentationController?.loadEpubEntry(href: href)
+                }
+            } else {
+                Text(String(localized: "reader_no_epub_loaded"))
+                    .padding()
+            }
+        case .labelManager:
+            NavigationStack {
+                LabelManagerView()
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button(String(localized: "done"), action: dismissReaderModal)
+                        }
+                    }
+            }
+        case .studyPadSelector:
+            NavigationStack {
+                LabelManagerView(onOpenStudyPad: { labelId in
+                    dismissReaderModal()
+                    panePresentationController?.loadStudyPadDocument(labelId: labelId)
+                })
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button(String(localized: "done"), action: dismissReaderModal)
+                    }
+                }
+            }
+        case .chooseDocument:
+            readerChooseDocumentSheet
+        case .help:
+            NavigationStack {
+                HelpView()
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button(String(localized: "done"), action: dismissReaderModal)
+                        }
+                    }
+            }
         }
     }
 
@@ -1132,86 +1129,68 @@ public struct BibleReaderView: View {
 
             switch presentation {
             case .labelManager:
-                showLabelManager = true
+                presentReaderModal(.labelManager)
             case .compare:
-                setPanePresentationTarget(windowManager.activeWindow?.id)
-                showCompare = true
+                presentReaderModal(.compare, from: windowManager.activeWindow?.id)
             case .bookmarks:
-                setPanePresentationTarget(windowManager.activeWindow?.id)
-                activeReaderSheet = .bookmarks
+                presentReaderSheet(.bookmarks, from: windowManager.activeWindow?.id)
             case .history:
-                setPanePresentationTarget(windowManager.activeWindow?.id)
-                activeReaderSheet = .history
+                presentReaderSheet(.history, from: windowManager.activeWindow?.id)
             case .readingPlans:
-                setPanePresentationTarget(windowManager.activeWindow?.id)
-                activeReaderSheet = .readingPlans
+                presentReaderSheet(.readingPlans, from: windowManager.activeWindow?.id)
             case .settings:
-                setPanePresentationTarget(windowManager.activeWindow?.id)
-                activeReaderSheet = .settings
+                presentReaderSheet(.settings, from: windowManager.activeWindow?.id)
             case .workspaces:
-                setPanePresentationTarget(windowManager.activeWindow?.id)
-                activeReaderSheet = .workspaces
+                presentReaderSheet(.workspaces, from: windowManager.activeWindow?.id)
             case .downloads:
-                setPanePresentationTarget(windowManager.activeWindow?.id)
-                activeReaderSheet = .downloads
+                presentReaderSheet(.downloads, from: windowManager.activeWindow?.id)
             case .epubLibrary:
-                setPanePresentationTarget(windowManager.activeWindow?.id)
-                showEpubLibrary = true
+                presentReaderModal(.epubLibrary, from: windowManager.activeWindow?.id)
             case .epubBrowser:
-                setPanePresentationTarget(windowManager.activeWindow?.id)
-                showEpubBrowser = true
+                presentReaderModal(.epubBrowser, from: windowManager.activeWindow?.id)
             case .epubSearch:
-                setPanePresentationTarget(windowManager.activeWindow?.id)
-                showEpubSearch = true
+                presentReaderModal(.epubSearch, from: windowManager.activeWindow?.id)
             case .help:
-                showHelp = true
+                presentReaderModal(.help)
             case .about:
-                setPanePresentationTarget(windowManager.activeWindow?.id)
-                activeReaderSheet = .about
+                presentReaderSheet(.about, from: windowManager.activeWindow?.id)
             }
         }
     }
 
     /** Opens Bookmarks from the reader shell. */
     private func openBookmarksFromReaderAction() {
-        setPanePresentationTarget(windowManager.activeWindow?.id)
-        activeReaderSheet = .bookmarks
+        presentReaderSheet(.bookmarks, from: windowManager.activeWindow?.id)
     }
 
     /** Opens History from the reader shell. */
     private func openHistoryFromReaderAction() {
-        setPanePresentationTarget(windowManager.activeWindow?.id)
-        activeReaderSheet = .history
+        presentReaderSheet(.history, from: windowManager.activeWindow?.id)
     }
 
     /** Opens Reading Plans from the reader shell. */
     private func openReadingPlansFromReaderAction() {
-        setPanePresentationTarget(windowManager.activeWindow?.id)
-        activeReaderSheet = .readingPlans
+        presentReaderSheet(.readingPlans, from: windowManager.activeWindow?.id)
     }
 
     /** Opens Settings from the reader shell. */
     private func openSettingsFromReaderAction() {
-        setPanePresentationTarget(windowManager.activeWindow?.id)
-        activeReaderSheet = .settings
+        presentReaderSheet(.settings, from: windowManager.activeWindow?.id)
     }
 
     /** Opens Workspaces from the reader shell. */
     private func openWorkspacesFromReaderAction() {
-        setPanePresentationTarget(windowManager.activeWindow?.id)
-        activeReaderSheet = .workspaces
+        presentReaderSheet(.workspaces, from: windowManager.activeWindow?.id)
     }
 
     /** Opens Downloads from the reader shell. */
     private func openDownloadsFromReaderAction() {
-        setPanePresentationTarget(windowManager.activeWindow?.id)
-        activeReaderSheet = .downloads
+        presentReaderSheet(.downloads, from: windowManager.activeWindow?.id)
     }
 
     /** Opens About from the reader shell. */
     private func openAboutFromReaderAction() {
-        setPanePresentationTarget(windowManager.activeWindow?.id)
-        activeReaderSheet = .about
+        presentReaderSheet(.about, from: windowManager.activeWindow?.id)
     }
 
     /**
@@ -1230,45 +1209,24 @@ public struct BibleReaderView: View {
             disableTwoStepBookmarking: disableTwoStepBookmarkingPref,
             hideWindowButtons: hideWindowButtonsPref,
             speakService: speakService,
-            onShowBookChooser: {
-                setPanePresentationTarget(window.id)
-                showBookChooser = true
-            },
+            onShowBookChooser: { presentBookChooser(from: window.id) },
             onShowSearch: { presentSearch(from: window.id) },
-            onShowBookmarks: {
-                setPanePresentationTarget(window.id)
-                activeReaderSheet = .bookmarks
-            },
-            onShowSettings: {
-                setPanePresentationTarget(window.id)
-                activeReaderSheet = .settings
-            },
-            onShowDownloads: {
-                setPanePresentationTarget(window.id)
-                activeReaderSheet = .downloads
-            },
-            onShowHistory: {
-                setPanePresentationTarget(window.id)
-                activeReaderSheet = .history
-            },
+            onShowBookmarks: { presentReaderSheet(.bookmarks, from: window.id) },
+            onShowSettings: { presentReaderSheet(.settings, from: window.id) },
+            onShowDownloads: { presentReaderSheet(.downloads, from: window.id) },
+            onShowHistory: { presentReaderSheet(.history, from: window.id) },
             onShowCompare: {
-                setPanePresentationTarget(window.id)
-                showCompare = true
+                presentReaderModal(.compare, from: window.id)
             },
-            onShowReadingPlans: {
-                setPanePresentationTarget(window.id)
-                activeReaderSheet = .readingPlans
-            },
-            onShowSpeakControls: { showSpeakControls = true },
+            onShowReadingPlans: { presentReaderSheet(.readingPlans, from: window.id) },
+            onShowSpeakControls: { presentReaderModal(.speakControls, from: window.id) },
             onShareText: { text in shareText = text },
             onShowCrossReferences: { refs in
                 setPanePresentationTarget(window.id)
                 crossReferences = refs
             },
             onShowModulePicker: { category in
-                setPanePresentationTarget(window.id)
-                pickerCategory = category
-                showModulePicker = true
+                presentModulePicker(category, from: window.id)
             },
             onShowToast: { text in
                 toastWorkItem?.cancel()
@@ -1279,10 +1237,7 @@ public struct BibleReaderView: View {
                 toastWorkItem = work
                 DispatchQueue.main.asyncAfter(deadline: .now() + 2.5, execute: work)
             },
-            onShowWorkspaces: {
-                setPanePresentationTarget(window.id)
-                activeReaderSheet = .workspaces
-            },
+            onShowWorkspaces: { presentReaderSheet(.workspaces, from: window.id) },
             onToggleFullScreen: {
                 if isFullScreen {
                     withAnimation(.easeInOut(duration: 0.2)) { isFullScreen = false }
@@ -1346,10 +1301,7 @@ public struct BibleReaderView: View {
                 }
             },
             onNavigatePrevious: { controller?.navigatePrevious() },
-            onShowBookChooser: {
-                setPanePresentationTarget(windowManager.activeWindow?.id)
-                showBookChooser = true
-            },
+            onShowBookChooser: { presentBookChooser(from: windowManager.activeWindow?.id) },
             onNavigateNext: { controller?.navigateNext() },
             onReturnFromMyNotes: { controller?.returnFromMyNotes() },
             onReturnFromStudyPad: { controller?.returnFromStudyPad() },
@@ -1357,10 +1309,10 @@ public struct BibleReaderView: View {
             onBrowseAuxiliary: {
                 setPanePresentationTarget(windowManager.activeWindow?.id)
                 switch controller?.currentCategory {
-                case .dictionary: showDictionaryBrowser = true
-                case .generalBook: showGeneralBookBrowser = true
-                case .map: showMapBrowser = true
-                case .epub: showEpubBrowser = true
+                case .dictionary: presentReaderModalPreservingPane(.dictionaryBrowser)
+                case .generalBook: presentReaderModalPreservingPane(.generalBookBrowser)
+                case .map: presentReaderModalPreservingPane(.mapBrowser)
+                case .epub: presentReaderModalPreservingPane(.epubBrowser)
                 default: break
                 }
             }
@@ -1581,7 +1533,7 @@ public struct BibleReaderView: View {
             activeChoice: activeReaderDocumentChoice,
             subtitle: readerDocumentChoiceSubtitle,
             onSelect: handleReaderDocumentChoice,
-            onDismiss: { showChooseDocumentSheet = false }
+            onDismiss: dismissReaderModal
         )
     }
 
@@ -1607,8 +1559,7 @@ public struct BibleReaderView: View {
         switch action {
         case .chooseDocument:
             dismissReaderNavigationDrawerAndPerform {
-                setPanePresentationTarget(windowManager.activeWindow?.id)
-                showChooseDocumentSheet = true
+                presentReaderModal(.chooseDocument, from: windowManager.activeWindow?.id)
             }
         case .search:
             dismissReaderNavigationDrawerAndPerform {
@@ -1619,21 +1570,19 @@ public struct BibleReaderView: View {
                 setPanePresentationTarget(windowManager.activeWindow?.id)
                 speakLastUsed = Date().timeIntervalSince1970
                 if speakService.isSpeaking {
-                    showSpeakControls = true
+                    presentReaderModal(.speakControls, from: windowManager.activeWindow?.id)
                 } else {
                     panePresentationController?.speakCurrentChapter()
-                    showSpeakControls = true
+                    presentReaderModal(.speakControls, from: windowManager.activeWindow?.id)
                 }
             }
         case .bookmarks:
             dismissReaderNavigationDrawerAndPerform {
-                setPanePresentationTarget(windowManager.activeWindow?.id)
-                activeReaderSheet = .bookmarks
+                presentReaderSheet(.bookmarks, from: windowManager.activeWindow?.id)
             }
         case .studyPads:
             dismissReaderNavigationDrawerAndPerform {
-                setPanePresentationTarget(windowManager.activeWindow?.id)
-                showStudyPadSelector = true
+                presentReaderModal(.studyPadSelector, from: windowManager.activeWindow?.id)
             }
         case .myNotes:
             dismissReaderNavigationDrawerAndPerform {
@@ -1642,30 +1591,26 @@ public struct BibleReaderView: View {
             }
         case .readingPlans:
             dismissReaderNavigationDrawerAndPerform {
-                setPanePresentationTarget(windowManager.activeWindow?.id)
-                activeReaderSheet = .readingPlans
+                presentReaderSheet(.readingPlans, from: windowManager.activeWindow?.id)
             }
         case .history:
             dismissReaderNavigationDrawerAndPerform {
-                setPanePresentationTarget(windowManager.activeWindow?.id)
-                activeReaderSheet = .history
+                presentReaderSheet(.history, from: windowManager.activeWindow?.id)
             }
         case .downloads:
             dismissReaderNavigationDrawerAndPerform {
-                setPanePresentationTarget(windowManager.activeWindow?.id)
-                activeReaderSheet = .downloads
+                presentReaderSheet(.downloads, from: windowManager.activeWindow?.id)
             }
         case .importExport:
-            dismissReaderNavigationDrawerAndPerform { showImportExport = true }
+            dismissReaderNavigationDrawerAndPerform { presentReaderModal(.importExport) }
         case .syncSettings:
-            dismissReaderNavigationDrawerAndPerform { showSyncSettings = true }
+            dismissReaderNavigationDrawerAndPerform { presentReaderModal(.syncSettings) }
         case .settings:
             dismissReaderNavigationDrawerAndPerform {
-                setPanePresentationTarget(windowManager.activeWindow?.id)
-                activeReaderSheet = .settings
+                presentReaderSheet(.settings, from: windowManager.activeWindow?.id)
             }
         case .help:
-            dismissReaderNavigationDrawerAndPerform { showHelp = true }
+            dismissReaderNavigationDrawerAndPerform { presentReaderModal(.help) }
         case .sponsorDevelopment:
             dismissReaderNavigationDrawerAndPerform {
                 openExternalLink("https://shop.andbible.org")
@@ -1680,8 +1625,7 @@ public struct BibleReaderView: View {
             }
         case .about:
             dismissReaderNavigationDrawerAndPerform {
-                setPanePresentationTarget(windowManager.activeWindow?.id)
-                activeReaderSheet = .about
+                presentReaderSheet(.about, from: windowManager.activeWindow?.id)
             }
         case .appLicense:
             dismissReaderNavigationDrawerAndPerform {
@@ -1769,62 +1713,62 @@ public struct BibleReaderView: View {
 
     /// Routes the choose-document selection into the existing reader module/category infrastructure.
     private func handleReaderDocumentChoice(_ choice: BibleReaderDocumentChoice) {
-        showChooseDocumentSheet = false
+        dismissReaderModal()
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
             guard let controller = panePresentationController else { return }
             switch choice {
             case .bible:
                 pickerCategory = .bible
-                showModulePicker = true
+                presentReaderModalPreservingPane(.modulePicker)
             case .commentary:
                 pickerCategory = .commentary
-                showModulePicker = true
+                presentReaderModalPreservingPane(.modulePicker)
             case .dictionary:
                 let modules = controller.installedDictionaryModules
                 if modules.isEmpty {
-                    activeReaderSheet = .downloads
+                    presentReaderSheetPreservingPane(.downloads)
                 } else if modules.count == 1 {
                     controller.switchDictionaryModule(to: modules[0].name)
                     controller.switchCategory(to: .dictionary)
-                    showDictionaryBrowser = true
+                    presentReaderModalPreservingPane(.dictionaryBrowser)
                 } else {
                     pickerCategory = .dictionary
-                    showModulePicker = true
+                    presentReaderModalPreservingPane(.modulePicker)
                 }
             case .generalBook:
                 let modules = controller.installedGeneralBookModules
                 if modules.isEmpty {
-                    activeReaderSheet = .downloads
+                    presentReaderSheetPreservingPane(.downloads)
                 } else if modules.count == 1 {
                     controller.switchGeneralBookModule(to: modules[0].name)
                     controller.switchCategory(to: .generalBook)
-                    showGeneralBookBrowser = true
+                    presentReaderModalPreservingPane(.generalBookBrowser)
                 } else {
                     pickerCategory = .generalBook
-                    showModulePicker = true
+                    presentReaderModalPreservingPane(.modulePicker)
                 }
             case .map:
                 let modules = controller.installedMapModules
                 if modules.isEmpty {
-                    activeReaderSheet = .downloads
+                    presentReaderSheetPreservingPane(.downloads)
                 } else if modules.count == 1 {
                     controller.switchMapModule(to: modules[0].name)
                     controller.switchCategory(to: .map)
-                    showMapBrowser = true
+                    presentReaderModalPreservingPane(.mapBrowser)
                 } else {
                     pickerCategory = .map
-                    showModulePicker = true
+                    presentReaderModalPreservingPane(.modulePicker)
                 }
             case .epub:
                 if !EpubReader.installedEpubs().isEmpty {
                     if controller.activeEpubReader != nil {
                         controller.switchCategory(to: .epub)
-                        showEpubBrowser = true
+                        presentReaderModalPreservingPane(.epubBrowser)
                     } else {
-                        showEpubLibrary = true
+                        presentReaderModalPreservingPane(.epubLibrary)
                     }
                 } else {
-                    activeReaderSheet = .downloads
+                    presentReaderSheetPreservingPane(.downloads)
                 }
             }
         }
@@ -1946,10 +1890,10 @@ public struct BibleReaderView: View {
             onShowSpeak: {
                 speakLastUsed = Date().timeIntervalSince1970
                 if speakService.isSpeaking {
-                    showSpeakControls = true
+                    presentReaderModal(.speakControls, from: windowManager.activeWindow?.id)
                 } else {
                     controller?.speakCurrentChapter()
-                    showSpeakControls = true
+                    presentReaderModal(.speakControls, from: windowManager.activeWindow?.id)
                 }
             },
             onApplyStrongsMode: { mode in applyStrongsMode(mode) },
@@ -1975,10 +1919,7 @@ public struct BibleReaderView: View {
                 suppressCommentaryTapAfterLongPress = true
                 handleCommentaryToolbarLongPress(controller)
             },
-            onShowWorkspaces: {
-                setPanePresentationTarget(windowManager.activeWindow?.id)
-                activeReaderSheet = .workspaces
-            }
+            onShowWorkspaces: { presentReaderSheet(.workspaces, from: windowManager.activeWindow?.id) }
         ) {
             readerOverflowToolbarButton
         }
@@ -2290,9 +2231,7 @@ public struct BibleReaderView: View {
      - Note: This is the SwiftUI-sheet equivalent of Android's document chooser activity.
      */
     private func performBibleChooserAction() {
-        setPanePresentationTarget(windowManager.activeWindow?.id)
-        pickerCategory = .bible
-        showModulePicker = true
+        presentModulePicker(.bible, from: windowManager.activeWindow?.id)
     }
 
     /**
@@ -2347,9 +2286,7 @@ public struct BibleReaderView: View {
      - Note: This is the SwiftUI-sheet equivalent of Android's document chooser activity.
      */
     private func performCommentaryChooserAction() {
-        setPanePresentationTarget(windowManager.activeWindow?.id)
-        pickerCategory = .commentary
-        showModulePicker = true
+        presentModulePicker(.commentary, from: windowManager.activeWindow?.id)
     }
 
     /**
