@@ -296,25 +296,38 @@ final class AndBibleTests: XCTestCase {
 
         let source = try String(contentsOf: contentViewURL, encoding: .utf8)
 
-        guard let navigationSplitViewRange = source.range(of: "NavigationSplitView") else {
-            return
+        let searchTerm = "NavigationSplitView"
+        var searchStartIndex = source.startIndex
+        var foundLegacyRootSidebarShell = false
+
+        while searchStartIndex < source.endIndex,
+              let navigationSplitViewRange = source.range(
+                  of: searchTerm,
+                  range: searchStartIndex..<source.endIndex
+              ) {
+            let contextStart = source.index(
+                navigationSplitViewRange.lowerBound,
+                offsetBy: -1200,
+                limitedBy: source.startIndex
+            ) ?? source.startIndex
+            let contextEnd = source.index(
+                navigationSplitViewRange.upperBound,
+                offsetBy: 1200,
+                limitedBy: source.endIndex
+            ) ?? source.endIndex
+            let navigationSplitViewContext = String(source[contextStart..<contextEnd])
+
+            if navigationSplitViewContext.contains("contentTabBible")
+                && navigationSplitViewContext.contains("contentSettingsLink") {
+                foundLegacyRootSidebarShell = true
+                break
+            }
+
+            searchStartIndex = navigationSplitViewRange.upperBound
         }
 
-        let contextStart = source.index(
-            navigationSplitViewRange.lowerBound,
-            offsetBy: -1200,
-            limitedBy: source.startIndex
-        ) ?? source.startIndex
-        let contextEnd = source.index(
-            navigationSplitViewRange.upperBound,
-            offsetBy: 1200,
-            limitedBy: source.endIndex
-        ) ?? source.endIndex
-        let navigationSplitViewContext = String(source[contextStart..<contextEnd])
-
         XCTAssertFalse(
-            navigationSplitViewContext.contains("contentTabBible")
-                && navigationSplitViewContext.contains("contentSettingsLink"),
+            foundLegacyRootSidebarShell,
             "ContentView.swift appears to contain the legacy root sidebar shell pattern: NavigationSplitView with contentTabBible/contentSettingsLink in the same root layout region."
         )
     }
