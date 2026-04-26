@@ -150,7 +150,7 @@ struct ReaderWindowControlsAvoidanceMetrics {
  */
 public struct BibleReaderView: View {
     /// Top-level sheets launched from the reader shell or its global shortcuts.
-    private enum ReaderSheet: String, Identifiable {
+    enum ReaderSheet: String, Identifiable {
         case bookmarks
         case settings
         case downloads
@@ -631,90 +631,7 @@ public struct BibleReaderView: View {
         .toolbar(.hidden, for: .navigationBar)
         #endif
         .onAppear {
-            // Load persisted settings
-            let store = SettingsStore(modelContext: modelContext)
-            globalDisplaySettings = store.globalTextDisplaySettings()
-            nightModeMode = store.getString(.nightModePref3)
-            let manualNightMode = store.getBool("night_mode")
-            nightMode = NightModeSettingsResolver.isNightMode(
-                rawValue: nightModeMode,
-                manualNightMode: manualNightMode,
-                systemIsDark: colorScheme == .dark
-            )
-            navigateToVersePref = store.getBool(.navigateToVersePref)
-            autoFullscreenPref = store.getBool(.autoFullscreenPref)
-            disableTwoStepBookmarkingPref = store.getBool(.disableTwoStepBookmarking)
-            toolbarButtonActionsMode = store.getString(.toolbarButtonActions)
-            bibleViewSwipeMode = store.getString(.bibleViewSwipeMode)
-            fullScreenHideButtonsPref = store.getBool(.fullScreenHideButtonsPref)
-            hideWindowButtonsPref = store.getBool(.hideWindowButtons)
-            hideBibleReferenceOverlayPref = store.getBool(.hideBibleReferenceOverlay)
-            #if os(iOS)
-            UIApplication.shared.isIdleTimerDisabled = store.getBool(.screenKeepOnPref)
-            #endif
-
-            // Wire TTS settings persistence and restore saved speed
-            speakService.settingsStore = store
-            speakService.restoreSettings()
-
-            syncActiveDisplaySettings()
-
-            // TTS callbacks — dynamically resolve the focused controller so TTS
-            // always operates on the active window (not the last-initialized pane).
-            let wm = windowManager
-            speakService.onRequestNext = {
-                if let activeId = wm.activeWindow?.id,
-                   let ctrl = wm.controllers[activeId] as? BibleReaderController {
-                    ctrl.navigateNext()
-                    ctrl.speakCurrentChapter()
-                }
-            }
-            speakService.onRequestPrevious = {
-                if let activeId = wm.activeWindow?.id,
-                   let ctrl = wm.controllers[activeId] as? BibleReaderController {
-                    ctrl.navigatePrevious()
-                    ctrl.speakCurrentChapter()
-                }
-            }
-            speakService.onFinishedSpeaking = {
-                if let activeId = wm.activeWindow?.id,
-                   let ctrl = wm.controllers[activeId] as? BibleReaderController {
-                    guard ctrl.hasNext else { return }
-                    ctrl.navigateNext()
-                    ctrl.speakCurrentChapter()
-                }
-            }
-
-            // Set up synchronized scrolling callback
-            windowManager.onSyncVerseChanged = { [weak windowManager] sourceWindow, ordinal, key in
-                guard let wm = windowManager else { return }
-                let syncTargets = wm.syncedWindows(for: sourceWindow)
-                    .filter { $0.id != sourceWindow.id }
-                for target in syncTargets {
-                    if let ctrl = wm.controllers[target.id] as? BibleReaderController {
-                        // Same book+chapter: scroll to verse. Different: navigate.
-                        let sourceBook = sourceWindow.pageManager?.bibleBibleBook
-                        let sourceChapter = sourceWindow.pageManager?.bibleChapterNo
-                        let targetBook = target.pageManager?.bibleBibleBook
-                        let targetChapter = target.pageManager?.bibleChapterNo
-                        if sourceBook == targetBook && sourceChapter == targetChapter {
-                            ctrl.scrollToOrdinal(ordinal)
-                        } else {
-                            // Parse key like "Gen.3.5" to navigate
-                            let parts = key.split(separator: ".")
-                            if parts.count >= 2,
-                               let chapter = Int(parts[1]) {
-                                let osisBook = String(parts[0])
-                                if let bookName = ctrl.bookName(forOsisId: osisBook) {
-                                    ctrl.navigateTo(book: bookName, chapter: chapter)
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            presentUITestLaunchSearchIfNeeded()
+            handleReaderAppear()
         }
         .onChange(of: windowManager.activeWindow?.id) { _, _ in
             syncActiveDisplaySettings()
@@ -760,78 +677,15 @@ public struct BibleReaderView: View {
             }
         }
         .sheet(item: $activeReaderSheet) { presentedSheet in
-            switch presentedSheet {
-            case .bookmarks:
-                NavigationStack {
-                    BookmarkListView(
-                        onNavigate: { book, chapter in
-                            activeReaderSheet = nil
-                            panePresentationController?.navigateTo(book: book, chapter: chapter)
-                        },
-                        onOpenStudyPad: { labelId in
-                            panePresentationController?.loadStudyPadDocument(labelId: labelId)
-                        }
-                    )
-                }
-            case .settings:
-                NavigationStack {
-                    SettingsView(
-                        displaySettings: $globalDisplaySettings,
-                        nightMode: $nightMode,
-                        nightModeMode: $nightModeMode,
-                        onSettingsChanged: applyGlobalDisplaySettingsChange
-                    )
-                    .toolbar {
-                        ToolbarItem(placement: .cancellationAction) {
-                            Button(String(localized: "done")) { activeReaderSheet = nil }
-                        }
-                    }
-                }
-            case .downloads:
-                NavigationStack {
-                    ModuleBrowserView()
-                        .toolbar {
-                            ToolbarItem(placement: .cancellationAction) {
-                                Button(String(localized: "done")) { activeReaderSheet = nil }
-                            }
-                        }
-                }
-            case .history:
-                NavigationStack {
-                    HistoryView(
-                        bookNameResolver: { [weak ctrl = panePresentationController] osisId in
-                            ctrl?.bookName(forOsisId: osisId)
-                        }
-                    ) { key in
-                        activeReaderSheet = nil
-                        _ = panePresentationController?.navigateToRef(key)
-                    }
-                }
-            case .readingPlans:
-                NavigationStack {
-                    ReadingPlanListView()
-                        .toolbar {
-                            ToolbarItem(placement: .cancellationAction) {
-                                Button(String(localized: "done")) { activeReaderSheet = nil }
-                            }
-                        }
-                }
-            case .workspaces:
-                NavigationStack {
-                    WorkspaceSelectorView()
-                }
-            case .about:
-                NavigationStack {
-                    AboutView()
-                        .toolbar {
-                            ToolbarItem(placement: .cancellationAction) {
-                                Button(String(localized: "done")) { activeReaderSheet = nil }
-                                    .accessibilityIdentifier("aboutDoneButton")
-                            }
-                        }
-                }
-                .accessibilityIdentifier("aboutSheetScreen")
-            }
+            BibleReaderActiveSheetContent(
+                sheet: presentedSheet,
+                controller: panePresentationController,
+                displaySettings: $globalDisplaySettings,
+                nightMode: $nightMode,
+                nightModeMode: $nightModeMode,
+                onDismiss: { activeReaderSheet = nil },
+                onSettingsChanged: applyGlobalDisplaySettingsChange
+            )
         }
         .sheet(isPresented: $showTextDisplaySettings) {
             NavigationStack {
@@ -1084,37 +938,129 @@ public struct BibleReaderView: View {
         }
         // MARK: - Keyboard Shortcuts (iPad/Mac)
         .background {
-            Group {
-                Button("") { presentSearch(from: windowManager.activeWindow?.id) }
-                    .keyboardShortcut("f", modifiers: .command)
-                Button("") {
+            BibleReaderKeyboardShortcuts(
+                onSearch: { presentSearch(from: windowManager.activeWindow?.id) },
+                onShowBookChooser: {
                     setPanePresentationTarget(windowManager.activeWindow?.id)
                     showBookChooser = true
-                }
-                    .keyboardShortcut("g", modifiers: .command)
-                Button("") {
+                },
+                onOpenBookmarks: {
                     setPanePresentationTarget(windowManager.activeWindow?.id)
                     activeReaderSheet = .bookmarks
-                }
-                    .keyboardShortcut("b", modifiers: .command)
-                Button("") { focusedController?.navigatePrevious() }
-                    .keyboardShortcut("[", modifiers: .command)
-                Button("") { focusedController?.navigateNext() }
-                    .keyboardShortcut("]", modifiers: .command)
-                Button("") {
+                },
+                onNavigatePrevious: { focusedController?.navigatePrevious() },
+                onNavigateNext: { focusedController?.navigateNext() },
+                onOpenDownloads: {
                     setPanePresentationTarget(windowManager.activeWindow?.id)
                     activeReaderSheet = .downloads
-                }
-                    .keyboardShortcut("d", modifiers: .command)
-                Button("") {
+                },
+                onOpenSettings: {
                     setPanePresentationTarget(windowManager.activeWindow?.id)
                     activeReaderSheet = .settings
                 }
-                    .keyboardShortcut(",", modifiers: .command)
+            )
+        }
+    }
+
+    // MARK: - Lifecycle Wiring
+
+    /**
+     Performs one-time reader setup when the SwiftUI screen appears.
+
+     This keeps the `body` focused on composition while leaving state loading and callback wiring
+     in the coordinator that owns the relevant services.
+     */
+    private func handleReaderAppear() {
+        let store = SettingsStore(modelContext: modelContext)
+        loadPersistedReaderSettings(from: store)
+        configureSpeakService(with: store)
+        syncActiveDisplaySettings()
+        installSynchronizedScrollingCallback()
+        presentUITestLaunchSearchIfNeeded()
+    }
+
+    /// Loads persisted display, behavior, and fullscreen preferences used by the reader shell.
+    private func loadPersistedReaderSettings(from store: SettingsStore) {
+        globalDisplaySettings = store.globalTextDisplaySettings()
+        nightModeMode = store.getString(.nightModePref3)
+        let manualNightMode = store.getBool("night_mode")
+        nightMode = NightModeSettingsResolver.isNightMode(
+            rawValue: nightModeMode,
+            manualNightMode: manualNightMode,
+            systemIsDark: colorScheme == .dark
+        )
+        navigateToVersePref = store.getBool(.navigateToVersePref)
+        autoFullscreenPref = store.getBool(.autoFullscreenPref)
+        disableTwoStepBookmarkingPref = store.getBool(.disableTwoStepBookmarking)
+        toolbarButtonActionsMode = store.getString(.toolbarButtonActions)
+        bibleViewSwipeMode = store.getString(.bibleViewSwipeMode)
+        fullScreenHideButtonsPref = store.getBool(.fullScreenHideButtonsPref)
+        hideWindowButtonsPref = store.getBool(.hideWindowButtons)
+        hideBibleReferenceOverlayPref = store.getBool(.hideBibleReferenceOverlay)
+        #if os(iOS)
+        UIApplication.shared.isIdleTimerDisabled = store.getBool(.screenKeepOnPref)
+        #endif
+    }
+
+    /// Wires TTS settings and callbacks to the currently active reader pane.
+    private func configureSpeakService(with store: SettingsStore) {
+        speakService.settingsStore = store
+        speakService.restoreSettings()
+
+        let wm = windowManager
+        speakService.onRequestNext = {
+            if let activeId = wm.activeWindow?.id,
+               let ctrl = wm.controllers[activeId] as? BibleReaderController {
+                ctrl.navigateNext()
+                ctrl.speakCurrentChapter()
             }
-            .frame(width: 0, height: 0)
-            .opacity(0)
-            .allowsHitTesting(false)
+        }
+        speakService.onRequestPrevious = {
+            if let activeId = wm.activeWindow?.id,
+               let ctrl = wm.controllers[activeId] as? BibleReaderController {
+                ctrl.navigatePrevious()
+                ctrl.speakCurrentChapter()
+            }
+        }
+        speakService.onFinishedSpeaking = {
+            if let activeId = wm.activeWindow?.id,
+               let ctrl = wm.controllers[activeId] as? BibleReaderController {
+                guard ctrl.hasNext else { return }
+                ctrl.navigateNext()
+                ctrl.speakCurrentChapter()
+            }
+        }
+    }
+
+    /// Registers synchronized scrolling behavior across windows in the active workspace.
+    private func installSynchronizedScrollingCallback() {
+        windowManager.onSyncVerseChanged = { [weak windowManager] sourceWindow, ordinal, key in
+            guard let wm = windowManager else { return }
+            let syncTargets = wm.syncedWindows(for: sourceWindow)
+                .filter { $0.id != sourceWindow.id }
+            for target in syncTargets {
+                guard let ctrl = wm.controllers[target.id] as? BibleReaderController else {
+                    continue
+                }
+
+                let sourceBook = sourceWindow.pageManager?.bibleBibleBook
+                let sourceChapter = sourceWindow.pageManager?.bibleChapterNo
+                let targetBook = target.pageManager?.bibleBibleBook
+                let targetChapter = target.pageManager?.bibleChapterNo
+                if sourceBook == targetBook && sourceChapter == targetChapter {
+                    ctrl.scrollToOrdinal(ordinal)
+                    continue
+                }
+
+                let parts = key.split(separator: ".")
+                if parts.count >= 2,
+                   let chapter = Int(parts[1]) {
+                    let osisBook = String(parts[0])
+                    if let bookName = ctrl.bookName(forOsisId: osisBook) {
+                        ctrl.navigateTo(book: bookName, chapter: chapter)
+                    }
+                }
+            }
         }
     }
 

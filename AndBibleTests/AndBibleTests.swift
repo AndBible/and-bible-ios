@@ -6,6 +6,7 @@ import SwiftData
 import SQLite3
 @testable import BibleUI
 @testable import BibleView
+import struct SwiftUI.Binding
 import enum SwiftUI.ColorScheme
 import struct SwiftUI.EdgeInsets
 import struct SwiftUI.EmptyView
@@ -309,6 +310,34 @@ final class AndBibleTests: XCTestCase {
         )
 
         XCTAssertTrue(String(describing: type(of: view)).contains("BibleReaderOverflowMenu"))
+    }
+
+    func testBibleReaderActiveSheetContentBuildsSettingsSheet() {
+        let view = BibleReaderActiveSheetContent(
+            sheet: .settings,
+            controller: nil,
+            displaySettings: Binding.constant(TextDisplaySettings()),
+            nightMode: Binding.constant(false),
+            nightModeMode: Binding.constant("system"),
+            onDismiss: {},
+            onSettingsChanged: {}
+        )
+
+        XCTAssertTrue(String(describing: type(of: view)).contains("BibleReaderActiveSheetContent"))
+    }
+
+    func testBibleReaderKeyboardShortcutsBuildCommandSurface() {
+        let view = BibleReaderKeyboardShortcuts(
+            onSearch: {},
+            onShowBookChooser: {},
+            onOpenBookmarks: {},
+            onNavigatePrevious: {},
+            onNavigateNext: {},
+            onOpenDownloads: {},
+            onOpenSettings: {}
+        )
+
+        XCTAssertTrue(String(describing: type(of: view)).contains("BibleReaderKeyboardShortcuts"))
     }
 
     func testBibleReaderNavigationDrawerBuildsWithActionHandler() {
