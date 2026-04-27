@@ -634,6 +634,7 @@
 "cloud_create_new" = "Copy from this device to Cloud";
 "cloud_disable_sync" = "Cancel & disable synchronization";
 "cloud_sync_title" = "Device synchronization";
+"application_preferences" = "Application preferences";
 "are_you_sure_reset_local" = "This will reset your local database for %s with the content that is currently stored in cloud service.";
 "are_you_sure_reset_cloud" = "This will reset your cloud database for %s with the content that you have in this device.";
 "reading_plans_content" = "Reading plans and their statuses";

@@ -121,7 +121,10 @@ struct BibleReaderNavigationDrawer: View {
                         action: .syncSettings
                     )
                     drawerRow(
-                        title: "Application preferences",
+                        title: localizedDrawerString(
+                            "application_preferences",
+                            default: "Application preferences"
+                        ),
                         icon: .asset("DrawerSettings"),
                         identifier: "readerOpenSettingsAction",
                         action: .settings

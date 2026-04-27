@@ -1567,7 +1567,6 @@ public struct BibleReaderView: View {
             }
         case .speak:
             dismissReaderNavigationDrawerAndPerform {
-                setPanePresentationTarget(windowManager.activeWindow?.id)
                 speakLastUsed = Date().timeIntervalSince1970
                 if speakService.isSpeaking {
                     presentReaderModal(.speakControls, from: windowManager.activeWindow?.id)
