@@ -453,8 +453,8 @@
 "choose_strongs_greek_morphology_title" = "Morfología griega de Robinson";
 "choose_strongs_hebrew_dictionary_summary" = "Elegir el diccionario de Strong para las definiciones de palabras hebreas";
 "choose_strongs_hebrew_dictionary_title" = "Diccionario hebreo de Strong";
-"choose_word_lookup_dictionary_summary" = "Choose dictionaries for looking up words";
-"choose_word_lookup_dictionary_title" = "Word lookup dictionaries";
+"choose_word_lookup_dictionary_summary" = "Elegir diccionarios para buscar palabras";
+"choose_word_lookup_dictionary_title" = "Diccionarios de búsqueda de palabras";
 "full_screen_hide_buttons_pref_summary" = "Cuando cambie al modo de pantalla completa, oculte automáticamente la barra de botones de la ventana que se encuentra en la parte inferior de la pantalla";
 "full_screen_hide_buttons_pref_title" = "Ocultar barra de botones de ventana en pantalla completa";
 "hide_bible_reference_overlay_summary" = "No mostrar la superposición semitransparente con referencia de Biblia cuando la aplicación está en modo pantalla completa";
@@ -466,8 +466,8 @@
 "prefs_bible_view_swipe_mode_title" = "Acción para el gesto de deslizar a izquierda / derecha";
 "prefs_disable_animations_summary" = "Deshabilitar varias animaciones tales como el desplazamiento suave.";
 "prefs_disable_animations_title" = "Deshabilitar animaciones";
-"prefs_disable_click_to_edit_summary" = "Requires using the edit button to edit notes in the Study Pad.";
-"prefs_disable_click_to_edit_title" = "Disable Study Pad click-to-edit";
+"prefs_disable_click_to_edit_summary" = "Requiere usar el botón de edición para editar notas en la Pizarra de Estudio.";
+"prefs_disable_click_to_edit_title" = "Desactivar edición con clic en Pizarra de Estudio";
 "prefs_double_tap_to_fullscreen_summary" = "Ingrese al modo de pantalla completa tocando dos veces la ventana";
 "prefs_double_tap_to_fullscreen_title" = "Toca dos veces para pantalla completa";
 "prefs_e_ink_mode_title" = "Modo negro & blanco";
@@ -491,8 +491,8 @@
 "prefs_swipe_mode_none" = "Desactivado";
 "prefs_swipe_mode_page" = "Página";
 
-"prefs_volume_keys_scroll_title" = "Volume buttons scroll";
-"prefs_volume_keys_scroll_summary" = "Use volume up/down to scroll Bible text";
+"prefs_volume_keys_scroll_title" = "Desplazamiento con botones de volumen";
+"prefs_volume_keys_scroll_summary" = "Usar subir/bajar volumen para desplazar el texto de la Biblia";
 "prefs_volume_keys_scroll_ios_note" = "iOS does not expose volume-button presses to apps. This setting is kept for Android parity and cross-device sync.";
 "prefs_experimental_features_title" = "Funciones experimentales";
 "prefs_experimental_features_summary" = "Seleccione las funciones experimentales que desea habilitar. Estas funciones aún se encuentran en desarrollo y pueden cambiar o eliminarse";

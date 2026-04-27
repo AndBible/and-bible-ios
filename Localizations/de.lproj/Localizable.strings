@@ -424,8 +424,8 @@
 "choose_strongs_greek_morphology_title" = "Robinsons griechische Morphologie";
 "choose_strongs_hebrew_dictionary_summary" = "Wähle das Wörterbuch für hebräische Wortdefinitionen aus";
 "choose_strongs_hebrew_dictionary_title" = "Strongs Wörterbuch Hebräisch-Englisch";
-"choose_word_lookup_dictionary_summary" = "Choose dictionaries for looking up words";
-"choose_word_lookup_dictionary_title" = "Word lookup dictionaries";
+"choose_word_lookup_dictionary_summary" = "Wörterbücher für die Wortsuche auswählen";
+"choose_word_lookup_dictionary_title" = "Wortsuche-Wörterbücher";
 "full_screen_hide_buttons_pref_summary" = "Dadurch wird im Vollbildmodus automatisch die Fensterschaltleiste am unteren Bildschirmrand ausgeblendet";
 "full_screen_hide_buttons_pref_title" = "Fensterschaltleiste im Vollbildmodus verbergen";
 "hide_bible_reference_overlay_summary" = "Die semitransparenten Überlagerungen mit Bibelverweisen ausblenden, wenn die App im Vollbildmodus ist";
@@ -437,8 +437,8 @@
 "prefs_bible_view_swipe_mode_title" = "Aktion beim Wischen nach rechts";
 "prefs_disable_animations_summary" = "Verschiedene Animationen, wie etwa flüssigen Bildvorlauf, deaktivieren.";
 "prefs_disable_animations_title" = "Animationen deaktivieren";
-"prefs_disable_click_to_edit_summary" = "Requires using the edit button to edit notes in the Study Pad.";
-"prefs_disable_click_to_edit_title" = "Disable Study Pad click-to-edit";
+"prefs_disable_click_to_edit_summary" = "Erfordert die Verwendung der Bearbeitungsschaltfläche zum Bearbeiten von Notizen im Studienblock.";
+"prefs_disable_click_to_edit_title" = "Studienblock-Klick-zum-Bearbeiten deaktivieren";
 "prefs_double_tap_to_fullscreen_summary" = "Durch doppeltes Antippen des Fensters den Vollbildschirmmodus aktivieren";
 "prefs_double_tap_to_fullscreen_title" = "Doppelt antippen für Vollbildschirm";
 "prefs_e_ink_mode_title" = "Schwarz/Weiß Modus";
@@ -462,8 +462,8 @@
 "prefs_swipe_mode_none" = "Deaktiviert";
 "prefs_swipe_mode_page" = "Seite";
 
-"prefs_volume_keys_scroll_title" = "Volume buttons scroll";
-"prefs_volume_keys_scroll_summary" = "Use volume up/down to scroll Bible text";
+"prefs_volume_keys_scroll_title" = "Lautstärketasten scrollen";
+"prefs_volume_keys_scroll_summary" = "Lautstärketasten zum Scrollen im Bibeltext verwenden";
 "prefs_volume_keys_scroll_ios_note" = "iOS does not expose volume-button presses to apps. This setting is kept for Android parity and cross-device sync.";
 "prefs_experimental_features_title" = "Experimentelle Funktionen";
 "prefs_experimental_features_summary" = "Wählen Sie aus, welche experimentellen Funktionen aktiviert werden sollen. Diese Funktionen befinden sich noch in der Entwicklung und können sich ändern oder entfernt werden.";

@@ -453,21 +453,21 @@
 "choose_strongs_greek_morphology_title" = "Morphologie grecque de Robinson";
 "choose_strongs_hebrew_dictionary_summary" = "Choisir le dictionnaire de Strongs pour les définitions des mots hébreux";
 "choose_strongs_hebrew_dictionary_title" = "Dictionnaire hébreu de Strongs";
-"choose_word_lookup_dictionary_summary" = "Choose dictionaries for looking up words";
-"choose_word_lookup_dictionary_title" = "Word lookup dictionaries";
+"choose_word_lookup_dictionary_summary" = "Choisir les dictionnaires pour la recherche de mots";
+"choose_word_lookup_dictionary_title" = "Dictionnaires de recherche de mots";
 "full_screen_hide_buttons_pref_summary" = "Lorsque vous passez en mode plein écran, masquer automatiquement la barre de boutons de la fenêtre qui se trouve en bas de l’écran";
 "full_screen_hide_buttons_pref_title" = "Masquer la barre de boutons de la fenêtre en plein écran";
 "hide_bible_reference_overlay_summary" = "Ne pas afficher la superposition semi-transparente des références bibliques lorsque l’application est en mode plein écran.";
 "hide_bible_reference_overlay_title" = "Masquer la superposition des références bibliques";
 "hide_window_buttons_summary" = "Les boutons de fenêtre qui sont affichés sur le côté droit des vues de la Bible sont cachés. La barre de navigation des fenêtres en bas est toujours affichée et vous pouvez ouvrir le menu contextuel des fenêtres en les cliquant longuement.";
 "hide_window_buttons_title" = "Cacher les boutons de fenêtres";
-"pref_font_size_multiplier_title" = "Font size multiplier";
+"pref_font_size_multiplier_title" = "Multiplicateur de taille de police";
 "prefs_bible_view_swipe_mode_summary" = "Le geste de balayage vers la gauche/droite permet de passer à la page/au chapitre suivant.";
 "prefs_bible_view_swipe_mode_title" = "Action pour le geste de balayage vers la gauche / droite";
 "prefs_disable_animations_summary" = "Désactiver diverses animations telles que le défilement fluide.";
 "prefs_disable_animations_title" = "Désactiver les animations";
-"prefs_disable_click_to_edit_summary" = "Requires using the edit button to edit notes in the Study Pad.";
-"prefs_disable_click_to_edit_title" = "Disable Study Pad click-to-edit";
+"prefs_disable_click_to_edit_summary" = "Nécessite d'utiliser le bouton d'édition pour modifier les notes dans le bloc-notes.";
+"prefs_disable_click_to_edit_title" = "Désactiver la modification par clic dans le bloc-notes";
 "prefs_double_tap_to_fullscreen_summary" = "Appuyer deux fois sur l’écran pour activer le mode plein écran";
 "prefs_double_tap_to_fullscreen_title" = "Appuyez deux fois pour le plein écran";
 "prefs_e_ink_mode_title" = "Mode noir & blanc";
@@ -491,8 +491,8 @@
 "prefs_swipe_mode_none" = "Désactiver";
 "prefs_swipe_mode_page" = "Page";
 
-"prefs_volume_keys_scroll_title" = "Volume buttons scroll";
-"prefs_volume_keys_scroll_summary" = "Use volume up/down to scroll Bible text";
+"prefs_volume_keys_scroll_title" = "Les boutons de volume font défiler";
+"prefs_volume_keys_scroll_summary" = "Utiliser les boutons volume haut/bas pour faire défiler le texte biblique";
 "prefs_volume_keys_scroll_ios_note" = "iOS does not expose volume-button presses to apps. This setting is kept for Android parity and cross-device sync.";
 "prefs_experimental_features_title" = "Fonctionnalités expérimentales";
 "prefs_experimental_features_summary" = "Sélectionner quelle fonctionnalités expérimentales à activer. Ces fonctionnalités sont toujours en développement et peuvent être modifiées ou supprimés.";

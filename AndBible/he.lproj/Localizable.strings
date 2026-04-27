@@ -453,21 +453,21 @@
 "choose_strongs_greek_morphology_title" = "רובינסון - מורפולוגיה יונית";
 "choose_strongs_hebrew_dictionary_summary" = "בחר מילון סטרונג לפרשנות מילים בעברית";
 "choose_strongs_hebrew_dictionary_title" = "מילון העברית של סטרונג";
-"choose_word_lookup_dictionary_summary" = "Choose dictionaries for looking up words";
-"choose_word_lookup_dictionary_title" = "Word lookup dictionaries";
+"choose_word_lookup_dictionary_summary" = "בחר מילונים לחיפוש מילים";
+"choose_word_lookup_dictionary_title" = "מילוני חיפוש מילים";
 "full_screen_hide_buttons_pref_summary" = "כשעוברים לתצוגה במסך מלא, הסתר אוטומטית את שורת הכפתורים בתחתית המסך";
 "full_screen_hide_buttons_pref_title" = "להסתיר תפריט במסך מלא";
 "hide_bible_reference_overlay_summary" = "אל תציג את את מראה המקום בשכבה השקופה-למחצה כשהיישום במצב מסך מלא";
 "hide_bible_reference_overlay_title" = "הסתר שכבת מראה מקום";
 "hide_window_buttons_summary" = "כפתורי החלון שבצד שמאל מוסתרים. סרגל הניווט בתחתית המסך עדיין מוצג, ואפשר לפתוח את תפריט אפשרויות החלון בלחיצה ארוכה עליו.";
 "hide_window_buttons_title" = "הסתרת כפתורים של החלון";
-"pref_font_size_multiplier_title" = "Font size multiplier";
-"prefs_bible_view_swipe_mode_summary" = "Swipe left / right gesture can be used to go to next page / chapter.";
-"prefs_bible_view_swipe_mode_title" = "Action for swipe left / right gesture";
+"pref_font_size_multiplier_title" = "מכפיל גודל גופן";
+"prefs_bible_view_swipe_mode_summary" = "מחווה של החלקה שמאלה/ימינה ניתן להשתמש למעבר לעמוד/פרק הבא.";
+"prefs_bible_view_swipe_mode_title" = "פעולה למחווה של החלקה שמאלה/ימינה";
 "prefs_disable_animations_summary" = "אל תציג הנפשות מסויימות, כגון גלילה חלקה.";
 "prefs_disable_animations_title" = "אל תציג הנפשות";
-"prefs_disable_click_to_edit_summary" = "Requires using the edit button to edit notes in the Study Pad.";
-"prefs_disable_click_to_edit_title" = "Disable Study Pad click-to-edit";
+"prefs_disable_click_to_edit_summary" = "נדרש שימוש בכפתור העריכה לעריכת הערות בפנקס הלימוד.";
+"prefs_disable_click_to_edit_title" = "השבת עריכה בהקשה בפנקס לימוד";
 "prefs_double_tap_to_fullscreen_summary" = "עבור לתצוגה במסך מלא ע\"י הקשה כפולה";
 "prefs_double_tap_to_fullscreen_title" = "הקשה כפולה למסך מלא";
 "prefs_e_ink_mode_title" = "מצב שחור-לבן";
@@ -491,18 +491,18 @@
 "prefs_swipe_mode_none" = "לא זמין";
 "prefs_swipe_mode_page" = "עמוד";
 
-"prefs_volume_keys_scroll_title" = "Volume buttons scroll";
-"prefs_volume_keys_scroll_summary" = "Use volume up/down to scroll Bible text";
+"prefs_volume_keys_scroll_title" = "גלילה בכפתורי עוצמה";
+"prefs_volume_keys_scroll_summary" = "השתמש בכפתורי עוצמה למעלה/למטה לגלילת טקסט תנ\"כי";
 "prefs_volume_keys_scroll_ios_note" = "iOS does not expose volume-button presses to apps. This setting is kept for Android parity and cross-device sync.";
-"prefs_experimental_features_title" = "Experimental features";
-"prefs_experimental_features_summary" = "Select which experimental features to enable. These features are still in development and may change or be removed";
+"prefs_experimental_features_title" = "תכונות ניסיוניות";
+"prefs_experimental_features_summary" = "בחר אילו תכונות ניסיוניות להפעיל. תכונות אלו עדיין בפיתוח ועשויות להשתנות או להיות מוסרות";
 "experimental_feature_bookmark_edit_actions" = "Bookmark edit actions";
 "experimental_feature_add_paragraph_break" = "Add paragraph break bookmark";
 "prefs_enable_bluetooth_title" = "אפשר כפתורי מדיה בבלוטות'";
 "prefs_enable_bluetooth_summary" = "אפשר להשתמש בכפתורי מדיה בלוטות' כדי להתחיל או להפסיק הקראה.";
 
 "open_bible_links_title" = "פתח קישורים לכתובים באמצעות AndBible";
-"open_bible_links_summary" = "When clicking links that refer to AndBible supported Bible URL, open them in AndBible";
+"open_bible_links_summary" = "בעת לחיצה על קישורים המפנים לכתובת URL מקראית הנתמכת על ידי AndBible, פתח אותם ב-AndBible";
 
 "crash_app" = "Crash app!";
 "crash_app_summary" = "Crash app after 10 seconds. Debugging feature, visible only in debug builds.";

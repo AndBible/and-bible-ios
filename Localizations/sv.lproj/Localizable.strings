@@ -424,8 +424,8 @@
 "choose_strongs_greek_morphology_title" = "Robinsons grekiska morfologi";
 "choose_strongs_hebrew_dictionary_summary" = "Välj Strongs ordbok för hebreiska orddefinitioner";
 "choose_strongs_hebrew_dictionary_title" = "Strongs hebreiska ordbok";
-"choose_word_lookup_dictionary_summary" = "Choose dictionaries for looking up words";
-"choose_word_lookup_dictionary_title" = "Word lookup dictionaries";
+"choose_word_lookup_dictionary_summary" = "Välj lexikon för ordsökning";
+"choose_word_lookup_dictionary_title" = "Ordsöklexikon";
 "full_screen_hide_buttons_pref_summary" = "Vid byte till fullskärmsläge, dölj automatiskt fönsterknapplistan som är i botten av skärmen";
 "full_screen_hide_buttons_pref_title" = "Dölj fönsterknappar i fullskärm";
 "hide_bible_reference_overlay_summary" = "Visa inte meddelanderuta om nuvarande bibelställe när appen är i helskärmsläge";
@@ -437,8 +437,8 @@
 "prefs_bible_view_swipe_mode_title" = "Åtgärd vid svepgest till vänster/höger";
 "prefs_disable_animations_summary" = "Inaktivera olika animationer såsom mjuk skrollning.";
 "prefs_disable_animations_title" = "Inaktivera animationer";
-"prefs_disable_click_to_edit_summary" = "Requires using the edit button to edit notes in the Study Pad.";
-"prefs_disable_click_to_edit_title" = "Disable Study Pad click-to-edit";
+"prefs_disable_click_to_edit_summary" = "Kräver att redigeringsknappen används för att redigera anteckningar i studieblocket.";
+"prefs_disable_click_to_edit_title" = "Inaktivera klicka-för-att-redigera i studieblock";
 "prefs_double_tap_to_fullscreen_summary" = "Starta helskärmsläge genom att dubbeltrycka i fönstret";
 "prefs_double_tap_to_fullscreen_title" = "Dubbeltryck för att starta helskärmsläge";
 "prefs_e_ink_mode_title" = "Svartvitt läge";
@@ -462,8 +462,8 @@
 "prefs_swipe_mode_none" = "Inaktiverad";
 "prefs_swipe_mode_page" = "Sida";
 
-"prefs_volume_keys_scroll_title" = "Volume buttons scroll";
-"prefs_volume_keys_scroll_summary" = "Use volume up/down to scroll Bible text";
+"prefs_volume_keys_scroll_title" = "Volymknappar scrollar";
+"prefs_volume_keys_scroll_summary" = "Använd volym upp/ned för att scrolla bibeltext";
 "prefs_volume_keys_scroll_ios_note" = "iOS does not expose volume-button presses to apps. This setting is kept for Android parity and cross-device sync.";
 "prefs_experimental_features_title" = "Experimentella funktioner";
 "prefs_experimental_features_summary" = "Välj vilka experimentella funktioner du vill aktivera. Dessa funktioner utvecklas fortfarande och kan komma att ändras eller tas bort.";

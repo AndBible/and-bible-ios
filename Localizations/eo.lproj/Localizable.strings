@@ -424,8 +424,8 @@
 "choose_strongs_greek_morphology_title" = "Greka morfologio de Robinson";
 "choose_strongs_hebrew_dictionary_summary" = "Elekti vortaron de Strong por difinojn de hebreaj vortoj";
 "choose_strongs_hebrew_dictionary_title" = "Hebrea vortaro de Strong";
-"choose_word_lookup_dictionary_summary" = "Choose dictionaries for looking up words";
-"choose_word_lookup_dictionary_title" = "Word lookup dictionaries";
+"choose_word_lookup_dictionary_summary" = "Elekti vortarojn por vortoserĉado";
+"choose_word_lookup_dictionary_title" = "Vortaro por vortoserĉo";
 "full_screen_hide_buttons_pref_summary" = "Kiam baskuligi al plenekrana reĝimo, aŭtomate kaŝi breton de fenestraj butonoj, kiu aperas ĉe subo de la ekrano";
 "full_screen_hide_buttons_pref_title" = "Kaŝi strion de fenestraj butonoj en plenekrano";
 "hide_bible_reference_overlay_summary" = "Ne montri travideblan tavolon de bibliaj referencoj kiam la aplikaĵo laboras en plenekrana reĝimo";
@@ -437,8 +437,8 @@
 "prefs_bible_view_swipe_mode_title" = "Ago por fingrumi (mal)dekstren";
 "prefs_disable_animations_summary" = "Malaktivigi diversajn animaciojn, kiel glatan rulumadon.";
 "prefs_disable_animations_title" = "Malaktivigi movbildojn";
-"prefs_disable_click_to_edit_summary" = "Requires using the edit button to edit notes in the Study Pad.";
-"prefs_disable_click_to_edit_title" = "Disable Study Pad click-to-edit";
+"prefs_disable_click_to_edit_summary" = "Postulas uzon de la redakta butono por redakti notojn en la Notbloko.";
+"prefs_disable_click_to_edit_title" = "Malaktivigi klak-por-redakti en Notbloko";
 "prefs_double_tap_to_fullscreen_summary" = "Enigi plenekranon per duoble frapeti la fenestron";
 "prefs_double_tap_to_fullscreen_title" = "Plenekranigi per duobla frapeto";
 "prefs_e_ink_mode_title" = "Blank-nigra reĝimo";
@@ -462,8 +462,8 @@
 "prefs_swipe_mode_none" = "Malaktiva";
 "prefs_swipe_mode_page" = "Paĝo";
 
-"prefs_volume_keys_scroll_title" = "Volume buttons scroll";
-"prefs_volume_keys_scroll_summary" = "Use volume up/down to scroll Bible text";
+"prefs_volume_keys_scroll_title" = "Laŭtec-butonoj por rulumado";
+"prefs_volume_keys_scroll_summary" = "Uzi laŭtec-supren/malsupren por rulumi biblian tekston";
 "prefs_volume_keys_scroll_ios_note" = "iOS does not expose volume-button presses to apps. This setting is kept for Android parity and cross-device sync.";
 "prefs_experimental_features_title" = "Eksperimentaj ebloj";
 "prefs_experimental_features_summary" = "Elekti eksperimentajn eblojn por aktivigi. Tiuj ĉi ebloj plue estas prilaborataj kaj povas esti ŝanĝitaj aŭ forigitaj.";

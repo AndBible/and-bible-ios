@@ -7642,7 +7642,8 @@ final class AndBibleUITests: XCTestCase {
     private func createFreshLabelFromAssignment(in app: XCUIApplication) {
         presentLabelCreationPrompt(in: app, timeout: 10)
         let nameField = requireLabelManagerNewLabelField(in: app, timeout: 10)
-        replaceText(in: nameField, with: "UI Test Fresh", placeholderHints: ["Label name"])
+        focusTextEntryElement(nameField, timeout: 10)
+        app.typeText("UI Test Fresh")
         tapElementReliably(requireLabelManagerCreateButton(in: app, timeout: 10), timeout: 10)
     }
 

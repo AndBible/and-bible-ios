@@ -402,7 +402,7 @@
 "prefs_display_customization_cat" = "Utseende og utforming";
 "prefs_advanced_settings_cat" = "Avanserte innstillinger";
 
-"prefs_toolbar_button_action_title" = "Action for toolbar button press";
+"prefs_toolbar_button_action_title" = "Handling for verktøylinjeknapp";
 "prefs_toolbar_button_action_summary" = "Handling ved trykk/langt trykk på Bibel eller bibelkommentar-knapp på verktøylinjen";
 "prefs_toolbar_button_action_default" = "Trykk for å åpne meny, langt trykk for dokumentskjerm (standard)";
 "prefs_toolbar_button_action_swap_menu" = "Trykk for å åpne neste modul, lang-trykk for å åpne meny";
@@ -411,11 +411,11 @@
 
 "add_bookmark3" = "Selection";
 "add_bookmark_whole_verse1" = "Verses";
-"prefs_disable_two_step_bookmarking_title" = "One-step bookmarking";
-"prefs_disable_two_step_bookmarking_summary" = "Show \"Selection\" and \"Verses\" items directly in Bible view Selection menu";
+"prefs_disable_two_step_bookmarking_title" = "Éntrinnsbokmerking";
+"prefs_disable_two_step_bookmarking_summary" = "Vis «Utvalg» og «Vers» direkte i bibelvisningens utvalgsmerke";
 
-"active_window_indicator_summary" = "Highlight window corners to help recognising which window is active";
-"active_window_indicator_title" = "Show active window indicator";
+"active_window_indicator_summary" = "Fremhev vindushjørner for å hjelpe med å gjenkjenne hvilket vindu som er aktivt";
+"active_window_indicator_title" = "Vis aktiv vindusindikator";
 "auto_fullscreen" = "Fullskjerm ved tekstrulling";
 "auto_fullscreen_summary" = "Automatisk bytte til fullskjerm ved tekstrulling. Tips: du kan også dobbeltklikke på skjermen for fullskjerm-modus.";
 "choose_strongs_greek_dictionary_summary" = "Velg Strongs ordbok for greske ordforklaringer";
@@ -424,21 +424,21 @@
 "choose_strongs_greek_morphology_title" = "Robinson gresk morfologi";
 "choose_strongs_hebrew_dictionary_summary" = "Velg Strongs ordbok for hebraiske ordforklaringer";
 "choose_strongs_hebrew_dictionary_title" = "Strongs hebraisk ordbok";
-"choose_word_lookup_dictionary_summary" = "Choose dictionaries for looking up words";
-"choose_word_lookup_dictionary_title" = "Word lookup dictionaries";
+"choose_word_lookup_dictionary_summary" = "Velg ordbøker for oppslag av ord";
+"choose_word_lookup_dictionary_title" = "Ordbøker for ordoppslag";
 "full_screen_hide_buttons_pref_summary" = "Skjul knapperader i bunnen av et vindu når man går til fullskjermmodus";
 "full_screen_hide_buttons_pref_title" = "Skjul vindusknapper i fullskjerm";
-"hide_bible_reference_overlay_summary" = "Do not show the semi-transparent Bible reference overlay when app is in fullscreen mode";
-"hide_bible_reference_overlay_title" = "Hide Bible reference overlay";
-"hide_window_buttons_summary" = "Window buttons that are displayed on right side of the Bible views are hidden. Window navigation bar on the bottom is still displayed and you may open window popup menu by long-clicking them.";
+"hide_bible_reference_overlay_summary" = "Ikke vis det gjennomsiktige bibelreferanseoverlegget når appen er i fullskjermmodus";
+"hide_bible_reference_overlay_title" = "Skjul bibelreferanseoverlegg";
+"hide_window_buttons_summary" = "Vindusknapper som vises på høyre side av bibelvisningene er skjult. Vindusnavigasjonslinjen nederst vises fortsatt og du kan åpne vinduets hurtigmeny ved å holde inne knappene.";
 "hide_window_buttons_title" = "Skjul vindusknapper";
-"pref_font_size_multiplier_title" = "Font size multiplier";
-"prefs_bible_view_swipe_mode_summary" = "Swipe left / right gesture can be used to go to next page / chapter.";
-"prefs_bible_view_swipe_mode_title" = "Action for swipe left / right gesture";
+"pref_font_size_multiplier_title" = "Skriftstørrelsesmultiplikator";
+"prefs_bible_view_swipe_mode_summary" = "Sveip til venstre/høyre kan brukes til å gå til neste side/kapittel.";
+"prefs_bible_view_swipe_mode_title" = "Handling for sveip til venstre/høyre";
 "prefs_disable_animations_summary" = "Slå av animasjoner, som tekstrulling osv.";
 "prefs_disable_animations_title" = "Slå av animasjoner";
-"prefs_disable_click_to_edit_summary" = "Requires using the edit button to edit notes in the Study Pad.";
-"prefs_disable_click_to_edit_title" = "Disable Study Pad click-to-edit";
+"prefs_disable_click_to_edit_summary" = "Krever bruk av redigeringsknappen for å redigere notater i studiebrettet.";
+"prefs_disable_click_to_edit_title" = "Deaktiver klikk-for-å-redigere i studiebrett";
 "prefs_double_tap_to_fullscreen_summary" = "Start fullskjermmodus ved å dobbel-tappe i vinduet";
 "prefs_double_tap_to_fullscreen_title" = "Dobbel-tap for fullskjermmodus";
 "prefs_e_ink_mode_title" = "Svart/hvitt-modus";
@@ -452,28 +452,28 @@
 "prefs_night_mode_summary" = "Dersom nattmodus slås på automatisk (dersom enheten støtter dette), manuelt, eller gjennom systeminnstillingene (Android 10+). Manuelt skifte kan gjøres gjennom 3-prikksknappen fra hovedvinduet.";
 "prefs_night_mode_system" = "System";
 "prefs_night_mode_title" = "Nattmodus";
-"prefs_open_links_in_special_window_summary" = "Open links in special window, for quicker display of cross-references and Strongs";
-"prefs_open_links_in_special_window_title" = "Links window";
+"prefs_open_links_in_special_window_summary" = "Åpne lenker i et spesielt vindu for raskere visning av kryssreferanser og Strong's";
+"prefs_open_links_in_special_window_title" = "Lenkevindu";
 "prefs_screen_keep_on_summary" = "La skjerm være påslått når denne applikasjonen benyttes";
 "prefs_screen_keep_on_title" = "Hold skjerm påslått";
-"prefs_show_error_box_summary" = "Useful for developers when debugging BibleView javascript side errors. This will make the app slower.";
-"prefs_show_error_box_title" = "Show Javascript error box";
+"prefs_show_error_box_summary" = "Nyttig for utviklere ved feilsøking på BibleView javascript-siden. Dette vil gjøre appen tregere.";
+"prefs_show_error_box_title" = "Vis Javascript-feilboks";
 "prefs_swipe_mode_chapter" = "Kapittel";
 "prefs_swipe_mode_none" = "Disabled";
 "prefs_swipe_mode_page" = "Page";
 
-"prefs_volume_keys_scroll_title" = "Volume buttons scroll";
-"prefs_volume_keys_scroll_summary" = "Use volume up/down to scroll Bible text";
+"prefs_volume_keys_scroll_title" = "Volum-knapper ruller";
+"prefs_volume_keys_scroll_summary" = "Bruk volum opp/ned for å rulle bibelteksten";
 "prefs_volume_keys_scroll_ios_note" = "iOS does not expose volume-button presses to apps. This setting is kept for Android parity and cross-device sync.";
-"prefs_experimental_features_title" = "Experimental features";
-"prefs_experimental_features_summary" = "Select which experimental features to enable. These features are still in development and may change or be removed";
+"prefs_experimental_features_title" = "Eksperimentelle funksjoner";
+"prefs_experimental_features_summary" = "Velg hvilke eksperimentelle funksjoner som skal aktiveres. Disse funksjonene er fortsatt under utvikling og kan endres eller fjernes";
 "experimental_feature_bookmark_edit_actions" = "Bookmark edit actions";
 "experimental_feature_add_paragraph_break" = "Add paragraph break bookmark";
 "prefs_enable_bluetooth_title" = "Vis knapper for blåtann";
-"prefs_enable_bluetooth_summary" = "Handle Bluetooth media buttons to start/stop speaking.";
+"prefs_enable_bluetooth_summary" = "Håndter Bluetooth-medieknapper for å starte/stoppe høytlesing.";
 
-"open_bible_links_title" = "Open Bible links in AndBible";
-"open_bible_links_summary" = "When clicking links that refer to AndBible supported Bible URL, open them in AndBible";
+"open_bible_links_title" = "Åpne bibellenker i AndBible";
+"open_bible_links_summary" = "Når du klikker på lenker som refererer til AndBible-støttede bibel-URLer, åpnes de i AndBible";
 
 "crash_app" = "Crash app!";
 "crash_app_summary" = "Crash app after 10 seconds. Debugging feature, visible only in debug builds.";

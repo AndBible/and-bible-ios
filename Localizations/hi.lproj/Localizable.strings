@@ -424,21 +424,21 @@
 "choose_strongs_greek_morphology_title" = "रॉबिन्सन की यूनानी आकृति विज्ञान";
 "choose_strongs_hebrew_dictionary_summary" = "यहूदी शब्द परिभाषाओं के लिए स्ट्रॉन्ग्स शब्दकोश चुनें";
 "choose_strongs_hebrew_dictionary_title" = "स्ट्रॉन्ग्स यहूदी शब्दकोश";
-"choose_word_lookup_dictionary_summary" = "Choose dictionaries for looking up words";
-"choose_word_lookup_dictionary_title" = "Word lookup dictionaries";
+"choose_word_lookup_dictionary_summary" = "शब्द खोजने के लिए शब्दकोश चुनें";
+"choose_word_lookup_dictionary_title" = "शब्द खोज शब्दकोश";
 "full_screen_hide_buttons_pref_summary" = " फ़ुलस्क्रीन मोड पर स्विच करते समय, स्वचालित रूप से विंडो बटन बार को छिपाएं जो स्क्रीन के निचले भाग पर है";
 "full_screen_hide_buttons_pref_title" = "फुलस्क्रीन में विंडो बटन बार छिपाएं";
 "hide_bible_reference_overlay_summary" = "जब ऐप फ़ुलस्क्रीन मोड में हो तो अर्ध-पारदर्शी बाइबिल संदर्भ उपरिशायी न दिखाएँ";
 "hide_bible_reference_overlay_title" = "बाइबिल संदर्भ उपरिशायी छुपाएं ";
 "hide_window_buttons_summary" = "विंडो बटन जो बाइबिल के दृश्य के दाईं ओर प्रदर्शित होते हैं, छिपे हुए हैं। नीचे की ओर विंडो नेविगेशन बार अभी भी प्रदर्शित है और आप विंडो पॉपअप मेनू को लॉन्ग-क्लिक करके खोल सकते हैं।";
 "hide_window_buttons_title" = " विंडो बटन छिपाएं";
-"pref_font_size_multiplier_title" = "Font size multiplier";
-"prefs_bible_view_swipe_mode_summary" = "Swipe left / right gesture can be used to go to next page / chapter.";
-"prefs_bible_view_swipe_mode_title" = "Action for swipe left / right gesture";
+"pref_font_size_multiplier_title" = "फ़ॉन्ट आकार गुणक";
+"prefs_bible_view_swipe_mode_summary" = "बाएं/दाएं स्वाइप जेस्चर का उपयोग अगले पेज/अध्याय पर जाने के लिए किया जा सकता है।";
+"prefs_bible_view_swipe_mode_title" = "बाएं/दाएं स्वाइप जेस्चर की क्रिया";
 "prefs_disable_animations_summary" = "सहज स्क्रॉलिंग जैसे विभिन्न एनिमेशन बंद करें।";
 "prefs_disable_animations_title" = "एनिमेशन बंद करें";
-"prefs_disable_click_to_edit_summary" = "Requires using the edit button to edit notes in the Study Pad.";
-"prefs_disable_click_to_edit_title" = "Disable Study Pad click-to-edit";
+"prefs_disable_click_to_edit_summary" = "स्टडी पैड में नोट्स संपादित करने के लिए एडिट बटन का उपयोग करना आवश्यक है।";
+"prefs_disable_click_to_edit_title" = "स्टडी पैड क्लिक-टू-एडिट अक्षम करें";
 "prefs_double_tap_to_fullscreen_summary" = "विंडो को डबल-टैप करके फ़ुलस्क्रीन मोड का उपयोग करें";
 "prefs_double_tap_to_fullscreen_title" = "फ़ुलस्क्रीन के लिए दो बार टैप करें";
 "prefs_e_ink_mode_title" = "ब्लैक &amp वाइट मोड";
@@ -462,18 +462,18 @@
 "prefs_swipe_mode_none" = "Disabled";
 "prefs_swipe_mode_page" = "Page";
 
-"prefs_volume_keys_scroll_title" = "Volume buttons scroll";
-"prefs_volume_keys_scroll_summary" = "Use volume up/down to scroll Bible text";
+"prefs_volume_keys_scroll_title" = "वॉल्यूम बटन स्क्रॉल";
+"prefs_volume_keys_scroll_summary" = "बाइबिल टेक्स्ट स्क्रॉल करने के लिए वॉल्यूम अप/डाउन का उपयोग करें";
 "prefs_volume_keys_scroll_ios_note" = "iOS does not expose volume-button presses to apps. This setting is kept for Android parity and cross-device sync.";
-"prefs_experimental_features_title" = "Experimental features";
-"prefs_experimental_features_summary" = "Select which experimental features to enable. These features are still in development and may change or be removed";
+"prefs_experimental_features_title" = "प्रयोगात्मक फ़ीचर";
+"prefs_experimental_features_summary" = "कौन से प्रयोगात्मक फ़ीचर सक्षम करने हैं चुनें। ये फ़ीचर अभी विकास में हैं और बदल या हटाए जा सकते हैं";
 "experimental_feature_bookmark_edit_actions" = "Bookmark edit actions";
 "experimental_feature_add_paragraph_break" = "Add paragraph break bookmark";
-"prefs_enable_bluetooth_title" = "Enable Bluetooth media buttons";
-"prefs_enable_bluetooth_summary" = "Handle Bluetooth media buttons to start/stop speaking.";
+"prefs_enable_bluetooth_title" = "Bluetooth मीडिया बटन सक्षम करें";
+"prefs_enable_bluetooth_summary" = "बोलना शुरू/बंद करने के लिए Bluetooth मीडिया बटन का उपयोग करें।";
 
-"open_bible_links_title" = "Open Bible links in AndBible";
-"open_bible_links_summary" = "When clicking links that refer to AndBible supported Bible URL, open them in AndBible";
+"open_bible_links_title" = "AndBible में बाइबिल लिंक खोलें";
+"open_bible_links_summary" = "AndBible समर्थित बाइबिल URL को संदर्भित करने वाले लिंक पर क्लिक करने पर, उन्हें AndBible में खोलें";
 
 "crash_app" = "Crash app!";
 "crash_app_summary" = "Crash app after 10 seconds. Debugging feature, visible only in debug builds.";
