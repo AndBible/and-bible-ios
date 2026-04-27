@@ -387,11 +387,8 @@ final class AndBibleUITests: XCTestCase {
         let originalActiveWorkspaceName = requireActiveWorkspaceRow(in: app, timeout: 10).label
 
         _ = openWorkspaceCreatePrompt(in: app, timeout: 10)
-        replaceText(
-            in: requireWorkspaceNamePromptField(in: app, timeout: 10),
-            with: createdName,
-            placeholderHints: ["Name", "name"]
-        )
+        focusTextEntryElement(requireWorkspaceNamePromptField(in: app, timeout: 10), timeout: 10)
+        app.typeText(createdName)
         tapElementReliably(requireElement("workspaceNamePromptConfirmButton", in: app, timeout: 10), timeout: 10)
 
         XCTAssertTrue(
@@ -4478,17 +4475,7 @@ final class AndBibleUITests: XCTestCase {
             app.secureTextFields[identifier].firstMatch,
             app.otherElements[identifier].firstMatch,
         ]
-        let systemPromptCandidates: [XCUIElement]
-        if let prompt = resolvedModalPrompt(in: app, timeout: 0) {
-            systemPromptCandidates = modalTextFieldCandidates(
-                in: prompt,
-                identifiers: [identifier],
-                titles: ["Name", "name"]
-            )
-        } else {
-            systemPromptCandidates = []
-        }
-        return customSheetCandidates + focusedTextEntryCandidates(in: app) + systemPromptCandidates
+        return customSheetCandidates + focusedTextEntryCandidates(in: app)
     }
 
     /// Returns workspace-name prompt buttons without walking the custom sheet hierarchy.
@@ -4518,17 +4505,7 @@ final class AndBibleUITests: XCTestCase {
         let directTitleCandidates = titles.map { title in
             app.buttons[title].firstMatch
         }
-        let systemPromptCandidates: [XCUIElement]
-        if let prompt = resolvedModalPrompt(in: app, timeout: 0) {
-            systemPromptCandidates = modalButtonCandidates(
-                in: prompt,
-                identifiers: [identifier],
-                titles: titles
-            )
-        } else {
-            systemPromptCandidates = []
-        }
-        return directIdentifierCandidates + directTitleCandidates + systemPromptCandidates
+        return directIdentifierCandidates + directTitleCandidates
     }
 
     /// Returns screen-aware candidates for small exported semantic state controls.
