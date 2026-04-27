@@ -387,7 +387,8 @@ final class AndBibleUITests: XCTestCase {
         let originalActiveWorkspaceName = requireActiveWorkspaceRow(in: app, timeout: 10).label
 
         _ = openWorkspaceCreatePrompt(in: app, timeout: 10)
-        focusTextEntryElement(requireWorkspaceNamePromptField(in: app, timeout: 10), timeout: 10)
+        let workspaceNameField = requireWorkspaceNamePromptField(in: app, timeout: 10)
+        focusResolvedTextEntryElement(workspaceNameField, timeout: 10)
         app.typeText(createdName)
         tapElementReliably(requireElement("workspaceNamePromptConfirmButton", in: app, timeout: 10), timeout: 10)
 
@@ -735,7 +736,6 @@ final class AndBibleUITests: XCTestCase {
         let searchField = requireBookmarkListSearchField(in: app, timeout: 10)
 
         replaceText(in: searchField, with: "Matthew", placeholderHints: ["Search bookmarks"])
-        searchField.typeText("\n")
         waitForBookmarkListState(containing: "count=1", in: app, timeout: 10)
         waitForBookmarkListState(containing: "query=Matthew", in: app, timeout: 10)
         waitForBookmarkListState(containing: bookmarkListRowStateToken("Matthew_3_1"), in: app, timeout: 10)
@@ -1148,7 +1148,6 @@ final class AndBibleUITests: XCTestCase {
         waitForBookmarkListState(notContaining: bookmarkListRowStateToken("Exodus_2_1"), in: app, timeout: 10)
 
         replaceText(in: searchField, with: "Exodus", placeholderHints: ["Search bookmarks"])
-        searchField.typeText("\n")
         waitForBookmarkListState(containing: "count=0", in: app, timeout: 10)
         waitForBookmarkListState(containing: "query=Exodus", in: app, timeout: 10)
         waitForBookmarkListState(notContaining: bookmarkListRowStateToken("Genesis_1_1"), in: app, timeout: 10)
@@ -1184,11 +1183,9 @@ final class AndBibleUITests: XCTestCase {
 
         tapElementReliably(requireElement("labelManagerAddButton", in: app, timeout: 10), timeout: 10)
         waitForLabelManagerState(containing: "showNewLabel=true", in: app, timeout: 10)
-        replaceText(
-            in: requireLabelManagerNewLabelField(in: app, timeout: 10),
-            with: originalName,
-            placeholderHints: ["Label name"]
-        )
+        let newLabelNameField = requireLabelManagerNewLabelField(in: app, timeout: 10)
+        focusResolvedTextEntryElement(newLabelNameField, timeout: 10)
+        app.typeText(originalName)
         tapElementReliably(requireLabelManagerCreateButton(in: app, timeout: 10), timeout: 10)
         waitForLabelManagerState(containing: labelManagerRowStateToken(originalName), in: app, timeout: 10)
 
@@ -7619,7 +7616,7 @@ final class AndBibleUITests: XCTestCase {
     private func createFreshLabelFromAssignment(in app: XCUIApplication) {
         presentLabelCreationPrompt(in: app, timeout: 10)
         let nameField = requireLabelManagerNewLabelField(in: app, timeout: 10)
-        focusTextEntryElement(nameField, timeout: 10)
+        focusResolvedTextEntryElement(nameField, timeout: 10)
         app.typeText("UI Test Fresh")
         tapElementReliably(requireLabelManagerCreateButton(in: app, timeout: 10), timeout: 10)
     }
@@ -8345,6 +8342,7 @@ final class AndBibleUITests: XCTestCase {
      *
      * - Parameters:
      *   - element: Text field or search field that should receive keyboard focus.
+     *   - requireExistencePreflight: Whether to run an explicit existence wait before tapping.
      *   - timeout: Maximum number of seconds to wait for the control to expose a stable frame.
      *   - file: Source file used for XCTest failure attribution.
      *   - line: Source line used for XCTest failure attribution.
@@ -8358,16 +8356,19 @@ final class AndBibleUITests: XCTestCase {
     private func focusTextEntryElement(
         _ element: XCUIElement,
         preferTrailingEdge: Bool = false,
+        requireExistencePreflight: Bool = true,
         timeout: TimeInterval = 10,
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
-        XCTAssertTrue(
-            element.waitForExistence(timeout: timeout),
-            "Expected text input '\(element.identifier)' to exist within \(timeout) seconds.",
-            file: file,
-            line: line
-        )
+        if requireExistencePreflight {
+            XCTAssertTrue(
+                element.waitForExistence(timeout: timeout),
+                "Expected text input '\(element.identifier)' to exist within \(timeout) seconds.",
+                file: file,
+                line: line
+            )
+        }
 
         let deadline = Date().addingTimeInterval(timeout)
         repeat {
@@ -8413,6 +8414,30 @@ final class AndBibleUITests: XCTestCase {
         XCTAssertTrue(
             waitForElementKeyboardFocus(element, timeout: 0.5),
             "Expected text input '\(element.identifier)' to gain keyboard focus within \(timeout) seconds.",
+            file: file,
+            line: line
+        )
+    }
+
+    /**
+     Focuses a text-entry control that was already resolved by a prompt-specific helper.
+     *
+     * SwiftUI alerts and sheets can expose their text field briefly, then make a second
+     * `waitForExistence` call hang while XCTest rebuilds the modal snapshot. Prompt-specific
+     * resolvers already proved the field exists, so this path starts with the focus attempts.
+     */
+    private func focusResolvedTextEntryElement(
+        _ element: XCUIElement,
+        preferTrailingEdge: Bool = false,
+        timeout: TimeInterval = 10,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        focusTextEntryElement(
+            element,
+            preferTrailingEdge: preferTrailingEdge,
+            requireExistencePreflight: false,
+            timeout: timeout,
             file: file,
             line: line
         )
