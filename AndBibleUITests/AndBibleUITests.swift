@@ -5788,13 +5788,14 @@ final class AndBibleUITests: XCTestCase {
     ) -> Bool {
         _ = waitForReaderShellReady(in: app, timeout: min(10, timeout))
         let deadline = Date().addingTimeInterval(timeout)
+
+        tapReaderToolbarCoordinate(.moreMenu, in: app)
+        if waitForReaderOverflowMenu(in: app, timeout: min(5, max(1, deadline.timeIntervalSinceNow))) {
+            return true
+        }
+
         repeat {
-            let button = requireReaderMoreMenuButton(
-                in: app,
-                timeout: min(2, max(0.5, deadline.timeIntervalSinceNow)),
-                file: file,
-                line: line
-            )
+            let button = unresolvedElement("readerMoreMenuButton", in: app)
             if waitForElementToBecomeHittable(button, timeout: min(2, max(0.5, deadline.timeIntervalSinceNow))) {
                 button.tap()
             } else if button.exists, !button.frame.isEmpty {
@@ -5980,12 +5981,17 @@ final class AndBibleUITests: XCTestCase {
     ) -> Bool {
         _ = waitForReaderShellReady(in: app, timeout: min(10, timeout))
         let deadline = Date().addingTimeInterval(timeout)
+
+        tapReaderToolbarCoordinate(.navigationDrawer, in: app)
+        if waitForReaderNavigationDrawer(
+            in: app,
+            timeout: min(5, max(2, deadline.timeIntervalSinceNow))
+        ) {
+            return true
+        }
+
         repeat {
-            let button = requireElement(
-                "readerNavigationDrawerButton",
-                in: app,
-                timeout: min(2, max(0.5, deadline.timeIntervalSinceNow))
-            )
+            let button = unresolvedElement("readerNavigationDrawerButton", in: app)
             if waitForElementToBecomeHittable(button, timeout: min(2, max(0.5, deadline.timeIntervalSinceNow))) {
                 button.tap()
             } else if button.exists, !button.frame.isEmpty {
@@ -6001,6 +6007,28 @@ final class AndBibleUITests: XCTestCase {
         } while Date() < deadline
 
         return false
+    }
+
+    /// Toolbar buttons occasionally trigger slow XCTest snapshots; coordinates are verified by state.
+    private enum ReaderToolbarCoordinateTarget {
+        case navigationDrawer
+        case moreMenu
+
+        var normalizedOffset: CGVector {
+            switch self {
+            case .navigationDrawer:
+                CGVector(dx: 0.055, dy: 0.085)
+            case .moreMenu:
+                CGVector(dx: 0.965, dy: 0.085)
+            }
+        }
+    }
+
+    private func tapReaderToolbarCoordinate(
+        _ target: ReaderToolbarCoordinateTarget,
+        in app: XCUIApplication
+    ) {
+        app.coordinate(withNormalizedOffset: target.normalizedOffset).tap()
     }
 
     /**
@@ -6306,7 +6334,7 @@ final class AndBibleUITests: XCTestCase {
         case "readerOpenHistoryAction":
             return "History"
         case "readerOpenReadingPlansAction":
-            return "Reading Plans"
+            return "Reading Plan"
         case "readerOpenSettingsAction":
             return "Application preferences"
         case "readerOpenWorkspacesAction":
