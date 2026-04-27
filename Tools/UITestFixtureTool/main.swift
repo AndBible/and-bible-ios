@@ -272,6 +272,7 @@ private struct FixtureTool {
         let fileManager = FileManager.default
         let swordURL = paths.documentsURL.appendingPathComponent("sword", isDirectory: true)
         let candidates = [
+            swordURL.appendingPathComponent("mods.d/modules-conf.cache", isDirectory: false),
             swordURL.appendingPathComponent("mods.d/uitestcomm.conf", isDirectory: false),
             swordURL.appendingPathComponent("modules/comments/rawcom/uitestcomm", isDirectory: true),
         ]
@@ -603,6 +604,7 @@ private final class FixtureContext {
         )
         try fileManager.createDirectory(at: modsDURL, withIntermediateDirectories: true)
         try fileManager.createDirectory(at: dataURL, withIntermediateDirectories: true)
+        try removeCachedSwordModuleConfig(in: modsDURL)
 
         let conf = """
         [UITestComm]
@@ -626,6 +628,14 @@ private final class FixtureContext {
             if !fileManager.fileExists(atPath: url.path) {
                 try Data().write(to: url)
             }
+        }
+    }
+
+    /// Removes SWORD's module cache so newly seeded UI-test modules are discovered on app launch.
+    private func removeCachedSwordModuleConfig(in modsDURL: URL) throws {
+        let cacheURL = modsDURL.appendingPathComponent("modules-conf.cache", isDirectory: false)
+        if fileManager.fileExists(atPath: cacheURL.path) {
+            try fileManager.removeItem(at: cacheURL)
         }
     }
 

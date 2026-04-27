@@ -681,12 +681,12 @@ public struct SyncSettingsView: View {
      */
     @ViewBuilder
     private var syncSettingsStateProbe: some View {
-        Color.clear
+        Text(syncSettingsAccessibilityValue)
+            .font(.system(size: 1))
             .frame(width: 1, height: 1)
+            .opacity(0.01)
             .allowsHitTesting(false)
-            .accessibilityElement()
             .accessibilityIdentifier("syncSettingsState")
-            .accessibilityLabel("")
             .accessibilityValue(syncSettingsAccessibilityValue)
     }
 

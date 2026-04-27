@@ -4357,11 +4357,10 @@ final class AndBibleUITests: XCTestCase {
     }
 
     /**
-     Resolves lightweight state-export or status candidates by searching inside one owning screen
-     before falling back to app-wide queries.
+     Resolves lightweight state-export or status candidates without probing broad `Other` queries.
 
-     This keeps value-based polling off the full app hierarchy for controls that only ever exist
-     inside a known screen, which materially reduces snapshot timeout pressure in CI.
+     The app emits these probes as tiny static text nodes specifically so polling their value does
+     not force XCTest to snapshot unrelated SwiftUI containers.
      */
     private func screenScopedStateCandidates(
         _ identifier: String,
@@ -4369,12 +4368,10 @@ final class AndBibleUITests: XCTestCase {
         in app: XCUIApplication
     ) -> [XCUIElement] {
         let directCandidates = [
-            app.otherElements[identifier].firstMatch,
             app.staticTexts[identifier].firstMatch,
         ]
         let scopedCandidates = screenRootCandidates(screenIdentifier, in: app).flatMap { root in
             [
-                root.otherElements[identifier].firstMatch,
                 root.staticTexts[identifier].firstMatch,
             ]
         }
@@ -4550,7 +4547,6 @@ final class AndBibleUITests: XCTestCase {
             return screenScopedStateCandidates(identifier, within: "syncSettingsScreen", in: app)
         default:
             return [
-                app.otherElements[identifier].firstMatch,
                 app.staticTexts[identifier].firstMatch,
             ]
         }
@@ -4829,6 +4825,13 @@ final class AndBibleUITests: XCTestCase {
                 app.buttons[identifier].firstMatch,
                 app.otherElements[identifier].firstMatch,
             ]
+        case "textDisplaySettingsScreen":
+            return [
+                app.collectionViews[identifier].firstMatch,
+                app.tables[identifier].firstMatch,
+                app.otherElements[identifier].firstMatch,
+                app.scrollViews[identifier].firstMatch,
+            ]
         case
             "settingsForm",
             "bookmarkListScreen",
@@ -4837,7 +4840,6 @@ final class AndBibleUITests: XCTestCase {
             "labelEditScreen",
             "syncSettingsScreen",
             "colorSettingsScreen",
-            "textDisplaySettingsScreen",
             "importExportScreen",
             "modulePickerScreen",
             "moduleBrowserScreen":
