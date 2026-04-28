@@ -453,8 +453,8 @@
 "choose_strongs_greek_morphology_title" = "Грецька морфологія Робінзона";
 "choose_strongs_hebrew_dictionary_summary" = "Виберіть словник Стронга для визначення єврейських слів";
 "choose_strongs_hebrew_dictionary_title" = "Єврейський словник Стронга";
-"choose_word_lookup_dictionary_summary" = "Choose dictionaries for looking up words";
-"choose_word_lookup_dictionary_title" = "Word lookup dictionaries";
+"choose_word_lookup_dictionary_summary" = "Вибрати словники для пошуку слів";
+"choose_word_lookup_dictionary_title" = "Словники для пошуку слів";
 "full_screen_hide_buttons_pref_summary" = "При переході в повноекранний режим, автоматично сховати панель кнопок вікна, що знаходиться внизу екрана";
 "full_screen_hide_buttons_pref_title" = "Сховати панель кнопок вікна y повноекранному режимі";
 "hide_bible_reference_overlay_summary" = "Не показувати напівпрозоре накладання посилань, коли програма перебуває в повноекранному режимі";
@@ -462,12 +462,12 @@
 "hide_window_buttons_summary" = "Кнопки вікна, які відображаються на правій стороні під час перегляду Біблії, приховані. Навігаційна панель вікна внизу все ще відображається, і ви можете відкрити спливаюче меню вікна, довго натискаючи її.";
 "hide_window_buttons_title" = "Сховати кнопки вікна";
 "pref_font_size_multiplier_title" = "Множник розміру шрифту";
-"prefs_bible_view_swipe_mode_summary" = "Swipe left / right gesture can be used to go to next page / chapter.";
-"prefs_bible_view_swipe_mode_title" = "Action for swipe left / right gesture";
+"prefs_bible_view_swipe_mode_summary" = "Жест проведення вліво/вправо можна використовувати для переходу до наступної сторінки/розділу.";
+"prefs_bible_view_swipe_mode_title" = "Дія для жесту проведення вліво/вправо";
 "prefs_disable_animations_summary" = "Вимкнути різні анімації, такі як плавне прокручування.";
 "prefs_disable_animations_title" = "Вимкнути анімацію";
-"prefs_disable_click_to_edit_summary" = "Requires using the edit button to edit notes in the Study Pad.";
-"prefs_disable_click_to_edit_title" = "Disable Study Pad click-to-edit";
+"prefs_disable_click_to_edit_summary" = "Для редагування приміток у блокноті потрібно використовувати кнопку змінення.";
+"prefs_disable_click_to_edit_title" = "Вимкнути редагування дотиком у блокноті";
 "prefs_double_tap_to_fullscreen_summary" = "Увійдіть у повноекранний режим, двічі торкнувшись вікна";
 "prefs_double_tap_to_fullscreen_title" = "Подвійний дотик на весь екран";
 "prefs_e_ink_mode_title" = "Чорний та білий режим";
@@ -491,11 +491,11 @@
 "prefs_swipe_mode_none" = "Вимкнено";
 "prefs_swipe_mode_page" = "Сторінка";
 
-"prefs_volume_keys_scroll_title" = "Volume buttons scroll";
-"prefs_volume_keys_scroll_summary" = "Use volume up/down to scroll Bible text";
+"prefs_volume_keys_scroll_title" = "Кнопки гучності для прокручування";
+"prefs_volume_keys_scroll_summary" = "Використовуйте кнопки збільшення/зменшення гучності для прокручування тексту Біблії";
 "prefs_volume_keys_scroll_ios_note" = "iOS does not expose volume-button presses to apps. This setting is kept for Android parity and cross-device sync.";
-"prefs_experimental_features_title" = "Experimental features";
-"prefs_experimental_features_summary" = "Select which experimental features to enable. These features are still in development and may change or be removed";
+"prefs_experimental_features_title" = "Експериментальні функції";
+"prefs_experimental_features_summary" = "Вибрати, які експериментальні функції увімкнути. Ці функції ще в розробці та можуть змінитися або бути видалені";
 "experimental_feature_bookmark_edit_actions" = "Bookmark edit actions";
 "experimental_feature_add_paragraph_break" = "Add paragraph break bookmark";
 "prefs_enable_bluetooth_title" = "Увімкнути мультимедійні кнопки Bluetooth";

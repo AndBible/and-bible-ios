@@ -453,8 +453,8 @@
 "choose_strongs_greek_morphology_title" = "Robinsono graikų morfologija";
 "choose_strongs_hebrew_dictionary_summary" = "Pasirinkite hebrajiškų žodžių apibrėžimų Strongo žodyną";
 "choose_strongs_hebrew_dictionary_title" = "Strongo hebrajų žodynas";
-"choose_word_lookup_dictionary_summary" = "Choose dictionaries for looking up words";
-"choose_word_lookup_dictionary_title" = "Word lookup dictionaries";
+"choose_word_lookup_dictionary_summary" = "Pasirinkti žodynus žodžių paieškai";
+"choose_word_lookup_dictionary_title" = "Žodžių peržvalgos žodynai";
 "full_screen_hide_buttons_pref_summary" = "Perjungiant į viso ekrano režimą, automatiškai paslėpti ekrano apačioje esančią lango mygtukų juostą";
 "full_screen_hide_buttons_pref_title" = "Viso ekrano režime slėpti lango mygtukų juostą";
 "hide_bible_reference_overlay_summary" = "Nerodyti pusiau permatomo Biblijos nuorodų sluoksnio, kai programėlė yra atidaryta visame ekrane";
@@ -466,8 +466,8 @@
 "prefs_bible_view_swipe_mode_title" = "Perbraukimo kairėn / dešinėn gesto veiksmas";
 "prefs_disable_animations_summary" = "Išjungti įvairias animacijas, tokias kaip, glotnus slinkimas.";
 "prefs_disable_animations_title" = "Išjungti animacijas";
-"prefs_disable_click_to_edit_summary" = "Requires using the edit button to edit notes in the Study Pad.";
-"prefs_disable_click_to_edit_title" = "Disable Study Pad click-to-edit";
+"prefs_disable_click_to_edit_summary" = "Norint redaguoti pastabas užrašų knygelėje, reikia naudoti redagavimo mygtuką.";
+"prefs_disable_click_to_edit_title" = "Išjungti spustelėjimą redaguoti užrašų knygelėje";
 "prefs_double_tap_to_fullscreen_summary" = "Bakstelėjus du kartus ant lango, įjungti viso ekrano režimą";
 "prefs_double_tap_to_fullscreen_title" = "Bakstelėjus du kartus, perjungti į visą ekraną";
 "prefs_e_ink_mode_title" = "Nespalvotasis režimas";
@@ -491,8 +491,8 @@
 "prefs_swipe_mode_none" = "Išjungta";
 "prefs_swipe_mode_page" = "Puslapis";
 
-"prefs_volume_keys_scroll_title" = "Volume buttons scroll";
-"prefs_volume_keys_scroll_summary" = "Use volume up/down to scroll Bible text";
+"prefs_volume_keys_scroll_title" = "Garso mygtukai slinkčiai";
+"prefs_volume_keys_scroll_summary" = "Naudoti garso didinimo/mažinimo mygtukus Biblijos teksto slinkimui";
 "prefs_volume_keys_scroll_ios_note" = "iOS does not expose volume-button presses to apps. This setting is kept for Android parity and cross-device sync.";
 "prefs_experimental_features_title" = "Eksperimentinės ypatybės";
 "prefs_experimental_features_summary" = "Pažymėkite, kurias eksperimentines ypatybes norite įjungti. Šios ypatybės yra vis dar plėtojamos ir gali būti pakeistos ar pašalintos";

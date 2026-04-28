@@ -348,12 +348,12 @@ public struct SearchView: View {
     @ViewBuilder
     private var searchStateExport: some View {
         if UITestRuntimeConfiguration.enablesDetailedAccessibilityExports {
-            Color.clear
+            Text(searchAccessibilityValue)
+                .font(.system(size: 1))
                 .frame(width: 1, height: 1)
+                .opacity(0.01)
                 .allowsHitTesting(false)
-                .accessibilityElement()
                 .accessibilityIdentifier("searchStateExport")
-                .accessibilityLabel("")
                 .accessibilityValue(searchAccessibilityValue)
         }
     }

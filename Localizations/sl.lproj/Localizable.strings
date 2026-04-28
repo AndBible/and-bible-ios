@@ -424,8 +424,8 @@
 "choose_strongs_greek_morphology_title" = "Robinsonovo grško oblikoslovje";
 "choose_strongs_hebrew_dictionary_summary" = "Izberite hebrejski Strong-ov slovar za definicije grških besed";
 "choose_strongs_hebrew_dictionary_title" = "Slovar hebrejskih Strong-ovih števil";
-"choose_word_lookup_dictionary_summary" = "Choose dictionaries for looking up words";
-"choose_word_lookup_dictionary_title" = "Word lookup dictionaries";
+"choose_word_lookup_dictionary_summary" = "Izberi slovarje za iskanje besed";
+"choose_word_lookup_dictionary_title" = "Slovarji za iskanje besed";
 "full_screen_hide_buttons_pref_summary" = "Ko preklopite v celozaslonski način, samodejno skrijte vrstico gumbov z okni, ki je na dnu zaslona";
 "full_screen_hide_buttons_pref_title" = "Skrij gumbe oken v celozaslonskem prikazu";
 "hide_bible_reference_overlay_summary" = "Ne prikazuje polprozorne biblijske vrstice na dnu zaslona, ko je aplikacija v celozaslonskem načinu.";
@@ -437,8 +437,8 @@
 "prefs_bible_view_swipe_mode_title" = "Akcija za poteg levo / desno";
 "prefs_disable_animations_summary" = "Onemogočite različne animacije, na primer gladko drsenje.";
 "prefs_disable_animations_title" = "Izklopi animacije";
-"prefs_disable_click_to_edit_summary" = "Requires using the edit button to edit notes in the Study Pad.";
-"prefs_disable_click_to_edit_title" = "Disable Study Pad click-to-edit";
+"prefs_disable_click_to_edit_summary" = "Za urejanje opomb v študijskem zvezku je treba uporabiti gumb za urejanje.";
+"prefs_disable_click_to_edit_title" = "Onemogoči urejanje s klikom v študijskem zvezku";
 "prefs_double_tap_to_fullscreen_summary" = "Za celozaslonski način dvakrat tapnite v oknu";
 "prefs_double_tap_to_fullscreen_title" = "Dvakrat tapnite za celozaslonski način";
 "prefs_e_ink_mode_title" = "Črno-bel način";
@@ -462,8 +462,8 @@
 "prefs_swipe_mode_none" = "Onemogočeno";
 "prefs_swipe_mode_page" = "Stran";
 
-"prefs_volume_keys_scroll_title" = "Volume buttons scroll";
-"prefs_volume_keys_scroll_summary" = "Use volume up/down to scroll Bible text";
+"prefs_volume_keys_scroll_title" = "Gumbi za glasnost za pomikanje";
+"prefs_volume_keys_scroll_summary" = "Uporabi gumba za povečanje/zmanjšanje glasnosti za pomikanje po besedilu biblije";
 "prefs_volume_keys_scroll_ios_note" = "iOS does not expose volume-button presses to apps. This setting is kept for Android parity and cross-device sync.";
 "prefs_experimental_features_title" = "Eksperimentalne lastnosti";
 "prefs_experimental_features_summary" = "Izberite, katere eksperimentalne funkcije boste omogočili. Te funkcije so še vedno v razvoju in se lahko spremenijo ali odstranijo.";

@@ -453,8 +453,8 @@
 "choose_strongs_greek_morphology_title" = "Robinsonova řecká morfologie";
 "choose_strongs_hebrew_dictionary_summary" = "Vybrat Strongův slovník definicí hebrejských slov";
 "choose_strongs_hebrew_dictionary_title" = "Strongův hebrejský slovník";
-"choose_word_lookup_dictionary_summary" = "Choose dictionaries for looking up words";
-"choose_word_lookup_dictionary_title" = "Word lookup dictionaries";
+"choose_word_lookup_dictionary_summary" = "Vybrat slovníky pro vyhledávání slov";
+"choose_word_lookup_dictionary_title" = "Slovníky pro vyhledávání slov";
 "full_screen_hide_buttons_pref_summary" = "Při přechodu do režimu celé obrazovky automaticky skrýt spodní lištu tlačítek";
 "full_screen_hide_buttons_pref_title" = "Skrýt panel tlačítek v režimu celé obrazovky";
 "hide_bible_reference_overlay_summary" = "Nezobrazovat poloprůhledné okno s aktuální pozicí v Bibli při celoobrazovkovém režimu";
@@ -466,8 +466,8 @@
 "prefs_bible_view_swipe_mode_title" = "Akce při přejetí prstem doleva / doprava";
 "prefs_disable_animations_summary" = "Vypnout různé animace, jako např. jemné posouvání.";
 "prefs_disable_animations_title" = "Vypnout animace";
-"prefs_disable_click_to_edit_summary" = "Requires using the edit button to edit notes in the Study Pad.";
-"prefs_disable_click_to_edit_title" = "Disable Study Pad click-to-edit";
+"prefs_disable_click_to_edit_summary" = "Ke změnám poznámek ve studijní složce je nutné použít tlačítko pro úpravu.";
+"prefs_disable_click_to_edit_title" = "Zakázat kliknutí pro úpravu studijní složky";
 "prefs_double_tap_to_fullscreen_summary" = "Zapnout dvojklikem celoobrazovkový režim";
 "prefs_double_tap_to_fullscreen_title" = "Dvojklik pro celou obrazovku";
 "prefs_e_ink_mode_title" = "Černobílý mód ";
@@ -491,8 +491,8 @@
 "prefs_swipe_mode_none" = "Nepovoleno";
 "prefs_swipe_mode_page" = "Strana";
 
-"prefs_volume_keys_scroll_title" = "Volume buttons scroll";
-"prefs_volume_keys_scroll_summary" = "Use volume up/down to scroll Bible text";
+"prefs_volume_keys_scroll_title" = "Tlačítka hlasitosti pro posouvání";
+"prefs_volume_keys_scroll_summary" = "Použít tlačítka zvýšení/snížení hlasitosti pro posouvání textu Bible";
 "prefs_volume_keys_scroll_ios_note" = "iOS does not expose volume-button presses to apps. This setting is kept for Android parity and cross-device sync.";
 "prefs_experimental_features_title" = "Experimentální funkce";
 "prefs_experimental_features_summary" = "Vyberte, které experimentální funkce chcete povolit. Tyto funkce jsou stále ve vývoji a mohou být změněny nebo odstraněny.";

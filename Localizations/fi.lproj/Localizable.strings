@@ -424,8 +424,8 @@
 "choose_strongs_greek_morphology_title" = "Robinsonin Kreikan morfologia";
 "choose_strongs_hebrew_dictionary_summary" = "Valitse Strongin sanakirja Hepreankielisten sanojen selityksille";
 "choose_strongs_hebrew_dictionary_title" = "Strongin Heprean sanakirja";
-"choose_word_lookup_dictionary_summary" = "Choose dictionaries for looking up words";
-"choose_word_lookup_dictionary_title" = "Word lookup dictionaries";
+"choose_word_lookup_dictionary_summary" = "Valitse sanakirjat sanojen hakemiseen";
+"choose_word_lookup_dictionary_title" = "Sanahaun sanakirjat";
 "full_screen_hide_buttons_pref_summary" = "Kun vaihdat kokoruututilaan, piilota automaattisesti ikkunoiden painikepaneeli, joka sijaitsee ruudun alalaidassa.";
 "full_screen_hide_buttons_pref_title" = "Piilota ikkunoiden painikepaneeli kokoruututilassa";
 "hide_bible_reference_overlay_summary" = "Älä näytä puoliksi läpinäkyvää raamattuviitteen näyttöä kun sovellus on kokoruudun tilassa";
@@ -437,8 +437,8 @@
 "prefs_bible_view_swipe_mode_title" = "Toiminne pyyhkäisyeleelle (oikea / vasen)";
 "prefs_disable_animations_summary" = "Kytke erilaiset animaatio pois, kuten pehmeä tekstin vieritys";
 "prefs_disable_animations_title" = "Kytke animaatiot pois";
-"prefs_disable_click_to_edit_summary" = "Requires using the edit button to edit notes in the Study Pad.";
-"prefs_disable_click_to_edit_title" = "Disable Study Pad click-to-edit";
+"prefs_disable_click_to_edit_summary" = "Edellyttää muokkauspainikkeen käyttöä muistiinpanojen muokkaamiseen opintoalustassa.";
+"prefs_disable_click_to_edit_title" = "Poista opintoalustan napsautusmuokkaus käytöstä";
 "prefs_double_tap_to_fullscreen_summary" = "Siirry kokoruututilaan kaksoisnapauttamalla teksti-ikkunaa";
 "prefs_double_tap_to_fullscreen_title" = "Kaksoisnapautuksella kokoruututilaan";
 "prefs_e_ink_mode_title" = "Mustavalkoinen tila";
@@ -462,11 +462,11 @@
 "prefs_swipe_mode_none" = "Luku";
 "prefs_swipe_mode_page" = "Sivu";
 
-"prefs_volume_keys_scroll_title" = "Volume buttons scroll";
-"prefs_volume_keys_scroll_summary" = "Use volume up/down to scroll Bible text";
+"prefs_volume_keys_scroll_title" = "Äänenvoimakkuuspainikkeet vierittävät";
+"prefs_volume_keys_scroll_summary" = "Käytä äänenvoimakkuuspainikkeita raamatuntekstin vierittämiseen";
 "prefs_volume_keys_scroll_ios_note" = "iOS does not expose volume-button presses to apps. This setting is kept for Android parity and cross-device sync.";
-"prefs_experimental_features_title" = "Experimental features";
-"prefs_experimental_features_summary" = "Select which experimental features to enable. These features are still in development and may change or be removed";
+"prefs_experimental_features_title" = "Kokeelliset ominaisuudet";
+"prefs_experimental_features_summary" = "Valitse käyttöön otettavat kokeelliset ominaisuudet. Nämä ominaisuudet ovat vielä kehitteillä ja voivat muuttua tai poistua";
 "experimental_feature_bookmark_edit_actions" = "Bookmark edit actions";
 "experimental_feature_add_paragraph_break" = "Add paragraph break bookmark";
 "prefs_enable_bluetooth_title" = "Laita päälle bluetooth media-painikkeet";

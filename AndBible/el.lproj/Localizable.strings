@@ -453,8 +453,8 @@
 "choose_strongs_greek_morphology_title" = "Μορφολογία Ελληνικών Robinson";
 "choose_strongs_hebrew_dictionary_summary" = "Επιλογή Εβραϊκού λεξικού Strongs για ερμηνεία Εβραϊκών λέξεων";
 "choose_strongs_hebrew_dictionary_title" = "Εβραϊκό λεξικό Strongs";
-"choose_word_lookup_dictionary_summary" = "Choose dictionaries for looking up words";
-"choose_word_lookup_dictionary_title" = "Word lookup dictionaries";
+"choose_word_lookup_dictionary_summary" = "Επιλέξτε λεξικά για αναζήτηση λέξεων";
+"choose_word_lookup_dictionary_title" = "Λεξικά αναζήτησης λέξεων";
 "full_screen_hide_buttons_pref_summary" = "Στην εναλλαγή στην πλήρη οθόνη, αυτόματη απόκρυψη της μπάρας κουμπιών παραθύρου που βρίσκεται στο κάτω μέρος της οθόνης";
 "full_screen_hide_buttons_pref_title" = "Απόκρυψη μπάρας κουμπιών παραθύρου στην πλήρη οθόνη";
 "hide_bible_reference_overlay_summary" = "Απόκρυψη της ημι-διάφανης επικάλυψης βιβλικής παραπομπής κατά την λειτουργία πλήρους οθόνης";
@@ -466,8 +466,8 @@
 "prefs_bible_view_swipe_mode_title" = "Ενέργεια χειρονομίας συρσίματος αριστερά / δεξιά";
 "prefs_disable_animations_summary" = "Απενεργοποίηση διάφορων animation όπως smooth scrolling";
 "prefs_disable_animations_title" = "Απενεργοποίηση κινούμενων σχεδίων";
-"prefs_disable_click_to_edit_summary" = "Requires using the edit button to edit notes in the Study Pad.";
-"prefs_disable_click_to_edit_title" = "Disable Study Pad click-to-edit";
+"prefs_disable_click_to_edit_summary" = "Απαιτεί χρήση του κουμπιού επεξεργασίας για επεξεργασία σημειώσεων στον Χώρο Μελέτης.";
+"prefs_disable_click_to_edit_title" = "Απενεργοποίηση κλικ για επεξεργασία στον Χώρο Μελέτης";
 "prefs_double_tap_to_fullscreen_summary" = "Μπείτε σε λειτουργία πλήρους οθόνης με διπλό πάτημα στο παράθυρο";
 "prefs_double_tap_to_fullscreen_title" = "Διπλό πάτημα για πλήρη οθόνη";
 "prefs_e_ink_mode_title" = "Ασπρόμαυρη εμφάνιση";
@@ -491,8 +491,8 @@
 "prefs_swipe_mode_none" = "Ανενεργή";
 "prefs_swipe_mode_page" = "Σελίδα";
 
-"prefs_volume_keys_scroll_title" = "Volume buttons scroll";
-"prefs_volume_keys_scroll_summary" = "Use volume up/down to scroll Bible text";
+"prefs_volume_keys_scroll_title" = "Κύλιση με κουμπιά έντασης";
+"prefs_volume_keys_scroll_summary" = "Χρήση κουμπιών έντασης πάνω/κάτω για κύλιση κειμένου Αγίας Γραφής";
 "prefs_volume_keys_scroll_ios_note" = "iOS does not expose volume-button presses to apps. This setting is kept for Android parity and cross-device sync.";
 "prefs_experimental_features_title" = "Πειραματικες δυνατότητες";
 "prefs_experimental_features_summary" = "Επιλέξτε ποιές πειραματικές δυνατότητες θέλετε να ενεργοποιήσετε. Αυτές οι δυνατότητες βρίσκονται ακόμα υπό ανάπτυξη και μπορεί να αλλάξουν ή να καταργηθούν";

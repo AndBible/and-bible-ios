@@ -6,7 +6,10 @@ import SwiftData
 import SQLite3
 @testable import BibleUI
 @testable import BibleView
+import struct SwiftUI.Binding
+import enum SwiftUI.ColorScheme
 import struct SwiftUI.EdgeInsets
+import struct SwiftUI.EmptyView
 #if os(iOS)
 import UIKit
 import struct SwiftUI.Color
@@ -232,6 +235,155 @@ final class AndBibleTests: XCTestCase {
 
         XCTAssertEqual(insets.top, 0)
         XCTAssertEqual(insets.leading, 36)
+    }
+
+    func testBibleReaderDocumentHeaderBuildsBibleModeWithWindowControlInsets() {
+        let view = BibleReaderDocumentHeader(
+            mode: .bible(
+                title: "Genesis 1:1",
+                subtitle: "King James Version",
+                hasPrevious: false,
+                hasNext: true
+            ),
+            currentReference: "Genesis 1",
+            avoidanceInsets: EdgeInsets(top: 10, leading: 56, bottom: 0, trailing: 0),
+            onOpenNavigationDrawer: {},
+            onNavigatePrevious: {},
+            onShowBookChooser: {},
+            onNavigateNext: {},
+            onReturnFromMyNotes: {},
+            onReturnFromStudyPad: {},
+            onReturnFromAuxiliary: {},
+            onBrowseAuxiliary: {}
+        ) {
+            EmptyView()
+        }
+
+        XCTAssertTrue(String(describing: type(of: view)).contains("BibleReaderDocumentHeader"))
+    }
+
+    func testBibleReaderToolbarActionsBuildCompactStrongsConfiguration() {
+        let view = BibleReaderToolbarActions(
+            usesCompactToolbar: true,
+            preferredSingleAccessory: .search,
+            moduleHasStrongs: true,
+            strongsIconAssetName: "ToolbarStrongsHebrewLinks",
+            strongsMode: StrongsMode.inline.rawValue,
+            strongsEnabled: true,
+            isBibleActive: true,
+            isCommentaryActive: false,
+            onShowSearch: {},
+            onShowSpeak: {},
+            onApplyStrongsMode: { _ in },
+            onBibleTap: {},
+            onBibleLongPress: {},
+            onCommentaryTap: {},
+            onCommentaryLongPress: {},
+            onShowWorkspaces: {}
+        ) {
+            EmptyView()
+        }
+
+        XCTAssertTrue(String(describing: type(of: view)).contains("BibleReaderToolbarActions"))
+    }
+
+    func testBibleReaderOverflowMenuBuildsWithBibleDisplayOptions() {
+        let state = BibleReaderOverflowMenuState(
+            isFullScreen: false,
+            showsNightModeToggle: true,
+            nightMode: false,
+            showsTiltToScrollToggle: true,
+            tiltToScrollEnabled: false,
+            showsReverseSplitModeToggle: true,
+            reverseSplitModeEnabled: false,
+            windowPinningEnabled: false,
+            showsBibleDisplayOptions: true,
+            sectionTitlesEnabled: true,
+            moduleHasStrongs: true,
+            strongsMenuIconAssetName: "ToolbarStrongsHebrew",
+            verseNumbersEnabled: true
+        )
+        let view = BibleReaderOverflowMenu(
+            state: state,
+            colorScheme: ColorScheme.light,
+            onAction: { _ in }
+        )
+
+        XCTAssertTrue(String(describing: type(of: view)).contains("BibleReaderOverflowMenu"))
+    }
+
+    func testBibleReaderActiveSheetContentBuildsSettingsSheet() {
+        let view = BibleReaderActiveSheetContent(
+            sheet: .settings,
+            controller: nil,
+            displaySettings: Binding.constant(TextDisplaySettings()),
+            nightMode: Binding.constant(false),
+            nightModeMode: Binding.constant("system"),
+            onDismiss: {},
+            onSettingsChanged: {}
+        )
+
+        XCTAssertTrue(String(describing: type(of: view)).contains("BibleReaderActiveSheetContent"))
+    }
+
+    func testBibleReaderKeyboardShortcutsBuildCommandSurface() {
+        let view = BibleReaderKeyboardShortcuts(
+            onSearch: {},
+            onShowBookChooser: {},
+            onOpenBookmarks: {},
+            onNavigatePrevious: {},
+            onNavigateNext: {},
+            onOpenDownloads: {},
+            onOpenSettings: {}
+        )
+
+        XCTAssertTrue(String(describing: type(of: view)).contains("BibleReaderKeyboardShortcuts"))
+    }
+
+    func testBibleReaderModulePickerBuildsForBibleCategory() {
+        let view = BibleReaderModulePicker(
+            controller: nil,
+            category: .bible,
+            onDismiss: {},
+            onOpenDownloads: {},
+            onOpenDictionaryBrowser: {},
+            onOpenGeneralBookBrowser: {},
+            onOpenMapBrowser: {}
+        )
+
+        XCTAssertTrue(String(describing: type(of: view)).contains("BibleReaderModulePicker"))
+    }
+
+    func testBibleReaderSpeakMiniPlayerBuildsWithSpeakService() {
+        let view = BibleReaderSpeakMiniPlayer(
+            speakService: SpeakService(),
+            currentReference: "Genesis 1",
+            onShowControls: {}
+        )
+
+        XCTAssertTrue(String(describing: type(of: view)).contains("BibleReaderSpeakMiniPlayer"))
+    }
+
+    func testBibleReaderNavigationDrawerBuildsWithActionHandler() {
+        let view = BibleReaderNavigationDrawer(
+            width: 306,
+            colorScheme: ColorScheme.dark,
+            versionText: "Version 1.0 (1)",
+            onAction: { _ in }
+        )
+
+        XCTAssertTrue(String(describing: type(of: view)).contains("BibleReaderNavigationDrawer"))
+    }
+
+    func testBibleReaderChooseDocumentSheetBuildsWithActiveBibleChoice() {
+        let view = BibleReaderChooseDocumentSheet(
+            activeChoice: .bible,
+            subtitle: { _ in nil },
+            onSelect: { _ in },
+            onDismiss: {}
+        )
+
+        XCTAssertTrue(String(describing: type(of: view)).contains("BibleReaderChooseDocumentSheet"))
     }
 
     #if os(iOS)

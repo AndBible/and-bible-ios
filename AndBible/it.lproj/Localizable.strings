@@ -453,8 +453,8 @@
 "choose_strongs_greek_morphology_title" = "Morfologia greca di Robinson";
 "choose_strongs_hebrew_dictionary_summary" = "Scegli il dizionario Strong per le definizioni in ebraico";
 "choose_strongs_hebrew_dictionary_title" = "Dizionario ebraico di Strong";
-"choose_word_lookup_dictionary_summary" = "Choose dictionaries for looking up words";
-"choose_word_lookup_dictionary_title" = "Word lookup dictionaries";
+"choose_word_lookup_dictionary_summary" = "Scegli i dizionari per cercare le parole";
+"choose_word_lookup_dictionary_title" = "Dizionari per la ricerca delle parole";
 "full_screen_hide_buttons_pref_summary" = "Quando si passa alla modalità a schermo intero, nasconde automaticamente la barra dei pulsanti della finestra che si trova nella parte inferiore dello schermo";
 "full_screen_hide_buttons_pref_title" = "Nascondi pulsanti a schermo intero";
 "hide_bible_reference_overlay_summary" = "Non mostrare i riferimenti biblici semi-trasparenti in sovraimpressione quando l'app è a schermo intero";
@@ -466,8 +466,8 @@
 "prefs_bible_view_swipe_mode_title" = "Azione per il gesto scorri a sinistra / destra";
 "prefs_disable_animations_summary" = "Disabilita varie animazioni come lo scorrimento fluido";
 "prefs_disable_animations_title" = "Disabilita animazioni";
-"prefs_disable_click_to_edit_summary" = "Requires using the edit button to edit notes in the Study Pad.";
-"prefs_disable_click_to_edit_title" = "Disable Study Pad click-to-edit";
+"prefs_disable_click_to_edit_summary" = "Richiede l'uso del pulsante modifica per modificare le note negli appunti di studio.";
+"prefs_disable_click_to_edit_title" = "Disabilita modifica con tocco negli appunti di studio";
 "prefs_double_tap_to_fullscreen_summary" = "Usa la modalità schermo intero toccando due volte la finestra";
 "prefs_double_tap_to_fullscreen_title" = "Tocca due volte per lo schermo intero";
 "prefs_e_ink_mode_title" = "Modalità bianco e nero";
@@ -491,8 +491,8 @@
 "prefs_swipe_mode_none" = "Disabilitato";
 "prefs_swipe_mode_page" = "Pagina";
 
-"prefs_volume_keys_scroll_title" = "Volume buttons scroll";
-"prefs_volume_keys_scroll_summary" = "Use volume up/down to scroll Bible text";
+"prefs_volume_keys_scroll_title" = "Tasti volume per scorrimento";
+"prefs_volume_keys_scroll_summary" = "Usa i tasti volume su/giù per scorrere il testo biblico";
 "prefs_volume_keys_scroll_ios_note" = "iOS does not expose volume-button presses to apps. This setting is kept for Android parity and cross-device sync.";
 "prefs_experimental_features_title" = "Funzionalità sperimentali";
 "prefs_experimental_features_summary" = "Scegli quali funzionalità sperimentali abilitare. Queste funzionalità sono ancora in fase di sviluppo e potrebbero subire modifiche o essere rimosse";

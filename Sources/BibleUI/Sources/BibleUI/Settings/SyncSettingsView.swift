@@ -673,21 +673,24 @@ public struct SyncSettingsView: View {
     }
 
     /**
-     Hidden accessibility probe used by UI tests to observe the live sync-state token.
+     UI-test-only accessibility probe used to observe the live sync-state token.
 
      SwiftUI's `Form` wrapper can lag behind nested state mutations when XCTest reads the
      collection view's exported value directly. This dedicated probe mirrors the same semantic
-     token without changing the visible layout.
+     token without changing the visible layout or exposing diagnostic tokens to real users.
      */
     @ViewBuilder
     private var syncSettingsStateProbe: some View {
-        Color.clear
-            .frame(width: 1, height: 1)
-            .allowsHitTesting(false)
-            .accessibilityElement()
-            .accessibilityIdentifier("syncSettingsState")
-            .accessibilityLabel("")
-            .accessibilityValue(syncSettingsAccessibilityValue)
+        if UITestRuntimeConfiguration.enablesDetailedAccessibilityExports {
+            Text(syncSettingsAccessibilityValue)
+                .font(.system(size: 1))
+                .frame(width: 1, height: 1)
+                .opacity(0.01)
+                .allowsHitTesting(false)
+                .accessibilityIdentifier("syncSettingsState")
+                .accessibilityLabel("")
+                .accessibilityValue(syncSettingsAccessibilityValue)
+        }
     }
 
     /**

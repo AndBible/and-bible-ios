@@ -387,11 +387,9 @@ final class AndBibleUITests: XCTestCase {
         let originalActiveWorkspaceName = requireActiveWorkspaceRow(in: app, timeout: 10).label
 
         _ = openWorkspaceCreatePrompt(in: app, timeout: 10)
-        replaceText(
-            in: requireWorkspaceNamePromptField(in: app, timeout: 10),
-            with: createdName,
-            placeholderHints: ["Name", "name"]
-        )
+        let workspaceNameField = requireWorkspaceNamePromptField(in: app, timeout: 10)
+        focusResolvedTextEntryElement(workspaceNameField, timeout: 10)
+        app.typeText(createdName)
         tapElementReliably(requireElement("workspaceNamePromptConfirmButton", in: app, timeout: 10), timeout: 10)
 
         XCTAssertTrue(
@@ -738,7 +736,6 @@ final class AndBibleUITests: XCTestCase {
         let searchField = requireBookmarkListSearchField(in: app, timeout: 10)
 
         replaceText(in: searchField, with: "Matthew", placeholderHints: ["Search bookmarks"])
-        searchField.typeText("\n")
         waitForBookmarkListState(containing: "count=1", in: app, timeout: 10)
         waitForBookmarkListState(containing: "query=Matthew", in: app, timeout: 10)
         waitForBookmarkListState(containing: bookmarkListRowStateToken("Matthew_3_1"), in: app, timeout: 10)
@@ -1151,7 +1148,6 @@ final class AndBibleUITests: XCTestCase {
         waitForBookmarkListState(notContaining: bookmarkListRowStateToken("Exodus_2_1"), in: app, timeout: 10)
 
         replaceText(in: searchField, with: "Exodus", placeholderHints: ["Search bookmarks"])
-        searchField.typeText("\n")
         waitForBookmarkListState(containing: "count=0", in: app, timeout: 10)
         waitForBookmarkListState(containing: "query=Exodus", in: app, timeout: 10)
         waitForBookmarkListState(notContaining: bookmarkListRowStateToken("Genesis_1_1"), in: app, timeout: 10)
@@ -1187,11 +1183,9 @@ final class AndBibleUITests: XCTestCase {
 
         tapElementReliably(requireElement("labelManagerAddButton", in: app, timeout: 10), timeout: 10)
         waitForLabelManagerState(containing: "showNewLabel=true", in: app, timeout: 10)
-        replaceText(
-            in: requireLabelManagerNewLabelField(in: app, timeout: 10),
-            with: originalName,
-            placeholderHints: ["Label name"]
-        )
+        let newLabelNameField = requireLabelManagerNewLabelField(in: app, timeout: 10)
+        focusResolvedTextEntryElement(newLabelNameField, timeout: 10)
+        app.typeText(originalName)
         tapElementReliably(requireLabelManagerCreateButton(in: app, timeout: 10), timeout: 10)
         waitForLabelManagerState(containing: labelManagerRowStateToken(originalName), in: app, timeout: 10)
 
@@ -2647,19 +2641,26 @@ final class AndBibleUITests: XCTestCase {
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
-        let screen = requireElement("modulePickerScreen", in: app, timeout: timeout, file: file, line: line)
+        _ = requireElement("modulePickerScreen", in: app, timeout: timeout, file: file, line: line)
+        let predicate = NSPredicate(format: "identifier BEGINSWITH %@", "modulePickerRow::")
+        let candidates = [
+            app.buttons.matching(predicate).firstMatch,
+            app.collectionViews.buttons.matching(predicate).firstMatch,
+            app.collectionViews.cells.matching(predicate).firstMatch,
+            app.cells.matching(predicate).firstMatch,
+            app.otherElements.matching(predicate).firstMatch,
+        ]
         let deadline = Date().addingTimeInterval(timeout)
         repeat {
-            let button = screen.buttons.element(boundBy: 0)
-            if button.exists {
-                tapElementReliably(button, timeout: timeout, file: file, line: line)
+            if let row = candidates.first(where: { $0.exists || $0.waitForExistence(timeout: 0.2) }) {
+                tapElementReliably(row, timeout: timeout, file: file, line: line)
                 return
             }
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         } while Date() < deadline
 
         XCTFail(
-            "Expected module picker to expose at least one selectable module row within \(timeout) seconds.",
+            "Expected module picker to expose at least one 'modulePickerRow::' row within \(timeout) seconds.",
             file: file,
             line: line
         )
@@ -4350,11 +4351,10 @@ final class AndBibleUITests: XCTestCase {
     }
 
     /**
-     Resolves lightweight state-export or status candidates by searching inside one owning screen
-     before falling back to app-wide queries.
+     Resolves lightweight state-export or status candidates without probing broad `Other` queries.
 
-     This keeps value-based polling off the full app hierarchy for controls that only ever exist
-     inside a known screen, which materially reduces snapshot timeout pressure in CI.
+     The app emits these probes as tiny static text nodes specifically so polling their value does
+     not force XCTest to snapshot unrelated SwiftUI containers.
      */
     private func screenScopedStateCandidates(
         _ identifier: String,
@@ -4362,12 +4362,10 @@ final class AndBibleUITests: XCTestCase {
         in app: XCUIApplication
     ) -> [XCUIElement] {
         let directCandidates = [
-            app.otherElements[identifier].firstMatch,
             app.staticTexts[identifier].firstMatch,
         ]
         let scopedCandidates = screenRootCandidates(screenIdentifier, in: app).flatMap { root in
             [
-                root.otherElements[identifier].firstMatch,
                 root.staticTexts[identifier].firstMatch,
             ]
         }
@@ -4474,17 +4472,7 @@ final class AndBibleUITests: XCTestCase {
             app.secureTextFields[identifier].firstMatch,
             app.otherElements[identifier].firstMatch,
         ]
-        let systemPromptCandidates: [XCUIElement]
-        if let prompt = resolvedModalPrompt(in: app, timeout: 0) {
-            systemPromptCandidates = modalTextFieldCandidates(
-                in: prompt,
-                identifiers: [identifier],
-                titles: ["Name", "name"]
-            )
-        } else {
-            systemPromptCandidates = []
-        }
-        return customSheetCandidates + focusedTextEntryCandidates(in: app) + systemPromptCandidates
+        return customSheetCandidates + focusedTextEntryCandidates(in: app)
     }
 
     /// Returns workspace-name prompt buttons without walking the custom sheet hierarchy.
@@ -4514,17 +4502,7 @@ final class AndBibleUITests: XCTestCase {
         let directTitleCandidates = titles.map { title in
             app.buttons[title].firstMatch
         }
-        let systemPromptCandidates: [XCUIElement]
-        if let prompt = resolvedModalPrompt(in: app, timeout: 0) {
-            systemPromptCandidates = modalButtonCandidates(
-                in: prompt,
-                identifiers: [identifier],
-                titles: titles
-            )
-        } else {
-            systemPromptCandidates = []
-        }
-        return directIdentifierCandidates + directTitleCandidates + systemPromptCandidates
+        return directIdentifierCandidates + directTitleCandidates
     }
 
     /// Returns screen-aware candidates for small exported semantic state controls.
@@ -4543,7 +4521,6 @@ final class AndBibleUITests: XCTestCase {
             return screenScopedStateCandidates(identifier, within: "syncSettingsScreen", in: app)
         default:
             return [
-                app.otherElements[identifier].firstMatch,
                 app.staticTexts[identifier].firstMatch,
             ]
         }
@@ -4648,6 +4625,7 @@ final class AndBibleUITests: XCTestCase {
             ]
         case "readerBibleToolbarButton", "readerCommentaryToolbarButton":
             return [
+                app.buttons[identifier].firstMatch,
                 app.otherElements[identifier].firstMatch,
                 app.images[identifier].firstMatch,
             ]
@@ -4821,6 +4799,13 @@ final class AndBibleUITests: XCTestCase {
                 app.buttons[identifier].firstMatch,
                 app.otherElements[identifier].firstMatch,
             ]
+        case "textDisplaySettingsScreen":
+            return [
+                app.collectionViews[identifier].firstMatch,
+                app.tables[identifier].firstMatch,
+                app.otherElements[identifier].firstMatch,
+                app.scrollViews[identifier].firstMatch,
+            ]
         case
             "settingsForm",
             "bookmarkListScreen",
@@ -4829,7 +4814,6 @@ final class AndBibleUITests: XCTestCase {
             "labelEditScreen",
             "syncSettingsScreen",
             "colorSettingsScreen",
-            "textDisplaySettingsScreen",
             "importExportScreen",
             "modulePickerScreen",
             "moduleBrowserScreen":
@@ -5804,13 +5788,14 @@ final class AndBibleUITests: XCTestCase {
     ) -> Bool {
         _ = waitForReaderShellReady(in: app, timeout: min(10, timeout))
         let deadline = Date().addingTimeInterval(timeout)
+
+        tapReaderToolbarCoordinate(.moreMenu, in: app)
+        if waitForReaderOverflowMenu(in: app, timeout: min(5, max(1, deadline.timeIntervalSinceNow))) {
+            return true
+        }
+
         repeat {
-            let button = requireReaderMoreMenuButton(
-                in: app,
-                timeout: min(2, max(0.5, deadline.timeIntervalSinceNow)),
-                file: file,
-                line: line
-            )
+            let button = unresolvedElement("readerMoreMenuButton", in: app)
             if waitForElementToBecomeHittable(button, timeout: min(2, max(0.5, deadline.timeIntervalSinceNow))) {
                 button.tap()
             } else if button.exists, !button.frame.isEmpty {
@@ -5996,12 +5981,17 @@ final class AndBibleUITests: XCTestCase {
     ) -> Bool {
         _ = waitForReaderShellReady(in: app, timeout: min(10, timeout))
         let deadline = Date().addingTimeInterval(timeout)
+
+        tapReaderToolbarCoordinate(.navigationDrawer, in: app)
+        if waitForReaderNavigationDrawer(
+            in: app,
+            timeout: min(5, max(2, deadline.timeIntervalSinceNow))
+        ) {
+            return true
+        }
+
         repeat {
-            let button = requireElement(
-                "readerNavigationDrawerButton",
-                in: app,
-                timeout: min(2, max(0.5, deadline.timeIntervalSinceNow))
-            )
+            let button = unresolvedElement("readerNavigationDrawerButton", in: app)
             if waitForElementToBecomeHittable(button, timeout: min(2, max(0.5, deadline.timeIntervalSinceNow))) {
                 button.tap()
             } else if button.exists, !button.frame.isEmpty {
@@ -6017,6 +6007,28 @@ final class AndBibleUITests: XCTestCase {
         } while Date() < deadline
 
         return false
+    }
+
+    /// Toolbar buttons occasionally trigger slow XCTest snapshots; coordinates are verified by state.
+    private enum ReaderToolbarCoordinateTarget {
+        case navigationDrawer
+        case moreMenu
+
+        var normalizedOffset: CGVector {
+            switch self {
+            case .navigationDrawer:
+                CGVector(dx: 0.055, dy: 0.085)
+            case .moreMenu:
+                CGVector(dx: 0.965, dy: 0.085)
+            }
+        }
+    }
+
+    private func tapReaderToolbarCoordinate(
+        _ target: ReaderToolbarCoordinateTarget,
+        in app: XCUIApplication
+    ) {
+        app.coordinate(withNormalizedOffset: target.normalizedOffset).tap()
     }
 
     /**
@@ -6322,7 +6334,7 @@ final class AndBibleUITests: XCTestCase {
         case "readerOpenHistoryAction":
             return "History"
         case "readerOpenReadingPlansAction":
-            return "Reading Plans"
+            return "Reading Plan"
         case "readerOpenSettingsAction":
             return "Application preferences"
         case "readerOpenWorkspacesAction":
@@ -7632,7 +7644,8 @@ final class AndBibleUITests: XCTestCase {
     private func createFreshLabelFromAssignment(in app: XCUIApplication) {
         presentLabelCreationPrompt(in: app, timeout: 10)
         let nameField = requireLabelManagerNewLabelField(in: app, timeout: 10)
-        replaceText(in: nameField, with: "UI Test Fresh", placeholderHints: ["Label name"])
+        focusResolvedTextEntryElement(nameField, timeout: 10)
+        app.typeText("UI Test Fresh")
         tapElementReliably(requireLabelManagerCreateButton(in: app, timeout: 10), timeout: 10)
     }
 
@@ -8357,6 +8370,7 @@ final class AndBibleUITests: XCTestCase {
      *
      * - Parameters:
      *   - element: Text field or search field that should receive keyboard focus.
+     *   - requireExistencePreflight: Whether to run an explicit existence wait before tapping.
      *   - timeout: Maximum number of seconds to wait for the control to expose a stable frame.
      *   - file: Source file used for XCTest failure attribution.
      *   - line: Source line used for XCTest failure attribution.
@@ -8370,16 +8384,19 @@ final class AndBibleUITests: XCTestCase {
     private func focusTextEntryElement(
         _ element: XCUIElement,
         preferTrailingEdge: Bool = false,
+        requireExistencePreflight: Bool = true,
         timeout: TimeInterval = 10,
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
-        XCTAssertTrue(
-            element.waitForExistence(timeout: timeout),
-            "Expected text input '\(element.identifier)' to exist within \(timeout) seconds.",
-            file: file,
-            line: line
-        )
+        if requireExistencePreflight {
+            XCTAssertTrue(
+                element.waitForExistence(timeout: timeout),
+                "Expected text input '\(element.identifier)' to exist within \(timeout) seconds.",
+                file: file,
+                line: line
+            )
+        }
 
         let deadline = Date().addingTimeInterval(timeout)
         repeat {
@@ -8425,6 +8442,30 @@ final class AndBibleUITests: XCTestCase {
         XCTAssertTrue(
             waitForElementKeyboardFocus(element, timeout: 0.5),
             "Expected text input '\(element.identifier)' to gain keyboard focus within \(timeout) seconds.",
+            file: file,
+            line: line
+        )
+    }
+
+    /**
+     Focuses a text-entry control that was already resolved by a prompt-specific helper.
+     *
+     * SwiftUI alerts and sheets can expose their text field briefly, then make a second
+     * `waitForExistence` call hang while XCTest rebuilds the modal snapshot. Prompt-specific
+     * resolvers already proved the field exists, so this path starts with the focus attempts.
+     */
+    private func focusResolvedTextEntryElement(
+        _ element: XCUIElement,
+        preferTrailingEdge: Bool = false,
+        timeout: TimeInterval = 10,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        focusTextEntryElement(
+            element,
+            preferTrailingEdge: preferTrailingEdge,
+            requireExistencePreflight: false,
+            timeout: timeout,
             file: file,
             line: line
         )

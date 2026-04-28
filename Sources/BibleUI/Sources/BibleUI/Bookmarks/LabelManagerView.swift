@@ -80,12 +80,12 @@ public struct LabelManagerView: View {
     @ViewBuilder
     private var labelManagerStateExport: some View {
         if UITestRuntimeConfiguration.enablesDetailedAccessibilityExports {
-            Color.clear
+            Text(labelManagerAccessibilityValue)
+                .font(.system(size: 1))
                 .frame(width: 1, height: 1)
+                .opacity(0.01)
                 .allowsHitTesting(false)
-                .accessibilityElement()
                 .accessibilityIdentifier("labelManagerStateExport")
-                .accessibilityLabel("")
                 .accessibilityValue(labelManagerAccessibilityValue)
         }
     }

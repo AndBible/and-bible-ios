@@ -244,12 +244,12 @@ public struct BookmarkListView: View {
     @ViewBuilder
     private var bookmarkListStateExport: some View {
         if UITestRuntimeConfiguration.enablesDetailedAccessibilityExports {
-            Color.clear
+            Text(bookmarkListAccessibilityValue)
+                .font(.system(size: 1))
                 .frame(width: 1, height: 1)
+                .opacity(0.01)
                 .allowsHitTesting(false)
-                .accessibilityElement()
                 .accessibilityIdentifier("bookmarkListStateExport")
-                .accessibilityLabel("")
                 .accessibilityValue(bookmarkListAccessibilityValue)
         }
     }

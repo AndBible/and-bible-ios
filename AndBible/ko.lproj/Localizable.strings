@@ -440,11 +440,11 @@
 
 "add_bookmark3" = "선택";
 "add_bookmark_whole_verse1" = "구절";
-"prefs_disable_two_step_bookmarking_title" = "One-step bookmarking";
-"prefs_disable_two_step_bookmarking_summary" = "Show \"Selection\" and \"Verses\" items directly in Bible view Selection menu";
+"prefs_disable_two_step_bookmarking_title" = "한 단계 북마크";
+"prefs_disable_two_step_bookmarking_summary" = "성경 보기 선택 메뉴에 \"선택\" 및 \"구절\" 항목을 직접 표시";
 
-"active_window_indicator_summary" = "Highlight window corners to help recognising which window is active";
-"active_window_indicator_title" = "Show active window indicator";
+"active_window_indicator_summary" = "어느 창이 활성 상태인지 인식하는 데 도움이 되도록 창 모서리를 강조 표시합니다";
+"active_window_indicator_title" = "활성 창 표시기 표시";
 "auto_fullscreen" = "전체 화면으로 스크롤";
 "auto_fullscreen_summary" = "텍스트를 스크롤링할 때 자동으로 전체 화면으로 전환. 팁: 화면을 두 번 탭하면 언제나 전체 화면으로 변경할 수 있습니다.";
 "choose_strongs_greek_dictionary_summary" = "그리스어 단어의 스트롱 사전을 선택합니다";
@@ -453,21 +453,21 @@
 "choose_strongs_greek_morphology_title" = "Robinson Greek morphology";
 "choose_strongs_hebrew_dictionary_summary" = "히브리어 단어의 스트롱 사전을 선택합니다";
 "choose_strongs_hebrew_dictionary_title" = "스트롱 히브리어 사전";
-"choose_word_lookup_dictionary_summary" = "Choose dictionaries for looking up words";
-"choose_word_lookup_dictionary_title" = "Word lookup dictionaries";
+"choose_word_lookup_dictionary_summary" = "단어 검색에 사용할 사전 선택";
+"choose_word_lookup_dictionary_title" = "단어 검색 사전";
 "full_screen_hide_buttons_pref_summary" = "전체 화면 모드로 전환되면 화면 아래에 있는 윈도우 버튼을 자동으로 숨깁니다";
 "full_screen_hide_buttons_pref_title" = "전체 화면에서 윈도우 버튼 바를 숨김";
 "hide_bible_reference_overlay_summary" = "앱이 전체 화면 모드에 있을 때 반투명한 성경 참조 오버레이를 보여주지 않음";
 "hide_bible_reference_overlay_title" = "성경 참조 오버레이 숨기기";
 "hide_window_buttons_summary" = "성경 창의 오른쪽에 있는 윈도우 버튼을 숨깁니다. 아래쪽의 윈도우 내비게이션 바는 여전히 보이고 오래 클릭해서 윈도우 팝업 메뉴를 열 수 있습니다.";
 "hide_window_buttons_title" = "윈도우 버튼 숨기기";
-"pref_font_size_multiplier_title" = "Font size multiplier";
-"prefs_bible_view_swipe_mode_summary" = "Swipe left / right gesture can be used to go to next page / chapter.";
-"prefs_bible_view_swipe_mode_title" = "Action for swipe left / right gesture";
+"pref_font_size_multiplier_title" = "글꼴 크기 배율";
+"prefs_bible_view_swipe_mode_summary" = "좌/우 스와이프 제스처로 다음 페이지/장으로 이동할 수 있습니다.";
+"prefs_bible_view_swipe_mode_title" = "좌/우 스와이프 제스처 동작";
 "prefs_disable_animations_summary" = "부드러운 스크롤과 같은 애니메이션을 끕니다.";
 "prefs_disable_animations_title" = "애니메이션 끄기";
-"prefs_disable_click_to_edit_summary" = "Requires using the edit button to edit notes in the Study Pad.";
-"prefs_disable_click_to_edit_title" = "Disable Study Pad click-to-edit";
+"prefs_disable_click_to_edit_summary" = "스터디 패드에서 노트를 편집하려면 편집 버튼을 사용해야 합니다.";
+"prefs_disable_click_to_edit_title" = "스터디 패드 클릭 편집 비활성화";
 "prefs_double_tap_to_fullscreen_summary" = "윈도우를 두 번 탭하면 전체 화면으로 전환됩니다";
 "prefs_double_tap_to_fullscreen_title" = "두 번 탭하여 전체 화면으로 전환";
 "prefs_e_ink_mode_title" = "흑백 모드";
@@ -485,24 +485,24 @@
 "prefs_open_links_in_special_window_title" = "링크 윈도우";
 "prefs_screen_keep_on_summary" = "이 앱을 사용하는 동안 스크린이 꺼지지 않게 함";
 "prefs_screen_keep_on_title" = "화면 켜 놓기";
-"prefs_show_error_box_summary" = "Useful for developers when debugging BibleView javascript side errors. This will make the app slower.";
+"prefs_show_error_box_summary" = "BibleView JavaScript 오류를 디버깅할 때 개발자에게 유용합니다. 이 기능을 사용하면 앱이 느려집니다.";
 "prefs_show_error_box_title" = "자바스크립트 오류 창 보기";
 "prefs_swipe_mode_chapter" = "장";
 "prefs_swipe_mode_none" = "Disabled";
 "prefs_swipe_mode_page" = "Page";
 
-"prefs_volume_keys_scroll_title" = "Volume buttons scroll";
-"prefs_volume_keys_scroll_summary" = "Use volume up/down to scroll Bible text";
+"prefs_volume_keys_scroll_title" = "볼륨 버튼 스크롤";
+"prefs_volume_keys_scroll_summary" = "볼륨 위/아래 버튼으로 성경 텍스트를 스크롤합니다";
 "prefs_volume_keys_scroll_ios_note" = "iOS does not expose volume-button presses to apps. This setting is kept for Android parity and cross-device sync.";
-"prefs_experimental_features_title" = "Experimental features";
-"prefs_experimental_features_summary" = "Select which experimental features to enable. These features are still in development and may change or be removed";
+"prefs_experimental_features_title" = "실험적 기능";
+"prefs_experimental_features_summary" = "활성화할 실험적 기능을 선택하세요. 이 기능들은 아직 개발 중이며 변경되거나 제거될 수 있습니다";
 "experimental_feature_bookmark_edit_actions" = "Bookmark edit actions";
 "experimental_feature_add_paragraph_break" = "Add paragraph break bookmark";
-"prefs_enable_bluetooth_title" = "Enable Bluetooth media buttons";
-"prefs_enable_bluetooth_summary" = "Handle Bluetooth media buttons to start/stop speaking.";
+"prefs_enable_bluetooth_title" = "Bluetooth 미디어 버튼 활성화";
+"prefs_enable_bluetooth_summary" = "Bluetooth 미디어 버튼으로 음성 읽기 시작/중지를 제어합니다.";
 
-"open_bible_links_title" = "Open Bible links in AndBible";
-"open_bible_links_summary" = "When clicking links that refer to AndBible supported Bible URL, open them in AndBible";
+"open_bible_links_title" = "AndBible에서 성경 링크 열기";
+"open_bible_links_summary" = "AndBible에서 지원하는 성경 URL을 참조하는 링크를 클릭할 때 AndBible에서 열기";
 
 "crash_app" = "Crash app!";
 "crash_app_summary" = "Crash app after 10 seconds. Debugging feature, visible only in debug builds.";

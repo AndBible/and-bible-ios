@@ -440,10 +440,10 @@
 
 "add_bookmark3" = "تحديد";
 "add_bookmark_whole_verse1" = "آيات";
-"prefs_disable_two_step_bookmarking_title" = "One-step bookmarking";
-"prefs_disable_two_step_bookmarking_summary" = "Show \"Selection\" and \"Verses\" items directly in Bible view Selection menu";
+"prefs_disable_two_step_bookmarking_title" = "الإشارة المرجعية بخطوة واحدة";
+"prefs_disable_two_step_bookmarking_summary" = "إظهار عناصر \"التحديد\" و\"الآيات\" مباشرةً في قائمة التحديد بمشهد الكتاب المقدس";
 
-"active_window_indicator_summary" = "Highlight window corners to help recognising which window is active";
+"active_window_indicator_summary" = "إبراز زوايا النافذة للمساعدة في التعرف على النافذة النشطة";
 "active_window_indicator_title" = "عرض مؤشر النافذة النشطة";
 "auto_fullscreen" = "ملء الشاشة عند التمرير";
 "auto_fullscreen_summary" = "التبديل تلقائيًا إلى وضع ملء الشاشة عند تمرير النص. نصيحة: يمكنك دائمًا التبديل إلى ملء الشاشة عن طريق النقر المزدوج على الشاشة.";
@@ -453,21 +453,21 @@
 "choose_strongs_greek_morphology_title" = "علم التشكل اليوناني روبنسون";
 "choose_strongs_hebrew_dictionary_summary" = "اختر قاموس Strongs لتعريفات الكلمات العبرية";
 "choose_strongs_hebrew_dictionary_title" = "القاموس العبري Strongs";
-"choose_word_lookup_dictionary_summary" = "Choose dictionaries for looking up words";
-"choose_word_lookup_dictionary_title" = "Word lookup dictionaries";
+"choose_word_lookup_dictionary_summary" = "اختر القواميس للبحث عن الكلمات";
+"choose_word_lookup_dictionary_title" = "قواميس البحث عن الكلمات";
 "full_screen_hide_buttons_pref_summary" = "عند التبديل إلى وضع ملء الشاشة، إخفاء شريط أزرار النافذة تلقائيًا الموجود أسفل الشاشة";
 "full_screen_hide_buttons_pref_title" = "إخفاء شريط زر النافذة في وضع ملء الشاشة";
 "hide_bible_reference_overlay_summary" = "لا تعرض تراكب مراجع الكتاب المقدس شبه الشفافة عندما يكون التطبيق في وضع ملء الشاشة";
 "hide_bible_reference_overlay_title" = "إخفاء تراكب مرجع الكتاب المقدس";
 "hide_window_buttons_summary" = "أزرار النافذة التي يتم عرضها على الجانب الأيمن من عروض الكتاب المقدس مخفية. لا يزال شريط تنقل النافذة في الجزء السفلي معروضًا ويمكنك فتح قائمة منبثقة من خلال النقر عليها مطولاً.";
 "hide_window_buttons_title" = "إخفاء أزرار النافذة";
-"pref_font_size_multiplier_title" = "Font size multiplier";
-"prefs_bible_view_swipe_mode_summary" = "Swipe left / right gesture can be used to go to next page / chapter.";
-"prefs_bible_view_swipe_mode_title" = "Action for swipe left / right gesture";
+"pref_font_size_multiplier_title" = "مضاعف حجم الخط";
+"prefs_bible_view_swipe_mode_summary" = "يمكن استخدام إيماءة التمرير يساراً / يميناً للانتقال إلى الصفحة / الفصل التالي.";
+"prefs_bible_view_swipe_mode_title" = "إجراء إيماءة التمرير يساراً / يميناً";
 "prefs_disable_animations_summary" = "تعطيل الرسوم المتحركة المختلفة مثل التمرير السلس.";
 "prefs_disable_animations_title" = "تعطيل الرسوم المتحركة";
-"prefs_disable_click_to_edit_summary" = "Requires using the edit button to edit notes in the Study Pad.";
-"prefs_disable_click_to_edit_title" = "Disable Study Pad click-to-edit";
+"prefs_disable_click_to_edit_summary" = "يتطلب استخدام زر التحرير لتعديل الملاحظات في لوحة الدراسة.";
+"prefs_disable_click_to_edit_title" = "تعطيل النقر للتحرير في لوحة الدراسة";
 "prefs_double_tap_to_fullscreen_summary" = "الدخول إلى وضع ملء الشاشة عن طريق النقر المزدوج على النافذة";
 "prefs_double_tap_to_fullscreen_title" = "نقراً مزدوجاً للوصول إلى وضع ملء الشاشة";
 "prefs_e_ink_mode_title" = "وضع أبيض وأسود";
@@ -485,24 +485,24 @@
 "prefs_open_links_in_special_window_title" = "نافذة الروابط";
 "prefs_screen_keep_on_summary" = "امنع الشاشة من الاغلاق اثناء استخدام التطبيق";
 "prefs_screen_keep_on_title" = "لا تطفئ الشاشة";
-"prefs_show_error_box_summary" = "Useful for developers when debugging BibleView javascript side errors. This will make the app slower.";
-"prefs_show_error_box_title" = "Show Javascript error box";
+"prefs_show_error_box_summary" = "مفيد للمطورين عند تصحيح أخطاء جانب JavaScript في BibleView. سيجعل هذا التطبيق أبطأ.";
+"prefs_show_error_box_title" = "إظهار مربع خطأ JavaScript";
 "prefs_swipe_mode_chapter" = "فصل";
 "prefs_swipe_mode_none" = "Disabled";
 "prefs_swipe_mode_page" = "Page";
 
-"prefs_volume_keys_scroll_title" = "Volume buttons scroll";
-"prefs_volume_keys_scroll_summary" = "Use volume up/down to scroll Bible text";
+"prefs_volume_keys_scroll_title" = "تمرير أزرار الصوت";
+"prefs_volume_keys_scroll_summary" = "استخدم زر رفع/خفض الصوت لتمرير نص الكتاب المقدس";
 "prefs_volume_keys_scroll_ios_note" = "iOS does not expose volume-button presses to apps. This setting is kept for Android parity and cross-device sync.";
-"prefs_experimental_features_title" = "Experimental features";
-"prefs_experimental_features_summary" = "Select which experimental features to enable. These features are still in development and may change or be removed";
+"prefs_experimental_features_title" = "الميزات التجريبية";
+"prefs_experimental_features_summary" = "اختر الميزات التجريبية التي تريد تفعيلها. هذه الميزات لا تزال قيد التطوير وقد تتغير أو تُزال";
 "experimental_feature_bookmark_edit_actions" = "Bookmark edit actions";
 "experimental_feature_add_paragraph_break" = "Add paragraph break bookmark";
 "prefs_enable_bluetooth_title" = "تمكين أزرار وسائط البلوتوث";
 "prefs_enable_bluetooth_summary" = "تعامل مع أزرار وسائط البلوتوث لبدء / إيقاف التحدث.";
 
-"open_bible_links_title" = "Open Bible links in AndBible";
-"open_bible_links_summary" = "When clicking links that refer to AndBible supported Bible URL, open them in AndBible";
+"open_bible_links_title" = "فتح روابط الكتاب المقدس في AndBible";
+"open_bible_links_summary" = "عند النقر على روابط تشير إلى عناوين URL للكتاب المقدس المدعومة من AndBible، افتحها في AndBible";
 
 "crash_app" = "Crash app!";
 "crash_app_summary" = "Crash app after 10 seconds. Debugging feature, visible only in debug builds.";

@@ -453,8 +453,8 @@
 "choose_strongs_greek_morphology_title" = "Morfologia greacă a lui Robinson";
 "choose_strongs_hebrew_dictionary_summary" = "Alege dicționarul Strong pentru definițiile cuvintelor ebraice";
 "choose_strongs_hebrew_dictionary_title" = "Dicționarul ebraic Strong";
-"choose_word_lookup_dictionary_summary" = "Choose dictionaries for looking up words";
-"choose_word_lookup_dictionary_title" = "Word lookup dictionaries";
+"choose_word_lookup_dictionary_summary" = "Alege dicționare pentru căutarea cuvintelor";
+"choose_word_lookup_dictionary_title" = "Dicționare pentru căutarea cuvintelor";
 "full_screen_hide_buttons_pref_summary" = "Cînd se dă pe tot ecranul, ascunde automat butoanele care se află în partea de jos a ecranului";
 "full_screen_hide_buttons_pref_title" = "Ascunde butoanele de jos";
 "hide_bible_reference_overlay_summary" = "Nu arăta suprapunerea semi-transparentă a trimiterilor biblice cînd aplicația este pe tot ecranul";
@@ -466,8 +466,8 @@
 "prefs_bible_view_swipe_mode_title" = "Acțiune pentru gestul de tragere în stânga / dreapta";
 "prefs_disable_animations_summary" = "Dezactivează diverse animații, cum ar fi derularea lină.";
 "prefs_disable_animations_title" = "Dezactivează animațiile";
-"prefs_disable_click_to_edit_summary" = "Requires using the edit button to edit notes in the Study Pad.";
-"prefs_disable_click_to_edit_title" = "Disable Study Pad click-to-edit";
+"prefs_disable_click_to_edit_summary" = "Necesită folosirea butonului de modificare pentru a edita notițele din Notița de studiu.";
+"prefs_disable_click_to_edit_title" = "Dezactivează editarea prin atingere în Notița de studiu";
 "prefs_double_tap_to_fullscreen_summary" = "Dă pe tot ecranul apăsînd de două ori pe el";
 "prefs_double_tap_to_fullscreen_title" = "Dubla apăsare dă pe tot ecranul";
 "prefs_e_ink_mode_title" = "Fond negru și alb";
@@ -491,8 +491,8 @@
 "prefs_swipe_mode_none" = "Dezactivat";
 "prefs_swipe_mode_page" = "Pagina";
 
-"prefs_volume_keys_scroll_title" = "Volume buttons scroll";
-"prefs_volume_keys_scroll_summary" = "Use volume up/down to scroll Bible text";
+"prefs_volume_keys_scroll_title" = "Butoanele de volum defilează";
+"prefs_volume_keys_scroll_summary" = "Folosește volumul sus/jos pentru a defila textul biblic";
 "prefs_volume_keys_scroll_ios_note" = "iOS does not expose volume-button presses to apps. This setting is kept for Android parity and cross-device sync.";
 "prefs_experimental_features_title" = "Caracteristici experimentale";
 "prefs_experimental_features_summary" = "Alege caracteristicile experimentale pe care vrei să le activezi. Aceste caracteristici sunt încă în dezvoltare și pot fi modificate sau eliminate";
