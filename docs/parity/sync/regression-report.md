@@ -1,18 +1,20 @@
 # SYNC-702 Regression Report
 
-Date: 2026-03-16
+Date: 2026-04-28
 
 ## Scope
 
 Regression verification for the current sync parity surface, covering:
 
-- Android-compatible backend and category settings persistence
+- Android-compatible backend and supported-category settings persistence
 - NextCloud/WebDAV URL normalization plus DAV request semantics
 - bootstrap ready/adopt/create decisions
-- Android-shaped initial-backup restore and initial-backup upload behavior
+- Android-shaped initial-backup restore and initial-backup upload behavior for bookmarks,
+  workspaces, and reading plans
 - ready-state patch replay and steady-state outbound upload
 - Sync settings backend/category mutation and reopen persistence
 - the parked Google Drive auth and adapter contract
+- local Android reference comparison
 
 Contract reference:
 
@@ -32,7 +34,7 @@ Operational setup reference:
 - Simulator destination: `platform=iOS Simulator,name=iPhone 17`
 - Validation style: focused `xcodebuild test` subset
 
-## Tests Executed
+## Current Rerunnable Test Set
 
 ### Unit and Integration
 
@@ -58,14 +60,17 @@ Operational setup reference:
 - `AndBibleTests/testRemoteSyncSynchronizationServiceReturnsRemoteAdoptionDecision`
 - `AndBibleTests/testRemoteSyncInitialBackupRestoreDispatchesReadingPlanBackups`
 - `AndBibleTests/testRemoteSyncInitialBackupRestoreDispatchesBookmarkBackups`
+- `AndBibleTests/testRemoteSyncInitialBackupRestoreDispatchesWorkspaceBackups`
 - `AndBibleTests/testRemoteSyncInitialBackupUploadWritesReadingPlanDatabaseAndResetsBaseline`
 - `AndBibleTests/testRemoteSyncInitialBackupUploadWritesBookmarkDatabaseAndResetsBaseline`
+- `AndBibleTests/testRemoteSyncInitialBackupUploadWritesWorkspaceDatabaseAndResetsBaseline`
 - `AndBibleTests/testRemoteSyncSynchronizationServiceCreateRemoteFolderUploadsInitialBackupAndSuppressesSparseUpload`
 - `AndBibleTests/testRemoteSyncSynchronizationServiceAdoptRemoteFolderRestoresInitialAndRecordsPatchZero`
 - `AndBibleTests/testRemoteSyncSynchronizationServiceAdoptRemoteFolderReplaysRemotePatchWithoutUploadingLocally`
 - `AndBibleTests/testRemoteSyncSynchronizationServiceSynchronizesReadyReadingPlanCategory`
 - `AndBibleTests/testRemoteSyncSynchronizationServiceUploadsLocalBookmarkChangesWhenNoRemotePatchesExist`
 - `AndBibleTests/testRemoteSyncSynchronizationServiceUploadsLocalReadingPlanChangesWhenNoRemotePatchesExist`
+- `AndBibleTests/testRemoteSyncSynchronizationServiceUploadsLocalWorkspaceChangesWhenNoRemotePatchesExist`
 - `AndBibleTests/testGoogleDriveSyncAdapterListsFilesFromAppDataFolderWithPagination`
 - `AndBibleTests/testGoogleDriveSyncAdapterCreatesFolderUnderAppDataRoot`
 - `AndBibleTests/testGoogleDriveSyncAdapterUploadsMultipartPatchArchive`
@@ -107,9 +112,8 @@ Operational setup reference:
 
 - ready categories can replay newer remote patches
 - ready categories can upload sparse local patches when no newer remote patch exists
-- bookmark and reading-plan category streams are rerun in the current shared-scheme subset
-- workspace sync still has dedicated regression coverage in `WorkspaceSyncRestoreTests.swift`, but
-  that target is not currently part of the shared `AndBible` scheme
+- bookmark, reading-plan, and workspace category streams are in the shared `AndBible`
+  scheme through the `AndBibleTests` target
 
 ### Google Drive parked branch
 
@@ -117,21 +121,27 @@ Operational setup reference:
 - OAuth bundle configuration is validated before sign-in can begin
 - auth state can restore a prior sign-in and still reject access-token reads when Drive scope is missing
 
-## Current Result
+## Historical Result And Current Interpretation
 
-Focused sync validation passed on 2026-03-16:
+Focused sync validation passed on 2026-03-16 for the then-current non-workspace subset:
 
 - unit and integration: `41` tests, `0` failures
 - UI: `6` tests, `0` failures
 - combined focused subset runtime: about `238s` end-to-end
 
-This gives the sync domain current shared-scheme regression evidence for:
+The stale workspace-scheme limitation from the original report has been removed. As of this
+audit, `WorkspaceSyncRestoreTests.swift` is part of the `AndBibleTests` target and is included by
+the shared `AndBible` scheme, so workspace sync is a standard rerunnable path. This doc refresh did
+not rerun the simulator suite, so the old runtime/counts above should not be treated as a fresh
+2026-04-28 execution result.
+
+The checked-in shared-scheme test set gives the sync domain rerunnable regression coverage for:
 
 - Android-compatible backend and category persistence
 - NextCloud/WebDAV normalization and transport behavior
 - bootstrap ready/adopt/create decisions
-- initial-backup restore and initial-backup upload for bookmark and reading-plan flows
-- ready-state synchronization for bookmark and reading-plan categories
+- initial-backup restore and initial-backup upload for bookmark, workspace, and reading-plan flows
+- ready-state synchronization for bookmark, workspace, and reading-plan categories
 - parked Google Drive auth and adapter contracts
 - Sync settings backend/category mutation plus reopen persistence
 
@@ -140,9 +150,10 @@ This gives the sync domain current shared-scheme regression evidence for:
 The current sync parity gap is not the core bootstrap or patch engine. It is:
 
 - a focused UI workflow that drives the explicit adopt-versus-create confirmation sheet end to end
-- bringing the dedicated workspace sync regression target into the shared scheme or another
-  standard runnable path so workspace parity can be rerun alongside the rest of sync
+- Android category breadth beyond iOS's supported `bookmarks`, `workspaces`, and `readingplans`
+  categories: Android also exposes `mydocuments`, `ai_settings`, and `progress`
 
 That branch is already covered in unit and integration tests through the coordinator and
-synchronization service. It remains `Partial` only because the user-facing confirmation path is not
-yet locked by a focused simulator workflow.
+synchronization service. It remains `Partial` because the user-facing confirmation path is not yet
+locked by a focused simulator workflow, and the remaining Android-only categories are not
+implemented on iOS yet.

@@ -1,15 +1,16 @@
 # BRIDGE-702 Regression Report
 
-Date: 2026-03-16
+Date: 2026-04-28
 
 ## Scope
 
 This is the current validation snapshot for the bridge-adjacent surface. It
 covers:
 
-- embedded My Notes document rendering plus note mutation persistence
-- StudyPad document handoff and note creation from a real bookmark workflow
-- the native persistence paths that rebuild those embedded note surfaces
+- StudyPad document handoff from a real bookmark workflow
+- the native persistence paths that support those embedded note surfaces
+- local Android bridge surface comparison
+- machine-readable gap inventory for Android-only and iOS no-op bridge methods
 
 Contract reference:
 
@@ -30,34 +31,28 @@ Related domain references:
 - Simulator destination: `platform=iOS Simulator,name=iPhone 17`
 - Validation style: focused `xcodebuild test` subset
 
-## Tests Executed
+## Current Rerunnable Test Set
 
 ### Unit
 
 - `AndBibleTests/testBookmarkServiceClearingBibleBookmarkNoteDeletesPersistedNoteRow`
 - `AndBibleTests/testBookmarkServiceClearingBibleBookmarkNoteRemovesBookmarkFromMyNotesQuery`
+- `AndBibleTests/testBookmarkServiceUpdatingBibleBookmarkNoteReusesPersistedNoteRow`
 
 ### UI
 
-- `AndBibleUITests/testMyNotesDirectLaunchShowsHeaderAndReturnsToBible`
-- `AndBibleUITests/testMyNotesSeededNoteUpdatePersistsAcrossReturnAndReopen`
-- `AndBibleUITests/testMyNotesSeededNoteDeletePersistsAcrossReturnAndReopen`
 - `AndBibleUITests/testBookmarkListOpensStudyPadForSelectedLabel`
-- `AndBibleUITests/testBookmarkStudyPadCreateNoteFromLabelWorkflow`
 
 ## What This Validation Actually Covers
 
 ### Embedded note surfaces
 
-- the embedded My Notes surface opens, returns to the reader shell, and survives reopen
-- updating a seeded My Notes note persists through return and reopen
-- deleting a seeded My Notes note persists through return and reopen
+- service-layer note persistence still feeds the embedded My Notes data model
+- visible My Notes note update/delete workflows no longer have focused UI coverage
 
 ### StudyPad handoff
 
 - a real bookmark-list label flow can hand off into the matching StudyPad document
-- the reader-shell StudyPad note workflow can create one deterministic note and expose the
-  resulting persisted state
 
 ### Persistence support
 
@@ -65,30 +60,35 @@ Related domain references:
 - rebuilding the My Notes bookmark query after note deletion removes the bookmark from the
   resulting note-backed surface
 
-## Current Result
+## Historical Result And Current Interpretation
 
-Focused bridge-adjacent validation passed on 2026-03-16:
+Focused bridge-adjacent validation passed on 2026-03-16, but the original UI result is now stale
+because four UI tests from that report no longer exist in `AndBibleUITests`. The current rerunnable
+named subset in this report is:
 
-- Unit: `2` tests, `0` failures
-- Unit runtime: `0.291s`
-- UI: `5` tests, `0` failures
-- UI runtime: `161.543s`
+- Unit: `3` tests
+- UI: `1` test
 
-Taken together, this gives the bridge domain current regression evidence for:
+This doc refresh did not rerun the simulator suite, so do not treat the old UI runtime/count as
+current evidence. The checked-in named subset gives the bridge domain rerunnable evidence for:
 
-- embedded My Notes document lifecycle and note persistence
-- StudyPad document handoff plus note creation
+- service-layer note persistence
+- StudyPad document handoff
 - bookmark-note persistence feeding those embedded surfaces
 
 So the bridge story is not "everything is shaky." It is more specific than
-that: the note-backed embedded surfaces are in decent shape, while the rawer
-transport edges still need more direct protection.
+that: the StudyPad handoff and note persistence support are present, while the visible My Notes
+lifecycle and rawer transport edges still need more direct protection.
 
 ## What Is Still Not Well Locked Yet
 
-The note-backed document surfaces are in decent shape. The pieces that still
-need tighter protection are:
+The pieces that still need tighter protection are:
 
+- visible My Notes open/update/delete workflows
+- full current Android bridge breadth beyond the shared iOS subset (`88` Android methods versus
+  `62` iOS-bundled methods in `bibleview-js/src/composables/android.ts`)
+- the tracked bridge gap inventory: 26 missing Android methods plus 3 iOS no-op methods that
+  still need implementation or explicit product divergence
 - raw `window.android.*` compatibility-shim behavior on a per-method basis
 - `callId` async request/response flows for content expansion and native dialogs
 - Strong's sheet bridge coverage, especially the dedicated `contentType: "strongs"` route

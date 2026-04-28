@@ -67,8 +67,7 @@ described in `regression-report.md` green, especially:
 - bookmark-list search, filter, sort, row navigation, and row deletion
 - label assignment create/remove/toggle paths
 - label manager CRUD
-- StudyPad handoff and note creation
-- My Notes note update/delete persistence
+- StudyPad handoff from bookmark labels
 - note-row persistence regressions in `AndBibleTests`
 
 If a change touches one of the still-partial areas, raise the bar and add
@@ -86,6 +85,7 @@ focused coverage rather than relying on the existing bookmark subset alone.
 ## Potential Improvements
 
 - add focused UI coverage for generic-bookmark visible workflows
-- add focused UI coverage for broader StudyPad reorder and delete behavior
+- add focused UI coverage for My Notes visible note update/delete workflows
+- add focused UI coverage for broader StudyPad create, reorder, and delete behavior
 - add machine-readable snapshots of bookmark sort and filter state contracts if the UI surface grows
   materially more complex

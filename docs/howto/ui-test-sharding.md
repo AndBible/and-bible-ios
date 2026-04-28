@@ -24,12 +24,22 @@ Current workflow inputs:
 Important nuance:
 
 - the planner is capable of dynamic shard counts
-- in practice, with the current manifest and suite size, it usually behaves as
-  a balanced 2-way split
+- `UI_TEST_MIN_SHARD_COUNT` is a floor, not a promise that CI will run exactly
+  two UI shards
+- with the current manifest and suite size, the planner emits three balanced
+  shards
 
-It is better to describe the current system as "planner-capable but usually a
-balanced 2-way split" unless the timing manifest is being refreshed from real
-runs and the shard count is actually moving because of current evidence.
+It is better to describe the current system as "planner-capable with a minimum
+of two shards" unless the timing manifest is being refreshed from real runs and
+the shard count is being changed because of current evidence.
+
+Current local planner output for the checked-in suite is:
+
+```text
+shard 1: 14 tests, estimated 478.683s
+shard 2: 15 tests, estimated 485.855s
+shard 3: 15 tests, estimated 485.735s
+```
 
 ## How CI Actually Executes
 
@@ -68,7 +78,7 @@ Preferred order:
 
 Why this matters:
 
-- a full serial local UI run covers the same 39 UI tests, but its wall-clock
+- a full serial local UI run covers the same 44 UI tests, but its wall-clock
   runtime is not comparable to CI because CI runs shards in parallel
 - a targeted subset can prove a specific fix, but it does not prove the shard
   or full-suite shape is clean
@@ -89,7 +99,7 @@ The full serial local run is useful for:
 
 It is not the right measure for:
 
-- whether a 2-shard split is well balanced
+- whether the generated shard set is well balanced
 - whether a 90-minute per-shard timeout is justified
 
 For sharding decisions, use shard-shaped runs and current CI data.
@@ -118,7 +128,6 @@ For sharding decisions, use shard-shaped runs and current CI data.
 
    - this file
    - `docs/howto/building-and-testing.md` when developer workflow changes
-   - `UI-TEST-ANALYSIS.md` if the operational conclusions materially change
 
 ## Key Files
 
@@ -134,7 +143,7 @@ This guide does not claim that:
 
 - the current 90-minute timeout is optimal
 - the current timing manifest is fresh
-- the current 2-shard split is the final long-term design
+- the current generated shard count is the final long-term design
 
 It only documents the system as it exists now, so future changes can be judged
 against an explicit contract instead of fuzzy repo memory.

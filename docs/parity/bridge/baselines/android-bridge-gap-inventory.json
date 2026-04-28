@@ -1,0 +1,222 @@
+{
+  "schemaVersion": 1,
+  "updated": "2026-04-28",
+  "purpose": "Track Android bridge surface that is not true iOS parity yet.",
+  "references": {
+    "androidInterfaceRelativePath": "app/bibleview-js/src/composables/android.ts",
+    "androidMethodCount": 88,
+    "iosInterfacePath": "bibleview-js/src/composables/android.ts",
+    "iosBundledMethodCount": 62
+  },
+  "statusLegend": {
+    "missing_needs_triage": "Android exposes the method and iOS does not. Treat as a parity gap until implemented or explicitly recorded as an iOS divergence.",
+    "ios_no_op_needs_decision": "iOS exposes the method only as a stable no-op. Treat as a parity gap until implemented or explicitly recorded as an iOS divergence."
+  },
+  "missingAndroidMethods": [
+    {
+      "method": "addMemorizationTarget",
+      "androidSignature": "(bookInitials: string, startOrdinal: number, endOrdinal: number) => void",
+      "domain": "memorization",
+      "status": "missing_needs_triage",
+      "nextStep": "Implement iOS memorization target handling or record a product divergence."
+    },
+    {
+      "method": "copyMyDocumentContent",
+      "androidSignature": "(bookInitials: string, pageKey: string) => void",
+      "domain": "my_documents",
+      "status": "missing_needs_triage",
+      "nextStep": "Implement iOS My Documents content copy or record a product divergence."
+    },
+    {
+      "method": "createWholePageBookmark",
+      "androidSignature": "(bookInitials: string, bookKey: string) => void",
+      "domain": "bookmarks",
+      "status": "missing_needs_triage",
+      "nextStep": "Implement whole-page bookmark behavior or record a product divergence."
+    },
+    {
+      "method": "deleteMyDocumentPage",
+      "androidSignature": "(pageId: string) => void",
+      "domain": "my_documents",
+      "status": "missing_needs_triage",
+      "nextStep": "Implement iOS My Documents page deletion or record a product divergence."
+    },
+    {
+      "method": "getMyDocumentPageRawContent",
+      "androidSignature": "(callId: number, bookInitials: string, pageKey: string) => void",
+      "domain": "my_documents",
+      "status": "missing_needs_triage",
+      "nextStep": "Implement async raw-content response semantics for iOS My Documents or record a product divergence."
+    },
+    {
+      "method": "goToNextChapter",
+      "androidSignature": "() => void",
+      "domain": "reader_navigation",
+      "status": "missing_needs_triage",
+      "nextStep": "Implement bridge-driven chapter navigation or confirm native iOS navigation is an intentional divergence."
+    },
+    {
+      "method": "goToPreviousChapter",
+      "androidSignature": "() => void",
+      "domain": "reader_navigation",
+      "status": "missing_needs_triage",
+      "nextStep": "Implement bridge-driven chapter navigation or confirm native iOS navigation is an intentional divergence."
+    },
+    {
+      "method": "llmAction",
+      "androidSignature": "(bookInitials: string, startOrdinal: number, endOrdinal: number, text: string) => void",
+      "domain": "ai_actions",
+      "status": "missing_needs_triage",
+      "nextStep": "Implement iOS AI action handoff or record a product divergence."
+    },
+    {
+      "method": "llmActionGeneric",
+      "androidSignature": "(bookInitials: string, osisRef: string, startOrdinal: number, endOrdinal: number, text: string) => void",
+      "domain": "ai_actions",
+      "status": "missing_needs_triage",
+      "nextStep": "Implement iOS generic-document AI action handoff or record a product divergence."
+    },
+    {
+      "method": "markAsMemorized",
+      "androidSignature": "(bookInitials: string, startOrdinal: number, endOrdinal: number) => void",
+      "domain": "memorization",
+      "status": "missing_needs_triage",
+      "nextStep": "Implement memorized-state updates or record a product divergence."
+    },
+    {
+      "method": "markChapterRead",
+      "androidSignature": "(bookInitials: string, startOrdinal: number, chapter: number, source: string) => void",
+      "domain": "reading_progress",
+      "status": "missing_needs_triage",
+      "nextStep": "Implement chapter-read progress mutation or record a product divergence."
+    },
+    {
+      "method": "noteEditorLlmAction",
+      "androidSignature": "(contextJson: string) => void",
+      "domain": "ai_actions",
+      "status": "missing_needs_triage",
+      "nextStep": "Implement note-editor AI action handoff or record a product divergence."
+    },
+    {
+      "method": "openAiDocPage",
+      "androidSignature": "(documentInitials: string, pageKey: string) => void",
+      "domain": "ai_documents",
+      "status": "missing_needs_triage",
+      "nextStep": "Implement AI document page navigation or record a product divergence."
+    },
+    {
+      "method": "openAiDocPageChooser",
+      "androidSignature": "(markersJson: string) => void",
+      "domain": "ai_documents",
+      "status": "missing_needs_triage",
+      "nextStep": "Implement AI document page chooser or record a product divergence."
+    },
+    {
+      "method": "openPromptEditor",
+      "androidSignature": "(promptId: string) => void",
+      "domain": "ai_actions",
+      "status": "missing_needs_triage",
+      "nextStep": "Implement prompt editor handoff or record a product divergence."
+    },
+    {
+      "method": "openReadingProgress",
+      "androidSignature": "(tab: number) => void",
+      "domain": "reading_progress",
+      "status": "missing_needs_triage",
+      "nextStep": "Implement reading-progress UI handoff or record a product divergence."
+    },
+    {
+      "method": "openReadingProgressSettings",
+      "androidSignature": "() => void",
+      "domain": "reading_progress",
+      "status": "missing_needs_triage",
+      "nextStep": "Implement reading-progress settings handoff or record a product divergence."
+    },
+    {
+      "method": "regenerateMyDocumentPage",
+      "androidSignature": "(pageId: string) => void",
+      "domain": "my_documents",
+      "status": "missing_needs_triage",
+      "nextStep": "Implement My Documents page regeneration or record a product divergence."
+    },
+    {
+      "method": "reloadMyDocumentPage",
+      "androidSignature": "(bookInitials: string) => void",
+      "domain": "my_documents",
+      "status": "missing_needs_triage",
+      "nextStep": "Implement My Documents page reload or record a product divergence."
+    },
+    {
+      "method": "removeMemorizationTarget",
+      "androidSignature": "(bookInitials: string, startOrdinal: number, endOrdinal: number) => void",
+      "domain": "memorization",
+      "status": "missing_needs_triage",
+      "nextStep": "Implement memorization target removal or record a product divergence."
+    },
+    {
+      "method": "saveMyDocumentPageContent",
+      "androidSignature": "(bookInitials: string, pageId: string, content: string, title: string | null) => void",
+      "domain": "my_documents",
+      "status": "missing_needs_triage",
+      "nextStep": "Implement My Documents content save or record a product divergence."
+    },
+    {
+      "method": "setReadingProgressSettings",
+      "androidSignature": "(json: string) => void",
+      "domain": "reading_progress",
+      "status": "missing_needs_triage",
+      "nextStep": "Implement reading-progress setting persistence or record a product divergence."
+    },
+    {
+      "method": "shareMyDocumentContent",
+      "androidSignature": "(bookInitials: string, pageKey: string) => void",
+      "domain": "my_documents",
+      "status": "missing_needs_triage",
+      "nextStep": "Implement My Documents sharing or record a product divergence."
+    },
+    {
+      "method": "speakMemorizationLoop",
+      "androidSignature": "(bookInitials: string, v11n: string, startOrdinal: number, endOrdinal: number) => void",
+      "domain": "memorization",
+      "status": "missing_needs_triage",
+      "nextStep": "Implement memorization speech loop or record a product divergence."
+    },
+    {
+      "method": "unmarkChapterRead",
+      "androidSignature": "(bookInitials: string, startOrdinal: number, chapter: number) => void",
+      "domain": "reading_progress",
+      "status": "missing_needs_triage",
+      "nextStep": "Implement chapter-read progress removal or record a product divergence."
+    },
+    {
+      "method": "unmarkMemorized",
+      "androidSignature": "(bookInitials: string, startOrdinal: number, endOrdinal: number) => void",
+      "domain": "memorization",
+      "status": "missing_needs_triage",
+      "nextStep": "Implement memorized-state removal or record a product divergence."
+    }
+  ],
+  "iosNoOpMethods": [
+    {
+      "method": "addGenericParagraphBreakBookmark",
+      "iosSignature": "(bookInitials: string, osisRef: string, startOrdinal: number, endOrdinal: number) => void",
+      "domain": "bookmarks",
+      "status": "ios_no_op_needs_decision",
+      "nextStep": "Implement paragraph-break bookmark behavior or record an explicit iOS divergence."
+    },
+    {
+      "method": "addParagraphBreakBookmark",
+      "iosSignature": "(bookInitials: string, startOrdinal: number, endOrdinal: number) => void",
+      "domain": "bookmarks",
+      "status": "ios_no_op_needs_decision",
+      "nextStep": "Implement paragraph-break bookmark behavior or record an explicit iOS divergence."
+    },
+    {
+      "method": "memorize",
+      "iosSignature": "(bookInitials: string, verseOrdinal: number, endOrdinal: number) => void",
+      "domain": "memorization",
+      "status": "ios_no_op_needs_decision",
+      "nextStep": "Implement memorization workflow entry or record an explicit iOS divergence."
+    }
+  ]
+}

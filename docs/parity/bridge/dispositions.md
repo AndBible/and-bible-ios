@@ -17,6 +17,8 @@ Why this is fine:
 
 - The shared frontend still calls Android-style APIs directly.
 - Preserving that call surface is lower risk than forking the client contract.
+- This means preserving the iOS-bundled shared subset, not every method that
+  exists in Android's current `window.android` interface.
 
 ## 2. `getActiveLanguages()` is cached for synchronous parity
 
@@ -81,3 +83,24 @@ Why this is fine:
   behavior such as per-dictionary tabs and preserved in-modal state.
 - iOS still needs native sheet ownership for presentation, dismissal, and
   nested reader coordination.
+
+## 6. Android-only bridge breadth is not fully implemented on iOS
+
+- Status: current parity gap
+
+What we do:
+
+- iOS preserves the bridge methods needed by this repo's bundled frontend and
+  native feature set.
+- Android currently exposes 88 methods in its `BibleJavascriptInterface` type,
+  while the iOS-bundled frontend exposes 62. The Android-only methods cover
+  areas such as memorization, reading progress, AI document actions, chapter
+  navigation, and document-page editing.
+
+Why this is still a gap:
+
+- Those Android-only methods are real product surface in the Android checkout.
+  If the iOS bundle starts calling them, the iOS bridge contract and regression
+  coverage need to grow in the same change.
+- The machine-readable gap inventory tracks these as work to close, not as
+  permanently acceptable omissions.
