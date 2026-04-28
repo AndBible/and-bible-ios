@@ -177,6 +177,12 @@ def validate_inventory(
                 "Android bridge method count drifted: "
                 f"inventory={expected_android_count}, actual={len(android_methods)}"
             )
+        no_ops_missing_from_android = sorted(no_op_methods - set(android_methods))
+        if no_ops_missing_from_android:
+            raise InventoryError(
+                "iOS no-op methods are not present in Android: "
+                + ", ".join(no_ops_missing_from_android)
+            )
         android_only = set(android_methods) - set(ios_methods)
         missing_from_inventory = sorted(android_only - missing_methods)
         stale_inventory = sorted(missing_methods - android_only)

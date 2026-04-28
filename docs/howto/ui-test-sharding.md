@@ -36,9 +36,9 @@ the shard count is being changed because of current evidence.
 Current local planner output for the checked-in suite is:
 
 ```text
-shard 1: 14 tests, estimated 478.683s
-shard 2: 15 tests, estimated 485.855s
-shard 3: 15 tests, estimated 485.735s
+Shard 1/3: 14 tests, estimated 478.683s
+Shard 2/3: 15 tests, estimated 485.855s
+Shard 3/3: 15 tests, estimated 485.735s
 ```
 
 ## How CI Actually Executes
