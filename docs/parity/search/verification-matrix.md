@@ -1,12 +1,14 @@
 # SEARCH-701 Verification Matrix (Android Search -> iOS)
 
-Date: 2026-03-16
+Date: 2026-04-28
 
 ## Scope and Method
 
 - Contract baseline: `docs/parity/search/contract.md`
 - Verification method:
   - direct code inspection of `SearchView`, `SearchService`, and `StrongsSearchSupport`
+  - direct comparison with a local Android reference checkout, especially
+    `Search.kt`, `SearchResults.kt`, `EpubSearch.kt`, and `MultiSearchItemAdapter.kt`
   - focused simulator-backed UI coverage from `AndBibleUITests`
   - focused unit regression coverage from `AndBibleTests`
 - Regression evidence: `docs/parity/search/regression-report.md`
@@ -34,4 +36,4 @@ Date: 2026-03-16
 | Result selection navigates the reader | `SearchView.navigateTo(_:)`; UI test `testSearchResultSelectionNavigatesReaderToBundledReference` | Pass | Search is verified as a real reader-owned workflow, not only a direct-launch harness. |
 | Direct-launch query retention for deterministic search workflows | UI test `testSearchDirectLaunchRetainsSeededQuery` | Pass | This protects the test harness path used by deeper search regression coverage. |
 | Search implementation backing via local FTS service plus direct SWORD fallback | `SearchView.swift`, `SearchService.swift`, `SearchIndexService`; documented in `dispositions.md` | Adapted Pass | The parity goal is query semantics and user-facing behavior, not Android's exact internal search stack. |
-| Multi-translation selection and grouped result totals | `SearchView.swift` translation picker and `MultiResultGroup`; `SearchService.searchMultiple(...)` | Partial | Code path exists, but this area does not yet have a focused simulator or unit regression gate. |
+| Multi-translation selection and grouped result totals | `SearchView.swift` translation picker and `MultiResultGroup`; `SearchService.searchMultiple(...)`; Android reference uses `selectedTranslations` and `getMultiSearchResults(...)` in `SearchResults.kt` | Partial | The code path exists, and Android parity was checked against the local Android implementation, but this area does not yet have a focused simulator or unit regression gate. |

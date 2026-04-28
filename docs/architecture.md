@@ -51,8 +51,8 @@ Purpose: host the packaged Vue.js client in `WKWebView` and translate between JS
 
 Key points:
 - Declared at `Package.swift:67-80`
-- `BibleWebView` creates the web view, injects the Android compatibility shim, and loads the packaged bundle: `Sources/BibleView/Sources/BibleView/BibleWebView.swift:141-301`
-- `BibleBridge` owns the message handler, async response path, and native-to-JS emit API: `Sources/BibleView/Sources/BibleView/BibleBridge.swift:149-576`
+- `BibleWebView` creates the web view, injects the Android compatibility shim, and loads the packaged bundle: `Sources/BibleView/Sources/BibleView/BibleWebView.swift:164` and `:345`
+- `BibleBridge` owns the message handler, async response path, and native-to-JS emit API: `Sources/BibleView/Sources/BibleView/BibleBridge.swift:212`
 - `WebViewCoordinator` handles navigation interception plus native scroll/swipe gesture forwarding: `Sources/BibleView/Sources/BibleView/WebViewCoordinator.swift:12-143`
 
 ### 4. `BibleUI`
@@ -61,9 +61,9 @@ Purpose: SwiftUI feature screens and controllers.
 
 Key points:
 - Declared at `Package.swift:82-92`
-- `BibleReaderView` coordinates toolbars, sheets, split windows, fullscreen state, and settings reload: `Sources/BibleUI/Sources/BibleUI/Bible/BibleReaderView.swift:42-240`
-- `BibleWindowPane` binds one `BibleBridge`, one `BibleReaderController`, and one `BibleWebView` to a single window: `Sources/BibleUI/Sources/BibleUI/Bible/BibleWindowPane.swift:16-126`
-- `BibleReaderController` is the main feature controller implementing the bridge delegate and emitting document/config/bookmark updates back to Vue.js: for example `updateDisplaySettings` at `.../BibleReaderController.swift:150-161`, async content expansion at `:1460-1519`, selection actions at `:1946-2000`, and active-window emission at `:4017-4034`
+- `BibleReaderView` coordinates toolbars, sheets, split windows, fullscreen state, and settings reload: `Sources/BibleUI/Sources/BibleUI/Bible/BibleReaderView.swift:151`
+- `BibleWindowPane` binds one `BibleBridge`, one `BibleReaderController`, and one `BibleWebView` to a single window: `Sources/BibleUI/Sources/BibleUI/Bible/BibleWindowPane.swift:34`
+- `BibleReaderController` is the main feature controller implementing the bridge delegate and emitting document/config/bookmark updates back to Vue.js: for example `updateDisplaySettings` at `.../BibleReaderController.swift:245`, async content expansion at `:1751`, selection actions at `:2392`, and active-window emission at `:5000`
 
 ## App Boot Sequence
 
@@ -80,13 +80,13 @@ Key points:
 
 Typical Bible reading flow:
 
-1. `ContentView` shows `BibleReaderView` as the main detail surface: `AndBible/ContentView.swift:100-121`
+1. `ContentView` shows `BibleReaderView` as the main detail surface: `AndBible/ContentView.swift:11`
 2. `BibleReaderView` lays out one or more `BibleWindowPane`s for the active workspace: `Sources/BibleUI/Sources/BibleUI/Bible/BibleReaderView.swift`
-3. Each pane initializes a `BibleReaderController` and registers it with `WindowManager`: `Sources/BibleUI/Sources/BibleUI/Bible/BibleWindowPane.swift:79-96`
-4. `BibleReaderController` loads SWORD content, builds bridge JSON, and emits `clear_document`, `add_documents`, and `setup_content`: for example commentary flow at `.../BibleReaderController.swift:602-686`
+3. Each pane initializes a `BibleReaderController` and registers it with `WindowManager`: `Sources/BibleUI/Sources/BibleUI/Bible/BibleWindowPane.swift:34`
+4. `BibleReaderController` loads SWORD content, builds bridge JSON, and emits `clear_document`, `add_documents`, and `setup_content`: for example document emission at `.../BibleReaderController.swift:702`
 5. The Vue.js client renders the document in the packaged `WKWebView`
-6. User actions from the client come back through `BibleBridge.userContentController(...)`: `Sources/BibleView/Sources/BibleView/BibleBridge.swift:195-457`
-7. Native responses and state pushes go back through `sendResponse(...)` and `emit(...)`: `Sources/BibleView/Sources/BibleView/BibleBridge.swift:480-576`
+6. User actions from the client come back through `BibleBridge.userContentController(...)`: `Sources/BibleView/Sources/BibleView/BibleBridge.swift:212`
+7. Native responses and state pushes go back through `sendResponse(...)` and `emit(...)`: `Sources/BibleView/Sources/BibleView/BibleBridge.swift:507`
 
 ## State Ownership
 
@@ -118,8 +118,8 @@ Examples:
 The practical threading rules are:
 
 - SwiftUI and `WKWebView` interactions stay on the main actor/thread.
-- `BibleBridge.querySelection()` is explicitly `@MainActor`: `Sources/BibleView/Sources/BibleView/BibleBridge.swift:517-549`
-- Bridge JS evaluation is marshalled back to the main queue in `evaluateJavaScript(...)`: `Sources/BibleView/Sources/BibleView/BibleBridge.swift:566-576`
+- `BibleBridge.querySelection()` is explicitly `@MainActor`: `Sources/BibleView/Sources/BibleView/BibleBridge.swift:548`
+- Bridge JS evaluation is marshalled back to the main queue in `evaluateJavaScript(...)`: `Sources/BibleView/Sources/BibleView/BibleBridge.swift:605`
 - SWORD and service work is generally orchestrated by controllers/services, then pushed back to the bridge on the main thread.
 
 When adding new code, treat `WKWebView`, SwiftUI view state, and bridge callbacks as main-thread work unless a specific service already isolates background work for you.
@@ -129,9 +129,9 @@ When adding new code, treat `WKWebView`, SwiftUI view state, and bridge callback
 AndBible iOS keeps Android's multi-window reading model.
 
 - `WindowManager` is injected as an environment object from `AndBibleApp`: `AndBible/AndBibleApp.swift:149-153`
-- `BibleReaderView` reads the focused controller from `WindowManager` and manages fullscreen/tab bar behavior from that single source of truth: `Sources/BibleUI/Sources/BibleUI/Bible/BibleReaderView.swift:105-144`
-- `BibleWindowPane` instances render independent bridges/controllers, so each pane can hold a different module/category and scroll position: `Sources/BibleUI/Sources/BibleUI/Bible/BibleWindowPane.swift:16-126`
-- The web client receives active-window state from `emitActiveState()`: `Sources/BibleUI/Sources/BibleUI/Bible/BibleReaderController.swift:4017-4034`
+- `BibleReaderView` reads the focused controller from `WindowManager` and manages fullscreen/tab bar behavior from that single source of truth: `Sources/BibleUI/Sources/BibleUI/Bible/BibleReaderView.swift:151`
+- `BibleWindowPane` instances render independent bridges/controllers, so each pane can hold a different module/category and scroll position: `Sources/BibleUI/Sources/BibleUI/Bible/BibleWindowPane.swift:34`
+- The web client receives active-window state from `emitActiveState()`: `Sources/BibleUI/Sources/BibleUI/Bible/BibleReaderController.swift:5000`
 
 ## Where To Read Next
 

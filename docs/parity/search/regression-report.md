@@ -1,6 +1,6 @@
 # SEARCH-702 Regression Report
 
-Date: 2026-03-16
+Date: 2026-04-28
 
 ## Scope
 
@@ -11,6 +11,7 @@ Regression verification for the current search parity surface, covering:
 - scope and word-mode rerun semantics
 - Strong's normalization and bundled-module hit search
 - navigation from real search results back into the reader
+- local Android reference comparison for word modes and multi-translation result flow
 
 Contract reference:
 
@@ -26,7 +27,7 @@ Verification matrix:
 - Simulator destination: `platform=iOS Simulator,name=iPhone 17`
 - Validation style: focused `xcodebuild test` subset
 
-## Tests Executed
+## Current Rerunnable Test Set
 
 ### Unit
 
@@ -40,7 +41,7 @@ Verification matrix:
 ### UI
 
 - `AndBibleUITests/testSearchDirectLaunchRetainsSeededQuery`
-- `AndBibleUITests/testSearchDirectLaunchBuildsIndexAndReturnsBundledResults`
+- `AndBibleUITests/testSearchDirectLaunchUsesSeededIndexAndReturnsBundledResults`
 - `AndBibleUITests/testSearchScopeChangeRerunsQueryAndUpdatesResults`
 - `AndBibleUITests/testSearchWordModeChangeRerunsQueryAndUpdatesResults`
 - `AndBibleUITests/testSearchResultSelectionNavigatesReaderToBundledReference`
@@ -71,9 +72,11 @@ Verification matrix:
 - opening Search from the real reader shell and selecting a result moves the
   reader away from its seeded `Genesis 1` state
 
-## Current Result
+## Historical Result And Current Interpretation
 
-Focused search validation passed on 2026-03-16:
+Focused search validation passed on 2026-03-16. The direct-launch indexed-result UI test has since
+been renamed to `testSearchDirectLaunchUsesSeededIndexAndReturnsBundledResults`; this doc refresh
+did not rerun the simulator suite.
 
 - unit: `6` tests, `0` failures
 - UI: `5` tests, `0` failures

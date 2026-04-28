@@ -6,7 +6,7 @@ This is the quickest orientation map for the repo's code modules.
 
 ### `AndBible.xcodeproj`
 
-Purpose: main iOS/macOS app target, assets, entitlements, and platform-specific app lifecycle.
+Purpose: main iOS app target, assets, entitlements, and platform-specific app lifecycle.
 
 Start with:
 - `AndBible/AndBibleApp.swift:15`
@@ -19,7 +19,7 @@ Notes:
 
 ## Swift Package Modules
 
-Source of truth: `Package.swift:5-97`
+Source of truth: `Package.swift`
 
 ### `CLibSword`
 
@@ -44,7 +44,7 @@ Location:
 Read first:
 - `SwordManager.swift`
 - `SwordModule.swift`
-- `BookInfo.swift`
+- `ModuleInfo.swift`
 
 Use when:
 - You need to inspect modules, positions, keys, versification, or raw/rendered entries.
@@ -64,7 +64,7 @@ Read first:
 - `Services/BookmarkService.swift`
 - `Services/SearchIndexService.swift`
 - `Models/`
-- `Stores/`
+- `Database/`
 
 Use when:
 - The feature touches persistence, bookmarks, workspaces, reading plans, repositories, settings, or app-level business rules.
@@ -124,7 +124,7 @@ Tests:
 ### Web bundle
 
 - Packaged bundle path used by `BibleWebView`: `Sources/BibleView/Sources/BibleView/Resources`
-- Loader implementation: `Sources/BibleView/Sources/BibleView/BibleWebView.swift:147-301`
+- Loader implementation: `Sources/BibleView/Sources/BibleView/BibleWebView.swift:345`
 
 ### Docs
 

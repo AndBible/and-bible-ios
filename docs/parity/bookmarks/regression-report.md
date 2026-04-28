@@ -1,6 +1,6 @@
 # BOOKMARKS-702 Regression Report
 
-Date: 2026-03-16
+Date: 2026-04-28
 
 ## Scope
 
@@ -8,9 +8,9 @@ Regression verification for the current bookmark parity surface, covering:
 
 - native bookmark-list search, filter, sort, selection, and deletion
 - label assignment and label-manager mutation flows
-- StudyPad handoff and deterministic note creation
-- My Notes note update and delete persistence
-- note-row persistence semantics in the shared bookmark service layer
+- StudyPad handoff from a real bookmark workflow
+- service-layer My Notes/note-row persistence semantics
+- local Android bookmark reference comparison
 
 Contract reference:
 
@@ -26,7 +26,7 @@ Verification matrix:
 - Simulator destination: `platform=iOS Simulator,name=iPhone 17`
 - Validation style: focused `xcodebuild test` subset
 
-## Tests Executed
+## Current Rerunnable Test Set
 
 ### Unit
 
@@ -47,9 +47,7 @@ Verification matrix:
 - `AndBibleUITests/testBookmarkListLabelAssignmentCreatesAndAssignsNewLabel`
 - `AndBibleUITests/testBookmarkListLabelAssignmentRemovalHidesBookmarkUnderFilter`
 - `AndBibleUITests/testLabelManagerCreateRenameDeleteFlow`
-- `AndBibleUITests/testBookmarkStudyPadCreateNoteFromLabelWorkflow`
-- `AndBibleUITests/testMyNotesSeededNoteUpdatePersistsAcrossReturnAndReopen`
-- `AndBibleUITests/testMyNotesSeededNoteDeletePersistsAcrossReturnAndReopen`
+- `AndBibleUITests/testBookmarkListOpensStudyPadForSelectedLabel`
 
 ## Expected Assertions Covered
 
@@ -70,9 +68,9 @@ Verification matrix:
 
 ### StudyPad and My Notes
 
-- opening StudyPad from a selected bookmark label supports deterministic note creation
-- a seeded My Notes note can be updated, then reopened with the updated state preserved
-- a seeded My Notes note can be deleted, then reopened with the deleted state preserved
+- opening StudyPad from a selected bookmark label reaches the embedded StudyPad document path
+- My Notes note mutation/delete is still supported at the service/controller layer, but the previous
+  focused My Notes UI tests are no longer present
 
 ### Service-layer persistence
 
@@ -82,21 +80,22 @@ Verification matrix:
 - clearing a bookmark note deletes the persisted note row
 - clearing a bookmark note removes it from the My Notes rebuild query
 
-## Current Result
+## Historical Result And Current Interpretation
 
-Focused bookmark validation passed on 2026-03-16:
+Focused bookmark validation passed on 2026-03-16, but the original UI count/runtime claim is now
+stale because three UI tests from that report no longer exist in `AndBibleUITests`. The current
+rerunnable named subset in this report is:
 
-- unit: `5` tests, `0` failures
-- UI: `12` tests, `0` failures
-- UI subset runtime: about `604s` on the simulator, excluding package/bootstrap overhead before
-  test execution began
+- unit: `5` tests
+- UI: `10` tests
 
-This gives the bookmark domain current regression evidence for:
+This doc refresh did not rerun the simulator suite, so do not treat the old runtime or the
+old UI count as current evidence. The checked-in named subset still gives the bookmark
+domain rerunnable evidence for:
 
 - bookmark-list search, filter, sort, selection, and deletion
 - label assignment and label-manager CRUD
-- StudyPad handoff plus deterministic note creation
-- My Notes note update and delete persistence
+- StudyPad handoff from a selected label
 - shared bookmark-note persistence semantics in the service layer
 
 ## Remaining Gap
@@ -104,7 +103,8 @@ This gives the bookmark domain current regression evidence for:
 The current bookmark parity gaps are:
 
 - generic-bookmark visible workflows
-- deeper StudyPad mutation coverage beyond handoff plus note creation
+- My Notes visible note update/delete workflows
+- deeper StudyPad mutation coverage beyond handoff
 
 Those areas remain `Partial` in `verification-matrix.md` until they have focused regression
 coverage.

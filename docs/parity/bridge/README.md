@@ -11,6 +11,11 @@ the Vue.js client and native iOS code.
 4. [regression-report.md](regression-report.md): focused bridge-adjacent validation evidence
 5. [guardrails.md](guardrails.md): maintenance rules for high-risk bridge changes
 
+Machine-readable tracking:
+
+- [baselines/android-bridge-gap-inventory.json](baselines/android-bridge-gap-inventory.json):
+  Android bridge methods and iOS no-op methods that are not true parity yet
+
 Companion reference:
 
 - [../../bridge-guide.md](../../bridge-guide.md): detailed message/event catalog and

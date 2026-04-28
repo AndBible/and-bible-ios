@@ -116,11 +116,11 @@ Examples:
 ```bash
 xcodebuild -project AndBible.xcodeproj -scheme AndBible \
   -destination 'platform=iOS Simulator,name=iPhone 17' \
-  test -only-testing:AndBibleTests/AndBibleTests/testExample
+  test -only-testing:AndBibleTests/AndBibleTests/testStrongsQueryNormalizationHandlesLeadingZeroes
 
 xcodebuild -project AndBible.xcodeproj -scheme AndBible \
   -destination 'platform=iOS Simulator,name=iPhone 17' \
-  test -only-testing:AndBibleUITests/AndBibleUITests/testExample
+  test -only-testing:AndBibleUITests/AndBibleUITests/testSearchDirectLaunchUsesSeededIndexAndReturnsBundledResults
 ```
 
 ### Package-Only Logic Changes

@@ -20,6 +20,9 @@ rules explicit for changes in:
    shared contract. Changing names like `openMyNotes`, `openStudyPad`,
    `parseRef`, `toggleFullScreen`, or `setClientReady` is a cross-platform
    breaking change unless Android and `bibleview-js` are updated in lockstep.
+   Also do not assume iOS implements every method in Android's current
+   `window.android` interface; the supported iOS subset must stay aligned with
+   this repo's bundled frontend.
 
 2. Do not change bridge argument ordering casually.
 
@@ -61,6 +64,9 @@ rules explicit for changes in:
    - `docs/parity/bridge/dispositions.md` when the behavior is iOS-specific
    - `docs/bridge-guide.md`
    - `docs/parity/bridge/verification-matrix.md` if status changes
+   - `docs/parity/bridge/baselines/android-bridge-gap-inventory.json` if an
+     Android-only method is implemented, intentionally no-oped, or declared an
+     explicit iOS product divergence
 
 ## Validation Expectations
 
@@ -74,11 +80,20 @@ xcodebuild -project AndBible.xcodeproj -scheme AndBible \
   CODE_SIGNING_ALLOWED=NO test \
   -only-testing:AndBibleTests/AndBibleTests/testBookmarkServiceClearingBibleBookmarkNoteDeletesPersistedNoteRow \
   -only-testing:AndBibleTests/AndBibleTests/testBookmarkServiceClearingBibleBookmarkNoteRemovesBookmarkFromMyNotesQuery \
-  -only-testing:AndBibleUITests/AndBibleUITests/testMyNotesDirectLaunchShowsHeaderAndReturnsToBible \
-  -only-testing:AndBibleUITests/AndBibleUITests/testMyNotesSeededNoteUpdatePersistsAcrossReturnAndReopen \
-  -only-testing:AndBibleUITests/AndBibleUITests/testMyNotesSeededNoteDeletePersistsAcrossReturnAndReopen \
-  -only-testing:AndBibleUITests/AndBibleUITests/testBookmarkListOpensStudyPadForSelectedLabel \
-  -only-testing:AndBibleUITests/AndBibleUITests/testBookmarkStudyPadCreateNoteFromLabelWorkflow
+  -only-testing:AndBibleUITests/AndBibleUITests/testBookmarkListOpensStudyPadForSelectedLabel
+```
+
+Bridge-surface changes should also run:
+
+```bash
+python3 scripts/check_bridge_parity_inventory.py
+```
+
+If a local Android reference checkout is available, include it for stricter
+Android-only method drift detection:
+
+```bash
+python3 scripts/check_bridge_parity_inventory.py --android-root .and-bible-android
 ```
 
 If a change touches one of the still-partial branches in the bridge matrix,
@@ -90,6 +105,8 @@ indirect note/document workflows alone.
 - The repo currently has no dedicated machine-readable bridge drift checker.
 - Current protection is a combination of:
   - focused regression coverage documented in `regression-report.md`
+  - machine-readable gap tracking in
+    `baselines/android-bridge-gap-inventory.json`
   - explicit parity documentation in `contract.md`, `dispositions.md`, and
     `bridge-guide.md`
   - review discipline on `BibleBridge`, `BibleWebView`, `BridgeTypes`, and the
@@ -97,7 +114,10 @@ indirect note/document workflows alone.
 
 ## Potential Improvements
 
-- add a generated snapshot of JS method names and emitted event names
+- expand the bridge inventory from gap tracking into a full per-method status
+  ledger when implementation work begins
 - add a lightweight parity checker for `BridgeTypes.swift` versus selected
   TypeScript type definitions
+- restore focused My Notes UI lifecycle coverage if that visible surface remains
+  in scope
 - add dedicated focused coverage for `callId` request/response flows

@@ -5,11 +5,11 @@ This documents the JSON emitted by `BibleReaderController.buildConfigJSON()` and
 ## Source Files
 
 Native producer:
-- `Sources/BibleUI/Sources/BibleUI/Bible/BibleReaderController.swift:4059-4103`
+- `Sources/BibleUI/Sources/BibleUI/Bible/BibleReaderController.swift:5048`
 
 Client consumer:
-- `bibleview-js/src/composables/config.ts:42-123`
-- `bibleview-js/src/composables/config.ts:298-356`
+- `bibleview-js/src/composables/config.ts:60`
+- `bibleview-js/src/composables/config.ts:299`
 
 ## Top-Level Shape
 
@@ -116,11 +116,11 @@ This block carries runtime/UI state rather than document content.
 
 Examples from the Vue.js side:
 
-- `appSettings.disableAnimations` affects scroll animation behavior: `bibleview-js/src/composables/scroll.ts:78,146`
-- `appSettings.monochromeMode` affects bookmark and page styling: `bibleview-js/src/components/BibleView.vue:266-333` and `bibleview-js/src/composables/bookmarks.ts`
+- `appSettings.disableAnimations` affects scroll animation behavior: `bibleview-js/src/composables/scroll.ts:99` and `:167`
+- `appSettings.monochromeMode` affects bookmark and page styling: `bibleview-js/src/components/BibleView.vue:269` and `bibleview-js/src/composables/bookmarks.ts`
 - `appSettings.activeWindow`, `hasActiveIndicator`, and `activeSince` drive active-window UX in ambiguous selection modals: `bibleview-js/src/composables/config.ts:259-267` and `bibleview-js/src/components/modals/AmbiguousSelection.vue:300-310`
-- `appSettings.disableBibleModalButtons` and `disableGenericModalButtons` control modal actions: `bibleview-js/src/components/AmbiguousActionButtons.vue:97-104`
-- `appSettings.studyPadCursors` and `autoAssignLabels` affect StudyPad document behavior: `bibleview-js/src/components/documents/StudyPadDocument.vue:273-278`
+- `appSettings.disableBibleModalButtons` and `disableGenericModalButtons` control modal actions: `bibleview-js/src/components/AmbiguousActionButtons.vue:102`
+- `appSettings.studyPadCursors` and `autoAssignLabels` affect StudyPad document behavior: `bibleview-js/src/components/documents/StudyPadDocument.vue:273`
 - `appSettings.hideCompareDocuments` filters compare fragments: `bibleview-js/src/components/documents/MultiDocument.vue:72-78`
 
 ## Important Constraints
@@ -128,15 +128,15 @@ Examples from the Vue.js side:
 ### Unknown keys
 
 The client logs unknown keys but does not fail hard:
-- config keys: `bibleview-js/src/composables/config.ts:325-333`
-- appSettings keys: `bibleview-js/src/composables/config.ts:336-344`
+- config keys: `bibleview-js/src/composables/config.ts:325`
+- appSettings keys: `bibleview-js/src/composables/config.ts:336`
 
 That means drift can be silent in production. If you add or rename a field, update both sides in the same change.
 
 ### `fontSizeMultiplier`
 
 Native emits a normalized decimal multiplier, not a percentage integer:
-- producer normalization: `Sources/BibleUI/Sources/BibleUI/Bible/BibleReaderController.swift:4072-4073`
+- producer normalization: `Sources/BibleUI/Sources/BibleUI/Bible/BibleReaderController.swift:5061`
 - client use: `bibleview-js/src/components/BibleView.vue:290-306`
 
 ### Margin units

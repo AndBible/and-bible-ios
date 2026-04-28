@@ -23,7 +23,7 @@ rules explicit for changes in:
 
 2. Preserve category identifiers and category-to-service wiring.
 
-   The category names and their dispatch mapping must stay stable across:
+   The iOS-supported category names and their dispatch mapping must stay stable across:
 
    - initial-backup restore
    - initial-backup upload
@@ -32,6 +32,9 @@ rules explicit for changes in:
    - settings persistence
 
    Any category rename or remapping is a compatibility change.
+   Current iOS-supported Android-aligned categories are `bookmarks`, `workspaces`, and
+   `readingplans`. Android also exposes `mydocuments`, `ai_settings`, and `progress`, which are
+   not implemented on iOS yet; adding them is new parity surface, not a local cleanup.
 
 3. Treat bootstrap markers and remote-folder ownership semantics as contract
    surface.
@@ -88,7 +91,7 @@ described in `regression-report.md` green, especially:
 - backend/category settings persistence
 - WebDAV normalization and request semantics
 - bootstrap ready/adopt/create decisions
-- initial-backup restore/upload for shared-scheme-covered categories
+- initial-backup restore/upload for iOS-supported categories
 - Sync settings backend/category reopen persistence
 
 If a change touches one of the remaining partial areas, raise the bar and add
@@ -99,14 +102,14 @@ focused coverage rather than relying on the existing subset alone.
 - The repo currently has focused sync regression coverage, but no separate
   machine-readable sync drift checker.
 - Current protection is a combination of:
-  - focused unit/integration coverage in `AndBibleTests`
+  - focused unit/integration coverage in `AndBibleTests`, including workspace
+    sync coverage from `WorkspaceSyncRestoreTests.swift`
   - focused Sync UI coverage in `AndBibleUITests`
-  - dedicated workspace sync tests in `WorkspaceSyncRestoreTests.swift`
   - explicit parity documentation in this directory
 
 ## Potential Improvements
 
 - add a machine-readable snapshot of Android-compatible sync keys and category names
-- bring the dedicated workspace sync regression target into a standard shared-scheme or equivalent
-  runnable path
+- expand iOS coverage to Android's remaining `mydocuments`, `ai_settings`, and `progress`
+  sync categories if those surfaces become product scope
 - add a focused XCUITest for the adopt-versus-create confirmation branch

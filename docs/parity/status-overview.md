@@ -1,6 +1,6 @@
 # Parity Status Overview
 
-Date: 2026-04-01
+Date: 2026-04-28
 
 ## Purpose
 
@@ -24,12 +24,12 @@ give you the fuller human context behind it.
 | Domain | Current Posture | Automation State | Primary Remaining Gap |
 |---|---|---|---|
 | [settings](settings/README.md) | Mature: `24 Pass`, `9 Adapted Pass`, `0 Partial`, `2 Documented Divergence` | Dedicated localization guardrail script, committed baselines, CI integration, focused simulator/unit validation | Broader machine-readable guardrails beyond localization if the settings surface grows materially |
-| [sync](sync/README.md) | Strong but not fully locked: `4 Pass`, `2 Adapted Pass`, `3 Partial` | Focused unit/integration coverage, focused Sync UI coverage, explicit guardrails | Workspace sync not yet in a standard shared-scheme path; adopt/create confirmation UI still partial |
-| [bookmarks](bookmarks/README.md) | Strong user-workflow coverage: `5 Pass`, `2 Adapted Pass`, `2 Partial` | Focused bookmark UI workflows plus note-persistence unit regressions | Generic-bookmark visible workflows and broader StudyPad mutation breadth |
+| [sync](sync/README.md) | Strong for supported Android categories: `6 Pass`, `2 Adapted Pass`, `2 Partial` | Focused unit/integration coverage, focused Sync UI coverage, explicit guardrails | Android-only category breadth (`mydocuments`, `ai_settings`, `progress`) and adopt/create confirmation UI still partial |
+| [bookmarks](bookmarks/README.md) | Strong bookmark-list coverage, thinner note-document UI coverage: `4 Pass`, `2 Adapted Pass`, `3 Partial` | Focused bookmark UI workflows plus note-persistence unit regressions | Generic-bookmark visible workflows, My Notes visible note mutation, and broader StudyPad mutation breadth |
 | [search](search/README.md) | Strong semantic coverage: `5 Pass`, `2 Adapted Pass`, `1 Partial` | Focused search UI workflows plus Strong's unit regressions | Multi-translation search still lacks focused regression coverage |
 | [reading-plans](reading-plans/README.md) | Strong sync and progression coverage: `5 Pass`, `1 Adapted Pass`, `3 Partial` | Focused daily-reading UI coverage plus restore/upload/patch unit coverage | Custom plan import, reading-plan list/start/import breadth, and additive iOS-only plan lifecycle coverage |
 | [reader](reader/README.md) | Reader shell/menu parity is stronger, but deeper gesture/modal/config branches remain partial: `4 Pass`, `1 Adapted Pass`, `5 Partial` | Focused reader-shell UI coverage, restored-position unit regressions, and full local UI validation | Strong's modal, fullscreen, swipe-mode, compare, and config-bridge coverage still need tighter focused regression locking |
-| [bridge](bridge/README.md) | Embedded note/document bridge paths locked, raw transport still partial: `1 Pass`, `1 Adapted Pass`, `5 Partial` | Focused My Notes/StudyPad regressions plus bridge guardrails | Raw bridge drift detection for method names, payloads, and async `callId` flows |
+| [bridge](bridge/README.md) | StudyPad handoff and shared iOS bridge subset are present; full Android bridge breadth remains partial: `1 Pass`, `1 Adapted Pass`, `6 Partial` | Focused StudyPad handoff, note-persistence regressions, bridge guardrails, and a machine-readable gap inventory | Raw bridge drift detection, visible My Notes lifecycle coverage, Android-only bridge method breadth, payloads, and async `callId` flows |
 
 ## How To Read Each Domain
 
@@ -108,8 +108,9 @@ What it still does not have is one uniform machine-readable drift check for
 every domain. That is deliberate for now. The current posture is:
 
 - strongest automation in `settings/`
-- strong focused regression evidence in `sync`, `bookmarks`, `search`, and
-  `reading-plans`
+- strong focused regression evidence in `sync`, `search`, and `reading-plans`
+- strong bookmark-list evidence in `bookmarks`, with visible My Notes and broader
+  StudyPad mutation still partial
 - meaningful but still partial protection in `reader` and `bridge` where the
   remaining gaps are mostly boundary and protocol behaviors
 

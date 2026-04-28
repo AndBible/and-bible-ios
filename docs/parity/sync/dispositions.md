@@ -74,3 +74,21 @@ Reason:
 
 - This matches Android's top-level synchronization branch point and avoids
   accidental destructive behavior during remote bootstrap.
+
+## 5. iOS currently implements a narrower category set than Android
+
+- Status: current parity gap
+- Scope: remote sync categories
+
+Disposition:
+
+- iOS currently implements Android-aligned sync for `bookmarks`, `workspaces`,
+  and `readingplans`.
+- Android currently also exposes `mydocuments`, `ai_settings`, and `progress`.
+  Those categories are not implemented on iOS yet.
+
+Reason:
+
+- The current iOS product surface does not yet expose the matching Android
+  document, AI-settings, or reading-progress sync flows. Adding them should be
+  treated as new parity work with service, UI, and regression coverage.

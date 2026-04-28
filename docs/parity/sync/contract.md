@@ -35,7 +35,7 @@ the `sync_adapter` setting:
 ## Category Contract
 
 The Android-style remote sync implementation preserves three independent
-category streams:
+category streams on iOS:
 
 | Category | Persisted value | Scope |
 |---|---|---|
@@ -50,6 +50,10 @@ These categories are tracked independently for:
 - patch progress
 - initial-backup restore/upload
 - patch replay/upload
+
+The current Android app also defines `mydocuments`, `ai_settings`, and
+`progress` sync categories. Those are Android contract surface, but they are not
+implemented in the current iOS sync surface yet.
 
 ## Bootstrap Contract
 
@@ -114,7 +118,7 @@ The Sync settings screen currently provides:
 - iCloud controls
 - NextCloud/WebDAV credential editing and connection test
 - Google Drive sign-in/sign-out/reset flow
-- per-category enable/disable controls
+- per-supported-category enable/disable controls
 - adopt/create confirmation flow for discovered remote folders
 
 The settings screen is the user-facing branch point for Android-style remote

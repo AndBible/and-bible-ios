@@ -17,6 +17,14 @@ Primary code references:
 ## Core Transport Shape
 
 The shared frontend still expects Android-style bridge semantics, even on iOS.
+iOS currently implements the Android-style bridge subset exercised by the
+bundled iOS frontend. That is enough for the current iOS bundle to run, but it
+is not full bridge parity.
+
+Android exposes additional methods for memorization, reading progress, AI
+document actions, chapter navigation, and document-page editing. Those remain
+tracked parity gaps until iOS implements them or records an explicit product
+divergence.
 
 ### JavaScript to native
 
@@ -64,7 +72,15 @@ Current message groups:
 - client state/reporting messages
 
 The main parity risk here is casual drift in shared method names, argument
-ordering, or response expectations.
+ordering, response expectations, or assuming an Android-only method is safe to
+call from the iOS-packaged frontend.
+
+The current bridge gap inventory lives at:
+
+- `docs/parity/bridge/baselines/android-bridge-gap-inventory.json`
+
+Use that file as the track record for Android methods that still need iOS
+implementation or an explicit iOS disposition.
 
 ## Event Shape
 
