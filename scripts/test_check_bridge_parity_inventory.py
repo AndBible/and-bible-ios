@@ -218,6 +218,36 @@ class BridgeParityInventoryTests(unittest.TestCase):
             ):
                 validate_inventory(inventory, ios_interface, None)
 
+    def test_validate_inventory_requires_no_op_methods_to_exist_in_android(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            ios_interface = self.write_ios_interface(
+                root,
+                "    implemented: () => void,\n"
+                "    noOp: () => void,\n",
+            )
+            inventory = self.write_inventory(
+                root,
+                ios_count=2,
+                android_count=1,
+                no_op_methods=[
+                    {"method": "noOp", "status": "ios_no_op_needs_decision"},
+                ],
+            )
+            android_root = root / "android"
+            android_root.mkdir()
+            (android_root / "android.ts").write_text(
+                "export type BibleJavascriptInterface = {\n"
+                "    implemented: () => void,\n"
+                "}\n"
+            )
+
+            with self.assertRaisesRegex(
+                InventoryError,
+                "iOS no-op methods are not present in Android: noOp",
+            ):
+                validate_inventory(inventory, ios_interface, android_root)
+
 
 if __name__ == "__main__":
     unittest.main()
