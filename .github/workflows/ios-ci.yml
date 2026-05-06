@@ -35,6 +35,9 @@ jobs:
       - name: Run repo standards unit tests
         run: python3 -m unittest discover -s scripts -p 'test_*.py'
 
+      - name: Check bridge parity inventory
+        run: python3 scripts/check_bridge_parity_inventory.py
+
       - name: Check commit messages (pull request range)
         if: github.event_name == 'pull_request'
         run: >-
@@ -317,6 +320,7 @@ jobs:
           name: andbible-xcresult-${{ github.run_id }}-unit
           path: .artifacts/*.xcresult
           if-no-files-found: warn
+          include-hidden-files: true
           retention-days: 14
 
       - name: Retry upload xcodebuild test result bundle
@@ -326,6 +330,7 @@ jobs:
           name: andbible-xcresult-${{ github.run_id }}-unit
           path: .artifacts/*.xcresult
           if-no-files-found: warn
+          include-hidden-files: true
           retention-days: 14
           overwrite: true
 
@@ -469,6 +474,7 @@ jobs:
           name: andbible-xcresult-${{ github.run_id }}-${{ matrix.artifact_suffix }}
           path: .artifacts/*.xcresult
           if-no-files-found: warn
+          include-hidden-files: true
           retention-days: 14
 
       - name: Retry upload xcodebuild test result bundle
@@ -478,6 +484,7 @@ jobs:
           name: andbible-xcresult-${{ github.run_id }}-${{ matrix.artifact_suffix }}
           path: .artifacts/*.xcresult
           if-no-files-found: warn
+          include-hidden-files: true
           retention-days: 14
           overwrite: true
 

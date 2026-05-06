@@ -1,6 +1,6 @@
 # BRIDGE-701 Verification Matrix (Android WebView Bridge -> iOS)
 
-Date: 2026-04-28
+Date: 2026-05-06
 
 ## Scope and Method
 
@@ -11,7 +11,8 @@ Date: 2026-04-28
   - direct comparison with a local Android reference checkout, especially
     Android's `bibleview-js/src/composables/android.ts` and `BibleJavascriptInterface.kt`
   - machine-readable gap tracking in
-    `docs/parity/bridge/baselines/android-bridge-gap-inventory.json`
+    `docs/parity/bridge/baselines/android-bridge-gap-inventory.json`, checked by
+    `python3 scripts/check_bridge_parity_inventory.py`
   - focused unit and simulator-backed regression coverage for StudyPad handoff
     and note-persistence support
 - Regression evidence: `docs/parity/bridge/regression-report.md`

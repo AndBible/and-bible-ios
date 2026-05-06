@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -18,6 +19,8 @@ from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_INVENTORY = REPO_ROOT / "docs/parity/bridge/baselines/android-bridge-gap-inventory.json"
+ANDROID_ROOT_ENV = "ANDBIBLE_ANDROID_ROOT"
+RECOMMENDED_ANDROID_ROOT = "../and-bible"
 ALLOWED_MISSING_STATUSES = {"missing_needs_triage"}
 ALLOWED_NO_OP_STATUSES = {"ios_no_op_needs_decision"}
 REQUIRED_REFERENCE_KEYS = {
@@ -51,7 +54,34 @@ def parse_bridge_methods(source: str) -> dict[str, str]:
 
 def load_methods(path: Path) -> dict[str, str]:
     """Load a TypeScript bridge interface file and return method signatures."""
-    return parse_bridge_methods(path.read_text())
+    return parse_bridge_methods(path.read_text(encoding="utf-8"))
+
+
+def display_path(path: Path) -> str:
+    """Format paths consistently for pasteable command output."""
+    resolved = path.expanduser()
+    try:
+        return str(resolved.resolve().relative_to(REPO_ROOT))
+    except (OSError, ValueError):
+        return str(path)
+
+
+def format_method_names(methods: set[str] | list[str]) -> str:
+    """Return a stable, compact representation of method names."""
+    names = sorted(methods)
+    return "none" if not names else ", ".join(names)
+
+
+def resolve_android_root(android_root_arg: Path | None) -> Path | None:
+    """Resolve the optional Android checkout root from CLI or environment."""
+    if android_root_arg is not None:
+        return android_root_arg
+
+    android_root_env = os.environ.get(ANDROID_ROOT_ENV)
+    if android_root_env:
+        return Path(android_root_env).expanduser()
+
+    return None
 
 
 def require_object(value: Any, label: str) -> dict[str, Any]:
@@ -97,7 +127,11 @@ def require_unique_methods(entries: list[Any], section: str) -> set[str]:
     return set(names)
 
 
-def require_allowed_statuses(entries: list[Any], section: str, allowed_statuses: set[str]) -> set[str]:
+def require_allowed_statuses(
+    entries: list[Any],
+    section: str,
+    allowed_statuses: set[str],
+) -> set[str]:
     """Return unexpected statuses after validating every status value is a string."""
     unexpected_statuses: set[str] = set()
     for entry in entries:
@@ -117,8 +151,10 @@ def validate_inventory(
     android_root: Path | None,
 ) -> list[str]:
     """Validate inventory consistency and return informational messages."""
-    inventory = require_object(json.loads(inventory_path.read_text()), "inventory root")
-    messages: list[str] = []
+    inventory = require_object(
+        json.loads(inventory_path.read_text(encoding="utf-8")),
+        "inventory root",
+    )
 
     references = require_references(inventory)
     missing_entries = require_list(inventory, "missingAndroidMethods")
@@ -168,40 +204,77 @@ def validate_inventory(
     if bad_no_op_statuses:
         raise InventoryError(f"unexpected no-op statuses: {bad_no_op_statuses}")
 
+    messages = [
+        "Bridge parity alignment summary",
+        f"- inventory: {display_path(inventory_path)}",
+        f"- iOS interface: {display_path(ios_interface_path)} ({len(ios_methods)} methods)",
+        (
+            "- iOS no-op methods needing decision: "
+            f"{len(no_op_methods)} ({format_method_names(no_op_methods)})"
+        ),
+    ]
+
     if android_root is not None:
         android_interface_path = android_root / references["androidInterfaceRelativePath"]
+        if not android_interface_path.exists():
+            raise InventoryError(
+                "Android bridge interface not found: "
+                f"{android_interface_path}. Set --android-root to the Android repo root "
+                f"(usually {RECOMMENDED_ANDROID_ROOT}) or set {ANDROID_ROOT_ENV}."
+            )
         android_methods = load_methods(android_interface_path)
         expected_android_count = references.get("androidMethodCount")
+        android_method_names = set(android_methods)
+        no_ops_missing_from_android = sorted(no_op_methods - android_method_names)
+        android_only = android_method_names - set(ios_methods)
+        missing_from_inventory = sorted(android_only - missing_methods)
+        stale_inventory = sorted(missing_methods - android_only)
+
+        failures: list[str] = []
         if expected_android_count != len(android_methods):
-            raise InventoryError(
+            failures.append(
                 "Android bridge method count drifted: "
                 f"inventory={expected_android_count}, actual={len(android_methods)}"
             )
-        no_ops_missing_from_android = sorted(no_op_methods - set(android_methods))
         if no_ops_missing_from_android:
-            raise InventoryError(
+            failures.append(
                 "iOS no-op methods are not present in Android: "
                 + ", ".join(no_ops_missing_from_android)
             )
-        android_only = set(android_methods) - set(ios_methods)
-        missing_from_inventory = sorted(android_only - missing_methods)
-        stale_inventory = sorted(missing_methods - android_only)
         if missing_from_inventory:
-            raise InventoryError(
-                "Android-only methods missing from inventory: " + ", ".join(missing_from_inventory)
+            failures.append(
+                "new Android-only methods: " + ", ".join(missing_from_inventory)
             )
         if stale_inventory:
-            raise InventoryError(
-                "inventory methods are no longer Android-only: " + ", ".join(stale_inventory)
-            )
-        messages.append(f"Android comparison checked: {len(android_only)} tracked Android-only methods")
-    else:
-        messages.append("Android comparison skipped; pass --android-root to validate against Android")
+            failures.append("stale inventory entries: " + ", ".join(stale_inventory))
+        if failures:
+            raise InventoryError("\n".join(failures))
 
-    messages.append(
-        f"iOS bridge inventory checked: {len(ios_methods)} iOS methods, "
-        f"{len(missing_methods)} missing Android methods, {len(no_op_methods)} iOS no-op methods"
-    )
+        messages.extend(
+            [
+                (
+                    f"- Android reference: {display_path(android_root)} "
+                    f"({len(android_methods)} methods)"
+                ),
+                f"- tracked Android-only methods: {len(missing_methods)}",
+                "- new Android-only methods: none",
+                "- stale inventory entries: none",
+            ]
+        )
+    else:
+        messages.extend(
+            [
+                (
+                    "- Android reference: not checked "
+                    f"(pass --android-root {RECOMMENDED_ANDROID_ROOT} or set {ANDROID_ROOT_ENV})"
+                ),
+                f"- tracked Android-only methods: {len(missing_methods)} (inventory only)",
+                "- new Android-only methods: not checked",
+                "- stale inventory entries: not checked",
+            ]
+        )
+
+    messages.append("Bridge parity inventory passed.")
     return messages
 
 
@@ -213,11 +286,16 @@ def main() -> int:
         type=Path,
         default=REPO_ROOT / "bibleview-js/src/composables/android.ts",
     )
-    parser.add_argument("--android-root", type=Path)
+    parser.add_argument(
+        "--android-root",
+        type=Path,
+        help=f"Path to Android repo root. Defaults to ${ANDROID_ROOT_ENV} when set.",
+    )
     args = parser.parse_args()
 
     try:
-        for message in validate_inventory(args.inventory, args.ios_interface, args.android_root):
+        android_root = resolve_android_root(args.android_root)
+        for message in validate_inventory(args.inventory, args.ios_interface, android_root):
             print(message)
     except (FileNotFoundError, InventoryError, json.JSONDecodeError) as error:
         print(f"bridge parity inventory check failed: {error}", file=sys.stderr)
