@@ -35,6 +35,9 @@ jobs:
       - name: Run repo standards unit tests
         run: python3 -m unittest discover -s scripts -p 'test_*.py'
 
+      - name: Check bridge parity inventory
+        run: python3 scripts/check_bridge_parity_inventory.py
+
       - name: Check commit messages (pull request range)
         if: github.event_name == 'pull_request'
         run: >-

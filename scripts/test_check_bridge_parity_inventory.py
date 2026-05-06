@@ -10,10 +10,15 @@ import tempfile
 import unittest
 from pathlib import Path
 import sys
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from check_bridge_parity_inventory import InventoryError, validate_inventory
+from check_bridge_parity_inventory import (
+    InventoryError,
+    resolve_android_root,
+    validate_inventory,
+)
 
 
 class BridgeParityInventoryTests(unittest.TestCase):
@@ -89,7 +94,14 @@ class BridgeParityInventoryTests(unittest.TestCase):
 
             messages = validate_inventory(inventory, ios_interface, android_root)
 
-        self.assertTrue(any("1 tracked Android-only methods" in message for message in messages))
+        self.assertEqual(messages[0], "Bridge parity alignment summary")
+        self.assertIn("- tracked Android-only methods: 1", messages)
+        self.assertIn("- new Android-only methods: none", messages)
+        self.assertIn("- stale inventory entries: none", messages)
+        self.assertTrue(
+            any("iOS no-op methods needing decision: 1 (noOp)" in message for message in messages)
+        )
+        self.assertEqual(messages[-1], "Bridge parity inventory passed.")
 
     def test_validate_inventory_fails_when_missing_method_is_added_to_ios(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -114,6 +126,28 @@ class BridgeParityInventoryTests(unittest.TestCase):
 
             with self.assertRaisesRegex(InventoryError, "marked missing now exist"):
                 validate_inventory(inventory, ios_interface, None)
+
+    def test_validate_inventory_reports_skipped_android_comparison(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            ios_interface = self.write_ios_interface(root)
+            inventory = self.write_inventory(root)
+
+            messages = validate_inventory(inventory, ios_interface, None)
+
+        self.assertIn(
+            "- Android reference: not checked "
+            "(pass --android-root ../and-bible or set ANDBIBLE_ANDROID_ROOT)",
+            messages,
+        )
+        self.assertIn("- tracked Android-only methods: 0 (inventory only)", messages)
+        self.assertIn("- new Android-only methods: not checked", messages)
+        self.assertIn("- stale inventory entries: not checked", messages)
+
+    def test_resolve_android_root_uses_environment_when_cli_arg_is_absent(self) -> None:
+        with mock.patch.dict("os.environ", {"ANDBIBLE_ANDROID_ROOT": "/tmp/and-bible"}):
+            self.assertEqual(resolve_android_root(None), Path("/tmp/and-bible"))
+            self.assertEqual(resolve_android_root(Path("../explicit")), Path("../explicit"))
 
     def test_validate_inventory_rejects_non_object_root(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -247,6 +281,33 @@ class BridgeParityInventoryTests(unittest.TestCase):
                 "iOS no-op methods are not present in Android: noOp",
             ):
                 validate_inventory(inventory, ios_interface, android_root)
+
+    def test_validate_inventory_reports_new_and_stale_android_methods(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            ios_interface = self.write_ios_interface(root)
+            inventory = self.write_inventory(
+                root,
+                android_count=2,
+                missing_methods=[
+                    {"method": "stale", "status": "missing_needs_triage"},
+                ],
+            )
+            android_root = root / "android"
+            android_root.mkdir()
+            (android_root / "android.ts").write_text(
+                "export type BibleJavascriptInterface = {\n"
+                "    implemented: () => void,\n"
+                "    newMethod: () => void,\n"
+                "}\n"
+            )
+
+            with self.assertRaises(InventoryError) as context:
+                validate_inventory(inventory, ios_interface, android_root)
+
+        message = str(context.exception)
+        self.assertIn("new Android-only methods: newMethod", message)
+        self.assertIn("stale inventory entries: stale", message)
 
 
 if __name__ == "__main__":

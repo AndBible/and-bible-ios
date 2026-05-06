@@ -1,6 +1,6 @@
 # Parity Status Overview
 
-Date: 2026-04-28
+Date: 2026-05-06
 
 ## Purpose
 
@@ -29,7 +29,7 @@ give you the fuller human context behind it.
 | [search](search/README.md) | Strong semantic coverage: `5 Pass`, `2 Adapted Pass`, `1 Partial` | Focused search UI workflows plus Strong's unit regressions | Multi-translation search still lacks focused regression coverage |
 | [reading-plans](reading-plans/README.md) | Strong sync and progression coverage: `5 Pass`, `1 Adapted Pass`, `3 Partial` | Focused daily-reading UI coverage plus restore/upload/patch unit coverage | Custom plan import, reading-plan list/start/import breadth, and additive iOS-only plan lifecycle coverage |
 | [reader](reader/README.md) | Reader shell/menu parity is stronger, but deeper gesture/modal/config branches remain partial: `4 Pass`, `1 Adapted Pass`, `5 Partial` | Focused reader-shell UI coverage, restored-position unit regressions, and full local UI validation | Strong's modal, fullscreen, swipe-mode, compare, and config-bridge coverage still need tighter focused regression locking |
-| [bridge](bridge/README.md) | StudyPad handoff and shared iOS bridge subset are present; full Android bridge breadth remains partial: `1 Pass`, `1 Adapted Pass`, `6 Partial` | Focused StudyPad handoff, note-persistence regressions, bridge guardrails, and a machine-readable gap inventory | Raw bridge drift detection, visible My Notes lifecycle coverage, Android-only bridge method breadth, payloads, and async `callId` flows |
+| [bridge](bridge/README.md) | StudyPad handoff and shared iOS bridge subset are present; full Android bridge breadth remains partial: `1 Pass`, `1 Adapted Pass`, `6 Partial` | Focused StudyPad handoff, note-persistence regressions, bridge guardrails, machine-readable gap inventory, and local Android-backed drift checking | Visible My Notes lifecycle coverage, Android-only bridge method breadth, payloads, and async `callId` flows |
 
 ## How To Read Each Domain
 
@@ -56,11 +56,15 @@ The current parity story has three layers of protection.
 Currently strongest in:
 
 - [settings](settings/README.md)
+- [bridge](bridge/README.md), for bridge inventory drift against the bundled iOS
+  interface and optional local Android checkout
 
 Current mechanisms:
 
 - `scripts/check_settings_localization_guardrails.py`
+- `scripts/check_bridge_parity_inventory.py`
 - committed snapshots in `docs/parity/settings/baselines/`
+- committed bridge gap inventory in `docs/parity/bridge/baselines/`
 - CI integration in `.github/workflows/ios-ci.yml`
 
 ### Tier 2: Focused regression coverage
@@ -107,7 +111,10 @@ It now has:
 What it still does not have is one uniform machine-readable drift check for
 every domain. That is deliberate for now. The current posture is:
 
-- strongest automation in `settings/`
+- strongest automation in `settings`
+- a dedicated bridge inventory drift checker for the local
+  `python3 scripts/check_bridge_parity_inventory.py --android-root ../and-bible`
+  workflow
 - strong focused regression evidence in `sync`, `search`, and `reading-plans`
 - strong bookmark-list evidence in `bookmarks`, with visible My Notes and broader
   StudyPad mutation still partial

@@ -89,12 +89,30 @@ Bridge-surface changes should also run:
 python3 scripts/check_bridge_parity_inventory.py
 ```
 
-If a local Android reference checkout is available, include it for stricter
-Android-only method drift detection:
+For parity-sensitive bridge work, run the Android alignment check against a
+local Android checkout. The expected sibling checkout path is `../and-bible`:
 
 ```bash
-python3 scripts/check_bridge_parity_inventory.py --android-root .and-bible-android
+python3 scripts/check_bridge_parity_inventory.py --android-root ../and-bible
 ```
+
+If the Android checkout lives somewhere else, pass that path with
+`--android-root` or set `ANDBIBLE_ANDROID_ROOT`. The command prints a compact
+summary that can be pasted into an issue or PR. That summary should show:
+
+- the iOS bundled bridge method count
+- the Android reference method count when an Android checkout is supplied
+- tracked Android-only methods
+- new Android-only methods
+- stale inventory entries
+- iOS no-op methods that still need a disposition decision
+
+Run the Android-backed check when:
+
+- Android has moved since the last parity pass
+- bridge method names, argument ordering, or payloads are touched
+- a PR changes `bibleview-js/src/composables/android.ts`
+- an issue claims a bridge gap has been implemented or intentionally diverged
 
 If a change touches one of the still-partial branches in the bridge matrix,
 raise the bar and add focused regression coverage rather than relying on these
@@ -102,11 +120,16 @@ indirect note/document workflows alone.
 
 ## Current Automation Status
 
-- The repo currently has no dedicated machine-readable bridge drift checker.
+- The repo now has a dedicated machine-readable bridge inventory checker:
+  `scripts/check_bridge_parity_inventory.py`.
 - Current protection is a combination of:
   - focused regression coverage documented in `regression-report.md`
   - machine-readable gap tracking in
     `baselines/android-bridge-gap-inventory.json`
+  - CI execution of `python3 scripts/check_bridge_parity_inventory.py` against
+    the checked-in iOS bundle and inventory
+  - local Android-backed drift detection through
+    `python3 scripts/check_bridge_parity_inventory.py --android-root ../and-bible`
   - explicit parity documentation in `contract.md`, `dispositions.md`, and
     `bridge-guide.md`
   - review discipline on `BibleBridge`, `BibleWebView`, `BridgeTypes`, and the
@@ -118,6 +141,4 @@ indirect note/document workflows alone.
   ledger when implementation work begins
 - add a lightweight parity checker for `BridgeTypes.swift` versus selected
   TypeScript type definitions
-- restore focused My Notes UI lifecycle coverage if that visible surface remains
-  in scope
 - add dedicated focused coverage for `callId` request/response flows

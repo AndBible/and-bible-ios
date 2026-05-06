@@ -1,6 +1,6 @@
 # BRIDGE-702 Regression Report
 
-Date: 2026-04-28
+Date: 2026-05-06
 
 ## Scope
 
@@ -11,6 +11,7 @@ covers:
 - the native persistence paths that support those embedded note surfaces
 - local Android bridge surface comparison
 - machine-readable gap inventory for Android-only and iOS no-op bridge methods
+- pasteable bridge inventory summaries for parity issues and PR validation notes
 
 Contract reference:
 
@@ -32,6 +33,12 @@ Related domain references:
 - Validation style: focused `xcodebuild test` subset
 
 ## Current Rerunnable Test Set
+
+### Machine-readable guardrails
+
+- `python3 scripts/check_bridge_parity_inventory.py`
+- `python3 scripts/check_bridge_parity_inventory.py --android-root ../and-bible`
+  when the Android checkout is available locally
 
 ### Unit
 
@@ -85,8 +92,9 @@ lifecycle and rawer transport edges still need more direct protection.
 The pieces that still need tighter protection are:
 
 - visible My Notes open/update/delete workflows
-- full current Android bridge breadth beyond the shared iOS subset (`88` Android methods versus
-  `62` iOS-bundled methods in `bibleview-js/src/composables/android.ts`)
+- full current Android bridge breadth beyond the shared iOS subset (`88` Android
+  methods versus `62` iOS-bundled methods in
+  `bibleview-js/src/composables/android.ts`)
 - the tracked bridge gap inventory: 26 missing Android methods plus 3 iOS no-op methods that
   still need implementation or explicit product divergence
 - raw `window.android.*` compatibility-shim behavior on a per-method basis

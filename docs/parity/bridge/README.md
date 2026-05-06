@@ -16,6 +16,17 @@ Machine-readable tracking:
 - [baselines/android-bridge-gap-inventory.json](baselines/android-bridge-gap-inventory.json):
   Android bridge methods and iOS no-op methods that are not true parity yet
 
+Recurring alignment check:
+
+```bash
+python3 scripts/check_bridge_parity_inventory.py --android-root ../and-bible
+```
+
+Use `--android-root` for a non-sibling Android checkout, or set
+`ANDBIBLE_ANDROID_ROOT` for repeated local runs. Paste the command summary into
+bridge parity issues and PR validation notes when Android-backed drift was
+checked.
+
 Companion reference:
 
 - [../../bridge-guide.md](../../bridge-guide.md): detailed message/event catalog and
