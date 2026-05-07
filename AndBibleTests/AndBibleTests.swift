@@ -30,6 +30,21 @@ final class AndBibleTests: XCTestCase {
     }
     #endif
 
+    private func bridgeJSONObject<T: Encodable>(_ value: T) throws -> [String: Any] {
+        let data = try bridgeEncoder.encode(value)
+        let object = try JSONSerialization.jsonObject(with: data)
+        return try XCTUnwrap(object as? [String: Any])
+    }
+
+    private func assertJSONKeys(
+        _ object: [String: Any],
+        _ expectedKeys: Set<String>,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        XCTAssertEqual(Set(object.keys), expectedKeys, file: file, line: line)
+    }
+
     private var temporarySwordModulePaths: [String] = []
 
     override func tearDown() {
@@ -863,6 +878,152 @@ final class AndBibleTests: XCTestCase {
         )
     }
 
+    func testBridgeCallIdRequestMappingMatchesWebClientContract() {
+        let bridge = BibleBridge()
+
+        XCTAssertEqual(
+            bridge.callIdRequest(method: "requestMoreToBeginning", args: [41]),
+            .requestMoreToBeginning(41)
+        )
+        XCTAssertEqual(
+            bridge.callIdRequest(method: "requestMoreToEnd", args: [42]),
+            .requestMoreToEnd(42)
+        )
+        XCTAssertEqual(
+            bridge.callIdRequest(method: "refChooserDialog", args: [43]),
+            .refChooserDialog(43)
+        )
+        XCTAssertEqual(
+            bridge.callIdRequest(method: "parseRef", args: [44, "Genesis 1:1"]),
+            .parseRef(callId: 44, text: "Genesis 1:1")
+        )
+
+        XCTAssertNil(bridge.callIdRequest(method: "parseRef", args: [44]))
+        XCTAssertNil(bridge.callIdRequest(method: "parseRef", args: ["Genesis 1:1", 44]))
+        XCTAssertNil(bridge.callIdRequest(method: "helpDialog", args: [45]))
+    }
+
+    @MainActor
+    func testBridgeSendResponseEmitsCallIdResponseJavaScript() {
+        let bridge = BibleBridge()
+        var scripts: [String] = []
+        bridge.javaScriptEvaluationObserver = { script in
+            scripts.append(script)
+        }
+
+        bridge.sendResponse(callId: 54, value: "null")
+        bridge.sendResponse(callId: 55, value: ["osisRef": "Gen.1.1"])
+
+        XCTAssertEqual(
+            scripts,
+            [
+                "bibleView.response(54, null);",
+                #"bibleView.response(55, {"osisRef":"Gen.1.1"});"#,
+            ]
+        )
+    }
+
+    func testBridgePayloadKeysMatchWebClientContracts() throws {
+        let fragment = OsisFragment(
+            xml: "<div>In the beginning...</div>",
+            key: "Gen.1",
+            keyName: "Genesis 1",
+            v11n: "KJVA",
+            bookCategory: "BIBLE",
+            bookInitials: "KJV",
+            bookAbbreviation: "Gen",
+            osisRef: "Gen.1",
+            isNewTestament: false,
+            features: OsisFeatures(type: "hebrew", keyName: "H00430"),
+            ordinalRange: [1, 31],
+            language: "en",
+            direction: "ltr"
+        )
+        let fragmentObject = try bridgeJSONObject(fragment)
+        assertJSONKeys(
+            fragmentObject,
+            [
+                "xml",
+                "key",
+                "keyName",
+                "v11n",
+                "bookCategory",
+                "bookInitials",
+                "bookAbbreviation",
+                "osisRef",
+                "isNewTestament",
+                "features",
+                "ordinalRange",
+                "language",
+                "direction",
+            ]
+        )
+        let features = try XCTUnwrap(fragmentObject["features"] as? [String: Any])
+        assertJSONKeys(features, ["type", "keyName"])
+
+        let label = LabelData(
+            id: "550e8400-e29b-41d4-a716-446655440000",
+            name: "Important",
+            style: BookmarkStyleData(
+                color: 0xFFFF0000,
+                isSpeak: true,
+                isParagraphBreak: true,
+                underline: true,
+                underlineWholeVerse: true,
+                markerStyle: true,
+                markerStyleWholeVerse: true,
+                hideStyle: true,
+                hideStyleWholeVerse: true,
+                customIcon: "star"
+            ),
+            isRealLabel: true
+        )
+        let labelObject = try bridgeJSONObject(label)
+        assertJSONKeys(labelObject, ["id", "name", "style", "isRealLabel"])
+
+        let style = try XCTUnwrap(labelObject["style"] as? [String: Any])
+        assertJSONKeys(
+            style,
+            [
+                "color",
+                "isSpeak",
+                "isParagraphBreak",
+                "underline",
+                "underlineWholeVerse",
+                "markerStyle",
+                "markerStyleWholeVerse",
+                "hideStyle",
+                "hideStyleWholeVerse",
+                "customIcon",
+            ]
+        )
+
+        let query = SelectionQuery(
+            bookInitials: "KJV",
+            osisRef: "Gen.1.1-Gen.1.3",
+            startOrdinal: 0,
+            startOffset: 1,
+            endOrdinal: 2,
+            endOffset: 50,
+            bookmarks: ["id1", "id2"],
+            text: "In the beginning God created..."
+        )
+        let queryObject = try bridgeJSONObject(query)
+        assertJSONKeys(
+            queryObject,
+            [
+                "bookInitials",
+                "osisRef",
+                "startOrdinal",
+                "startOffset",
+                "endOrdinal",
+                "endOffset",
+                "bookmarks",
+                "text",
+            ]
+        )
+    }
+
     #if os(iOS)
     func testBuildStrongsMultiDocJSONReturnsInstallFallbackWhenNoStrongsDictionaryIsInstalled() throws {
         let bridge = BibleBridge()
@@ -997,6 +1158,63 @@ final class AndBibleTests: XCTestCase {
             addDocumentsScript.contains("\"originalOrdinalRange\":[5,5]"),
             "Expected explicit verse navigation to preserve the original highlighted target. Script: \(addDocumentsScript)"
         )
+    }
+
+    @MainActor
+    func testRequestMoreToBeginningSendsDocumentResponseWithOriginalCallId() throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let modulePath = try makeTemporaryBundledSwordPath()
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+
+        controller.navigateTo(book: "Genesis", chapter: 2, verse: 1)
+        controller.loadCurrentContent()
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.1))
+
+        let baselineCount = recordedScripts().count
+        controller.bridge(bridge, requestMoreToBeginning: 3701)
+
+        let responseScript = try XCTUnwrap(
+            recordedScripts().dropFirst(baselineCount).first {
+                $0.contains("bibleView.response(3701")
+            }
+        )
+
+        XCTAssertTrue(
+            responseScript.hasPrefix("bibleView.response(3701, {"),
+            "Expected a document JSON response for the original callId. Script: \(responseScript)"
+        )
+        XCTAssertTrue(
+            responseScript.contains(#""key":"Gen.1""#),
+            "Expected the previous chapter document to be returned. Script: \(responseScript)"
+        )
+        XCTAssertTrue(
+            responseScript.contains(#""osisFragment""#),
+            "Expected the response payload to preserve the Bible document shape. Script: \(responseScript)"
+        )
+    }
+
+    @MainActor
+    func testRefChooserDialogSendsResponseWithOriginalCallId() {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let controller = BibleReaderController(bridge: bridge)
+        controller.onRefChooserDialog = { completion in
+            completion("Gen.1.1")
+        }
+
+        controller.bridge(bridge, refChooserDialog: 3702)
+
+        XCTAssertEqual(recordedScripts().last, #"bibleView.response(3702, "Gen.1.1");"#)
+    }
+
+    @MainActor
+    func testParseRefSendsResponseWithOriginalCallId() {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let controller = BibleReaderController(bridge: bridge)
+
+        controller.bridge(bridge, parseRef: 3703, text: "Genesis 1:1")
+
+        XCTAssertEqual(recordedScripts().last, #"bibleView.response(3703, "Gen.1.1");"#)
     }
     #endif
 

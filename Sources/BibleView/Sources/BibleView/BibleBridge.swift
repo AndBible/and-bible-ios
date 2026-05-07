@@ -18,6 +18,13 @@ public enum NativeHorizontalSwipeDirection: Sendable {
     case right
 }
 
+enum BibleBridgeCallIdRequest: Equatable {
+    case requestMoreToBeginning(Int)
+    case requestMoreToEnd(Int)
+    case refChooserDialog(Int)
+    case parseRef(callId: Int, text: String)
+}
+
 /// Protocol for handling bridge events from the Vue.js WebView.
 public protocol BibleBridgeDelegate: AnyObject {
     // MARK: - Navigation & Scroll
@@ -232,6 +239,11 @@ public final class BibleBridge: NSObject, WKScriptMessageHandler {
             onAnyMessage?()
         }
 
+        if isCallIdRequestMethod(method) {
+            dispatchCallIdRequest(method: method, args: args)
+            return
+        }
+
         switch method {
         // --- Logging & state sync from JavaScript to native ---
         case "console":
@@ -280,14 +292,6 @@ public final class BibleBridge: NSObject, WKScriptMessageHandler {
             if let key = args[safe: 0] as? String, let ordinal = args[safe: 1] as? Int {
                 let atChapterTop = args[safe: 2] as? Bool ?? false
                 delegate?.bridge(self, didScrollToOrdinal: ordinal, key: key, atChapterTop: atChapterTop)
-            }
-        case "requestMoreToBeginning":
-            if let callId = args.first as? Int {
-                delegate?.bridge(self, requestMoreToBeginning: callId)
-            }
-        case "requestMoreToEnd":
-            if let callId = args.first as? Int {
-                delegate?.bridge(self, requestMoreToEnd: callId)
             }
 
         // --- Bookmark CRUD and label assignment ---
@@ -467,14 +471,6 @@ public final class BibleBridge: NSObject, WKScriptMessageHandler {
             }
 
         // --- Dialog and async request entry points ---
-        case "refChooserDialog":
-            if let callId = args.first as? Int {
-                delegate?.bridge(self, refChooserDialog: callId)
-            }
-        case "parseRef":
-            if let callId = args[safe: 0] as? Int, let text = args[safe: 1] as? String {
-                delegate?.bridge(self, parseRef: callId, text: text)
-            }
         case "helpDialog":
             if let content = args[safe: 0] as? String {
                 delegate?.bridge(self, helpDialog: content, title: args[safe: 1] as? String)
@@ -497,6 +493,53 @@ public final class BibleBridge: NSObject, WKScriptMessageHandler {
     }
 
     // MARK: - Send to JavaScript
+
+    func callIdRequest(method: String, args: [Any]) -> BibleBridgeCallIdRequest? {
+        switch method {
+        case "requestMoreToBeginning":
+            guard let callId = args.first as? Int else { return nil }
+            return .requestMoreToBeginning(callId)
+        case "requestMoreToEnd":
+            guard let callId = args.first as? Int else { return nil }
+            return .requestMoreToEnd(callId)
+        case "refChooserDialog":
+            guard let callId = args.first as? Int else { return nil }
+            return .refChooserDialog(callId)
+        case "parseRef":
+            guard let callId = args[safe: 0] as? Int,
+                  let text = args[safe: 1] as? String else { return nil }
+            return .parseRef(callId: callId, text: text)
+        default:
+            return nil
+        }
+    }
+
+    @discardableResult
+    func dispatchCallIdRequest(method: String, args: [Any]) -> Bool {
+        guard let request = callIdRequest(method: method, args: args) else { return false }
+
+        switch request {
+        case .requestMoreToBeginning(let callId):
+            delegate?.bridge(self, requestMoreToBeginning: callId)
+        case .requestMoreToEnd(let callId):
+            delegate?.bridge(self, requestMoreToEnd: callId)
+        case .refChooserDialog(let callId):
+            delegate?.bridge(self, refChooserDialog: callId)
+        case .parseRef(let callId, let text):
+            delegate?.bridge(self, parseRef: callId, text: text)
+        }
+
+        return true
+    }
+
+    private func isCallIdRequestMethod(_ method: String) -> Bool {
+        switch method {
+        case "requestMoreToBeginning", "requestMoreToEnd", "refChooserDialog", "parseRef":
+            return true
+        default:
+            return false
+        }
+    }
 
     /**
      Sends a raw JSON response payload back to a pending JavaScript bridge call.

@@ -28,7 +28,8 @@ rules explicit for changes in:
 
    The frontend still sends positional `args` arrays, not keyed payload objects,
    for many calls. Reordering arguments in Swift without a coordinated client
-   change is a silent runtime break.
+   change is a silent runtime break. Async methods must keep `callId` as the
+   first argument unless the shared web-client bridge changes with it.
 
 3. Treat the `window.android` compatibility shim as contract surface.
 
@@ -89,6 +90,21 @@ Bridge-surface changes should also run:
 python3 scripts/check_bridge_parity_inventory.py
 ```
 
+Changes that touch async request/response handling or payload models should also
+run the focused shared-scheme bridge subset:
+
+```bash
+xcodebuild -project AndBible.xcodeproj -scheme AndBible \
+  -destination 'platform=iOS Simulator,name=iPhone 17' \
+  CODE_SIGNING_ALLOWED=NO test \
+  -only-testing:AndBibleTests/AndBibleTests/testBridgeCallIdRequestMappingMatchesWebClientContract \
+  -only-testing:AndBibleTests/AndBibleTests/testBridgeSendResponseEmitsCallIdResponseJavaScript \
+  -only-testing:AndBibleTests/AndBibleTests/testBridgePayloadKeysMatchWebClientContracts \
+  -only-testing:AndBibleTests/AndBibleTests/testRequestMoreToBeginningSendsDocumentResponseWithOriginalCallId \
+  -only-testing:AndBibleTests/AndBibleTests/testRefChooserDialogSendsResponseWithOriginalCallId \
+  -only-testing:AndBibleTests/AndBibleTests/testParseRefSendsResponseWithOriginalCallId
+```
+
 For parity-sensitive bridge work, run the Android alignment check against a
 local Android checkout. The expected sibling checkout path is `../and-bible`:
 
@@ -130,6 +146,8 @@ indirect note/document workflows alone.
     the checked-in iOS bundle and inventory
   - local Android-backed drift detection through
     `python3 scripts/check_bridge_parity_inventory.py --android-root ../and-bible`
+  - shared-scheme unit checks for async `callId` dispatch/response handling and
+    representative bridge payload key shapes
   - explicit parity documentation in `contract.md`, `dispositions.md`, and
     `bridge-guide.md`
   - review discipline on `BibleBridge`, `BibleWebView`, `BridgeTypes`, and the
@@ -141,4 +159,3 @@ indirect note/document workflows alone.
   ledger when implementation work begins
 - add a lightweight parity checker for `BridgeTypes.swift` versus selected
   TypeScript type definitions
-- add dedicated focused coverage for `callId` request/response flows

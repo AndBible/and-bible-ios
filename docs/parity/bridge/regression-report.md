@@ -1,6 +1,6 @@
 # BRIDGE-702 Regression Report
 
-Date: 2026-05-06
+Date: 2026-05-07
 
 ## Scope
 
@@ -9,6 +9,8 @@ covers:
 
 - StudyPad document handoff from a real bookmark workflow
 - the native persistence paths that support those embedded note surfaces
+- representative async `callId` request/response bridge flows
+- representative Swift bridge payload key shapes consumed by `bibleview-js`
 - local Android bridge surface comparison
 - machine-readable gap inventory for Android-only and iOS no-op bridge methods
 - pasteable bridge inventory summaries for parity issues and PR validation notes
@@ -45,6 +47,12 @@ Related domain references:
 - `AndBibleTests/testBookmarkServiceClearingBibleBookmarkNoteDeletesPersistedNoteRow`
 - `AndBibleTests/testBookmarkServiceClearingBibleBookmarkNoteRemovesBookmarkFromMyNotesQuery`
 - `AndBibleTests/testBookmarkServiceUpdatingBibleBookmarkNoteReusesPersistedNoteRow`
+- `AndBibleTests/testBridgeCallIdRequestMappingMatchesWebClientContract`
+- `AndBibleTests/testBridgeSendResponseEmitsCallIdResponseJavaScript`
+- `AndBibleTests/testBridgePayloadKeysMatchWebClientContracts`
+- `AndBibleTests/testRequestMoreToBeginningSendsDocumentResponseWithOriginalCallId`
+- `AndBibleTests/testRefChooserDialogSendsResponseWithOriginalCallId`
+- `AndBibleTests/testParseRefSendsResponseWithOriginalCallId`
 
 ### UI
 
@@ -67,21 +75,41 @@ Related domain references:
 - rebuilding the My Notes bookmark query after note deletion removes the bookmark from the
   resulting note-backed surface
 
+### Async callId flows
+
+- bridge dispatch keeps `callId` as the first positional argument for content expansion and
+  native reference dialog/parser requests
+- `BibleBridge.sendResponse(...)` emits `bibleView.response(callId, value)` with the original
+  call identifier
+- content expansion can return a previous-chapter Bible document payload for the original
+  `requestMoreToBeginning` call ID
+- native `refChooserDialog` and `parseRef` controller handlers send their responses through the
+  original call ID
+
+### Payload shapes
+
+- representative `OsisFragment`, label/style, and selection-query payloads preserve the key names
+  expected by `bibleview-js/src/types/client-objects.ts` and `bibleview-js/src/composables/android.ts`
+
 ## Historical Result And Current Interpretation
 
 Focused bridge-adjacent validation passed on 2026-03-16, but the original UI result is now stale
 because four UI tests from that report no longer exist in `AndBibleUITests`. The current rerunnable
 named subset in this report is:
 
-- Unit: `3` tests
+- Unit: `9` tests
 - UI: `1` test
 
-This doc refresh did not rerun the simulator suite, so do not treat the old UI runtime/count as
-current evidence. The checked-in named subset gives the bridge domain rerunnable evidence for:
+This doc refresh reran the new focused callId/payload subset locally, but did not rerun the full
+bridge-adjacent simulator suite. Do not treat the old UI runtime/count as current evidence. The
+checked-in named subset gives the bridge domain rerunnable evidence for:
 
 - service-layer note persistence
 - StudyPad document handoff
 - bookmark-note persistence feeding those embedded surfaces
+- async `callId` request/response transport for representative content expansion and native
+  reference workflows
+- representative bridge payload key shapes for OSIS fragments, labels/styles, and selection query
 
 So the bridge story is not "everything is shaky." It is more specific than
 that: the StudyPad handoff and note persistence support are present, while the visible My Notes
@@ -98,10 +126,10 @@ The pieces that still need tighter protection are:
 - the tracked bridge gap inventory: 26 missing Android methods plus 3 iOS no-op methods that
   still need implementation or explicit product divergence
 - raw `window.android.*` compatibility-shim behavior on a per-method basis
-- `callId` async request/response flows for content expansion and native dialogs
 - Strong's sheet bridge coverage, especially the dedicated `contentType: "strongs"` route
-- fullscreen, compare, help, and reference-dialog bridge workflows
-- explicit payload-shape guardrails between `BridgeTypes.swift` and `bibleview-js/src/types/`
+- fullscreen, compare, help, and full reference-dialog UI workflows
+- generated or full-surface payload-shape parity checks between `BridgeTypes.swift` and
+  `bibleview-js/src/types/` beyond the current representative key-shape tests
 
 Those areas are implemented and documented, but they are not yet locked by
 focused bridge-domain regression coverage, so they still show up as `Partial`
