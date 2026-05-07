@@ -16,7 +16,7 @@ rules explicit for changes in:
 
 1. Do not rename or remove existing JavaScript message names casually.
 
-   The switch cases in `BibleBridge.userContentController(...)` are part of the
+   The switch cases in `BibleBridge.dispatchMessage(method:args:)` are part of the
    shared contract. Changing names like `openMyNotes`, `openStudyPad`,
    `parseRef`, `toggleFullScreen`, or `setClientReady` is a cross-platform
    breaking change unless Android and `bibleview-js` are updated in lockstep.
@@ -30,6 +30,10 @@ rules explicit for changes in:
    for many calls. Reordering arguments in Swift without a coordinated client
    change is a silent runtime break. Async methods must keep `callId` as the
    first argument unless the shared web-client bridge changes with it.
+   Known bridge methods should validate required argument count/types and return
+   a malformed dispatch result instead of silently no-oping or defaulting a
+   required value. Optional arguments may be omitted or `null`, but a present
+   wrong-type optional value should also be treated as malformed.
 
 3. Treat the `window.android` compatibility shim as contract surface.
 
@@ -98,6 +102,8 @@ xcodebuild -project AndBible.xcodeproj -scheme AndBible \
   -destination 'platform=iOS Simulator,name=iPhone 17' \
   CODE_SIGNING_ALLOWED=NO test \
   -only-testing:AndBibleTests/AndBibleTests/testBridgeCallIdRequestMappingMatchesWebClientContract \
+  -only-testing:AndBibleTests/AndBibleTests/testBridgeCallIdDispatchClassifiesKnownMalformedMessages \
+  -only-testing:AndBibleTests/AndBibleTests/testBridgeMessageDispatchClassifiesKnownMalformedMessages \
   -only-testing:AndBibleTests/AndBibleTests/testBridgeSendResponseEmitsCallIdResponseJavaScript \
   -only-testing:AndBibleTests/AndBibleTests/testBridgePayloadKeysMatchWebClientContracts \
   -only-testing:AndBibleTests/AndBibleTests/testRequestMoreToBeginningSendsDocumentResponseWithOriginalCallId \
@@ -146,8 +152,9 @@ indirect note/document workflows alone.
     the checked-in iOS bundle and inventory
   - local Android-backed drift detection through
     `python3 scripts/check_bridge_parity_inventory.py --android-root ../and-bible`
-  - shared-scheme unit checks for async `callId` dispatch/response handling and
-    representative bridge payload key shapes
+  - shared-scheme unit checks for async `callId` dispatch/response handling,
+    malformed known-message dispatch classification, and representative bridge
+    payload key shapes
   - explicit parity documentation in `contract.md`, `dispositions.md`, and
     `bridge-guide.md`
   - review discipline on `BibleBridge`, `BibleWebView`, `BridgeTypes`, and the

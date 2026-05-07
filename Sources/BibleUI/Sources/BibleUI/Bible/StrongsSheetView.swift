@@ -550,6 +550,9 @@ final class StrongsSheetDelegate: NSObject, BibleBridgeDelegate {
     /// No-op because verse sharing is handled in the main reader.
     func bridge(_ bridge: BibleBridge, shareVerse bookInitials: String, startOrdinal: Int, endOrdinal: Int) {}
 
+    /// No-op because bookmark sharing is handled in the main reader.
+    func bridge(_ bridge: BibleBridge, shareBookmarkVerse bookmarkId: String) {}
+
     /// No-op because verse copying is handled in the main reader.
     func bridge(_ bridge: BibleBridge, copyVerse bookInitials: String, startOrdinal: Int, endOrdinal: Int) {}
 
