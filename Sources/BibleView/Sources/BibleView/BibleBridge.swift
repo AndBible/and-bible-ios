@@ -25,6 +25,11 @@ enum BibleBridgeCallIdRequest: Equatable {
     case parseRef(callId: Int, text: String)
 }
 
+enum BibleBridgeCallIdRequestParseResult: Equatable {
+    case request(BibleBridgeCallIdRequest)
+    case malformed
+}
+
 /// Protocol for handling bridge events from the Vue.js WebView.
 public protocol BibleBridgeDelegate: AnyObject {
     // MARK: - Navigation & Scroll
@@ -239,8 +244,7 @@ public final class BibleBridge: NSObject, WKScriptMessageHandler {
             onAnyMessage?()
         }
 
-        if isCallIdRequestMethod(method) {
-            dispatchCallIdRequest(method: method, args: args)
+        if dispatchCallIdRequest(method: method, args: args) {
             return
         }
 
@@ -492,23 +496,23 @@ public final class BibleBridge: NSObject, WKScriptMessageHandler {
         }
     }
 
-    // MARK: - Send to JavaScript
+    // MARK: - CallId Requests
 
-    func callIdRequest(method: String, args: [Any]) -> BibleBridgeCallIdRequest? {
+    func callIdRequest(method: String, args: [Any]) -> BibleBridgeCallIdRequestParseResult? {
         switch method {
         case "requestMoreToBeginning":
-            guard let callId = args.first as? Int else { return nil }
-            return .requestMoreToBeginning(callId)
+            guard let callId = args.first as? Int else { return .malformed }
+            return .request(.requestMoreToBeginning(callId))
         case "requestMoreToEnd":
-            guard let callId = args.first as? Int else { return nil }
-            return .requestMoreToEnd(callId)
+            guard let callId = args.first as? Int else { return .malformed }
+            return .request(.requestMoreToEnd(callId))
         case "refChooserDialog":
-            guard let callId = args.first as? Int else { return nil }
-            return .refChooserDialog(callId)
+            guard let callId = args.first as? Int else { return .malformed }
+            return .request(.refChooserDialog(callId))
         case "parseRef":
             guard let callId = args[safe: 0] as? Int,
-                  let text = args[safe: 1] as? String else { return nil }
-            return .parseRef(callId: callId, text: text)
+                  let text = args[safe: 1] as? String else { return .malformed }
+            return .request(.parseRef(callId: callId, text: text))
         default:
             return nil
         }
@@ -516,7 +520,8 @@ public final class BibleBridge: NSObject, WKScriptMessageHandler {
 
     @discardableResult
     func dispatchCallIdRequest(method: String, args: [Any]) -> Bool {
-        guard let request = callIdRequest(method: method, args: args) else { return false }
+        guard let parseResult = callIdRequest(method: method, args: args) else { return false }
+        guard case .request(let request) = parseResult else { return true }
 
         switch request {
         case .requestMoreToBeginning(let callId):
@@ -532,14 +537,7 @@ public final class BibleBridge: NSObject, WKScriptMessageHandler {
         return true
     }
 
-    private func isCallIdRequestMethod(_ method: String) -> Bool {
-        switch method {
-        case "requestMoreToBeginning", "requestMoreToEnd", "refChooserDialog", "parseRef":
-            return true
-        default:
-            return false
-        }
-    }
+    // MARK: - Send to JavaScript
 
     /**
      Sends a raw JSON response payload back to a pending JavaScript bridge call.

@@ -883,24 +883,31 @@ final class AndBibleTests: XCTestCase {
 
         XCTAssertEqual(
             bridge.callIdRequest(method: "requestMoreToBeginning", args: [41]),
-            .requestMoreToBeginning(41)
+            .request(.requestMoreToBeginning(41))
         )
         XCTAssertEqual(
             bridge.callIdRequest(method: "requestMoreToEnd", args: [42]),
-            .requestMoreToEnd(42)
+            .request(.requestMoreToEnd(42))
         )
         XCTAssertEqual(
             bridge.callIdRequest(method: "refChooserDialog", args: [43]),
-            .refChooserDialog(43)
+            .request(.refChooserDialog(43))
         )
         XCTAssertEqual(
             bridge.callIdRequest(method: "parseRef", args: [44, "Genesis 1:1"]),
-            .parseRef(callId: 44, text: "Genesis 1:1")
+            .request(.parseRef(callId: 44, text: "Genesis 1:1"))
         )
 
-        XCTAssertNil(bridge.callIdRequest(method: "parseRef", args: [44]))
-        XCTAssertNil(bridge.callIdRequest(method: "parseRef", args: ["Genesis 1:1", 44]))
+        XCTAssertEqual(bridge.callIdRequest(method: "parseRef", args: [44]), .malformed)
+        XCTAssertEqual(bridge.callIdRequest(method: "parseRef", args: ["Genesis 1:1", 44]), .malformed)
         XCTAssertNil(bridge.callIdRequest(method: "helpDialog", args: [45]))
+    }
+
+    func testBridgeCallIdDispatchTreatsKnownMalformedMessagesAsHandled() {
+        let bridge = BibleBridge()
+
+        XCTAssertTrue(bridge.dispatchCallIdRequest(method: "parseRef", args: [44]))
+        XCTAssertFalse(bridge.dispatchCallIdRequest(method: "helpDialog", args: [45]))
     }
 
     @MainActor
