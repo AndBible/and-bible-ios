@@ -30,6 +30,12 @@ enum BibleBridgeCallIdRequestParseResult: Equatable {
     case malformed
 }
 
+enum BibleBridgeCallIdRequestDispatchResult: Equatable {
+    case notCallIdRequest
+    case handled
+    case malformed
+}
+
 /// Protocol for handling bridge events from the Vue.js WebView.
 public protocol BibleBridgeDelegate: AnyObject {
     // MARK: - Navigation & Scroll
@@ -244,8 +250,11 @@ public final class BibleBridge: NSObject, WKScriptMessageHandler {
             onAnyMessage?()
         }
 
-        if dispatchCallIdRequest(method: method, args: args) {
+        switch dispatchCallIdRequest(method: method, args: args) {
+        case .handled, .malformed:
             return
+        case .notCallIdRequest:
+            break
         }
 
         switch method {
@@ -519,9 +528,15 @@ public final class BibleBridge: NSObject, WKScriptMessageHandler {
     }
 
     @discardableResult
-    func dispatchCallIdRequest(method: String, args: [Any]) -> Bool {
-        guard let parseResult = callIdRequest(method: method, args: args) else { return false }
-        guard case .request(let request) = parseResult else { return true }
+    func dispatchCallIdRequest(method: String, args: [Any]) -> BibleBridgeCallIdRequestDispatchResult {
+        guard let parseResult = callIdRequest(method: method, args: args) else { return .notCallIdRequest }
+        guard case .request(let request) = parseResult else {
+            let argTypes = args.map { String(describing: type(of: $0)) }.joined(separator: ", ")
+            logger.warning(
+                "Malformed callId bridge message: method=\(method, privacy: .public), argCount=\(args.count), argTypes=\(argTypes, privacy: .public)"
+            )
+            return .malformed
+        }
 
         switch request {
         case .requestMoreToBeginning(let callId):
@@ -534,7 +549,7 @@ public final class BibleBridge: NSObject, WKScriptMessageHandler {
             delegate?.bridge(self, parseRef: callId, text: text)
         }
 
-        return true
+        return .handled
     }
 
     // MARK: - Send to JavaScript

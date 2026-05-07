@@ -45,6 +45,19 @@ final class AndBibleTests: XCTestCase {
         XCTAssertEqual(Set(object.keys), expectedKeys, file: file, line: line)
     }
 
+    private var malformedCallIdRequests: [(method: String, args: [Any])] {
+        [
+            ("requestMoreToBeginning", []),
+            ("requestMoreToBeginning", ["41"]),
+            ("requestMoreToEnd", []),
+            ("requestMoreToEnd", ["42"]),
+            ("refChooserDialog", []),
+            ("refChooserDialog", ["43"]),
+            ("parseRef", [44]),
+            ("parseRef", ["Genesis 1:1", 44]),
+        ]
+    }
+
     private var temporarySwordModulePaths: [String] = []
 
     override func tearDown() {
@@ -898,16 +911,34 @@ final class AndBibleTests: XCTestCase {
             .request(.parseRef(callId: 44, text: "Genesis 1:1"))
         )
 
-        XCTAssertEqual(bridge.callIdRequest(method: "parseRef", args: [44]), .malformed)
-        XCTAssertEqual(bridge.callIdRequest(method: "parseRef", args: ["Genesis 1:1", 44]), .malformed)
+        for malformedRequest in malformedCallIdRequests {
+            XCTAssertEqual(
+                bridge.callIdRequest(method: malformedRequest.method, args: malformedRequest.args),
+                .malformed,
+                "Expected \(malformedRequest.method) to reject malformed args"
+            )
+        }
+
         XCTAssertNil(bridge.callIdRequest(method: "helpDialog", args: [45]))
     }
 
-    func testBridgeCallIdDispatchTreatsKnownMalformedMessagesAsHandled() {
+    func testBridgeCallIdDispatchClassifiesKnownMalformedMessages() {
         let bridge = BibleBridge()
 
-        XCTAssertTrue(bridge.dispatchCallIdRequest(method: "parseRef", args: [44]))
-        XCTAssertFalse(bridge.dispatchCallIdRequest(method: "helpDialog", args: [45]))
+        XCTAssertEqual(
+            bridge.dispatchCallIdRequest(method: "requestMoreToBeginning", args: [41]),
+            .handled
+        )
+
+        for malformedRequest in malformedCallIdRequests {
+            XCTAssertEqual(
+                bridge.dispatchCallIdRequest(method: malformedRequest.method, args: malformedRequest.args),
+                .malformed,
+                "Expected \(malformedRequest.method) to classify malformed args"
+            )
+        }
+
+        XCTAssertEqual(bridge.dispatchCallIdRequest(method: "helpDialog", args: [45]), .notCallIdRequest)
     }
 
     @MainActor
