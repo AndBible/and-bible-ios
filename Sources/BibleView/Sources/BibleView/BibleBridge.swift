@@ -18,6 +18,24 @@ public enum NativeHorizontalSwipeDirection: Sendable {
     case right
 }
 
+enum BibleBridgeCallIdRequest: Equatable {
+    case requestMoreToBeginning(Int)
+    case requestMoreToEnd(Int)
+    case refChooserDialog(Int)
+    case parseRef(callId: Int, text: String)
+}
+
+enum BibleBridgeCallIdRequestParseResult: Equatable {
+    case request(BibleBridgeCallIdRequest)
+    case malformed
+}
+
+enum BibleBridgeCallIdRequestDispatchResult: Equatable {
+    case notCallIdRequest
+    case handled
+    case malformed
+}
+
 /// Protocol for handling bridge events from the Vue.js WebView.
 public protocol BibleBridgeDelegate: AnyObject {
     // MARK: - Navigation & Scroll
@@ -232,6 +250,13 @@ public final class BibleBridge: NSObject, WKScriptMessageHandler {
             onAnyMessage?()
         }
 
+        switch dispatchCallIdRequest(method: method, args: args) {
+        case .handled, .malformed:
+            return
+        case .notCallIdRequest:
+            break
+        }
+
         switch method {
         // --- Logging & state sync from JavaScript to native ---
         case "console":
@@ -280,14 +305,6 @@ public final class BibleBridge: NSObject, WKScriptMessageHandler {
             if let key = args[safe: 0] as? String, let ordinal = args[safe: 1] as? Int {
                 let atChapterTop = args[safe: 2] as? Bool ?? false
                 delegate?.bridge(self, didScrollToOrdinal: ordinal, key: key, atChapterTop: atChapterTop)
-            }
-        case "requestMoreToBeginning":
-            if let callId = args.first as? Int {
-                delegate?.bridge(self, requestMoreToBeginning: callId)
-            }
-        case "requestMoreToEnd":
-            if let callId = args.first as? Int {
-                delegate?.bridge(self, requestMoreToEnd: callId)
             }
 
         // --- Bookmark CRUD and label assignment ---
@@ -467,14 +484,6 @@ public final class BibleBridge: NSObject, WKScriptMessageHandler {
             }
 
         // --- Dialog and async request entry points ---
-        case "refChooserDialog":
-            if let callId = args.first as? Int {
-                delegate?.bridge(self, refChooserDialog: callId)
-            }
-        case "parseRef":
-            if let callId = args[safe: 0] as? Int, let text = args[safe: 1] as? String {
-                delegate?.bridge(self, parseRef: callId, text: text)
-            }
         case "helpDialog":
             if let content = args[safe: 0] as? String {
                 delegate?.bridge(self, helpDialog: content, title: args[safe: 1] as? String)
@@ -494,6 +503,53 @@ public final class BibleBridge: NSObject, WKScriptMessageHandler {
         default:
             logger.debug("Unhandled bridge method: \(method)")
         }
+    }
+
+    // MARK: - CallId Requests
+
+    func callIdRequest(method: String, args: [Any]) -> BibleBridgeCallIdRequestParseResult? {
+        switch method {
+        case "requestMoreToBeginning":
+            guard let callId = args.first as? Int else { return .malformed }
+            return .request(.requestMoreToBeginning(callId))
+        case "requestMoreToEnd":
+            guard let callId = args.first as? Int else { return .malformed }
+            return .request(.requestMoreToEnd(callId))
+        case "refChooserDialog":
+            guard let callId = args.first as? Int else { return .malformed }
+            return .request(.refChooserDialog(callId))
+        case "parseRef":
+            guard let callId = args[safe: 0] as? Int,
+                  let text = args[safe: 1] as? String else { return .malformed }
+            return .request(.parseRef(callId: callId, text: text))
+        default:
+            return nil
+        }
+    }
+
+    @discardableResult
+    func dispatchCallIdRequest(method: String, args: [Any]) -> BibleBridgeCallIdRequestDispatchResult {
+        guard let parseResult = callIdRequest(method: method, args: args) else { return .notCallIdRequest }
+        guard case .request(let request) = parseResult else {
+            let argTypes = args.map { String(describing: type(of: $0)) }.joined(separator: ", ")
+            logger.warning(
+                "Malformed callId bridge message: method=\(method, privacy: .public), argCount=\(args.count), argTypes=\(argTypes, privacy: .public)"
+            )
+            return .malformed
+        }
+
+        switch request {
+        case .requestMoreToBeginning(let callId):
+            delegate?.bridge(self, requestMoreToBeginning: callId)
+        case .requestMoreToEnd(let callId):
+            delegate?.bridge(self, requestMoreToEnd: callId)
+        case .refChooserDialog(let callId):
+            delegate?.bridge(self, refChooserDialog: callId)
+        case .parseRef(let callId, let text):
+            delegate?.bridge(self, parseRef: callId, text: text)
+        }
+
+        return .handled
     }
 
     // MARK: - Send to JavaScript
