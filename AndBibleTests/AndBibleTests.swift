@@ -58,6 +58,67 @@ final class AndBibleTests: XCTestCase {
         ]
     }
 
+    private var malformedBridgeMessages: [(method: String, args: [Any])] {
+        [
+            ("jsLog", ["WARN"]),
+            ("toast", []),
+            ("reportModalState", []),
+            ("reportInputFocus", []),
+            ("setLimitAmbiguousModalSize", []),
+            ("selectionChanged", []),
+            ("setEditing", []),
+            ("saveState", []),
+            ("onKeyDown", []),
+            ("scrolledToOrdinal", ["main"]),
+            ("scrolledToOrdinal", ["main", 1, "true"]),
+            ("addBookmark", ["KJV", 1, 1]),
+            ("addGenericBookmark", ["KJV", "Gen.1.1", 1, 1]),
+            ("removeBookmark", []),
+            ("removeGenericBookmark", []),
+            ("saveBookmarkNote", []),
+            ("saveBookmarkNote", ["bookmark-id", 7]),
+            ("saveGenericBookmarkNote", []),
+            ("saveGenericBookmarkNote", ["bookmark-id", 7]),
+            ("assignLabels", []),
+            ("genericAssignLabels", []),
+            ("toggleBookmarkLabel", ["bookmark-id"]),
+            ("toggleGenericBookmarkLabel", ["bookmark-id"]),
+            ("removeBookmarkLabel", ["bookmark-id"]),
+            ("removeGenericBookmarkLabel", ["bookmark-id"]),
+            ("setAsPrimaryLabel", ["bookmark-id"]),
+            ("setAsPrimaryLabelGeneric", ["bookmark-id"]),
+            ("setBookmarkWholeVerse", ["bookmark-id"]),
+            ("setGenericBookmarkWholeVerse", ["bookmark-id"]),
+            ("setBookmarkCustomIcon", []),
+            ("setBookmarkCustomIcon", ["bookmark-id", 7]),
+            ("setGenericBookmarkCustomIcon", []),
+            ("setGenericBookmarkCustomIcon", ["bookmark-id", 7]),
+            ("shareVerse", ["KJV", 1]),
+            ("copyVerse", ["KJV", 1]),
+            ("shareBookmarkVerse", [["id": "bookmark-id"]]),
+            ("compare", ["KJV", 1]),
+            ("speak", ["KJV", "KJV", 1]),
+            ("speakGeneric", ["KJV", "Gen.1.1", 1]),
+            ("openStudyPad", ["label-id"]),
+            ("openMyNotes", ["KJV"]),
+            ("deleteStudyPadEntry", []),
+            ("createNewStudyPadEntry", ["label-id", "journal"]),
+            ("setStudyPadCursor", ["label-id"]),
+            ("updateOrderNumber", ["label-id"]),
+            ("updateStudyPadTextEntry", []),
+            ("updateStudyPadTextEntryText", ["entry-id"]),
+            ("updateBookmarkToLabel", []),
+            ("updateGenericBookmarkToLabel", []),
+            ("setBookmarkEditAction", ["bookmark-id"]),
+            ("openExternalLink", []),
+            ("openEpubLink", ["module", "key"]),
+            ("toggleCompareDocument", []),
+            ("helpDialog", []),
+            ("helpDialog", ["content", 7]),
+            ("shareHtml", []),
+        ]
+    }
+
     private var temporarySwordModulePaths: [String] = []
 
     override func tearDown() {
@@ -939,6 +1000,25 @@ final class AndBibleTests: XCTestCase {
         }
 
         XCTAssertEqual(bridge.dispatchCallIdRequest(method: "helpDialog", args: [45]), .notCallIdRequest)
+    }
+
+    func testBridgeMessageDispatchClassifiesKnownMalformedMessages() {
+        let bridge = BibleBridge()
+
+        for malformedMessage in malformedBridgeMessages {
+            XCTAssertEqual(
+                bridge.dispatchMessage(method: malformedMessage.method, args: malformedMessage.args),
+                .malformed,
+                "Expected \(malformedMessage.method) to classify malformed args"
+            )
+        }
+
+        XCTAssertEqual(bridge.dispatchMessage(method: "shareBookmarkVerse", args: ["bookmark-id"]), .handled)
+        XCTAssertEqual(bridge.dispatchMessage(method: "saveBookmarkNote", args: ["bookmark-id", NSNull()]), .handled)
+        XCTAssertEqual(bridge.dispatchMessage(method: "helpDialog", args: ["content", NSNull()]), .handled)
+        XCTAssertEqual(bridge.dispatchMessage(method: "scrolledToOrdinal", args: ["main", 1]), .handled)
+        XCTAssertEqual(bridge.dispatchMessage(method: "helpBookmarks", args: []), .handled)
+        XCTAssertEqual(bridge.dispatchMessage(method: "missingMethod", args: []), .unhandled)
     }
 
     @MainActor

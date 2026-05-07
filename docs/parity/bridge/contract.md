@@ -75,6 +75,15 @@ The main parity risk here is casual drift in shared method names, argument
 ordering, response expectations, or assuming an Android-only method is safe to
 call from the iOS-packaged frontend.
 
+Known JS-to-native methods route through a testable dispatcher. Required
+arguments must be present and have the expected type, and wrong-type optional
+arguments are malformed when present. Optional values may still be omitted or
+sent as `null`.
+
+One important positional detail: `shareBookmarkVerse` receives the bookmark ID
+string sent by `bibleview-js/src/composables/android.ts`, then resolves the
+persisted bookmark natively before sharing the saved verse range.
+
 The current bridge gap inventory lives at:
 
 - `docs/parity/bridge/baselines/android-bridge-gap-inventory.json`

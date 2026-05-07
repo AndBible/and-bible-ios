@@ -36,6 +36,88 @@ enum BibleBridgeCallIdRequestDispatchResult: Equatable {
     case malformed
 }
 
+enum BibleBridgeMessageDispatchResult: Equatable {
+    case handled
+    case malformed
+    case unhandled
+}
+
+private enum BibleBridgeOptionalValue<T> {
+    case value(T?)
+    case malformed
+}
+
+private struct BibleBridgeMessageArguments {
+    let method: String
+    let values: [Any]
+
+    func string(_ index: Int) -> String? {
+        value(index, as: String.self, expected: "String")
+    }
+
+    func int(_ index: Int) -> Int? {
+        value(index, as: Int.self, expected: "Int")
+    }
+
+    func bool(_ index: Int) -> Bool? {
+        value(index, as: Bool.self, expected: "Bool")
+    }
+
+    func optionalString(_ index: Int) -> BibleBridgeOptionalValue<String> {
+        optionalValue(index, as: String.self, expected: "String")
+    }
+
+    func optionalBool(_ index: Int) -> BibleBridgeOptionalValue<Bool> {
+        optionalValue(index, as: Bool.self, expected: "Bool")
+    }
+
+    func logMalformed(_ reason: String) {
+        logger.warning(
+            """
+            Malformed bridge message: method=\(method, privacy: .public), \
+            reason=\(reason, privacy: .public), argCount=\(values.count), \
+            argTypes=\(argumentTypes, privacy: .public)
+            """
+        )
+    }
+
+    private func value<T>(_ index: Int, as type: T.Type, expected: String) -> T? {
+        guard let rawValue = values[safe: index] else {
+            logMalformed("missing arg \(index), expected \(expected)")
+            return nil
+        }
+        guard let typedValue = rawValue as? T else {
+            logMalformed("arg \(index) expected \(expected), actual \(Self.typeDescription(rawValue))")
+            return nil
+        }
+        return typedValue
+    }
+
+    private func optionalValue<T>(
+        _ index: Int,
+        as type: T.Type,
+        expected: String
+    ) -> BibleBridgeOptionalValue<T> {
+        guard let rawValue = values[safe: index], !(rawValue is NSNull) else {
+            return .value(nil)
+        }
+        guard let typedValue = rawValue as? T else {
+            logMalformed("arg \(index) expected \(expected) or null, actual \(Self.typeDescription(rawValue))")
+            return .malformed
+        }
+        return .value(typedValue)
+    }
+
+    private var argumentTypes: String {
+        values.map(Self.typeDescription).joined(separator: ", ")
+    }
+
+    private static func typeDescription(_ value: Any) -> String {
+        if value is NSNull { return "null" }
+        return String(describing: type(of: value))
+    }
+}
+
 /// Protocol for handling bridge events from the Vue.js WebView.
 public protocol BibleBridgeDelegate: AnyObject {
     // MARK: - Navigation & Scroll
@@ -92,6 +174,8 @@ public protocol BibleBridgeDelegate: AnyObject {
     // MARK: - Content Actions
     /// Shares the selected verse range using native share UI.
     func bridge(_ bridge: BibleBridge, shareVerse bookInitials: String, startOrdinal: Int, endOrdinal: Int)
+    /// Shares a persisted Bible bookmark identified by the web-client bookmark UUID.
+    func bridge(_ bridge: BibleBridge, shareBookmarkVerse bookmarkId: String)
     /// Copies the selected verse range to the system pasteboard.
     func bridge(_ bridge: BibleBridge, copyVerse bookInitials: String, startOrdinal: Int, endOrdinal: Int)
     /// Opens the compare view for the selected verse range.
@@ -239,6 +323,13 @@ public final class BibleBridge: NSObject, WKScriptMessageHandler {
 
         let args = body["args"] as? [Any] ?? []
 
+        dispatchMessage(method: method, args: args)
+    }
+
+    @discardableResult
+    func dispatchMessage(method: String, args: [Any]) -> BibleBridgeMessageDispatchResult {
+        let arguments = BibleBridgeMessageArguments(method: method, values: args)
+
         // Notify listener for active window tracking, but skip passive/background
         // messages that don't represent user interaction to avoid focus ping-pong.
         switch method {
@@ -251,8 +342,10 @@ public final class BibleBridge: NSObject, WKScriptMessageHandler {
         }
 
         switch dispatchCallIdRequest(method: method, args: args) {
-        case .handled, .malformed:
-            return
+        case .handled:
+            return .handled
+        case .malformed:
+            return .malformed
         case .notCallIdRequest:
             break
         }
@@ -261,247 +354,271 @@ public final class BibleBridge: NSObject, WKScriptMessageHandler {
         // --- Logging & state sync from JavaScript to native ---
         case "console":
             handleConsole(args)
+            return .handled
         case "jsLog":
             // Routed from console.log/error/warn interceptor in BibleWebView.swift
-            if let level = args.first as? String, let msg = args.last as? String {
-                switch level {
-                case "ERROR":
-                    logger.error("[JS] \(msg)")
-                case "WARN":
-                    logger.warning("[JS] \(msg)")
-                default:
-                    logger.info("[JS] \(msg)")
-                }
+            guard let level = arguments.string(0),
+                  let msg = arguments.string(1) else { return .malformed }
+            switch level {
+            case "ERROR":
+                logger.error("[JS] \(msg)")
+            case "WARN":
+                logger.warning("[JS] \(msg)")
+            default:
+                logger.info("[JS] \(msg)")
             }
+            return .handled
         case "toast":
-            handleToast(args)
+            guard let text = arguments.string(0) else { return .malformed }
+            logger.info("Toast: \(text)")
+            delegate?.bridge(self, showToast: text)
+            return .handled
         case "setClientReady":
             delegate?.bridgeDidSetClientReady(self)
+            return .handled
         case "reportModalState":
-            delegate?.bridge(self, reportModalState: args.first as? Bool ?? false)
+            guard let isOpen = arguments.bool(0) else { return .malformed }
+            delegate?.bridge(self, reportModalState: isOpen)
+            return .handled
         case "reportInputFocus":
-            delegate?.bridge(self, reportInputFocus: args.first as? Bool ?? false)
+            guard let focused = arguments.bool(0) else { return .malformed }
+            delegate?.bridge(self, reportInputFocus: focused)
+            return .handled
         case "setLimitAmbiguousModalSize":
-            limitAmbiguousModalSize = args.first as? Bool ?? false
+            guard let shouldLimit = arguments.bool(0) else { return .malformed }
+            limitAmbiguousModalSize = shouldLimit
+            return .handled
         case "selectionCleared":
             delegate?.bridgeSelectionCleared(self)
+            return .handled
         case "selectionChanged":
-            if let text = args.first as? String {
-                delegate?.bridge(self, selectionChanged: text)
-            }
+            guard let text = arguments.string(0) else { return .malformed }
+            delegate?.bridge(self, selectionChanged: text)
+            return .handled
         case "setEditing":
-            delegate?.bridge(self, setEditing: args.first as? Bool ?? false)
+            guard let isEditing = arguments.bool(0) else { return .malformed }
+            delegate?.bridge(self, setEditing: isEditing)
+            return .handled
         case "saveState":
-            if let state = args.first as? String {
-                delegate?.bridge(self, saveState: state)
-            }
+            guard let state = arguments.string(0) else { return .malformed }
+            delegate?.bridge(self, saveState: state)
+            return .handled
         case "onKeyDown":
-            if let key = args.first as? String {
-                delegate?.bridge(self, onKeyDown: key)
-            }
+            guard let key = arguments.string(0) else { return .malformed }
+            delegate?.bridge(self, onKeyDown: key)
+            return .handled
 
         // --- Navigation & scroll position ---
         case "scrolledToOrdinal":
-            if let key = args[safe: 0] as? String, let ordinal = args[safe: 1] as? Int {
-                let atChapterTop = args[safe: 2] as? Bool ?? false
-                delegate?.bridge(self, didScrollToOrdinal: ordinal, key: key, atChapterTop: atChapterTop)
-            }
+            guard let key = arguments.string(0),
+                  let ordinal = arguments.int(1) else { return .malformed }
+            guard case .value(let atChapterTopValue) = arguments.optionalBool(2) else { return .malformed }
+            let atChapterTop = atChapterTopValue ?? false
+            delegate?.bridge(self, didScrollToOrdinal: ordinal, key: key, atChapterTop: atChapterTop)
+            return .handled
 
         // --- Bookmark CRUD and label assignment ---
         case "addBookmark":
-            if let initials = args[safe: 0] as? String,
-               let start = args[safe: 1] as? Int,
-               let end = args[safe: 2] as? Int,
-               let addNote = args[safe: 3] as? Bool {
-                delegate?.bridge(self, addBookmark: initials, startOrdinal: start, endOrdinal: end <= 0 ? start : end, addNote: addNote)
-            }
+            guard let initials = arguments.string(0),
+                  let start = arguments.int(1),
+                  let end = arguments.int(2),
+                  let addNote = arguments.bool(3) else { return .malformed }
+            delegate?.bridge(self, addBookmark: initials, startOrdinal: start, endOrdinal: end <= 0 ? start : end, addNote: addNote)
+            return .handled
         case "addGenericBookmark":
-            if let initials = args[safe: 0] as? String,
-               let osisRef = args[safe: 1] as? String,
-               let start = args[safe: 2] as? Int,
-               let end = args[safe: 3] as? Int,
-               let addNote = args[safe: 4] as? Bool {
-                delegate?.bridge(self, addGenericBookmark: initials, osisRef: osisRef, startOrdinal: start, endOrdinal: end < 0 ? start : end, addNote: addNote)
-            }
+            guard let initials = arguments.string(0),
+                  let osisRef = arguments.string(1),
+                  let start = arguments.int(2),
+                  let end = arguments.int(3),
+                  let addNote = arguments.bool(4) else { return .malformed }
+            delegate?.bridge(self, addGenericBookmark: initials, osisRef: osisRef, startOrdinal: start, endOrdinal: end < 0 ? start : end, addNote: addNote)
+            return .handled
         case "removeBookmark":
-            if let id = args.first as? String {
-                delegate?.bridge(self, removeBookmark: id)
-            }
+            guard let id = arguments.string(0) else { return .malformed }
+            delegate?.bridge(self, removeBookmark: id)
+            return .handled
         case "removeGenericBookmark":
-            if let id = args.first as? String {
-                delegate?.bridge(self, removeGenericBookmark: id)
-            }
+            guard let id = arguments.string(0) else { return .malformed }
+            delegate?.bridge(self, removeGenericBookmark: id)
+            return .handled
         case "saveBookmarkNote":
-            if let id = args[safe: 0] as? String {
-                let note = args[safe: 1] as? String
-                delegate?.bridge(self, saveBookmarkNote: id, note: note)
-            }
+            guard let id = arguments.string(0) else { return .malformed }
+            guard case .value(let note) = arguments.optionalString(1) else { return .malformed }
+            delegate?.bridge(self, saveBookmarkNote: id, note: note)
+            return .handled
         case "saveGenericBookmarkNote":
-            if let id = args[safe: 0] as? String {
-                let note = args[safe: 1] as? String
-                delegate?.bridge(self, saveBookmarkNote: id, note: note)
-            }
+            guard let id = arguments.string(0) else { return .malformed }
+            guard case .value(let note) = arguments.optionalString(1) else { return .malformed }
+            delegate?.bridge(self, saveBookmarkNote: id, note: note)
+            return .handled
         case "assignLabels":
-            if let id = args.first as? String {
-                delegate?.bridge(self, assignLabels: id)
-            }
+            guard let id = arguments.string(0) else { return .malformed }
+            delegate?.bridge(self, assignLabels: id)
+            return .handled
         case "genericAssignLabels":
-            if let id = args.first as? String {
-                delegate?.bridge(self, assignLabels: id)
-            }
+            guard let id = arguments.string(0) else { return .malformed }
+            delegate?.bridge(self, assignLabels: id)
+            return .handled
         case "toggleBookmarkLabel", "toggleGenericBookmarkLabel":
-            if let bmId = args[safe: 0] as? String, let lblId = args[safe: 1] as? String {
-                delegate?.bridge(self, toggleBookmarkLabel: bmId, labelId: lblId)
-            }
+            guard let bmId = arguments.string(0),
+                  let lblId = arguments.string(1) else { return .malformed }
+            delegate?.bridge(self, toggleBookmarkLabel: bmId, labelId: lblId)
+            return .handled
         case "removeBookmarkLabel", "removeGenericBookmarkLabel":
-            if let bmId = args[safe: 0] as? String, let lblId = args[safe: 1] as? String {
-                delegate?.bridge(self, removeBookmarkLabel: bmId, labelId: lblId)
-            }
+            guard let bmId = arguments.string(0),
+                  let lblId = arguments.string(1) else { return .malformed }
+            delegate?.bridge(self, removeBookmarkLabel: bmId, labelId: lblId)
+            return .handled
         case "setAsPrimaryLabel", "setAsPrimaryLabelGeneric":
-            if let bmId = args[safe: 0] as? String, let lblId = args[safe: 1] as? String {
-                delegate?.bridge(self, setPrimaryLabel: bmId, labelId: lblId)
-            }
+            guard let bmId = arguments.string(0),
+                  let lblId = arguments.string(1) else { return .malformed }
+            delegate?.bridge(self, setPrimaryLabel: bmId, labelId: lblId)
+            return .handled
         case "setBookmarkWholeVerse", "setGenericBookmarkWholeVerse":
-            if let id = args[safe: 0] as? String, let val = args[safe: 1] as? Bool {
-                delegate?.bridge(self, setBookmarkWholeVerse: id, value: val)
-            }
+            guard let id = arguments.string(0),
+                  let val = arguments.bool(1) else { return .malformed }
+            delegate?.bridge(self, setBookmarkWholeVerse: id, value: val)
+            return .handled
         case "setBookmarkCustomIcon", "setGenericBookmarkCustomIcon":
-            if let id = args[safe: 0] as? String {
-                delegate?.bridge(self, setBookmarkCustomIcon: id, value: args[safe: 1] as? String)
-            }
+            guard let id = arguments.string(0) else { return .malformed }
+            guard case .value(let value) = arguments.optionalString(1) else { return .malformed }
+            delegate?.bridge(self, setBookmarkCustomIcon: id, value: value)
+            return .handled
 
         // --- Content actions (share/copy/compare/speak) ---
         // Note: JavaScript sends endOrdinal=-1 to mean "single verse" (same as start).
         // Normalize here so delegate methods don't need to handle -1.
         case "shareVerse":
-            if let initials = args[safe: 0] as? String,
-               let start = args[safe: 1] as? Int,
-               let end = args[safe: 2] as? Int {
-                delegate?.bridge(self, shareVerse: initials, startOrdinal: start, endOrdinal: end < 0 ? start : end)
-            }
+            guard let initials = arguments.string(0),
+                  let start = arguments.int(1),
+                  let end = arguments.int(2) else { return .malformed }
+            delegate?.bridge(self, shareVerse: initials, startOrdinal: start, endOrdinal: end < 0 ? start : end)
+            return .handled
         case "copyVerse":
-            if let initials = args[safe: 0] as? String,
-               let start = args[safe: 1] as? Int,
-               let end = args[safe: 2] as? Int {
-                delegate?.bridge(self, copyVerse: initials, startOrdinal: start, endOrdinal: end < 0 ? start : end)
-            }
+            guard let initials = arguments.string(0),
+                  let start = arguments.int(1),
+                  let end = arguments.int(2) else { return .malformed }
+            delegate?.bridge(self, copyVerse: initials, startOrdinal: start, endOrdinal: end < 0 ? start : end)
+            return .handled
         case "shareBookmarkVerse":
-            if let bookmark = args.first as? [String: Any],
-               let ordinalRange = bookmark["ordinalRange"] as? [Int],
-               ordinalRange.count >= 2 {
-                let initials = bookmark["bookInitials"] as? String ?? ""
-                delegate?.bridge(self, shareVerse: initials, startOrdinal: ordinalRange[0], endOrdinal: ordinalRange[1])
-            }
+            guard let bookmarkId = arguments.string(0) else { return .malformed }
+            delegate?.bridge(self, shareBookmarkVerse: bookmarkId)
+            return .handled
         case "compare":
-            if let initials = args[safe: 0] as? String,
-               let start = args[safe: 1] as? Int,
-               let end = args[safe: 2] as? Int {
-                delegate?.bridge(self, compareVerses: initials, startOrdinal: start, endOrdinal: end < 0 ? start : end)
-            }
+            guard let initials = arguments.string(0),
+                  let start = arguments.int(1),
+                  let end = arguments.int(2) else { return .malformed }
+            delegate?.bridge(self, compareVerses: initials, startOrdinal: start, endOrdinal: end < 0 ? start : end)
+            return .handled
         case "speak", "speakGeneric":
-            if let initials = args[safe: 0] as? String,
-               let v11n = args[safe: 1] as? String,
-               let start = args[safe: 2] as? Int,
-               let end = args[safe: 3] as? Int {
-                delegate?.bridge(self, speak: initials, v11n: v11n, startOrdinal: start, endOrdinal: end < 0 ? start : end)
-            }
+            guard let initials = arguments.string(0),
+                  let v11n = arguments.string(1),
+                  let start = arguments.int(2),
+                  let end = arguments.int(3) else { return .malformed }
+            delegate?.bridge(self, speak: initials, v11n: v11n, startOrdinal: start, endOrdinal: end < 0 ? start : end)
+            return .handled
         case "memorize":
-            break // Memorize mode — future feature, not yet implemented on iOS
+            return .handled // Memorize mode — future feature, not yet implemented on iOS
         case "addParagraphBreakBookmark", "addGenericParagraphBreakBookmark":
-            break // Paragraph break bookmarks — Android-specific, not applicable on iOS
+            return .handled // Paragraph break bookmarks — Android-specific, not applicable on iOS
 
         // --- StudyPad editing and ordering ---
         case "openStudyPad":
-            if let labelId = args[safe: 0] as? String, let bmId = args[safe: 1] as? String {
-                delegate?.bridge(self, openStudyPad: labelId, bookmarkId: bmId)
-            }
+            guard let labelId = arguments.string(0),
+                  let bmId = arguments.string(1) else { return .malformed }
+            delegate?.bridge(self, openStudyPad: labelId, bookmarkId: bmId)
+            return .handled
         case "openMyNotes":
-            if let v11n = args[safe: 0] as? String, let ordinal = args[safe: 1] as? Int {
-                delegate?.bridge(self, openMyNotes: v11n, ordinal: ordinal)
-            }
+            guard let v11n = arguments.string(0),
+                  let ordinal = arguments.int(1) else { return .malformed }
+            delegate?.bridge(self, openMyNotes: v11n, ordinal: ordinal)
+            return .handled
         case "deleteStudyPadEntry":
-            if let id = args.first as? String {
-                delegate?.bridge(self, deleteStudyPadEntry: id)
-            }
+            guard let id = arguments.string(0) else { return .malformed }
+            delegate?.bridge(self, deleteStudyPadEntry: id)
+            return .handled
         case "createNewStudyPadEntry":
-            if let labelId = args[safe: 0] as? String,
-               let entryType = args[safe: 1] as? String,
-               let afterId = args[safe: 2] as? String {
-                delegate?.bridge(self, createNewStudyPadEntry: labelId, entryType: entryType, afterEntryId: afterId)
-            }
+            guard let labelId = arguments.string(0),
+                  let entryType = arguments.string(1),
+                  let afterId = arguments.string(2) else { return .malformed }
+            delegate?.bridge(self, createNewStudyPadEntry: labelId, entryType: entryType, afterEntryId: afterId)
+            return .handled
         case "setStudyPadCursor":
-            if let labelId = args[safe: 0] as? String,
-               let orderNumber = args[safe: 1] as? Int {
-                delegate?.bridge(self, setStudyPadCursor: labelId, orderNumber: orderNumber)
-            }
+            guard let labelId = arguments.string(0),
+                  let orderNumber = arguments.int(1) else { return .malformed }
+            delegate?.bridge(self, setStudyPadCursor: labelId, orderNumber: orderNumber)
+            return .handled
         case "updateOrderNumber":
-            if let labelId = args[safe: 0] as? String,
-               let data = args[safe: 1] as? String {
-                delegate?.bridge(self, updateOrderNumber: labelId, data: data)
-            }
+            guard let labelId = arguments.string(0),
+                  let data = arguments.string(1) else { return .malformed }
+            delegate?.bridge(self, updateOrderNumber: labelId, data: data)
+            return .handled
         case "updateStudyPadTextEntry":
-            if let data = args.first as? String {
-                delegate?.bridge(self, updateStudyPadTextEntry: data)
-            }
+            guard let data = arguments.string(0) else { return .malformed }
+            delegate?.bridge(self, updateStudyPadTextEntry: data)
+            return .handled
         case "updateStudyPadTextEntryText":
-            if let id = args[safe: 0] as? String,
-               let text = args[safe: 1] as? String {
-                delegate?.bridge(self, updateStudyPadTextEntryText: id, text: text)
-            }
+            guard let id = arguments.string(0),
+                  let text = arguments.string(1) else { return .malformed }
+            delegate?.bridge(self, updateStudyPadTextEntryText: id, text: text)
+            return .handled
         case "updateBookmarkToLabel":
-            if let data = args.first as? String {
-                delegate?.bridge(self, updateBookmarkToLabel: data)
-            }
+            guard let data = arguments.string(0) else { return .malformed }
+            delegate?.bridge(self, updateBookmarkToLabel: data)
+            return .handled
         case "updateGenericBookmarkToLabel":
-            if let data = args.first as? String {
-                delegate?.bridge(self, updateGenericBookmarkToLabel: data)
-            }
+            guard let data = arguments.string(0) else { return .malformed }
+            delegate?.bridge(self, updateGenericBookmarkToLabel: data)
+            return .handled
         case "setBookmarkEditAction":
-            if let bmId = args[safe: 0] as? String,
-               let value = args[safe: 1] as? String {
-                delegate?.bridge(self, setBookmarkEditAction: bmId, value: value)
-            }
+            guard let bmId = arguments.string(0),
+                  let value = arguments.string(1) else { return .malformed }
+            delegate?.bridge(self, setBookmarkEditAction: bmId, value: value)
+            return .handled
 
         // --- Navigation and link handling ---
         case "openExternalLink":
-            if let link = args.first as? String {
-                logger.info("openExternalLink received from JS: '\(link)', delegate=\(self.delegate != nil)")
-                delegate?.bridge(self, openExternalLink: link)
-            } else {
-                logger.error("openExternalLink: args missing or not a string, args=\(String(describing: args))")
-            }
+            guard let link = arguments.string(0) else { return .malformed }
+            logger.info("openExternalLink received from JS: '\(link)', delegate=\(self.delegate != nil)")
+            delegate?.bridge(self, openExternalLink: link)
+            return .handled
         case "openEpubLink":
-            if let bookInitials = args[safe: 0] as? String,
-               let toKey = args[safe: 1] as? String,
-               let toId = args[safe: 2] as? String {
-                delegate?.bridge(self, openEpubLink: bookInitials, toKey: toKey, toId: toId)
-            }
+            guard let bookInitials = arguments.string(0),
+                  let toKey = arguments.string(1),
+                  let toId = arguments.string(2) else { return .malformed }
+            delegate?.bridge(self, openEpubLink: bookInitials, toKey: toKey, toId: toId)
+            return .handled
         case "openDownloads":
             delegate?.bridgeDidRequestOpenDownloads(self)
+            return .handled
         case "toggleCompareDocument":
-            if let docId = args.first as? String {
-                delegate?.bridge(self, toggleCompareDocument: docId)
-            }
+            guard let docId = arguments.string(0) else { return .malformed }
+            delegate?.bridge(self, toggleCompareDocument: docId)
+            return .handled
 
         // --- Dialog and async request entry points ---
         case "helpDialog":
-            if let content = args[safe: 0] as? String {
-                delegate?.bridge(self, helpDialog: content, title: args[safe: 1] as? String)
-            }
+            guard let content = arguments.string(0) else { return .malformed }
+            guard case .value(let title) = arguments.optionalString(1) else { return .malformed }
+            delegate?.bridge(self, helpDialog: content, title: title)
+            return .handled
         case "helpBookmarks":
             delegate?.bridge(self, helpDialog: "Bookmarks Help", title: "Bookmarks")
+            return .handled
         case "shareHtml":
-            if let html = args.first as? String {
-                delegate?.bridge(self, shareHtml: html)
-            }
+            guard let html = arguments.string(0) else { return .malformed }
+            delegate?.bridge(self, shareHtml: html)
+            return .handled
         case "getActiveLanguages":
-            break // Handled synchronously via proxy shim (see BibleWebView.swift)
+            return .handled // Handled synchronously via proxy shim (see BibleWebView.swift)
 
         case "toggleFullScreen":
             delegate?.bridgeDidRequestToggleFullScreen(self)
+            return .handled
 
         default:
             logger.debug("Unhandled bridge method: \(method)")
+            return .unhandled
         }
     }
 
@@ -690,11 +807,6 @@ public final class BibleBridge: NSObject, WKScriptMessageHandler {
         logger.debug("[\(loggerName)] \(message)")
     }
 
-    private func handleToast(_ args: [Any]) {
-        guard let text = args.first as? String else { return }
-        logger.info("Toast: \(text)")
-        delegate?.bridge(self, showToast: text)
-    }
 }
 
 // MARK: - Array Safe Subscript

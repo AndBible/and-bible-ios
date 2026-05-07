@@ -10,6 +10,8 @@ covers:
 - StudyPad document handoff from a real bookmark workflow
 - the native persistence paths that support those embedded note surfaces
 - representative async `callId` request/response bridge flows
+- known malformed bridge message classification for positional JS-to-native
+  dispatch
 - representative Swift bridge payload key shapes consumed by `bibleview-js`
 - local Android bridge surface comparison
 - machine-readable gap inventory for Android-only and iOS no-op bridge methods
@@ -48,6 +50,8 @@ Related domain references:
 - `AndBibleTests/testBookmarkServiceClearingBibleBookmarkNoteRemovesBookmarkFromMyNotesQuery`
 - `AndBibleTests/testBookmarkServiceUpdatingBibleBookmarkNoteReusesPersistedNoteRow`
 - `AndBibleTests/testBridgeCallIdRequestMappingMatchesWebClientContract`
+- `AndBibleTests/testBridgeCallIdDispatchClassifiesKnownMalformedMessages`
+- `AndBibleTests/testBridgeMessageDispatchClassifiesKnownMalformedMessages`
 - `AndBibleTests/testBridgeSendResponseEmitsCallIdResponseJavaScript`
 - `AndBibleTests/testBridgePayloadKeysMatchWebClientContracts`
 - `AndBibleTests/testRequestMoreToBeginningSendsDocumentResponseWithOriginalCallId`
@@ -86,6 +90,14 @@ Related domain references:
 - native `refChooserDialog` and `parseRef` controller handlers send their responses through the
   original call ID
 
+### Message dispatch validation
+
+- known bridge methods with missing required arguments classify as malformed
+- wrong-type required arguments and wrong-type present optional arguments classify as malformed
+- `shareBookmarkVerse` follows the web-client contract and accepts a bookmark ID string rather
+  than an invented bookmark dictionary payload
+- intentionally supported no-argument branches such as `helpBookmarks` remain handled
+
 ### Payload shapes
 
 - representative `OsisFragment`, label/style, and selection-query payloads preserve the key names
@@ -97,23 +109,24 @@ Focused bridge-adjacent validation passed on 2026-03-16, but the original UI res
 because four UI tests from that report no longer exist in `AndBibleUITests`. The current rerunnable
 named subset in this report is:
 
-- Unit: `9` tests
+- Unit: `11` tests
 - UI: `1` test
 
-This doc refresh reran the new focused callId/payload subset locally, but did not rerun the full
-bridge-adjacent simulator suite. Do not treat the old UI runtime/count as current evidence. The
-checked-in named subset gives the bridge domain rerunnable evidence for:
+This doc refresh reran the focused bridge dispatcher/callId/payload subset locally, but did not
+rerun the full bridge-adjacent simulator suite. Do not treat the old UI runtime/count as current
+evidence. The checked-in named subset gives the bridge domain rerunnable evidence for:
 
 - service-layer note persistence
 - StudyPad document handoff
 - bookmark-note persistence feeding those embedded surfaces
 - async `callId` request/response transport for representative content expansion and native
   reference workflows
+- malformed known-message classification for positional JS-to-native dispatch
 - representative bridge payload key shapes for OSIS fragments, labels/styles, and selection query
 
 So the bridge story is not "everything is shaky." It is more specific than
 that: the StudyPad handoff and note persistence support are present, while the visible My Notes
-lifecycle and rawer transport edges still need more direct protection.
+lifecycle and full valid delegate-call coverage still need more direct protection.
 
 ## What Is Still Not Well Locked Yet
 
@@ -128,6 +141,7 @@ The pieces that still need tighter protection are:
 - raw `window.android.*` compatibility-shim behavior on a per-method basis
 - Strong's sheet bridge coverage, especially the dedicated `contentType: "strongs"` route
 - fullscreen, compare, help, and full reference-dialog UI workflows
+- positive delegate-callback assertions across the full JS-to-native message surface
 - generated or full-surface payload-shape parity checks between `BridgeTypes.swift` and
   `bibleview-js/src/types/` beyond the current representative key-shape tests
 

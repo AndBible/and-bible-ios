@@ -2585,6 +2585,24 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     }
 
     /**
+     Shares a Bible bookmark identified by the web client's `shareBookmarkVerse(bookmark.id)` call.
+     */
+    public func bridge(_ bridge: BibleBridge, shareBookmarkVerse bookmarkId: String) {
+        guard let service = bookmarkService,
+              let uuid = UUID(uuidString: bookmarkId),
+              let bookmark = service.bibleBookmark(id: uuid) else {
+            logger.warning("shareBookmarkVerse: bookmark not found for id=\(bookmarkId)")
+            return
+        }
+        self.bridge(
+            bridge,
+            shareVerse: activeModuleName,
+            startOrdinal: bookmark.ordinalStart,
+            endOrdinal: bookmark.ordinalEnd
+        )
+    }
+
+    /**
      Copies a verse selection and its reference to the platform pasteboard.
      */
     public func bridge(_ bridge: BibleBridge, copyVerse bookInitials: String, startOrdinal: Int, endOrdinal: Int) {
