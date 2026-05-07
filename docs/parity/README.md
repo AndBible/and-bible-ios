@@ -23,8 +23,10 @@ Current maturity:
   - verification matrix
   - regression report
   - guardrails
-- `settings/` remains the most operationally mature domain because it also has
+- `settings/` remains the most operationally mature domain because it has
   machine-readable baselines plus a dedicated localization guardrail script
+- `bridge/` now has a dedicated inventory checker for the bundled iOS bridge
+  surface and optional local Android-backed drift detection
 - the remaining domains currently rely on focused unit/UI coverage and
   documentation guardrails, with room to add more machine-readable protection
   where it is worth the maintenance cost
