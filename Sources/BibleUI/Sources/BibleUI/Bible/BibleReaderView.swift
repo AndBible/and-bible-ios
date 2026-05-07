@@ -439,6 +439,21 @@ public struct BibleReaderView: View {
         return "\(windowToken);\(contentToken);strongsMode=\(strongsMode);\(drawerToken);\(overflowToken);\(sheetToken);\(modalToken);\(searchToken)"
     }
 
+    /// Compact dedicated state export used by UI tests instead of snapshotting the full reader.
+    @ViewBuilder
+    private var readerRenderedContentStateExport: some View {
+        if UITestRuntimeConfiguration.enablesDetailedAccessibilityExports {
+            Text(readerRenderedContentStateValue)
+                .font(.system(size: 1))
+                .frame(width: 1, height: 1)
+                .opacity(0.01)
+                .allowsHitTesting(false)
+                .accessibilityIdentifier("readerRenderedContentState")
+                .accessibilityLabel("")
+                .accessibilityValue(readerRenderedContentStateValue)
+        }
+    }
+
     /// Converts SWORD Roman-numeral book prefixes into Android-style Arabic numerals for toolbar display.
     private func toolbarBookName(for rawName: String) -> String {
         let replacements = [
@@ -576,12 +591,7 @@ public struct BibleReaderView: View {
             }
         }
         .overlay(alignment: .topLeading) {
-            Rectangle()
-                .fill(Color.clear)
-                .frame(width: 1, height: 1)
-                .accessibilityElement(children: .ignore)
-                .accessibilityIdentifier("readerRenderedContentState")
-                .accessibilityValue(readerRenderedContentStateValue)
+            readerRenderedContentStateExport
         }
         .overlay {
             if showReaderNavigationDrawer {

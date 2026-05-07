@@ -4642,7 +4642,6 @@ final class AndBibleUITests: XCTestCase {
             ]
         case "readerRenderedContentState":
             return [
-                app.otherElements[identifier].firstMatch,
                 app.staticTexts[identifier].firstMatch,
             ]
         case "readerOverflowMenu":
