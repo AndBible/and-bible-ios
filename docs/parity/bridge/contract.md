@@ -84,6 +84,12 @@ One important positional detail: `shareBookmarkVerse` receives the bookmark ID
 string sent by `bibleview-js/src/composables/android.ts`, then resolves the
 persisted bookmark natively before sharing the saved verse range.
 
+Paragraph-break bridge actions are part of the supported iOS subset:
+`addParagraphBreakBookmark` and `addGenericParagraphBreakBookmark` create native
+bookmarks with the reserved paragraph-break label. `memorize` remains exposed
+and validates its positional arguments, but the native memorization workflow is
+deferred to the dedicated memorization parity issue.
+
 The current bridge gap inventory lives at:
 
 - `docs/parity/bridge/baselines/android-bridge-gap-inventory.json`

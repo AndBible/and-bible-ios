@@ -107,7 +107,10 @@ Notes:
 - The bridge normalizes `endOrdinal < 0` to `startOrdinal` for single-verse operations.
 - `shareBookmarkVerse` accepts the bookmark ID string sent by the web client, then the native
   controller resolves the persisted bookmark before sharing the saved verse range.
-- `memorize` and paragraph-break bookmark actions are explicitly no-ops on iOS right now.
+- `addParagraphBreakBookmark` and `addGenericParagraphBreakBookmark` create native bookmarks
+  with the reserved paragraph-break label so the web renderer inserts the break marker.
+- `memorize` validates its Android-style arguments but remains a deferred no-op on iOS until
+  native memorization/progress parity is implemented.
 
 ### StudyPad
 

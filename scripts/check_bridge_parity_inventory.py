@@ -22,7 +22,13 @@ DEFAULT_INVENTORY = REPO_ROOT / "docs/parity/bridge/baselines/android-bridge-gap
 ANDROID_ROOT_ENV = "ANDBIBLE_ANDROID_ROOT"
 RECOMMENDED_ANDROID_ROOT = "../and-bible"
 ALLOWED_MISSING_STATUSES = {"missing_needs_triage"}
-ALLOWED_NO_OP_STATUSES = {"ios_no_op_needs_decision"}
+NO_OP_NEEDS_DECISION_STATUS = "ios_no_op_needs_decision"
+ALLOWED_NO_OP_STATUSES = {
+    NO_OP_NEEDS_DECISION_STATUS,
+    "implemented",
+    "deferred_with_issue",
+    "intentional_ios_divergence",
+}
 REQUIRED_REFERENCE_KEYS = {
     "androidInterfaceRelativePath": str,
     "androidMethodCount": int,
@@ -70,6 +76,15 @@ def format_method_names(methods: set[str] | list[str]) -> str:
     """Return a stable, compact representation of method names."""
     names = sorted(methods)
     return "none" if not names else ", ".join(names)
+
+
+def methods_with_status(entries: list[Any], status: str) -> set[str]:
+    """Return method names from entries that carry the requested status."""
+    return {
+        entry["method"]
+        for entry in entries
+        if isinstance(entry, dict) and entry.get("status") == status
+    }
 
 
 def resolve_android_root(android_root_arg: Path | None) -> Path | None:
@@ -204,13 +219,22 @@ def validate_inventory(
     if bad_no_op_statuses:
         raise InventoryError(f"unexpected no-op statuses: {bad_no_op_statuses}")
 
+    no_ops_needing_decision = methods_with_status(
+        no_op_entries,
+        NO_OP_NEEDS_DECISION_STATUS,
+    )
+
     messages = [
         "Bridge parity alignment summary",
         f"- inventory: {display_path(inventory_path)}",
         f"- iOS interface: {display_path(ios_interface_path)} ({len(ios_methods)} methods)",
         (
-            "- iOS no-op methods needing decision: "
+            "- iOS no-op method dispositions: "
             f"{len(no_op_methods)} ({format_method_names(no_op_methods)})"
+        ),
+        (
+            "- iOS no-op methods needing decision: "
+            f"{len(no_ops_needing_decision)} ({format_method_names(no_ops_needing_decision)})"
         ),
     ]
 

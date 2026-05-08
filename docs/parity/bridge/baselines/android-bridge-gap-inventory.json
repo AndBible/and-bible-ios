@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "updated": "2026-04-28",
-  "purpose": "Track Android bridge surface that is not true iOS parity yet.",
+  "updated": "2026-05-07",
+  "purpose": "Track Android bridge surface that is not true iOS parity yet, plus resolved dispositions for formerly silent iOS no-ops.",
   "references": {
     "androidInterfaceRelativePath": "app/bibleview-js/src/composables/android.ts",
     "androidMethodCount": 88,
@@ -10,7 +10,10 @@
   },
   "statusLegend": {
     "missing_needs_triage": "Android exposes the method and iOS does not. Treat as a parity gap until implemented or explicitly recorded as an iOS divergence.",
-    "ios_no_op_needs_decision": "iOS exposes the method only as a stable no-op. Treat as a parity gap until implemented or explicitly recorded as an iOS divergence."
+    "ios_no_op_needs_decision": "iOS exposes the method only as a stable no-op. Treat as a parity gap until implemented or explicitly recorded as an iOS divergence.",
+    "implemented": "The former no-op now has native iOS behavior while preserving the shared bridge method name.",
+    "deferred_with_issue": "The method remains a validated iOS no-op because the native feature scope is deferred to the linked issue.",
+    "intentional_ios_divergence": "The method remains a validated iOS no-op because iOS has an explicit product or platform divergence."
   },
   "missingAndroidMethods": [
     {
@@ -201,22 +204,22 @@
       "method": "addGenericParagraphBreakBookmark",
       "iosSignature": "(bookInitials: string, osisRef: string, startOrdinal: number, endOrdinal: number) => void",
       "domain": "bookmarks",
-      "status": "ios_no_op_needs_decision",
-      "nextStep": "Implement paragraph-break bookmark behavior or record an explicit iOS divergence."
+      "status": "implemented",
+      "nextStep": "Implemented by creating a generic bookmark with the reserved paragraph-break label."
     },
     {
       "method": "addParagraphBreakBookmark",
       "iosSignature": "(bookInitials: string, startOrdinal: number, endOrdinal: number) => void",
       "domain": "bookmarks",
-      "status": "ios_no_op_needs_decision",
-      "nextStep": "Implement paragraph-break bookmark behavior or record an explicit iOS divergence."
+      "status": "implemented",
+      "nextStep": "Implemented by creating a Bible bookmark with the reserved paragraph-break label."
     },
     {
       "method": "memorize",
       "iosSignature": "(bookInitials: string, verseOrdinal: number, endOrdinal: number) => void",
       "domain": "memorization",
-      "status": "ios_no_op_needs_decision",
-      "nextStep": "Implement memorization workflow entry or record an explicit iOS divergence."
+      "status": "deferred_with_issue",
+      "nextStep": "Deferred to issue #50 because iOS does not yet have the native memorization/progress model needed for Android parity."
     }
   ]
 }

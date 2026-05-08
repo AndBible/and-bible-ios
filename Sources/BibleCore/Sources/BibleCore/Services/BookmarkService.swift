@@ -47,6 +47,30 @@ public final class BookmarkService {
         return bookmark
     }
 
+    /// Create a Bible bookmark that renders as a paragraph break in the web reader.
+    @discardableResult
+    public func addParagraphBreakBibleBookmark(
+        bookInitials: String,
+        startOrdinal: Int,
+        endOrdinal: Int,
+        v11n: String = "KJVA",
+        book: String? = nil
+    ) -> BibleBookmark {
+        ensureSystemLabels()
+        let bookmark = BibleBookmark(
+            kjvOrdinalStart: startOrdinal,
+            kjvOrdinalEnd: endOrdinal,
+            ordinalStart: startOrdinal,
+            ordinalEnd: endOrdinal,
+            v11n: v11n,
+            wholeVerse: false
+        )
+        bookmark.book = book
+        store.insert(bookmark)
+        attachParagraphBreakLabel(to: bookmark)
+        return bookmark
+    }
+
     /// Save or update a bookmark note (Bible or generic).
     public func saveBibleBookmarkNote(bookmarkId: UUID, note: String?) {
         // Try Bible bookmark first
@@ -135,6 +159,27 @@ public final class BookmarkService {
             wholeVerse: wholeVerse
         )
         store.insert(bookmark)
+        return bookmark
+    }
+
+    /// Create a generic bookmark that renders as a paragraph break in the web reader.
+    @discardableResult
+    public func addParagraphBreakGenericBookmark(
+        bookInitials: String,
+        key: String,
+        startOrdinal: Int,
+        endOrdinal: Int
+    ) -> GenericBookmark {
+        ensureSystemLabels()
+        let bookmark = GenericBookmark(
+            key: key,
+            bookInitials: bookInitials,
+            ordinalStart: startOrdinal,
+            ordinalEnd: endOrdinal,
+            wholeVerse: false
+        )
+        store.insert(bookmark)
+        attachParagraphBreakLabel(to: bookmark)
         return bookmark
     }
 
@@ -260,6 +305,24 @@ public final class BookmarkService {
                 store.insert(label)
             }
         }
+    }
+
+    private func attachParagraphBreakLabel(to bookmark: BibleBookmark) {
+        guard let label = store.label(id: Label.paragraphBreakLabelId) else { return }
+        bookmark.primaryLabelId = label.id
+        let link = BibleBookmarkToLabel()
+        link.bookmark = bookmark
+        link.label = label
+        store.insert(link)
+    }
+
+    private func attachParagraphBreakLabel(to bookmark: GenericBookmark) {
+        guard let label = store.label(id: Label.paragraphBreakLabelId) else { return }
+        bookmark.primaryLabelId = label.id
+        let link = GenericBookmarkToLabel()
+        link.bookmark = bookmark
+        link.label = label
+        store.insert(link)
     }
 
     /**

@@ -1957,6 +1957,36 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         }
     }
 
+    /// Creates a Bible paragraph-break bookmark requested from the web client.
+    public func bridge(_ bridge: BibleBridge, addParagraphBreakBookmark bookInitials: String, startOrdinal: Int, endOrdinal: Int) {
+        logger.info("Add paragraph break bookmark: \(bookInitials)")
+        guard let service = bookmarkService else { return }
+        let bookmark = service.addParagraphBreakBibleBookmark(
+            bookInitials: bookInitials,
+            startOrdinal: startOrdinal,
+            endOrdinal: endOrdinal,
+            book: currentBook
+        )
+        sendLabelsToVueJS()
+        let json = buildBookmarkJSON(bookmark)
+        bridge.emit(event: "add_or_update_bookmarks", data: "[\(json)]")
+    }
+
+    /// Creates a generic paragraph-break bookmark requested from the web client.
+    public func bridge(_ bridge: BibleBridge, addGenericParagraphBreakBookmark bookInitials: String, osisRef: String, startOrdinal: Int, endOrdinal: Int) {
+        logger.info("Add generic paragraph break bookmark: \(bookInitials) ref=\(osisRef)")
+        guard let service = bookmarkService else { return }
+        let bookmark = service.addParagraphBreakGenericBookmark(
+            bookInitials: bookInitials,
+            key: osisRef,
+            startOrdinal: startOrdinal,
+            endOrdinal: endOrdinal
+        )
+        sendLabelsToVueJS()
+        let json = buildGenericBookmarkJSONForStudyPad(bookmark)
+        bridge.emit(event: "add_or_update_bookmarks", data: "[\(json)]")
+    }
+
     /**
      Deletes a Bible bookmark requested from the web client.
 
@@ -4604,9 +4634,12 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         let unlabeledJSON = """
         {"id":"\(Self.unlabeledLabelId)","name":"__UNLABELED__","isRealLabel":false,"style":{"color":\(BibleCore.Label.defaultColor),"isSpeak":false,"isParagraphBreak":false,"underline":false,"underlineWholeVerse":false,"markerStyle":false,"markerStyleWholeVerse":false,"hideStyle":false,"hideStyleWholeVerse":false,"customIcon":null}}
         """
+        let paragraphBreakJSON = """
+        {"id":"\(BibleCore.Label.paragraphBreakLabelId.uuidString)","name":"\(BibleCore.Label.paragraphBreakLabelName)","isRealLabel":false,"style":{"color":\(BibleCore.Label.defaultColor),"isSpeak":false,"isParagraphBreak":true,"underline":false,"underlineWholeVerse":false,"markerStyle":false,"markerStyleWholeVerse":false,"hideStyle":false,"hideStyleWholeVerse":false,"customIcon":null}}
+        """
 
         // Build user labels JSON
-        var allLabelsJSON = [unlabeledJSON]
+        var allLabelsJSON = [unlabeledJSON, paragraphBreakJSON]
         if let service = bookmarkService {
             for label in service.allLabels() {
                 guard let labelID = BookmarkLabelSerializationSupport.liveLabelIDString(for: label) else {
@@ -4812,7 +4845,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             .replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")
         return """
-        {"id":"\(labelID)","name":"\(escapedName)","isRealLabel":\(label.isRealLabel),"style":{"color":\(label.color),"isSpeak":false,"isParagraphBreak":false,"underline":\(label.underlineStyle),"underlineWholeVerse":\(label.underlineStyleWholeVerse),"markerStyle":\(label.markerStyle),"markerStyleWholeVerse":\(label.markerStyleWholeVerse),"hideStyle":\(label.hideStyle),"hideStyleWholeVerse":\(label.hideStyleWholeVerse),"customIcon":\(customIcon)}}
+        {"id":"\(labelID)","name":"\(escapedName)","isRealLabel":\(label.isRealLabel),"style":{"color":\(label.color),"isSpeak":\(label.name == BibleCore.Label.speakLabelName),"isParagraphBreak":\(label.name == BibleCore.Label.paragraphBreakLabelName),"underline":\(label.underlineStyle),"underlineWholeVerse":\(label.underlineStyleWholeVerse),"markerStyle":\(label.markerStyle),"markerStyleWholeVerse":\(label.markerStyleWholeVerse),"hideStyle":\(label.hideStyle),"hideStyleWholeVerse":\(label.hideStyleWholeVerse),"customIcon":\(customIcon)}}
         """
     }
 
@@ -5203,7 +5236,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
         let bookmarkObjects = bookmarks.compactMap { jsonObject(from: buildBookmarkJSON($0)) }
 
-        var doc: [String: Any] = [
+        let doc: [String: Any] = [
             "id": "doc-1",
             "type": "bible",
             "osisFragment": osisFragmentObject(xml: xml, ordinalRange: [ordinalStart, ordinalEnd], keySuffix: key),

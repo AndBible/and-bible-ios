@@ -152,6 +152,10 @@ public protocol BibleBridgeDelegate: AnyObject {
     func bridge(_ bridge: BibleBridge, addBookmark bookInitials: String, startOrdinal: Int, endOrdinal: Int, addNote: Bool)
     /// Creates or edits a bookmark for non-Bible content such as dictionaries or general books.
     func bridge(_ bridge: BibleBridge, addGenericBookmark bookInitials: String, osisRef: String, startOrdinal: Int, endOrdinal: Int, addNote: Bool)
+    /// Creates a Bible paragraph-break bookmark using the shared Android-style bridge surface.
+    func bridge(_ bridge: BibleBridge, addParagraphBreakBookmark bookInitials: String, startOrdinal: Int, endOrdinal: Int)
+    /// Creates a non-Bible paragraph-break bookmark using the shared Android-style bridge surface.
+    func bridge(_ bridge: BibleBridge, addGenericParagraphBreakBookmark bookInitials: String, osisRef: String, startOrdinal: Int, endOrdinal: Int)
     /// Deletes a Bible bookmark identified by its persisted UUID string.
     func bridge(_ bridge: BibleBridge, removeBookmark bookmarkId: String)
     /// Deletes a non-Bible bookmark identified by its persisted UUID string.
@@ -518,9 +522,23 @@ public final class BibleBridge: NSObject, WKScriptMessageHandler {
             delegate?.bridge(self, speak: initials, v11n: v11n, startOrdinal: start, endOrdinal: end < 0 ? start : end)
             return .handled
         case "memorize":
-            return .handled // Memorize mode — future feature, not yet implemented on iOS
-        case "addParagraphBreakBookmark", "addGenericParagraphBreakBookmark":
-            return .handled // Paragraph break bookmarks — Android-specific, not applicable on iOS
+            guard arguments.string(0) != nil,
+                  arguments.int(1) != nil,
+                  arguments.int(2) != nil else { return .malformed }
+            return .handled // Memorization is deferred on iOS; keep the bridge surface validated.
+        case "addParagraphBreakBookmark":
+            guard let initials = arguments.string(0),
+                  let start = arguments.int(1),
+                  let end = arguments.int(2) else { return .malformed }
+            delegate?.bridge(self, addParagraphBreakBookmark: initials, startOrdinal: start, endOrdinal: end < 0 ? start : end)
+            return .handled
+        case "addGenericParagraphBreakBookmark":
+            guard let initials = arguments.string(0),
+                  let osisRef = arguments.string(1),
+                  let start = arguments.int(2),
+                  let end = arguments.int(3) else { return .malformed }
+            delegate?.bridge(self, addGenericParagraphBreakBookmark: initials, osisRef: osisRef, startOrdinal: start, endOrdinal: end < 0 ? start : end)
+            return .handled
 
         // --- StudyPad editing and ordering ---
         case "openStudyPad":
