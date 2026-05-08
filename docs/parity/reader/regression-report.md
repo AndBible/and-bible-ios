@@ -1,6 +1,6 @@
 # READER-702 Regression Report
 
-Date: 2026-04-01
+Date: 2026-05-08
 
 ## Scope
 
@@ -11,6 +11,7 @@ This is the current validation snapshot for the reader surface. It covers:
 - history jump-back, clear, and single-row delete flows
 - workspace selector create/switch flow from the reader shell
 - restored-position highlight behavior in the emitted reader payload
+- reader config/appSettings payload construction for embedded-client display and active-window state
 
 Contract reference:
 
@@ -34,6 +35,7 @@ Related domain references:
   - full local serial simulator suite on `reader-menu-drawer-parity`
   - reader-relevant workflow assertions exercised within that suite
   - reader-adjacent unit regressions for payload-level restore/highlight behavior
+  - focused reader/controller payload subset on `test/reader-config-payload-coverage`
 
 ## Tests Executed
 
@@ -41,6 +43,8 @@ Related domain references:
 
 - `AndBibleTests/testLoadCurrentContentDoesNotHighlightRestoredReadingPosition`
 - `AndBibleTests/testLoadCurrentContentHighlightsExplicitVerseNavigationTarget`
+- `AndBibleTests/testReaderConfigPayloadIncludesDisplaySettingsAndActiveWindowState`
+- `AndBibleTests/testReaderConfigPayloadMarksInactiveWindowWithoutActiveIndicator`
 
 ### UI
 
@@ -77,9 +81,26 @@ Related domain references:
 - restoring a saved reading position does not emit a stale highlighted verse target
 - explicit verse-target navigation still emits the expected highlighted target range
 
+### Reader config payload
+
+- `set_config` payloads retain the expected top-level `config`, `appSettings`, and `initial`
+  sections
+- `config` still includes the display-setting fields the embedded reader depends on, including
+  color, margin, typography, footnote, cross-reference, and page-number values
+- `appSettings` still includes app preference, workspace label, hidden compare document, modal
+  button, experimental feature, and active-window state fields
+- active windows with multiple visible panes emit `hasActiveIndicator: true`; inactive panes emit
+  both `activeWindow: false` and `hasActiveIndicator: false`
+
 ## Current Result
 
-Reader validation passed on 2026-04-01:
+Latest focused reader/controller validation passed on 2026-05-08:
+
+- focused shared-scheme reader/controller subset: `7/7`
+- new reader config payload tests: `2/2`
+- result bundle: `.artifacts/AndBibleTests-reader-config-20260507-v4.xcresult`
+
+Previous full reader validation passed on 2026-04-01:
 
 - non-UI XCTest suite: `146/146`
 - full UI XCTest suite: `39/39`
@@ -93,6 +114,7 @@ Taken together, this gives the reader domain current regression evidence for:
 - history navigation and destructive persistence
 - workspace selector create/switch handoff
 - payload-level restore/highlight behavior
+- payload-level config/appSettings propagation into the embedded document client
 
 That is a much healthier place than the branch was in earlier. The remaining
 reader risk is no longer the basic shell/menu flow; it is the deeper behavior
@@ -107,7 +129,6 @@ need tighter protection are:
 - swipe-mode and auto-fullscreen behavior
 - double-tap fullscreen behavior
 - compare presentation workflows
-- explicit regression around the config payload pushed into the embedded document client
 
 Those areas are implemented and documented, but they are not yet locked by
 focused reader-domain regression coverage, so they still show up as `Partial`
