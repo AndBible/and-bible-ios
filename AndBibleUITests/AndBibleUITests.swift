@@ -4335,18 +4335,18 @@ final class AndBibleUITests: XCTestCase {
     ) -> [XCUIElement] {
         let scopedCandidates = screenRootCandidates(screenIdentifier, in: app).flatMap { root in
             [
-                root.otherElements[identifier].firstMatch,
                 root.cells[identifier].firstMatch,
                 root.buttons[identifier].firstMatch,
+                root.otherElements[identifier].firstMatch,
             ]
         }
 
         return scopedCandidates + [
-            app.otherElements[identifier].firstMatch,
             app.collectionViews.cells[identifier].firstMatch,
             app.cells[identifier].firstMatch,
             app.buttons[identifier].firstMatch,
             app.collectionViews.buttons[identifier].firstMatch,
+            app.otherElements[identifier].firstMatch,
         ]
     }
 
@@ -4737,9 +4737,9 @@ final class AndBibleUITests: XCTestCase {
             ]
         case "searchScreen":
             return [
-                app.otherElements[identifier].firstMatch,
                 app.collectionViews[identifier].firstMatch,
                 app.scrollViews[identifier].firstMatch,
+                app.otherElements[identifier].firstMatch,
             ]
         case "searchStateExport", "bookmarkListStateExport", "labelManagerStateExport":
             return semanticStateCandidates(for: identifier, in: app)
@@ -4802,8 +4802,8 @@ final class AndBibleUITests: XCTestCase {
             return [
                 app.collectionViews[identifier].firstMatch,
                 app.tables[identifier].firstMatch,
-                app.otherElements[identifier].firstMatch,
                 app.scrollViews[identifier].firstMatch,
+                app.otherElements[identifier].firstMatch,
             ]
         case
             "settingsForm",
@@ -4833,6 +4833,7 @@ final class AndBibleUITests: XCTestCase {
             return [
                 app.collectionViews[identifier].firstMatch,
                 app.tables[identifier].firstMatch,
+                app.scrollViews[identifier].firstMatch,
                 app.otherElements[identifier].firstMatch,
             ]
         case "readingPlanTemplateButton":
