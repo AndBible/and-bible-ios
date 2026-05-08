@@ -4635,7 +4635,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         {"id":"\(Self.unlabeledLabelId)","name":"__UNLABELED__","isRealLabel":false,"style":{"color":\(BibleCore.Label.defaultColor),"isSpeak":false,"isParagraphBreak":false,"underline":false,"underlineWholeVerse":false,"markerStyle":false,"markerStyleWholeVerse":false,"hideStyle":false,"hideStyleWholeVerse":false,"customIcon":null}}
         """
         let paragraphBreakJSON = """
-        {"id":"\(BibleCore.Label.paragraphBreakLabelId.uuidString)","name":"__PARAGRAPH_BREAK_LABEL__","isRealLabel":false,"style":{"color":\(BibleCore.Label.defaultColor),"isSpeak":false,"isParagraphBreak":true,"underline":false,"underlineWholeVerse":false,"markerStyle":false,"markerStyleWholeVerse":false,"hideStyle":false,"hideStyleWholeVerse":false,"customIcon":null}}
+        {"id":"\(BibleCore.Label.paragraphBreakLabelId.uuidString)","name":"\(BibleCore.Label.paragraphBreakLabelName)","isRealLabel":false,"style":{"color":\(BibleCore.Label.defaultColor),"isSpeak":false,"isParagraphBreak":true,"underline":false,"underlineWholeVerse":false,"markerStyle":false,"markerStyleWholeVerse":false,"hideStyle":false,"hideStyleWholeVerse":false,"customIcon":null}}
         """
 
         // Build user labels JSON

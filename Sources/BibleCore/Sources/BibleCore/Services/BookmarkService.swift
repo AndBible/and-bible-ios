@@ -314,7 +314,6 @@ public final class BookmarkService {
         link.bookmark = bookmark
         link.label = label
         store.insert(link)
-        store.saveChanges()
     }
 
     private func attachParagraphBreakLabel(to bookmark: GenericBookmark) {
@@ -324,7 +323,6 @@ public final class BookmarkService {
         link.bookmark = bookmark
         link.label = label
         store.insert(link)
-        store.saveChanges()
     }
 
     /**
