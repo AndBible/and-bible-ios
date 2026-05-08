@@ -2468,16 +2468,16 @@ final class AndBibleUITests: XCTestCase {
         let deadline = Date().addingTimeInterval(timeout)
 
         repeat {
-            if let stateElement = resolvedSearchStateElement(in: app) {
-                return stateElement
+            if let screen = resolvedSearchScreenElement(in: app) {
+                return screen
             }
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         } while Date() < deadline
 
-        let screen = unresolvedElement("searchStateExport", in: app)
+        let screen = unresolvedElement("searchScreen", in: app)
         XCTAssertTrue(
             screen.exists,
-            "Expected Search to present the exported Search state element within \(timeout) seconds.",
+            "Expected Search to present its root state element within \(timeout) seconds.",
             file: file,
             line: line
         )
@@ -7765,12 +7765,17 @@ final class AndBibleUITests: XCTestCase {
         return nil
     }
 
-    /// Resolves the compact exported Search state element when Search is presented.
-    private func resolvedSearchStateElement(in app: XCUIApplication) -> XCUIElement? {
-        resolvedStateExportElement("searchStateExport", in: app) ?? resolvedElement("searchScreen", in: app)
+    /// Resolves the Search root element that owns the canonical UI-test state value.
+    private func resolvedSearchScreenElement(in app: XCUIApplication) -> XCUIElement? {
+        resolvedElement("searchScreen", in: app)
     }
 
-    /// Reads the current exported Search state without forcing the whole Search container query.
+    /// Resolves the canonical Search state element without walking result-row static text nodes.
+    private func resolvedSearchStateElement(in app: XCUIApplication) -> XCUIElement? {
+        resolvedSearchScreenElement(in: app) ?? resolvedStateExportElement("searchStateExport", in: app)
+    }
+
+    /// Reads the current exported Search state from the state-bearing root element.
     private func resolvedSearchStateValue(in app: XCUIApplication) -> String? {
         if let stateElement = resolvedSearchStateElement(in: app),
            let value = stateElement.value as? String {
