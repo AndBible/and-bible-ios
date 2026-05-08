@@ -4287,10 +4287,10 @@ final class AndBibleUITests: XCTestCase {
         in app: XCUIApplication
     ) -> [XCUIElement] {
         [
-            app.otherElements[identifier].firstMatch,
             app.collectionViews[identifier].firstMatch,
             app.tables[identifier].firstMatch,
             app.scrollViews[identifier].firstMatch,
+            app.otherElements[identifier].firstMatch,
         ]
     }
 
@@ -4817,17 +4817,17 @@ final class AndBibleUITests: XCTestCase {
             "modulePickerScreen",
             "moduleBrowserScreen":
             return [
-                app.otherElements[identifier].firstMatch,
                 app.collectionViews[identifier].firstMatch,
                 app.tables[identifier].firstMatch,
                 app.scrollViews[identifier].firstMatch,
+                app.otherElements[identifier].firstMatch,
             ]
         case "historyScreen", "readingPlanListScreen", "workspaceNamePromptScreen":
             return [
-                app.otherElements[identifier].firstMatch,
                 app.tables[identifier].firstMatch,
                 app.collectionViews[identifier].firstMatch,
                 app.scrollViews[identifier].firstMatch,
+                app.otherElements[identifier].firstMatch,
             ]
         case "workspaceSelectorScreen":
             return [
