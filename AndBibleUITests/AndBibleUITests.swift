@@ -2468,16 +2468,16 @@ final class AndBibleUITests: XCTestCase {
         let deadline = Date().addingTimeInterval(timeout)
 
         repeat {
-            if let stateElement = resolvedSearchStateElement(in: app) {
-                return stateElement
+            if let screen = resolvedSearchScreenElement(in: app) {
+                return screen
             }
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         } while Date() < deadline
 
-        let screen = unresolvedElement("searchStateExport", in: app)
+        let screen = unresolvedElement("searchScreen", in: app)
         XCTAssertTrue(
             screen.exists,
-            "Expected Search to present the exported Search state element within \(timeout) seconds.",
+            "Expected Search to present its root state element within \(timeout) seconds.",
             file: file,
             line: line
         )
@@ -4287,10 +4287,10 @@ final class AndBibleUITests: XCTestCase {
         in app: XCUIApplication
     ) -> [XCUIElement] {
         [
-            app.otherElements[identifier].firstMatch,
             app.collectionViews[identifier].firstMatch,
             app.tables[identifier].firstMatch,
             app.scrollViews[identifier].firstMatch,
+            app.otherElements[identifier].firstMatch,
         ]
     }
 
@@ -4335,18 +4335,18 @@ final class AndBibleUITests: XCTestCase {
     ) -> [XCUIElement] {
         let scopedCandidates = screenRootCandidates(screenIdentifier, in: app).flatMap { root in
             [
-                root.otherElements[identifier].firstMatch,
                 root.cells[identifier].firstMatch,
                 root.buttons[identifier].firstMatch,
+                root.otherElements[identifier].firstMatch,
             ]
         }
 
         return scopedCandidates + [
-            app.otherElements[identifier].firstMatch,
             app.collectionViews.cells[identifier].firstMatch,
             app.cells[identifier].firstMatch,
             app.buttons[identifier].firstMatch,
             app.collectionViews.buttons[identifier].firstMatch,
+            app.otherElements[identifier].firstMatch,
         ]
     }
 
@@ -4736,6 +4736,8 @@ final class AndBibleUITests: XCTestCase {
                 app.otherElements[identifier].firstMatch,
             ]
         case "searchScreen":
+            // Search exports its live state on an accessibility Other root; scoped helpers use
+            // unresolvedElement("searchScreen") before probing child controls.
             return [
                 app.otherElements[identifier].firstMatch,
                 app.collectionViews[identifier].firstMatch,
@@ -4802,8 +4804,8 @@ final class AndBibleUITests: XCTestCase {
             return [
                 app.collectionViews[identifier].firstMatch,
                 app.tables[identifier].firstMatch,
-                app.otherElements[identifier].firstMatch,
                 app.scrollViews[identifier].firstMatch,
+                app.otherElements[identifier].firstMatch,
             ]
         case
             "settingsForm",
@@ -4817,22 +4819,23 @@ final class AndBibleUITests: XCTestCase {
             "modulePickerScreen",
             "moduleBrowserScreen":
             return [
-                app.otherElements[identifier].firstMatch,
                 app.collectionViews[identifier].firstMatch,
                 app.tables[identifier].firstMatch,
                 app.scrollViews[identifier].firstMatch,
+                app.otherElements[identifier].firstMatch,
             ]
         case "historyScreen", "readingPlanListScreen", "workspaceNamePromptScreen":
             return [
-                app.otherElements[identifier].firstMatch,
                 app.tables[identifier].firstMatch,
                 app.collectionViews[identifier].firstMatch,
                 app.scrollViews[identifier].firstMatch,
+                app.otherElements[identifier].firstMatch,
             ]
         case "workspaceSelectorScreen":
             return [
                 app.collectionViews[identifier].firstMatch,
                 app.tables[identifier].firstMatch,
+                app.scrollViews[identifier].firstMatch,
                 app.otherElements[identifier].firstMatch,
             ]
         case "readingPlanTemplateButton":
@@ -5788,11 +5791,6 @@ final class AndBibleUITests: XCTestCase {
         _ = waitForReaderShellReady(in: app, timeout: min(10, timeout))
         let deadline = Date().addingTimeInterval(timeout)
 
-        tapReaderToolbarCoordinate(.moreMenu, in: app)
-        if waitForReaderOverflowMenu(in: app, timeout: min(5, max(1, deadline.timeIntervalSinceNow))) {
-            return true
-        }
-
         repeat {
             let button = unresolvedElement("readerMoreMenuButton", in: app)
             if waitForElementToBecomeHittable(button, timeout: min(2, max(0.5, deadline.timeIntervalSinceNow))) {
@@ -5981,14 +5979,6 @@ final class AndBibleUITests: XCTestCase {
         _ = waitForReaderShellReady(in: app, timeout: min(10, timeout))
         let deadline = Date().addingTimeInterval(timeout)
 
-        tapReaderToolbarCoordinate(.navigationDrawer, in: app)
-        if waitForReaderNavigationDrawer(
-            in: app,
-            timeout: min(5, max(2, deadline.timeIntervalSinceNow))
-        ) {
-            return true
-        }
-
         repeat {
             let button = unresolvedElement("readerNavigationDrawerButton", in: app)
             if waitForElementToBecomeHittable(button, timeout: min(2, max(0.5, deadline.timeIntervalSinceNow))) {
@@ -6006,28 +5996,6 @@ final class AndBibleUITests: XCTestCase {
         } while Date() < deadline
 
         return false
-    }
-
-    /// Toolbar buttons occasionally trigger slow XCTest snapshots; coordinates are verified by state.
-    private enum ReaderToolbarCoordinateTarget {
-        case navigationDrawer
-        case moreMenu
-
-        var normalizedOffset: CGVector {
-            switch self {
-            case .navigationDrawer:
-                CGVector(dx: 0.055, dy: 0.085)
-            case .moreMenu:
-                CGVector(dx: 0.965, dy: 0.085)
-            }
-        }
-    }
-
-    private func tapReaderToolbarCoordinate(
-        _ target: ReaderToolbarCoordinateTarget,
-        in app: XCUIApplication
-    ) {
-        app.coordinate(withNormalizedOffset: target.normalizedOffset).tap()
     }
 
     /**
@@ -7765,12 +7733,17 @@ final class AndBibleUITests: XCTestCase {
         return nil
     }
 
-    /// Resolves the compact exported Search state element when Search is presented.
-    private func resolvedSearchStateElement(in app: XCUIApplication) -> XCUIElement? {
-        resolvedStateExportElement("searchStateExport", in: app) ?? resolvedElement("searchScreen", in: app)
+    /// Resolves the Search root element that owns the canonical UI-test state value.
+    private func resolvedSearchScreenElement(in app: XCUIApplication) -> XCUIElement? {
+        resolvedElement("searchScreen", in: app)
     }
 
-    /// Reads the current exported Search state without forcing the whole Search container query.
+    /// Resolves the canonical Search state element without walking result-row static text nodes.
+    private func resolvedSearchStateElement(in app: XCUIApplication) -> XCUIElement? {
+        resolvedSearchScreenElement(in: app) ?? resolvedStateExportElement("searchStateExport", in: app)
+    }
+
+    /// Reads the current exported Search state from the state-bearing root element.
     private func resolvedSearchStateValue(in app: XCUIApplication) -> String? {
         if let stateElement = resolvedSearchStateElement(in: app),
            let value = stateElement.value as? String {

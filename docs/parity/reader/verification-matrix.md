@@ -1,6 +1,6 @@
 # READER-701 Verification Matrix (Android Reader -> iOS)
 
-Date: 2026-04-01
+Date: 2026-05-08
 
 ## Scope and Method
 
@@ -30,9 +30,9 @@ trust than proof.
 
 ## Summary
 
-- `Pass`: 4
+- `Pass`: 5
 - `Adapted Pass`: 1
-- `Partial`: 5
+- `Partial`: 4
 
 ## Matrix
 
@@ -47,4 +47,4 @@ trust than proof.
 | Horizontal swipe modes and auto-fullscreen thresholds are implemented natively | `WebViewCoordinator.swift` native swipe/scroll callbacks; `BibleReaderView.handleNativeHorizontalSwipe(_:)` and auto-fullscreen tracking in `BibleReaderView` | Partial | The code paths exist, but we still do not have the kind of focused regression that would make this feel safely locked. |
 | Double-tap fullscreen remains owned by the native reader shell | `BibleReaderController.handleToggleFullscreen()` and `BibleReaderView` fullscreen state/overlay ownership; documented in `dispositions.md` | Partial | The ownership story is clear, but the dedicated regression story is not there yet. |
 | Compare requests are presented through native iOS sheet flow | `BibleReaderController.compareSelection()`, `BibleReaderController.bridge(_:compareVerses:startOrdinal:endOrdinal:)`, `BibleReaderView.showCompare`, `presentCompareView(...)`; documented in `dispositions.md` | Partial | The entry points are in place, but this is still one of the places where a future regression could slip through unless we add a focused workflow check. |
-| Reader config pushes active-window and display state into the embedded client | `BibleReaderController.buildConfigJSON()`, `BibleReaderController.updateConfig()`, `BibleReaderView.updateDisplaySettings(...)` | Partial | This bridge is central to runtime behavior, and that is exactly why it deserves better dedicated protection than it has today. |
+| Reader config pushes active-window and display state into the embedded client | `BibleReaderController.buildConfigJSON()`, `BibleReaderController.updateConfig()`, `BibleReaderView.updateDisplaySettings(...)`; unit tests `testReaderConfigPayloadIncludesDisplaySettingsAndActiveWindowState`, `testReaderConfigPayloadMarksInactiveWindowWithoutActiveIndicator` | Pass | Focused payload-level coverage now locks the config/appSettings key shape, representative display settings, app preference values, workspace label state, and active/inactive window indicator behavior. |

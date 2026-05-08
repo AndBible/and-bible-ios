@@ -28,6 +28,46 @@ final class AndBibleTests: XCTestCase {
         }
         return (bridge, { evaluatedScripts })
     }
+
+    private func setConfigPayload(
+        from scripts: [String],
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) throws -> [String: Any] {
+        let script = try XCTUnwrap(
+            scripts.first { $0.contains("bibleView.emit('set_config'") },
+            "Expected a set_config bridge emission",
+            file: file,
+            line: line
+        )
+        let prefix = "bibleView.emit('set_config', "
+        let start = try XCTUnwrap(
+            script.range(of: prefix)?.upperBound,
+            "Expected set_config payload prefix in script: \(script)",
+            file: file,
+            line: line
+        )
+        let end = try XCTUnwrap(
+            script.range(of: "); } catch", range: start..<script.endIndex)?.lowerBound,
+            "Expected set_config payload suffix in script: \(script)",
+            file: file,
+            line: line
+        )
+        let json = String(script[start..<end])
+        let data = try XCTUnwrap(
+            json.data(using: .utf8),
+            "Expected UTF-8 JSON payload",
+            file: file,
+            line: line
+        )
+        let object = try JSONSerialization.jsonObject(with: data)
+        return try XCTUnwrap(
+            object as? [String: Any],
+            "Expected set_config payload to be a JSON object",
+            file: file,
+            line: line
+        )
+    }
     #endif
 
     private func bridgeJSONObject<T: Encodable>(_ value: T) throws -> [String: Any] {
@@ -1285,6 +1325,247 @@ final class AndBibleTests: XCTestCase {
             addDocumentsScript.contains("\"originalOrdinalRange\":[5,5]"),
             "Expected explicit verse navigation to preserve the original highlighted target. Script: \(addDocumentsScript)"
         )
+    }
+
+    @MainActor
+    func testReaderConfigPayloadIncludesDisplaySettingsAndActiveWindowState() throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let container = try makeWorkspaceModelContainer()
+        let context = ModelContext(container)
+        let workspaceStore = WorkspaceStore(modelContext: context)
+        let settingsStore = SettingsStore(modelContext: context)
+        let windowManager = WindowManager(workspaceStore: workspaceStore)
+        let workspace = workspaceStore.createWorkspace(name: "Reader Config")
+        let studyPadCursorId = try XCTUnwrap(UUID(uuidString: "11111111-1111-1111-1111-111111111111"))
+        let autoAssignLabelId = try XCTUnwrap(UUID(uuidString: "22222222-2222-2222-2222-222222222222"))
+        workspace.workspaceSettings = WorkspaceSettings(
+            autoAssignLabels: [autoAssignLabelId],
+            studyPadCursors: [studyPadCursorId: 7]
+        )
+        let firstWindow = try XCTUnwrap(workspaceStore.windows(workspaceId: workspace.id).first)
+        windowManager.setActiveWorkspace(workspace)
+        _ = try XCTUnwrap(windowManager.addWindow(from: firstWindow))
+        windowManager.activeWindow = firstWindow
+
+        settingsStore.setBool(.showActiveWindowIndicator, value: true)
+        settingsStore.setBool(.showErrorBox, value: true)
+        settingsStore.setBool(.monochromeMode, value: true)
+        settingsStore.setBool(.disableAnimations, value: true)
+        settingsStore.setBool(.disableClickToEdit, value: true)
+        settingsStore.setInt(.fontSizeMultiplier, value: 125)
+        settingsStore.setStringSet(.disableBibleBookmarkModalButtons, values: ["speak", "bookmark"])
+        settingsStore.setStringSet(.disableGenBookmarkModalButtons, values: ["generic-note"])
+        settingsStore.setStringSet(
+            .experimentalFeatures,
+            values: ["bookmark_edit_actions", "add_paragraph_break"]
+        )
+
+        var display = TextDisplaySettings()
+        display.showVerseNumbers = false
+        display.strongsMode = 2
+        display.showMorphology = true
+        display.showRedLetters = false
+        display.showVersePerLine = true
+        display.showSectionTitles = false
+        display.showFootNotes = true
+        display.showFootNotesInline = true
+        display.showXrefs = true
+        display.expandXrefs = true
+        display.fontFamily = "Georgia"
+        display.fontSize = 21
+        display.showBookmarks = false
+        display.showMyNotes = false
+        display.hyphenation = false
+        display.lineSpacing = 14
+        display.justifyText = true
+        display.marginLeft = 5
+        display.marginRight = 6
+        display.maxWidth = 410
+        display.topMargin = 12
+        display.showPageNumber = true
+        display.dayBackground = -2
+        display.dayNoise = 3
+        display.nightBackground = -123_456
+        display.nightNoise = 4
+        display.dayTextColor = -654_321
+        display.nightTextColor = -111_111
+
+        let controller = BibleReaderController(bridge: bridge)
+        controller.settingsStore = settingsStore
+        controller.displaySettings = display
+        controller.nightMode = true
+        controller.activeWindow = firstWindow
+        controller.windowManagerRef = windowManager
+        controller.hiddenCompareDocuments = ["KJV", "ESV"]
+
+        controller.bridgeDidSetClientReady(bridge)
+
+        let payload = try setConfigPayload(from: recordedScripts())
+        assertJSONKeys(payload, ["config", "appSettings", "initial"])
+        let config = try XCTUnwrap(payload["config"] as? [String: Any])
+        let appSettings = try XCTUnwrap(payload["appSettings"] as? [String: Any])
+        assertJSONKeys(
+            config,
+            [
+                "developmentMode",
+                "testMode",
+                "showAnnotations",
+                "showChapterNumbers",
+                "showVerseNumbers",
+                "strongsMode",
+                "showMorphology",
+                "showRedLetters",
+                "showVersePerLine",
+                "showNonCanonical",
+                "makeNonCanonicalItalic",
+                "showSectionTitles",
+                "showStrongsSeparately",
+                "showFootNotes",
+                "showFootNotesInline",
+                "showXrefs",
+                "expandXrefs",
+                "fontFamily",
+                "fontSize",
+                "disableBookmarking",
+                "showBookmarks",
+                "showMyNotes",
+                "bookmarksHideLabels",
+                "bookmarksAssignLabels",
+                "colors",
+                "hyphenation",
+                "lineSpacing",
+                "justifyText",
+                "marginSize",
+                "topMargin",
+                "showPageNumber",
+            ]
+        )
+        assertJSONKeys(
+            appSettings,
+            [
+                "nightMode",
+                "errorBox",
+                "favouriteLabels",
+                "recentLabels",
+                "studyPadCursors",
+                "autoAssignLabels",
+                "hideCompareDocuments",
+                "activeWindow",
+                "rightToLeft",
+                "actionMode",
+                "hasActiveIndicator",
+                "activeSince",
+                "limitAmbiguousModalSize",
+                "windowId",
+                "disableBibleModalButtons",
+                "disableGenericModalButtons",
+                "monochromeMode",
+                "disableAnimations",
+                "disableClickToEdit",
+                "fontSizeMultiplier",
+                "enabledExperimentalFeatures",
+            ]
+        )
+        let colors = try XCTUnwrap(config["colors"] as? [String: Any])
+        assertJSONKeys(
+            colors,
+            ["dayBackground", "dayNoise", "nightBackground", "nightNoise", "dayTextColor", "nightTextColor"]
+        )
+        let marginSize = try XCTUnwrap(config["marginSize"] as? [String: Any])
+        assertJSONKeys(marginSize, ["marginLeft", "marginRight", "maxWidth"])
+
+        XCTAssertEqual(payload["initial"] as? Bool, false)
+        XCTAssertEqual(config["showVerseNumbers"] as? Bool, false)
+        XCTAssertEqual(config["strongsMode"] as? Int, 2)
+        XCTAssertEqual(config["showMorphology"] as? Bool, true)
+        XCTAssertEqual(config["showRedLetters"] as? Bool, false)
+        XCTAssertEqual(config["showVersePerLine"] as? Bool, true)
+        XCTAssertEqual(config["showSectionTitles"] as? Bool, false)
+        XCTAssertEqual(config["showFootNotes"] as? Bool, true)
+        XCTAssertEqual(config["showFootNotesInline"] as? Bool, true)
+        XCTAssertEqual(config["showXrefs"] as? Bool, true)
+        XCTAssertEqual(config["expandXrefs"] as? Bool, true)
+        XCTAssertEqual(config["fontFamily"] as? String, "Georgia")
+        XCTAssertEqual(config["fontSize"] as? Int, 21)
+        XCTAssertEqual(config["showBookmarks"] as? Bool, false)
+        XCTAssertEqual(config["showMyNotes"] as? Bool, false)
+        XCTAssertEqual(config["hyphenation"] as? Bool, false)
+        XCTAssertEqual(config["lineSpacing"] as? Int, 14)
+        XCTAssertEqual(config["justifyText"] as? Bool, true)
+        XCTAssertEqual(config["topMargin"] as? Int, 12)
+        XCTAssertEqual(config["showPageNumber"] as? Bool, true)
+        XCTAssertEqual(colors["dayBackground"] as? Int, -2)
+        XCTAssertEqual(colors["dayNoise"] as? Int, 3)
+        XCTAssertEqual(colors["nightBackground"] as? Int, -123_456)
+        XCTAssertEqual(colors["nightNoise"] as? Int, 4)
+        XCTAssertEqual(colors["dayTextColor"] as? Int, -654_321)
+        XCTAssertEqual(colors["nightTextColor"] as? Int, -111_111)
+        XCTAssertEqual(marginSize["marginLeft"] as? Int, 5)
+        XCTAssertEqual(marginSize["marginRight"] as? Int, 6)
+        XCTAssertEqual(marginSize["maxWidth"] as? Int, 410)
+
+        XCTAssertEqual(appSettings["nightMode"] as? Bool, true)
+        XCTAssertEqual(appSettings["errorBox"] as? Bool, true)
+        XCTAssertEqual(appSettings["activeWindow"] as? Bool, true)
+        XCTAssertEqual(appSettings["hasActiveIndicator"] as? Bool, true)
+        XCTAssertEqual(appSettings["rightToLeft"] as? Bool, false)
+        XCTAssertEqual(appSettings["actionMode"] as? Bool, false)
+        XCTAssertEqual(appSettings["limitAmbiguousModalSize"] as? Bool, false)
+        XCTAssertEqual(appSettings["windowId"] as? String, "")
+        XCTAssertEqual(appSettings["monochromeMode"] as? Bool, true)
+        XCTAssertEqual(appSettings["disableAnimations"] as? Bool, true)
+        XCTAssertEqual(appSettings["disableClickToEdit"] as? Bool, true)
+        XCTAssertEqual(appSettings["fontSizeMultiplier"] as? Double, 1.25)
+        XCTAssertNotNil(appSettings["activeSince"] as? Int)
+        XCTAssertEqual(
+            appSettings["studyPadCursors"] as? [String: Int],
+            [studyPadCursorId.uuidString: 7]
+        )
+        XCTAssertEqual(
+            Set(try XCTUnwrap(appSettings["autoAssignLabels"] as? [String])),
+            [autoAssignLabelId.uuidString]
+        )
+        XCTAssertEqual(Set(try XCTUnwrap(appSettings["hideCompareDocuments"] as? [String])), ["ESV", "KJV"])
+        XCTAssertEqual(
+            Set(try XCTUnwrap(appSettings["disableBibleModalButtons"] as? [String])),
+            ["bookmark", "speak"]
+        )
+        XCTAssertEqual(
+            Set(try XCTUnwrap(appSettings["disableGenericModalButtons"] as? [String])),
+            ["generic-note"]
+        )
+        XCTAssertEqual(
+            Set(try XCTUnwrap(appSettings["enabledExperimentalFeatures"] as? [String])),
+            ["add_paragraph_break", "bookmark_edit_actions"]
+        )
+    }
+
+    @MainActor
+    func testReaderConfigPayloadMarksInactiveWindowWithoutActiveIndicator() throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let container = try makeWorkspaceModelContainer()
+        let context = ModelContext(container)
+        let workspaceStore = WorkspaceStore(modelContext: context)
+        let settingsStore = SettingsStore(modelContext: context)
+        let windowManager = WindowManager(workspaceStore: workspaceStore)
+        let workspace = workspaceStore.createWorkspace(name: "Reader Config")
+        let firstWindow = try XCTUnwrap(workspaceStore.windows(workspaceId: workspace.id).first)
+        windowManager.setActiveWorkspace(workspace)
+        let secondWindow = try XCTUnwrap(windowManager.addWindow(from: firstWindow))
+        windowManager.activeWindow = firstWindow
+        settingsStore.setBool(.showActiveWindowIndicator, value: true)
+
+        let controller = BibleReaderController(bridge: bridge)
+        controller.settingsStore = settingsStore
+        controller.activeWindow = secondWindow
+        controller.windowManagerRef = windowManager
+
+        controller.bridgeDidSetClientReady(bridge)
+
+        let payload = try setConfigPayload(from: recordedScripts())
+        let appSettings = try XCTUnwrap(payload["appSettings"] as? [String: Any])
+        XCTAssertEqual(appSettings["activeWindow"] as? Bool, false)
+        XCTAssertEqual(appSettings["hasActiveIndicator"] as? Bool, false)
     }
 
     @MainActor
