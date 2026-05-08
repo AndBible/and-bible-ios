@@ -4736,10 +4736,12 @@ final class AndBibleUITests: XCTestCase {
                 app.otherElements[identifier].firstMatch,
             ]
         case "searchScreen":
+            // Search exports its live state on an accessibility Other root; scoped helpers use
+            // unresolvedElement("searchScreen") before probing child controls.
             return [
+                app.otherElements[identifier].firstMatch,
                 app.collectionViews[identifier].firstMatch,
                 app.scrollViews[identifier].firstMatch,
-                app.otherElements[identifier].firstMatch,
             ]
         case "searchStateExport", "bookmarkListStateExport", "labelManagerStateExport":
             return semanticStateCandidates(for: identifier, in: app)
