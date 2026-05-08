@@ -99,6 +99,9 @@ final class AndBibleTests: XCTestCase {
             ("compare", ["KJV", 1]),
             ("speak", ["KJV", "KJV", 1]),
             ("speakGeneric", ["KJV", "Gen.1.1", 1]),
+            ("memorize", ["KJV", 1]),
+            ("addParagraphBreakBookmark", ["KJV", 1]),
+            ("addGenericParagraphBreakBookmark", ["KJV", "Gen.1.1", 1]),
             ("openStudyPad", ["label-id"]),
             ("openMyNotes", ["KJV"]),
             ("deleteStudyPadEntry", []),
@@ -1018,6 +1021,12 @@ final class AndBibleTests: XCTestCase {
         XCTAssertEqual(bridge.dispatchMessage(method: "helpDialog", args: ["content", NSNull()]), .handled)
         XCTAssertEqual(bridge.dispatchMessage(method: "scrolledToOrdinal", args: ["main", 1]), .handled)
         XCTAssertEqual(bridge.dispatchMessage(method: "helpBookmarks", args: []), .handled)
+        XCTAssertEqual(bridge.dispatchMessage(method: "memorize", args: ["KJV", 1, -1]), .handled)
+        XCTAssertEqual(bridge.dispatchMessage(method: "addParagraphBreakBookmark", args: ["KJV", 1, -1]), .handled)
+        XCTAssertEqual(
+            bridge.dispatchMessage(method: "addGenericParagraphBreakBookmark", args: ["KJV", "Gen.1.1", 1, -1]),
+            .handled
+        )
         XCTAssertEqual(bridge.dispatchMessage(method: "missingMethod", args: []), .unhandled)
     }
 
@@ -8075,6 +8084,97 @@ final class AndBibleTests: XCTestCase {
         XCTAssertNil(reloadedGenericBookmark.primaryLabelId)
         XCTAssertTrue(reloadedGenericBookmark.bookmarkToLabels?.isEmpty ?? true)
         XCTAssertTrue(try modelContext.fetch(FetchDescriptor<GenericBookmarkToLabel>()).isEmpty)
+    }
+
+    /**
+     Verifies that paragraph-break Bible bookmarks are persisted with the reserved system label.
+     *
+     * Data dependencies:
+     * - creates an in-memory bookmark schema without pre-existing system labels
+     *
+     * Side effects:
+     * - creates system labels and one Bible bookmark through `BookmarkService`
+     *
+     * Failure modes:
+     * - throws if the in-memory SwiftData container cannot be created or queried
+     * - fails if the bookmark is not linked to the paragraph-break label as its primary style label
+     */
+    func testBookmarkServiceCreatesParagraphBreakBibleBookmark() throws {
+        let container = try makeBookmarkRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        let bookmarkStore = BookmarkStore(modelContext: modelContext)
+        let bookmarkService = BookmarkService(store: bookmarkStore)
+
+        let bookmark = bookmarkService.addParagraphBreakBibleBookmark(
+            bookInitials: "KJV",
+            startOrdinal: 1,
+            endOrdinal: 1,
+            book: "Genesis"
+        )
+
+        let paragraphLabel = try XCTUnwrap(bookmarkService.label(id: Label.paragraphBreakLabelId))
+        let reloadedBookmark = try XCTUnwrap(bookmarkService.bibleBookmark(id: bookmark.id))
+        let link = try XCTUnwrap(
+            bookmarkService.bibleBookmarkToLabel(
+                bookmarkId: bookmark.id,
+                labelId: Label.paragraphBreakLabelId
+            )
+        )
+
+        XCTAssertEqual(paragraphLabel.name, Label.paragraphBreakLabelName)
+        XCTAssertEqual(reloadedBookmark.book, "Genesis")
+        XCTAssertFalse(reloadedBookmark.wholeVerse)
+        XCTAssertEqual(reloadedBookmark.primaryLabelId, Label.paragraphBreakLabelId)
+        XCTAssertEqual(link.bookmark?.id, bookmark.id)
+        XCTAssertEqual(link.label?.id, Label.paragraphBreakLabelId)
+        XCTAssertEqual(reloadedBookmark.bookmarkToLabels?.count, 1)
+        XCTAssertEqual(reloadedBookmark.bookmarkToLabels?.first?.label?.id, Label.paragraphBreakLabelId)
+    }
+
+    /**
+     Verifies that paragraph-break generic bookmarks use the same reserved label contract.
+     *
+     * Data dependencies:
+     * - creates an in-memory bookmark schema without pre-existing system labels
+     *
+     * Side effects:
+     * - creates system labels and one generic bookmark through `BookmarkService`
+     *
+     * Failure modes:
+     * - throws if the in-memory SwiftData container cannot be created or queried
+     * - fails if the generic bookmark does not carry the paragraph-break label relationship
+     */
+    func testBookmarkServiceCreatesParagraphBreakGenericBookmark() throws {
+        let container = try makeBookmarkRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        let bookmarkStore = BookmarkStore(modelContext: modelContext)
+        let bookmarkService = BookmarkService(store: bookmarkStore)
+
+        let bookmark = bookmarkService.addParagraphBreakGenericBookmark(
+            bookInitials: "DICT",
+            key: "entry-key",
+            startOrdinal: 7,
+            endOrdinal: 9
+        )
+
+        let reloadedBookmark = try XCTUnwrap(bookmarkService.genericBookmark(id: bookmark.id))
+        let link = try XCTUnwrap(
+            bookmarkService.genericBookmarkToLabel(
+                bookmarkId: bookmark.id,
+                labelId: Label.paragraphBreakLabelId
+            )
+        )
+
+        XCTAssertEqual(reloadedBookmark.bookInitials, "DICT")
+        XCTAssertEqual(reloadedBookmark.key, "entry-key")
+        XCTAssertEqual(reloadedBookmark.ordinalStart, 7)
+        XCTAssertEqual(reloadedBookmark.ordinalEnd, 9)
+        XCTAssertFalse(reloadedBookmark.wholeVerse)
+        XCTAssertEqual(reloadedBookmark.primaryLabelId, Label.paragraphBreakLabelId)
+        XCTAssertEqual(link.bookmark?.id, bookmark.id)
+        XCTAssertEqual(link.label?.id, Label.paragraphBreakLabelId)
+        XCTAssertEqual(reloadedBookmark.bookmarkToLabels?.count, 1)
+        XCTAssertEqual(reloadedBookmark.bookmarkToLabels?.first?.label?.id, Label.paragraphBreakLabelId)
     }
 
     /**

@@ -34,20 +34,25 @@ Why this is fine:
 - `WKScriptMessageHandler` does not support synchronous return values.
 - The cache preserves the frontend's expectation that this call is synchronous.
 
-## 3. Some Android bridge actions remain intentional no-ops on iOS
+## 3. Former no-op bridge actions now have explicit dispositions
 
-- Status: documented divergence
+- Status: mixed
 
-Current intentional no-ops:
+Current dispositions:
 
-- `memorize`
-- `addParagraphBreakBookmark`
-- `addGenericParagraphBreakBookmark`
+- `addParagraphBreakBookmark`: implemented on iOS by creating a Bible bookmark
+  with the reserved paragraph-break label.
+- `addGenericParagraphBreakBookmark`: implemented on iOS by creating a generic
+  bookmark with the reserved paragraph-break label.
+- `memorize`: validated no-op deferred to #50 because Android parity depends on
+  native memorization/progress state that iOS does not have yet.
 
-Why this is still a gap:
+Why this is no longer fuzzy:
 
-- These flows do not currently have a complete native iOS implementation, so
-  the bridge preserves the method surface without claiming feature parity.
+- Paragraph-break actions now mutate native bookmark state and preserve the
+  shared method surface used by the frontend.
+- Memorization remains visible in the bridge inventory as deferred work rather
+  than an accidental silent no-op.
 
 ## 4. Fullscreen and compare are handled through iOS-native presentation paths
 

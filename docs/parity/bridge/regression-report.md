@@ -13,8 +13,9 @@ covers:
 - known malformed bridge message classification for positional JS-to-native
   dispatch
 - representative Swift bridge payload key shapes consumed by `bibleview-js`
+- paragraph-break bookmark persistence for the former no-op bridge actions
 - local Android bridge surface comparison
-- machine-readable gap inventory for Android-only and iOS no-op bridge methods
+- machine-readable gap inventory for Android-only and iOS no-op/former no-op bridge methods
 - pasteable bridge inventory summaries for parity issues and PR validation notes
 
 Contract reference:
@@ -49,6 +50,8 @@ Related domain references:
 - `AndBibleTests/testBookmarkServiceClearingBibleBookmarkNoteDeletesPersistedNoteRow`
 - `AndBibleTests/testBookmarkServiceClearingBibleBookmarkNoteRemovesBookmarkFromMyNotesQuery`
 - `AndBibleTests/testBookmarkServiceUpdatingBibleBookmarkNoteReusesPersistedNoteRow`
+- `AndBibleTests/testBookmarkServiceCreatesParagraphBreakBibleBookmark`
+- `AndBibleTests/testBookmarkServiceCreatesParagraphBreakGenericBookmark`
 - `AndBibleTests/testBridgeCallIdRequestMappingMatchesWebClientContract`
 - `AndBibleTests/testBridgeCallIdDispatchClassifiesKnownMalformedMessages`
 - `AndBibleTests/testBridgeMessageDispatchClassifiesKnownMalformedMessages`
@@ -97,6 +100,8 @@ Related domain references:
 - `shareBookmarkVerse` follows the web-client contract and accepts a bookmark ID string rather
   than an invented bookmark dictionary payload
 - intentionally supported no-argument branches such as `helpBookmarks` remain handled
+- paragraph-break bridge actions validate required arguments before creating native bookmarks
+- `memorize` remains handled only for valid positional arguments while its native feature scope is deferred
 
 ### Payload shapes
 
@@ -109,7 +114,7 @@ Focused bridge-adjacent validation passed on 2026-03-16, but the original UI res
 because four UI tests from that report no longer exist in `AndBibleUITests`. The current rerunnable
 named subset in this report is:
 
-- Unit: `11` tests
+- Unit: `13` tests
 - UI: `1` test
 
 This doc refresh reran the focused bridge dispatcher/callId/payload subset locally, but did not
@@ -119,6 +124,7 @@ evidence. The checked-in named subset gives the bridge domain rerunnable evidenc
 - service-layer note persistence
 - StudyPad document handoff
 - bookmark-note persistence feeding those embedded surfaces
+- paragraph-break bookmark persistence using the reserved system label
 - async `callId` request/response transport for representative content expansion and native
   reference workflows
 - malformed known-message classification for positional JS-to-native dispatch
@@ -136,8 +142,8 @@ The pieces that still need tighter protection are:
 - full current Android bridge breadth beyond the shared iOS subset (`88` Android
   methods versus `62` iOS-bundled methods in
   `bibleview-js/src/composables/android.ts`)
-- the tracked bridge gap inventory: 26 missing Android methods plus 3 iOS no-op methods that
-  still need implementation or explicit product divergence
+- the tracked bridge gap inventory: 26 missing Android methods plus 3 former no-op method
+  dispositions; no current iOS no-op method remains in "needs decision" status
 - raw `window.android.*` compatibility-shim behavior on a per-method basis
 - Strong's sheet bridge coverage, especially the dedicated `contentType: "strongs"` route
 - fullscreen, compare, help, and full reference-dialog UI workflows

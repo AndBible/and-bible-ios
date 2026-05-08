@@ -6,7 +6,7 @@ the Vue.js client and native iOS code.
 ## Reading Order
 
 1. [contract.md](contract.md): bridge contract and message/event expectations
-2. [dispositions.md](dispositions.md): explicit iOS adaptations and no-op branches
+2. [dispositions.md](dispositions.md): explicit iOS adaptations and no-op dispositions
 3. [verification-matrix.md](verification-matrix.md): current status by bridge contract area
 4. [regression-report.md](regression-report.md): focused bridge-adjacent validation evidence
 5. [guardrails.md](guardrails.md): maintenance rules for high-risk bridge changes
@@ -14,7 +14,7 @@ the Vue.js client and native iOS code.
 Machine-readable tracking:
 
 - [baselines/android-bridge-gap-inventory.json](baselines/android-bridge-gap-inventory.json):
-  Android bridge methods and iOS no-op methods that are not true parity yet
+  Android bridge methods plus iOS no-op and former no-op dispositions
 
 Recurring alignment check:
 

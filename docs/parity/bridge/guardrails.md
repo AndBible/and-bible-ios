@@ -48,12 +48,15 @@ rules explicit for changes in:
    synchronous answer. Replacing it with an async-only path is a behavioral
    contract break.
 
-5. Treat documented no-op methods as stable surface, not dead code.
+5. Treat documented no-op and former no-op methods as stable surface, not dead code.
 
-   Current no-op branches such as `memorize`,
-   `addParagraphBreakBookmark`, and `addGenericParagraphBreakBookmark` remain
-   part of the contract because the shared frontend still knows about them.
-   Removing them requires coordinated contract work, not opportunistic cleanup.
+   `memorize`, `addParagraphBreakBookmark`, and
+   `addGenericParagraphBreakBookmark` remain part of the contract because the
+   shared frontend still knows about them. Paragraph-break actions now create
+   native bookmarks with the reserved paragraph-break label; `memorize` remains
+   a validated deferred no-op linked to the memorization parity issue. Removing
+   or weakening these branches requires coordinated contract work, not
+   opportunistic cleanup.
 
 6. Do not change `BridgeTypes.swift` payload keys casually.
 
@@ -127,7 +130,8 @@ summary that can be pasted into an issue or PR. That summary should show:
 - tracked Android-only methods
 - new Android-only methods
 - stale inventory entries
-- iOS no-op methods that still need a disposition decision
+- iOS no-op and former no-op method dispositions, including any methods that
+  still need a disposition decision
 
 Run the Android-backed check when:
 
