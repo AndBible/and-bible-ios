@@ -30,9 +30,9 @@ trust than proof.
 
 ## Summary
 
-- `Pass`: 5
+- `Pass`: 7
 - `Adapted Pass`: 1
-- `Partial`: 4
+- `Partial`: 2
 
 ## Matrix
 
@@ -44,7 +44,7 @@ trust than proof.
 | Workspace selection and switching remain coordinated by the reader shell | `BibleReaderView.swift`, `WorkspaceSelectorView.swift`, `WindowManager`; UI test `testWorkspaceSelectorCreateAndSwitchFlow` | Pass | The current check is doing useful work here: it covers creation, activation, and a clean return to the reader shell, not just low-level persistence. |
 | Restored reading position avoids stale verse highlighting while explicit verse navigation preserves its target highlight | `BibleReaderController.swift`; unit tests `testLoadCurrentContentDoesNotHighlightRestoredReadingPosition`, `testLoadCurrentContentHighlightsExplicitVerseNavigationTarget` | Pass | This is a small detail, but it is a very visible one when it breaks, so it is good to have it locked at the payload-emission layer. |
 | Strong's / dictionary modal uses the dedicated Strong's document path with per-dictionary tabs and recursive in-modal navigation | `BibleReaderController.buildStrongsMultiDocJSON()`, `StrongsSheetView.swift`, `DocumentBroker.vue`, `StrongsDocument.vue`, `TabNavigation.vue` | Partial | The richer modal path is there now and it feels much better, but we are still leaning on implementation confidence more than focused regression coverage for this surface. |
-| Horizontal swipe modes and auto-fullscreen thresholds are implemented natively | `WebViewCoordinator.swift` native swipe/scroll callbacks; `BibleReaderView.handleNativeHorizontalSwipe(_:)` and auto-fullscreen tracking in `BibleReaderView` | Partial | The code paths exist, but we still do not have the kind of focused regression that would make this feel safely locked. |
-| Double-tap fullscreen remains owned by the native reader shell | `BibleReaderController.handleToggleFullscreen()` and `BibleReaderView` fullscreen state/overlay ownership; documented in `dispositions.md` | Partial | The ownership story is clear, but the dedicated regression story is not there yet. |
+| Horizontal swipe modes and auto-fullscreen thresholds are implemented natively | `WebViewCoordinator.swift` native swipe/scroll callbacks; `BibleReaderView.handleHorizontalSwipe(...)`; `BibleReaderInteractionPolicies.swift`; unit tests `testReaderHorizontalSwipePolicyMapsConfiguredModes`, `testAutoFullscreenPolicyAccumulatesThresholdByDirection`, `testAutoFullscreenPolicyHonorsDisabledAndDoubleTapLock` | Pass | The gesture callbacks still stay native, while the decision logic is now covered at the policy layer instead of depending on flaky web-view gesture timing. |
+| Double-tap fullscreen remains owned by the native reader shell | `BibleBridge.dispatchMessage(method:args:)`, `BibleReaderController.bridgeDidRequestToggleFullScreen(...)`, `BibleReaderView` fullscreen state/overlay ownership; unit test `testDoubleTapFullscreenPreferenceGateControlsNativeToggleRequest`; documented in `dispositions.md` | Pass | The bridge path now has focused coverage proving the `double_tap_to_fullscreen` preference gate is honored before native fullscreen state changes. |
 | Compare requests are presented through native iOS sheet flow | `BibleReaderController.compareSelection()`, `BibleReaderController.bridge(_:compareVerses:startOrdinal:endOrdinal:)`, `BibleReaderView.showCompare`, `presentCompareView(...)`; documented in `dispositions.md` | Partial | The entry points are in place, but this is still one of the places where a future regression could slip through unless we add a focused workflow check. |
 | Reader config pushes active-window and display state into the embedded client | `BibleReaderController.buildConfigJSON()`, `BibleReaderController.updateConfig()`, `BibleReaderView.updateDisplaySettings(...)`; unit tests `testReaderConfigPayloadIncludesDisplaySettingsAndActiveWindowState`, `testReaderConfigPayloadMarksInactiveWindowWithoutActiveIndicator` | Pass | Focused payload-level coverage now locks the config/appSettings key shape, representative display settings, app preference values, workspace label state, and active/inactive window indicator behavior. |

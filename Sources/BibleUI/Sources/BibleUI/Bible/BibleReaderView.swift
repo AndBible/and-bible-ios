@@ -333,11 +333,8 @@ public struct BibleReaderView: View {
     /// Tracks whether fullscreen was last entered by the double-tap gesture instead of scrolling.
     @State private var lastFullScreenByDoubleTap = false
 
-    /// Cached scroll direction used to accumulate auto-fullscreen distance per direction.
-    @State private var autoFullscreenDirectionDown: Bool?
-
-    /// Accumulated user scroll distance toward the auto-fullscreen threshold.
-    @State private var autoFullscreenDistance: Double = 0
+    /// Accumulated user scroll state toward the auto-fullscreen threshold.
+    @State private var autoFullscreenTracking = ReaderAutoFullscreenTracking()
 
     /// Initial query forwarded into `SearchView`, usually from Strong's lookups.
     @State private var searchInitialQuery = ""
@@ -357,9 +354,6 @@ public struct BibleReaderView: View {
     /// Motion-driven scroll helper used when tilt-to-scroll is enabled for the workspace.
     @State private var tiltScrollService = TiltScrollService()
     #endif
-
-    /// Minimum cumulative scroll distance before auto-fullscreen toggles the reader chrome.
-    private let autoFullscreenScrollThreshold: Double = 56.0
 
     /**
      The focused window's controller resolved from `WindowManager`'s single source of truth.
@@ -2378,8 +2372,7 @@ public struct BibleReaderView: View {
 
     /// Clears accumulated scroll-direction state for auto-fullscreen tracking.
     private func resetAutoFullscreenTracking() {
-        autoFullscreenDirectionDown = nil
-        autoFullscreenDistance = 0
+        autoFullscreenTracking.reset()
     }
 
     /**
@@ -2396,30 +2389,21 @@ public struct BibleReaderView: View {
      */
     private func handleAutoFullscreenScroll(from window: Window, deltaY: Double) {
         guard windowManager.activeWindow?.id == window.id else { return }
-        guard autoFullscreenPref else {
-            resetAutoFullscreenTracking()
-            return
-        }
-        guard deltaY != 0 else { return }
+        let action = ReaderAutoFullscreenPolicy.action(
+            deltaY: deltaY,
+            isEnabled: autoFullscreenPref,
+            isFullScreen: isFullScreen,
+            fullscreenLockedByDoubleTap: lastFullScreenByDoubleTap,
+            tracking: &autoFullscreenTracking
+        )
 
-        let isDirectionDown = deltaY > 0
-        if autoFullscreenDirectionDown != isDirectionDown {
-            autoFullscreenDirectionDown = isDirectionDown
-            autoFullscreenDistance = 0
-        }
-
-        autoFullscreenDistance += abs(deltaY)
-        guard autoFullscreenDistance >= autoFullscreenScrollThreshold else { return }
-        autoFullscreenDistance = 0
-
-        // Match Android: when fullscreen was entered by double-tap, scrolling
-        // should not auto-toggle fullscreen until fullscreen has been exited.
-        guard !lastFullScreenByDoubleTap else { return }
-
-        if !isFullScreen && isDirectionDown {
+        switch action {
+        case .enterFullscreen:
             withAnimation(.easeInOut(duration: 0.2)) { isFullScreen = true }
-        } else if isFullScreen && !isDirectionDown {
+        case .exitFullscreen:
             withAnimation(.easeInOut(duration: 0.2)) { isFullScreen = false }
+        case .none:
+            break
         }
     }
 
@@ -2438,21 +2422,19 @@ public struct BibleReaderView: View {
     private func handleHorizontalSwipe(from window: Window, direction: NativeHorizontalSwipeDirection) {
         guard windowManager.activeWindow?.id == window.id else { return }
         guard let ctrl = windowManager.controllers[window.id] as? BibleReaderController else { return }
-        guard !ctrl.hasActiveSelection else { return }
-
-        switch BibleSwipeMode(rawValue: bibleViewSwipeMode) ?? .chapter {
-        case .chapter:
-            if direction == .left {
-                ctrl.navigateNext()
-            } else {
-                ctrl.navigatePrevious()
-            }
-        case .page:
-            if direction == .left {
-                ctrl.scrollPageDown()
-            } else {
-                ctrl.scrollPageUp()
-            }
+        switch ReaderHorizontalSwipePolicy.action(
+            modeRawValue: bibleViewSwipeMode,
+            direction: direction,
+            hasActiveSelection: ctrl.hasActiveSelection
+        ) {
+        case .navigateNextChapter:
+            ctrl.navigateNext()
+        case .navigatePreviousChapter:
+            ctrl.navigatePrevious()
+        case .scrollPageDown:
+            ctrl.scrollPageDown()
+        case .scrollPageUp:
+            ctrl.scrollPageUp()
         case .none:
             return
         }
@@ -2543,18 +2525,6 @@ enum StrongsMode: Int, CaseIterable, Identifiable {
         case .hidden: String(localized: "strongs_hidden")
         }
     }
-}
-
-/// Horizontal swipe modes for Bible panes, mirroring the Android preference values.
-private enum BibleSwipeMode: String {
-    /// Swiping left or right changes chapter.
-    case chapter = "CHAPTER"
-
-    /// Swiping left or right scrolls by page height within the current document.
-    case page = "PAGE"
-
-    /// Horizontal swipe gestures are ignored.
-    case none = "NONE"
 }
 
 /// Gesture mappings for the Bible and commentary toolbar buttons.

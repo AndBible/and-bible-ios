@@ -1,14 +1,15 @@
 # Parity Status Overview
 
-Date: 2026-05-06
+Date: 2026-05-08
 
 ## Purpose
 
 This is the quickest way to get oriented on Android parity in
 `and-bible-ios`.
 
-If you are touching a parity-sensitive area, this file should help you answer
-four questions without having to reconstruct repo history first:
+Start with [android-parity-contract.md](android-parity-contract.md) for the
+global functional, visual, and architecture standard. Then use this file to
+answer four questions without having to reconstruct repo history first:
 
 1. what domains are formally documented
 2. what their current parity posture is
@@ -28,8 +29,8 @@ give you the fuller human context behind it.
 | [bookmarks](bookmarks/README.md) | Strong bookmark-list coverage, thinner note-document UI coverage: `4 Pass`, `2 Adapted Pass`, `3 Partial` | Focused bookmark UI workflows plus note-persistence unit regressions | Generic-bookmark visible workflows, My Notes visible note mutation, and broader StudyPad mutation breadth |
 | [search](search/README.md) | Strong semantic coverage: `5 Pass`, `2 Adapted Pass`, `1 Partial` | Focused search UI workflows plus Strong's unit regressions | Multi-translation search still lacks focused regression coverage |
 | [reading-plans](reading-plans/README.md) | Strong sync and progression coverage: `5 Pass`, `1 Adapted Pass`, `3 Partial` | Focused daily-reading UI coverage plus restore/upload/patch unit coverage | Custom plan import, reading-plan list/start/import breadth, and additive iOS-only plan lifecycle coverage |
-| [reader](reader/README.md) | Reader shell/menu parity is stronger, but deeper gesture/modal/config branches remain partial: `4 Pass`, `1 Adapted Pass`, `5 Partial` | Focused reader-shell UI coverage, restored-position unit regressions, and full local UI validation | Strong's modal, fullscreen, swipe-mode, compare, and config-bridge coverage still need tighter focused regression locking |
-| [bridge](bridge/README.md) | StudyPad handoff and shared iOS bridge subset are present; full Android bridge breadth remains partial: `1 Pass`, `1 Adapted Pass`, `6 Partial` | Focused StudyPad handoff, note-persistence regressions, bridge guardrails, machine-readable gap inventory, and local Android-backed drift checking | Visible My Notes lifecycle coverage, Android-only bridge method breadth, payloads, and async `callId` flows |
+| [reader](reader/README.md) | Reader shell/menu parity is stronger, with remaining gaps concentrated in modal/workflow branches: `7 Pass`, `1 Adapted Pass`, `2 Partial` | Focused reader-shell UI coverage, restored-position/config-payload/gesture-policy unit regressions, and full local UI validation | Strong's modal and compare coverage still need tighter focused regression locking |
+| [bridge](bridge/README.md) | StudyPad handoff, async `callId` flows, and shared iOS bridge subset are present; full Android bridge breadth remains partial: `2 Pass`, `1 Adapted Pass`, `5 Partial` | Focused StudyPad handoff, async `callId`, note-persistence regressions, bridge guardrails, machine-readable gap inventory, and local Android-backed drift checking | Visible My Notes lifecycle coverage, Android-only bridge method breadth, delegate branch coverage, and payload-schema breadth |
 
 ## How To Read Each Domain
 
@@ -103,6 +104,8 @@ This repo is no longer in a "parity planning only" state.
 
 It now has:
 
+- a top-level Android parity contract for functional, visual, and architecture
+  expectations
 - a documented parity contract for every current domain
 - explicit iOS adaptations for every current domain
 - a verification snapshot for every current domain
@@ -119,7 +122,8 @@ every domain. That is deliberate for now. The current posture is:
 - strong bookmark-list evidence in `bookmarks`, with visible My Notes and broader
   StudyPad mutation still partial
 - meaningful but still partial protection in `reader` and `bridge` where the
-  remaining gaps are mostly boundary and protocol behaviors
+  remaining gaps are mostly focused workflow coverage, Android-only breadth, and
+  payload-schema breadth
 
 That means the docs matter. In some areas they are still the clearest way to
 understand not just what the app does, but why we are treating a behavior as
@@ -129,13 +133,15 @@ understand not just what the app does, but why we are treating a behavior as
 
 When you are changing a parity-sensitive area:
 
-1. start with this overview
-2. open the target domain `README.md`
-3. read `contract.md` and `dispositions.md`
-4. check `verification-matrix.md` for current status
-5. use `regression-report.md` and `guardrails.md` to choose the validation bar
+1. start with [android-parity-contract.md](android-parity-contract.md)
+2. use this overview to find the target domain
+3. open the target domain `README.md`
+4. read `contract.md` and `dispositions.md`
+5. check `verification-matrix.md` for current status
+6. use `regression-report.md` and `guardrails.md` to choose the validation bar
 
 If a change meaningfully shifts the parity story, update both:
 
 - the domain docs
 - this overview
+- the global contract when the standard itself changes

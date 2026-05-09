@@ -12,6 +12,9 @@ This is the current validation snapshot for the reader surface. It covers:
 - workspace selector create/switch flow from the reader shell
 - restored-position highlight behavior in the emitted reader payload
 - reader config/appSettings payload construction for embedded-client display and active-window state
+- double-tap fullscreen preference gating
+- horizontal swipe-mode dispatch policy
+- auto-fullscreen scroll-threshold policy
 
 Contract reference:
 
@@ -36,6 +39,7 @@ Related domain references:
   - reader-relevant workflow assertions exercised within that suite
   - reader-adjacent unit regressions for payload-level restore/highlight behavior
   - focused reader/controller payload subset on `test/reader-config-payload-coverage`
+  - focused reader gesture/fullscreen policy subset on `test/reader-fullscreen-swipe-coverage`
 
 ## Tests Executed
 
@@ -45,6 +49,10 @@ Related domain references:
 - `AndBibleTests/testLoadCurrentContentHighlightsExplicitVerseNavigationTarget`
 - `AndBibleTests/testReaderConfigPayloadIncludesDisplaySettingsAndActiveWindowState`
 - `AndBibleTests/testReaderConfigPayloadMarksInactiveWindowWithoutActiveIndicator`
+- `AndBibleTests/testDoubleTapFullscreenPreferenceGateControlsNativeToggleRequest`
+- `AndBibleTests/testReaderHorizontalSwipePolicyMapsConfiguredModes`
+- `AndBibleTests/testAutoFullscreenPolicyAccumulatesThresholdByDirection`
+- `AndBibleTests/testAutoFullscreenPolicyHonorsDisabledAndDoubleTapLock`
 
 ### UI
 
@@ -92,7 +100,31 @@ Related domain references:
 - active windows with multiple visible panes emit `hasActiveIndicator: true`; inactive panes emit
   both `activeWindow: false` and `hasActiveIndicator: false`
 
+### Fullscreen and swipe behavior
+
+- embedded-client `toggleFullScreen` bridge messages honor the
+  `double_tap_to_fullscreen` preference before invoking the native fullscreen
+  toggle callback
+- `CHAPTER`, `PAGE`, and `NONE` horizontal swipe modes resolve to the expected
+  native navigation, page-scroll, or no-op action
+- active text selection suppresses horizontal swipe actions
+- auto-fullscreen scroll deltas accumulate by direction, reset on direction
+  changes, enter/exit fullscreen only after the threshold, reset when disabled,
+  and do not auto-toggle when fullscreen was entered by double tap
+
 ## Current Result
+
+Latest full non-UI XCTest validation passed on 2026-05-08:
+
+- `AndBibleTests`: `206/206`
+- command: `xcodebuild test -project AndBible.xcodeproj -scheme AndBible -destination 'platform=iOS Simulator,id=73679934-67DF-45BE-AEAC-186E2396213C' CODE_SIGNING_ALLOWED=NO -only-testing:AndBibleTests`
+- result bundle: `~/Library/Developer/Xcode/DerivedData/AndBible-fxmuikolbspefdbpaozhvagfvbdj/Logs/Test/Test-AndBible-2026.05.08_18-10-34--0400.xcresult`
+
+Latest focused reader gesture/fullscreen validation passed on 2026-05-08:
+
+- focused issue #40 subset: `4/4`
+- command: `xcodebuild test -project AndBible.xcodeproj -scheme AndBible -destination 'platform=iOS Simulator,id=73679934-67DF-45BE-AEAC-186E2396213C' CODE_SIGNING_ALLOWED=NO -only-testing:AndBibleTests/AndBibleTests/testDoubleTapFullscreenPreferenceGateControlsNativeToggleRequest -only-testing:AndBibleTests/AndBibleTests/testReaderHorizontalSwipePolicyMapsConfiguredModes -only-testing:AndBibleTests/AndBibleTests/testAutoFullscreenPolicyAccumulatesThresholdByDirection -only-testing:AndBibleTests/AndBibleTests/testAutoFullscreenPolicyHonorsDisabledAndDoubleTapLock`
+- result bundle: `~/Library/Developer/Xcode/DerivedData/AndBible-fxmuikolbspefdbpaozhvagfvbdj/Logs/Test/Test-AndBible-2026.05.08_18-08-54--0400.xcresult`
 
 Latest focused reader/controller validation passed on 2026-05-08:
 
@@ -115,6 +147,9 @@ Taken together, this gives the reader domain current regression evidence for:
 - workspace selector create/switch handoff
 - payload-level restore/highlight behavior
 - payload-level config/appSettings propagation into the embedded document client
+- double-tap fullscreen preference gating
+- horizontal swipe-mode dispatch policy
+- auto-fullscreen threshold and lockout policy
 
 That is a much healthier place than the branch was in earlier. The remaining
 reader risk is no longer the basic shell/menu flow; it is the deeper behavior
@@ -126,8 +161,6 @@ The reader shell baseline is in much better shape now. The parts that still
 need tighter protection are:
 
 - dedicated Strong's / dictionary modal regression coverage
-- swipe-mode and auto-fullscreen behavior
-- double-tap fullscreen behavior
 - compare presentation workflows
 
 Those areas are implemented and documented, but they are not yet locked by
