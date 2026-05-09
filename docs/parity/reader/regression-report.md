@@ -118,13 +118,11 @@ Latest full non-UI XCTest validation passed on 2026-05-08:
 
 - `AndBibleTests`: `206/206`
 - command: `xcodebuild test -project AndBible.xcodeproj -scheme AndBible -destination 'platform=iOS Simulator,id=73679934-67DF-45BE-AEAC-186E2396213C' CODE_SIGNING_ALLOWED=NO -only-testing:AndBibleTests`
-- result bundle: `~/Library/Developer/Xcode/DerivedData/AndBible-fxmuikolbspefdbpaozhvagfvbdj/Logs/Test/Test-AndBible-2026.05.08_18-10-34--0400.xcresult`
 
 Latest focused reader gesture/fullscreen validation passed on 2026-05-08:
 
 - focused issue #40 subset: `4/4`
 - command: `xcodebuild test -project AndBible.xcodeproj -scheme AndBible -destination 'platform=iOS Simulator,id=73679934-67DF-45BE-AEAC-186E2396213C' CODE_SIGNING_ALLOWED=NO -only-testing:AndBibleTests/AndBibleTests/testDoubleTapFullscreenPreferenceGateControlsNativeToggleRequest -only-testing:AndBibleTests/AndBibleTests/testReaderHorizontalSwipePolicyMapsConfiguredModes -only-testing:AndBibleTests/AndBibleTests/testAutoFullscreenPolicyAccumulatesThresholdByDirection -only-testing:AndBibleTests/AndBibleTests/testAutoFullscreenPolicyHonorsDisabledAndDoubleTapLock`
-- result bundle: `~/Library/Developer/Xcode/DerivedData/AndBible-fxmuikolbspefdbpaozhvagfvbdj/Logs/Test/Test-AndBible-2026.05.08_18-08-54--0400.xcresult`
 
 Latest focused reader/controller validation passed on 2026-05-08:
 

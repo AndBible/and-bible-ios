@@ -3,7 +3,7 @@
 import BibleView
 
 /// Horizontal swipe modes for Bible panes, mirroring the Android preference values.
-enum BibleSwipeMode: String {
+private enum BibleSwipeMode: String {
     /// Swiping left or right changes chapter.
     case chapter = "CHAPTER"
 
