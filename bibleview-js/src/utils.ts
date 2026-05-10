@@ -446,6 +446,57 @@ export function navigateLink(url: string) {
     }
 }
 
+const routedAnchorSchemes = new Set([
+    "http",
+    "https",
+    "osis",
+    "multi",
+    "ab-w",
+    "ab-find-all",
+    "sword",
+    "strongs",
+    "morphology",
+    "my-notes",
+    "journal",
+    "download",
+    "ab-error",
+    "epub-ref",
+]);
+
+function routedAnchorHref(href: string): boolean {
+    if (!href || href.startsWith("#")) {
+        return false;
+    }
+
+    try {
+        const url = new URL(href, window.location.href);
+        return routedAnchorSchemes.has(url.protocol.replace(/:$/, "").toLowerCase());
+    } catch {
+        return false;
+    }
+}
+
+export function handleAnchorNavigation(event: MouseEvent): boolean {
+    if (event.defaultPrevented) {
+        return false;
+    }
+
+    const target = event.target as Element | null;
+    const link = target?.closest?.("a[href]") as HTMLAnchorElement | null;
+    const href = link?.getAttribute("href");
+    if (!href || !routedAnchorHref(href)) {
+        return false;
+    }
+
+    event.preventDefault();
+    navigateLink(href);
+    return true;
+}
+
+export function installGlobalAnchorNavigationHandler() {
+    document.addEventListener("click", handleAnchorNavigation);
+}
+
 export function draggableElement(element: HTMLElement, dragHandle: HTMLElement) {
     let pos1 = 0, pos2 = 0, pos3 = 0, pos4 = 0;
 

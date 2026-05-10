@@ -108,15 +108,32 @@ public final class ReadingPlanService {
      Returns a dictionary mapping 1-based day number to the readings string.
      */
     private static func loadPropertiesPlan(code: String) -> [Int: String]? {
-        guard let url = Bundle.module.url(
+        guard let url = moduleResourceURL(
             forResource: code,
             withExtension: "properties",
-            subdirectory: "Resources/readingplan"
+            subdirectories: ["readingplan", "Resources/readingplan"]
         ) else { return nil }
 
         guard let contents = try? String(contentsOf: url, encoding: .utf8) else { return nil }
 
         return parseProperties(contents)
+    }
+
+    private static func moduleResourceURL(
+        forResource name: String,
+        withExtension ext: String,
+        subdirectories: [String?]
+    ) -> URL? {
+        for subdirectory in subdirectories {
+            if let url = Bundle.module.url(
+                forResource: name,
+                withExtension: ext,
+                subdirectory: subdirectory
+            ) {
+                return url
+            }
+        }
+        return nil
     }
 
     /**

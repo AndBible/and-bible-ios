@@ -344,17 +344,17 @@ extension BibleWebView {
     /// Loads the packaged Vue.js bundle, falling back to the placeholder page in development.
     private func loadBibleViewBundle(into webView: WKWebView) {
         // Look for the Vue.js built bundle first (bibleview-js/index.html)
-        if let bundleURL = Bundle.module.url(
+        if let bundleURL = Self.moduleResourceURL(
             forResource: "index",
             withExtension: "html",
-            subdirectory: "Resources/bibleview-js"
+            subdirectories: ["bibleview-js", "Resources/bibleview-js"]
         ) {
             let bundleDir = bundleURL.deletingLastPathComponent()
             webView.loadFileURL(bundleURL, allowingReadAccessTo: bundleDir)
-        } else if let bundleURL = Bundle.module.url(
+        } else if let bundleURL = Self.moduleResourceURL(
             forResource: "index",
             withExtension: "html",
-            subdirectory: "Resources"
+            subdirectories: [nil, "Resources"]
         ) {
             // Fallback to placeholder
             let bundleDir = bundleURL.deletingLastPathComponent()
@@ -367,5 +367,22 @@ extension BibleWebView {
                 </body></html>
             """, baseURL: nil)
         }
+    }
+
+    private static func moduleResourceURL(
+        forResource name: String,
+        withExtension ext: String,
+        subdirectories: [String?]
+    ) -> URL? {
+        for subdirectory in subdirectories {
+            if let url = Bundle.module.url(
+                forResource: name,
+                withExtension: ext,
+                subdirectory: subdirectory
+            ) {
+                return url
+            }
+        }
+        return nil
     }
 }

@@ -49,9 +49,9 @@ public class WebViewCoordinator: NSObject, WKNavigationDelegate {
      Intercepts app-internal links and forwards them to the native bridge delegate.
 
      Local `file://` navigation is allowed so the packaged Vue.js bundle can load assets.
-     `osis://`, `multi://`, `ab-w://`, `ab-find-all://`, and standard HTTP(S) links are routed
-     back to native code so `BibleReaderController` can decide whether to navigate internally,
-     open a Strong's sheet, or hand off to the system browser.
+     App-internal custom schemes and standard HTTP(S) links are routed back to native code so
+     `BibleReaderController` can decide whether to navigate internally, open a Strong's sheet,
+     present downloads, or hand off to the system browser.
      */
     public func webView(
         _ webView: WKWebView,
@@ -62,23 +62,8 @@ public class WebViewCoordinator: NSObject, WKNavigationDelegate {
         if let url = navigationAction.request.url {
             if url.isFileURL {
                 decisionHandler(.allow)
-            } else if url.scheme == "osis" || url.scheme == "multi" {
-                // Cross-reference links: osis://?osis=Matt.1.1&v11n=KJV
-                bridge.delegate?.bridge(bridge, openExternalLink: url.absoluteString)
-                decisionHandler(.cancel)
-            } else if url.scheme == "ab-w" {
-                // ab-w:// links from raw HTML <a> tags (e.g. linkified Strong's refs).
-                // Vue.js components use navigateLink() → postMessage, but raw <a href>
-                // tags in v-html content trigger navigation directly.
-                logger.info("decidePolicyFor: intercepted ab-w:// navigation: \(url.absoluteString)")
-                bridge.delegate?.bridge(bridge, openExternalLink: url.absoluteString)
-                decisionHandler(.cancel)
-            } else if url.scheme == "ab-find-all" {
-                // "Find all occurrences" links from FeaturesLink.vue
-                bridge.delegate?.bridge(bridge, openExternalLink: url.absoluteString)
-                decisionHandler(.cancel)
-            } else if url.scheme == "https" || url.scheme == "http" {
-                // External links through bridge delegate
+            } else if Self.routedScheme(url.scheme) {
+                logger.info("decidePolicyFor: intercepted app link navigation: \(url.absoluteString)")
                 bridge.delegate?.bridge(bridge, openExternalLink: url.absoluteString)
                 decisionHandler(.cancel)
             } else {
@@ -87,6 +72,26 @@ public class WebViewCoordinator: NSObject, WKNavigationDelegate {
         } else {
             decisionHandler(.allow)
         }
+    }
+
+    private static func routedScheme(_ scheme: String?) -> Bool {
+        guard let scheme = scheme?.lowercased() else { return false }
+        return [
+            "http",
+            "https",
+            "osis",
+            "multi",
+            "ab-w",
+            "ab-find-all",
+            "sword",
+            "strongs",
+            "morphology",
+            "my-notes",
+            "journal",
+            "download",
+            "ab-error",
+            "epub-ref"
+        ].contains(scheme)
     }
 
     /// Logs a provisional-navigation failure before the page finishes loading.

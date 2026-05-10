@@ -27,12 +27,12 @@
       <div v-if="showDragHandle" class="drag-handle journal-button" @touchstart="dragStart" @touchend="dragEnd">
         <FontAwesomeIcon icon="sort"/>
       </div>
-      <div class="journal-button">
+      <div class="journal-button" role="button" tabindex="0" :aria-label="menuLabel" :title="menuLabel">
         <FontAwesomeIcon icon="ellipsis-h"/>
       </div>
     </div>
     <slot v-if="!expanded" name="menubutton">
-      <div class="journal-button">
+      <div class="journal-button" role="button" tabindex="0" :aria-label="menuLabel" :title="menuLabel">
         <FontAwesomeIcon icon="ellipsis-h"/>
       </div>
     </slot>
@@ -45,18 +45,19 @@ let cancel = () => {}
 
 <script lang="ts" setup>
 import {FontAwesomeIcon} from "@fortawesome/vue-fontawesome";
-import {inject, ref, watch} from "vue";
+import {computed, inject, ref, watch} from "vue";
 import {useCommon} from "@/composables";
 import {eventBus} from "@/eventbus";
 import {androidKey} from "@/types/constants";
 
 const props = withDefaults(
-    defineProps<{ showDragHandle?: boolean, handleTouch?: boolean }>(),
+    defineProps<{ showDragHandle?: boolean, handleTouch?: boolean, menuLabel?: string }>(),
     {showDragHandle: false, handleTouch: false}
 )
 
 const android = inject(androidKey)!;
 const {strings} = useCommon();
+const menuLabel = computed(() => props.menuLabel || strings.more);
 const expanded = ref(false);
 const element = ref(null);
 

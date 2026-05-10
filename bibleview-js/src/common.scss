@@ -52,6 +52,13 @@
   }
 }
 
+button.journal-button {
+  background: transparent;
+  border: 0;
+  font: inherit;
+  line-height: inherit;
+}
+
 .note-container {
   min-height: 2em;
   position: relative;

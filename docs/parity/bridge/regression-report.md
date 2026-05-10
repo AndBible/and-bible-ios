@@ -1,6 +1,6 @@
 # BRIDGE-702 Regression Report
 
-Date: 2026-05-07
+Date: 2026-05-10
 
 ## Scope
 
@@ -8,6 +8,7 @@ This is the current validation snapshot for the bridge-adjacent surface. It
 covers:
 
 - StudyPad document handoff from a real bookmark workflow
+- visible My Notes note update/delete from the production reader path
 - the native persistence paths that support those embedded note surfaces
 - representative async `callId` request/response bridge flows
 - known malformed bridge message classification for positional JS-to-native
@@ -64,13 +65,14 @@ Related domain references:
 ### UI
 
 - `AndBibleUITests/testBookmarkListOpensStudyPadForSelectedLabel`
+- `AndBibleUITests/testMyNotesNoteUpdateAndDeletePersistsFromVisibleWorkflow`
 
 ## What This Validation Actually Covers
 
 ### Embedded note surfaces
 
 - service-layer note persistence still feeds the embedded My Notes data model
-- visible My Notes note update/delete workflows no longer have focused UI coverage
+- visible My Notes note update/delete is covered through the production reader My Notes path
 
 ### StudyPad handoff
 
@@ -115,7 +117,7 @@ because four UI tests from that report no longer exist in `AndBibleUITests`. The
 named subset in this report is:
 
 - Unit: `13` tests
-- UI: `1` test
+- UI: `2` tests
 
 This doc refresh reran the focused bridge dispatcher/callId/payload subset locally, but did not
 rerun the full bridge-adjacent simulator suite. Do not treat the old UI runtime/count as current
@@ -123,6 +125,7 @@ evidence. The checked-in named subset gives the bridge domain rerunnable evidenc
 
 - service-layer note persistence
 - StudyPad document handoff
+- visible My Notes update/delete and document rebuild from the reader-owned path
 - bookmark-note persistence feeding those embedded surfaces
 - paragraph-break bookmark persistence using the reserved system label
 - async `callId` request/response transport for representative content expansion and native
@@ -131,14 +134,13 @@ evidence. The checked-in named subset gives the bridge domain rerunnable evidenc
 - representative bridge payload key shapes for OSIS fragments, labels/styles, and selection query
 
 So the bridge story is not "everything is shaky." It is more specific than
-that: the StudyPad handoff and note persistence support are present, while the visible My Notes
-lifecycle and full valid delegate-call coverage still need more direct protection.
+that: the StudyPad handoff, visible My Notes lifecycle, and note persistence support are present,
+while full valid delegate-call coverage still needs more direct protection.
 
 ## What Is Still Not Well Locked Yet
 
 The pieces that still need tighter protection are:
 
-- visible My Notes open/update/delete workflows
 - full current Android bridge breadth beyond the shared iOS subset (`88` Android
   methods versus `62` iOS-bundled methods in
   `bibleview-js/src/composables/android.ts`)

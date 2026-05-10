@@ -383,6 +383,18 @@ public struct BibleReaderView: View {
         return focusedController
     }
 
+    /// Controller whose WebView is currently showing the visible My Notes document.
+    private var myNotesAccessibilityController: BibleReaderController? {
+        if let focusedController, focusedController.showingMyNotes {
+            return focusedController
+        }
+
+        _ = windowManager.controllerVersion
+        return windowManager.controllers.values
+            .compactMap { $0 as? BibleReaderController }
+            .first { $0.showingMyNotes }
+    }
+
     /// Captures the window that should own the next pane-scoped presentation.
     private func setPanePresentationTarget(_ windowId: UUID?) {
         panePresentationTargetWindowId = windowId ?? windowManager.activeWindow?.id
@@ -420,8 +432,11 @@ public struct BibleReaderView: View {
     /// Accessibility-exported state for the content most recently rendered in the active pane.
     private var readerRenderedContentStateValue: String {
         let windowToken = windowManager.activeWindow.map { "windowOrder=\($0.orderNumber)" } ?? "windowOrder=none"
-        let contentToken = focusedController?.renderedContentState
+        let exportController = myNotesAccessibilityController ?? focusedController
+        let contentToken = exportController?.renderedContentState
             ?? BibleReaderController.emptyRenderedContentState
+        let myNotesToken = exportController?.myNotesAccessibilityState
+            ?? "myNotesVisible=false;myNotesRevision=0;myNotesCount=0;myNotesRows=;myNotesNotes="
         let strongsMode = resolvedDisplaySettings(for: windowManager.activeWindow).strongsMode
             ?? TextDisplaySettings.appDefaults.strongsMode
             ?? 0
@@ -430,7 +445,7 @@ public struct BibleReaderView: View {
         let sheetToken = "readerSheet=\(activeReaderSheet?.rawValue ?? "none")"
         let modalToken = "readerModal=\(activeReaderModal?.rawValue ?? "none")"
         let searchToken = "searchVisible=\(showSearch ? "true" : "false")"
-        return "\(windowToken);\(contentToken);strongsMode=\(strongsMode);\(drawerToken);\(overflowToken);\(sheetToken);\(modalToken);\(searchToken)"
+        return "\(windowToken);\(contentToken);\(myNotesToken);strongsMode=\(strongsMode);\(drawerToken);\(overflowToken);\(sheetToken);\(modalToken);\(searchToken)"
     }
 
     /// Compact dedicated state export used by UI tests instead of snapshotting the full reader.

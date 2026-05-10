@@ -30,6 +30,7 @@ type Action = string |
 type PellSettings = {
     element: HTMLElement,
     onChange: (html: string) => void
+    contentAccessibilityLabel?: string
     actions: Action[]
 }
 

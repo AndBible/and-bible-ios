@@ -63,13 +63,13 @@
       <div class="bible-text">
         <BookmarkText expanded :bookmark="bookmark"/>
       </div>
-      <div class="links">
+      <div class="links" @click="handleAnchorNavigation">
         <div
             v-if="isBibleBookmark(bookmark)"
             class="link-line"
         >
           <span class="link-icon"><FontAwesomeIcon icon="file-alt"/></span>
-          <a :href="`my-notes://?ordinal=${bookmark.originalOrdinalRange[0]}&v11n=${bookmark.v11n}`">{{
+          <a :href="myNotesHref(bookmark)">{{
               strings.openMyNotes
             }}</a>
         </div>
@@ -82,7 +82,7 @@
             }}</a>
         </div>
       </div>
-      <div class="info-text">
+      <div class="info-text" @click="handleAnchorNavigation">
         <div class="separator"/>
         <div v-if="bookmark.bookName">
           <span v-html="sprintf(strings.bookmarkAccurate, originalBookLink)"/>
@@ -109,7 +109,7 @@ import EditableText from "@/components/EditableText.vue";
 import LabelList from "@/components/LabelList.vue";
 import BookmarkText from "@/components/BookmarkText.vue";
 import BookmarkButtons from "@/components/BookmarkButtons.vue";
-import {clickWaiter} from "@/utils";
+import {clickWaiter, handleAnchorNavigation} from "@/utils";
 import {sortBy} from "lodash";
 import {androidKey, globalBookmarksKey, locateTopKey} from "@/types/constants";
 import {BaseBookmark} from "@/types/client-objects";
@@ -181,6 +181,17 @@ function closeBookmark() {
 }
 
 const {adjustedColor, strings, sprintf, formatTimestamp} = useCommon();
+
+function myNotesHref(bookmark: BaseBookmark): string {
+    if (!isBibleBookmark(bookmark)) return "my-notes://";
+
+    const params = new URLSearchParams({
+        ordinal: String(bookmark.originalOrdinalRange[0]),
+        v11n: bookmark.v11n,
+        osis: bookmark.osisRef,
+    });
+    return `my-notes://?${params.toString()}`;
+}
 
 const changeNote = (text: string) => {
     if (bookmark.value) {

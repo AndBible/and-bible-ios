@@ -1,6 +1,9 @@
 import Foundation
 import Darwin
 import XCTest
+#if canImport(UIKit)
+import UIKit
+#endif
 
 /**
  UI smoke tests for the core iPhone navigation shell.
@@ -818,6 +821,61 @@ final class AndBibleUITests: XCTestCase {
         waitForStudyPadPresentation(in: app, timeout: 20)
         let studyPadTitle = requireElement("readerStudyPadTitle", in: app, timeout: 10)
         XCTAssertEqual(studyPadTitle.label, "UI Test Seed")
+    }
+
+    /**
+     Verifies that the visible My Notes document can update and delete a note-backed bookmark.
+     *
+     * - Side effects:
+     *   - launches the reader shell with one deterministic Genesis note fixture
+     *   - opens My Notes through the production reader navigation drawer
+     *   - edits the visible note through the embedded web editor, returns to Bible, and reopens
+     *     My Notes to verify the persisted note is rebuilt into the document
+     *   - deletes the visible My Notes row and verifies the rebuilt document stays empty
+     * - Failure modes:
+     *   - fails if the My Notes action, visible note editor, delete action, or persistence export
+     *     never reaches the expected state
+     */
+    func testMyNotesNoteUpdateAndDeletePersistsFromVisibleWorkflow() {
+        let app = makeApp()
+        app.launch()
+
+        let referenceLabel = "Genesis 1:1"
+        let rowToken = "Genesis_1_1"
+        let originalNote = "UI_Test_My_Notes_Note"
+        let updatedNoteMarker = "updated"
+        let editNoteLabel = "Edit My Notes note for \(referenceLabel)"
+        let editorLabel = "My Notes note editor for \(referenceLabel)"
+        let actionsLabel = "My Notes actions for \(referenceLabel)"
+        let deleteLabel = "Delete My Notes note for \(referenceLabel)"
+
+        openMyNotesFromReader(in: app)
+        waitForMyNotesState(containing: "myNotesCount=1", in: app, timeout: 20)
+        waitForMyNotesState(containing: "|\(rowToken)=\(originalNote)|", in: app, timeout: 20)
+
+        tapElementReliably(requireMyNotesWebControl(named: editNoteLabel, in: app, timeout: 15), timeout: 10)
+        let editor = requireMyNotesWebControl(named: editorLabel, in: app, timeout: 15)
+        focusResolvedTextEntryElement(editor, preferTrailingEdge: true, timeout: 10)
+        pasteTextIntoFocusedElement(" \(updatedNoteMarker)", in: app, sourceElement: editor, timeout: 10)
+        waitForMyNotesState(containing: updatedNoteMarker, in: app, timeout: 20)
+
+        tapElementReliably(requireElement("readerReturnFromMyNotesButton", in: app, timeout: 10), timeout: 10)
+        waitForMyNotesState(containing: "myNotesVisible=false", in: app, timeout: 20)
+
+        openMyNotesFromReader(in: app)
+        waitForMyNotesState(containing: "myNotesCount=1", in: app, timeout: 20)
+        waitForMyNotesState(containing: updatedNoteMarker, in: app, timeout: 20)
+
+        tapElementReliably(requireMyNotesWebControl(named: actionsLabel, in: app, timeout: 15), timeout: 10)
+        tapElementReliably(requireMyNotesWebControl(named: deleteLabel, in: app, timeout: 15), timeout: 10)
+        tapElementReliably(requireMyNotesWebControl(named: "Yes", in: app, timeout: 10), timeout: 10)
+        waitForMyNotesState(containing: "myNotesCount=0", in: app, timeout: 20)
+        waitForMyNotesState(notContaining: "|\(rowToken)|", in: app, timeout: 20)
+
+        tapElementReliably(requireElement("readerReturnFromMyNotesButton", in: app, timeout: 10), timeout: 10)
+        openMyNotesFromReader(in: app)
+        waitForMyNotesState(containing: "myNotesCount=0", in: app, timeout: 20)
+        waitForMyNotesState(notContaining: updatedNoteMarker, in: app, timeout: 20)
     }
 
     /**
@@ -4640,6 +4698,12 @@ final class AndBibleUITests: XCTestCase {
                 app.navigationBars.staticTexts[identifier].firstMatch,
                 app.otherElements[identifier].firstMatch,
             ]
+        case "readerReturnFromMyNotesButton":
+            return [
+                app.buttons[identifier].firstMatch,
+                app.navigationBars.buttons[identifier].firstMatch,
+                app.otherElements[identifier].firstMatch,
+            ]
         case "readerRenderedContentState":
             return [
                 app.staticTexts[identifier].firstMatch,
@@ -7498,6 +7562,115 @@ final class AndBibleUITests: XCTestCase {
     }
 
     /**
+     Opens the My Notes document through the production reader navigation drawer.
+     */
+    private func openMyNotesFromReader(
+        in app: XCUIApplication,
+        timeout: TimeInterval = 20,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        tapReaderAction("readerOpenMyNotesAction", in: app, timeout: timeout, file: file, line: line)
+        waitForMyNotesPresentation(in: app, timeout: timeout, file: file, line: line)
+        waitForMyNotesState(containing: "myNotesVisible=true", in: app, timeout: timeout, file: file, line: line)
+    }
+
+    /**
+     Waits for the reader's compact My Notes state export to contain one token.
+     */
+    private func waitForMyNotesState(
+        containing token: String,
+        in app: XCUIApplication,
+        timeout: TimeInterval = 10,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        waitForResolvedSemanticState(
+            named: "readerRenderedContentState",
+            timeout: timeout,
+            valueProvider: { readerRenderedContentStateValue(in: app) },
+            success: { $0.contains(token) },
+            failureDescription: { finalValue in
+                "Expected My Notes state to contain '\(token)' within \(timeout) seconds. Final value: '\(finalValue)'."
+            },
+            file: file,
+            line: line
+        )
+    }
+
+    /**
+     Waits for the reader's compact My Notes state export to stop containing one token.
+     */
+    private func waitForMyNotesState(
+        notContaining token: String,
+        in app: XCUIApplication,
+        timeout: TimeInterval = 10,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        waitForResolvedSemanticState(
+            named: "readerRenderedContentState",
+            timeout: timeout,
+            valueProvider: { readerRenderedContentStateValue(in: app) },
+            success: { !$0.contains(token) },
+            failureDescription: { finalValue in
+                "Expected My Notes state to stop containing '\(token)' within \(timeout) seconds. Final value: '\(finalValue)'."
+            },
+            file: file,
+            line: line
+        )
+    }
+
+    /**
+     Resolves one accessibility-labelled control inside the embedded My Notes web document.
+     */
+    private func requireMyNotesWebControl(
+        named label: String,
+        in app: XCUIApplication,
+        timeout: TimeInterval = 10,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) -> XCUIElement {
+        let candidates = [
+            app.webViews.buttons[label].firstMatch,
+            app.webViews.textViews[label].firstMatch,
+            app.webViews.textFields[label].firstMatch,
+            app.webViews.otherElements[label].firstMatch,
+            app.buttons[label].firstMatch,
+            app.textViews[label].firstMatch,
+            app.textFields[label].firstMatch,
+            app.otherElements[label].firstMatch,
+        ]
+        if let element = firstExistingMyNotesWebControl(candidates, timeout: timeout) {
+            return element
+        }
+        XCTFail(
+            "Expected My Notes web control named '\(label)' to exist within \(timeout) seconds.",
+            file: file,
+            line: line
+        )
+        return candidates[0]
+    }
+
+    /**
+     Polls a small My Notes candidate set using a shared timeout across all accessibility types.
+     */
+    private func firstExistingMyNotesWebControl(
+        _ candidates: [XCUIElement],
+        timeout: TimeInterval
+    ) -> XCUIElement? {
+        let deadline = Date().addingTimeInterval(max(0, timeout))
+        repeat {
+            for candidate in candidates where candidate.exists {
+                return candidate
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        } while Date() < deadline
+
+        return candidates.first(where: { $0.exists })
+    }
+
+    /**
      Waits for the StudyPad screen title to appear.
      *
      * - Parameters:
@@ -8335,6 +8508,53 @@ final class AndBibleUITests: XCTestCase {
 
         element.tap()
         return tapSelectAllIfPresent(timeout: 0.5)
+    }
+
+    /**
+     Pastes text through the system edit menu into a focused text-entry control.
+     */
+    private func pasteTextIntoFocusedElement(
+        _ text: String,
+        in app: XCUIApplication,
+        sourceElement element: XCUIElement,
+        timeout: TimeInterval = 10,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+#if canImport(UIKit)
+        let previousPasteboardText = UIPasteboard.general.string
+        UIPasteboard.general.string = text
+        defer {
+            UIPasteboard.general.string = previousPasteboardText
+        }
+
+        let pasteMenuItem = app.menuItems["Paste"].firstMatch
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            if pasteMenuItem.waitForExistence(timeout: 0.5) {
+                pasteMenuItem.tap()
+                return
+            }
+
+            if element.exists && !element.frame.isEmpty {
+                element.press(forDuration: 0.8)
+                if pasteMenuItem.waitForExistence(timeout: 0.5) {
+                    pasteMenuItem.tap()
+                    return
+                }
+            }
+
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        } while Date() < deadline
+
+        XCTFail(
+            "Expected Paste edit-menu action for text entry '\(element.identifier)' within \(timeout) seconds.",
+            file: file,
+            line: line
+        )
+#else
+        XCTFail("Paste-driven text entry requires UIKit pasteboard access.", file: file, line: line)
+#endif
     }
 
     /**

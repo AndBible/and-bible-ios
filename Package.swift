@@ -65,7 +65,7 @@ let package = Package(
             ],
             path: "Sources/BibleCore/Sources/BibleCore",
             resources: [
-                .copy("Resources"),
+                .copy("Resources/readingplan"),
             ]
         ),
         .testTarget(
@@ -80,7 +80,8 @@ let package = Package(
             dependencies: ["BibleCore"],
             path: "Sources/BibleView/Sources/BibleView",
             resources: [
-                .copy("Resources"),
+                .copy("Resources/index.html"),
+                .copy("Resources/bibleview-js"),
             ]
         ),
         .testTarget(

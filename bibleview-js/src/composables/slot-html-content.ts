@@ -16,6 +16,7 @@
  */
 
 import {onMounted, ref, watch} from "vue";
+import {navigateLink} from "@/utils";
 
 /**
  * DOMPurify config that allows AndBible custom URI schemes alongside standard ones.
@@ -56,7 +57,7 @@ export function useSlotHtmlContent() {
             event.preventDefault();
             const href = link.getAttribute("href");
             if (href) {
-                window.location.assign(href);
+                navigateLink(href);
             }
         }
     }
