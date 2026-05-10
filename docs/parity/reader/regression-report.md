@@ -1,6 +1,6 @@
 # READER-702 Regression Report
 
-Date: 2026-05-08
+Date: 2026-05-09
 
 ## Scope
 
@@ -13,6 +13,7 @@ This is the current validation snapshot for the reader surface. It covers:
 - restored-position highlight behavior in the emitted reader payload
 - reader config/appSettings payload construction for embedded-client display and active-window state
 - double-tap fullscreen preference gating
+- bridge-driven compare presentation payload construction
 - horizontal swipe-mode dispatch policy
 - auto-fullscreen scroll-threshold policy
 
@@ -40,6 +41,7 @@ Related domain references:
   - reader-adjacent unit regressions for payload-level restore/highlight behavior
   - focused reader/controller payload subset on `test/reader-config-payload-coverage`
   - focused reader gesture/fullscreen policy subset on `test/reader-fullscreen-swipe-coverage`
+  - focused reader compare bridge subset on `test/reader-compare-workflow-coverage`
 
 ## Tests Executed
 
@@ -50,6 +52,7 @@ Related domain references:
 - `AndBibleTests/testReaderConfigPayloadIncludesDisplaySettingsAndActiveWindowState`
 - `AndBibleTests/testReaderConfigPayloadMarksInactiveWindowWithoutActiveIndicator`
 - `AndBibleTests/testDoubleTapFullscreenPreferenceGateControlsNativeToggleRequest`
+- `AndBibleTests/testReaderCompareBridgeRequestBuildsNativePresentationPayload`
 - `AndBibleTests/testReaderHorizontalSwipePolicyMapsConfiguredModes`
 - `AndBibleTests/testAutoFullscreenPolicyAccumulatesThresholdByDirection`
 - `AndBibleTests/testAutoFullscreenPolicyHonorsDisabledAndDoubleTapLock`
@@ -112,11 +115,23 @@ Related domain references:
   changes, enter/exit fullscreen only after the threshold, reset when disabled,
   and do not auto-toggle when fullscreen was entered by double tap
 
+### Compare presentation payload
+
+- embedded-client `compare` bridge messages are classified as handled and reach
+  the controller's native compare presentation callback
+- the callback receives the active reader book, chapter, current module name,
+  and normalized start/end verse numbers derived from the web ordinal range
+
 ## Current Result
 
-Latest full non-UI XCTest validation passed on 2026-05-08:
+Latest focused reader compare validation passed on 2026-05-09:
 
-- `AndBibleTests`: `206/206`
+- focused issue #41 subset: `1/1`
+- command: `xcodebuild test -project AndBible.xcodeproj -scheme AndBible -destination 'platform=iOS Simulator,id=73679934-67DF-45BE-AEAC-186E2396213C' CODE_SIGNING_ALLOWED=NO -only-testing:AndBibleTests/AndBibleTests/testReaderCompareBridgeRequestBuildsNativePresentationPayload`
+
+Latest full non-UI XCTest validation passed on 2026-05-09:
+
+- `AndBibleTests`: `207/207`
 - command: `xcodebuild test -project AndBible.xcodeproj -scheme AndBible -destination 'platform=iOS Simulator,id=73679934-67DF-45BE-AEAC-186E2396213C' CODE_SIGNING_ALLOWED=NO -only-testing:AndBibleTests`
 
 Latest focused reader gesture/fullscreen validation passed on 2026-05-08:
@@ -146,6 +161,7 @@ Taken together, this gives the reader domain current regression evidence for:
 - payload-level restore/highlight behavior
 - payload-level config/appSettings propagation into the embedded document client
 - double-tap fullscreen preference gating
+- bridge-driven compare presentation payload construction
 - horizontal swipe-mode dispatch policy
 - auto-fullscreen threshold and lockout policy
 
@@ -155,12 +171,11 @@ branches we still have not isolated with their own focused checks.
 
 ## What Is Still Not Well Locked Yet
 
-The reader shell baseline is in much better shape now. The parts that still
-need tighter protection are:
+The reader shell baseline is in much better shape now. The part that still
+needs tighter protection is:
 
 - dedicated Strong's / dictionary modal regression coverage
-- compare presentation workflows
 
-Those areas are implemented and documented, but they are not yet locked by
-focused reader-domain regression coverage, so they still show up as `Partial`
+That area is implemented and documented, but it is not yet locked by focused
+reader-domain regression coverage, so it still shows up as `Partial`
 in [verification-matrix.md](verification-matrix.md).

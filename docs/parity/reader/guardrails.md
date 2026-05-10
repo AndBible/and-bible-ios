@@ -74,6 +74,7 @@ At minimum, reader-adjacent changes should keep the focused workflow subset in
 - history jump-back plus clear/delete persistence
 - workspace selector create/switch from the reader shell
 - restored-position highlight behavior
+- bridge-driven compare presentation payload construction
 
 If a change touches one of the still-partial areas, it is worth raising the bar
 and adding focused coverage instead of leaning only on the current reader
@@ -84,8 +85,8 @@ subset.
 - The repo currently has focused reader-shell UI coverage for drawer/overflow
   routing, history workflows, and workspace switching plus unit regressions for
   restored-position highlight behavior, reader config payloads, double-tap
-  fullscreen gating, horizontal swipe-mode mapping, and auto-fullscreen
-  threshold behavior.
+  fullscreen gating, compare presentation payload construction, horizontal
+  swipe-mode mapping, and auto-fullscreen threshold behavior.
 - In practice, current protection is a mix of:
   - reader workflow tests in `AndBibleUITests`
   - reader-adjacent payload regressions in `AndBibleTests`
@@ -95,5 +96,4 @@ subset.
 ## Useful Next Improvements
 
 - add focused regression coverage for the Strong's / dictionary modal
-- add focused workflow coverage for compare presentation
 - add a tighter guardrail around reader config emission into the embedded document client
