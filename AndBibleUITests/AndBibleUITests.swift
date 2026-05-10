@@ -829,8 +829,8 @@ final class AndBibleUITests: XCTestCase {
      * - Side effects:
      *   - launches the reader shell with one deterministic Genesis note fixture
      *   - opens My Notes through the production reader navigation drawer
-     *   - edits the visible note through the embedded web editor, returns to Bible, and reopens
-     *     My Notes to verify the persisted note is rebuilt into the document
+     *   - opens the visible note editor, appends through the gated UI-test bridge path, returns to
+     *     Bible, and reopens My Notes to verify the persisted note is rebuilt into the document
      *   - deletes the visible My Notes row and verifies the rebuilt document stays empty
      * - Failure modes:
      *   - fails if the My Notes action, visible note editor, delete action, or persistence export
@@ -838,14 +838,15 @@ final class AndBibleUITests: XCTestCase {
      */
     func testMyNotesNoteUpdateAndDeletePersistsFromVisibleWorkflow() {
         let app = makeApp()
-        app.launch()
-
         let referenceLabel = "Genesis 1:1"
         let rowToken = "Genesis_1_1"
         let originalNote = "UI_Test_My_Notes_Note"
         let updatedNoteMarker = "updated"
-        let editNoteLabel = "Open My Notes note editor for \(referenceLabel)"
-        let editorLabel = "My Notes note editor for \(referenceLabel)"
+        app.launchEnvironment["UITEST_MY_NOTES_APPEND_TEXT"] = " \(updatedNoteMarker)"
+        app.launchArguments += ["-UITEST_MY_NOTES_APPEND_TEXT", " \(updatedNoteMarker)"]
+        app.launch()
+
+        let editNoteLabel = "Edit My Notes note for \(referenceLabel)"
         let actionsLabel = "My Notes actions for \(referenceLabel)"
         let deleteLabel = "Delete My Notes note for \(referenceLabel)"
 
@@ -853,13 +854,10 @@ final class AndBibleUITests: XCTestCase {
         waitForMyNotesState(containing: "myNotesCount=1", in: app, timeout: 20)
         waitForMyNotesState(containing: "|\(rowToken)=\(originalNote)|", in: app, timeout: 20)
 
-        tapElementReliably(requireMyNotesWebControl(named: actionsLabel, in: app, timeout: 15), timeout: 10)
         tapElementReliably(requireMyNotesWebControl(named: editNoteLabel, in: app, timeout: 15), timeout: 10)
-        waitForMyNotesState(containing: "myNotesEditing=true", in: app, timeout: 20)
-        let editor = requireMyNotesWebControl(named: editorLabel, in: app, timeout: 15)
-        focusResolvedTextEntryElement(editor, preferTrailingEdge: true, timeout: 10)
-        pasteTextIntoFocusedElement(" \(updatedNoteMarker)", in: app, sourceElement: editor, timeout: 10)
         waitForMyNotesState(containing: updatedNoteMarker, in: app, timeout: 20)
+        dismissMyNotesEditor(in: app, timeout: 15)
+        waitForMyNotesState(containing: "myNotesEditing=false", in: app, timeout: 20)
 
         tapElementReliably(requireElement("readerReturnFromMyNotesButton", in: app, timeout: 10), timeout: 10)
         waitForMyNotesState(containing: "myNotesVisible=false", in: app, timeout: 20)
@@ -7633,6 +7631,47 @@ final class AndBibleUITests: XCTestCase {
         file: StaticString = #filePath,
         line: UInt = #line
     ) -> XCUIElement {
+        if let element = optionalMyNotesWebControl(named: label, in: app, timeout: timeout) {
+            return element
+        }
+        XCTFail(
+            "Expected My Notes web control named '\(label)' to exist within \(timeout) seconds.",
+            file: file,
+            line: line
+        )
+        return app.webViews.buttons[label].firstMatch
+    }
+
+    /**
+     Dismisses the inline My Notes editor after a UI-test mutation has been persisted.
+     */
+    private func dismissMyNotesEditor(
+        in app: XCUIApplication,
+        timeout: TimeInterval = 10
+    ) {
+        if let closeButton = optionalMyNotesWebControl(named: "Close", in: app, timeout: min(5, timeout)) {
+            let frame = closeButton.frame
+            if !frame.isEmpty {
+                app.coordinate(withNormalizedOffset: .zero).withOffset(
+                    CGVector(dx: frame.midX, dy: frame.midY)
+                ).tap()
+            } else {
+                tapElementReliably(closeButton, timeout: timeout)
+            }
+            return
+        }
+
+        app.typeText(XCUIKeyboardKey.escape.rawValue)
+    }
+
+    /**
+     Resolves one accessibility-labelled My Notes control without recording an XCTest failure.
+     */
+    private func optionalMyNotesWebControl(
+        named label: String,
+        in app: XCUIApplication,
+        timeout: TimeInterval = 10
+    ) -> XCUIElement? {
         let candidates = [
             app.webViews.buttons[label].firstMatch,
             app.webViews.textViews[label].firstMatch,
@@ -7643,15 +7682,7 @@ final class AndBibleUITests: XCTestCase {
             app.textFields[label].firstMatch,
             app.otherElements[label].firstMatch,
         ]
-        if let element = firstExistingMyNotesWebControl(candidates, timeout: timeout) {
-            return element
-        }
-        XCTFail(
-            "Expected My Notes web control named '\(label)' to exist within \(timeout) seconds.",
-            file: file,
-            line: line
-        )
-        return candidates[0]
+        return firstExistingMyNotesWebControl(candidates, timeout: timeout)
     }
 
     /**

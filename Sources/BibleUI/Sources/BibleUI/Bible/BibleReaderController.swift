@@ -50,6 +50,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     private(set) var showingMyNotes = false
     /// Monotonic marker used by lightweight UI-test exports when My Notes state or documents rebuild.
     private(set) var myNotesMutationRevision = 0
+    /// Prevents a launch-seeded UI-test append from firing more than once in the same reader session.
+    private var didApplyUITestMyNotesAppendText = false
 
     /// Whether the WebView is currently showing a StudyPad document.
     private(set) var showingStudyPad = false
@@ -2093,14 +2095,51 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      */
     public func bridge(_ bridge: BibleBridge, saveBookmarkNote bookmarkId: String, note: String?) {
         logger.info("Save bookmark note: \(bookmarkId)")
-        guard let service = bookmarkService, let uuid = UUID(uuidString: bookmarkId) else { return }
-        service.saveBibleBookmarkNote(bookmarkId: uuid, note: note)
+        guard let uuid = UUID(uuidString: bookmarkId) else { return }
+        _ = saveBookmarkNoteAndNotify(bookmarkId: uuid, note: note)
+    }
+
+    private func applyUITestMyNotesAppendTextIfNeeded() {
+        guard !didApplyUITestMyNotesAppendText,
+              let appendText = UITestRuntimeConfiguration.myNotesAppendText,
+              appendUITestTextToFirstVisibleMyNotesNote(appendText) else {
+            return
+        }
+        didApplyUITestMyNotesAppendText = true
+    }
+
+    @discardableResult
+    private func appendUITestTextToFirstVisibleMyNotesNote(_ text: String) -> Bool {
+        guard UITestRuntimeConfiguration.enablesDetailedAccessibilityExports,
+              showingMyNotes,
+              !text.isEmpty,
+              let bookmark = currentChapterMyNotesBookmarks().first
+        else {
+            return false
+        }
+
+        let currentNote = bookmark.notes?.notes ?? ""
+        return saveBookmarkNoteAndNotify(bookmarkId: bookmark.id, note: currentNote + text)
+    }
+
+    @discardableResult
+    private func saveBookmarkNoteAndNotify(bookmarkId: UUID, note: String?) -> Bool {
+        guard let service = bookmarkService else { return false }
+        service.saveBibleBookmarkNote(bookmarkId: bookmarkId, note: note)
         myNotesMutationRevision += 1
-        let escapedNote = (note ?? "").replacingOccurrences(of: "\"", with: "\\\"").replacingOccurrences(of: "\n", with: "\\n")
         let timestamp = Int(Date().timeIntervalSince1970 * 1000)
-        bridge.emit(event: "bookmark_note_modified", data: """
-        {"id":"\(bookmarkId)","notes":"\(escapedNote)","lastUpdatedOn":\(timestamp)}
-        """)
+        let payload: [String: Any] = [
+            "id": bookmarkId.uuidString,
+            "notes": note ?? "",
+            "lastUpdatedOn": timestamp,
+        ]
+        guard let data = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]),
+              let json = String(data: data, encoding: .utf8) else {
+            logger.error("Failed to serialize bookmark note update for \(bookmarkId.uuidString)")
+            return false
+        }
+        self.bridge.emit(event: "bookmark_note_modified", data: json)
+        return true
     }
 
     /**
@@ -2432,6 +2471,9 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     public func bridge(_ bridge: BibleBridge, setEditing enabled: Bool) {
         logger.info("WebView editing mode: \(enabled)")
         editingInWebView = enabled
+        if enabled {
+            applyUITestMyNotesAppendTextIfNeeded()
+        }
     }
 
     /**

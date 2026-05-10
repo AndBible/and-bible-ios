@@ -4,6 +4,8 @@ import Foundation
 enum UITestRuntimeConfiguration {
     private static let detailedAccessibilityExportsEnvironmentKey = "UITEST_ENABLE_DETAILED_ACCESSIBILITY_EXPORTS"
     private static let detailedAccessibilityExportsArgument = "-UITEST_ENABLE_DETAILED_ACCESSIBILITY_EXPORTS"
+    private static let myNotesAppendTextEnvironmentKey = "UITEST_MY_NOTES_APPEND_TEXT"
+    private static let myNotesAppendTextArgument = "-UITEST_MY_NOTES_APPEND_TEXT"
 
     /// Upper bound for test-only row-token exports embedded into accessibility state strings.
     static let detailedAccessibilityRowTokenLimit = 50
@@ -16,11 +18,31 @@ enum UITestRuntimeConfiguration {
         return ProcessInfo.processInfo.arguments.contains(detailedAccessibilityExportsArgument)
     }
 
+    /// Optional text for deterministic My Notes append actions exposed only during UI tests.
+    static var myNotesAppendText: String? {
+        if let value = ProcessInfo.processInfo.environment[myNotesAppendTextEnvironmentKey],
+           !value.isEmpty {
+            return value
+        }
+        guard let value = argumentValue(after: myNotesAppendTextArgument), !value.isEmpty else {
+            return nil
+        }
+        return value
+    }
+
     /**
      Search autofocus is useful in production, but it forces hosted UI tests to fight the
      software keyboard before they can reach scope and mode controls.
      */
     static var shouldAutofocusSearchField: Bool {
         !enablesDetailedAccessibilityExports
+    }
+
+    private static func argumentValue(after argument: String) -> String? {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let index = arguments.firstIndex(of: argument) else { return nil }
+        let valueIndex = arguments.index(after: index)
+        guard valueIndex < arguments.endIndex else { return nil }
+        return arguments[valueIndex]
     }
 }
