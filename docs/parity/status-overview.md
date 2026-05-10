@@ -1,6 +1,6 @@
 # Parity Status Overview
 
-Date: 2026-05-08
+Date: 2026-05-09
 
 ## Purpose
 
@@ -29,7 +29,7 @@ give you the fuller human context behind it.
 | [bookmarks](bookmarks/README.md) | Strong bookmark-list coverage, thinner note-document UI coverage: `4 Pass`, `2 Adapted Pass`, `3 Partial` | Focused bookmark UI workflows plus note-persistence unit regressions | Generic-bookmark visible workflows, My Notes visible note mutation, and broader StudyPad mutation breadth |
 | [search](search/README.md) | Strong semantic coverage: `5 Pass`, `2 Adapted Pass`, `1 Partial` | Focused search UI workflows plus Strong's unit regressions | Multi-translation search still lacks focused regression coverage |
 | [reading-plans](reading-plans/README.md) | Strong sync and progression coverage: `5 Pass`, `1 Adapted Pass`, `3 Partial` | Focused daily-reading UI coverage plus restore/upload/patch unit coverage | Custom plan import, reading-plan list/start/import breadth, and additive iOS-only plan lifecycle coverage |
-| [reader](reader/README.md) | Reader shell/menu parity is stronger, with remaining gaps concentrated in modal/workflow branches: `7 Pass`, `1 Adapted Pass`, `2 Partial` | Focused reader-shell UI coverage, restored-position/config-payload/gesture-policy unit regressions, and full local UI validation | Strong's modal and compare coverage still need tighter focused regression locking |
+| [reader](reader/README.md) | Reader shell/menu parity is stronger, with the remaining gap concentrated in the Strong's modal branch: `8 Pass`, `1 Adapted Pass`, `1 Partial` | Focused reader-shell UI coverage, restored-position/config-payload/gesture-policy/compare-payload unit regressions, and full local UI validation | Strong's modal coverage still needs tighter focused regression locking |
 | [bridge](bridge/README.md) | StudyPad handoff, async `callId` flows, and shared iOS bridge subset are present; full Android bridge breadth remains partial: `2 Pass`, `1 Adapted Pass`, `5 Partial` | Focused StudyPad handoff, async `callId`, note-persistence regressions, bridge guardrails, machine-readable gap inventory, and local Android-backed drift checking | Visible My Notes lifecycle coverage, Android-only bridge method breadth, delegate branch coverage, and payload-schema breadth |
 
 ## How To Read Each Domain

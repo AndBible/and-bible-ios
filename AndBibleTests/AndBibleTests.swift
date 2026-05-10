@@ -1070,6 +1070,39 @@ final class AndBibleTests: XCTestCase {
         XCTAssertEqual(bridge.dispatchMessage(method: "missingMethod", args: []), .unhandled)
     }
 
+    func testReaderCompareBridgeRequestBuildsNativePresentationPayload() throws {
+        let bridge = BibleBridge()
+        let controller = BibleReaderController(bridge: bridge)
+        let secondCorinthians = try XCTUnwrap(
+            controller.bookList.first(where: { $0.osisId == "2Cor" })?.name
+        )
+
+        controller.navigateTo(book: secondCorinthians, chapter: 2, verse: 1)
+
+        var receivedPayload: (
+            book: String,
+            chapter: Int,
+            moduleName: String,
+            startVerse: Int?,
+            endVerse: Int?
+        )?
+        controller.onCompareVerses = { book, chapter, moduleName, startVerse, endVerse in
+            receivedPayload = (book, chapter, moduleName, startVerse, endVerse)
+        }
+
+        XCTAssertEqual(
+            bridge.dispatchMessage(method: "compare", args: ["KJV", 45, 47]),
+            .handled
+        )
+
+        let payload = try XCTUnwrap(receivedPayload)
+        XCTAssertEqual(payload.book, secondCorinthians)
+        XCTAssertEqual(payload.chapter, 2)
+        XCTAssertEqual(payload.moduleName, "KJV")
+        XCTAssertEqual(payload.startVerse, 5)
+        XCTAssertEqual(payload.endVerse, 7)
+    }
+
     func testDoubleTapFullscreenPreferenceGateControlsNativeToggleRequest() throws {
         let bridge = BibleBridge()
         let controller = BibleReaderController(bridge: bridge)

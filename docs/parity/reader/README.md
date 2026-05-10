@@ -2,7 +2,7 @@
 
 This directory is meant to help the next person understand how close the iOS `reader` currently is to Android, where the remaining gaps are, and which parts are easy to break by accident.
 
-It covers the main reading experience, including the reader shell, toolbar chrome, drawer/overflow navigation, history handoff, workspace switching, and the Strong's / dictionary modal path.
+It covers the main reading experience, including the reader shell, toolbar chrome, drawer/overflow navigation, history handoff, workspace switching, compare presentation, and the Strong's / dictionary modal path.
 
 If you are new to this area, start here and read top to bottom once. The matrix
 is useful, but the surrounding notes are where the intent and the remaining rough edges are easier to understand.
@@ -27,6 +27,7 @@ Primary code references:
 - `Sources/BibleUI/Sources/BibleUI/Bible/BibleReaderView.swift`
 - `Sources/BibleUI/Sources/BibleUI/Bible/BibleReaderController.swift`
 - `Sources/BibleUI/Sources/BibleUI/Bible/BibleWindowPane.swift`
+- `Sources/BibleUI/Sources/BibleUI/Bible/CompareView.swift`
 - `Sources/BibleUI/Sources/BibleUI/Bible/StrongsSheetView.swift`
 - `Sources/BibleView/Sources/BibleView/WebViewCoordinator.swift`
 - `Sources/BibleUI/Sources/BibleUI/Shared/HistoryView.swift`
