@@ -17,6 +17,23 @@ private let logger = Logger(subsystem: "org.andbible", category: "WebViewCoordin
  and swipe input into Android-parity bridge callbacks.
  */
 public class WebViewCoordinator: NSObject, WKNavigationDelegate {
+    private static let routedSchemes: Set<String> = [
+        "http",
+        "https",
+        "osis",
+        "multi",
+        "ab-w",
+        "ab-find-all",
+        "sword",
+        "strongs",
+        "morphology",
+        "my-notes",
+        "journal",
+        "download",
+        "ab-error",
+        "epub-ref"
+    ]
+
     let bridge: BibleBridge
     weak var webView: WKWebView?
     #if os(iOS)
@@ -76,22 +93,7 @@ public class WebViewCoordinator: NSObject, WKNavigationDelegate {
 
     private static func routedScheme(_ scheme: String?) -> Bool {
         guard let scheme = scheme?.lowercased() else { return false }
-        return [
-            "http",
-            "https",
-            "osis",
-            "multi",
-            "ab-w",
-            "ab-find-all",
-            "sword",
-            "strongs",
-            "morphology",
-            "my-notes",
-            "journal",
-            "download",
-            "ab-error",
-            "epub-ref"
-        ].contains(scheme)
+        return routedSchemes.contains(scheme)
     }
 
     /// Logs a provisional-navigation failure before the page finishes loading.

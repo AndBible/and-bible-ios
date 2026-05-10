@@ -48,7 +48,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
     /// Whether the WebView is currently showing the My Notes document (vs Bible text).
     private(set) var showingMyNotes = false
-    /// Monotonic marker used by lightweight UI-test exports when My Notes persistence changes.
+    /// Monotonic marker used by lightweight UI-test exports when My Notes state or documents rebuild.
     private(set) var myNotesMutationRevision = 0
 
     /// Whether the WebView is currently showing a StudyPad document.
@@ -181,6 +181,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         }.joined(separator: ",")
         return [
             "myNotesVisible=\(showingMyNotes)",
+            "myNotesEditing=\(editingInWebView)",
             "myNotesRevision=\(myNotesMutationRevision)",
             "myNotesCount=\(bookmarks.count)",
             "myNotesRows=\(rowTokens)",

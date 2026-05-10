@@ -27,14 +27,14 @@
       <div v-if="showDragHandle" class="drag-handle journal-button" @touchstart="dragStart" @touchend="dragEnd">
         <FontAwesomeIcon icon="sort"/>
       </div>
-      <div class="journal-button" role="button" tabindex="0" :aria-label="menuLabel" :title="menuLabel">
+      <button type="button" class="journal-button" :aria-label="menuLabel" :title="menuLabel">
         <FontAwesomeIcon icon="ellipsis-h"/>
-      </div>
+      </button>
     </div>
     <slot v-if="!expanded" name="menubutton">
-      <div class="journal-button" role="button" tabindex="0" :aria-label="menuLabel" :title="menuLabel">
+      <button type="button" class="journal-button" :aria-label="menuLabel" :title="menuLabel">
         <FontAwesomeIcon icon="ellipsis-h"/>
-      </div>
+      </button>
     </slot>
   </div>
 </template>

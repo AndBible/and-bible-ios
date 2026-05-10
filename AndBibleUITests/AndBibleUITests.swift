@@ -854,6 +854,7 @@ final class AndBibleUITests: XCTestCase {
         waitForMyNotesState(containing: "|\(rowToken)=\(originalNote)|", in: app, timeout: 20)
 
         tapElementReliably(requireMyNotesWebControl(named: editNoteLabel, in: app, timeout: 15), timeout: 10)
+        waitForMyNotesState(containing: "myNotesEditing=true", in: app, timeout: 20)
         let editor = requireMyNotesWebControl(named: editorLabel, in: app, timeout: 15)
         focusResolvedTextEntryElement(editor, preferTrailingEdge: true, timeout: 10)
         pasteTextIntoFocusedElement(" \(updatedNoteMarker)", in: app, sourceElement: editor, timeout: 10)
