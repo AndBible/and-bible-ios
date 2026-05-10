@@ -7,6 +7,7 @@ someone is changing:
 
 - `Sources/BibleUI/Sources/BibleUI/Bible/BibleReaderView.swift`
 - `Sources/BibleUI/Sources/BibleUI/Bible/BibleReaderController.swift`
+- `Sources/BibleUI/Sources/BibleUI/Bible/BibleReaderInteractionPolicies.swift`
 - `Sources/BibleUI/Sources/BibleUI/Bible/BibleWindowPane.swift`
 - `Sources/BibleUI/Sources/BibleUI/Bible/StrongsSheetView.swift`
 - `Sources/BibleView/Sources/BibleView/WebViewCoordinator.swift`
@@ -41,11 +42,11 @@ someone is changing:
    The reader is where active workspace changes become visible. Create, rename,
    clone, and delete all need to keep the reader-shell invariants intact.
 
-5. Fullscreen, swipe-mode, and auto-fullscreen behavior are parity-sensitive,
-   even where coverage is still partial.
+5. Fullscreen, swipe-mode, and auto-fullscreen behavior are parity-sensitive.
 
    These branches are easy to break through gesture or layout refactors. Thin
-   coverage is not a good reason to simplify them casually.
+   policy coverage is useful, but it is not a good reason to simplify them
+   casually.
 
 6. Reader config emission into the embedded client is part of the parity
    surface.
@@ -82,7 +83,9 @@ subset.
 
 - The repo currently has focused reader-shell UI coverage for drawer/overflow
   routing, history workflows, and workspace switching plus unit regressions for
-  restored-position highlight behavior.
+  restored-position highlight behavior, reader config payloads, double-tap
+  fullscreen gating, horizontal swipe-mode mapping, and auto-fullscreen
+  threshold behavior.
 - In practice, current protection is a mix of:
   - reader workflow tests in `AndBibleUITests`
   - reader-adjacent payload regressions in `AndBibleTests`
@@ -92,6 +95,5 @@ subset.
 ## Useful Next Improvements
 
 - add focused regression coverage for the Strong's / dictionary modal
-- add focused regression coverage for fullscreen, swipe-mode, and auto-fullscreen behavior
 - add focused workflow coverage for compare presentation
 - add a tighter guardrail around reader config emission into the embedded document client

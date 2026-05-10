@@ -4,8 +4,10 @@ This subtree holds cross-platform parity material.
 
 Recommended reading order:
 
-1. [status-overview.md](status-overview.md): current parity posture and automation state by domain
-2. domain `README.md` files: scoped reading order for each domain
+1. [android-parity-contract.md](android-parity-contract.md): global functional,
+   visual, and architecture standard
+2. [status-overview.md](status-overview.md): current parity posture and automation state by domain
+3. domain `README.md` files: scoped reading order for each domain
 
 Use domain folders so each parity area can carry, as needed:
 
@@ -33,6 +35,7 @@ Current maturity:
 
 Current domains:
 
+- [android-parity-contract.md](android-parity-contract.md)
 - [status-overview.md](status-overview.md)
 - [bridge/](bridge/README.md)
 - [reader/](reader/README.md)

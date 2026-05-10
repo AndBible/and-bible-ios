@@ -12,6 +12,8 @@ Primary code references:
   `Sources/BibleUI/Sources/BibleUI/Bible/BibleReaderView.swift`
 - main document controller:
   `Sources/BibleUI/Sources/BibleUI/Bible/BibleReaderController.swift`
+- reader gesture/fullscreen policies:
+  `Sources/BibleUI/Sources/BibleUI/Bible/BibleReaderInteractionPolicies.swift`
 - web view coordinator and swipe handling:
   `Sources/BibleView/Sources/BibleView/WebViewCoordinator.swift`
 - pane shell:

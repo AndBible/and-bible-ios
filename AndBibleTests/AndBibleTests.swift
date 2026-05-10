@@ -1070,6 +1070,171 @@ final class AndBibleTests: XCTestCase {
         XCTAssertEqual(bridge.dispatchMessage(method: "missingMethod", args: []), .unhandled)
     }
 
+    func testDoubleTapFullscreenPreferenceGateControlsNativeToggleRequest() throws {
+        let bridge = BibleBridge()
+        let controller = BibleReaderController(bridge: bridge)
+        let settingsStore = try makeInMemorySettingsStore()
+        controller.settingsStore = settingsStore
+
+        var toggleCount = 0
+        controller.onToggleFullScreen = { toggleCount += 1 }
+
+        XCTAssertEqual(bridge.dispatchMessage(method: "toggleFullScreen", args: []), .handled)
+        XCTAssertEqual(toggleCount, 1)
+
+        settingsStore.setBool(.doubleTapToFullscreen, value: false)
+        XCTAssertEqual(bridge.dispatchMessage(method: "toggleFullScreen", args: []), .handled)
+        XCTAssertEqual(toggleCount, 1)
+
+        settingsStore.setBool(.doubleTapToFullscreen, value: true)
+        XCTAssertEqual(bridge.dispatchMessage(method: "toggleFullScreen", args: []), .handled)
+        XCTAssertEqual(toggleCount, 2)
+    }
+
+    func testReaderHorizontalSwipePolicyMapsConfiguredModes() {
+        XCTAssertEqual(
+            ReaderHorizontalSwipePolicy.action(
+                modeRawValue: "CHAPTER",
+                direction: .left,
+                hasActiveSelection: false
+            ),
+            .navigateNextChapter
+        )
+        XCTAssertEqual(
+            ReaderHorizontalSwipePolicy.action(
+                modeRawValue: "CHAPTER",
+                direction: .right,
+                hasActiveSelection: false
+            ),
+            .navigatePreviousChapter
+        )
+        XCTAssertEqual(
+            ReaderHorizontalSwipePolicy.action(
+                modeRawValue: "PAGE",
+                direction: .left,
+                hasActiveSelection: false
+            ),
+            .scrollPageDown
+        )
+        XCTAssertEqual(
+            ReaderHorizontalSwipePolicy.action(
+                modeRawValue: "PAGE",
+                direction: .right,
+                hasActiveSelection: false
+            ),
+            .scrollPageUp
+        )
+        XCTAssertEqual(
+            ReaderHorizontalSwipePolicy.action(
+                modeRawValue: "NONE",
+                direction: .left,
+                hasActiveSelection: false
+            ),
+            .none
+        )
+        XCTAssertEqual(
+            ReaderHorizontalSwipePolicy.action(
+                modeRawValue: "PAGE",
+                direction: .left,
+                hasActiveSelection: true
+            ),
+            .none
+        )
+        XCTAssertEqual(
+            ReaderHorizontalSwipePolicy.action(
+                modeRawValue: "unexpected",
+                direction: .left,
+                hasActiveSelection: false
+            ),
+            .navigateNextChapter
+        )
+    }
+
+    func testAutoFullscreenPolicyAccumulatesThresholdByDirection() {
+        var tracking = ReaderAutoFullscreenTracking()
+
+        XCTAssertEqual(
+            ReaderAutoFullscreenPolicy.action(
+                deltaY: 20,
+                isEnabled: true,
+                isFullScreen: false,
+                fullscreenLockedByDoubleTap: false,
+                tracking: &tracking
+            ),
+            .none
+        )
+        XCTAssertEqual(tracking.directionDown, true)
+        XCTAssertEqual(tracking.distance, 20)
+
+        XCTAssertEqual(
+            ReaderAutoFullscreenPolicy.action(
+                deltaY: 36,
+                isEnabled: true,
+                isFullScreen: false,
+                fullscreenLockedByDoubleTap: false,
+                tracking: &tracking
+            ),
+            .enterFullscreen
+        )
+        XCTAssertEqual(tracking.directionDown, true)
+        XCTAssertEqual(tracking.distance, 0)
+
+        XCTAssertEqual(
+            ReaderAutoFullscreenPolicy.action(
+                deltaY: -10,
+                isEnabled: true,
+                isFullScreen: true,
+                fullscreenLockedByDoubleTap: false,
+                tracking: &tracking
+            ),
+            .none
+        )
+        XCTAssertEqual(tracking.directionDown, false)
+        XCTAssertEqual(tracking.distance, 10)
+
+        XCTAssertEqual(
+            ReaderAutoFullscreenPolicy.action(
+                deltaY: -46,
+                isEnabled: true,
+                isFullScreen: true,
+                fullscreenLockedByDoubleTap: false,
+                tracking: &tracking
+            ),
+            .exitFullscreen
+        )
+        XCTAssertEqual(tracking.distance, 0)
+    }
+
+    func testAutoFullscreenPolicyHonorsDisabledAndDoubleTapLock() {
+        var tracking = ReaderAutoFullscreenTracking(directionDown: true, distance: 24)
+
+        XCTAssertEqual(
+            ReaderAutoFullscreenPolicy.action(
+                deltaY: 10,
+                isEnabled: false,
+                isFullScreen: false,
+                fullscreenLockedByDoubleTap: false,
+                tracking: &tracking
+            ),
+            .none
+        )
+        XCTAssertEqual(tracking, ReaderAutoFullscreenTracking())
+
+        tracking = ReaderAutoFullscreenTracking()
+        XCTAssertEqual(
+            ReaderAutoFullscreenPolicy.action(
+                deltaY: -56,
+                isEnabled: true,
+                isFullScreen: true,
+                fullscreenLockedByDoubleTap: true,
+                tracking: &tracking
+            ),
+            .none
+        )
+        XCTAssertEqual(tracking.directionDown, false)
+        XCTAssertEqual(tracking.distance, 0)
+    }
+
     @MainActor
     func testBridgeSendResponseEmitsCallIdResponseJavaScript() {
         let bridge = BibleBridge()
