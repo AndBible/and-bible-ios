@@ -1076,8 +1076,16 @@ final class AndBibleTests: XCTestCase {
         let secondCorinthians = try XCTUnwrap(
             controller.bookList.first(where: { $0.osisId == "2Cor" })?.name
         )
+        let chapter = 2
+        let startVerse = 5
+        let endVerse = 7
+        let activeModuleName = controller.activeModuleName
 
-        controller.navigateTo(book: secondCorinthians, chapter: 2, verse: 1)
+        func ordinal(for verse: Int) -> Int {
+            (chapter - 1) * 40 + verse
+        }
+
+        controller.navigateTo(book: secondCorinthians, chapter: chapter, verse: 1)
 
         var receivedPayload: (
             book: String,
@@ -1091,16 +1099,19 @@ final class AndBibleTests: XCTestCase {
         }
 
         XCTAssertEqual(
-            bridge.dispatchMessage(method: "compare", args: ["KJV", 45, 47]),
+            bridge.dispatchMessage(
+                method: "compare",
+                args: [activeModuleName, ordinal(for: startVerse), ordinal(for: endVerse)]
+            ),
             .handled
         )
 
         let payload = try XCTUnwrap(receivedPayload)
         XCTAssertEqual(payload.book, secondCorinthians)
-        XCTAssertEqual(payload.chapter, 2)
-        XCTAssertEqual(payload.moduleName, "KJV")
-        XCTAssertEqual(payload.startVerse, 5)
-        XCTAssertEqual(payload.endVerse, 7)
+        XCTAssertEqual(payload.chapter, chapter)
+        XCTAssertEqual(payload.moduleName, activeModuleName)
+        XCTAssertEqual(payload.startVerse, startVerse)
+        XCTAssertEqual(payload.endVerse, endVerse)
     }
 
     func testDoubleTapFullscreenPreferenceGateControlsNativeToggleRequest() throws {
