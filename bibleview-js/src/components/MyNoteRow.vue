@@ -34,11 +34,10 @@
         <FontAwesomeIcon icon="info-circle"/>
       </button>
       <button
-          v-if="!bookmark.notes"
           type="button"
           class="journal-button"
-          :aria-label="myNotesEditAccessibilityLabel"
-          :title="myNotesEditAccessibilityLabel"
+          :aria-label="myNotesEditButtonAccessibilityLabel"
+          :title="myNotesEditButtonAccessibilityLabel"
           @click.stop="setEditMode(true)"
       >
         <FontAwesomeIcon icon="edit"/>
@@ -134,6 +133,7 @@ const {strings} = useCommon();
 const myNotesReferenceLabel = computed(() => props.bookmark.verseRange || props.bookmark.verseRangeOnlyNumber);
 const myNotesMenuAccessibilityLabel = computed(() => `My Notes actions for ${myNotesReferenceLabel.value}`);
 const myNotesInfoAccessibilityLabel = computed(() => `Show My Notes bookmark details for ${myNotesReferenceLabel.value}`);
+const myNotesEditButtonAccessibilityLabel = computed(() => `Open My Notes note editor for ${myNotesReferenceLabel.value}`);
 const myNotesEditAccessibilityLabel = computed(() => `Edit My Notes note for ${myNotesReferenceLabel.value}`);
 const myNotesEditorAccessibilityLabel = computed(() => `My Notes note editor for ${myNotesReferenceLabel.value}`);
 const myNotesDeleteAccessibilityLabel = computed(() => `Delete My Notes note for ${myNotesReferenceLabel.value}`);

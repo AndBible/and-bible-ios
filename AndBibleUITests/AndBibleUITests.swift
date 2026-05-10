@@ -391,7 +391,7 @@ final class AndBibleUITests: XCTestCase {
 
         _ = openWorkspaceCreatePrompt(in: app, timeout: 10)
         let workspaceNameField = requireWorkspaceNamePromptField(in: app, timeout: 10)
-        focusResolvedTextEntryElement(workspaceNameField, timeout: 10)
+        focusResolvedPromptTextEntryElement(workspaceNameField, timeout: 10)
         app.typeText(createdName)
         tapElementReliably(requireElement("workspaceNamePromptConfirmButton", in: app, timeout: 10), timeout: 10)
 
@@ -844,7 +844,7 @@ final class AndBibleUITests: XCTestCase {
         let rowToken = "Genesis_1_1"
         let originalNote = "UI_Test_My_Notes_Note"
         let updatedNoteMarker = "updated"
-        let editNoteLabel = "Edit My Notes note for \(referenceLabel)"
+        let editNoteLabel = "Open My Notes note editor for \(referenceLabel)"
         let editorLabel = "My Notes note editor for \(referenceLabel)"
         let actionsLabel = "My Notes actions for \(referenceLabel)"
         let deleteLabel = "Delete My Notes note for \(referenceLabel)"
@@ -853,6 +853,7 @@ final class AndBibleUITests: XCTestCase {
         waitForMyNotesState(containing: "myNotesCount=1", in: app, timeout: 20)
         waitForMyNotesState(containing: "|\(rowToken)=\(originalNote)|", in: app, timeout: 20)
 
+        tapElementReliably(requireMyNotesWebControl(named: actionsLabel, in: app, timeout: 15), timeout: 10)
         tapElementReliably(requireMyNotesWebControl(named: editNoteLabel, in: app, timeout: 15), timeout: 10)
         waitForMyNotesState(containing: "myNotesEditing=true", in: app, timeout: 20)
         let editor = requireMyNotesWebControl(named: editorLabel, in: app, timeout: 15)
@@ -1243,7 +1244,7 @@ final class AndBibleUITests: XCTestCase {
         tapElementReliably(requireElement("labelManagerAddButton", in: app, timeout: 10), timeout: 10)
         waitForLabelManagerState(containing: "showNewLabel=true", in: app, timeout: 10)
         let newLabelNameField = requireLabelManagerNewLabelField(in: app, timeout: 10)
-        focusResolvedTextEntryElement(newLabelNameField, timeout: 10)
+        focusResolvedPromptTextEntryElement(newLabelNameField, timeout: 10)
         app.typeText(originalName)
         tapElementReliably(requireLabelManagerCreateButton(in: app, timeout: 10), timeout: 10)
         waitForLabelManagerState(containing: labelManagerRowStateToken(originalName), in: app, timeout: 10)
@@ -7785,7 +7786,7 @@ final class AndBibleUITests: XCTestCase {
     private func createFreshLabelFromAssignment(in app: XCUIApplication) {
         presentLabelCreationPrompt(in: app, timeout: 10)
         let nameField = requireLabelManagerNewLabelField(in: app, timeout: 10)
-        focusResolvedTextEntryElement(nameField, timeout: 10)
+        focusResolvedPromptTextEntryElement(nameField, timeout: 10)
         app.typeText("UI Test Fresh")
         tapElementReliably(requireLabelManagerCreateButton(in: app, timeout: 10), timeout: 10)
     }
@@ -8659,6 +8660,47 @@ final class AndBibleUITests: XCTestCase {
             preferTrailingEdge: preferTrailingEdge,
             requireExistencePreflight: false,
             timeout: timeout,
+            file: file,
+            line: line
+        )
+    }
+
+    /**
+     Focuses a prompt-owned text-entry control without polling `isHittable`.
+
+     SwiftUI alert text fields can occasionally stall XCTest while resolving hittability even after
+     the prompt-specific resolver has found the field. A coordinate tap against the resolved field
+     frame is enough to attach the keyboard and avoids that flaky snapshot path.
+     */
+    private func focusResolvedPromptTextEntryElement(
+        _ element: XCUIElement,
+        preferTrailingEdge: Bool = false,
+        timeout: TimeInterval = 10,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let deadline = Date().addingTimeInterval(timeout)
+        let tapOffset = CGVector(dx: preferTrailingEdge ? 0.92 : 0.5, dy: 0.5)
+
+        repeat {
+            let remaining = deadline.timeIntervalSinceNow
+            let exists = element.exists || (remaining > 0 && element.waitForExistence(timeout: min(0.2, remaining)))
+            if exists {
+                if !element.frame.isEmpty {
+                    element.coordinate(withNormalizedOffset: tapOffset).tap()
+                } else {
+                    element.tap()
+                }
+                if waitForElementKeyboardFocus(element, timeout: 0.75) {
+                    return
+                }
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        } while Date() < deadline
+
+        XCTAssertTrue(
+            waitForElementKeyboardFocus(element, timeout: 0.5),
+            "Expected prompt text input '\(element.identifier)' to gain keyboard focus within \(timeout) seconds.",
             file: file,
             line: line
         )
