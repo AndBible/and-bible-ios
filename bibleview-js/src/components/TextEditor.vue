@@ -56,7 +56,11 @@ import ModalDialog from "@/components/modals/ModalDialog.vue";
 import {setupElementEventListener} from "@/utils";
 import {androidKey, customFeaturesKey, keyboardKey} from "@/types/constants";
 
-const props = defineProps<{ text: string, contentAccessibilityLabel?: string }>();
+const props = defineProps<{
+    text: string
+    contentAccessibilityLabel?: string
+    closeAccessibilityLabel?: string
+}>();
 const emit = defineEmits(["save", "close"]);
 
 const android = inject(androidKey)!;
@@ -101,7 +105,7 @@ const outdent = {
 const close = {
     icon: icon(faTimes).html,
     class: "end",
-    title: 'Close',
+    title: props.closeAccessibilityLabel || 'Close',
     result: () => {
         save();
         emit('close')

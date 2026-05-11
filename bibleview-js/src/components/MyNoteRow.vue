@@ -67,6 +67,7 @@
           :text="bookmark.notes"
           :display-accessibility-label="myNotesEditAccessibilityLabel"
           :editor-accessibility-label="myNotesEditorAccessibilityLabel"
+          :close-accessibility-label="myNotesCloseEditorAccessibilityLabel"
           @save="save"
       />
     </div>
@@ -136,6 +137,7 @@ const myNotesInfoAccessibilityLabel = computed(() => `Show My Notes bookmark det
 const myNotesEditButtonAccessibilityLabel = computed(() => `Open My Notes note editor for ${myNotesReferenceLabel.value}`);
 const myNotesEditAccessibilityLabel = computed(() => `Edit My Notes note for ${myNotesReferenceLabel.value}`);
 const myNotesEditorAccessibilityLabel = computed(() => `My Notes note editor for ${myNotesReferenceLabel.value}`);
+const myNotesCloseEditorAccessibilityLabel = computed(() => `Close My Notes note editor for ${myNotesReferenceLabel.value}`);
 const myNotesDeleteAccessibilityLabel = computed(() => `Delete My Notes note for ${myNotesReferenceLabel.value}`);
 </script>
 

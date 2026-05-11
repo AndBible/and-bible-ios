@@ -847,6 +847,7 @@ final class AndBibleUITests: XCTestCase {
         app.launch()
 
         let editNoteLabel = "Edit My Notes note for \(referenceLabel)"
+        let closeEditorLabel = "Close My Notes note editor for \(referenceLabel)"
         let actionsLabel = "My Notes actions for \(referenceLabel)"
         let deleteLabel = "Delete My Notes note for \(referenceLabel)"
 
@@ -856,7 +857,7 @@ final class AndBibleUITests: XCTestCase {
 
         tapElementReliably(requireMyNotesWebControl(named: editNoteLabel, in: app, timeout: 15), timeout: 10)
         waitForMyNotesState(containing: updatedNoteMarker, in: app, timeout: 20)
-        dismissMyNotesEditor(in: app, timeout: 15)
+        dismissMyNotesEditor(named: closeEditorLabel, in: app, timeout: 15)
         waitForMyNotesState(containing: "myNotesEditing=false", in: app, timeout: 20)
 
         tapElementReliably(requireElement("readerReturnFromMyNotesButton", in: app, timeout: 10), timeout: 10)
@@ -5306,16 +5307,16 @@ final class AndBibleUITests: XCTestCase {
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
+        let stateElement = readerRenderedContentStateElement(in: app)
         let deadline = Date().addingTimeInterval(timeout)
         repeat {
-            if let value = readerRenderedContentStateValue(in: app),
+            if let value = stateElement.value as? String,
                value.contains(token) {
                 return
             }
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         } while Date() < deadline
 
-        let stateElement = requireElement("readerRenderedContentState", in: app, timeout: 1, file: file, line: line)
         let lastValue = stateElement.value.map { "\($0)" } ?? "nil"
         XCTFail(
             "Expected reader rendered-content state to contain '\(token)' within \(timeout) seconds; last value was '\(lastValue)'.",
@@ -5326,10 +5327,12 @@ final class AndBibleUITests: XCTestCase {
 
     /// Reads the compact reader state export without walking drawer or overflow menu contents.
     private func readerRenderedContentStateValue(in app: XCUIApplication) -> String? {
-        guard let stateElement = resolvedElement("readerRenderedContentState", in: app) else {
-            return nil
-        }
-        return stateElement.value as? String
+        readerRenderedContentStateElement(in: app).value as? String
+    }
+
+    /// Returns the dedicated compact reader state export query without probing broad element sets.
+    private func readerRenderedContentStateElement(in app: XCUIApplication) -> XCUIElement {
+        app.staticTexts["readerRenderedContentState"].firstMatch
     }
 
     /// Returns whether the compact reader state export currently contains one token.
@@ -5461,14 +5464,14 @@ final class AndBibleUITests: XCTestCase {
 
         let deadline = Date().addingTimeInterval(timeout)
         repeat {
-            if let value = resolvedElement(identifier, in: app)?.value as? String,
+            if let value = tabButton.value as? String,
                value.contains("state=active") {
                 return
             }
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         } while Date() < deadline
 
-        let lastValue = resolvedElement(identifier, in: app)?.value.map { "\($0)" } ?? "nil"
+        let lastValue = tabButton.value.map { "\($0)" } ?? "nil"
         XCTFail(
             "Expected window tab \(order) to become active within \(timeout) seconds; last value was '\(lastValue)'.",
             file: file,
@@ -5508,20 +5511,21 @@ final class AndBibleUITests: XCTestCase {
         )
 
         let identifier = "windowTabButton::\(order)"
-        _ = requireElement(identifier, in: app, timeout: timeout, file: file, line: line)
+        let tabButton = requireElement(identifier, in: app, timeout: timeout, file: file, line: line)
+        let stateElement = readerRenderedContentStateElement(in: app)
 
         let deadline = Date().addingTimeInterval(timeout)
         repeat {
-            let tabValue = resolvedElement(identifier, in: app)?.value as? String ?? ""
-            let renderedState = resolvedElement("readerRenderedContentState", in: app)?.value as? String ?? ""
+            let tabValue = tabButton.value as? String ?? ""
+            let renderedState = stateElement.value as? String ?? ""
             if tabValue.contains("state=active") && renderedState.contains("windowOrder=\(order)") {
                 return
             }
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         } while Date() < deadline
 
-        let lastTabValue = resolvedElement(identifier, in: app)?.value.map { "\($0)" } ?? "nil"
-        let lastRenderedState = resolvedElement("readerRenderedContentState", in: app)?.value.map { "\($0)" } ?? "nil"
+        let lastTabValue = tabButton.value.map { "\($0)" } ?? "nil"
+        let lastRenderedState = stateElement.value.map { "\($0)" } ?? "nil"
         XCTFail(
             "Expected added window tab \(order) to become the active rendered window within \(timeout) seconds; last tab value was '\(lastTabValue)' and last reader state was '\(lastRenderedState)'.",
             file: file,
@@ -7646,10 +7650,12 @@ final class AndBibleUITests: XCTestCase {
      Dismisses the inline My Notes editor after a UI-test mutation has been persisted.
      */
     private func dismissMyNotesEditor(
+        named closeLabel: String,
         in app: XCUIApplication,
         timeout: TimeInterval = 10
     ) {
-        if let closeButton = optionalMyNotesWebControl(named: "Close", in: app, timeout: min(5, timeout)) {
+        let closeButton = requireMyNotesWebControl(named: closeLabel, in: app, timeout: timeout)
+        if closeButton.exists {
             let frame = closeButton.frame
             if !frame.isEmpty {
                 app.coordinate(withNormalizedOffset: .zero).withOffset(
@@ -7658,10 +7664,7 @@ final class AndBibleUITests: XCTestCase {
             } else {
                 tapElementReliably(closeButton, timeout: timeout)
             }
-            return
         }
-
-        app.typeText(XCUIKeyboardKey.escape.rawValue)
     }
 
     /**
