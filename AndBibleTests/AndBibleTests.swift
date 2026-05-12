@@ -1833,6 +1833,17 @@ final class AndBibleTests: XCTestCase {
 
         XCTAssertEqual(recordedScripts().last, #"bibleView.response(3703, "Gen.1.1");"#)
     }
+
+    func testOpenExternalLinkRoutesAbErrorToIssueTrackerURL() {
+        let bridge = BibleBridge()
+        let controller = BibleReaderController(bridge: bridge)
+        var openedURL: URL?
+        controller.onOpenExternalURL = { openedURL = $0 }
+
+        controller.openExternalLink("ab-error://error")
+
+        XCTAssertEqual(openedURL?.absoluteString, "https://github.com/AndBible/and-bible/issues")
+    }
     #endif
 
     func testNavigateToPersistsSelectedVerseOnPageManager() {
@@ -8803,6 +8814,47 @@ final class AndBibleTests: XCTestCase {
             .bookmarks(for: 1, endOrdinal: 40, book: "Genesis")
             .filter { $0.notes != nil && !($0.notes?.notes.isEmpty ?? true) }
         XCTAssertTrue(rebuiltMyNotesBookmarks.isEmpty)
+    }
+
+    func testMyNotesAccessibilityStateCapsDetailedRowAndNoteTokens() throws {
+        let container = try makeBookmarkRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        let bookmarkStore = BookmarkStore(modelContext: modelContext)
+        let bookmarkService = BookmarkService(store: bookmarkStore)
+        let controller = BibleReaderController(bridge: BibleBridge())
+        controller.bookmarkService = bookmarkService
+        controller.navigateTo(book: "Psalms", chapter: 119, verse: 1)
+
+        for verse in 1...60 {
+            let ordinal = (119 - 1) * 40 + verse
+            let bookmark = BibleBookmark(
+                kjvOrdinalStart: ordinal,
+                kjvOrdinalEnd: ordinal,
+                ordinalStart: ordinal,
+                ordinalEnd: ordinal,
+                v11n: "KJVA"
+            )
+            bookmark.book = "Psalms"
+            modelContext.insert(bookmark)
+            try modelContext.save()
+            bookmarkService.saveBibleBookmarkNote(bookmarkId: bookmark.id, note: "Note \(verse)")
+        }
+
+        let state = controller.myNotesAccessibilityState
+        let segments = Dictionary(
+            uniqueKeysWithValues: state.split(separator: ";").compactMap { segment in
+                guard let separator = segment.firstIndex(of: "=") else { return nil }
+                let key = String(segment[..<separator])
+                let value = String(segment[segment.index(after: separator)...])
+                return (key, value)
+            }
+        )
+        let rowTokens = segments["myNotesRows"]?.split(separator: ",").filter { !$0.isEmpty } ?? []
+        let noteTokens = segments["myNotesNotes"]?.split(separator: ",").filter { !$0.isEmpty } ?? []
+
+        XCTAssertEqual(segments["myNotesCount"], "60")
+        XCTAssertEqual(rowTokens.count, UITestRuntimeConfiguration.detailedAccessibilityRowTokenLimit)
+        XCTAssertEqual(noteTokens.count, UITestRuntimeConfiguration.detailedAccessibilityRowTokenLimit)
     }
 
     /**

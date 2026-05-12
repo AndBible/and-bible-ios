@@ -113,6 +113,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
     /// Stable summary of the last content payload emitted to the reader WebView.
     static let emptyRenderedContentState = "category=none;module=none;book=none;chapter=none;key=none"
+    private static let issueTrackerURLString = "https://github.com/AndBible/and-bible/issues"
     private(set) var renderedContentState: String = BibleReaderController.emptyRenderedContentState
 
     /// Infinite scroll: tracks the range of chapters/books currently loaded in the WebView.
@@ -177,8 +178,9 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     /// Compact My Notes state used by UI tests after opening the real visible My Notes document.
     var myNotesAccessibilityState: String {
         let bookmarks = currentChapterMyNotesBookmarks()
-        let rowTokens = bookmarks.map { "|\(myNotesReferenceToken(for: $0))|" }.joined(separator: ",")
-        let noteTokens = bookmarks.map {
+        let exportedBookmarks = bookmarks.prefix(UITestRuntimeConfiguration.detailedAccessibilityRowTokenLimit)
+        let rowTokens = exportedBookmarks.map { "|\(myNotesReferenceToken(for: $0))|" }.joined(separator: ",")
+        let noteTokens = exportedBookmarks.map {
             "|\(myNotesReferenceToken(for: $0))=\(Self.contentStateToken($0.notes?.notes))|"
         }.joined(separator: ",")
         return [
@@ -2694,6 +2696,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     /// Callback for presenting action sheets (set by BibleReaderView)
     var onShareVerseText: ((String) -> Void)?
     var onRequestOpenDownloads: (() -> Void)?
+    var onOpenExternalURL: ((URL) -> Void)?
 
     /// Whether there's an active text selection in the WebView.
     private(set) var hasActiveSelection = false
@@ -2930,6 +2933,11 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             handleFindAllLink(link)
             return
         }
+        // Handle error-report links surfaced in web-rendered error overlays.
+        if link.hasPrefix("ab-error://") {
+            handleErrorReportLink()
+            return
+        }
         // Handle EPUB internal reference links when surfaced as raw anchors.
         if link.hasPrefix("epub-ref://") {
             handleEpubRefLink(link)
@@ -2988,6 +2996,19 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             return
         }
         guard let url = URL(string: link) else { return }
+        openPlatformURL(url)
+    }
+
+    private func handleErrorReportLink() {
+        guard let url = URL(string: Self.issueTrackerURLString) else { return }
+        openPlatformURL(url)
+    }
+
+    private func openPlatformURL(_ url: URL) {
+        if let onOpenExternalURL {
+            onOpenExternalURL(url)
+            return
+        }
         #if os(iOS)
         UIApplication.shared.open(url)
         #elseif os(macOS)
