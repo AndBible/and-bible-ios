@@ -452,14 +452,18 @@ public struct BibleReaderView: View {
     @ViewBuilder
     private var readerRenderedContentStateExport: some View {
         if UITestRuntimeConfiguration.enablesDetailedAccessibilityExports {
-            Text(readerRenderedContentStateValue)
-                .font(.system(size: 1))
-                .frame(width: 1, height: 1)
-                .opacity(0.01)
-                .allowsHitTesting(false)
-                .accessibilityIdentifier("readerRenderedContentState")
-                .accessibilityLabel("")
-                .accessibilityValue(readerRenderedContentStateValue)
+            Button(action: {}) {
+                Text("reader-state")
+                    .font(.system(size: 1))
+                    .frame(width: 1, height: 1)
+                    .opacity(0.01)
+            }
+            .buttonStyle(.plain)
+            .frame(width: 1, height: 1)
+            .allowsHitTesting(false)
+            .accessibilityIdentifier("readerRenderedContentState")
+            .accessibilityLabel("readerRenderedContentState")
+            .accessibilityValue(readerRenderedContentStateValue)
         }
     }
 

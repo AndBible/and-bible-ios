@@ -4703,9 +4703,12 @@ final class AndBibleUITests: XCTestCase {
                 app.buttons[identifier].firstMatch,
                 app.navigationBars.buttons[identifier].firstMatch,
                 app.otherElements[identifier].firstMatch,
+                app.staticTexts[identifier].firstMatch,
             ]
         case "readerRenderedContentState":
             return [
+                app.buttons[identifier].firstMatch,
+                app.otherElements[identifier].firstMatch,
                 app.staticTexts[identifier].firstMatch,
             ]
         case "readerOverflowMenu":
@@ -5306,17 +5309,16 @@ final class AndBibleUITests: XCTestCase {
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
-        let stateElement = readerRenderedContentStateElement(in: app)
         let deadline = Date().addingTimeInterval(timeout)
         repeat {
-            if let value = stateElement.value as? String,
+            if let value = readerRenderedContentStateValue(in: app),
                value.contains(token) {
                 return
             }
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         } while Date() < deadline
 
-        let lastValue = stateElement.value.map { "\($0)" } ?? "nil"
+        let lastValue = readerRenderedContentStateValue(in: app) ?? "nil"
         XCTFail(
             "Expected reader rendered-content state to contain '\(token)' within \(timeout) seconds; last value was '\(lastValue)'.",
             file: file,
@@ -5326,12 +5328,24 @@ final class AndBibleUITests: XCTestCase {
 
     /// Reads the compact reader state export without walking drawer or overflow menu contents.
     private func readerRenderedContentStateValue(in app: XCUIApplication) -> String? {
-        readerRenderedContentStateElement(in: app).value as? String
+        let stateElement = readerRenderedContentStateElement(in: app)
+        guard stateElement.exists else {
+            return nil
+        }
+        return stateElement.value as? String
     }
 
     /// Returns the dedicated compact reader state export query without probing broad element sets.
     private func readerRenderedContentStateElement(in app: XCUIApplication) -> XCUIElement {
-        app.staticTexts["readerRenderedContentState"].firstMatch
+        let buttonExport = app.buttons["readerRenderedContentState"].firstMatch
+        if buttonExport.exists {
+            return buttonExport
+        }
+        let otherExport = app.otherElements["readerRenderedContentState"].firstMatch
+        if otherExport.exists {
+            return otherExport
+        }
+        return app.staticTexts["readerRenderedContentState"].firstMatch
     }
 
     /// Returns whether the compact reader state export currently contains one token.
@@ -5359,11 +5373,11 @@ final class AndBibleUITests: XCTestCase {
      * - Parameters:
      *   - app: Running application under test.
      *   - timeout: Maximum number of seconds to wait before returning `false`.
-     * - Returns: `true` when the stable reader toolbar is visible again and no drawer-only or
-     *   overflow-only action remains exposed over the shell.
+     * - Returns: `true` when the reader's compact state export reports that transient reader
+     *   surfaces are closed and My Notes is no longer fronting the primary reader chrome.
      * - Side effects:
-     *   - polls the live toolbar hierarchy while modal surfaces dismiss back to the reader shell
-     *   - avoids expensive cross-surface root queries by checking menu-only action affordances
+     *   - polls the compact reader state export while modal surfaces dismiss back to the reader
+     *     shell, avoiding full-toolbar snapshots while WebView content is settling
      * - Failure modes:
      *   - returns `false` when the reader shell never restores its primary controls before timeout
      */
@@ -5373,20 +5387,17 @@ final class AndBibleUITests: XCTestCase {
     ) -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
         repeat {
-            let drawerButton = app.buttons["readerNavigationDrawerButton"].firstMatch
-            let moreButton = app.buttons["readerMoreMenuButton"].firstMatch
             let readerState = readerRenderedContentStateValue(in: app)
             let readerSurfacesClosed = readerState.map { state in
                 let drawerClosed = state.contains("drawerVisible=false") || !state.contains("drawerVisible=")
                 let overflowClosed = state.contains("overflowVisible=false") || !state.contains("overflowVisible=")
                 let sheetClosed = state.contains("readerSheet=none") || !state.contains("readerSheet=")
                 let searchClosed = state.contains("searchVisible=false") || !state.contains("searchVisible=")
-                return drawerClosed && overflowClosed && sheetClosed && searchClosed
+                let myNotesClosed = state.contains("myNotesVisible=false") || !state.contains("myNotesVisible=")
+                return drawerClosed && overflowClosed && sheetClosed && searchClosed && myNotesClosed
             } ?? false
 
             if readerState != nil,
-               drawerButton.exists,
-               moreButton.exists,
                readerSurfacesClosed {
                 return true
             }
@@ -5860,10 +5871,10 @@ final class AndBibleUITests: XCTestCase {
 
         repeat {
             let button = unresolvedElement("readerMoreMenuButton", in: app)
-            if waitForElementToBecomeHittable(button, timeout: min(2, max(0.5, deadline.timeIntervalSinceNow))) {
-                button.tap()
-            } else if button.exists, !button.frame.isEmpty {
+            if elementHasUsableFrame(button) {
                 button.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+            } else if waitForElementToBecomeHittable(button, timeout: min(2, max(0.5, deadline.timeIntervalSinceNow))) {
+                button.tap()
             }
             if waitForReaderOverflowMenu(in: app, timeout: min(5, max(1, deadline.timeIntervalSinceNow))) {
                 return true
@@ -6048,10 +6059,10 @@ final class AndBibleUITests: XCTestCase {
 
         repeat {
             let button = unresolvedElement("readerNavigationDrawerButton", in: app)
-            if waitForElementToBecomeHittable(button, timeout: min(2, max(0.5, deadline.timeIntervalSinceNow))) {
-                button.tap()
-            } else if button.exists, !button.frame.isEmpty {
+            if elementHasUsableFrame(button) {
                 button.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+            } else if waitForElementToBecomeHittable(button, timeout: min(2, max(0.5, deadline.timeIntervalSinceNow))) {
+                button.tap()
             }
             if waitForReaderNavigationDrawer(
                 in: app,
@@ -6645,10 +6656,10 @@ final class AndBibleUITests: XCTestCase {
             actionSurface.otherElements[identifier].firstMatch,
         ]
 
-        if let visibleCandidate = scopedCandidates.first(where: { $0.exists && $0.isHittable }) {
+        if let visibleCandidate = scopedCandidates.first(where: { isElementHittable($0) }) {
             return visibleCandidate
         }
-        if let frameCandidate = scopedCandidates.first(where: { $0.exists && !$0.frame.isEmpty }) {
+        if let frameCandidate = scopedCandidates.first(where: { elementHasUsableFrame($0) }) {
             return frameCandidate
         }
         return scopedCandidates.first(where: { $0.exists }) ?? actionSurface.buttons[identifier].firstMatch
@@ -6699,7 +6710,7 @@ final class AndBibleUITests: XCTestCase {
             return finalAction
         }
 
-        if let directAction = directActionCandidates.first(where: { $0.exists && !$0.frame.isEmpty }) {
+        if let directAction = directActionCandidates.first(where: { elementHasUsableFrame($0) }) {
             return directAction
         }
 
@@ -6741,17 +6752,17 @@ final class AndBibleUITests: XCTestCase {
                     if isElementVisible(action, within: actionSurface) {
                         return action
                     }
-                    if let directAction = directActionCandidates.first(where: { $0.exists && $0.isHittable }) {
+                    if let directAction = directActionCandidates.first(where: { isElementHittable($0) }) {
                         return directAction
                     }
-                    if actionSurface.exists, !actionSurface.frame.isEmpty {
+                    if elementHasUsableFrame(actionSurface) {
                         actionSurface.swipeUp()
                         RunLoop.current.run(until: Date().addingTimeInterval(0.2))
                     }
                 }
             }
 
-            if let directAction = directActionCandidates.first(where: { $0.exists && $0.isHittable }) {
+            if let directAction = directActionCandidates.first(where: { isElementHittable($0) }) {
                 return directAction
             }
 
@@ -6768,10 +6779,33 @@ final class AndBibleUITests: XCTestCase {
             }
         }
 
-        if let directAction = directActionCandidates.first(where: { $0.exists && $0.isHittable }) {
+        if let directAction = directActionCandidates.first(where: { isElementHittable($0) }) {
             return directAction
         }
         return nil
+    }
+
+    /**
+     Returns true when XCTest has a finite, non-empty frame it can use for activation-point work.
+     */
+    private func elementHasUsableFrame(_ element: XCUIElement) -> Bool {
+        guard element.exists else {
+            return false
+        }
+        let frame = element.frame
+        return !frame.isNull &&
+            !frame.isEmpty &&
+            frame.origin.x.isFinite &&
+            frame.origin.y.isFinite &&
+            frame.width.isFinite &&
+            frame.height.isFinite
+    }
+
+    /**
+     Samples hittability only after the element exposes a usable frame.
+     */
+    private func isElementHittable(_ element: XCUIElement) -> Bool {
+        elementHasUsableFrame(element) && element.isHittable
     }
 
     /**
@@ -6791,7 +6825,7 @@ final class AndBibleUITests: XCTestCase {
     ) -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
         repeat {
-            if element.exists && element.isHittable {
+            if isElementHittable(element) {
                 return true
             }
             let remaining = deadline.timeIntervalSinceNow
@@ -6801,7 +6835,7 @@ final class AndBibleUITests: XCTestCase {
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         } while Date() < deadline
 
-        return element.exists && element.isHittable
+        return isElementHittable(element)
     }
 
     /**
@@ -6840,13 +6874,12 @@ final class AndBibleUITests: XCTestCase {
         guard exists else {
             return
         }
-        if !element.frame.isEmpty {
+        if elementHasUsableFrame(element) {
             element.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
             return
         }
-        XCTAssertTrue(
-            element.isHittable,
-            "Expected element '\(element.identifier)' to become hittable before tapping within \(timeout) seconds.",
+        XCTFail(
+            "Expected element '\(element.identifier)' to expose a usable frame before tapping within \(timeout) seconds.",
             file: file,
             line: line
         )
@@ -7224,7 +7257,7 @@ final class AndBibleUITests: XCTestCase {
         let deadline = Date().addingTimeInterval(waitTimeout)
         repeat {
             for candidate in candidates where candidate.exists {
-                if candidate.isHittable || !candidate.frame.isEmpty {
+                if isElementHittable(candidate) || elementHasUsableFrame(candidate) {
                     return candidate
                 }
             }
