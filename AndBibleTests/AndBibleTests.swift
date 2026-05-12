@@ -1840,7 +1840,7 @@ final class AndBibleTests: XCTestCase {
         var openedURL: URL?
         controller.onOpenExternalURL = { openedURL = $0 }
 
-        controller.openExternalLink("ab-error://error")
+        controller.bridge(bridge, openExternalLink: "ab-error://error")
 
         XCTAssertEqual(openedURL?.absoluteString, "https://github.com/AndBible/and-bible/issues")
     }
@@ -8841,14 +8841,12 @@ final class AndBibleTests: XCTestCase {
         }
 
         let state = controller.myNotesAccessibilityState
-        let segments = Dictionary(
-            uniqueKeysWithValues: state.split(separator: ";").compactMap { segment in
-                guard let separator = segment.firstIndex(of: "=") else { return nil }
-                let key = String(segment[..<separator])
-                let value = String(segment[segment.index(after: separator)...])
-                return (key, value)
-            }
-        )
+        let segments: [String: String] = state.split(separator: ";").reduce(into: [:]) { result, segment in
+            guard let separator = segment.firstIndex(of: "=") else { return }
+            let key = String(segment[..<separator])
+            let value = String(segment[segment.index(after: separator)...])
+            result[key] = value
+        }
         let rowTokens = segments["myNotesRows"]?.split(separator: ",").filter { !$0.isEmpty } ?? []
         let noteTokens = segments["myNotesNotes"]?.split(separator: ",").filter { !$0.isEmpty } ?? []
 
