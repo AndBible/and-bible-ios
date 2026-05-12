@@ -830,7 +830,7 @@ final class AndBibleUITests: XCTestCase {
      *   - launches the reader shell with one deterministic Genesis note fixture
      *   - opens My Notes through the production reader navigation drawer
      *   - opens the visible note editor, appends through the gated UI-test bridge path, returns to
-     *     Bible, and reopens My Notes to verify the persisted note is rebuilt into the document
+     *     Bible when needed, and reopens My Notes to verify the persisted note is rebuilt
      *   - deletes the visible My Notes row and verifies the rebuilt document stays empty
      * - Failure modes:
      *   - fails if the My Notes action, visible note editor, delete action, or persistence export
@@ -859,8 +859,7 @@ final class AndBibleUITests: XCTestCase {
         dismissMyNotesEditor(in: app, timeout: 15)
         waitForMyNotesState(containing: "myNotesEditing=false", in: app, timeout: 20)
 
-        tapElementReliably(requireElement("readerReturnFromMyNotesButton", in: app, timeout: 10), timeout: 10)
-        waitForMyNotesState(containing: "myNotesVisible=false", in: app, timeout: 20)
+        returnFromMyNotesIfVisible(in: app, timeout: 20)
 
         openMyNotesFromReader(in: app)
         waitForMyNotesState(containing: "myNotesCount=1", in: app, timeout: 20)
@@ -872,7 +871,7 @@ final class AndBibleUITests: XCTestCase {
         waitForMyNotesState(containing: "myNotesCount=0", in: app, timeout: 20)
         waitForMyNotesState(notContaining: "|\(rowToken)|", in: app, timeout: 20)
 
-        tapElementReliably(requireElement("readerReturnFromMyNotesButton", in: app, timeout: 10), timeout: 10)
+        returnFromMyNotesIfVisible(in: app, timeout: 20)
         openMyNotesFromReader(in: app)
         waitForMyNotesState(containing: "myNotesCount=0", in: app, timeout: 20)
         waitForMyNotesState(notContaining: updatedNoteMarker, in: app, timeout: 20)
@@ -4702,14 +4701,10 @@ final class AndBibleUITests: XCTestCase {
             return [
                 app.buttons[identifier].firstMatch,
                 app.navigationBars.buttons[identifier].firstMatch,
-                app.otherElements[identifier].firstMatch,
-                app.staticTexts[identifier].firstMatch,
             ]
         case "readerRenderedContentState":
             return [
                 app.buttons[identifier].firstMatch,
-                app.otherElements[identifier].firstMatch,
-                app.staticTexts[identifier].firstMatch,
             ]
         case "readerOverflowMenu":
             return [
@@ -5337,15 +5332,7 @@ final class AndBibleUITests: XCTestCase {
 
     /// Returns the dedicated compact reader state export query without probing broad element sets.
     private func readerRenderedContentStateElement(in app: XCUIApplication) -> XCUIElement {
-        let buttonExport = app.buttons["readerRenderedContentState"].firstMatch
-        if buttonExport.exists {
-            return buttonExport
-        }
-        let otherExport = app.otherElements["readerRenderedContentState"].firstMatch
-        if otherExport.exists {
-            return otherExport
-        }
-        return app.staticTexts["readerRenderedContentState"].firstMatch
+        app.buttons["readerRenderedContentState"].firstMatch
     }
 
     /// Returns whether the compact reader state export currently contains one token.
@@ -7652,6 +7639,62 @@ final class AndBibleUITests: XCTestCase {
             failureDescription: { finalValue in
                 "Expected My Notes state to stop containing '\(token)' within \(timeout) seconds. Final value: '\(finalValue)'."
             },
+            file: file,
+            line: line
+        )
+    }
+
+    /**
+     Returns from My Notes when the document is still visible.
+     */
+    private func returnFromMyNotesIfVisible(
+        in app: XCUIApplication,
+        timeout: TimeInterval = 10,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            let state = readerRenderedContentStateValue(in: app)
+            if state?.contains("myNotesVisible=false") == true {
+                return
+            }
+
+            if state?.contains("myNotesVisible=true") == true {
+                let button = app.buttons["readerReturnFromMyNotesButton"].firstMatch
+                if waitForElementToBecomeHittable(
+                    button,
+                    timeout: min(2, max(0.2, deadline.timeIntervalSinceNow))
+                ) {
+                    button.tap()
+                    waitForMyNotesState(
+                        containing: "myNotesVisible=false",
+                        in: app,
+                        timeout: timeout,
+                        file: file,
+                        line: line
+                    )
+                    return
+                }
+                if elementHasUsableFrame(button) {
+                    button.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+                    waitForMyNotesState(
+                        containing: "myNotesVisible=false",
+                        in: app,
+                        timeout: timeout,
+                        file: file,
+                        line: line
+                    )
+                    return
+                }
+            }
+
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        } while Date() < deadline
+
+        let finalState = readerRenderedContentStateValue(in: app) ?? "nil"
+        XCTFail(
+            "Expected My Notes to be hidden or expose its return button within \(timeout) seconds. Final state: '\(finalState)'.",
             file: file,
             line: line
         )
