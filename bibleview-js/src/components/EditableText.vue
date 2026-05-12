@@ -21,7 +21,6 @@
       <TextEditor
           :text="editText || ''"
           :content-accessibility-label="editorAccessibilityLabel"
-          :close-accessibility-label="closeAccessibilityLabel"
           @save="textChanged"
           @close="editMode = false"
       />
@@ -72,7 +71,6 @@ const props = withDefaults(defineProps<{
     disableClickToEdit?: boolean
     displayAccessibilityLabel?: string
     editorAccessibilityLabel?: string
-    closeAccessibilityLabel?: string
 }>(), {
     editDirectly: false,
     showPlaceholder: false,

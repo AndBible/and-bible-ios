@@ -59,7 +59,6 @@ import {androidKey, customFeaturesKey, keyboardKey} from "@/types/constants";
 const props = defineProps<{
     text: string
     contentAccessibilityLabel?: string
-    closeAccessibilityLabel?: string
 }>();
 const emit = defineEmits(["save", "close"]);
 
@@ -105,7 +104,7 @@ const outdent = {
 const close = {
     icon: icon(faTimes).html,
     class: "end",
-    title: props.closeAccessibilityLabel || 'Close',
+    title: 'Close',
     result: () => {
         save();
         emit('close')

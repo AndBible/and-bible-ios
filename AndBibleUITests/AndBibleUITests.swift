@@ -847,7 +847,6 @@ final class AndBibleUITests: XCTestCase {
         app.launch()
 
         let editNoteLabel = "Edit My Notes note for \(referenceLabel)"
-        let closeEditorLabel = "Close My Notes note editor for \(referenceLabel)"
         let actionsLabel = "My Notes actions for \(referenceLabel)"
         let deleteLabel = "Delete My Notes note for \(referenceLabel)"
 
@@ -857,7 +856,7 @@ final class AndBibleUITests: XCTestCase {
 
         tapElementReliably(requireMyNotesWebControl(named: editNoteLabel, in: app, timeout: 15), timeout: 10)
         waitForMyNotesState(containing: updatedNoteMarker, in: app, timeout: 20)
-        dismissMyNotesEditor(named: closeEditorLabel, in: app, timeout: 15)
+        dismissMyNotesEditor(in: app, timeout: 15)
         waitForMyNotesState(containing: "myNotesEditing=false", in: app, timeout: 20)
 
         tapElementReliably(requireElement("readerReturnFromMyNotesButton", in: app, timeout: 10), timeout: 10)
@@ -7650,12 +7649,10 @@ final class AndBibleUITests: XCTestCase {
      Dismisses the inline My Notes editor after a UI-test mutation has been persisted.
      */
     private func dismissMyNotesEditor(
-        named closeLabel: String,
         in app: XCUIApplication,
         timeout: TimeInterval = 10
     ) {
-        let closeButton = requireMyNotesWebControl(named: closeLabel, in: app, timeout: timeout)
-        if closeButton.exists {
+        if let closeButton = optionalMyNotesWebControl(named: "Close", in: app, timeout: min(5, timeout)) {
             let frame = closeButton.frame
             if !frame.isEmpty {
                 app.coordinate(withNormalizedOffset: .zero).withOffset(
@@ -7664,7 +7661,10 @@ final class AndBibleUITests: XCTestCase {
             } else {
                 tapElementReliably(closeButton, timeout: timeout)
             }
+            return
         }
+
+        app.typeText(XCUIKeyboardKey.escape.rawValue)
     }
 
     /**
