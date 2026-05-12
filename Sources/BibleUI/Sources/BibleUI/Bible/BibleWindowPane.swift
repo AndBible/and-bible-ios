@@ -12,10 +12,11 @@ private let logger = Logger(subsystem: "org.andbible", category: "BibleWindowPan
 /**
  Hosts one fully independent reading pane inside the multi-window reader.
 
- Each pane owns its own `BibleBridge`, `BibleReaderController`, and `BibleWebView`, while
+ Each pane uses the `BibleBridge` and `BibleReaderController` registered for its `Window`, while
  delegating sheet/alert/toast presentation back to `BibleReaderView` through callback closures.
- This separation lets multiple panes render different modules and references simultaneously
- while still sharing workspace-level state from `WindowManager`.
+ Keeping that controller/bridge pair scoped to the window, not transient SwiftUI appearances, lets
+ multiple panes render different modules and references simultaneously while still sharing
+ workspace-level state from `WindowManager`.
 
  Data dependencies:
  - `window`, `isFocused`, `displaySettings`, `nightMode`, `disableTwoStepBookmarking`, and
@@ -26,8 +27,8 @@ private let logger = Logger(subsystem: "org.andbible", category: "BibleWindowPan
    bookmark, history, and settings mutations initiated by the controller
 
  Side effects:
- - `onAppear` lazily creates the pane controller and registers it with `WindowManager`
- - `onDisappear` unregisters the controller when the pane leaves the hierarchy
+ - `onAppear` lazily creates or reuses the pane controller and registers it with `WindowManager`
+ - window removal or workspace switching unregisters controllers from `WindowManager`
  - `onChange` for `nightMode` and `displaySettings` pushes updated display state into the
    embedded web view via `BibleReaderController.updateDisplaySettings`
  */
@@ -73,6 +74,17 @@ struct BibleWindowPane: View {
 
     /// SwiftData context used to build stores and persist pane-driven mutations.
     @Environment(\.modelContext) private var modelContext
+
+    /// Bridge that should back the current `BibleWebView` render pass.
+    private var webBridge: BibleBridge {
+        if let controller {
+            return controller.bridge
+        }
+        if let registeredController = windowManager.controllers[window.id] as? BibleReaderController {
+            return registeredController.bridge
+        }
+        return bridge
+    }
 
     /// Requests the parent reader to present the book chooser.
     var onShowBookChooser: (() -> Void)?
@@ -146,7 +158,7 @@ struct BibleWindowPane: View {
 
     var body: some View {
         ZStack(alignment: .bottom) {
-            BibleWebView(bridge: bridge, backgroundColorInt: activeBackgroundColorInt)
+            BibleWebView(bridge: webBridge, backgroundColorInt: activeBackgroundColorInt)
                 .ignoresSafeArea(edges: .bottom)
 
             // Selection action bar — shows when text is long-press selected
@@ -167,21 +179,11 @@ struct BibleWindowPane: View {
             if controller == nil {
                 initializeController()
             } else {
-                // Re-register existing controller — onDisappear may have cleared the
-                // registry during a ForEach re-layout (e.g. when adding/removing windows).
-                windowManager.registerController(controller!, for: window.id)
-                // Async nudge (same reason as initializeController — see comment there).
-                let wm = windowManager
-                let wid = window.id
-                let ctrl = controller!
-                Task { @MainActor in
-                    wm.registerController(ctrl, for: wid)
-                }
+                let workspaceStore = WorkspaceStore(modelContext: modelContext)
+                let settingsStore = SettingsStore(modelContext: modelContext)
+                configureController(controller!, workspaceStore: workspaceStore, settingsStore: settingsStore)
+                registerController(controller!)
             }
-        }
-        .onDisappear {
-            // Unregister controller when pane is removed
-            windowManager.unregisterController(for: window.id)
         }
         .onChange(of: nightMode) { _, newValue in
             controller?.updateDisplaySettings(displaySettings, nightMode: newValue)
@@ -344,18 +346,21 @@ struct BibleWindowPane: View {
     private func initializeController() {
         guard controller == nil else { return }
 
-        let bookmarkStore = BookmarkStore(modelContext: modelContext)
-        let bookmarkService = BookmarkService(store: bookmarkStore)
         let workspaceStore = WorkspaceStore(modelContext: modelContext)
         let store = SettingsStore(modelContext: modelContext)
 
+        if let existingController = windowManager.controllers[window.id] as? BibleReaderController {
+            bridge = existingController.bridge
+            controller = existingController
+            configureController(existingController, workspaceStore: workspaceStore, settingsStore: store)
+            registerController(existingController)
+            return
+        }
+
+        let bookmarkStore = BookmarkStore(modelContext: modelContext)
+        let bookmarkService = BookmarkService(store: bookmarkStore)
         let ctrl = BibleReaderController(bridge: bridge, bookmarkService: bookmarkService)
-        ctrl.displaySettings = displaySettings
-        ctrl.nightMode = nightMode
-        ctrl.speakService = speakService
-        ctrl.workspaceStore = workspaceStore
-        ctrl.activeWindow = window
-        ctrl.settingsStore = store
+        configureController(ctrl, workspaceStore: workspaceStore, settingsStore: store)
 
         // Share module discovery from an existing controller to avoid
         // creating multiple conflicting SwordManager C++ instances.
@@ -365,7 +370,23 @@ struct BibleWindowPane: View {
 
         ctrl.restoreSavedPosition()
 
-        // Wire callbacks to parent
+        controller = ctrl
+        registerController(ctrl)
+    }
+
+    /// Wires transient view dependencies back into a pane-scoped controller.
+    private func configureController(
+        _ ctrl: BibleReaderController,
+        workspaceStore: WorkspaceStore,
+        settingsStore store: SettingsStore
+    ) {
+        ctrl.displaySettings = displaySettings
+        ctrl.nightMode = nightMode
+        ctrl.speakService = speakService
+        ctrl.workspaceStore = workspaceStore
+        ctrl.activeWindow = window
+        ctrl.settingsStore = store
+
         ctrl.onShareVerseText = { text in onShareText?(text) }
         ctrl.onRequestOpenDownloads = { onShowDownloads?() }
         ctrl.onShowStrongsDefinition = { json, config in onShowStrongsSheet?(json, config) }
@@ -418,11 +439,11 @@ struct BibleWindowPane: View {
             }
         }
         ctrl.onInteraction = focusHandler
-        bridge.onAnyMessage = focusHandler
-        bridge.onNativeScrollDeltaY = { deltaY in
+        ctrl.bridge.onAnyMessage = focusHandler
+        ctrl.bridge.onNativeScrollDeltaY = { deltaY in
             onUserScrollDeltaY?(deltaY)
         }
-        bridge.onNativeHorizontalSwipe = { direction in
+        ctrl.bridge.onNativeHorizontalSwipe = { direction in
             onUserHorizontalSwipe?(direction)
         }
 
@@ -463,9 +484,10 @@ struct BibleWindowPane: View {
                 }
             }
         }
+    }
 
-        controller = ctrl
-
+    /// Registers the pane controller and nudges SwiftUI to re-evaluate registry-backed UI.
+    private func registerController(_ ctrl: BibleReaderController) {
         // Register controller with WindowManager — the single source of truth.
         // BibleReaderView reads from windowManager.controllers via focusedController,
         // and controllerVersion ensures SwiftUI re-evaluates the toolbar.

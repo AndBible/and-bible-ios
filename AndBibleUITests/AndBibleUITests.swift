@@ -7655,38 +7655,36 @@ final class AndBibleUITests: XCTestCase {
     ) {
         let deadline = Date().addingTimeInterval(timeout)
         repeat {
-            let state = readerRenderedContentStateValue(in: app)
-            if state?.contains("myNotesVisible=false") == true {
+            let button = app.buttons["readerReturnFromMyNotesButton"].firstMatch
+            if waitForElementToBecomeHittable(
+                button,
+                timeout: min(2, max(0.2, deadline.timeIntervalSinceNow))
+            ) {
+                button.tap()
+                waitForMyNotesState(
+                    containing: "myNotesVisible=false",
+                    in: app,
+                    timeout: timeout,
+                    file: file,
+                    line: line
+                )
+                return
+            }
+            if elementHasUsableFrame(button) {
+                button.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+                waitForMyNotesState(
+                    containing: "myNotesVisible=false",
+                    in: app,
+                    timeout: timeout,
+                    file: file,
+                    line: line
+                )
                 return
             }
 
-            if state?.contains("myNotesVisible=true") == true {
-                let button = app.buttons["readerReturnFromMyNotesButton"].firstMatch
-                if waitForElementToBecomeHittable(
-                    button,
-                    timeout: min(2, max(0.2, deadline.timeIntervalSinceNow))
-                ) {
-                    button.tap()
-                    waitForMyNotesState(
-                        containing: "myNotesVisible=false",
-                        in: app,
-                        timeout: timeout,
-                        file: file,
-                        line: line
-                    )
-                    return
-                }
-                if elementHasUsableFrame(button) {
-                    button.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
-                    waitForMyNotesState(
-                        containing: "myNotesVisible=false",
-                        in: app,
-                        timeout: timeout,
-                        file: file,
-                        line: line
-                    )
-                    return
-                }
+            let state = readerRenderedContentStateValue(in: app)
+            if state?.contains("myNotesVisible=false") == true {
+                return
             }
 
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
@@ -7732,10 +7730,6 @@ final class AndBibleUITests: XCTestCase {
     ) {
         let deadline = Date().addingTimeInterval(timeout)
         repeat {
-            if readerRenderedContentStateContains("myNotesEditing=false", in: app) {
-                return
-            }
-
             if let closeButton = optionalMyNotesWebControl(named: "Close", in: app, timeout: 0.2) {
                 let frame = closeButton.frame
                 if !frame.isEmpty {
@@ -7745,6 +7739,10 @@ final class AndBibleUITests: XCTestCase {
                 } else {
                     tapElementReliably(closeButton, timeout: timeout, file: file, line: line)
                 }
+                return
+            }
+
+            if readerRenderedContentStateContains("myNotesEditing=false", in: app) {
                 return
             }
 
