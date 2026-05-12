@@ -8842,10 +8842,9 @@ final class AndBibleTests: XCTestCase {
 
         let state = controller.myNotesAccessibilityState
         let segments: [String: String] = state.split(separator: ";").reduce(into: [:]) { result, segment in
-            guard let separator = segment.firstIndex(of: "=") else { return }
-            let key = String(segment[..<separator])
-            let value = String(segment[segment.index(after: separator)...])
-            result[key] = value
+            let parts = segment.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
+            guard parts.count == 2 else { return }
+            result[String(parts[0])] = String(parts[1])
         }
         let rowTokens = segments["myNotesRows"]?.split(separator: ",").filter { !$0.isEmpty } ?? []
         let noteTokens = segments["myNotesNotes"]?.split(separator: ",").filter { !$0.isEmpty } ?? []
