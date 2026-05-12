@@ -436,7 +436,7 @@ public struct BibleReaderView: View {
         let contentToken = exportController?.renderedContentState
             ?? BibleReaderController.emptyRenderedContentState
         let myNotesToken = exportController?.myNotesAccessibilityState
-            ?? "myNotesVisible=false;myNotesRevision=0;myNotesCount=0;myNotesRows=;myNotesNotes="
+            ?? MyNotesAccessibilitySnapshot.empty.encodedValue
         let strongsMode = resolvedDisplaySettings(for: windowManager.activeWindow).strongsMode
             ?? TextDisplaySettings.appDefaults.strongsMode
             ?? 0

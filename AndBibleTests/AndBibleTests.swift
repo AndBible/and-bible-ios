@@ -8840,18 +8840,12 @@ final class AndBibleTests: XCTestCase {
             bookmarkService.saveBibleBookmarkNote(bookmarkId: bookmark.id, note: "Note \(verse)")
         }
 
-        let state = controller.myNotesAccessibilityState
-        let segments: [String: String] = state.split(separator: ";").reduce(into: [:]) { result, segment in
-            let parts = segment.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
-            guard parts.count == 2 else { return }
-            result[String(parts[0])] = String(parts[1])
-        }
-        let rowTokens = segments["myNotesRows"]?.split(separator: ",").filter { !$0.isEmpty } ?? []
-        let noteTokens = segments["myNotesNotes"]?.split(separator: ",").filter { !$0.isEmpty } ?? []
+        let snapshot = controller.myNotesAccessibilitySnapshot
 
-        XCTAssertEqual(segments["myNotesCount"], "60")
-        XCTAssertEqual(rowTokens.count, UITestRuntimeConfiguration.detailedAccessibilityRowTokenLimit)
-        XCTAssertEqual(noteTokens.count, UITestRuntimeConfiguration.detailedAccessibilityRowTokenLimit)
+        XCTAssertEqual(snapshot.totalCount, 60)
+        XCTAssertEqual(snapshot.rowReferenceTokens.count, UITestRuntimeConfiguration.detailedAccessibilityRowTokenLimit)
+        XCTAssertEqual(snapshot.noteTokens.count, UITestRuntimeConfiguration.detailedAccessibilityRowTokenLimit)
+        XCTAssertEqual(controller.myNotesAccessibilityState, snapshot.encodedValue)
     }
 
     /**

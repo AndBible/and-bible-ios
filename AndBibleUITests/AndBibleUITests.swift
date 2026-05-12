@@ -7650,21 +7650,37 @@ final class AndBibleUITests: XCTestCase {
      */
     private func dismissMyNotesEditor(
         in app: XCUIApplication,
-        timeout: TimeInterval = 10
+        timeout: TimeInterval = 10,
+        file: StaticString = #filePath,
+        line: UInt = #line
     ) {
-        if let closeButton = optionalMyNotesWebControl(named: "Close", in: app, timeout: min(5, timeout)) {
-            let frame = closeButton.frame
-            if !frame.isEmpty {
-                app.coordinate(withNormalizedOffset: .zero).withOffset(
-                    CGVector(dx: frame.midX, dy: frame.midY)
-                ).tap()
-            } else {
-                tapElementReliably(closeButton, timeout: timeout)
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            if readerRenderedContentStateContains("myNotesEditing=false", in: app) {
+                return
             }
-            return
-        }
 
-        app.typeText(XCUIKeyboardKey.escape.rawValue)
+            if let closeButton = optionalMyNotesWebControl(named: "Close", in: app, timeout: 0.2) {
+                let frame = closeButton.frame
+                if !frame.isEmpty {
+                    app.coordinate(withNormalizedOffset: .zero).withOffset(
+                        CGVector(dx: frame.midX, dy: frame.midY)
+                    ).tap()
+                } else {
+                    tapElementReliably(closeButton, timeout: timeout, file: file, line: line)
+                }
+                return
+            }
+
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        } while Date() < deadline
+
+        let finalState = readerRenderedContentStateValue(in: app) ?? "nil"
+        XCTFail(
+            "Expected My Notes editor to expose a Close control or report myNotesEditing=false within \(timeout) seconds. Final state: '\(finalState)'.",
+            file: file,
+            line: line
+        )
     }
 
     /**

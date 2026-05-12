@@ -13,6 +13,46 @@ import AppKit
 
 private let logger = Logger(subsystem: "org.andbible", category: "BibleReaderController")
 
+struct MyNotesAccessibilityNoteToken: Equatable {
+    let referenceToken: String
+    let noteToken: String
+
+    var encodedValue: String {
+        "|\(referenceToken)=\(noteToken)|"
+    }
+}
+
+struct MyNotesAccessibilitySnapshot: Equatable {
+    let isVisible: Bool
+    let isEditing: Bool
+    let revision: Int
+    let totalCount: Int
+    let rowReferenceTokens: [String]
+    let noteTokens: [MyNotesAccessibilityNoteToken]
+
+    static let empty = MyNotesAccessibilitySnapshot(
+        isVisible: false,
+        isEditing: false,
+        revision: 0,
+        totalCount: 0,
+        rowReferenceTokens: [],
+        noteTokens: []
+    )
+
+    var encodedValue: String {
+        let rowTokens = rowReferenceTokens.map { "|\($0)|" }.joined(separator: ",")
+        let notes = noteTokens.map(\.encodedValue).joined(separator: ",")
+        return [
+            "myNotesVisible=\(isVisible)",
+            "myNotesEditing=\(isEditing)",
+            "myNotesRevision=\(revision)",
+            "myNotesCount=\(totalCount)",
+            "myNotesRows=\(rowTokens)",
+            "myNotesNotes=\(notes)",
+        ].joined(separator: ";")
+    }
+}
+
 /**
  Coordinates BibleView bridge events, SWORD content loading, and native presentation callbacks.
 
@@ -175,22 +215,29 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         return "\(Self.contentStateToken(currentBook))_\(currentChapter)_\(verseToken)"
     }
 
-    /// Compact My Notes state used by UI tests after opening the real visible My Notes document.
-    var myNotesAccessibilityState: String {
+    /// Typed My Notes state used to produce compact UI-test accessibility exports.
+    var myNotesAccessibilitySnapshot: MyNotesAccessibilitySnapshot {
         let bookmarks = currentChapterMyNotesBookmarks()
         let exportedBookmarks = bookmarks.prefix(UITestRuntimeConfiguration.detailedAccessibilityRowTokenLimit)
-        let rowTokens = exportedBookmarks.map { "|\(myNotesReferenceToken(for: $0))|" }.joined(separator: ",")
-        let noteTokens = exportedBookmarks.map {
-            "|\(myNotesReferenceToken(for: $0))=\(Self.contentStateToken($0.notes?.notes))|"
-        }.joined(separator: ",")
-        return [
-            "myNotesVisible=\(showingMyNotes)",
-            "myNotesEditing=\(editingInWebView)",
-            "myNotesRevision=\(myNotesMutationRevision)",
-            "myNotesCount=\(bookmarks.count)",
-            "myNotesRows=\(rowTokens)",
-            "myNotesNotes=\(noteTokens)",
-        ].joined(separator: ";")
+        let noteTokens = exportedBookmarks.map { bookmark in
+            MyNotesAccessibilityNoteToken(
+                referenceToken: myNotesReferenceToken(for: bookmark),
+                noteToken: Self.contentStateToken(bookmark.notes?.notes)
+            )
+        }
+        return MyNotesAccessibilitySnapshot(
+            isVisible: showingMyNotes,
+            isEditing: editingInWebView,
+            revision: myNotesMutationRevision,
+            totalCount: bookmarks.count,
+            rowReferenceTokens: noteTokens.map(\.referenceToken),
+            noteTokens: noteTokens
+        )
+    }
+
+    /// Compact My Notes state used by UI tests after opening the real visible My Notes document.
+    var myNotesAccessibilityState: String {
+        myNotesAccessibilitySnapshot.encodedValue
     }
 
     /// Records the latest content identity that native requested the reader WebView to display.
