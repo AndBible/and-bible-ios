@@ -4704,7 +4704,7 @@ final class AndBibleUITests: XCTestCase {
             ]
         case "readerRenderedContentState":
             return [
-                app.buttons[identifier].firstMatch,
+                app.textFields[identifier].firstMatch,
             ]
         case "readerOverflowMenu":
             return [
@@ -5332,7 +5332,7 @@ final class AndBibleUITests: XCTestCase {
 
     /// Returns the dedicated compact reader state export query without probing broad element sets.
     private func readerRenderedContentStateElement(in app: XCUIApplication) -> XCUIElement {
-        app.buttons["readerRenderedContentState"].firstMatch
+        app.textFields["readerRenderedContentState"].firstMatch
     }
 
     /// Returns whether the compact reader state export currently contains one token.
