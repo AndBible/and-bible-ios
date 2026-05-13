@@ -145,6 +145,7 @@ const strings = useStrings();
 window.bibleViewDebug.documents = documents;
 const topElement = shallowRef<HTMLElement | null>(null);
 const documentPromise: Ref<Promise<void> | null> = ref(null);
+const documentGeneration = ref(0);
 const verseHighlight = useOrdinalHighlight();
 provide(ordinalHighlightKey, verseHighlight);
 const {resetHighlights} = verseHighlight;
@@ -152,7 +153,7 @@ const {resetHighlights} = verseHighlight;
 const customCss = useCustomCss();
 provide(customCssKey, customCss);
 
-const scroll = useScroll(config, appSettings, calculatedConfig, verseHighlight, documentPromise);
+const scroll = useScroll(config, appSettings, calculatedConfig, verseHighlight, documentPromise, documentGeneration);
 const {doScrolling, scrollToId, scrollYAtStart, scrollY} = scroll;
 provide(scrollKey, scroll);
 const globalBookmarks = useGlobalBookmarks(config);
@@ -189,23 +190,45 @@ const {documentsCleared} = useInfiniteScroll(android, scroll, documents);
 const loadingCount = ref(0);
 
 function addDocuments(...docs: AnyDocument[]) {
+    const generation = documentGeneration.value;
+
+    function generationIsCurrent() {
+        return generation === documentGeneration.value;
+    }
+
     async function doAddDocuments() {
-        console.log("doAddDocuments, start")
+        console.log("doAddDocuments, start", {generation})
         loadingCount.value++;
-        await document.fonts.ready;
-        await nextTick();
-        // 2 animation frames seem to make sure that loading indicator is visible.
-        await waitNextAnimationFrame();
-        await waitNextAnimationFrame();
-        documents.push(...docs);
-        await nextTick();
-        await Promise.all(customCss.customCssPromises);
-        await waitNextAnimationFrame();
-        loadingCount.value--;
-        if(loadingCount.value < 0) {
-            loadingCount.value = 0;
+        try {
+            await document.fonts.ready;
+            if (!generationIsCurrent()) return;
+            await nextTick();
+            if (!generationIsCurrent()) return;
+            // 2 animation frames seem to make sure that loading indicator is visible.
+            await waitNextAnimationFrame();
+            if (!generationIsCurrent()) return;
+            await waitNextAnimationFrame();
+            if (!generationIsCurrent()) return;
+            documents.push(...docs);
+            await nextTick();
+            if (!generationIsCurrent()) return;
+            await Promise.all(customCss.customCssPromises);
+            if (!generationIsCurrent()) return;
+            await waitNextAnimationFrame();
+        } finally {
+            if (generationIsCurrent()) {
+                loadingCount.value--;
+                if(loadingCount.value < 0) {
+                    loadingCount.value = 0;
+                }
+                console.log(`doAddDocuments, finish, loadingCount: ${loadingCount.value}`, {generation})
+            } else {
+                console.log("doAddDocuments, skipped stale generation", {
+                    generation,
+                    currentGeneration: documentGeneration.value,
+                });
+            }
         }
-        console.log(`doAddDocuments, finish, loadingCount: ${loadingCount.value}`)
     }
 
     documentPromise.value = doAddDocuments()
@@ -220,6 +243,8 @@ setupEventBusListener("config_changed", async (deferred: Deferred) => {
 })
 
 setupEventBusListener("clear_document", function clearDocument() {
+    documentGeneration.value++;
+    documentPromise.value = null;
     loadingCount.value = 0;
     footNoteCount = 0;
     documentsCleared();
