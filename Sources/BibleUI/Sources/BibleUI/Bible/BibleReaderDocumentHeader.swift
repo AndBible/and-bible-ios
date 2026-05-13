@@ -67,6 +67,8 @@ struct BibleReaderDocumentHeader<ToolbarActions: View>: View {
             .padding(.leading, 16 + avoidanceInsets.leading)
             .padding(.trailing, 16)
             .background(.bar)
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("readerDocumentHeader")
         }
     }
 

@@ -12,6 +12,7 @@ import struct SwiftUI.EdgeInsets
 import struct SwiftUI.EmptyView
 #if os(iOS)
 import UIKit
+import WebKit
 import struct SwiftUI.Color
 #endif
 
@@ -19,6 +20,26 @@ private let sqliteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self
 
 final class AndBibleTests: XCTestCase {
     #if os(iOS)
+    @MainActor
+    func testBridgeBindsWeakWebViewReferenceFromLifecycleCallbacks() {
+        let bridge = BibleBridge()
+        let webView = WKWebView()
+
+        bridge.bindWebView(webView)
+
+        XCTAssertTrue(bridge.webView === webView)
+    }
+
+    @MainActor
+    func testBridgeEmitUsesFireAndForgetJavaScript() {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+
+        bridge.emit(event: "set_config", data: #"{"theme":"light"}"#)
+
+        let script = recordedScripts().first ?? ""
+        XCTAssertTrue(script.contains("void bibleView.emit('set_config'"))
+    }
+
     @MainActor
     private func makeRecordingBridge() -> (BibleBridge, () -> [String]) {
         let bridge = BibleBridge()

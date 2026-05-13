@@ -51,6 +51,7 @@ public class WebViewCoordinator: NSObject, WKNavigationDelegate {
 
     /// Marks the page as loaded and resets native scroll tracking.
     public func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        bridge.bindWebView(webView)
         logger.info("BibleView page loaded successfully")
         #if os(iOS)
         lastUserScrollOffsetY = webView.scrollView.contentOffset.y
