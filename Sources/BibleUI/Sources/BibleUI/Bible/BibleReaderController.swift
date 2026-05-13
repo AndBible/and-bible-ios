@@ -84,7 +84,6 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     private(set) var currentChapter: Int = 1
     private(set) var currentVerse: Int = 1
     private var clientReady = false
-    private var configSent = false
 
     /// Whether the WebView is currently showing the My Notes document (vs Bible text).
     private(set) var showingMyNotes = false
@@ -1702,10 +1701,29 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         loadRecentLabels()
         applyNightModeBackground()
         updateActiveLanguages()
-        if !configSent {
-            bridge.emit(event: "set_config", data: buildConfigJSON())
-            configSent = true
+        bridge.emit(event: "set_config", data: buildConfigJSON())
+        reloadVisibleDocumentAfterClientReady()
+    }
+
+    /**
+     Replays the native controller's current document after the web client bootstraps.
+
+     WKWebView can be recreated by SwiftUI while the pane controller survives. In that case the new
+     JavaScript client has no document/config state even though native state still says the pane is
+     showing My Notes, StudyPad, or the current Bible/category document. Rehydrating from the
+     controller state keeps the WebView content and native accessibility/export state aligned.
+     */
+    private func reloadVisibleDocumentAfterClientReady() {
+        if showingMyNotes {
+            loadMyNotesDocument()
+            return
         }
+
+        if showingStudyPad, let activeStudyPadLabelId {
+            loadStudyPadDocument(labelId: activeStudyPadLabelId)
+            return
+        }
+
         loadCurrentContent()
     }
 
@@ -2839,6 +2857,14 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      */
     public func loadMyNotesDocument(jumpToOrdinal: Int? = nil) {
         guard clientReady else { return }
+        showingMyNotes = true
+        showingStudyPad = false
+        activeStudyPadLabelId = nil
+        activeStudyPadLabelName = nil
+        editingInWebView = false
+        hasActiveSelection = false
+        selectedText = ""
+
         let osisBookId = osisBookId(for: currentBook)
         let range = currentChapterOrdinalRange()
         let verseCount = range.verseCount
@@ -2874,7 +2900,6 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             key: docId
         )
 
-        showingMyNotes = true
         myNotesMutationRevision += 1
     }
 
@@ -2892,6 +2917,13 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             logger.warning("loadStudyPadDocument: label not found for \(labelId)")
             return
         }
+        showingMyNotes = false
+        showingStudyPad = true
+        activeStudyPadLabelId = labelId
+        activeStudyPadLabelName = label.name
+        editingInWebView = false
+        hasActiveSelection = false
+        selectedText = ""
 
         // Fetch all data for this StudyPad
         let bibleBookmarks = service.bibleBookmarks(withLabel: labelId)
@@ -2935,9 +2967,6 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             key: "journal_\(labelId.uuidString)"
         )
 
-        showingStudyPad = true
-        activeStudyPadLabelId = labelId
-        activeStudyPadLabelName = label.name
         applyNightModeBackground()
     }
 

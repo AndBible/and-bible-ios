@@ -851,30 +851,30 @@ final class AndBibleUITests: XCTestCase {
         let deleteLabel = "Delete My Notes note for \(referenceLabel)"
 
         openMyNotesFromReader(in: app)
-        waitForMyNotesState(containing: "myNotesCount=1", in: app, timeout: 20)
-        waitForMyNotesState(containing: "|\(rowToken)=\(originalNote)|", in: app, timeout: 20)
+        waitForVisibleMyNotesState(containing: "myNotesCount=1", in: app, timeout: 20)
+        waitForVisibleMyNotesState(containing: "|\(rowToken)=\(originalNote)|", in: app, timeout: 20)
 
         tapElementReliably(requireMyNotesWebControl(named: editNoteLabel, in: app, timeout: 15), timeout: 10)
-        waitForMyNotesState(containing: updatedNoteMarker, in: app, timeout: 20)
+        waitForVisibleMyNotesState(containing: updatedNoteMarker, in: app, timeout: 20)
         dismissMyNotesEditor(in: app, timeout: 15)
-        waitForMyNotesState(containing: "myNotesEditing=false", in: app, timeout: 20)
+        waitForVisibleMyNotesState(containing: "myNotesEditing=false", in: app, timeout: 20)
 
         returnFromMyNotesIfVisible(in: app, timeout: 20)
 
         openMyNotesFromReader(in: app)
-        waitForMyNotesState(containing: "myNotesCount=1", in: app, timeout: 20)
-        waitForMyNotesState(containing: updatedNoteMarker, in: app, timeout: 20)
+        waitForVisibleMyNotesState(containing: "myNotesCount=1", in: app, timeout: 20)
+        waitForVisibleMyNotesState(containing: updatedNoteMarker, in: app, timeout: 20)
 
         tapElementReliably(requireMyNotesWebControl(named: actionsLabel, in: app, timeout: 15), timeout: 10)
         tapElementReliably(requireMyNotesWebControl(named: deleteLabel, in: app, timeout: 15), timeout: 10)
         tapElementReliably(requireMyNotesWebControl(named: "Yes", in: app, timeout: 10), timeout: 10)
-        waitForMyNotesState(containing: "myNotesCount=0", in: app, timeout: 20)
-        waitForMyNotesState(notContaining: "|\(rowToken)|", in: app, timeout: 20)
+        waitForVisibleMyNotesState(containing: "myNotesCount=0", in: app, timeout: 20)
+        waitForVisibleMyNotesState(notContaining: "|\(rowToken)|", in: app, timeout: 20)
 
         returnFromMyNotesIfVisible(in: app, timeout: 20)
         openMyNotesFromReader(in: app)
-        waitForMyNotesState(containing: "myNotesCount=0", in: app, timeout: 20)
-        waitForMyNotesState(notContaining: updatedNoteMarker, in: app, timeout: 20)
+        waitForVisibleMyNotesState(containing: "myNotesCount=0", in: app, timeout: 20)
+        waitForVisibleMyNotesState(notContaining: updatedNoteMarker, in: app, timeout: 20)
     }
 
     /**
@@ -4666,22 +4666,35 @@ final class AndBibleUITests: XCTestCase {
                 app.otherElements[identifier].firstMatch,
             ]
         case "readerNavigationDrawerButton":
+            let readerHeader = app.otherElements["readerDocumentHeader"].firstMatch
             return [
+                readerHeader.buttons[identifier].firstMatch,
+                readerHeader.otherElements[identifier].firstMatch,
                 app.buttons[identifier].firstMatch,
                 app.otherElements[identifier].firstMatch,
             ]
         case "readerMoreMenuButton", "bookChooserButton":
+            let readerHeader = app.otherElements["readerDocumentHeader"].firstMatch
             return [
+                readerHeader.buttons[identifier].firstMatch,
+                readerHeader.otherElements[identifier].firstMatch,
                 app.buttons[identifier].firstMatch,
                 app.otherElements[identifier].firstMatch,
             ]
         case "readerStrongsToolbarButton":
+            let readerHeader = app.otherElements["readerDocumentHeader"].firstMatch
             return [
+                readerHeader.buttons[identifier].firstMatch,
+                readerHeader.otherElements[identifier].firstMatch,
                 app.buttons[identifier].firstMatch,
                 app.otherElements[identifier].firstMatch,
             ]
         case "readerBibleToolbarButton", "readerCommentaryToolbarButton":
+            let readerHeader = app.otherElements["readerDocumentHeader"].firstMatch
             return [
+                readerHeader.buttons[identifier].firstMatch,
+                readerHeader.otherElements[identifier].firstMatch,
+                readerHeader.images[identifier].firstMatch,
                 app.buttons[identifier].firstMatch,
                 app.otherElements[identifier].firstMatch,
                 app.images[identifier].firstMatch,
@@ -7595,7 +7608,13 @@ final class AndBibleUITests: XCTestCase {
     ) {
         tapReaderAction("readerOpenMyNotesAction", in: app, timeout: timeout, file: file, line: line)
         waitForMyNotesPresentation(in: app, timeout: timeout, file: file, line: line)
-        waitForMyNotesState(containing: "myNotesVisible=true", in: app, timeout: timeout, file: file, line: line)
+        waitForVisibleMyNotesState(
+            containing: "myNotesVisible=true",
+            in: app,
+            timeout: timeout,
+            file: file,
+            line: line
+        )
     }
 
     /**
@@ -7622,6 +7641,29 @@ final class AndBibleUITests: XCTestCase {
     }
 
     /**
+     Waits for a compact My Notes export that is both visible and contains one token.
+     */
+    private func waitForVisibleMyNotesState(
+        containing token: String,
+        in app: XCUIApplication,
+        timeout: TimeInterval = 10,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        waitForResolvedSemanticState(
+            named: "readerRenderedContentState",
+            timeout: timeout,
+            valueProvider: { readerRenderedContentStateValue(in: app) },
+            success: { $0.contains("myNotesVisible=true") && $0.contains(token) },
+            failureDescription: { finalValue in
+                "Expected visible My Notes state to contain '\(token)' within \(timeout) seconds. Final value: '\(finalValue)'."
+            },
+            file: file,
+            line: line
+        )
+    }
+
+    /**
      Waits for the reader's compact My Notes state export to stop containing one token.
      */
     private func waitForMyNotesState(
@@ -7638,6 +7680,29 @@ final class AndBibleUITests: XCTestCase {
             success: { !$0.contains(token) },
             failureDescription: { finalValue in
                 "Expected My Notes state to stop containing '\(token)' within \(timeout) seconds. Final value: '\(finalValue)'."
+            },
+            file: file,
+            line: line
+        )
+    }
+
+    /**
+     Waits for a compact My Notes export that is visible and no longer contains one token.
+     */
+    private func waitForVisibleMyNotesState(
+        notContaining token: String,
+        in app: XCUIApplication,
+        timeout: TimeInterval = 10,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        waitForResolvedSemanticState(
+            named: "readerRenderedContentState",
+            timeout: timeout,
+            valueProvider: { readerRenderedContentStateValue(in: app) },
+            success: { $0.contains("myNotesVisible=true") && !$0.contains(token) },
+            failureDescription: { finalValue in
+                "Expected visible My Notes state to stop containing '\(token)' within \(timeout) seconds. Final value: '\(finalValue)'."
             },
             file: file,
             line: line
