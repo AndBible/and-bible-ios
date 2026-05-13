@@ -4666,35 +4666,22 @@ final class AndBibleUITests: XCTestCase {
                 app.otherElements[identifier].firstMatch,
             ]
         case "readerNavigationDrawerButton":
-            let readerHeader = app.otherElements["readerDocumentHeader"].firstMatch
             return [
-                readerHeader.buttons[identifier].firstMatch,
-                readerHeader.otherElements[identifier].firstMatch,
                 app.buttons[identifier].firstMatch,
                 app.otherElements[identifier].firstMatch,
             ]
         case "readerMoreMenuButton", "bookChooserButton":
-            let readerHeader = app.otherElements["readerDocumentHeader"].firstMatch
             return [
-                readerHeader.buttons[identifier].firstMatch,
-                readerHeader.otherElements[identifier].firstMatch,
                 app.buttons[identifier].firstMatch,
                 app.otherElements[identifier].firstMatch,
             ]
         case "readerStrongsToolbarButton":
-            let readerHeader = app.otherElements["readerDocumentHeader"].firstMatch
             return [
-                readerHeader.buttons[identifier].firstMatch,
-                readerHeader.otherElements[identifier].firstMatch,
                 app.buttons[identifier].firstMatch,
                 app.otherElements[identifier].firstMatch,
             ]
         case "readerBibleToolbarButton", "readerCommentaryToolbarButton":
-            let readerHeader = app.otherElements["readerDocumentHeader"].firstMatch
             return [
-                readerHeader.buttons[identifier].firstMatch,
-                readerHeader.otherElements[identifier].firstMatch,
-                readerHeader.images[identifier].firstMatch,
                 app.buttons[identifier].firstMatch,
                 app.otherElements[identifier].firstMatch,
                 app.images[identifier].firstMatch,
