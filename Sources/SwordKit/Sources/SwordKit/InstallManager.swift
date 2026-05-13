@@ -16,6 +16,12 @@ public struct RemoteSource: Sendable, Identifiable {
     }
 }
 
+/// Installation state for a remote module row.
+public enum RemoteModuleAvailability: String, Sendable {
+    case installable
+    case unavailable
+}
+
 /// Information about a remotely available module.
 public struct RemoteModuleInfo: Sendable, Identifiable {
     /// Module abbreviation (e.g., "KJV").
@@ -33,21 +39,34 @@ public struct RemoteModuleInfo: Sendable, Identifiable {
     /// Source repository name.
     public let sourceName: String
 
+    /// Whether this remote catalog row can be installed.
+    public let availability: RemoteModuleAvailability
+
+    /// User-visible explanation when the module cannot be installed.
+    public let unavailableReason: String?
+
     /// Unique identifier.
     public var id: String { "\(sourceName):\(name)" }
+
+    /// Convenience flag for install controls.
+    public var isInstallable: Bool { availability == .installable }
 
     public init(
         name: String,
         description: String,
         category: ModuleCategory,
         language: String,
-        sourceName: String
+        sourceName: String,
+        availability: RemoteModuleAvailability = .installable,
+        unavailableReason: String? = nil
     ) {
         self.name = name
         self.description = description
         self.category = category
         self.language = language
         self.sourceName = sourceName
+        self.availability = availability
+        self.unavailableReason = unavailableReason
     }
 }
 
@@ -66,6 +85,27 @@ public struct RemoteModuleInfo: Sendable, Identifiable {
  ```
  */
 public final class InstallManager: @unchecked Sendable {
+    private static let defaultConfigVersionMarker = "# AndBibleDefaultSourcesVersion=2"
+
+    private static let defaultSourceLines = [
+        "HTTPSource=CrossWire|crosswire.org|/ftpmirror/pub/sword/raw",
+        "HTTPSource=Crosswire Beta|crosswire.org|/ftpmirror/pub/sword/betaraw",
+        "HTTPSource=AndBible Extra|andbible.github.io|/andbible-extra",
+        "HTTPSource=AndBible|andbible.github.io|/data/andbible",
+        "HTTPSource=AndBible Beta|andbible.github.io|/data/andbible/beta",
+        "HTTPSource=IBT|ibtrussia.org|/ftpmirror/pub/modsword/raw",
+        "HTTPSource=Wycliffe (CrossWire)|crosswire.org|/ftpmirror/pub/sword/wyclifferaw",
+        "HTTPSource=eBible|ebible.org|/sword",
+        "HTTPSource=Lockman (CrossWire)|crosswire.org|/ftpmirror/pub/sword/lockmanraw",
+        "HTTPSource=STEP Bible (Tyndale)|public.modules.stepbible.org|/catalog",
+        "FTPSource=CrossWire|ftp.crosswire.org|/pub/sword/raw",
+    ]
+
+    private static let upgradeSourceLines = [
+        "HTTPSource=AndBible|andbible.github.io|/data/andbible",
+        "HTTPSource=AndBible Beta|andbible.github.io|/data/andbible/beta",
+    ]
+
     private let handle: UnsafeMutableRawPointer
     private let queue = DispatchQueue(label: "org.andbible.InstallManager", qos: .userInitiated)
 
@@ -119,7 +159,10 @@ public final class InstallManager: @unchecked Sendable {
         let configPath = (basePath as NSString).appendingPathComponent("InstallMgr.conf")
         let fm = FileManager.default
 
-        guard !fm.fileExists(atPath: configPath) else { return }
+        guard !fm.fileExists(atPath: configPath) else {
+            migrateDefaultConfigIfNeeded(at: configPath)
+            return
+        }
 
         // Sources matching AndBible Android's repositories.txt, in priority order.
         // Format: HTTPSource=Label|host|catalogDirectory
@@ -128,18 +171,74 @@ public final class InstallManager: @unchecked Sendable {
         PassiveFTP=true
 
         [Sources]
-        HTTPSource=CrossWire|crosswire.org|/ftpmirror/pub/sword/raw
-        HTTPSource=eBible|ebible.org|/sword
-        HTTPSource=Lockman (CrossWire)|crosswire.org|/ftpmirror/pub/sword/lockmanraw
-        HTTPSource=Wycliffe (CrossWire)|crosswire.org|/ftpmirror/pub/sword/wyclifferaw
-        HTTPSource=AndBible Extra|andbible.github.io|/andbible-extra
-        HTTPSource=IBT|ibtrussia.org|/ftpmirror/pub/modsword/raw
-        HTTPSource=STEP Bible (Tyndale)|public.modules.stepbible.org|/catalog
-        HTTPSource=Crosswire Beta|crosswire.org|/ftpmirror/pub/sword/betaraw
-        FTPSource=CrossWire|ftp.crosswire.org|/pub/sword/raw
+        \(Self.defaultConfigVersionMarker)
+        \(Self.defaultSourceLines.joined(separator: "\n"))
         """
 
         try? config.write(toFile: configPath, atomically: true, encoding: .utf8)
+    }
+
+    private static func migrateDefaultConfigIfNeeded(at configPath: String) {
+        guard var content = try? String(contentsOfFile: configPath, encoding: .utf8),
+              !content.contains(Self.defaultConfigVersionMarker) else {
+            return
+        }
+
+        let existingSourceNames = Self.sourceNames(in: content)
+        let missingLines = Self.upgradeSourceLines.filter { line in
+            guard let sourceName = Self.sourceName(in: line) else { return false }
+            return !existingSourceNames.contains(sourceName)
+        }
+
+        guard !missingLines.isEmpty else {
+            content = Self.insertingSourceLines([Self.defaultConfigVersionMarker], into: content)
+            try? content.write(toFile: configPath, atomically: true, encoding: .utf8)
+            return
+        }
+
+        content = Self.insertingSourceLines([Self.defaultConfigVersionMarker] + missingLines, into: content)
+        try? content.write(toFile: configPath, atomically: true, encoding: .utf8)
+    }
+
+    private static func insertingSourceLines(_ lines: [String], into content: String) -> String {
+        guard !lines.isEmpty else { return content }
+
+        var configLines = content.components(separatedBy: .newlines)
+        let sourcesIndex = configLines.firstIndex {
+            $0.trimmingCharacters(in: .whitespaces) == "[Sources]"
+        }
+
+        var insertionIndex = configLines.endIndex
+        if let sourcesIndex {
+            insertionIndex = configLines[configLines.index(after: sourcesIndex)...]
+                .firstIndex { line in
+                    let trimmed = line.trimmingCharacters(in: .whitespaces)
+                    return trimmed.hasPrefix("[") && trimmed.hasSuffix("]")
+                } ?? configLines.endIndex
+        }
+
+        if insertionIndex == configLines.endIndex,
+           configLines.last == "" {
+            insertionIndex = configLines.index(before: configLines.endIndex)
+        }
+
+        configLines.insert(contentsOf: lines, at: insertionIndex)
+        var updated = configLines.joined(separator: "\n")
+        if !updated.hasSuffix("\n") { updated += "\n" }
+        return updated
+    }
+
+    private static func sourceNames(in content: String) -> Set<String> {
+        Set(content.components(separatedBy: .newlines).compactMap { Self.sourceName(in: $0) })
+    }
+
+    private static func sourceName(in line: String) -> String? {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        guard trimmed.hasPrefix("HTTPSource=") || trimmed.hasPrefix("FTPSource=") else {
+            return nil
+        }
+        let value = String(trimmed.drop(while: { $0 != "=" }).dropFirst())
+        return value.components(separatedBy: "|").first
     }
 
     // MARK: - Remote Sources
