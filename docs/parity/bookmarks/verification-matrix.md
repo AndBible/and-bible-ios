@@ -1,6 +1,6 @@
 # BOOKMARKS-701 Verification Matrix (Android Bookmarks -> iOS)
 
-Date: 2026-04-28
+Date: 2026-05-10
 
 ## Scope and Method
 
@@ -24,9 +24,9 @@ Date: 2026-04-28
 
 ## Summary
 
-- `Pass`: 4
+- `Pass`: 5
 - `Adapted Pass`: 2
-- `Partial`: 3
+- `Partial`: 2
 
 ## Matrix
 
@@ -36,7 +36,7 @@ Date: 2026-04-28
 | Label assignment: toggle assignment, toggle favourite, create label inline, remove label | `LabelAssignmentView.swift`; UI tests `testLabelAssignmentTogglesFavouriteAndAssignment`, `testBookmarkListLabelAssignmentCreatesAndAssignsNewLabel`, `testBookmarkListLabelAssignmentRemovalHidesBookmarkUnderFilter` | Pass | Covers both relationship mutation and immediate UI reflection back in the bookmark list. |
 | Label manager CRUD | `LabelManagerView.swift`; UI test `testLabelManagerCreateRenameDeleteFlow` | Pass | Create, rename, and delete are locked by a real end-to-end UI workflow. |
 | StudyPad handoff from bookmarks | `BookmarkListView.swift`, `BibleReaderController.swift`, `BibleReaderView.swift`; UI test `testBookmarkListOpensStudyPadForSelectedLabel` | Pass | Android exposes `openStudyPad` through `BibleJavascriptInterface` and `LinkControl`; iOS has current UI coverage for the bookmark-label handoff into StudyPad. |
-| My Notes note mutation and delete persistence | `BibleReaderController.swift`, `BibleReaderView.swift`; service-layer tests `testBookmarkServiceClearingBibleBookmarkNoteDeletesPersistedNoteRow`, `testBookmarkServiceClearingBibleBookmarkNoteRemovesBookmarkFromMyNotesQuery`, `testBookmarkServiceUpdatingBibleBookmarkNoteReusesPersistedNoteRow` | Partial | Android exposes `openMyNotes` through `BibleJavascriptInterface` and `LinkControl`. iOS still has the route and persistence support, but the previous focused My Notes UI tests are no longer present. |
+| My Notes note mutation and delete persistence | `BibleReaderController.swift`, `BibleReaderView.swift`; UI test `testMyNotesNoteUpdateAndDeletePersistsFromVisibleWorkflow`; service-layer tests `testBookmarkServiceClearingBibleBookmarkNoteDeletesPersistedNoteRow`, `testBookmarkServiceClearingBibleBookmarkNoteRemovesBookmarkFromMyNotesQuery`, `testBookmarkServiceUpdatingBibleBookmarkNoteReusesPersistedNoteRow` | Pass | Android exposes `openMyNotes` through `BibleJavascriptInterface` and `LinkControl`. iOS now has focused visible-path coverage that opens My Notes from the reader, updates a note, rebuilds the document, deletes the visible note-backed row, and verifies the rebuilt document stays empty. |
 | Bookmark note persistence split across bookmark rows and separate note entities | `BookmarkService.saveBibleBookmarkNote`, `BookmarkStore`; unit tests `testBookmarkServiceClearingBibleBookmarkNoteDeletesPersistedNoteRow`, `testBookmarkServiceClearingBibleBookmarkNoteRemovesBookmarkFromMyNotesQuery` | Adapted Pass | iOS preserves the Android-compatible data split, but exposes note-centric workflows through a separate My Notes surface. |
 | Native bookmark list plus separate My Notes surface instead of one unified browser | `BookmarkListView.swift` note suppression and `BibleReaderController` My Notes document flow; documented in `dispositions.md`; UI coverage spans the bookmark surface and service coverage spans note persistence | Adapted Pass | The parity goal is shared data semantics and user-visible outcomes, not Android-identical screen structure. |
 | StudyPad ordering, reorder, and delete breadth | `BookmarkService` and `BibleReaderController` StudyPad entry operations exist; no focused UI regression currently covers create, reorder, or delete | Partial | Current UI evidence locks handoff only; the full StudyPad mutation surface still needs focused coverage. |

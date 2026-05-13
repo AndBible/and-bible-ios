@@ -56,7 +56,10 @@ import ModalDialog from "@/components/modals/ModalDialog.vue";
 import {setupElementEventListener} from "@/utils";
 import {androidKey, customFeaturesKey, keyboardKey} from "@/types/constants";
 
-const props = defineProps<{ text: string }>();
+const props = defineProps<{
+    text: string
+    contentAccessibilityLabel?: string
+}>();
 const emit = defineEmits(["save", "close"]);
 
 const android = inject(androidKey)!;
@@ -183,6 +186,7 @@ onMounted(() => {
             editText.value = html;
             dirty.value = true;
         },
+        contentAccessibilityLabel: props.contentAccessibilityLabel,
         actions: [
             'bold', 'italic', 'underline', divider, oList, uList, divider, outdent, indent, divider, bibleLink, divider, close
         ],

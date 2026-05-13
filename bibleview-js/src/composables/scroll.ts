@@ -51,6 +51,7 @@ export function useScroll(
     calculatedConfig: CalculatedConfig,
     highlight: ReturnType<typeof useOrdinalHighlight>,
     documentPromise: Ref<Promise<void> | null>,
+    documentGeneration: Ref<number>,
 ) {
     const {highlightOrdinal, resetHighlights} = highlight;
     const currentScrollAnimation = ref<number | null>(null);
@@ -222,12 +223,27 @@ export function useScroll(
             topOffset: number,
             bottomOffset: number
         }) {
+        const generation = documentGeneration.value;
         await documentPromise.value;
+        if (generation !== documentGeneration.value) {
+            console.log("setupContent skipped stale generation", {
+                generation,
+                currentGeneration: documentGeneration.value,
+            });
+            return;
+        }
         console.log(`setupContent`, jumpToOrdinal, jumpToAnchor, topOffset);
 
         setToolbarOffset(topOffset, bottomOffset, {immediate: true, doNotScroll: true});
 
         await nextTick(); // Do scrolling only after view has been settled (fonts etc)
+        if (generation !== documentGeneration.value) {
+            console.log("setupContent skipped stale generation after nextTick", {
+                generation,
+                currentGeneration: documentGeneration.value,
+            });
+            return;
+        }
 
         if (jumpToOrdinal != null) {
             scrollToId(`o-${jumpToOrdinal}`, {now: true, force: true});

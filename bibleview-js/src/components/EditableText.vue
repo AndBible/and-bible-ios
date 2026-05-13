@@ -18,10 +18,26 @@
 <template>
   <div :style="parentStyle" class="editable-text">
     <div class="editor-container" :class="{constraintDisplayHeight}" v-if="editMode">
-      <TextEditor :text="editText || ''" @save="textChanged" @close="editMode = false"/>
+      <TextEditor
+          :text="editText || ''"
+          :content-accessibility-label="editorAccessibilityLabel"
+          @save="textChanged"
+          @close="editMode = false"
+      />
     </div>
     <template v-else>
-      <div v-if="editText" class="notes-display" :class="{constraintDisplayHeight}" @click="handleClicks">
+      <div
+          v-if="editText"
+          class="notes-display"
+          :class="{constraintDisplayHeight}"
+          :role="displayAccessibilityLabel ? 'button' : undefined"
+          :tabindex="displayAccessibilityLabel ? 0 : undefined"
+          :aria-label="displayAccessibilityLabel"
+          :title="displayAccessibilityLabel"
+          @click="handleClicks"
+          @keydown.enter.prevent="handleKeyboardEdit"
+          @keydown.space.prevent="handleKeyboardEdit"
+      >
         <div v-html="editText"/>
       </div>
       <div class="placeholder" v-else-if="showPlaceholder" @click="handleClicks">
@@ -53,6 +69,8 @@ const props = withDefaults(defineProps<{
     maxEditorHeight?: string
     constraintDisplayHeight?: boolean
     disableClickToEdit?: boolean
+    displayAccessibilityLabel?: string
+    editorAccessibilityLabel?: string
 }>(), {
     editDirectly: false,
     showPlaceholder: false,
@@ -100,6 +118,12 @@ function textChanged(newText: string) {
 
 function handleClicks(event: MouseEvent) {
     if (!props.disableClickToEdit && (event.target! as HTMLElement).nodeName !== "A") {
+        editMode.value = true;
+    }
+}
+
+function handleKeyboardEdit() {
+    if (!props.disableClickToEdit) {
         editMode.value = true;
     }
 }

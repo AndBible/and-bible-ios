@@ -137,9 +137,27 @@ export const init = settings => {
   const content = settings.element.content = createElement('div')
   content.contentEditable = true
   content.className = classes.content
-  content.oninput = ({ target: { firstChild } }) => {
-    settings.onChange(content.innerHTML)
+  if (settings.contentAccessibilityLabel) {
+    content.setAttribute('aria-label', settings.contentAccessibilityLabel)
+    content.setAttribute('role', 'textbox')
+    content.setAttribute('aria-multiline', 'true')
   }
+
+  let lastKnownHtml = content.innerHTML
+  const notifyChange = () => {
+    const nextHtml = content.innerHTML
+    if (nextHtml === lastKnownHtml) return
+    lastKnownHtml = nextHtml
+    settings.onChange(nextHtml)
+  }
+
+  addEventListener(content, 'focus', () => {
+    lastKnownHtml = content.innerHTML
+  })
+  addEventListener(content, 'input', notifyChange)
+  addEventListener(content, 'keyup', notifyChange)
+  addEventListener(content, 'blur', notifyChange)
+  addEventListener(content, 'compositionend', notifyChange)
   content.onkeydown = event => {
     if (event.key === 'Enter' && queryCommandValue(formatBlock) === 'blockquote') {
       setTimeout(() => exec(formatBlock, `<${defaultParagraphSeparator}>`), 0)
@@ -167,9 +185,12 @@ export const init = settings => {
       }
     }
     
-    const images = content.querySelectorAll('img, video, audio, embed, object, iframe');
-    console.log("Removing media elements after paste:", images.length);
-    images.forEach(el => el.remove());
+    setTimeout(() => {
+      const images = content.querySelectorAll('img, video, audio, embed, object, iframe');
+      console.log("Removing media elements after paste:", images.length);
+      images.forEach(el => el.remove());
+      notifyChange()
+    }, 0);
   }
   appendChild(settings.element, content)
   appendChild(settings.element, actionbar)
@@ -185,6 +206,7 @@ export const init = settings => {
     button.className = `${classes.button} ${action.class||""}`
     button.innerHTML = action.icon
     button.title = action.title
+    button.setAttribute('aria-label', action.title)
     button.setAttribute('type', 'button')
     button.onclick = () => action.result() && content.focus()
 

@@ -67,6 +67,8 @@ struct BibleReaderDocumentHeader<ToolbarActions: View>: View {
             .padding(.leading, 16 + avoidanceInsets.leading)
             .padding(.trailing, 16)
             .background(.bar)
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("readerDocumentHeader")
         }
     }
 
@@ -96,7 +98,11 @@ struct BibleReaderDocumentHeader<ToolbarActions: View>: View {
         Group {
             Button(action: onReturnFromMyNotes) {
                 backToBibleLabel
+                    .frame(minWidth: 80, alignment: .leading)
+                    .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
+            .accessibilityElement(children: .combine)
             .accessibilityLabel(String(localized: "back_to_bible"))
             .accessibilityIdentifier("readerReturnFromMyNotesButton")
 

@@ -420,8 +420,11 @@ public struct BibleReaderView: View {
     /// Accessibility-exported state for the content most recently rendered in the active pane.
     private var readerRenderedContentStateValue: String {
         let windowToken = windowManager.activeWindow.map { "windowOrder=\($0.orderNumber)" } ?? "windowOrder=none"
-        let contentToken = focusedController?.renderedContentState
+        let exportController = focusedController
+        let contentToken = exportController?.renderedContentState
             ?? BibleReaderController.emptyRenderedContentState
+        let myNotesToken = exportController?.myNotesAccessibilityState
+            ?? MyNotesAccessibilitySnapshot.empty.encodedValue
         let strongsMode = resolvedDisplaySettings(for: windowManager.activeWindow).strongsMode
             ?? TextDisplaySettings.appDefaults.strongsMode
             ?? 0
@@ -430,21 +433,25 @@ public struct BibleReaderView: View {
         let sheetToken = "readerSheet=\(activeReaderSheet?.rawValue ?? "none")"
         let modalToken = "readerModal=\(activeReaderModal?.rawValue ?? "none")"
         let searchToken = "searchVisible=\(showSearch ? "true" : "false")"
-        return "\(windowToken);\(contentToken);strongsMode=\(strongsMode);\(drawerToken);\(overflowToken);\(sheetToken);\(modalToken);\(searchToken)"
+        return "\(windowToken);\(contentToken);\(myNotesToken);strongsMode=\(strongsMode);\(drawerToken);\(overflowToken);\(sheetToken);\(modalToken);\(searchToken)"
     }
 
     /// Compact dedicated state export used by UI tests instead of snapshotting the full reader.
     @ViewBuilder
     private var readerRenderedContentStateExport: some View {
         if UITestRuntimeConfiguration.enablesDetailedAccessibilityExports {
-            Text(readerRenderedContentStateValue)
-                .font(.system(size: 1))
-                .frame(width: 1, height: 1)
-                .opacity(0.01)
-                .allowsHitTesting(false)
-                .accessibilityIdentifier("readerRenderedContentState")
-                .accessibilityLabel("")
-                .accessibilityValue(readerRenderedContentStateValue)
+            TextField(
+                "readerRenderedContentState",
+                text: .constant(readerRenderedContentStateValue)
+            )
+            .textFieldStyle(.plain)
+            .font(.system(size: 1))
+            .frame(width: 1, height: 1)
+            .opacity(0.01)
+            .allowsHitTesting(false)
+            .accessibilityIdentifier("readerRenderedContentState")
+            .accessibilityLabel("readerRenderedContentState")
+            .accessibilityValue(readerRenderedContentStateValue)
         }
     }
 

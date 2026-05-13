@@ -306,6 +306,11 @@ public final class BibleBridge: NSObject, WKScriptMessageHandler {
         super.init()
     }
 
+    /// Refreshes the weak web view reference from WebKit lifecycle callbacks.
+    func bindWebView(_ webView: WKWebView) {
+        self.webView = webView
+    }
+
     // MARK: - WKScriptMessageHandler
 
     /**
@@ -319,6 +324,10 @@ public final class BibleBridge: NSObject, WKScriptMessageHandler {
         _ userContentController: WKUserContentController,
         didReceive message: WKScriptMessage
     ) {
+        if let webView = message.webView {
+            bindWebView(webView)
+        }
+
         guard let body = message.body as? [String: Any],
               let method = body["method"] as? String else {
             logger.warning("Invalid bridge message: \(String(describing: message.body))")
@@ -714,7 +723,7 @@ public final class BibleBridge: NSObject, WKScriptMessageHandler {
      refreshed state into the already-loaded client.
      */
     public func emit(event: String, data: String = "null") {
-        let js = "try { bibleView.emit('\(event)', \(data)); } catch(e) { window.webkit.messageHandlers.bibleView.postMessage({method:'console',args:['BRIDGE','JS EMIT ERROR in \(event): ' + e.message + ' ' + e.stack]}); }"
+        let js = "try { void bibleView.emit('\(event)', \(data)); } catch(e) { window.webkit.messageHandlers.bibleView.postMessage({method:'console',args:['BRIDGE','JS EMIT ERROR in \(event): ' + e.message + ' ' + e.stack]}); }"
         evaluateJavaScript(js)
     }
 

@@ -1,6 +1,9 @@
 import Foundation
 import Darwin
 import XCTest
+#if canImport(UIKit)
+import UIKit
+#endif
 
 /**
  UI smoke tests for the core iPhone navigation shell.
@@ -388,7 +391,7 @@ final class AndBibleUITests: XCTestCase {
 
         _ = openWorkspaceCreatePrompt(in: app, timeout: 10)
         let workspaceNameField = requireWorkspaceNamePromptField(in: app, timeout: 10)
-        focusResolvedTextEntryElement(workspaceNameField, timeout: 10)
+        focusResolvedPromptTextEntryElement(workspaceNameField, timeout: 10)
         app.typeText(createdName)
         tapElementReliably(requireElement("workspaceNamePromptConfirmButton", in: app, timeout: 10), timeout: 10)
 
@@ -821,6 +824,60 @@ final class AndBibleUITests: XCTestCase {
     }
 
     /**
+     Verifies that the visible My Notes document can update and delete a note-backed bookmark.
+     *
+     * - Side effects:
+     *   - launches the reader shell with one deterministic Genesis note fixture
+     *   - opens My Notes through the production reader navigation drawer
+     *   - opens the visible note editor, appends through the gated UI-test bridge path, returns to
+     *     Bible when needed, and reopens My Notes to verify the persisted note is rebuilt
+     *   - deletes the visible My Notes row and verifies the rebuilt document stays empty
+     * - Failure modes:
+     *   - fails if the My Notes action, visible note editor, delete action, or persistence export
+     *     never reaches the expected state
+     */
+    func testMyNotesNoteUpdateAndDeletePersistsFromVisibleWorkflow() {
+        let app = makeApp()
+        let referenceLabel = "Genesis 1:1"
+        let rowToken = "Genesis_1_1"
+        let originalNote = "UI_Test_My_Notes_Note"
+        let updatedNoteMarker = "updated"
+        app.launchEnvironment["UITEST_MY_NOTES_APPEND_TEXT"] = " \(updatedNoteMarker)"
+        app.launchArguments += ["-UITEST_MY_NOTES_APPEND_TEXT", " \(updatedNoteMarker)"]
+        app.launch()
+
+        let editNoteLabel = "Edit My Notes note for \(referenceLabel)"
+        let actionsLabel = "My Notes actions for \(referenceLabel)"
+        let deleteLabel = "Delete My Notes note for \(referenceLabel)"
+
+        openMyNotesFromReader(in: app)
+        waitForVisibleMyNotesState(containing: "myNotesCount=1", in: app, timeout: 20)
+        waitForVisibleMyNotesState(containing: "|\(rowToken)=\(originalNote)|", in: app, timeout: 20)
+
+        tapElementReliably(requireMyNotesWebControl(named: editNoteLabel, in: app, timeout: 15), timeout: 10)
+        waitForVisibleMyNotesState(containing: updatedNoteMarker, in: app, timeout: 20)
+        dismissMyNotesEditor(in: app, timeout: 15)
+        waitForVisibleMyNotesState(containing: "myNotesEditing=false", in: app, timeout: 20)
+
+        returnFromMyNotesIfVisible(in: app, timeout: 20)
+
+        openMyNotesFromReader(in: app)
+        waitForVisibleMyNotesState(containing: "myNotesCount=1", in: app, timeout: 20)
+        waitForVisibleMyNotesState(containing: updatedNoteMarker, in: app, timeout: 20)
+
+        tapElementReliably(requireMyNotesWebControl(named: actionsLabel, in: app, timeout: 15), timeout: 10)
+        tapElementReliably(requireMyNotesWebControl(named: deleteLabel, in: app, timeout: 15), timeout: 10)
+        tapElementReliably(requireMyNotesWebControl(named: "Yes", in: app, timeout: 10), timeout: 10)
+        waitForVisibleMyNotesState(containing: "myNotesCount=0", in: app, timeout: 20)
+        waitForVisibleMyNotesState(notContaining: "|\(rowToken)|", in: app, timeout: 20)
+
+        returnFromMyNotesIfVisible(in: app, timeout: 20)
+        openMyNotesFromReader(in: app)
+        waitForVisibleMyNotesState(containing: "myNotesCount=0", in: app, timeout: 20)
+        waitForVisibleMyNotesState(notContaining: updatedNoteMarker, in: app, timeout: 20)
+    }
+
+    /**
      Verifies that selecting a seeded history row jumps the active reader to that prior location.
      *
      * - Side effects:
@@ -1184,7 +1241,7 @@ final class AndBibleUITests: XCTestCase {
         tapElementReliably(requireElement("labelManagerAddButton", in: app, timeout: 10), timeout: 10)
         waitForLabelManagerState(containing: "showNewLabel=true", in: app, timeout: 10)
         let newLabelNameField = requireLabelManagerNewLabelField(in: app, timeout: 10)
-        focusResolvedTextEntryElement(newLabelNameField, timeout: 10)
+        focusResolvedPromptTextEntryElement(newLabelNameField, timeout: 10)
         app.typeText(originalName)
         tapElementReliably(requireLabelManagerCreateButton(in: app, timeout: 10), timeout: 10)
         waitForLabelManagerState(containing: labelManagerRowStateToken(originalName), in: app, timeout: 10)
@@ -4610,11 +4667,13 @@ final class AndBibleUITests: XCTestCase {
             ]
         case "readerNavigationDrawerButton":
             return [
+                app.otherElements["readerDocumentHeader"].buttons[identifier].firstMatch,
                 app.buttons[identifier].firstMatch,
                 app.otherElements[identifier].firstMatch,
             ]
         case "readerMoreMenuButton", "bookChooserButton":
             return [
+                app.otherElements["readerDocumentHeader"].buttons[identifier].firstMatch,
                 app.buttons[identifier].firstMatch,
                 app.otherElements[identifier].firstMatch,
             ]
@@ -4640,9 +4699,14 @@ final class AndBibleUITests: XCTestCase {
                 app.navigationBars.staticTexts[identifier].firstMatch,
                 app.otherElements[identifier].firstMatch,
             ]
+        case "readerReturnFromMyNotesButton":
+            return [
+                app.buttons[identifier].firstMatch,
+                app.navigationBars.buttons[identifier].firstMatch,
+            ]
         case "readerRenderedContentState":
             return [
-                app.staticTexts[identifier].firstMatch,
+                app.textFields[identifier].firstMatch,
             ]
         case "readerOverflowMenu":
             return [
@@ -5251,8 +5315,7 @@ final class AndBibleUITests: XCTestCase {
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         } while Date() < deadline
 
-        let stateElement = requireElement("readerRenderedContentState", in: app, timeout: 1, file: file, line: line)
-        let lastValue = stateElement.value.map { "\($0)" } ?? "nil"
+        let lastValue = readerRenderedContentStateValue(in: app) ?? "nil"
         XCTFail(
             "Expected reader rendered-content state to contain '\(token)' within \(timeout) seconds; last value was '\(lastValue)'.",
             file: file,
@@ -5262,10 +5325,16 @@ final class AndBibleUITests: XCTestCase {
 
     /// Reads the compact reader state export without walking drawer or overflow menu contents.
     private func readerRenderedContentStateValue(in app: XCUIApplication) -> String? {
-        guard let stateElement = resolvedElement("readerRenderedContentState", in: app) else {
+        let stateElement = readerRenderedContentStateElement(in: app)
+        guard stateElement.exists else {
             return nil
         }
         return stateElement.value as? String
+    }
+
+    /// Returns the dedicated compact reader state export query without probing broad element sets.
+    private func readerRenderedContentStateElement(in app: XCUIApplication) -> XCUIElement {
+        app.textFields["readerRenderedContentState"].firstMatch
     }
 
     /// Returns whether the compact reader state export currently contains one token.
@@ -5293,11 +5362,11 @@ final class AndBibleUITests: XCTestCase {
      * - Parameters:
      *   - app: Running application under test.
      *   - timeout: Maximum number of seconds to wait before returning `false`.
-     * - Returns: `true` when the stable reader toolbar is visible again and no drawer-only or
-     *   overflow-only action remains exposed over the shell.
+     * - Returns: `true` when the reader's compact state export reports that transient reader
+     *   surfaces are closed and My Notes is no longer fronting the primary reader chrome.
      * - Side effects:
-     *   - polls the live toolbar hierarchy while modal surfaces dismiss back to the reader shell
-     *   - avoids expensive cross-surface root queries by checking menu-only action affordances
+     *   - polls the compact reader state export while modal surfaces dismiss back to the reader
+     *     shell, avoiding full-toolbar snapshots while WebView content is settling
      * - Failure modes:
      *   - returns `false` when the reader shell never restores its primary controls before timeout
      */
@@ -5307,20 +5376,17 @@ final class AndBibleUITests: XCTestCase {
     ) -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
         repeat {
-            let drawerButton = app.buttons["readerNavigationDrawerButton"].firstMatch
-            let moreButton = app.buttons["readerMoreMenuButton"].firstMatch
             let readerState = readerRenderedContentStateValue(in: app)
             let readerSurfacesClosed = readerState.map { state in
                 let drawerClosed = state.contains("drawerVisible=false") || !state.contains("drawerVisible=")
                 let overflowClosed = state.contains("overflowVisible=false") || !state.contains("overflowVisible=")
                 let sheetClosed = state.contains("readerSheet=none") || !state.contains("readerSheet=")
                 let searchClosed = state.contains("searchVisible=false") || !state.contains("searchVisible=")
-                return drawerClosed && overflowClosed && sheetClosed && searchClosed
+                let myNotesClosed = state.contains("myNotesVisible=false") || !state.contains("myNotesVisible=")
+                return drawerClosed && overflowClosed && sheetClosed && searchClosed && myNotesClosed
             } ?? false
 
             if readerState != nil,
-               drawerButton.exists,
-               moreButton.exists,
                readerSurfacesClosed {
                 return true
             }
@@ -5397,14 +5463,14 @@ final class AndBibleUITests: XCTestCase {
 
         let deadline = Date().addingTimeInterval(timeout)
         repeat {
-            if let value = resolvedElement(identifier, in: app)?.value as? String,
+            if let value = tabButton.value as? String,
                value.contains("state=active") {
                 return
             }
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         } while Date() < deadline
 
-        let lastValue = resolvedElement(identifier, in: app)?.value.map { "\($0)" } ?? "nil"
+        let lastValue = tabButton.value.map { "\($0)" } ?? "nil"
         XCTFail(
             "Expected window tab \(order) to become active within \(timeout) seconds; last value was '\(lastValue)'.",
             file: file,
@@ -5444,20 +5510,21 @@ final class AndBibleUITests: XCTestCase {
         )
 
         let identifier = "windowTabButton::\(order)"
-        _ = requireElement(identifier, in: app, timeout: timeout, file: file, line: line)
+        let tabButton = requireElement(identifier, in: app, timeout: timeout, file: file, line: line)
+        let stateElement = readerRenderedContentStateElement(in: app)
 
         let deadline = Date().addingTimeInterval(timeout)
         repeat {
-            let tabValue = resolvedElement(identifier, in: app)?.value as? String ?? ""
-            let renderedState = resolvedElement("readerRenderedContentState", in: app)?.value as? String ?? ""
+            let tabValue = tabButton.value as? String ?? ""
+            let renderedState = stateElement.value as? String ?? ""
             if tabValue.contains("state=active") && renderedState.contains("windowOrder=\(order)") {
                 return
             }
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         } while Date() < deadline
 
-        let lastTabValue = resolvedElement(identifier, in: app)?.value.map { "\($0)" } ?? "nil"
-        let lastRenderedState = resolvedElement("readerRenderedContentState", in: app)?.value.map { "\($0)" } ?? "nil"
+        let lastTabValue = tabButton.value.map { "\($0)" } ?? "nil"
+        let lastRenderedState = stateElement.value.map { "\($0)" } ?? "nil"
         XCTFail(
             "Expected added window tab \(order) to become the active rendered window within \(timeout) seconds; last tab value was '\(lastTabValue)' and last reader state was '\(lastRenderedState)'.",
             file: file,
@@ -5793,10 +5860,10 @@ final class AndBibleUITests: XCTestCase {
 
         repeat {
             let button = unresolvedElement("readerMoreMenuButton", in: app)
-            if waitForElementToBecomeHittable(button, timeout: min(2, max(0.5, deadline.timeIntervalSinceNow))) {
-                button.tap()
-            } else if button.exists, !button.frame.isEmpty {
+            if elementHasUsableFrame(button) {
                 button.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+            } else if waitForElementToBecomeHittable(button, timeout: min(2, max(0.5, deadline.timeIntervalSinceNow))) {
+                button.tap()
             }
             if waitForReaderOverflowMenu(in: app, timeout: min(5, max(1, deadline.timeIntervalSinceNow))) {
                 return true
@@ -5981,10 +6048,10 @@ final class AndBibleUITests: XCTestCase {
 
         repeat {
             let button = unresolvedElement("readerNavigationDrawerButton", in: app)
-            if waitForElementToBecomeHittable(button, timeout: min(2, max(0.5, deadline.timeIntervalSinceNow))) {
-                button.tap()
-            } else if button.exists, !button.frame.isEmpty {
+            if elementHasUsableFrame(button) {
                 button.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+            } else if waitForElementToBecomeHittable(button, timeout: min(2, max(0.5, deadline.timeIntervalSinceNow))) {
+                button.tap()
             }
             if waitForReaderNavigationDrawer(
                 in: app,
@@ -6578,10 +6645,10 @@ final class AndBibleUITests: XCTestCase {
             actionSurface.otherElements[identifier].firstMatch,
         ]
 
-        if let visibleCandidate = scopedCandidates.first(where: { $0.exists && $0.isHittable }) {
+        if let visibleCandidate = scopedCandidates.first(where: { isElementHittable($0) }) {
             return visibleCandidate
         }
-        if let frameCandidate = scopedCandidates.first(where: { $0.exists && !$0.frame.isEmpty }) {
+        if let frameCandidate = scopedCandidates.first(where: { elementHasUsableFrame($0) }) {
             return frameCandidate
         }
         return scopedCandidates.first(where: { $0.exists }) ?? actionSurface.buttons[identifier].firstMatch
@@ -6632,7 +6699,7 @@ final class AndBibleUITests: XCTestCase {
             return finalAction
         }
 
-        if let directAction = directActionCandidates.first(where: { $0.exists && !$0.frame.isEmpty }) {
+        if let directAction = directActionCandidates.first(where: { elementHasUsableFrame($0) }) {
             return directAction
         }
 
@@ -6674,17 +6741,17 @@ final class AndBibleUITests: XCTestCase {
                     if isElementVisible(action, within: actionSurface) {
                         return action
                     }
-                    if let directAction = directActionCandidates.first(where: { $0.exists && $0.isHittable }) {
+                    if let directAction = directActionCandidates.first(where: { isElementHittable($0) }) {
                         return directAction
                     }
-                    if actionSurface.exists, !actionSurface.frame.isEmpty {
+                    if elementHasUsableFrame(actionSurface) {
                         actionSurface.swipeUp()
                         RunLoop.current.run(until: Date().addingTimeInterval(0.2))
                     }
                 }
             }
 
-            if let directAction = directActionCandidates.first(where: { $0.exists && $0.isHittable }) {
+            if let directAction = directActionCandidates.first(where: { isElementHittable($0) }) {
                 return directAction
             }
 
@@ -6701,10 +6768,33 @@ final class AndBibleUITests: XCTestCase {
             }
         }
 
-        if let directAction = directActionCandidates.first(where: { $0.exists && $0.isHittable }) {
+        if let directAction = directActionCandidates.first(where: { isElementHittable($0) }) {
             return directAction
         }
         return nil
+    }
+
+    /**
+     Returns true when XCTest has a finite, non-empty frame it can use for activation-point work.
+     */
+    private func elementHasUsableFrame(_ element: XCUIElement) -> Bool {
+        guard element.exists else {
+            return false
+        }
+        let frame = element.frame
+        return !frame.isNull &&
+            !frame.isEmpty &&
+            frame.origin.x.isFinite &&
+            frame.origin.y.isFinite &&
+            frame.width.isFinite &&
+            frame.height.isFinite
+    }
+
+    /**
+     Samples hittability only after the element exposes a usable frame.
+     */
+    private func isElementHittable(_ element: XCUIElement) -> Bool {
+        elementHasUsableFrame(element) && element.isHittable
     }
 
     /**
@@ -6724,7 +6814,7 @@ final class AndBibleUITests: XCTestCase {
     ) -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
         repeat {
-            if element.exists && element.isHittable {
+            if isElementHittable(element) {
                 return true
             }
             let remaining = deadline.timeIntervalSinceNow
@@ -6734,7 +6824,7 @@ final class AndBibleUITests: XCTestCase {
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         } while Date() < deadline
 
-        return element.exists && element.isHittable
+        return isElementHittable(element)
     }
 
     /**
@@ -6773,13 +6863,12 @@ final class AndBibleUITests: XCTestCase {
         guard exists else {
             return
         }
-        if !element.frame.isEmpty {
+        if elementHasUsableFrame(element) {
             element.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
             return
         }
-        XCTAssertTrue(
-            element.isHittable,
-            "Expected element '\(element.identifier)' to become hittable before tapping within \(timeout) seconds.",
+        XCTFail(
+            "Expected element '\(element.identifier)' to expose a usable frame before tapping within \(timeout) seconds.",
             file: file,
             line: line
         )
@@ -7157,7 +7246,7 @@ final class AndBibleUITests: XCTestCase {
         let deadline = Date().addingTimeInterval(waitTimeout)
         repeat {
             for candidate in candidates where candidate.exists {
-                if candidate.isHittable || !candidate.frame.isEmpty {
+                if isElementHittable(candidate) || elementHasUsableFrame(candidate) {
                     return candidate
                 }
             }
@@ -7498,6 +7587,270 @@ final class AndBibleUITests: XCTestCase {
     }
 
     /**
+     Opens the My Notes document through the production reader navigation drawer.
+     */
+    private func openMyNotesFromReader(
+        in app: XCUIApplication,
+        timeout: TimeInterval = 20,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        tapReaderAction("readerOpenMyNotesAction", in: app, timeout: timeout, file: file, line: line)
+        waitForMyNotesPresentation(in: app, timeout: timeout, file: file, line: line)
+        waitForVisibleMyNotesState(
+            containing: "myNotesVisible=true",
+            in: app,
+            timeout: timeout,
+            file: file,
+            line: line
+        )
+    }
+
+    /**
+     Waits for the reader's compact My Notes state export to contain one token.
+     */
+    private func waitForMyNotesState(
+        containing token: String,
+        in app: XCUIApplication,
+        timeout: TimeInterval = 10,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        waitForResolvedSemanticState(
+            named: "readerRenderedContentState",
+            timeout: timeout,
+            valueProvider: { readerRenderedContentStateValue(in: app) },
+            success: { $0.contains(token) },
+            failureDescription: { finalValue in
+                "Expected My Notes state to contain '\(token)' within \(timeout) seconds. Final value: '\(finalValue)'."
+            },
+            file: file,
+            line: line
+        )
+    }
+
+    /**
+     Waits for a compact My Notes export that is both visible and contains one token.
+     */
+    private func waitForVisibleMyNotesState(
+        containing token: String,
+        in app: XCUIApplication,
+        timeout: TimeInterval = 10,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        waitForResolvedSemanticState(
+            named: "readerRenderedContentState",
+            timeout: timeout,
+            valueProvider: { readerRenderedContentStateValue(in: app) },
+            success: { $0.contains("myNotesVisible=true") && $0.contains(token) },
+            failureDescription: { finalValue in
+                "Expected visible My Notes state to contain '\(token)' within \(timeout) seconds. Final value: '\(finalValue)'."
+            },
+            file: file,
+            line: line
+        )
+    }
+
+    /**
+     Waits for the reader's compact My Notes state export to stop containing one token.
+     */
+    private func waitForMyNotesState(
+        notContaining token: String,
+        in app: XCUIApplication,
+        timeout: TimeInterval = 10,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        waitForResolvedSemanticState(
+            named: "readerRenderedContentState",
+            timeout: timeout,
+            valueProvider: { readerRenderedContentStateValue(in: app) },
+            success: { !$0.contains(token) },
+            failureDescription: { finalValue in
+                "Expected My Notes state to stop containing '\(token)' within \(timeout) seconds. Final value: '\(finalValue)'."
+            },
+            file: file,
+            line: line
+        )
+    }
+
+    /**
+     Waits for a compact My Notes export that is visible and no longer contains one token.
+     */
+    private func waitForVisibleMyNotesState(
+        notContaining token: String,
+        in app: XCUIApplication,
+        timeout: TimeInterval = 10,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        waitForResolvedSemanticState(
+            named: "readerRenderedContentState",
+            timeout: timeout,
+            valueProvider: { readerRenderedContentStateValue(in: app) },
+            success: { $0.contains("myNotesVisible=true") && !$0.contains(token) },
+            failureDescription: { finalValue in
+                "Expected visible My Notes state to stop containing '\(token)' within \(timeout) seconds. Final value: '\(finalValue)'."
+            },
+            file: file,
+            line: line
+        )
+    }
+
+    /**
+     Returns from My Notes when the document is still visible.
+     */
+    private func returnFromMyNotesIfVisible(
+        in app: XCUIApplication,
+        timeout: TimeInterval = 10,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            let button = app.buttons["readerReturnFromMyNotesButton"].firstMatch
+            if waitForElementToBecomeHittable(
+                button,
+                timeout: min(2, max(0.2, deadline.timeIntervalSinceNow))
+            ) {
+                button.tap()
+                waitForMyNotesState(
+                    containing: "myNotesVisible=false",
+                    in: app,
+                    timeout: timeout,
+                    file: file,
+                    line: line
+                )
+                return
+            }
+            if elementHasUsableFrame(button) {
+                button.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+                waitForMyNotesState(
+                    containing: "myNotesVisible=false",
+                    in: app,
+                    timeout: timeout,
+                    file: file,
+                    line: line
+                )
+                return
+            }
+
+            let state = readerRenderedContentStateValue(in: app)
+            if state?.contains("myNotesVisible=false") == true {
+                return
+            }
+
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        } while Date() < deadline
+
+        let finalState = readerRenderedContentStateValue(in: app) ?? "nil"
+        XCTFail(
+            "Expected My Notes to be hidden or expose its return button within \(timeout) seconds. Final state: '\(finalState)'.",
+            file: file,
+            line: line
+        )
+    }
+
+    /**
+     Resolves one accessibility-labelled control inside the embedded My Notes web document.
+     */
+    private func requireMyNotesWebControl(
+        named label: String,
+        in app: XCUIApplication,
+        timeout: TimeInterval = 10,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) -> XCUIElement {
+        if let element = optionalMyNotesWebControl(named: label, in: app, timeout: timeout) {
+            return element
+        }
+        XCTFail(
+            "Expected My Notes web control named '\(label)' to exist within \(timeout) seconds.",
+            file: file,
+            line: line
+        )
+        return app.webViews.buttons[label].firstMatch
+    }
+
+    /**
+     Dismisses the inline My Notes editor after a UI-test mutation has been persisted.
+     */
+    private func dismissMyNotesEditor(
+        in app: XCUIApplication,
+        timeout: TimeInterval = 10,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            if let closeButton = optionalMyNotesWebControl(named: "Close", in: app, timeout: 0.2) {
+                let frame = closeButton.frame
+                if !frame.isEmpty {
+                    app.coordinate(withNormalizedOffset: .zero).withOffset(
+                        CGVector(dx: frame.midX, dy: frame.midY)
+                    ).tap()
+                } else {
+                    tapElementReliably(closeButton, timeout: timeout, file: file, line: line)
+                }
+                return
+            }
+
+            if readerRenderedContentStateContains("myNotesEditing=false", in: app) {
+                return
+            }
+
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        } while Date() < deadline
+
+        let finalState = readerRenderedContentStateValue(in: app) ?? "nil"
+        XCTFail(
+            "Expected My Notes editor to expose a Close control or report myNotesEditing=false within \(timeout) seconds. Final state: '\(finalState)'.",
+            file: file,
+            line: line
+        )
+    }
+
+    /**
+     Resolves one accessibility-labelled My Notes control without recording an XCTest failure.
+     */
+    private func optionalMyNotesWebControl(
+        named label: String,
+        in app: XCUIApplication,
+        timeout: TimeInterval = 10
+    ) -> XCUIElement? {
+        let candidates = [
+            app.webViews.buttons[label].firstMatch,
+            app.webViews.textViews[label].firstMatch,
+            app.webViews.textFields[label].firstMatch,
+            app.webViews.otherElements[label].firstMatch,
+            app.buttons[label].firstMatch,
+            app.textViews[label].firstMatch,
+            app.textFields[label].firstMatch,
+            app.otherElements[label].firstMatch,
+        ]
+        return firstExistingMyNotesWebControl(candidates, timeout: timeout)
+    }
+
+    /**
+     Polls a small My Notes candidate set using a shared timeout across all accessibility types.
+     */
+    private func firstExistingMyNotesWebControl(
+        _ candidates: [XCUIElement],
+        timeout: TimeInterval
+    ) -> XCUIElement? {
+        let deadline = Date().addingTimeInterval(max(0, timeout))
+        repeat {
+            for candidate in candidates where candidate.exists {
+                return candidate
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        } while Date() < deadline
+
+        return candidates.first(where: { $0.exists })
+    }
+
+    /**
      Waits for the StudyPad screen title to appear.
      *
      * - Parameters:
@@ -7611,7 +7964,7 @@ final class AndBibleUITests: XCTestCase {
     private func createFreshLabelFromAssignment(in app: XCUIApplication) {
         presentLabelCreationPrompt(in: app, timeout: 10)
         let nameField = requireLabelManagerNewLabelField(in: app, timeout: 10)
-        focusResolvedTextEntryElement(nameField, timeout: 10)
+        focusResolvedPromptTextEntryElement(nameField, timeout: 10)
         app.typeText("UI Test Fresh")
         tapElementReliably(requireLabelManagerCreateButton(in: app, timeout: 10), timeout: 10)
     }
@@ -8338,6 +8691,53 @@ final class AndBibleUITests: XCTestCase {
     }
 
     /**
+     Pastes text through the system edit menu into a focused text-entry control.
+     */
+    private func pasteTextIntoFocusedElement(
+        _ text: String,
+        in app: XCUIApplication,
+        sourceElement element: XCUIElement,
+        timeout: TimeInterval = 10,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+#if canImport(UIKit)
+        let previousPasteboardText = UIPasteboard.general.string
+        UIPasteboard.general.string = text
+        defer {
+            UIPasteboard.general.string = previousPasteboardText
+        }
+
+        let pasteMenuItem = app.menuItems["Paste"].firstMatch
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            if pasteMenuItem.waitForExistence(timeout: 0.5) {
+                pasteMenuItem.tap()
+                return
+            }
+
+            if element.exists && !element.frame.isEmpty {
+                element.press(forDuration: 0.8)
+                if pasteMenuItem.waitForExistence(timeout: 0.5) {
+                    pasteMenuItem.tap()
+                    return
+                }
+            }
+
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        } while Date() < deadline
+
+        XCTFail(
+            "Expected Paste edit-menu action for text entry '\(element.identifier)' within \(timeout) seconds.",
+            file: file,
+            line: line
+        )
+#else
+        XCTFail("Paste-driven text entry requires UIKit pasteboard access.", file: file, line: line)
+#endif
+    }
+
+    /**
      Focuses one text-entry control through XCTest's native tap path without coordinate fallback.
      *
      * - Parameters:
@@ -8438,6 +8838,47 @@ final class AndBibleUITests: XCTestCase {
             preferTrailingEdge: preferTrailingEdge,
             requireExistencePreflight: false,
             timeout: timeout,
+            file: file,
+            line: line
+        )
+    }
+
+    /**
+     Focuses a prompt-owned text-entry control without polling `isHittable`.
+
+     SwiftUI alert text fields can occasionally stall XCTest while resolving hittability even after
+     the prompt-specific resolver has found the field. A coordinate tap against the resolved field
+     frame is enough to attach the keyboard and avoids that flaky snapshot path.
+     */
+    private func focusResolvedPromptTextEntryElement(
+        _ element: XCUIElement,
+        preferTrailingEdge: Bool = false,
+        timeout: TimeInterval = 10,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let deadline = Date().addingTimeInterval(timeout)
+        let tapOffset = CGVector(dx: preferTrailingEdge ? 0.92 : 0.5, dy: 0.5)
+
+        repeat {
+            let remaining = deadline.timeIntervalSinceNow
+            let exists = element.exists || (remaining > 0 && element.waitForExistence(timeout: min(0.2, remaining)))
+            if exists {
+                if !element.frame.isEmpty {
+                    element.coordinate(withNormalizedOffset: tapOffset).tap()
+                } else {
+                    element.tap()
+                }
+                if waitForElementKeyboardFocus(element, timeout: 0.75) {
+                    return
+                }
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        } while Date() < deadline
+
+        XCTAssertTrue(
+            waitForElementKeyboardFocus(element, timeout: 0.5),
+            "Expected prompt text input '\(element.identifier)' to gain keyboard focus within \(timeout) seconds.",
             file: file,
             line: line
         )

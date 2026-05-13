@@ -25,6 +25,7 @@ import BibleView from "@/components/BibleView.vue";
 import AmbiguousSelection from "@/components/modals/AmbiguousSelection.vue";
 import LabelList from "@/components/LabelList.vue";
 import BookmarkLabelActions from "@/components/modals/BookmarkLabelActions.vue";
+import {installGlobalAnchorNavigationHandler} from "@/utils";
 
 declare global {
     interface Window {
@@ -42,6 +43,7 @@ window.bibleView = {};
 window.bibleViewDebug = {};
 
 patchAndroidConsole();
+installGlobalAnchorNavigationHandler();
 
 console.log("main.ts after patching console");
 

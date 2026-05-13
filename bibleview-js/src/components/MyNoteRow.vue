@@ -23,16 +23,34 @@
     {{ strings.removeBookmarkConfirmation }}
   </AreYouSure>
   <div v-if="!exportMode" class="menu" style="display: flex;">
-    <ButtonRow>
-      <div class="journal-button" @click="editBookmark">
+    <ButtonRow :menu-label="myNotesMenuAccessibilityLabel">
+      <button
+          type="button"
+          class="journal-button"
+          :aria-label="myNotesInfoAccessibilityLabel"
+          :title="myNotesInfoAccessibilityLabel"
+          @click.stop="editBookmark"
+      >
         <FontAwesomeIcon icon="info-circle"/>
-      </div>
-      <div v-if="!bookmark.notes" class="journal-button" @click="setEditMode(true)">
+      </button>
+      <button
+          type="button"
+          class="journal-button"
+          :aria-label="myNotesEditButtonAccessibilityLabel"
+          :title="myNotesEditButtonAccessibilityLabel"
+          @click.stop="setEditMode(true)"
+      >
         <FontAwesomeIcon icon="edit"/>
-      </div>
-      <div class="journal-button" @click="deleteEntry">
+      </button>
+      <button
+          type="button"
+          class="journal-button"
+          :aria-label="myNotesDeleteAccessibilityLabel"
+          :title="myNotesDeleteAccessibilityLabel"
+          @click.stop="deleteEntry"
+      >
         <FontAwesomeIcon icon="trash"/>
-      </div>
+      </button>
     </ButtonRow>
   </div>
   <div>
@@ -47,6 +65,8 @@
       <EditableText
           ref="editor"
           :text="bookmark.notes"
+          :display-accessibility-label="myNotesEditAccessibilityLabel"
+          :editor-accessibility-label="myNotesEditorAccessibilityLabel"
           @save="save"
       />
     </div>
@@ -110,6 +130,13 @@ const bibleUrl = computed(
 );
 
 const {strings} = useCommon();
+const myNotesReferenceLabel = computed(() => props.bookmark.verseRange || props.bookmark.verseRangeOnlyNumber);
+const myNotesMenuAccessibilityLabel = computed(() => `My Notes actions for ${myNotesReferenceLabel.value}`);
+const myNotesInfoAccessibilityLabel = computed(() => `Show My Notes bookmark details for ${myNotesReferenceLabel.value}`);
+const myNotesEditButtonAccessibilityLabel = computed(() => `Open My Notes note editor for ${myNotesReferenceLabel.value}`);
+const myNotesEditAccessibilityLabel = computed(() => `Edit My Notes note for ${myNotesReferenceLabel.value}`);
+const myNotesEditorAccessibilityLabel = computed(() => `My Notes note editor for ${myNotesReferenceLabel.value}`);
+const myNotesDeleteAccessibilityLabel = computed(() => `Delete My Notes note for ${myNotesReferenceLabel.value}`);
 </script>
 
 <style scoped lang="scss">

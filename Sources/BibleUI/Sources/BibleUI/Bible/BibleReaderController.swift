@@ -13,6 +13,46 @@ import AppKit
 
 private let logger = Logger(subsystem: "org.andbible", category: "BibleReaderController")
 
+struct MyNotesAccessibilityNoteToken: Equatable {
+    let referenceToken: String
+    let noteToken: String
+
+    var encodedValue: String {
+        "|\(referenceToken)=\(noteToken)|"
+    }
+}
+
+struct MyNotesAccessibilitySnapshot: Equatable {
+    let isVisible: Bool
+    let isEditing: Bool
+    let revision: Int
+    let totalCount: Int
+    let rowReferenceTokens: [String]
+    let noteTokens: [MyNotesAccessibilityNoteToken]
+
+    static let empty = MyNotesAccessibilitySnapshot(
+        isVisible: false,
+        isEditing: false,
+        revision: 0,
+        totalCount: 0,
+        rowReferenceTokens: [],
+        noteTokens: []
+    )
+
+    var encodedValue: String {
+        let rowTokens = rowReferenceTokens.map { "|\($0)|" }.joined(separator: ",")
+        let notes = noteTokens.map(\.encodedValue).joined(separator: ",")
+        return [
+            "myNotesVisible=\(isVisible)",
+            "myNotesEditing=\(isEditing)",
+            "myNotesRevision=\(revision)",
+            "myNotesCount=\(totalCount)",
+            "myNotesRows=\(rowTokens)",
+            "myNotesNotes=\(notes)",
+        ].joined(separator: ";")
+    }
+}
+
 /**
  Coordinates BibleView bridge events, SWORD content loading, and native presentation callbacks.
 
@@ -44,10 +84,13 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     private(set) var currentChapter: Int = 1
     private(set) var currentVerse: Int = 1
     private var clientReady = false
-    private var configSent = false
 
     /// Whether the WebView is currently showing the My Notes document (vs Bible text).
     private(set) var showingMyNotes = false
+    /// Monotonic marker used by lightweight UI-test exports when My Notes state or documents rebuild.
+    private(set) var myNotesMutationRevision = 0
+    /// Prevents a launch-seeded UI-test append from firing more than once in the same reader session.
+    private var didApplyUITestMyNotesAppendText = false
 
     /// Whether the WebView is currently showing a StudyPad document.
     private(set) var showingStudyPad = false
@@ -109,6 +152,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
     /// Stable summary of the last content payload emitted to the reader WebView.
     static let emptyRenderedContentState = "category=none;module=none;book=none;chapter=none;key=none"
+    private static let issueTrackerURLString = "https://github.com/AndBible/and-bible/issues"
     private(set) var renderedContentState: String = BibleReaderController.emptyRenderedContentState
 
     /// Infinite scroll: tracks the range of chapters/books currently loaded in the WebView.
@@ -131,7 +175,68 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         (raw ?? "none")
             .replacingOccurrences(of: ";", with: "_")
             .replacingOccurrences(of: ",", with: "_")
+            .replacingOccurrences(of: "|", with: "_")
+            .replacingOccurrences(of: "=", with: "_")
             .replacingOccurrences(of: "\n", with: " ")
+    }
+
+    /// Ordinal range for the current chapter using the app's KJVA-compatible ordinal scheme.
+    private func currentChapterOrdinalRange() -> (start: Int, end: Int, verseCount: Int) {
+        let verseCount = Self.verseCount(for: currentBook, chapter: currentChapter)
+        let ordinalStart = (currentChapter - 1) * 40 + 1
+        let ordinalEnd = (currentChapter - 1) * 40 + verseCount
+        return (ordinalStart, ordinalEnd, verseCount)
+    }
+
+    /// Notes with non-empty payloads that belong to the currently visible chapter.
+    private func currentChapterMyNotesBookmarks() -> [BibleBookmark] {
+        guard let service = bookmarkService else { return [] }
+        let range = currentChapterOrdinalRange()
+        return service.bookmarks(for: range.start, endOrdinal: range.end, book: currentBook)
+            .filter { bookmark in
+                guard let note = bookmark.notes?.notes else { return false }
+                return !note.isEmpty
+            }
+            .sorted {
+                if $0.ordinalStart != $1.ordinalStart {
+                    return $0.ordinalStart < $1.ordinalStart
+                }
+                return $0.createdAt < $1.createdAt
+            }
+    }
+
+    /// Stable row token for the My Notes accessibility export.
+    private func myNotesReferenceToken(for bookmark: BibleBookmark) -> String {
+        let chapterBase = (currentChapter - 1) * 40
+        let startVerse = max(1, bookmark.ordinalStart - chapterBase)
+        let endVerse = max(startVerse, bookmark.ordinalEnd - chapterBase)
+        let verseToken = startVerse == endVerse ? "\(startVerse)" : "\(startVerse)_\(endVerse)"
+        return "\(Self.contentStateToken(currentBook))_\(currentChapter)_\(verseToken)"
+    }
+
+    /// Typed My Notes state used to produce compact UI-test accessibility exports.
+    var myNotesAccessibilitySnapshot: MyNotesAccessibilitySnapshot {
+        let bookmarks = currentChapterMyNotesBookmarks()
+        let exportedBookmarks = bookmarks.prefix(UITestRuntimeConfiguration.detailedAccessibilityRowTokenLimit)
+        let noteTokens = exportedBookmarks.map { bookmark in
+            MyNotesAccessibilityNoteToken(
+                referenceToken: myNotesReferenceToken(for: bookmark),
+                noteToken: Self.contentStateToken(bookmark.notes?.notes)
+            )
+        }
+        return MyNotesAccessibilitySnapshot(
+            isVisible: showingMyNotes,
+            isEditing: editingInWebView,
+            revision: myNotesMutationRevision,
+            totalCount: bookmarks.count,
+            rowReferenceTokens: noteTokens.map(\.referenceToken),
+            noteTokens: noteTokens
+        )
+    }
+
+    /// Compact My Notes state used by UI tests after opening the real visible My Notes document.
+    var myNotesAccessibilityState: String {
+        myNotesAccessibilitySnapshot.encodedValue
     }
 
     /// Records the latest content identity that native requested the reader WebView to display.
@@ -1596,10 +1701,29 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         loadRecentLabels()
         applyNightModeBackground()
         updateActiveLanguages()
-        if !configSent {
-            bridge.emit(event: "set_config", data: buildConfigJSON())
-            configSent = true
+        bridge.emit(event: "set_config", data: buildConfigJSON())
+        reloadVisibleDocumentAfterClientReady()
+    }
+
+    /**
+     Replays the native controller's current document after the web client bootstraps.
+
+     WKWebView can be recreated by SwiftUI while the pane controller survives. In that case the new
+     JavaScript client has no document/config state even though native state still says the pane is
+     showing My Notes, StudyPad, or the current Bible/category document. Rehydrating from the
+     controller state keeps the WebView content and native accessibility/export state aligned.
+     */
+    private func reloadVisibleDocumentAfterClientReady() {
+        if showingMyNotes {
+            loadMyNotesDocument()
+            return
         }
+
+        if showingStudyPad, let activeStudyPadLabelId {
+            loadStudyPadDocument(labelId: activeStudyPadLabelId)
+            return
+        }
+
         loadCurrentContent()
     }
 
@@ -2002,6 +2126,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         logger.info("Remove bookmark: \(bookmarkId)")
         guard let service = bookmarkService, let uuid = UUID(uuidString: bookmarkId) else { return }
         service.removeBibleBookmark(id: uuid)
+        myNotesMutationRevision += 1
         bridge.emit(event: "delete_bookmarks", data: "[\"\(bookmarkId)\"]")
     }
 
@@ -2037,13 +2162,51 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      */
     public func bridge(_ bridge: BibleBridge, saveBookmarkNote bookmarkId: String, note: String?) {
         logger.info("Save bookmark note: \(bookmarkId)")
-        guard let service = bookmarkService, let uuid = UUID(uuidString: bookmarkId) else { return }
-        service.saveBibleBookmarkNote(bookmarkId: uuid, note: note)
-        let escapedNote = (note ?? "").replacingOccurrences(of: "\"", with: "\\\"").replacingOccurrences(of: "\n", with: "\\n")
+        guard let uuid = UUID(uuidString: bookmarkId) else { return }
+        _ = saveBookmarkNoteAndNotify(bookmarkId: uuid, note: note)
+    }
+
+    private func applyUITestMyNotesAppendTextIfNeeded() {
+        guard !didApplyUITestMyNotesAppendText,
+              let appendText = UITestRuntimeConfiguration.myNotesAppendText,
+              appendUITestTextToFirstVisibleMyNotesNote(appendText) else {
+            return
+        }
+        didApplyUITestMyNotesAppendText = true
+    }
+
+    @discardableResult
+    private func appendUITestTextToFirstVisibleMyNotesNote(_ text: String) -> Bool {
+        guard UITestRuntimeConfiguration.enablesDetailedAccessibilityExports,
+              showingMyNotes,
+              !text.isEmpty,
+              let bookmark = currentChapterMyNotesBookmarks().first
+        else {
+            return false
+        }
+
+        let currentNote = bookmark.notes?.notes ?? ""
+        return saveBookmarkNoteAndNotify(bookmarkId: bookmark.id, note: currentNote + text)
+    }
+
+    @discardableResult
+    private func saveBookmarkNoteAndNotify(bookmarkId: UUID, note: String?) -> Bool {
+        guard let service = bookmarkService else { return false }
+        service.saveBibleBookmarkNote(bookmarkId: bookmarkId, note: note)
+        myNotesMutationRevision += 1
         let timestamp = Int(Date().timeIntervalSince1970 * 1000)
-        bridge.emit(event: "bookmark_note_modified", data: """
-        {"id":"\(bookmarkId)","notes":"\(escapedNote)","lastUpdatedOn":\(timestamp)}
-        """)
+        let payload: [String: Any] = [
+            "id": bookmarkId.uuidString,
+            "notes": note ?? "",
+            "lastUpdatedOn": timestamp,
+        ]
+        guard let data = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]),
+              let json = String(data: data, encoding: .utf8) else {
+            logger.error("Failed to serialize bookmark note update for \(bookmarkId.uuidString)")
+            return false
+        }
+        self.bridge.emit(event: "bookmark_note_modified", data: json)
+        return true
     }
 
     /**
@@ -2375,6 +2538,9 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     public func bridge(_ bridge: BibleBridge, setEditing enabled: Bool) {
         logger.info("WebView editing mode: \(enabled)")
         editingInWebView = enabled
+        if enabled {
+            applyUITestMyNotesAppendTextIfNeeded()
+        }
     }
 
     /**
@@ -2595,6 +2761,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     /// Callback for presenting action sheets (set by BibleReaderView)
     var onShareVerseText: ((String) -> Void)?
     var onRequestOpenDownloads: (() -> Void)?
+    var onOpenExternalURL: ((URL) -> Void)?
 
     /// Whether there's an active text selection in the WebView.
     private(set) var hasActiveSelection = false
@@ -2681,24 +2848,29 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      Opens the chapter-level My Notes document in the current pane.
      */
     public func bridge(_ bridge: BibleBridge, openMyNotes v11n: String, ordinal: Int) {
-        loadMyNotesDocument()
+        loadMyNotesDocument(jumpToOrdinal: ordinal)
     }
 
     /**
      Load the My Notes document for the current chapter into the WebView.
      Shows all bookmarks for the chapter in a personal-commentary style view.
      */
-    public func loadMyNotesDocument() {
+    public func loadMyNotesDocument(jumpToOrdinal: Int? = nil) {
         guard clientReady else { return }
+        showingMyNotes = true
+        showingStudyPad = false
+        activeStudyPadLabelId = nil
+        activeStudyPadLabelName = nil
+        editingInWebView = false
+        hasActiveSelection = false
+        selectedText = ""
+
         let osisBookId = osisBookId(for: currentBook)
-        let verseCount = Self.verseCount(for: currentBook, chapter: currentChapter)
-        let ordinalStart = (currentChapter - 1) * 40 + 1
-        let ordinalEnd = (currentChapter - 1) * 40 + verseCount
+        let range = currentChapterOrdinalRange()
+        let verseCount = range.verseCount
 
         // Get bookmarks with notes for this chapter
-        guard let service = bookmarkService else { return }
-        let bookmarks = service.bookmarks(for: ordinalStart, endOrdinal: ordinalEnd, book: currentBook)
-            .filter { $0.notes != nil && !($0.notes!.notes.isEmpty) }
+        let bookmarks = currentChapterMyNotesBookmarks()
 
         // Build the MyNotesDocument JSON (type: "notes")
         let bookmarksJSON = bookmarks.isEmpty ? "[]" :
@@ -2708,15 +2880,16 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         let docId = "\(osisBookId).\(currentChapter).1-\(osisBookId).\(currentChapter).\(verseCount)"
 
         let document = """
-        {"id":"\(docId)","type":"notes","bookmarks":\(bookmarksJSON),"verseRange":"\(verseRange)","ordinalRange":[\(ordinalStart),\(ordinalEnd)]}
+        {"id":"\(docId)","type":"notes","bookmarks":\(bookmarksJSON),"verseRange":"\(verseRange)","ordinalRange":[\(range.start),\(range.end)]}
         """
 
         // Send to Vue.js using the same sequence as loadCurrentChapter
         bridge.emit(event: "clear_document")
         sendLabelsToVueJS()
         bridge.emit(event: "add_documents", data: document)
+        let jumpToOrdinalJSON = jumpToOrdinal.map(String.init) ?? "null"
         bridge.emit(event: "setup_content", data: """
-        {"jumpToOrdinal":null,"jumpToAnchor":null,"jumpToId":null,"topOffset":0,"bottomOffset":0}
+        {"jumpToOrdinal":\(jumpToOrdinalJSON),"jumpToAnchor":null,"jumpToId":null,"topOffset":0,"bottomOffset":0}
         """)
 
         setRenderedContentState(
@@ -2727,13 +2900,14 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             key: docId
         )
 
-        showingMyNotes = true
+        myNotesMutationRevision += 1
     }
 
     /// Return from My Notes to the Bible text view.
     public func returnFromMyNotes() {
         guard showingMyNotes else { return }
         loadCurrentChapter()
+        myNotesMutationRevision += 1
     }
 
     /// Load a StudyPad document for a label into the WebView.
@@ -2743,6 +2917,13 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             logger.warning("loadStudyPadDocument: label not found for \(labelId)")
             return
         }
+        showingMyNotes = false
+        showingStudyPad = true
+        activeStudyPadLabelId = labelId
+        activeStudyPadLabelName = label.name
+        editingInWebView = false
+        hasActiveSelection = false
+        selectedText = ""
 
         // Fetch all data for this StudyPad
         let bibleBookmarks = service.bibleBookmarks(withLabel: labelId)
@@ -2786,9 +2967,6 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             key: "journal_\(labelId.uuidString)"
         )
 
-        showingStudyPad = true
-        activeStudyPadLabelId = labelId
-        activeStudyPadLabelName = label.name
         applyNightModeBackground()
     }
 
@@ -2816,9 +2994,44 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             handleStrongsLink(link)
             return
         }
+        // Handle document-independent Strong's links: strongs://G2316, strongs://H430.
+        if link.hasPrefix("strongs://") {
+            handleStandaloneStrongsLink(link)
+            return
+        }
+        // Handle document-independent morphology links: morphology://robinson/V-PAI-3S.
+        if link.hasPrefix("morphology://") {
+            handleStandaloneMorphologyLink(link)
+            return
+        }
         // Handle "Find all occurrences" links from FeaturesLink.vue
         if link.hasPrefix("ab-find-all://") {
             handleFindAllLink(link)
+            return
+        }
+        // Handle error-report links surfaced in web-rendered error overlays.
+        if link.hasPrefix("ab-error://") {
+            handleErrorReportLink()
+            return
+        }
+        // Handle EPUB internal reference links when surfaced as raw anchors.
+        if link.hasPrefix("epub-ref://") {
+            handleEpubRefLink(link)
+            return
+        }
+        // Handle Downloads links surfaced in web-rendered help/error content.
+        if link.hasPrefix("download://") {
+            onRequestOpenDownloads?()
+            return
+        }
+        // Handle My Notes links surfaced in bookmark metadata.
+        if link.hasPrefix("my-notes://") {
+            handleMyNotesLink(link)
+            return
+        }
+        // Handle StudyPad links surfaced in bookmark metadata.
+        if link.hasPrefix("journal://") {
+            handleJournalLink(link)
             return
         }
         // Handle cross-reference links: osis://?osis=Matt.1.1&v11n=KJV
@@ -2859,6 +3072,19 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             return
         }
         guard let url = URL(string: link) else { return }
+        openPlatformURL(url)
+    }
+
+    private func handleErrorReportLink() {
+        guard let url = URL(string: Self.issueTrackerURLString) else { return }
+        openPlatformURL(url)
+    }
+
+    private func openPlatformURL(_ url: URL) {
+        if let onOpenExternalURL {
+            onOpenExternalURL(url)
+            return
+        }
         #if os(iOS)
         UIApplication.shared.open(url)
         #elseif os(macOS)
@@ -2899,6 +3125,30 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         // Send to sheet via callback (not to the main WebView)
         let configJSON = buildConfigJSON()
         onShowStrongsDefinition?(multiDocJSON, configJSON)
+    }
+
+    private func handleStandaloneStrongsLink(_ link: String) {
+        guard let components = URLComponents(string: link) else { return }
+        let ref = components.host ?? components.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        guard !ref.isEmpty else { return }
+        handleStrongsLink("ab-w://?strong=\(ref)")
+    }
+
+    private func handleStandaloneMorphologyLink(_ link: String) {
+        guard let components = URLComponents(string: link) else { return }
+        let code = components.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        guard !code.isEmpty else { return }
+        handleStrongsLink("ab-w://?robinson=\(code)")
+    }
+
+    private func handleEpubRefLink(_ link: String) {
+        guard let components = URLComponents(string: link),
+              let items = components.queryItems,
+              let book = items.first(where: { $0.name == "book" })?.value,
+              let toKey = items.first(where: { $0.name == "toKey" })?.value,
+              let toId = items.first(where: { $0.name == "toId" })?.value else { return }
+
+        bridge(self.bridge, openEpubLink: book, toKey: toKey, toId: toId)
     }
 
     /**
@@ -3047,6 +3297,39 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         if !name.isEmpty {
             onShowStrongsSearch?(name)
         }
+    }
+
+    private func handleMyNotesLink(_ link: String) {
+        logger.info("handleMyNotesLink: \(link)")
+        guard let components = URLComponents(string: link) else {
+            loadMyNotesDocument()
+            return
+        }
+
+        let items = components.queryItems ?? []
+        let ordinal = items.first(where: { $0.name == "ordinal" })?.value.flatMap(Int.init)
+
+        if let osisRef = items.first(where: { $0.name == "osis" })?.value,
+           let ref = parseOsisReferences(osisRef).first {
+            navigateTo(book: ref.book, chapter: ref.chapter, verse: ref.verse)
+            loadMyNotesDocument(jumpToOrdinal: ordinal)
+            return
+        }
+
+        loadMyNotesDocument(jumpToOrdinal: ordinal)
+    }
+
+    private func handleJournalLink(_ link: String) {
+        logger.info("handleJournalLink: \(link)")
+        guard let components = URLComponents(string: link),
+              let items = components.queryItems,
+              let labelId = items.first(where: { $0.name == "id" })?.value,
+              let labelUUID = UUID(uuidString: labelId) else { return }
+
+        let entryId = items.first(where: { $0.name == "bookmarkId" })?.value
+            ?? items.first(where: { $0.name == "entryId" })?.value
+        let bookmarkUUID = entryId.flatMap(UUID.init(uuidString:))
+        loadStudyPadDocument(labelId: labelUUID, bookmarkId: bookmarkUUID)
     }
 
     /**

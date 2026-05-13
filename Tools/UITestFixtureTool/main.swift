@@ -873,7 +873,7 @@ private final class FixtureContext {
         note: String?,
         createdAt: Date
     ) -> BibleBookmark {
-        let ordinalStart = max((chapter - 1) * 40, 0)
+        let ordinalStart = (chapter - 1) * 40 + 1
         let bookmark = bookmarkService.addBibleBookmark(
             bookInitials: "KJV",
             startOrdinal: ordinalStart,

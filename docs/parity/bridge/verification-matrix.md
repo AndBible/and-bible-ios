@@ -1,6 +1,6 @@
 # BRIDGE-701 Verification Matrix (Android WebView Bridge -> iOS)
 
-Date: 2026-05-07
+Date: 2026-05-10
 
 ## Scope and Method
 
@@ -36,16 +36,16 @@ strongly than they are tested.
 
 ## Summary
 
-- `Pass`: 2
+- `Pass`: 3
 - `Adapted Pass`: 1
-- `Partial`: 5
+- `Partial`: 4
 
 ## Matrix
 
 | Bridge Contract Area | iOS Evidence | Status | Notes |
 |---|---|---|---|
 | StudyPad handoff stays connected to native persistence and document reload | `BibleBridge.swift`, `BibleReaderController.swift`; UI test `testBookmarkListOpensStudyPadForSelectedLabel` | Pass | The current focused UI evidence covers the bookmark-label handoff into the embedded StudyPad document path. |
-| My Notes visible document lifecycle and note mutation remain connected to native persistence | `BibleBridge.swift`, `BibleReaderController.swift`; unit tests `testBookmarkServiceClearingBibleBookmarkNoteDeletesPersistedNoteRow`, `testBookmarkServiceClearingBibleBookmarkNoteRemovesBookmarkFromMyNotesQuery`, `testBookmarkServiceUpdatingBibleBookmarkNoteReusesPersistedNoteRow` | Partial | The route and service support still exist, but the previous focused My Notes UI regressions are no longer present. |
+| My Notes visible document lifecycle and note mutation remain connected to native persistence | `BibleBridge.swift`, `BibleReaderController.swift`; UI test `testMyNotesNoteUpdateAndDeletePersistsFromVisibleWorkflow`; unit tests `testBookmarkServiceClearingBibleBookmarkNoteDeletesPersistedNoteRow`, `testBookmarkServiceClearingBibleBookmarkNoteRemovesBookmarkFromMyNotesQuery`, `testBookmarkServiceUpdatingBibleBookmarkNoteReusesPersistedNoteRow` | Pass | The route, web bridge note mutation, native persistence, document rebuild, and visible row deletion are now covered from the production reader My Notes path. |
 | iOS preserves the shared Android-style `window.android.*` call subset and synchronous `getActiveLanguages()` behavior via an injected shim | `BibleWebView.swift` shim injection and `BibleBridge.updateActiveLanguages(_:)`; documented in `dispositions.md` | Adapted Pass | The transport path is intentionally different, and the iOS-packaged frontend boots against the Android-oriented API subset used by this repo. This is not full bridge parity. |
 | Full current Android bridge surface breadth | Local comparison of iOS `bibleview-js/src/composables/android.ts` with the Android reference checkout's `app/bibleview-js/src/composables/android.ts`; `android-bridge-gap-inventory.json` | Partial | iOS currently exposes 62 bridge methods in its bundled frontend type, while Android exposes 88. The inventory tracks 26 missing Android methods plus 3 former no-op dispositions: paragraph-break bookmarks are implemented and `memorize` is deferred to #50. |
 | Async `callId` request/response flows remain available for content expansion and native dialogs | `BibleBridge.sendResponse(...)`; `BibleReaderController` handlers for `requestMoreToBeginning`, `requestMoreToEnd`, `refChooserDialog`, and `parseRef`; unit tests `testBridgeCallIdRequestMappingMatchesWebClientContract`, `testBridgeCallIdDispatchClassifiesKnownMalformedMessages`, `testBridgeSendResponseEmitsCallIdResponseJavaScript`, `testRequestMoreToBeginningSendsDocumentResponseWithOriginalCallId`, `testRefChooserDialogSendsResponseWithOriginalCallId`, `testParseRefSendsResponseWithOriginalCallId` | Pass | Focused shared-scheme coverage now locks the web-client `callId` argument position, malformed `callId` classification, response JavaScript shape, content expansion document response, and native dialog/parser responses preserving the original call ID. |

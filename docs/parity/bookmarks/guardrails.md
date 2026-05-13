@@ -79,13 +79,13 @@ focused coverage rather than relying on the existing bookmark subset alone.
   regressions for note persistence.
 - Current protection is a combination of:
   - bookmark workflow tests in `AndBibleUITests`
+  - visible My Notes lifecycle coverage in `AndBibleUITests`
   - note persistence regressions in `AndBibleTests`
   - explicit parity documentation in this directory
 
 ## Potential Improvements
 
 - add focused UI coverage for generic-bookmark visible workflows
-- add focused UI coverage for My Notes visible note update/delete workflows
 - add focused UI coverage for broader StudyPad create, reorder, and delete behavior
 - add machine-readable snapshots of bookmark sort and filter state contracts if the UI surface grows
   materially more complex

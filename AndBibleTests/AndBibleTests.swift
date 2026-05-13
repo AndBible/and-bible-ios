@@ -12,6 +12,7 @@ import struct SwiftUI.EdgeInsets
 import struct SwiftUI.EmptyView
 #if os(iOS)
 import UIKit
+import WebKit
 import struct SwiftUI.Color
 #endif
 
@@ -19,6 +20,26 @@ private let sqliteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self
 
 final class AndBibleTests: XCTestCase {
     #if os(iOS)
+    @MainActor
+    func testBridgeBindsWeakWebViewReferenceFromLifecycleCallbacks() {
+        let bridge = BibleBridge()
+        let webView = WKWebView()
+
+        bridge.bindWebView(webView)
+
+        XCTAssertTrue(bridge.webView === webView)
+    }
+
+    @MainActor
+    func testBridgeEmitUsesFireAndForgetJavaScript() {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+
+        bridge.emit(event: "set_config", data: #"{"theme":"light"}"#)
+
+        let script = recordedScripts().first ?? ""
+        XCTAssertTrue(script.contains("void bibleView.emit('set_config'"))
+    }
+
     @MainActor
     private func makeRecordingBridge() -> (BibleBridge, () -> [String]) {
         let bridge = BibleBridge()
@@ -1832,6 +1853,17 @@ final class AndBibleTests: XCTestCase {
         controller.bridge(bridge, parseRef: 3703, text: "Genesis 1:1")
 
         XCTAssertEqual(recordedScripts().last, #"bibleView.response(3703, "Gen.1.1");"#)
+    }
+
+    func testOpenExternalLinkRoutesAbErrorToIssueTrackerURL() {
+        let bridge = BibleBridge()
+        let controller = BibleReaderController(bridge: bridge)
+        var openedURL: URL?
+        controller.onOpenExternalURL = { openedURL = $0 }
+
+        controller.bridge(bridge, openExternalLink: "ab-error://error")
+
+        XCTAssertEqual(openedURL?.absoluteString, "https://github.com/AndBible/and-bible/issues")
     }
     #endif
 
@@ -8803,6 +8835,38 @@ final class AndBibleTests: XCTestCase {
             .bookmarks(for: 1, endOrdinal: 40, book: "Genesis")
             .filter { $0.notes != nil && !($0.notes?.notes.isEmpty ?? true) }
         XCTAssertTrue(rebuiltMyNotesBookmarks.isEmpty)
+    }
+
+    func testMyNotesAccessibilityStateCapsDetailedRowAndNoteTokens() throws {
+        let container = try makeBookmarkRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        let bookmarkStore = BookmarkStore(modelContext: modelContext)
+        let bookmarkService = BookmarkService(store: bookmarkStore)
+        let controller = BibleReaderController(bridge: BibleBridge())
+        controller.bookmarkService = bookmarkService
+        controller.navigateTo(book: "Psalms", chapter: 119, verse: 1)
+
+        for verse in 1...60 {
+            let ordinal = (119 - 1) * 40 + verse
+            let bookmark = BibleBookmark(
+                kjvOrdinalStart: ordinal,
+                kjvOrdinalEnd: ordinal,
+                ordinalStart: ordinal,
+                ordinalEnd: ordinal,
+                v11n: "KJVA"
+            )
+            bookmark.book = "Psalms"
+            modelContext.insert(bookmark)
+            try modelContext.save()
+            bookmarkService.saveBibleBookmarkNote(bookmarkId: bookmark.id, note: "Note \(verse)")
+        }
+
+        let snapshot = controller.myNotesAccessibilitySnapshot
+
+        XCTAssertEqual(snapshot.totalCount, 60)
+        XCTAssertEqual(snapshot.rowReferenceTokens.count, UITestRuntimeConfiguration.detailedAccessibilityRowTokenLimit)
+        XCTAssertEqual(snapshot.noteTokens.count, UITestRuntimeConfiguration.detailedAccessibilityRowTokenLimit)
+        XCTAssertEqual(controller.myNotesAccessibilityState, snapshot.encodedValue)
     }
 
     /**
