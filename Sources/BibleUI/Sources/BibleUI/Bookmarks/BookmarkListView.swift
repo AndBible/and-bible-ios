@@ -5,7 +5,7 @@ import SwiftData
 import BibleCore
 
 /**
- Displays a searchable, filterable, and sortable list of Bible bookmarks from SwiftData.
+ Displays a searchable, filterable, and sortable list of Bible and generic bookmarks from SwiftData.
 
  `BookmarkListView` is the main bookmark-browser surface. It excludes note-bearing bookmarks that
  belong in the My Notes flow, supports label-chip filtering, search-by-reference text, and
@@ -13,7 +13,8 @@ import BibleCore
 
  Data dependencies:
  - `modelContext` is used for bookmark deletion
- - `bookmarks` queries all `BibleBookmark` records for in-memory filtering and sorting
+ - `bibleBookmarks` queries all `BibleBookmark` records for in-memory filtering and sorting
+ - `genericBookmarks` queries all `GenericBookmark` records for in-memory filtering and sorting
  - `labels` queries all labels so the view can build filter chips and label-manager entry points
 
  Side effects:
@@ -29,8 +30,11 @@ public struct BookmarkListView: View {
     /// Dismiss action for closing the bookmark sheet.
     @Environment(\.dismiss) private var dismiss
 
-    /// Raw bookmark query used as the source set for filtering and sorting.
-    @Query(sort: \BibleBookmark.createdAt, order: .reverse) private var bookmarks: [BibleBookmark]
+    /// Raw Bible bookmark query used as part of the source set for filtering and sorting.
+    @Query(sort: \BibleBookmark.createdAt, order: .reverse) private var bibleBookmarks: [BibleBookmark]
+
+    /// Raw generic bookmark query used as part of the source set for filtering and sorting.
+    @Query(sort: \GenericBookmark.createdAt, order: .reverse) private var genericBookmarks: [GenericBookmark]
 
     /// Raw label query used to build filter chips and label-management affordances.
     @Query(sort: \BibleCore.Label.name) private var labels: [BibleCore.Label]
@@ -74,44 +78,47 @@ public struct BookmarkListView: View {
     /**
      Bookmarks after note suppression, label filtering, text filtering, and sort application.
      */
-    private var filteredBookmarks: [BibleBookmark] {
-        // Hide bookmarks that have notes (those belong in My Notes)
-        var result = bookmarks.filter { $0.notes == nil || $0.notes!.notes.isEmpty }
+    private var filteredBookmarks: [BookmarkListItem] {
+        var result = bookmarkListItems
 
         // Filter by label
         if let labelId = selectedLabelId {
-            result = result.filter { bookmark in
-                bookmark.bookmarkToLabels?.contains { $0.label?.id == labelId } ?? false
-            }
+            result = result.filter { $0.labels.contains { $0.id == labelId } }
         }
 
         // Filter by search text
         if !searchText.isEmpty {
-            result = result.filter { bookmark in
-                let ref = Self.verseReference(for: bookmark)
-                let noteText = bookmark.notes?.notes ?? ""
-                return ref.localizedCaseInsensitiveContains(searchText) ||
-                    noteText.localizedCaseInsensitiveContains(searchText)
-            }
+            result = result.filter { $0.searchableText.localizedCaseInsensitiveContains(searchText) }
         }
 
         // Sort
         switch sortOrder {
         case .bibleOrder:
-            result.sort { $0.kjvOrdinalStart < $1.kjvOrdinalStart }
+            result.sort { Self.compareBookmarkListItems($0, $1, by: \.documentSortKey, ascending: true) }
         case .bibleOrderDesc:
-            result.sort { $0.kjvOrdinalStart > $1.kjvOrdinalStart }
+            result.sort { Self.compareBookmarkListItems($0, $1, by: \.documentSortKey, ascending: false) }
         case .createdAt:
-            result.sort { $0.createdAt < $1.createdAt }
+            result.sort { Self.compareBookmarkListItems($0, $1, by: \.createdAt, ascending: true) }
         case .createdAtDesc:
-            result.sort { $0.createdAt > $1.createdAt }
+            result.sort { Self.compareBookmarkListItems($0, $1, by: \.createdAt, ascending: false) }
         case .lastUpdated:
-            result.sort { $0.lastUpdatedOn > $1.lastUpdatedOn }
+            result.sort { Self.compareBookmarkListItems($0, $1, by: \.lastUpdatedOn, ascending: false) }
         case .orderNumber:
-            result.sort { $0.kjvOrdinalStart < $1.kjvOrdinalStart }
+            result.sort { Self.compareBookmarkListItems($0, $1, by: \.documentSortKey, ascending: true) }
         }
 
         return result
+    }
+
+    /// Bookmark rows that belong in the native bookmark browser before label/search filtering.
+    private var bookmarkListItems: [BookmarkListItem] {
+        let bibleItems = bibleBookmarks
+            .filter { ($0.notes?.notes ?? "").isEmpty }
+            .map(BookmarkListItem.init(bibleBookmark:))
+        let genericItems = genericBookmarks
+            .filter { ($0.notes?.notes ?? "").isEmpty }
+            .map(BookmarkListItem.init(genericBookmark:))
+        return bibleItems + genericItems
     }
 
     /// User-created labels that should appear in the filter strip.
@@ -124,7 +131,7 @@ public struct BookmarkListView: View {
      */
     public var body: some View {
         Group {
-            if bookmarks.isEmpty {
+            if bookmarkListItems.isEmpty {
                 ContentUnavailableView(
                     String(localized: "no_bookmarks"),
                     systemImage: "bookmark",
@@ -206,9 +213,7 @@ public struct BookmarkListView: View {
                     } label: {
                         SwiftUI.Label(String(localized: "delete"), systemImage: "trash")
                     }
-                    .accessibilityIdentifier(
-                        "bookmarkListDeleteButton::\(bookmarkListAccessibilitySegment(Self.verseReference(for: bookmark)))"
-                    )
+                    .accessibilityIdentifier("bookmarkListDeleteButton::\(bookmark.accessibilitySegment)")
                 }
                 .contextMenu {
                     Button {
@@ -235,7 +240,7 @@ public struct BookmarkListView: View {
         }
 
         let rowTokens = filteredBookmarks.prefix(UITestRuntimeConfiguration.detailedAccessibilityRowTokenLimit).map {
-            "|\(bookmarkListAccessibilitySegment(Self.verseReference(for: $0)))|"
+            "|\($0.accessibilitySegment)|"
         }.joined(separator: ",")
         return "\(baseState);rows=\(rowTokens)"
     }
@@ -341,7 +346,7 @@ public struct BookmarkListView: View {
     private func deleteBookmarks(at offsets: IndexSet) {
         let toDelete = offsets.map { filteredBookmarks[$0] }
         for bookmark in toDelete {
-            modelContext.delete(bookmark)
+            deleteBookmarkWithoutSaving(bookmark)
         }
         try? modelContext.save()
     }
@@ -356,9 +361,19 @@ public struct BookmarkListView: View {
      - Failure modes:
        - silently discards save failures because the list has no retry UI for destructive actions
      */
-    private func deleteBookmark(_ bookmark: BibleBookmark) {
-        modelContext.delete(bookmark)
+    private func deleteBookmark(_ bookmark: BookmarkListItem) {
+        deleteBookmarkWithoutSaving(bookmark)
         try? modelContext.save()
+    }
+
+    /// Deletes one bookmark row from SwiftData without saving the context.
+    private func deleteBookmarkWithoutSaving(_ bookmark: BookmarkListItem) {
+        switch bookmark.source {
+        case .bible(let bibleBookmark):
+            modelContext.delete(bibleBookmark)
+        case .generic(let genericBookmark):
+            modelContext.delete(genericBookmark)
+        }
     }
 
     /**
@@ -381,6 +396,42 @@ public struct BookmarkListView: View {
             return "\(bookName) \(startChapter):\(startVerse)-\(endVerse)"
         }
     }
+
+    /**
+     Converts a generic bookmark target into user-visible list text.
+
+     - Parameter bookmark: Generic bookmark whose module/key should be rendered.
+     - Returns: Reference text like `UITESTDICT: Entry 1`.
+     */
+    static func genericReference(for bookmark: GenericBookmark) -> String {
+        let module = bookmark.bookInitials.trimmingCharacters(in: .whitespacesAndNewlines)
+        let key = bookmark.key.trimmingCharacters(in: .whitespacesAndNewlines)
+        if module.isEmpty {
+            return key.isEmpty ? "Unknown" : key
+        }
+        if key.isEmpty {
+            return module
+        }
+        return "\(module): \(key)"
+    }
+
+    /// Compares two rows by a primary key and uses reference/id tiebreakers for deterministic UI order.
+    private static func compareBookmarkListItems<Value: Comparable>(
+        _ lhs: BookmarkListItem,
+        _ rhs: BookmarkListItem,
+        by keyPath: KeyPath<BookmarkListItem, Value>,
+        ascending: Bool
+    ) -> Bool {
+        let lhsValue = lhs[keyPath: keyPath]
+        let rhsValue = rhs[keyPath: keyPath]
+        if lhsValue == rhsValue {
+            if lhs.reference == rhs.reference {
+                return lhs.id.uuidString < rhs.id.uuidString
+            }
+            return lhs.reference < rhs.reference
+        }
+        return ascending ? lhsValue < rhsValue : lhsValue > rhsValue
+    }
 }
 
 // MARK: - UUID Identifiable for sheet(item:)
@@ -389,6 +440,92 @@ public struct BookmarkListView: View {
 extension UUID: @retroactive Identifiable {
     /// Retroactive `Identifiable` conformance value for SwiftUI sheet presentation.
     public var id: UUID { self }
+}
+
+// MARK: - Bookmark List Item
+
+/// Normalized row data for Bible and generic bookmarks shown in `BookmarkListView`.
+private struct BookmarkListItem: Identifiable {
+    /// Original SwiftData model backing the row.
+    enum Source {
+        case bible(BibleBookmark)
+        case generic(GenericBookmark)
+    }
+
+    /// Stable bookmark identifier shared by the row and label-assignment sheet.
+    let id: UUID
+
+    /// Original SwiftData model backing the row.
+    let source: Source
+
+    /// User-visible reference text.
+    let reference: String
+
+    /// Text searched by the bookmark list search field.
+    let searchableText: String
+
+    /// Stable document-order key used by sort options.
+    let documentSortKey: Int
+
+    /// Bookmark creation timestamp.
+    let createdAt: Date
+
+    /// Bookmark last-updated timestamp.
+    let lastUpdatedOn: Date
+
+    /// Optional icon identifier.
+    let customIcon: String?
+
+    /// Optional note preview text.
+    let noteText: String
+
+    /// Labels assigned to the bookmark.
+    let labels: [BibleCore.Label]
+
+    /// Optional reader navigation target for Bible bookmarks.
+    let navigationTarget: (bookName: String, chapter: Int)?
+
+    /// Identifier-safe row reference segment used by UI automation.
+    var accessibilitySegment: String {
+        bookmarkListAccessibilitySegment(reference)
+    }
+
+    /// Creates a normalized row for one Bible bookmark.
+    init(bibleBookmark bookmark: BibleBookmark) {
+        let reference = BookmarkListView.verseReference(for: bookmark)
+        let noteText = bookmark.notes?.notes ?? ""
+        self.id = bookmark.id
+        self.source = .bible(bookmark)
+        self.reference = reference
+        self.searchableText = "\(reference) \(noteText)"
+        self.documentSortKey = bookmark.kjvOrdinalStart
+        self.createdAt = bookmark.createdAt
+        self.lastUpdatedOn = bookmark.lastUpdatedOn
+        self.customIcon = bookmark.customIcon
+        self.noteText = noteText
+        self.labels = bookmark.bookmarkToLabels?.compactMap { $0.label }.sorted { $0.name < $1.name } ?? []
+        self.navigationTarget = (
+            bookName: bookmark.book ?? "Genesis",
+            chapter: bookmark.ordinalStart / 40 + 1
+        )
+    }
+
+    /// Creates a normalized row for one generic bookmark.
+    init(genericBookmark bookmark: GenericBookmark) {
+        let reference = BookmarkListView.genericReference(for: bookmark)
+        let noteText = bookmark.notes?.notes ?? ""
+        self.id = bookmark.id
+        self.source = .generic(bookmark)
+        self.reference = reference
+        self.searchableText = "\(reference) \(noteText)"
+        self.documentSortKey = bookmark.ordinalStart
+        self.createdAt = bookmark.createdAt
+        self.lastUpdatedOn = bookmark.lastUpdatedOn
+        self.customIcon = bookmark.customIcon
+        self.noteText = noteText
+        self.labels = bookmark.bookmarkToLabels?.compactMap { $0.label }.sorted { $0.name < $1.name } ?? []
+        self.navigationTarget = nil
+    }
 }
 
 // MARK: - Bookmark Row
@@ -401,18 +538,13 @@ extension UUID: @retroactive Identifiable {
  */
 private struct BookmarkRow: View {
     /// Bookmark being rendered.
-    let bookmark: BibleBookmark
+    let bookmark: BookmarkListItem
 
     /// Callback used to navigate to the bookmark's passage.
     var onNavigate: ((String, Int) -> Void)?
 
     /// Callback used to open label editing for the bookmark.
     var onEditLabels: (() -> Void)?
-
-    /// Labels currently assigned to the bookmark, sorted by name.
-    private var assignedLabels: [BibleCore.Label] {
-        bookmark.bookmarkToLabels?.compactMap { $0.label }.sorted { $0.name < $1.name } ?? []
-    }
 
     /// Builds the tappable bookmark row.
     var body: some View {
@@ -426,12 +558,12 @@ private struct BookmarkRow: View {
      - Side effects:
        - invokes `onNavigate` with the bookmark's book/chapter when tapped
      - Failure modes: This helper cannot fail.
-     */
+    */
     private var selectionButton: some View {
         Button {
-            let chapter = bookmark.ordinalStart / 40 + 1
-            let bookName = bookmark.book ?? "Genesis"
-            onNavigate?(bookName, chapter)
+            if let target = bookmark.navigationTarget {
+                onNavigate?(target.bookName, target.chapter)
+            }
         } label: {
             VStack(alignment: .leading, spacing: 4) {
                 headerRow
@@ -451,9 +583,9 @@ private struct BookmarkRow: View {
     private var headerRow: some View {
         HStack {
             // Label color dots
-            if !assignedLabels.isEmpty {
+            if !bookmark.labels.isEmpty {
                 HStack(spacing: 2) {
-                    ForEach(Array(assignedLabels.prefix(3).enumerated()), id: \.offset) { _, label in
+                    ForEach(Array(bookmark.labels.prefix(3).enumerated()), id: \.offset) { _, label in
                         Circle()
                             .fill(Color(argbInt: label.color))
                             .frame(width: 10, height: 10)
@@ -466,7 +598,7 @@ private struct BookmarkRow: View {
                     .font(.headline)
             }
 
-            Text(BookmarkListView.verseReference(for: bookmark))
+            Text(bookmark.reference)
                 .font(.headline)
 
             Spacer()
@@ -480,8 +612,8 @@ private struct BookmarkRow: View {
     @ViewBuilder
     /// Optional note-preview text shown when the bookmark has saved note content.
     private var notePreview: some View {
-        if let notes = bookmark.notes, !notes.notes.isEmpty {
-            Text(notes.notes)
+        if !bookmark.noteText.isEmpty {
+            Text(bookmark.noteText)
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .lineLimit(2)
@@ -491,9 +623,9 @@ private struct BookmarkRow: View {
     @ViewBuilder
     /// Label tags or add-label affordance shown at the bottom of the bookmark row.
     private var labelTags: some View {
-        if !assignedLabels.isEmpty {
+        if !bookmark.labels.isEmpty {
             HStack(spacing: 4) {
-                ForEach(Array(assignedLabels.prefix(3).enumerated()), id: \.offset) { _, label in
+                ForEach(Array(bookmark.labels.prefix(3).enumerated()), id: \.offset) { _, label in
                     Text(label.name)
                         .font(.caption2)
                         .padding(.horizontal, 6)
@@ -534,9 +666,9 @@ private struct BookmarkRow: View {
      - Returns: Stable identifier derived from the bookmark reference string.
      - Side effects: none.
      - Failure modes: This helper cannot fail.
-     */
+    */
     private func bookmarkRowIdentifier() -> String {
-        "bookmarkListRowButton::\(bookmarkListAccessibilitySegment(BookmarkListView.verseReference(for: bookmark)))"
+        "bookmarkListRowButton::\(bookmark.accessibilitySegment)"
     }
 
     /**
@@ -546,9 +678,9 @@ private struct BookmarkRow: View {
      - Returns: Stable identifier derived from the action prefix and bookmark reference string.
      - Side effects: none.
      - Failure modes: This helper cannot fail.
-     */
+    */
     private func bookmarkInlineActionIdentifier(_ prefix: String) -> String {
-        "\(prefix)::\(bookmarkListAccessibilitySegment(BookmarkListView.verseReference(for: bookmark)))"
+        "\(prefix)::\(bookmark.accessibilitySegment)"
     }
 }
 

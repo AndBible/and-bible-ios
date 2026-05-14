@@ -1,6 +1,7 @@
 {
   "AndBibleUITests/AndBibleUITests/testAboutScreenOpensFromReaderMenu": "baseline",
   "AndBibleUITests/AndBibleUITests/testBookmarkListFilterAndSearchResetAcrossReopen": "bookmark-filter",
+  "AndBibleUITests/AndBibleUITests/testGenericBookmarkVisibleWorkflowAssignsLabelFromBookmarkList": "bookmark-generic-visible",
   "AndBibleUITests/AndBibleUITests/testBookmarkListLabelAssignmentCreatesAndAssignsNewLabel": "bookmark-row-label",
   "AndBibleUITests/AndBibleUITests/testBookmarkListLabelAssignmentRemovalHidesBookmarkUnderFilter": "bookmark-row-label",
   "AndBibleUITests/AndBibleUITests/testBookmarkListLabelFilterNarrowsAndClearsVisibleRows": "bookmark-filter",
