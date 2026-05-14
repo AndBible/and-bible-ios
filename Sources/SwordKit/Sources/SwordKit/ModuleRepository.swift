@@ -98,14 +98,18 @@ public final class ModuleRepository: @unchecked Sendable {
         (metadataCacheDir as NSString).appendingPathComponent("pseudo_books.json")
     }
 
-    public init(basePath: String? = nil, swordPath: String? = nil) {
+    public init(basePath: String? = nil, swordPath: String? = nil, session: URLSession? = nil) {
         self.basePath = basePath ?? InstallManager.defaultBasePath()
         self.swordPath = swordPath ?? SwordManager.defaultModulePath()
 
-        let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 30
-        config.timeoutIntervalForResource = 600
-        self.session = URLSession(configuration: config)
+        if let session {
+            self.session = session
+        } else {
+            let config = URLSessionConfiguration.default
+            config.timeoutIntervalForRequest = 30
+            config.timeoutIntervalForResource = 600
+            self.session = URLSession(configuration: config)
+        }
 
         // Ensure sword directories exist
         let fm = FileManager.default
@@ -188,13 +192,15 @@ public final class ModuleRepository: @unchecked Sendable {
                 "Pseudo books download failed (HTTP \(code))")
         }
 
+        let modules = try Self.pseudoModules(from: data)
+
         do {
-            try data.write(to: URL(fileURLWithPath: pseudoBooksCachePath))
+            try data.write(to: URL(fileURLWithPath: pseudoBooksCachePath), options: .atomic)
         } catch {
             logger.warning("Failed to cache pseudo books: \(error.localizedDescription)")
         }
 
-        return try Self.pseudoModules(from: data)
+        return modules
     }
 
     static func pseudoModules(from data: Data) throws -> [RemoteModuleInfo] {

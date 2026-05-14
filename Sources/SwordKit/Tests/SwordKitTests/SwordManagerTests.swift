@@ -62,6 +62,50 @@ final class SwordManagerTests: XCTestCase {
         XCTAssertEqual(modules[0].unavailableReason, modules[0].description)
     }
 
+    func testMalformedPseudoBookRefreshDoesNotOverwriteCachedMetadata() async throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let swordDir = tempDir.appendingPathComponent("sword", isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let validData = """
+        [
+          {"id": "ESV", "suggested": "Please contact the copyright holder."}
+        ]
+        """.data(using: .utf8)!
+        let malformedData = Data("<html>temporary failure</html>".utf8)
+        var responseBodies = [validData, malformedData]
+
+        PseudoBooksMockURLProtocol.requestHandler = { request in
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: nil
+            )!
+            return (response, responseBodies.removeFirst())
+        }
+        defer { PseudoBooksMockURLProtocol.requestHandler = nil }
+
+        let repository = ModuleRepository(
+            basePath: tempDir.path,
+            swordPath: swordDir.path,
+            session: Self.makePseudoBooksMockSession()
+        )
+
+        let refreshedModules = try await repository.refreshPseudoModules()
+        XCTAssertEqual(refreshedModules.map(\.name), ["ESV"])
+        XCTAssertEqual(repository.loadCachedPseudoModules().map(\.name), ["ESV"])
+
+        do {
+            _ = try await repository.refreshPseudoModules()
+            XCTFail("Expected malformed pseudo book metadata to fail decoding.")
+        } catch {
+            XCTAssertEqual(repository.loadCachedPseudoModules().map(\.name), ["ESV"])
+        }
+    }
+
     func testDefaultInstallManagerConfigIncludesAndBibleSources() throws {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -128,4 +172,39 @@ final class SwordManagerTests: XCTestCase {
         let r = SearchResult(key: "Gen 1:1", moduleName: "KJV")
         XCTAssertEqual(r.id, "KJV:Gen 1:1")
     }
+
+    private static func makePseudoBooksMockSession() -> URLSession {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [PseudoBooksMockURLProtocol.self]
+        return URLSession(configuration: configuration)
+    }
+}
+
+private final class PseudoBooksMockURLProtocol: URLProtocol {
+    static var requestHandler: ((URLRequest) throws -> (HTTPURLResponse, Data))?
+
+    override class func canInit(with request: URLRequest) -> Bool {
+        true
+    }
+
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest {
+        request
+    }
+
+    override func startLoading() {
+        guard let requestHandler = Self.requestHandler else {
+            fatalError("PseudoBooksMockURLProtocol.requestHandler must be set before use")
+        }
+
+        do {
+            let (response, data) = try requestHandler(request)
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didLoad: data)
+            client?.urlProtocolDidFinishLoading(self)
+        } catch {
+            client?.urlProtocol(self, didFailWithError: error)
+        }
+    }
+
+    override func stopLoading() {}
 }
