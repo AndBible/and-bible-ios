@@ -218,7 +218,9 @@ final class AndBibleUITests: XCTestCase {
         _ = openSearch(in: app)
         waitForSearchQuery("noah", in: app, timeout: 20)
 
-        let noahResult = requireElement("searchResultRow::Genesis_6_8", in: app, timeout: 20)
+        let noahResultIdentifier = "searchResultRow::Genesis_6_8"
+        waitForSearchResultRow(noahResultIdentifier, in: app, shouldExist: true, timeout: 20)
+        let noahResult = requireElement(noahResultIdentifier, in: app, timeout: 20)
         tapElementReliably(noahResult, timeout: 10)
 
         let updatedReference = waitForReaderReferenceValueToChange(
@@ -4408,6 +4410,29 @@ final class AndBibleUITests: XCTestCase {
     }
 
     /**
+     Resolves Search result rows inside the Search sheet/list before using any broader fallback.
+
+     Search result UI tests already wait for the compact Search state export before tapping a row.
+     Keeping the row query scoped avoids repeated full-app snapshots across the underlying reader
+     web view, which can time out in CI while the result list itself is already settled.
+     */
+    private func searchResultRowCandidates(
+        _ identifier: String,
+        in app: XCUIApplication
+    ) -> [XCUIElement] {
+        let roots = screenRootCandidates("searchResultsList", in: app) +
+            screenRootCandidates("searchScreen", in: app)
+
+        return roots.flatMap { root in
+            [
+                root.buttons[identifier].firstMatch,
+                root.cells[identifier].firstMatch,
+                root.otherElements[identifier].firstMatch,
+            ]
+        }
+    }
+
+    /**
      Resolves lightweight state-export or status candidates without probing broad `Other` queries.
 
      The app emits these probes as tiny static text nodes specifically so polling their value does
@@ -4639,13 +4664,7 @@ final class AndBibleUITests: XCTestCase {
         }
 
         if identifier.hasPrefix("searchResultRow::") {
-            return [
-                app.buttons[identifier].firstMatch,
-                app.collectionViews.buttons[identifier].firstMatch,
-                app.collectionViews.cells[identifier].firstMatch,
-                app.cells[identifier].firstMatch,
-                app.otherElements[identifier].firstMatch,
-            ]
+            return searchResultRowCandidates(identifier, in: app)
         }
 
         if identifier.hasPrefix("windowTabButton::") || identifier.hasPrefix("modulePickerRow::") {

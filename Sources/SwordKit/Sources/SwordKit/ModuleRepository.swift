@@ -70,6 +70,9 @@ public struct CatalogModule: Sendable, Identifiable {
  ```
  */
 public final class ModuleRepository: @unchecked Sendable {
+    private static let pseudoBooksURL = URL(string: "https://andbible.github.io/data/pseudo_books.json")!
+    private static let unavailablePseudoSourceName = "Not Available"
+
     private let basePath: String
     private let swordPath: String
     private let session: URLSession
@@ -84,14 +87,29 @@ public final class ModuleRepository: @unchecked Sendable {
         return dir
     }
 
-    public init(basePath: String? = nil, swordPath: String? = nil) {
+    /// Directory for AndBible metadata files that augment SWORD catalogs.
+    private var metadataCacheDir: String {
+        let dir = (basePath as NSString).appendingPathComponent("andbible-data")
+        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    private var pseudoBooksCachePath: String {
+        (metadataCacheDir as NSString).appendingPathComponent("pseudo_books.json")
+    }
+
+    public init(basePath: String? = nil, swordPath: String? = nil, session: URLSession? = nil) {
         self.basePath = basePath ?? InstallManager.defaultBasePath()
         self.swordPath = swordPath ?? SwordManager.defaultModulePath()
 
-        let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 30
-        config.timeoutIntervalForResource = 600
-        self.session = URLSession(configuration: config)
+        if let session {
+            self.session = session
+        } else {
+            let config = URLSessionConfiguration.default
+            config.timeoutIntervalForRequest = 30
+            config.timeoutIntervalForResource = 600
+            self.session = URLSession(configuration: config)
+        }
 
         // Ensure sword directories exist
         let fm = FileManager.default
@@ -140,6 +158,75 @@ public final class ModuleRepository: @unchecked Sendable {
             }
         }
         return sources
+    }
+
+    // MARK: - AndBible Metadata
+
+    private struct PseudoBook: Decodable {
+        let id: String
+        let suggested: String?
+    }
+
+    /// Load cached unavailable module metadata from AndBible's pseudo-books feed.
+    public func loadCachedPseudoModules() -> [RemoteModuleInfo] {
+        guard let data = FileManager.default.contents(atPath: pseudoBooksCachePath) else {
+            return []
+        }
+
+        do {
+            return try Self.pseudoModules(from: data)
+        } catch {
+            logger.warning("Failed to decode cached pseudo books: \(error.localizedDescription)")
+            return []
+        }
+    }
+
+    /// Refresh unavailable module metadata from AndBible's pseudo-books feed and cache it locally.
+    public func refreshPseudoModules() async throws -> [RemoteModuleInfo] {
+        let (data, response) = try await session.data(from: Self.pseudoBooksURL)
+
+        guard let httpResponse = response as? HTTPURLResponse,
+              httpResponse.statusCode == 200 else {
+            let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+            throw ModuleRepositoryError.downloadFailed(
+                "Pseudo books download failed (HTTP \(code))")
+        }
+
+        let modules = try Self.pseudoModules(from: data)
+
+        do {
+            try data.write(to: URL(fileURLWithPath: pseudoBooksCachePath), options: .atomic)
+        } catch {
+            logger.warning("Failed to cache pseudo books: \(error.localizedDescription)")
+        }
+
+        return modules
+    }
+
+    static func pseudoModules(from data: Data) throws -> [RemoteModuleInfo] {
+        try JSONDecoder().decode([PseudoBook].self, from: data)
+            .compactMap { book in
+                let name = book.id.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !name.isEmpty else { return nil }
+
+                let description = Self.pseudoBookDescription(suggested: book.suggested ?? "")
+                return RemoteModuleInfo(
+                    name: name,
+                    description: description,
+                    category: .bible,
+                    language: "en",
+                    sourceName: Self.unavailablePseudoSourceName,
+                    availability: .unavailable,
+                    unavailableReason: description
+                )
+            }
+    }
+
+    private static func pseudoBookDescription(suggested: String) -> String {
+        let base = "This popular translation is not available due to Copyright Holder not granting us distribution permission."
+        let trimmedSuggestion = suggested.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedSuggestion.isEmpty else { return base }
+        return "\(base) \(trimmedSuggestion)"
     }
 
     // MARK: - Catalog Cache (Disk)

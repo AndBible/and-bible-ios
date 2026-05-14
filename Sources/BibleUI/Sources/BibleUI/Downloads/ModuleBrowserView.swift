@@ -133,7 +133,8 @@ public struct ModuleBrowserView: View {
             modules = modules.filter {
                 $0.name.localizedCaseInsensitiveContains(searchText) ||
                 $0.description.localizedCaseInsensitiveContains(searchText) ||
-                $0.language.localizedCaseInsensitiveContains(searchText)
+                $0.language.localizedCaseInsensitiveContains(searchText) ||
+                $0.sourceName.localizedCaseInsensitiveContains(searchText)
             }
         }
         return modules.sorted { $0.name < $1.name }
@@ -313,7 +314,7 @@ public struct ModuleBrowserView: View {
                 Text(module.description)
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                    .lineLimit(2)
+                    .lineLimit(module.isInstallable ? 2 : 3)
                 HStack(spacing: 4) {
                     Text(displayName(for: module.language))
                         .font(.caption2)
@@ -331,6 +332,10 @@ public struct ModuleBrowserView: View {
                     .foregroundStyle(.green)
             } else if installingModules.contains(module.name) {
                 ProgressView()
+            } else if !module.isInstallable {
+                Label("Unavailable", systemImage: "lock.slash")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             } else {
                 Button("Install") {
                     installModule(module)
@@ -365,6 +370,21 @@ public struct ModuleBrowserView: View {
         return languageCode.uppercased()
     }
 
+    /**
+     De-duplicates remote modules by abbreviation while preserving source priority.
+
+     Real SWORD catalog entries are passed before pseudo/unavailable metadata so an installable
+     module keeps precedence over an unavailable placeholder with the same name.
+     */
+    private func deduplicatedModules(from modules: [RemoteModuleInfo]) -> [RemoteModuleInfo] {
+        var seen: Set<String> = []
+        var unique: [RemoteModuleInfo] = []
+        for module in modules where seen.insert(module.name).inserted {
+            unique.append(module)
+        }
+        return unique
+    }
+
     // MARK: - Data Management
 
     /**
@@ -387,17 +407,9 @@ public struct ModuleBrowserView: View {
 
         // Load cached catalog from disk if available modules are empty
         if availableModules.isEmpty {
-            let cached = repository.loadCachedCatalogs()
+            let cached = repository.loadCachedCatalogs() + repository.loadCachedPseudoModules()
             if !cached.isEmpty {
-                // De-duplicate
-                var seen: Set<String> = []
-                var unique: [RemoteModuleInfo] = []
-                for m in cached {
-                    if seen.insert(m.name).inserted {
-                        unique.append(m)
-                    }
-                }
-                availableModules = unique
+                availableModules = deduplicatedModules(from: cached)
             }
         }
     }
@@ -462,14 +474,23 @@ public struct ModuleBrowserView: View {
                 }
             }
 
-            // De-duplicate modules (same name from different sources — keep first)
-            var seen: Set<String> = []
-            var uniqueModules: [RemoteModuleInfo] = []
-            for module in allModules {
-                if seen.insert(module.name).inserted {
-                    uniqueModules.append(module)
+            await MainActor.run {
+                refreshProgress = "Refreshing unavailable modules..."
+            }
+
+            do {
+                let pseudoModules = try await repository.refreshPseudoModules()
+                allModules.append(contentsOf: pseudoModules)
+            } catch {
+                let cachedPseudoModules = repository.loadCachedPseudoModules()
+                if cachedPseudoModules.isEmpty {
+                    errors.append("AndBible metadata: \(error.localizedDescription)")
+                } else {
+                    allModules.append(contentsOf: cachedPseudoModules)
                 }
             }
+
+            let uniqueModules = deduplicatedModules(from: allModules)
 
             await MainActor.run {
                 availableModules = uniqueModules
@@ -503,6 +524,11 @@ public struct ModuleBrowserView: View {
      - repository installation errors are caught and reported without crashing the view
      */
     private func installModule(_ module: RemoteModuleInfo) {
+        guard module.isInstallable else {
+            errorMessage = module.unavailableReason ?? "\(module.name) is not available for installation."
+            return
+        }
+
         guard let source = repository.source(for: module.name) ?? sources.first(where: { $0.name == module.sourceName }) else {
             errorMessage = "Source not found for \(module.name)"
             return
