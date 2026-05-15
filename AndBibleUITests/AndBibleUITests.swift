@@ -1894,7 +1894,6 @@ final class AndBibleUITests: XCTestCase {
         }
 
         if usedXCTestBootstrap {
-            app.launchEnvironment["UITEST_EXIT_AFTER_BOOTSTRAP_LAUNCH"] = "1"
             app.launch()
             if let bootstrappedPath = waitForInstalledAppDataContainer(
                 simulatorID: simulatorID,
@@ -1902,7 +1901,7 @@ final class AndBibleUITests: XCTestCase {
                 timeout: 45
             ) {
                 XCTAssertTrue(
-                    waitForAppToStop(app, timeout: 30) || terminateAppReliably(
+                    terminateAppReliably(
                         app,
                         bundleIdentifier: bundleIdentifier,
                         simulatorID: simulatorID
@@ -1911,11 +1910,10 @@ final class AndBibleUITests: XCTestCase {
                     file: file,
                     line: line
                 )
-                app.launchEnvironment.removeValue(forKey: "UITEST_EXIT_AFTER_BOOTSTRAP_LAUNCH")
                 return bootstrappedPath
             }
             XCTAssertTrue(
-                waitForAppToStop(app, timeout: 30) || terminateAppReliably(
+                terminateAppReliably(
                     app,
                     bundleIdentifier: bundleIdentifier,
                     simulatorID: simulatorID
@@ -1924,7 +1922,6 @@ final class AndBibleUITests: XCTestCase {
                 file: file,
                 line: line
             )
-            app.launchEnvironment.removeValue(forKey: "UITEST_EXIT_AFTER_BOOTSTRAP_LAUNCH")
         }
 
         if let bootstrappedPath = waitForInstalledAppDataContainer(
@@ -2004,28 +2001,6 @@ final class AndBibleUITests: XCTestCase {
             }
             RunLoop.current.run(until: Date().addingTimeInterval(1))
         }
-
-        return app.state == .notRunning
-    }
-
-    /**
-     Waits for one XCUIApplication handle to report a stopped state.
-     *
-     * - Parameters:
-     *   - app: Application handle that should eventually stop.
-     *   - timeout: Maximum time to wait for `.notRunning`.
-     * - Returns: `true` when the app stops within the timeout, otherwise `false`.
-     * - Side effects: Pumps the current run loop while waiting for state propagation.
-     * - Failure modes: This helper does not record XCTest failures directly.
-     */
-    private func waitForAppToStop(_ app: XCUIApplication, timeout: TimeInterval) -> Bool {
-        let deadline = Date().addingTimeInterval(timeout)
-        repeat {
-            if app.state == .notRunning {
-                return true
-            }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.5))
-        } while Date() < deadline
 
         return app.state == .notRunning
     }
