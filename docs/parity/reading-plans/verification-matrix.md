@@ -1,6 +1,6 @@
 # READING-PLANS-701 Verification Matrix (Android Reading Plans -> iOS)
 
-Date: 2026-03-16
+Date: 2026-05-15
 
 ## Scope and Method
 
@@ -22,9 +22,9 @@ Date: 2026-03-16
 
 ## Summary
 
-- `Pass`: 5
+- `Pass`: 6
 - `Adapted Pass`: 1
-- `Partial`: 3
+- `Partial`: 2
 
 ## Matrix
 
@@ -32,8 +32,8 @@ Date: 2026-03-16
 |---|---|---|---|
 | Android `.properties` template parsing and custom-plan import syntax | `ReadingPlanService.parseProperties(_:)`, `ReadingPlanService.importCustomPlan(name:propertiesText:)` | Partial | The parser preserves Android-style `dayNumber=OsisRef...` semantics and ignores non-numeric keys, but custom import is not yet locked by focused regression coverage. |
 | Persisted plan creation keeps `currentDay` separate from 1-based day rows | `ReadingPlanService.startPlan(...)`, `DailyReadingView.loadPlan()`, `dispositions.md`; unit tests assert persisted `currentDay` values during restore/apply/upload flows | Adapted Pass | iOS intentionally keeps `ReadingPlan.currentDay` zero-based while generated `ReadingPlanDay.dayNumber` rows remain 1-based. |
-| Reading-plan list groups active vs completed plans and exposes start, delete, and import affordances | `ReadingPlanListView.swift`, `AvailablePlansView` | Partial | The list surface is implemented, but current focused UI coverage starts from a seeded daily-reading route rather than the list/start flow. |
-| Daily-reading progression marks a day complete and advances to the next day | `DailyReadingView.markDayComplete(_:)`, `DailyReadingView.checkPlanCompletion()`, UI test `testReadingPlansStartPlanAndAdvanceDay` | Pass | The current UI gate verifies day `1 -> 2` advancement on a seeded active plan. |
+| Reading-plan list groups active vs completed plans and exposes start, delete, and import affordances | `ReadingPlanListView.swift`, `AvailablePlansView`, UI test `testReadingPlanListStartDeleteAndImportAffordanceFlow` | Pass | Focused UI coverage now opens the real list, starts the built-in Android-parity template, deletes the active row through its swipe action, and verifies the custom import affordance requests file-picker presentation. |
+| Daily-reading progression marks a day complete and advances to the next day | `DailyReadingView.markDayComplete(_:)`, `DailyReadingView.checkPlanCompletion()`, UI test `testReadingPlansStartPlanAndAdvanceDay` | Pass | The current UI gate starts a built-in plan from the visible list, opens the daily view, and verifies day `1 -> 2` advancement. |
 | Android initial-backup restore reads staged `readingplans.sqlite3` snapshots and preserves raw status payloads | `RemoteSyncReadingPlanRestoreService`, `RemoteSyncReadingPlanStatusStore`; unit tests `testRemoteSyncReadingPlanRestoreReadsAndroidSnapshot` and `testRemoteSyncReadingPlanRestoreReplacesLocalPlansAndPreservesAndroidStatuses` | Pass | This locks the initial Android import contract plus raw-status fidelity preservation. |
 | Restore validation rejects unsupported plan definitions, orphan statuses, and malformed status JSON without mutation | `RemoteSyncReadingPlanRestoreService.preparePlans(from:)`; unit tests `testRemoteSyncReadingPlanRestoreRejectsUnknownPlanDefinitionsWithoutMutation`, `testRemoteSyncReadingPlanRestoreRejectsOrphanStatusesWithoutMutation`, `testRemoteSyncReadingPlanRestoreRejectsMalformedStatusPayloads` | Pass | Validation remains all-or-nothing before local reading-plan state is replaced. |
 | Initial-backup upload writes a full Android-shaped database and records patch-zero baseline state | `RemoteSyncInitialBackupUploadService.buildReadingPlanInitialBackup(...)`; unit test `testRemoteSyncInitialBackupUploadWritesReadingPlanDatabaseAndResetsBaseline` | Pass | This protects the create-new remote bootstrap path for reading plans. |

@@ -1,12 +1,13 @@
 # READING-PLANS-702 Regression Report
 
-Date: 2026-03-16
+Date: 2026-05-15
 
 ## Scope
 
 Regression verification for the current reading-plan parity surface, covering:
 
 - daily-reading progression in the native SwiftUI screen
+- visible reading-plan list start/delete/import affordance flow
 - Android initial-backup snapshot reading and validation
 - raw Android status-payload preservation
 - Android-shaped initial-backup upload
@@ -36,6 +37,8 @@ Verification matrix:
 - `AndBibleTests/testRemoteSyncReadingPlanRestoreRejectsUnknownPlanDefinitionsWithoutMutation`
 - `AndBibleTests/testRemoteSyncReadingPlanRestoreRejectsOrphanStatusesWithoutMutation`
 - `AndBibleTests/testRemoteSyncReadingPlanRestoreRejectsMalformedStatusPayloads`
+- `AndBibleTests/testRemoteSyncReadingPlanStatusStorePersistsAndClearsStatuses`
+- `AndBibleTests/testRemoteSyncReadingPlanStatusStorePreservesRemoteStatusIdentifiers`
 - `AndBibleTests/testRemoteSyncReadingPlanPatchApplyReplaysNewerRowsAndRecordsPatchStatus`
 - `AndBibleTests/testRemoteSyncReadingPlanPatchApplyDeletesStatusesByRemoteIdentifier`
 - `AndBibleTests/testRemoteSyncReadingPlanPatchApplySkipsOlderRows`
@@ -48,15 +51,24 @@ Verification matrix:
 
 ### UI
 
+- `AndBibleUITests/testReadingPlanListStartDeleteAndImportAffordanceFlow`
 - `AndBibleUITests/testReadingPlansStartPlanAndAdvanceDay`
 
 ## Expected Assertions Covered
 
 ### Daily-reading progression
 
-- a seeded active plan opens directly into `DailyReadingView`
+- a built-in plan started from the visible list opens into `DailyReadingView`
 - the current-day label starts on day `1`
 - tapping `Mark as Read` advances the visible day to `2`
+
+### Visible reading-plan list workflow
+
+- the real Reading Plans list starts with no active plans under the baseline fixture
+- the available-plan picker exposes the built-in Android-parity template list
+- starting `y1ot1nt1_OTthenNT` creates one active row in the list state
+- deleting that active row through the swipe action removes it from the list state
+- the custom import affordance requests file-picker presentation
 
 ### Android initial-backup restore
 
@@ -80,17 +92,18 @@ Verification matrix:
 
 ## Current Result
 
-Focused reading-plan validation passed on 2026-03-16:
+Focused reading-plan validation passed on 2026-05-15:
 
-- unit and integration: `14` tests, `0` failures
-- UI: `1` test, `0` failures
-- combined focused subset runtime: about `53s` end-to-end
+- unit and integration: `16` tests, `0` failures
+- UI: `2` tests, `0` failures
 
 This gives the reading-plan domain current regression evidence for:
 
 - Android initial-backup restore
 - all-or-nothing snapshot validation
+- visible list start/delete/import affordance behavior
 - daily-reading advancement
+- reading-plan status-store preservation
 - Android-shaped initial-backup upload
 - sparse patch replay
 - sparse patch upload
@@ -98,11 +111,10 @@ This gives the reading-plan domain current regression evidence for:
 
 ## Remaining Gap
 
-The current reading-plan parity gap is not the sync core. It is:
+The current reading-plan parity gap is not the sync core or visible list workflow. It is:
 
-- list/start/delete/import behavior from the real `ReadingPlanListView`
 - regression coverage for the additive iOS algorithmic plans
-- a focused import regression for custom `.properties` plans
+- a focused parser/import-content regression for custom `.properties` plans
 
 Those areas are implemented, but they are not yet locked by focused regression
 coverage, so they remain `Partial` in `verification-matrix.md`.
