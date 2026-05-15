@@ -6,6 +6,13 @@ enum UITestRuntimeConfiguration {
     private static let detailedAccessibilityExportsArgument = "-UITEST_ENABLE_DETAILED_ACCESSIBILITY_EXPORTS"
     private static let myNotesAppendTextEnvironmentKey = "UITEST_MY_NOTES_APPEND_TEXT"
     private static let myNotesAppendTextArgument = "-UITEST_MY_NOTES_APPEND_TEXT"
+    private static let remoteSyncBootstrapScenarioEnvironmentKey = "UITEST_REMOTE_SYNC_BOOTSTRAP_SCENARIO"
+    private static let remoteSyncBootstrapScenarioArgument = "-UITEST_REMOTE_SYNC_BOOTSTRAP_SCENARIO"
+
+    /// Test-only remote sync bootstrap paths that can replace live backend transport in UI tests.
+    enum RemoteSyncBootstrapScenario: String {
+        case adoptExisting = "adopt-existing"
+    }
 
     /// Upper bound for test-only row-token exports embedded into accessibility state strings.
     static let detailedAccessibilityRowTokenLimit = 50
@@ -28,6 +35,18 @@ enum UITestRuntimeConfiguration {
             return nil
         }
         return value
+    }
+
+    /// Optional deterministic remote-sync bootstrap path requested by UI automation.
+    static var remoteSyncBootstrapScenario: RemoteSyncBootstrapScenario? {
+        if let value = ProcessInfo.processInfo.environment[remoteSyncBootstrapScenarioEnvironmentKey],
+           !value.isEmpty {
+            return RemoteSyncBootstrapScenario(rawValue: value)
+        }
+        guard let value = argumentValue(after: remoteSyncBootstrapScenarioArgument), !value.isEmpty else {
+            return nil
+        }
+        return RemoteSyncBootstrapScenario(rawValue: value)
     }
 
     /**

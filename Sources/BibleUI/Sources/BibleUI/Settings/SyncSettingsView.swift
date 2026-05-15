@@ -89,6 +89,9 @@ public struct SyncSettingsView: View {
     /// Global remote-sync error message shown in an alert after a category sync failure.
     @State private var remoteSyncErrorMessage: String?
 
+    /// Last successfully completed confirmation branch exported only for UI-test assertions.
+    @State private var lastRemoteConfirmationAction: String?
+
     /**
      Represents the last manual WebDAV connection-test result shown in the status section.
 
@@ -659,7 +662,7 @@ public struct SyncSettingsView: View {
      The token captures the active backend plus the currently enabled remote categories so UI tests
      can assert state changes without relying on localized row text or SwiftUI switch internals.
 
-     - Returns: A deterministic `backend=<raw>;enabled=<csv-or-none>;remoteStatus=<token>` token.
+     - Returns: A deterministic token describing backend, enabled categories, and remote prompt state.
      - Side effects: none.
      - Failure modes: This helper cannot fail.
      */
@@ -669,7 +672,49 @@ public struct SyncSettingsView: View {
             .map(\.rawValue)
             .sorted()
         let enabledToken = enabledCategories.isEmpty ? "none" : enabledCategories.joined(separator: ",")
-        return "backend=\(selectedBackend.rawValue);enabled=\(enabledToken);remoteStatus=\(remoteStatusAccessibilityValue)"
+        return [
+            "backend=\(selectedBackend.rawValue)",
+            "enabled=\(enabledToken)",
+            "remoteStatus=\(remoteStatusAccessibilityValue)",
+            "bootstrapPrompt=\(remoteBootstrapPromptAccessibilityToken)",
+            "pendingConfirmation=\(remoteConfirmationAccessibilityToken)",
+            "lastConfirmation=\(lastRemoteConfirmationAction ?? "none")",
+        ]
+        .joined(separator: ";")
+    }
+
+    /**
+     Accessibility-exported token for the visible adopt-versus-create prompt.
+     *
+     * - Returns: `adoptOrCreate:<category>` when the first prompt is visible, otherwise `none`.
+     * - Side effects: none.
+     * - Failure modes: This helper cannot fail.
+     */
+    private var remoteBootstrapPromptAccessibilityToken: String {
+        guard let pendingRemoteAdoption else {
+            return "none"
+        }
+        return "adoptOrCreate:\(pendingRemoteAdoption.category.rawValue)"
+    }
+
+    /**
+     Accessibility-exported token for the visible destructive confirmation branch.
+     *
+     * - Returns: Branch and category tokens when the second confirmation is visible, otherwise `none`.
+     * - Side effects: none.
+     * - Failure modes: This helper cannot fail.
+     */
+    private var remoteConfirmationAccessibilityToken: String {
+        guard let pendingRemoteConfirmation else {
+            return "none"
+        }
+
+        switch pendingRemoteConfirmation {
+        case .resetLocal(let candidate):
+            return "resetLocal:\(candidate.category.rawValue)"
+        case .resetCloud(let candidate):
+            return "resetCloud:\(candidate.category.rawValue)"
+        }
     }
 
     /**
@@ -858,6 +903,21 @@ public struct SyncSettingsView: View {
             return
         }
 
+        if UITestRuntimeConfiguration.remoteSyncBootstrapScenario == .adoptExisting {
+            selectedBackend = .nextCloud
+            serverURL = "https://example.invalid/remote.php/dav/files/ui-test"
+            username = "ui-test"
+            password = "ui-test"
+            folderPath = ""
+            remoteCategoryEnabled = Dictionary(
+                uniqueKeysWithValues: RemoteSyncCategory.allCases.map { category in
+                    (category, false)
+                }
+            )
+            hasLoadedSettings = true
+            return
+        }
+
         selectedBackend = remoteSettingsStore.selectedBackend
 
         if let configuration = remoteSettingsStore.loadWebDAVConfiguration() {
@@ -965,6 +1025,7 @@ public struct SyncSettingsView: View {
     @MainActor
     private func beginRemoteSynchronization(for category: RemoteSyncCategory) async {
         persistRemoteSettings()
+        lastRemoteConfirmationAction = nil
 
         do {
             if selectedBackend == .googleDrive && !googleDriveAuthService.isReadyForSync {
@@ -1029,6 +1090,7 @@ public struct SyncSettingsView: View {
             let service = try makeRemoteSynchronizationService()
             let settingsStore = SettingsStore(modelContext: modelContext)
             let report: RemoteSyncCategorySynchronizationReport
+            let completedAction: String
 
             switch confirmation {
             case .resetLocal(let candidate):
@@ -1038,6 +1100,7 @@ public struct SyncSettingsView: View {
                     modelContext: modelContext,
                     settingsStore: settingsStore
                 )
+                completedAction = "resetLocal"
             case .resetCloud(let candidate):
                 report = try await service.createRemoteFolderAndSynchronize(
                     for: candidate.category,
@@ -1045,10 +1108,12 @@ public struct SyncSettingsView: View {
                     modelContext: modelContext,
                     settingsStore: settingsStore
                 )
+                completedAction = "resetCloud"
             }
 
             remoteCategoryStatuses[category] = .idle
             finishRemoteSynchronization(with: report, for: category)
+            lastRemoteConfirmationAction = "\(completedAction):\(category.rawValue)"
         } catch {
             handleRemoteSynchronizationError(error, for: category, revertEnablement: false)
         }
@@ -1089,6 +1154,7 @@ public struct SyncSettingsView: View {
         remoteSettingsStore.setSyncEnabled(false, for: category)
         remoteCategoryEnabled[category] = false
         remoteCategoryStatuses[category] = .idle
+        lastRemoteConfirmationAction = nil
     }
 
     /**
@@ -1158,6 +1224,15 @@ public struct SyncSettingsView: View {
      */
     private func makeRemoteSynchronizationService() throws -> RemoteSyncSynchronizationService {
         let bundleIdentifier = Bundle.main.bundleIdentifier ?? "org.andbible.ios"
+        if UITestRuntimeConfiguration.remoteSyncBootstrapScenario == .adoptExisting {
+            return RemoteSyncSynchronizationService(
+                adapter: UITestRemoteSyncAdapter(bundleIdentifier: bundleIdentifier),
+                bundleIdentifier: bundleIdentifier,
+                deviceIdentifier: remoteSettingsStore.deviceIdentifier(),
+                nowProvider: { 1_735_689_900_000 }
+            )
+        }
+
         let factory = RemoteSyncSynchronizationServiceFactory(
             bundleIdentifier: bundleIdentifier,
             googleDriveAccessTokenProvider: { [googleDriveAuthService] in
