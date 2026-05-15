@@ -1,6 +1,6 @@
 # BOOKMARKS-701 Verification Matrix (Android Bookmarks -> iOS)
 
-Date: 2026-05-10
+Date: 2026-05-14
 
 ## Scope and Method
 
@@ -24,9 +24,9 @@ Date: 2026-05-10
 
 ## Summary
 
-- `Pass`: 5
+- `Pass`: 6
 - `Adapted Pass`: 2
-- `Partial`: 2
+- `Partial`: 1
 
 ## Matrix
 
@@ -37,7 +37,7 @@ Date: 2026-05-10
 | Label manager CRUD | `LabelManagerView.swift`; UI test `testLabelManagerCreateRenameDeleteFlow` | Pass | Create, rename, and delete are locked by a real end-to-end UI workflow. |
 | StudyPad handoff from bookmarks | `BookmarkListView.swift`, `BibleReaderController.swift`, `BibleReaderView.swift`; UI test `testBookmarkListOpensStudyPadForSelectedLabel` | Pass | Android exposes `openStudyPad` through `BibleJavascriptInterface` and `LinkControl`; iOS has current UI coverage for the bookmark-label handoff into StudyPad. |
 | My Notes note mutation and delete persistence | `BibleReaderController.swift`, `BibleReaderView.swift`; UI test `testMyNotesNoteUpdateAndDeletePersistsFromVisibleWorkflow`; service-layer tests `testBookmarkServiceClearingBibleBookmarkNoteDeletesPersistedNoteRow`, `testBookmarkServiceClearingBibleBookmarkNoteRemovesBookmarkFromMyNotesQuery`, `testBookmarkServiceUpdatingBibleBookmarkNoteReusesPersistedNoteRow` | Pass | Android exposes `openMyNotes` through `BibleJavascriptInterface` and `LinkControl`. iOS now has focused visible-path coverage that opens My Notes from the reader, updates a note, rebuilds the document, deletes the visible note-backed row, and verifies the rebuilt document stays empty. |
+| Generic bookmark visible workflow parity | `BookmarkListView.swift`, `LabelAssignmentView.swift`, `BookmarkService`; UI test `testGenericBookmarkVisibleWorkflowAssignsLabelFromBookmarkList` | Pass | Generic bookmarks now render in the native bookmark list with module/key references, and the focused UI test verifies visible label assignment plus filtered-list reflection. |
 | Bookmark note persistence split across bookmark rows and separate note entities | `BookmarkService.saveBibleBookmarkNote`, `BookmarkStore`; unit tests `testBookmarkServiceClearingBibleBookmarkNoteDeletesPersistedNoteRow`, `testBookmarkServiceClearingBibleBookmarkNoteRemovesBookmarkFromMyNotesQuery` | Adapted Pass | iOS preserves the Android-compatible data split, but exposes note-centric workflows through a separate My Notes surface. |
 | Native bookmark list plus separate My Notes surface instead of one unified browser | `BookmarkListView.swift` note suppression and `BibleReaderController` My Notes document flow; documented in `dispositions.md`; UI coverage spans the bookmark surface and service coverage spans note persistence | Adapted Pass | The parity goal is shared data semantics and user-visible outcomes, not Android-identical screen structure. |
 | StudyPad ordering, reorder, and delete breadth | `BookmarkService` and `BibleReaderController` StudyPad entry operations exist; no focused UI regression currently covers create, reorder, or delete | Partial | Current UI evidence locks handoff only; the full StudyPad mutation surface still needs focused coverage. |
-| Generic bookmark visible workflow parity | `BookmarkService` and models support generic bookmarks; no focused regression currently exercises generic-bookmark browsing, editing, or label assignment from a visible UI path | Partial | The generic side of the bookmark domain exists in persistence and bridge logic, but it is not yet gated by focused workflow coverage. |

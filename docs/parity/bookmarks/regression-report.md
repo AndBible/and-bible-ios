@@ -1,12 +1,13 @@
 # BOOKMARKS-702 Regression Report
 
-Date: 2026-05-10
+Date: 2026-05-14
 
 ## Scope
 
 Regression verification for the current bookmark parity surface, covering:
 
 - native bookmark-list search, filter, sort, selection, and deletion
+- generic bookmark visibility plus label assignment from the native bookmark list
 - label assignment and label-manager mutation flows
 - StudyPad handoff from a real bookmark workflow
 - visible My Notes note update/delete from the production reader path
@@ -44,6 +45,7 @@ Verification matrix:
 - `AndBibleUITests/testBookmarkListSortMenuReordersRows`
 - `AndBibleUITests/testBookmarkListSearchNarrowsAndClearsVisibleRows`
 - `AndBibleUITests/testBookmarkListLabelFilterNarrowsAndClearsVisibleRows`
+- `AndBibleUITests/testGenericBookmarkVisibleWorkflowAssignsLabelFromBookmarkList`
 - `AndBibleUITests/testLabelAssignmentTogglesFavouriteAndAssignment`
 - `AndBibleUITests/testBookmarkListLabelAssignmentCreatesAndAssignsNewLabel`
 - `AndBibleUITests/testBookmarkListLabelAssignmentRemovalHidesBookmarkUnderFilter`
@@ -60,6 +62,9 @@ Verification matrix:
 - changing sort order reorders the visible rows
 - text search narrows and then clears back to the full seeded list
 - label filtering narrows and then clears back to the full seeded list
+- a seeded generic bookmark appears in the native bookmark list by module/key reference
+- assigning a label to the generic bookmark through the visible row makes it appear under that
+  label filter
 
 ### Labels
 
@@ -91,13 +96,14 @@ stale because three UI tests from that report no longer exist in `AndBibleUITest
 rerunnable named subset in this report is:
 
 - unit: `5` tests
-- UI: `11` tests
+- UI: `12` tests
 
 This doc refresh did not rerun the simulator suite, so do not treat the old runtime or the
 old UI count as current evidence. The checked-in named subset still gives the bookmark
 domain rerunnable evidence for:
 
 - bookmark-list search, filter, sort, selection, and deletion
+- generic-bookmark visibility and label assignment from the bookmark list
 - label assignment and label-manager CRUD
 - StudyPad handoff from a selected label
 - visible My Notes update/delete from the reader-owned document path
@@ -105,10 +111,8 @@ domain rerunnable evidence for:
 
 ## Remaining Gap
 
-The current bookmark parity gaps are:
+The current bookmark parity gap is:
 
-- generic-bookmark visible workflows
 - deeper StudyPad mutation coverage beyond handoff
 
-Those areas remain `Partial` in `verification-matrix.md` until they have focused regression
-coverage.
+That area remains `Partial` in `verification-matrix.md` until it has focused regression coverage.

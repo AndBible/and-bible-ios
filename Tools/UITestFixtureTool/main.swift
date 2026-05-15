@@ -40,6 +40,7 @@ private enum FixtureScenario: String, CaseIterable {
     case bookmarkMultiRow = "bookmark-multirow"
     case bookmarkFilter = "bookmark-filter"
     case bookmarkRowLabel = "bookmark-row-label"
+    case bookmarkGenericVisible = "bookmark-generic-visible"
     case bookmarkStudyPad = "bookmark-studypad"
     case historySingle = "history-single"
     case historyMultiRow = "history-multirow"
@@ -387,6 +388,8 @@ private final class FixtureContext {
             seedBookmarkFilter()
         case .bookmarkRowLabel:
             seedBookmarkRowLabel()
+        case .bookmarkGenericVisible:
+            seedBookmarkGenericVisible()
         case .bookmarkStudyPad:
             seedBookmarkStudyPad()
         case .historySingle:
@@ -756,6 +759,22 @@ private final class FixtureContext {
             note: nil,
             createdAt: seededDate(offset: 20)
         )
+    }
+
+    /**
+     Seeds one generic bookmark and one initially-unassigned label for visible workflow coverage.
+     */
+    private func seedBookmarkGenericVisible() {
+        _ = ensureUserLabel(name: "UI Test Seed", color: 0xFF91A7FF)
+        let bookmark = bookmarkService.addGenericBookmark(
+            bookInitials: "UITESTDICT",
+            key: "Entry 1",
+            startOrdinal: 7,
+            endOrdinal: 7
+        )
+        bookmark.createdAt = seededDate(offset: 20)
+        bookmark.lastUpdatedOn = seededDate(offset: 20)
+        bookmarkStore.saveChanges()
     }
 
     /**
