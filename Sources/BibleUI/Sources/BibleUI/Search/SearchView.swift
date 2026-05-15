@@ -727,6 +727,8 @@ public struct SearchView: View {
                 ForEach(results) { hit in
                     Button(action: { navigateTo(hit) }) {
                         searchHitRow(hit)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .accessibilityIdentifier(searchResultIdentifier(for: hit))

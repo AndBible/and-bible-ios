@@ -1893,8 +1893,12 @@ final class AndBibleTests: XCTestCase {
         controller.activeWindow = window
         controller.navigateTo(book: "Genesis", chapter: 1, verse: 1)
 
+        let persisted = expectation(description: "Visible verse state persisted after debounce")
         var persistCount = 0
-        controller.onPersistState = { persistCount += 1 }
+        controller.onPersistState = {
+            persistCount += 1
+            persisted.fulfill()
+        }
 
         controller.bridge(bridge, didScrollToOrdinal: 5, key: "Gen.1", atChapterTop: false)
 
@@ -1902,7 +1906,7 @@ final class AndBibleTests: XCTestCase {
         XCTAssertEqual(controller.currentVerse, 5)
         XCTAssertEqual(pageManager.bibleVerseNo, 5)
 
-        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.5))
+        wait(for: [persisted], timeout: 2.0)
 
         XCTAssertEqual(persistCount, 1)
     }
