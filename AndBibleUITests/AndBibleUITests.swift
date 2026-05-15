@@ -4825,14 +4825,14 @@ final class AndBibleUITests: XCTestCase {
             ]
         case "readerNavigationDrawerButton":
             return [
-                app.otherElements["readerDocumentHeader"].buttons[identifier].firstMatch,
                 app.buttons[identifier].firstMatch,
+                app.otherElements["readerDocumentHeader"].buttons[identifier].firstMatch,
                 app.otherElements[identifier].firstMatch,
             ]
         case "readerMoreMenuButton", "bookChooserButton":
             return [
-                app.otherElements["readerDocumentHeader"].buttons[identifier].firstMatch,
                 app.buttons[identifier].firstMatch,
+                app.otherElements["readerDocumentHeader"].buttons[identifier].firstMatch,
                 app.otherElements[identifier].firstMatch,
             ]
         case "readerStrongsToolbarButton":
