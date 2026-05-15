@@ -311,6 +311,52 @@ final class AndBibleUITests: XCTestCase {
     }
 
     /**
+     Verifies the visible reading-plan list can start and delete a built-in plan and reach the
+     custom import path from the available-plan picker.
+     *
+     * - Side effects:
+     *   - launches the reader shell with empty reading-plan state
+     *   - opens the real Reading Plans list, starts the first Android-parity built-in template,
+     *     deletes it from the active-plan row swipe action, then opens the import picker path
+     * - Failure modes:
+     *   - fails if the list state does not publish the expected active-plan counts
+     *   - fails if the built-in template cannot be started from the picker
+     *   - fails if the row-level delete action is missing or does not remove the active plan
+     *   - fails if the custom import affordance does not request file-picker presentation
+     */
+    func testReadingPlanListStartDeleteAndImportAffordanceFlow() {
+        let builtInPlanCode = "y1ot1nt1_OTthenNT"
+        let builtInPlanToken = readingPlanStateToken(builtInPlanCode)
+        let app = makeApp()
+        app.launch()
+
+        _ = openReadingPlans(in: app, timeout: 20)
+        waitForReadingPlanListState(containing: "active=0", in: app, timeout: 10)
+
+        tapElementReliably(requireElement("readingPlanStartButton", in: app, timeout: 10), timeout: 10)
+        _ = requireElement("availablePlansScreen", in: app, timeout: 10)
+        waitForAvailablePlansState(containing: builtInPlanToken, in: app, timeout: 10)
+
+        tapElementReliably(requireElement("readingPlanTemplateButton", in: app, timeout: 15), timeout: 10)
+        waitForReadingPlanListState(containing: "active=1", in: app, timeout: 15)
+        waitForReadingPlanListState(containing: builtInPlanToken, in: app, timeout: 10)
+
+        let activePlan = requireElement("readingPlanActivePlanLink", in: app, timeout: 10)
+        activePlan.swipeLeft()
+        tapElementReliably(
+            requireElement(readingPlanDeleteButtonIdentifier(for: builtInPlanCode), in: app, timeout: 10),
+            timeout: 10
+        )
+        waitForReadingPlanListState(containing: "active=0", in: app, timeout: 10)
+        waitForReadingPlanListState(notContaining: builtInPlanToken, in: app, timeout: 10)
+
+        tapElementReliably(requireElement("readingPlanStartButton", in: app, timeout: 10), timeout: 10)
+        _ = requireElement("availablePlansScreen", in: app, timeout: 10)
+        tapElementReliably(revealAvailablePlansImportButton(in: app, timeout: 10), timeout: 10)
+        waitForAvailablePlansState(containing: "importPickerPresented=true", in: app, timeout: 20)
+    }
+
+    /**
      Verifies that the downloads browser can be opened from the reader shell.
      *
      * - Side effects:
@@ -3594,6 +3640,80 @@ final class AndBibleUITests: XCTestCase {
         "|\(referenceToken)|"
     }
 
+    /// Waits for the Reading Plans list accessibility state to contain one token.
+    private func waitForReadingPlanListState(
+        containing token: String,
+        in app: XCUIApplication,
+        timeout: TimeInterval = 10
+    ) {
+        waitForResolvedSemanticState(
+            named: "readingPlanListStateExport",
+            timeout: timeout,
+            valueProvider: { resolvedReadingPlanListStateValue(in: app) },
+            success: { $0.contains(token) },
+            failureDescription: { finalValue in
+                "Expected element 'readingPlanListStateExport' to contain token '\(token)' within \(timeout) seconds. Final value: '\(finalValue)'."
+            }
+        )
+    }
+
+    /// Waits for the Reading Plans list accessibility state to stop containing one token.
+    private func waitForReadingPlanListState(
+        notContaining token: String,
+        in app: XCUIApplication,
+        timeout: TimeInterval = 10
+    ) {
+        waitForResolvedSemanticState(
+            named: "readingPlanListStateExport",
+            timeout: timeout,
+            valueProvider: { resolvedReadingPlanListStateValue(in: app) },
+            success: { !$0.contains(token) },
+            missingCountsAsSuccess: true,
+            failureDescription: { _ in
+                "Expected element 'readingPlanListStateExport' to stop containing '\(token)' within \(timeout) seconds."
+            }
+        )
+    }
+
+    /// Waits for the available-plan picker accessibility state to contain one token.
+    private func waitForAvailablePlansState(
+        containing token: String,
+        in app: XCUIApplication,
+        timeout: TimeInterval = 10
+    ) {
+        waitForResolvedSemanticState(
+            named: "availablePlansStateExport",
+            timeout: timeout,
+            valueProvider: { resolvedAvailablePlansStateValue(in: app) },
+            success: { $0.contains(token) },
+            failureDescription: { finalValue in
+                "Expected element 'availablePlansStateExport' to contain token '\(token)' within \(timeout) seconds. Final value: '\(finalValue)'."
+            }
+        )
+    }
+
+    /// Returns one reading-plan token as serialized by the list accessibility state.
+    private func readingPlanStateToken(_ planCode: String) -> String {
+        "|\(sanitizedReadingPlanStateToken(planCode))|"
+    }
+
+    /// Returns one reading-plan delete button identifier for the visible row swipe action.
+    private func readingPlanDeleteButtonIdentifier(for planCode: String) -> String {
+        "readingPlanDeleteButton::\(sanitizedReadingPlanStateToken(planCode))"
+    }
+
+    /// Sanitizes one reading-plan code to match the production accessibility export.
+    private func sanitizedReadingPlanStateToken(_ value: String) -> String {
+        let mapped = value.unicodeScalars.map { scalar -> String in
+            if CharacterSet.alphanumerics.contains(scalar) {
+                return String(scalar)
+            }
+            return "_"
+        }
+        let collapsed = mapped.joined().replacingOccurrences(of: "_+", with: "_", options: .regularExpression)
+        return collapsed.trimmingCharacters(in: CharacterSet(charactersIn: "_"))
+    }
+
     /// Sanitizes one label token to match the production accessibility export.
     private func sanitizedLabelManagerStateToken(_ value: String) -> String {
         let replaced = value.replacingOccurrences(
@@ -3793,6 +3913,54 @@ final class AndBibleUITests: XCTestCase {
             in: app,
             timeout: timeout
         )
+    }
+
+    /**
+     Reveals and returns the custom reading-plan import button in the available-plan picker.
+     *
+     * - Parameters:
+     *   - app: Running application whose available-plan picker should be visible.
+     *   - timeout: Maximum time to scroll before recording a failure.
+     * - Returns: The resolved import button.
+     * - Side effects:
+     *   - scrolls the picker list downward until the custom-plan section is visible
+     * - Failure modes:
+     *   - fails if the import button cannot be reached within the timeout
+     */
+    private func revealAvailablePlansImportButton(
+        in app: XCUIApplication,
+        timeout: TimeInterval = 10
+    ) -> XCUIElement {
+        let scrollSurface = resolvedElement("availablePlansScreen", in: app)
+            ?? unresolvedElement("availablePlansScreen", in: app)
+        if elementHasUsableFrame(scrollSurface) {
+            scrollSurface.swipeUp()
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        }
+
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            let directCandidates = [
+                app.buttons["readingPlanImportButton"].firstMatch,
+                app.collectionViews.buttons["readingPlanImportButton"].firstMatch,
+                app.cells.buttons["readingPlanImportButton"].firstMatch,
+                app.otherElements["readingPlanImportButton"].firstMatch,
+            ]
+            if let button = directCandidates.first(where: {
+                $0.exists && waitForElementToBecomeHittable($0, timeout: 0.2)
+            }) {
+                return button
+            }
+
+            if elementHasUsableFrame(scrollSurface) {
+                scrollSurface.swipeUp()
+            } else {
+                app.swipeUp()
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        } while Date() < deadline
+
+        return requireElement("readingPlanImportButton", in: app, timeout: 1)
     }
 
     /**
@@ -4736,6 +4904,10 @@ final class AndBibleUITests: XCTestCase {
             return screenScopedStateCandidates(identifier, within: "searchScreen", in: app)
         case "bookmarkListStateExport":
             return screenScopedStateCandidates(identifier, within: "bookmarkListScreen", in: app)
+        case "readingPlanListStateExport":
+            return screenScopedStateCandidates(identifier, within: "readingPlanListScreen", in: app)
+        case "availablePlansStateExport":
+            return screenScopedStateCandidates(identifier, within: "availablePlansScreen", in: app)
         case "labelManagerStateExport":
             return screenScopedStateCandidates(identifier, within: "labelManagerScreen", in: app)
         case "syncSettingsState":
@@ -4791,6 +4963,7 @@ final class AndBibleUITests: XCTestCase {
         }
 
         if identifier.hasPrefix("bookmarkListDeleteButton::")
+            || identifier.hasPrefix("readingPlanDeleteButton::")
             || identifier.hasPrefix("historyDeleteButton::")
             || identifier.hasPrefix("bookmarkListSortOption::")
         {
@@ -4965,7 +5138,12 @@ final class AndBibleUITests: XCTestCase {
                 app.collectionViews[identifier].firstMatch,
                 app.scrollViews[identifier].firstMatch,
             ]
-        case "searchStateExport", "bookmarkListStateExport", "labelManagerStateExport":
+        case
+            "searchStateExport",
+            "bookmarkListStateExport",
+            "readingPlanListStateExport",
+            "availablePlansStateExport",
+            "labelManagerStateExport":
             return semanticStateCandidates(for: identifier, in: app)
         case "searchResultsList":
             return [
@@ -5046,7 +5224,7 @@ final class AndBibleUITests: XCTestCase {
                 app.scrollViews[identifier].firstMatch,
                 app.otherElements[identifier].firstMatch,
             ]
-        case "historyScreen", "readingPlanListScreen", "workspaceNamePromptScreen":
+        case "historyScreen", "readingPlanListScreen", "availablePlansScreen", "workspaceNamePromptScreen":
             return [
                 app.tables[identifier].firstMatch,
                 app.collectionViews[identifier].firstMatch,
@@ -5061,12 +5239,11 @@ final class AndBibleUITests: XCTestCase {
                 app.otherElements[identifier].firstMatch,
             ]
         case "readingPlanTemplateButton":
-            return [
-                app.buttons[identifier].firstMatch,
-                app.collectionViews.buttons[identifier].firstMatch,
-                app.cells[identifier].firstMatch,
-                app.otherElements[identifier].firstMatch,
-            ]
+            return screenScopedButtonCandidates(identifier, within: "availablePlansScreen", in: app)
+        case "readingPlanImportButton":
+            return screenScopedButtonCandidates(identifier, within: "availablePlansScreen", in: app)
+        case "readingPlanStartButton", "readingPlanActivePlanLink":
+            return screenScopedButtonCandidates(identifier, within: "readingPlanListScreen", in: app)
         default:
             return heuristicElementCandidates(for: identifier, in: app)
         }
@@ -8270,6 +8447,32 @@ final class AndBibleUITests: XCTestCase {
             return value
         }
         if let screen = resolvedElement("bookmarkListScreen", in: app),
+           let value = screen.value as? String {
+            return value
+        }
+        return nil
+    }
+
+    /// Reads the current exported Reading Plans list state without walking the full list hierarchy.
+    private func resolvedReadingPlanListStateValue(in app: XCUIApplication) -> String? {
+        if let stateElement = resolvedStateExportElement("readingPlanListStateExport", in: app),
+           let value = stateElement.value as? String {
+            return value
+        }
+        if let screen = resolvedElement("readingPlanListScreen", in: app),
+           let value = screen.value as? String {
+            return value
+        }
+        return nil
+    }
+
+    /// Reads the current exported Available Plans state without walking the full picker hierarchy.
+    private func resolvedAvailablePlansStateValue(in app: XCUIApplication) -> String? {
+        if let stateElement = resolvedStateExportElement("availablePlansStateExport", in: app),
+           let value = stateElement.value as? String {
+            return value
+        }
+        if let screen = resolvedElement("availablePlansScreen", in: app),
            let value = screen.value as? String {
             return value
         }

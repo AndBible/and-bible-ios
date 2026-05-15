@@ -59,10 +59,15 @@ public struct ReadingPlanListView: View {
                     description: Text(String(localized: "reading_plan_no_plans_description"))
                 )
                 .accessibilityIdentifier("readingPlanListScreen")
+                .accessibilityValue(readingPlanListAccessibilityValue)
             } else {
                 planList
                     .accessibilityIdentifier("readingPlanListScreen")
+                    .accessibilityValue(readingPlanListAccessibilityValue)
             }
+        }
+        .overlay(alignment: .topLeading) {
+            readingPlanListStateExport
         }
         .navigationTitle(String(localized: "reading_plans"))
         #if os(iOS)
@@ -109,6 +114,7 @@ public struct ReadingPlanListView: View {
                                 modelContext.delete(plan)
                                 try? modelContext.save()
                             }
+                            .accessibilityIdentifier(readingPlanDeleteButtonIdentifier(for: plan))
                         }
                     }
                 }
@@ -123,11 +129,47 @@ public struct ReadingPlanListView: View {
                                     modelContext.delete(plan)
                                     try? modelContext.save()
                                 }
+                                .accessibilityIdentifier(readingPlanDeleteButtonIdentifier(for: plan))
                             }
                     }
                 }
             }
         }
+    }
+
+    /// Stable reading-plan list state exported for UI automation.
+    private var readingPlanListAccessibilityValue: String {
+        let baseState = "total=\(plans.count);active=\(activePlans.count);completed=\(completedPlans.count);showAvailablePlans=\(showAvailablePlans)"
+        guard UITestRuntimeConfiguration.enablesDetailedAccessibilityExports else {
+            return baseState
+        }
+
+        let activeTokens = activePlans.prefix(UITestRuntimeConfiguration.detailedAccessibilityRowTokenLimit)
+            .map { "|\(readingPlanAccessibilitySegment($0.planCode))|" }
+            .joined(separator: ",")
+        let completedTokens = completedPlans.prefix(UITestRuntimeConfiguration.detailedAccessibilityRowTokenLimit)
+            .map { "|\(readingPlanAccessibilitySegment($0.planCode))|" }
+            .joined(separator: ",")
+        return "\(baseState);activeRows=\(activeTokens);completedRows=\(completedTokens)"
+    }
+
+    /// Compact hidden state probe used by UI tests instead of snapshotting the live list surface.
+    @ViewBuilder
+    private var readingPlanListStateExport: some View {
+        if UITestRuntimeConfiguration.enablesDetailedAccessibilityExports {
+            Text(readingPlanListAccessibilityValue)
+                .font(.system(size: 1))
+                .frame(width: 1, height: 1)
+                .opacity(0.01)
+                .allowsHitTesting(false)
+                .accessibilityIdentifier("readingPlanListStateExport")
+                .accessibilityValue(readingPlanListAccessibilityValue)
+        }
+    }
+
+    /// Stable row-level delete button identifier for UI tests.
+    private func readingPlanDeleteButtonIdentifier(for plan: ReadingPlan) -> String {
+        "readingPlanDeleteButton::\(readingPlanAccessibilitySegment(plan.planCode))"
     }
 }
 
@@ -231,6 +273,20 @@ private struct AvailablePlansView: View {
     /// Latest user-visible custom-plan import error.
     @State private var importError: String?
 
+    /// Stable available-plan picker state exported for UI automation.
+    private var availablePlansAccessibilityValue: String {
+        let baseState = "templates=\(ReadingPlanService.availablePlans.count);importPickerPresented=\(showImportPicker)"
+        guard UITestRuntimeConfiguration.enablesDetailedAccessibilityExports else {
+            return baseState
+        }
+
+        let templateTokens = ReadingPlanService.availablePlans
+            .prefix(UITestRuntimeConfiguration.detailedAccessibilityRowTokenLimit)
+            .map { "|\(readingPlanAccessibilitySegment($0.code))|" }
+            .joined(separator: ",")
+        return "\(baseState);templateRows=\(templateTokens)"
+    }
+
     /// Builds the built-in template list, custom import action, and error section.
     var body: some View {
         List {
@@ -270,6 +326,7 @@ private struct AvailablePlansView: View {
                 } label: {
                     SwiftUI.Label(String(localized: "reading_plan_import_custom"), systemImage: "arrow.down.doc")
                 }
+                .accessibilityIdentifier("readingPlanImportButton")
             } header: {
                 Text(String(localized: "reading_plan_custom"))
             } footer: {
@@ -285,6 +342,10 @@ private struct AvailablePlansView: View {
             }
         }
         .accessibilityIdentifier("availablePlansScreen")
+        .accessibilityValue(availablePlansAccessibilityValue)
+        .overlay(alignment: .topLeading) {
+            availablePlansStateExport
+        }
         .navigationTitle(String(localized: "reading_plan_available"))
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
@@ -300,6 +361,20 @@ private struct AvailablePlansView: View {
             allowsMultipleSelection: false
         ) { result in
             handleCustomPlanImport(result)
+        }
+    }
+
+    /// Compact hidden state probe for the available-plan picker.
+    @ViewBuilder
+    private var availablePlansStateExport: some View {
+        if UITestRuntimeConfiguration.enablesDetailedAccessibilityExports {
+            Text(availablePlansAccessibilityValue)
+                .font(.system(size: 1))
+                .frame(width: 1, height: 1)
+                .opacity(0.01)
+                .allowsHitTesting(false)
+                .accessibilityIdentifier("availablePlansStateExport")
+                .accessibilityValue(availablePlansAccessibilityValue)
         }
     }
 
@@ -337,4 +412,16 @@ private struct AvailablePlansView: View {
             importError = error.localizedDescription
         }
     }
+}
+
+/// Sanitizes one reading-plan code for stable accessibility identifiers and state tokens.
+private func readingPlanAccessibilitySegment(_ value: String) -> String {
+    let mapped = value.unicodeScalars.map { scalar -> String in
+        if CharacterSet.alphanumerics.contains(scalar) {
+            return String(scalar)
+        }
+        return "_"
+    }
+    let collapsed = mapped.joined().replacingOccurrences(of: "_+", with: "_", options: .regularExpression)
+    return collapsed.trimmingCharacters(in: CharacterSet(charactersIn: "_"))
 }

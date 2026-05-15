@@ -21,6 +21,7 @@
   "AndBibleUITests/AndBibleUITests/testHistorySelectionNavigatesReaderToSeededReference": "history-single",
   "AndBibleUITests/AndBibleUITests/testLabelAssignmentTogglesFavouriteAndAssignment": "bookmark-row-label",
   "AndBibleUITests/AndBibleUITests/testLabelManagerCreateRenameDeleteFlow": "baseline",
+  "AndBibleUITests/AndBibleUITests/testReadingPlanListStartDeleteAndImportAffordanceFlow": "baseline",
   "AndBibleUITests/AndBibleUITests/testReadingPlansStartPlanAndAdvanceDay": "baseline",
   "AndBibleUITests/AndBibleUITests/testSearchDirectLaunchStrongsQueryReturnsBundledResults": "search-indexed",
   "AndBibleUITests/AndBibleUITests/testSearchDirectLaunchUsesSeededIndexAndReturnsBundledResults": "search-indexed",
