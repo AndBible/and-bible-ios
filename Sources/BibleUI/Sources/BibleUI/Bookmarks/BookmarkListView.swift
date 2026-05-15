@@ -558,7 +558,7 @@ private struct BookmarkRow: View {
      - Side effects:
        - invokes `onNavigate` with the bookmark's book/chapter when tapped
      - Failure modes: This helper cannot fail.
-    */
+     */
     private var selectionButton: some View {
         Button {
             if let target = bookmark.navigationTarget {
@@ -666,7 +666,7 @@ private struct BookmarkRow: View {
      - Returns: Stable identifier derived from the bookmark reference string.
      - Side effects: none.
      - Failure modes: This helper cannot fail.
-    */
+     */
     private func bookmarkRowIdentifier() -> String {
         "bookmarkListRowButton::\(bookmark.accessibilitySegment)"
     }
