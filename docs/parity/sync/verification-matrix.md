@@ -1,6 +1,6 @@
 # SYNC-701 Verification Matrix (Android Sync -> iOS)
 
-Date: 2026-04-28
+Date: 2026-05-15
 
 ## Scope and Method
 
@@ -27,9 +27,9 @@ Date: 2026-04-28
 
 ## Summary
 
-- `Pass`: 6
+- `Pass`: 7
 - `Adapted Pass`: 2
-- `Partial`: 2
+- `Partial`: 1
 
 ## Matrix
 
@@ -44,4 +44,4 @@ Date: 2026-04-28
 | Sync settings UI supports backend switching and category persistence across reopen | `SyncSettingsView.swift`; UI tests `testSettingsSyncLinkOpensSyncSettings`, `testSyncSettingsCategoryToggleMutatesExportedState`, `testSyncSettingsCategoryDisablePersistsAcrossDirectReopen`, `testSyncSettingsBackendSwitchMutatesVisibleSection`, `testSyncSettingsBackendSwitchPersistsAcrossDirectReopen` | Pass | The current gate is focused on persisted state and visible section changes, not just navigation smoke. |
 | Google Drive uses the Android-aligned OAuth + Drive API model but is operationally parked until real iOS OAuth provisioning exists | `GoogleDriveAuthService.swift`, `GoogleDriveSyncAdapter.swift`, `RemoteSyncSynchronizationServiceFactory`; unit tests `testGoogleDriveSyncAdapterListsFilesFromAppDataFolderWithPagination`, `testGoogleDriveSyncAdapterCreatesFolderUnderAppDataRoot`, `testGoogleDriveSyncAdapterUploadsMultipartPatchArchive`, `testGoogleDriveSyncAdapterUsesFolderExistenceForOwnershipProof`, `testGoogleDriveOAuthConfigurationParsesValidInfoDictionary`, `testGoogleDriveOAuthConfigurationRejectsMissingURLScheme`, `testGoogleDriveAuthServiceRestoresPreviousSignInOnceAndBecomesReadyForSync`, `testRemoteSyncSynchronizationServiceFactoryBuildsGoogleDriveAdapter`; documented in `dispositions.md` | Adapted Pass | The code path is regression-backed, but live end-user sign-in remains intentionally parked until release OAuth credentials exist. |
 | iCloud remains a first-class backend alongside Android-aligned remote sync | `RemoteSyncBackend.iCloud`, `SyncSettingsView.swift`, `dispositions.md` | Adapted Pass | This is an intentional iOS extension and does not redefine the Android parity contract for remote backends. |
-| UI coverage for the adopt-versus-create confirmation branch itself | `SyncSettingsView.swift` confirmation flow exists, but current focused UI subset does not drive the explicit adopt/create sheet end to end | Partial | The branch is well-covered in coordinator and synchronization unit tests, but not yet by a focused user-visible confirmation workflow test. |
+| UI coverage for the adopt-versus-create confirmation branch itself | `SyncSettingsView.swift`; UI test `testSyncSettingsAdoptCreateConfirmationCreateChoiceSynchronizesFromVisibleWorkflow` | Pass | The focused workflow drives the visible adopt/create sheet, chooses the create-new cloud replacement branch, confirms the destructive reset-cloud alert, and waits for the bookmarks category to finish enabled with `lastConfirmation=resetCloud:bookmarks`. |

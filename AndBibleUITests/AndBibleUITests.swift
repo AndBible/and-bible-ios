@@ -1369,6 +1369,62 @@ final class AndBibleUITests: XCTestCase {
     }
 
     /**
+     Verifies that the visible adopt-versus-create confirmation can drive the create-new branch.
+     *
+     * - Side effects:
+     *   - launches Sync Settings with deterministic NextCloud settings and a UI-test remote
+     *     backend that reports one existing same-named bookmark sync folder
+     *   - enables bookmark sync through the production category row
+     *   - chooses "Copy from this device to Cloud" in the adopt-versus-create prompt and confirms
+     *     the destructive reset-cloud branch
+     * - Failure modes:
+     *   - fails if the first adopt/create prompt never appears
+     *   - fails if the create-new choice does not surface the reset-cloud confirmation
+     *   - fails if confirming the reset-cloud branch does not complete synchronization with the
+     *     bookmarks category enabled
+     */
+    func testSyncSettingsAdoptCreateConfirmationCreateChoiceSynchronizesFromVisibleWorkflow() {
+        let app = makeApp(remoteSyncBootstrapScenario: "adopt-existing")
+        app.launch()
+
+        _ = openSyncSettingsFromReaderAction(in: app)
+        waitForSyncState(["backend": "NEXT_CLOUD", "enabled": "none"], in: app, timeout: 10)
+
+        toggleSyncCategory(
+            "syncCategoryToggle::bookmarks",
+            in: app,
+            expectedTokens: [
+                "backend": "NEXT_CLOUD",
+                "enabled": "bookmarks",
+                "bootstrapPrompt": "adoptOrCreate:bookmarks",
+            ],
+            timeout: 15
+        )
+
+        let createFromDeviceButton = app.alerts.firstMatch.buttons["Copy from this device to Cloud"].firstMatch
+        XCTAssertTrue(
+            createFromDeviceButton.waitForExistence(timeout: 10),
+            "Expected the adopt-versus-create alert to expose the create-new choice."
+        )
+        tapElementReliably(createFromDeviceButton, timeout: 10)
+
+        waitForSyncState(["pendingConfirmation": "resetCloud:bookmarks"], in: app, timeout: 10)
+        tapAlertButton("OK", in: app, timeout: 10)
+
+        waitForSyncState(
+            [
+                "backend": "NEXT_CLOUD",
+                "enabled": "bookmarks",
+                "bootstrapPrompt": "none",
+                "pendingConfirmation": "none",
+                "lastConfirmation": "resetCloud:bookmarks",
+            ],
+            in: app,
+            timeout: 20
+        )
+    }
+
+    /**
      Verifies that disabling one seeded NextCloud sync category updates the exported Sync screen
      state.
      *
@@ -1634,7 +1690,10 @@ final class AndBibleUITests: XCTestCase {
     /**
      Builds the XCUIApplication instance used by each UI test.
      *
-     * - Parameter searchQuery: Optional search query to type into Search after the sheet opens.
+     * - Parameters:
+     *   - searchQuery: Optional search query to type into Search after the sheet opens.
+     *   - remoteSyncBootstrapScenario: Optional deterministic remote-sync backend scenario for
+     *     UI-only confirmation workflows.
      * - Returns: App handle configured with deterministic per-test metadata.
      * - Side effects:
      *   - terminates any previously tracked app process so each test starts from a clean launch
@@ -1642,7 +1701,10 @@ final class AndBibleUITests: XCTestCase {
      *   - stores one optional Search query for later use by `openSearch(in:)`
      * - Failure modes: This helper cannot fail.
      */
-    private func makeApp(searchQuery: String? = nil) -> XCUIApplication {
+    private func makeApp(
+        searchQuery: String? = nil,
+        remoteSyncBootstrapScenario: String? = nil
+    ) -> XCUIApplication {
         if let trackedApp, trackedApp.state != .notRunning {
             _ = terminateAppReliably(trackedApp)
         }
@@ -1652,6 +1714,10 @@ final class AndBibleUITests: XCTestCase {
         app.launchEnvironment["UITEST_ENABLE_DETAILED_ACCESSIBILITY_EXPORTS"] = "1"
         app.launchArguments += ["-UITEST_ENABLE_DETAILED_ACCESSIBILITY_EXPORTS"]
         app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        if let remoteSyncBootstrapScenario {
+            app.launchEnvironment["UITEST_REMOTE_SYNC_BOOTSTRAP_SCENARIO"] = remoteSyncBootstrapScenario
+            app.launchArguments += ["-UITEST_REMOTE_SYNC_BOOTSTRAP_SCENARIO", remoteSyncBootstrapScenario]
+        }
         if let searchQuery {
             app.launchEnvironment["UITEST_SEARCH_QUERY"] = searchQuery
             app.launchArguments += ["-UITEST_SEARCH_QUERY", searchQuery]
@@ -1666,6 +1732,8 @@ final class AndBibleUITests: XCTestCase {
      * - Side effects:
      *   - resolves the app data container from the current simulator UDID
      *   - runs `UITestFixtureTool reset` and `seed` against that installed app container
+     *   - skips host-side fixture work when the manifest uses the `none` sentinel for a
+     *     launch-configuration-only test
      * - Failure modes:
      *   - records an XCTest failure when the fixture tool path, simulator UDID, or data container
      *     cannot be resolved from the current test-host environment
@@ -1682,6 +1750,9 @@ final class AndBibleUITests: XCTestCase {
             file: file,
             line: line
         ) else {
+            return
+        }
+        guard scenario != "none" else {
             return
         }
         guard let fixtureToolPath = resolveFixtureToolPath(
@@ -4754,14 +4825,14 @@ final class AndBibleUITests: XCTestCase {
             ]
         case "readerNavigationDrawerButton":
             return [
-                app.otherElements["readerDocumentHeader"].buttons[identifier].firstMatch,
                 app.buttons[identifier].firstMatch,
+                app.otherElements["readerDocumentHeader"].buttons[identifier].firstMatch,
                 app.otherElements[identifier].firstMatch,
             ]
         case "readerMoreMenuButton", "bookChooserButton":
             return [
-                app.otherElements["readerDocumentHeader"].buttons[identifier].firstMatch,
                 app.buttons[identifier].firstMatch,
+                app.otherElements["readerDocumentHeader"].buttons[identifier].firstMatch,
                 app.otherElements[identifier].firstMatch,
             ]
         case "readerStrongsToolbarButton":

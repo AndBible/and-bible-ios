@@ -1,6 +1,6 @@
 # SYNC-702 Regression Report
 
-Date: 2026-04-28
+Date: 2026-05-15
 
 ## Scope
 
@@ -13,6 +13,7 @@ Regression verification for the current sync parity surface, covering:
   workspaces, and reading plans
 - ready-state patch replay and steady-state outbound upload
 - Sync settings backend/category mutation and reopen persistence
+- Sync settings adopt-versus-create confirmation branch
 - the parked Google Drive auth and adapter contract
 - local Android reference comparison
 
@@ -89,6 +90,7 @@ Operational setup reference:
 - `AndBibleUITests/testSyncSettingsNextCloudInvalidURLShowsValidationStatus`
 - `AndBibleUITests/testSyncSettingsCategoryToggleMutatesExportedState`
 - `AndBibleUITests/testSyncSettingsCategoryDisablePersistsAcrossDirectReopen`
+- `AndBibleUITests/testSyncSettingsAdoptCreateConfirmationCreateChoiceSynchronizesFromVisibleWorkflow`
 - `AndBibleUITests/testSyncSettingsBackendSwitchMutatesVisibleSection`
 - `AndBibleUITests/testSyncSettingsBackendSwitchPersistsAcrossDirectReopen`
 
@@ -100,6 +102,8 @@ Operational setup reference:
 - Android-compatible raw keys persist NextCloud/WebDAV credentials and per-category enablement
 - backend and category mutations persist across direct Sync Settings reopen
 - invalid NextCloud URL input surfaces the expected UI validation state
+- the visible adopt/create prompt can drive the create-new cloud replacement branch and complete
+  synchronization with the selected category enabled
 
 ### Bootstrap and baseline handling
 
@@ -144,16 +148,15 @@ The checked-in shared-scheme test set gives the sync domain rerunnable regressio
 - ready-state synchronization for bookmark, workspace, and reading-plan categories
 - parked Google Drive auth and adapter contracts
 - Sync settings backend/category mutation plus reopen persistence
+- Sync settings adopt-versus-create confirmation UI coverage
 
 ## Remaining Gap
 
 The current sync parity gap is not the core bootstrap or patch engine. It is:
 
-- a focused UI workflow that drives the explicit adopt-versus-create confirmation sheet end to end
 - Android category breadth beyond iOS's supported `bookmarks`, `workspaces`, and `readingplans`
   categories: Android also exposes `mydocuments`, `ai_settings`, and `progress`
 
-That branch is already covered in unit and integration tests through the coordinator and
-synchronization service. It remains `Partial` because the user-facing confirmation path is not yet
-locked by a focused simulator workflow, and the remaining Android-only categories are not
-implemented on iOS yet.
+The adopt-versus-create branch is now covered both below the UI through coordinator and
+synchronization tests and through a focused simulator workflow. The remaining `Partial` sync parity
+area is Android category breadth beyond the currently supported iOS categories.

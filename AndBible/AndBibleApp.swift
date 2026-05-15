@@ -298,7 +298,8 @@ struct AndBibleApp: App {
             sync.startMonitoring(container: container)
 
             if ProcessInfo.processInfo.environment["UITEST_EXIT_AFTER_BOOTSTRAP_LAUNCH"] == "1" {
-                DispatchQueue.main.async {
+                // Give XCTest time to finish launch bookkeeping before the bootstrap process exits.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
                     Darwin.exit(EXIT_SUCCESS)
                 }
             }
