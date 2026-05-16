@@ -1,6 +1,6 @@
 # SEARCH-702 Regression Report
 
-Date: 2026-04-28
+Date: 2026-05-15
 
 ## Scope
 
@@ -9,6 +9,7 @@ Regression verification for the current search parity surface, covering:
 - direct-launch search harness behavior
 - local index creation against bundled modules
 - scope and word-mode rerun semantics
+- multi-translation selection with grouped-result totals
 - Strong's normalization and bundled-module hit search
 - navigation from real search results back into the reader
 - local Android reference comparison for word modes and multi-translation result flow
@@ -42,6 +43,7 @@ Verification matrix:
 
 - `AndBibleUITests/testSearchDirectLaunchRetainsSeededQuery`
 - `AndBibleUITests/testSearchDirectLaunchUsesSeededIndexAndReturnsBundledResults`
+- `AndBibleUITests/testSearchMultiTranslationSelectionUpdatesGroupedTotals`
 - `AndBibleUITests/testSearchScopeChangeRerunsQueryAndUpdatesResults`
 - `AndBibleUITests/testSearchWordModeChangeRerunsQueryAndUpdatesResults`
 - `AndBibleUITests/testSearchResultSelectionNavigatesReaderToBundledReference`
@@ -61,6 +63,14 @@ Verification matrix:
 - switching word mode from all-words -> phrase -> any-word reruns the same query
 - phrase mode correctly reduces `earth void` to zero bundled hits
 
+### Multi-translation grouped results
+
+- selecting a second translation from the Search translation picker reruns the active query
+- grouped Search state reports the selected translation set
+- grouped Search state reports a combined total plus per-translation counts
+- the regression fixture returns more hits only when both KJV and UITESTWEB participate
+- selecting a grouped UITESTWEB result navigates the reader away from its original passage
+
 ### Strong's behavior
 
 - `H02022` normalization preserves both padded and unpadded lookup forms
@@ -74,13 +84,13 @@ Verification matrix:
 
 ## Historical Result And Current Interpretation
 
-Focused search validation passed on 2026-03-16. The direct-launch indexed-result UI test has since
-been renamed to `testSearchDirectLaunchUsesSeededIndexAndReturnsBundledResults`; this doc refresh
-did not rerun the simulator suite.
+Focused search validation was refreshed on 2026-05-15 after adding
+`testSearchMultiTranslationSelectionUpdatesGroupedTotals`.
 
 - unit: `6` tests, `0` failures
-- UI: `5` tests, `0` failures
-- combined focused subset runtime: about `221s` end-to-end, including build and simulator execution
+- UI: `6` tests, `0` failures
+- focused unit subset runtime: about `32s` end-to-end, with `20s` of test execution
+- focused Search UI subset runtime: about `507s` end-to-end, including fixture resets and simulator execution
 
 This gives the search domain current regression evidence for:
 
@@ -88,14 +98,11 @@ This gives the search domain current regression evidence for:
 - query retention
 - scope mutation
 - word-mode mutation
+- multi-translation grouped totals
+- grouped-result navigation
 - Strong's normalization/hit search
 - result navigation into the reader
 
 ## Remaining Gap
 
-The current search parity gap is not the core indexed search workflow. It is:
-
-- multi-translation selection and grouped-result verification
-
-That path exists in code but is not yet covered by a focused regression test,
-so it remains `Partial` in `verification-matrix.md`.
+No open Search parity gap is currently tracked in `verification-matrix.md`.

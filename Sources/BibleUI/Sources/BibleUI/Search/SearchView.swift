@@ -309,6 +309,11 @@ public struct SearchView: View {
                 performSearch()
             }
         }
+        .onChange(of: selectedModules) { _, _ in
+            if case .ready = viewState, !query.trimmingCharacters(in: .whitespaces).isEmpty {
+                checkIndex()
+            }
+        }
     }
 
     /// Navigation title derived from the active state and latest result summary.
@@ -341,7 +346,23 @@ public struct SearchView: View {
         guard UITestRuntimeConfiguration.enablesDetailedAccessibilityExports else {
             return baseState
         }
-        return "\(baseState);rows=\(searchAccessibilityRowsToken)"
+        return "\(baseState);\(searchAccessibilitySelectionToken);\(searchAccessibilityGroupToken);rows=\(searchAccessibilityRowsToken)"
+    }
+
+    /// Stable selected-translation token exported for UI automation.
+    private var searchAccessibilitySelectionToken: String {
+        "selectedModules=\(selectedModules.sorted().joined(separator: ","))"
+    }
+
+    /// Stable grouped-result totals exported for UI automation.
+    private var searchAccessibilityGroupToken: String {
+        guard let multiResults else {
+            return "groupedTotal=none;groupedCounts=none"
+        }
+        let counts = multiResults.perModule
+            .map { "\($0.name):\($0.count)" }
+            .joined(separator: ",")
+        return "groupedTotal=\(multiResults.totalCount);groupedCounts=\(counts)"
     }
 
     /// Compact dedicated state export used by the UI harness instead of the full Search container.
@@ -585,6 +606,8 @@ public struct SearchView: View {
                     .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
                 }
                 .buttonStyle(.plain)
+                .accessibilityIdentifier("searchTranslationPickerButton")
+                .accessibilityValue(searchAccessibilitySelectionToken)
             }
         }
         .padding(.horizontal)
@@ -718,6 +741,10 @@ public struct SearchView: View {
                             .padding(.horizontal, 10)
                             .padding(.vertical, 5)
                             .background(.quaternary, in: Capsule())
+                            .accessibilityElement(children: .ignore)
+                            .accessibilityLabel(entry.name)
+                            .accessibilityValue("count=\(entry.count)")
+                            .accessibilityIdentifier("searchResultGroupPill::\(sanitizedAccessibilitySegment(entry.name))")
                         }
                     }
                 }
@@ -895,6 +922,7 @@ public struct SearchView: View {
                     translationRow(mod)
                 }
             }
+            .accessibilityIdentifier("searchTranslationPickerList")
             .navigationTitle(String(localized: "search_translations"))
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
@@ -902,11 +930,13 @@ public struct SearchView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button(String(localized: "done")) { showTranslationPicker = false }
+                        .accessibilityIdentifier("searchTranslationDoneButton")
                 }
                 ToolbarItem(placement: .primaryAction) {
                     Button(String(localized: "search_all")) {
                         selectedModules = Set(installedBibleModules.map(\.name))
                     }
+                    .accessibilityIdentifier("searchTranslationSelectAllButton")
                 }
             }
         }
@@ -941,8 +971,12 @@ public struct SearchView: View {
                     Image(systemName: "circle").foregroundStyle(.secondary)
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityIdentifier("searchTranslationRow::\(sanitizedAccessibilitySegment(modName))")
+        .accessibilityValue(isSelected ? "selected" : "unselected")
     }
 
     // MARK: - Navigation
@@ -960,7 +994,7 @@ public struct SearchView: View {
     // MARK: - Index Management
 
     /**
-     Checks whether the active module already has an index and updates `viewState` accordingly.
+     Checks whether the selected modules already have indexes and updates `viewState` accordingly.
 
      Side effects:
      - mutates `viewState` to `.ready`, `.needsIndex`, or `.creatingIndex`
@@ -985,15 +1019,35 @@ public struct SearchView: View {
             return
         }
 
-        if service.hasIndex(for: mod.info.name) {
+        let moduleNames = selectedModules.isEmpty ? [mod.info.name] : Array(selectedModules)
+        if let missingModuleName = moduleNames.sorted().first(where: { !service.hasIndex(for: $0) }) {
+            viewState = .needsIndex(
+                moduleName: missingModuleName,
+                moduleDescription: moduleDescription(for: missingModuleName)
+            )
+        } else {
             viewState = .ready
             autoSearchIfNeeded()
-        } else {
-            viewState = .needsIndex(
-                moduleName: mod.info.name,
-                moduleDescription: mod.info.description.isEmpty ? mod.info.name : mod.info.description
-            )
         }
+    }
+
+    /**
+     Resolves a user-visible description for one installed module name.
+
+     - Parameter moduleName: SWORD module abbreviation to describe.
+     - Returns: Module description when available, otherwise the module abbreviation.
+     */
+    private func moduleDescription(for moduleName: String) -> String {
+        if let info = installedBibleModules.first(where: { $0.name == moduleName }) {
+            return info.description.isEmpty ? info.name : info.description
+        }
+        if let mod = swordModule, mod.info.name == moduleName {
+            return mod.info.description.isEmpty ? mod.info.name : mod.info.description
+        }
+        if let mod = swordManager?.module(named: moduleName) {
+            return mod.info.description.isEmpty ? mod.info.name : mod.info.description
+        }
+        return moduleName
     }
 
     /**

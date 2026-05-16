@@ -1,6 +1,6 @@
 # SEARCH-701 Verification Matrix (Android Search -> iOS)
 
-Date: 2026-04-28
+Date: 2026-05-15
 
 ## Scope and Method
 
@@ -21,9 +21,9 @@ Date: 2026-04-28
 
 ## Summary
 
-- `Pass`: 5
+- `Pass`: 6
 - `Adapted Pass`: 2
-- `Partial`: 1
+- `Partial`: 0
 
 ## Matrix
 
@@ -36,4 +36,4 @@ Date: 2026-04-28
 | Result selection navigates the reader | `SearchView.navigateTo(_:)`; UI test `testSearchResultSelectionNavigatesReaderToBundledReference` | Pass | Search is verified as a real reader-owned workflow, not only a direct-launch harness. |
 | Direct-launch query retention for deterministic search workflows | UI test `testSearchDirectLaunchRetainsSeededQuery` | Pass | This protects the test harness path used by deeper search regression coverage. |
 | Search implementation backing via local FTS service plus direct SWORD fallback | `SearchView.swift`, `SearchService.swift`, `SearchIndexService`; documented in `dispositions.md` | Adapted Pass | The parity goal is query semantics and user-facing behavior, not Android's exact internal search stack. |
-| Multi-translation selection and grouped result totals | `SearchView.swift` translation picker and `MultiResultGroup`; `SearchService.searchMultiple(...)`; Android reference uses `selectedTranslations` and `getMultiSearchResults(...)` in `SearchResults.kt` | Partial | The code path exists, and Android parity was checked against the local Android implementation, but this area does not yet have a focused simulator or unit regression gate. |
+| Multi-translation selection and grouped result totals | `SearchView.swift` translation picker, `MultiResultGroup`, and rerun-on-selection path; `SearchIndexService.searchMultiple(...)`; UI test `testSearchMultiTranslationSelectionUpdatesGroupedTotals`; Android reference uses `selectedTranslations` and `getMultiSearchResults(...)` in `SearchResults.kt` | Pass | The focused UI regression selects a second translation, verifies grouped totals/per-module counts, and selects a grouped result, so this path now fails if Search only returns the primary translation or grouped rows stop navigating. |

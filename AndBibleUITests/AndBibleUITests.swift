@@ -128,6 +128,66 @@ final class AndBibleUITests: XCTestCase {
     }
 
     /**
+     Verifies that selecting a second Search translation reruns the query and reports grouped totals.
+     *
+     * - Side effects:
+     *   - launches Search with deterministic KJV and UITESTWEB index rows for `earth`
+     *   - opens the real translation picker and selects UITESTWEB
+     *   - waits for the active query to rerun and export grouped per-translation counts
+     * - Failure modes:
+     *   - fails if the translation picker is not reachable from Search options
+     *   - fails if selecting a second translation does not rerun the active query
+     *   - fails if grouped totals collapse to single-translation results
+     */
+    func testSearchMultiTranslationSelectionUpdatesGroupedTotals() {
+        let app = makeApp(searchQuery: "earth")
+        app.launch()
+
+        let initialReference = requireReaderReferenceValue(in: app, timeout: 15)
+
+        _ = openSearch(in: app)
+        waitForSearchState(containing: "query=earth", in: app, timeout: 20)
+        waitForSearchSelectedModules(
+            in: app,
+            timeout: 20,
+            description: "exactly KJV"
+        ) { modules in
+            modules == Set(["KJV"])
+        }
+        waitForSearchResultRow("searchResultRow::Genesis_1_2", in: app, shouldExist: true, timeout: 20)
+
+        tapSearchTranslationPicker(in: app, timeout: 10)
+        tapSearchTranslationRow(moduleName: "UITESTWEB", in: app, timeout: 10)
+        tapSearchTranslationDone(in: app, timeout: 10)
+
+        waitForSearchSelectedModules(
+            in: app,
+            timeout: 20,
+            description: "more than one module including UITESTWEB"
+        ) { modules in
+            modules.count > 1 && modules.contains("UITESTWEB")
+        }
+        waitForSearchState(containing: "groupedTotal=3", in: app, timeout: 20)
+        waitForSearchState(containing: "KJV:1", in: app, timeout: 20)
+        waitForSearchState(containing: "UITESTWEB:2", in: app, timeout: 20)
+        waitForSearchResultCount(atLeast: 3, in: app, timeout: 20)
+
+        let groupedResult = requireElement("searchResultRow::John_3_16", in: app, timeout: 20)
+        tapElementReliably(groupedResult, timeout: 10)
+
+        let updatedReference = waitForReaderReferenceValueToChange(
+            from: initialReference,
+            in: app,
+            timeout: 20
+        )
+        XCTAssertNotEqual(
+            updatedReference,
+            initialReference,
+            "Expected selecting a grouped Search result to move the reader away from '\(initialReference)'."
+        )
+    }
+
+    /**
      Verifies that changing Search scope reruns the current query and updates the result set.
      *
      * - Side effects:
@@ -2875,6 +2935,55 @@ final class AndBibleUITests: XCTestCase {
         return digits.isEmpty ? nil : Int(digits)
     }
 
+    /**
+     Waits for Search to expose a selected-module set matching one semantic predicate.
+     *
+     * - Parameters:
+     *   - app: Running application under test.
+     *   - timeout: Maximum time to wait before failing.
+     *   - description: Human-readable predicate description for failure output.
+     *   - predicate: Assertion predicate applied to the parsed selected-module set.
+     * - Side effects:
+     *   - polls the Search accessibility export until it reaches a settled ready state
+     * - Failure modes:
+     *   - fails when Search never publishes a selected-module set matching `predicate`
+     */
+    private func waitForSearchSelectedModules(
+        in app: XCUIApplication,
+        timeout: TimeInterval,
+        description: String,
+        file: StaticString = #filePath,
+        line: UInt = #line,
+        predicate: (Set<String>) -> Bool
+    ) {
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            if let value = resolvedSearchStateValue(in: app),
+               value.contains("state=ready"),
+               value.contains("searching=false"),
+               let modules = searchSelectedModules(from: value),
+               predicate(modules) {
+                return
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.25))
+        } while Date() < deadline
+
+        let lastValue = resolvedSearchStateValue(in: app) ?? "nil"
+        XCTFail(
+            "Expected Search selected modules to match \(description) within \(timeout) seconds; last value was '\(lastValue)'.",
+            file: file,
+            line: line
+        )
+    }
+
+    /// Parses the deterministic `selectedModules=` token from Search accessibility state.
+    private func searchSelectedModules(from state: String) -> Set<String>? {
+        guard let range = state.range(of: "selectedModules=") else { return nil }
+        let suffix = state[range.upperBound...]
+        let token = suffix.prefix { $0 != ";" }
+        return Set(token.split(separator: ",").map(String.init).filter { !$0.isEmpty })
+    }
+
     /// Taps the first visible module row inside the real module picker sheet.
     private func tapFirstModulePickerRow(
         in app: XCUIApplication,
@@ -2996,6 +3105,184 @@ final class AndBibleUITests: XCTestCase {
         }
 
         XCTFail("Expected Search scope button '\(scopeToken.fallbackLabel)' to exist within \(timeout) seconds.")
+    }
+
+    /**
+     Opens the Search translation picker through its stable Search options control.
+     *
+     * - Parameters:
+     *   - app: Running application under test.
+     *   - timeout: Maximum time to wait for the picker affordance.
+     * - Side effects:
+     *   - reveals Search options when needed and taps the translation picker button
+     * - Failure modes:
+     *   - fails when the translation picker affordance is not exposed by Search
+     */
+    private func tapSearchTranslationPicker(
+        in app: XCUIApplication,
+        timeout: TimeInterval
+    ) {
+        let deadline = Date().addingTimeInterval(timeout)
+
+        repeat {
+            dismissSearchFieldFocusIfNeeded(in: app)
+            revealSearchControls(in: app)
+            let searchScreen = unresolvedElement("searchScreen", in: app)
+            let candidates = [
+                searchScreen.buttons["searchTranslationPickerButton"].firstMatch,
+                searchScreen.otherElements["searchTranslationPickerButton"].firstMatch,
+                app.buttons["searchTranslationPickerButton"].firstMatch,
+                app.otherElements["searchTranslationPickerButton"].firstMatch,
+            ]
+
+            if let picker = candidates.first(where: {
+                ($0.exists || $0.waitForExistence(timeout: 0.2))
+                    && waitForElementToBecomeHittable($0, timeout: 0.5)
+            }) {
+                picker.tap()
+                return
+            }
+
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        } while Date() < deadline
+
+        XCTFail("Expected Search translation picker button to exist within \(timeout) seconds.")
+    }
+
+    /**
+     Toggles one module row in the Search translation picker.
+     *
+     * - Parameters:
+     *   - moduleName: Stable module abbreviation, such as `UITESTWEB`.
+     *   - app: Running application under test.
+     *   - timeout: Maximum time to wait for the row.
+     * - Side effects:
+     *   - taps the matching translation row
+     * - Failure modes:
+     *   - fails when the picker does not expose the requested row
+     */
+    private func tapSearchTranslationRow(
+        moduleName: String,
+        in app: XCUIApplication,
+        timeout: TimeInterval
+    ) {
+        let identifier = "searchTranslationRow::\(moduleName)"
+        let deadline = Date().addingTimeInterval(timeout)
+
+        repeat {
+            if let row = firstExistingElement(
+                searchTranslationRowCandidates(identifier, moduleName: moduleName, in: app),
+                timeout: 0.2
+            ) {
+                if waitForElementToBecomeHittable(row, timeout: 1),
+                   elementHasUsableFrame(row) {
+                    row.coordinate(withNormalizedOffset: CGVector(dx: 0.15, dy: 0.5)).tap()
+                } else {
+                    tapElementReliably(row, timeout: 1)
+                }
+                return
+            }
+
+            if let pickerList = firstExistingElement(searchTranslationPickerListCandidates(in: app), timeout: 0.1),
+               pickerList.exists {
+                pickerList.swipeUp()
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        } while Date() < deadline
+
+        XCTFail("Expected Search translation row '\(moduleName)' to exist within \(timeout) seconds.")
+    }
+
+    /// Returns list roots for the Search translation picker.
+    private func searchTranslationPickerListCandidates(in app: XCUIApplication) -> [XCUIElement] {
+        let identifier = "searchTranslationPickerList"
+        return [
+            app.collectionViews[identifier].firstMatch,
+            app.tables[identifier].firstMatch,
+            app.scrollViews[identifier].firstMatch,
+            app.otherElements[identifier].firstMatch,
+        ]
+    }
+
+    /// Returns row candidates for one Search translation picker module.
+    private func searchTranslationRowCandidates(
+        _ identifier: String,
+        moduleName: String,
+        in app: XCUIApplication
+    ) -> [XCUIElement] {
+        let scoped = searchTranslationPickerListCandidates(in: app).flatMap { list in
+            [
+                list.buttons[identifier].firstMatch,
+                list.cells[identifier].firstMatch,
+                list.otherElements[identifier].firstMatch,
+                list.staticTexts[moduleName].firstMatch,
+            ]
+        }
+        return scoped + [
+            app.buttons[identifier].firstMatch,
+            app.collectionViews.buttons[identifier].firstMatch,
+            app.cells[identifier].firstMatch,
+            app.otherElements[identifier].firstMatch,
+            app.staticTexts[moduleName].firstMatch,
+        ]
+    }
+
+    /**
+     Selects every module in the Search translation picker.
+     *
+     * - Parameters:
+     *   - app: Running application under test.
+     *   - timeout: Maximum time to wait for the toolbar action.
+     * - Side effects:
+     *   - taps the picker toolbar Search All action
+     * - Failure modes:
+     *   - fails when the Search All action is not reachable
+     */
+    private func tapSearchTranslationSelectAll(
+        in app: XCUIApplication,
+        timeout: TimeInterval
+    ) {
+        let selectAll = app.buttons["searchTranslationSelectAllButton"].firstMatch
+        if selectAll.waitForExistence(timeout: timeout) {
+            tapElementReliably(selectAll, timeout: timeout)
+            return
+        }
+
+        let fallbackSelectAll = app.buttons["All"].firstMatch
+        XCTAssertTrue(
+            fallbackSelectAll.waitForExistence(timeout: timeout),
+            "Expected Search translation All button to exist within \(timeout) seconds."
+        )
+        tapElementReliably(fallbackSelectAll, timeout: timeout)
+    }
+
+    /**
+     Closes the Search translation picker.
+     *
+     * - Parameters:
+     *   - app: Running application under test.
+     *   - timeout: Maximum time to wait for the Done action.
+     * - Side effects:
+     *   - taps the picker toolbar Done action
+     * - Failure modes:
+     *   - fails when the Done action is not reachable
+     */
+    private func tapSearchTranslationDone(
+        in app: XCUIApplication,
+        timeout: TimeInterval
+    ) {
+        let done = app.buttons["searchTranslationDoneButton"].firstMatch
+        if done.waitForExistence(timeout: timeout) {
+            tapElementReliably(done, timeout: timeout)
+            return
+        }
+
+        let fallbackDone = app.buttons["Done"].firstMatch
+        XCTAssertTrue(
+            fallbackDone.waitForExistence(timeout: timeout),
+            "Expected Search translation Done button to exist within \(timeout) seconds."
+        )
+        tapElementReliably(fallbackDone, timeout: timeout)
     }
 
     /**

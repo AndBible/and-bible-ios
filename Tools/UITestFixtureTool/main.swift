@@ -36,6 +36,7 @@ private enum FixtureScenario: String, CaseIterable {
     case baseline = "baseline"
     case commentaryModule = "commentary-module"
     case searchIndexed = "search-indexed"
+    case searchMultiTranslation = "search-multi-translation"
     case bookmarkNavigation = "bookmark-navigation"
     case bookmarkMultiRow = "bookmark-multirow"
     case bookmarkFilter = "bookmark-filter"
@@ -275,7 +276,9 @@ private struct FixtureTool {
         let candidates = [
             swordURL.appendingPathComponent("mods.d/modules-conf.cache", isDirectory: false),
             swordURL.appendingPathComponent("mods.d/uitestcomm.conf", isDirectory: false),
+            swordURL.appendingPathComponent("mods.d/uitestweb.conf", isDirectory: false),
             swordURL.appendingPathComponent("modules/comments/rawcom/uitestcomm", isDirectory: true),
+            swordURL.appendingPathComponent("modules/texts/rawtext/uitestweb", isDirectory: true),
         ]
         for candidate in candidates where fileManager.fileExists(atPath: candidate.path) {
             try fileManager.removeItem(at: candidate)
@@ -380,6 +383,9 @@ private final class FixtureContext {
             try seedUITestCommentaryModule()
         case .searchIndexed:
             try seedBundledSearchIndex()
+        case .searchMultiTranslation:
+            try seedUITestBibleModule()
+            try seedMultiTranslationSearchIndex()
         case .bookmarkNavigation:
             seedBookmarkNavigation()
         case .bookmarkMultiRow:
@@ -440,30 +446,68 @@ private final class FixtureContext {
         }
         defer { sqlite3_close(db) }
 
-        try executeSearchSQL("PRAGMA journal_mode=WAL", db: db)
-        try executeSearchSQL("""
-            CREATE VIRTUAL TABLE IF NOT EXISTS verse_fts USING fts5(
-                verse_key,
-                plain_text,
-                module_name UNINDEXED,
-                tokenize='unicode61'
-            )
-        """, db: db)
-        try executeSearchSQL("""
-            CREATE TABLE IF NOT EXISTS indexed_modules (
-                module_name TEXT PRIMARY KEY,
-                verse_count INTEGER DEFAULT 0,
-                indexed_at TEXT,
-                schema_version INTEGER DEFAULT 1
-            )
-        """, db: db)
+        try prepareSearchIndexSchema(in: db)
         try executeSearchSQL("DELETE FROM verse_fts WHERE module_name = 'KJV'", db: db)
         try executeSearchSQL("DELETE FROM indexed_modules WHERE module_name = 'KJV'", db: db)
         try executeSearchSQL("BEGIN TRANSACTION", db: db)
 
         do {
             try insertSeededSearchRows(into: db)
-            try recordSeededSearchModule(into: db, verseCount: Int32(Self.seededSearchRows.count))
+            try recordSeededSearchModule(
+                "KJV",
+                into: db,
+                verseCount: Int32(Self.seededSearchRows.count)
+            )
+            try executeSearchSQL("COMMIT", db: db)
+        } catch {
+            _ = try? executeSearchSQL("ROLLBACK", db: db)
+            throw error
+        }
+    }
+
+    /**
+     Seeds a second deterministic Bible module plus grouped FTS rows for multi-translation search.
+     *
+     * The fixture writes deterministic KJV rows plus two `UITESTWEB` rows for the same query so a
+     * grouped search must report results from more than one selected translation.
+     *
+     * - Throws: `FixtureToolError.sqlite` when the search-index database cannot be created or
+     *   written.
+     */
+    private func seedMultiTranslationSearchIndex() throws {
+        let databaseURL = paths.documentsURL.appendingPathComponent("search_indexes.sqlite")
+        try fileManager.createDirectory(
+            at: databaseURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(
+            databaseURL.path,
+            &db,
+            SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX,
+            nil
+        ) == SQLITE_OK, let db else {
+            throw FixtureToolError.sqlite(
+                "Unable to open search index database at '\(databaseURL.path)'."
+            )
+        }
+        defer { sqlite3_close(db) }
+
+        try prepareSearchIndexSchema(in: db)
+        for moduleName in ["KJV", "UITESTWEB"] {
+            try executeSearchSQL("DELETE FROM verse_fts WHERE module_name = '\(moduleName)'", db: db)
+            try executeSearchSQL("DELETE FROM indexed_modules WHERE module_name = '\(moduleName)'", db: db)
+        }
+        try executeSearchSQL("BEGIN TRANSACTION", db: db)
+
+        do {
+            let rows = Self.seededSearchRows + Self.seededMultiTranslationSearchRows
+            try insertSeededSearchRows(rows, into: db)
+            for moduleName in Set(rows.map { $0.moduleName }).sorted() {
+                let verseCount = rows.filter { $0.moduleName == moduleName }.count
+                try recordSeededSearchModule(moduleName, into: db, verseCount: Int32(verseCount))
+            }
             try executeSearchSQL("COMMIT", db: db)
         } catch {
             _ = try? executeSearchSQL("ROLLBACK", db: db)
@@ -478,6 +522,21 @@ private final class FixtureContext {
      * - Throws: `FixtureToolError.sqlite` when row insertion fails.
      */
     private func insertSeededSearchRows(into db: OpaquePointer) throws {
+        try insertSeededSearchRows(Self.seededSearchRows, into: db)
+    }
+
+    /**
+     Inserts the supplied deterministic FTS rows used by Search UI fixtures.
+     *
+     * - Parameters:
+     *   - rows: FTS rows to write.
+     *   - db: Open SQLite handle for `search_indexes.sqlite`.
+     * - Throws: `FixtureToolError.sqlite` when row insertion fails.
+     */
+    private func insertSeededSearchRows(
+        _ rows: [(verseKey: String, plainText: String, moduleName: String)],
+        into db: OpaquePointer
+    ) throws {
         let sql = "INSERT INTO verse_fts (verse_key, plain_text, module_name) VALUES (?, ?, ?)"
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK,
@@ -489,7 +548,7 @@ private final class FixtureContext {
         }
         defer { sqlite3_finalize(statement) }
 
-        for row in Self.seededSearchRows {
+        for row in rows {
             sqlite3_reset(statement)
             sqlite3_clear_bindings(statement)
             sqlite3_bind_text(statement, 1, row.verseKey, -1, sqliteTransient)
@@ -508,11 +567,12 @@ private final class FixtureContext {
      Records the seeded module metadata expected by `SearchIndexService.hasIndex`.
      *
      * - Parameters:
+     *   - moduleName: Module abbreviation to record as indexed.
      *   - db: Open SQLite handle for `search_indexes.sqlite`.
      *   - verseCount: Number of seeded verse rows for the module.
      * - Throws: `FixtureToolError.sqlite` when the metadata row cannot be written.
      */
-    private func recordSeededSearchModule(into db: OpaquePointer, verseCount: Int32) throws {
+    private func recordSeededSearchModule(_ moduleName: String, into db: OpaquePointer, verseCount: Int32) throws {
         let sql = """
             INSERT OR REPLACE INTO indexed_modules (module_name, verse_count, indexed_at, schema_version)
             VALUES (?, ?, datetime('now'), ?)
@@ -527,7 +587,7 @@ private final class FixtureContext {
         }
         defer { sqlite3_finalize(statement) }
 
-        sqlite3_bind_text(statement, 1, "KJV", -1, sqliteTransient)
+        sqlite3_bind_text(statement, 1, moduleName, -1, sqliteTransient)
         sqlite3_bind_int(statement, 2, verseCount)
         sqlite3_bind_int(statement, 3, 2)
 
@@ -537,6 +597,32 @@ private final class FixtureContext {
                 fallback: "Unable to record seeded search module metadata."
             )
         }
+    }
+
+    /**
+     Creates the Search FTS tables used by production `SearchIndexService`.
+     *
+     * - Parameter db: Open SQLite handle for `search_indexes.sqlite`.
+     * - Throws: `FixtureToolError.sqlite` when schema setup fails.
+     */
+    private func prepareSearchIndexSchema(in db: OpaquePointer) throws {
+        try executeSearchSQL("PRAGMA journal_mode=WAL", db: db)
+        try executeSearchSQL("""
+            CREATE VIRTUAL TABLE IF NOT EXISTS verse_fts USING fts5(
+                verse_key,
+                plain_text,
+                module_name UNINDEXED,
+                tokenize='unicode61'
+            )
+        """, db: db)
+        try executeSearchSQL("""
+            CREATE TABLE IF NOT EXISTS indexed_modules (
+                module_name TEXT PRIMARY KEY,
+                verse_count INTEGER DEFAULT 0,
+                indexed_at TEXT,
+                schema_version INTEGER DEFAULT 1
+            )
+        """, db: db)
     }
 
     /**
@@ -587,9 +673,67 @@ private final class FixtureContext {
         ),
     ]
 
+    /**
+     Additional deterministic rows used only by the grouped multi-translation Search fixture.
+     */
+    private static let seededMultiTranslationSearchRows: [(verseKey: String, plainText: String, moduleName: String)] = [
+        (
+            verseKey: "Genesis 1:2",
+            plainText: "The earth had become formless and empty, and darkness was on the surface of the deep.",
+            moduleName: "UITESTWEB"
+        ),
+        (
+            verseKey: "John 3:16",
+            plainText: "For God so loved the earth that the deterministic fixture can prove grouped search totals.",
+            moduleName: "UITESTWEB"
+        ),
+    ]
+
     /// SQLite destructor token instructing SQLite to copy bound text values.
     private var sqliteTransient: sqlite3_destructor_type {
         unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+    }
+
+    /**
+     Seeds a minimal SWORD Bible module used by multi-translation Search UI tests.
+
+     Search assertions read deterministic FTS rows from `search_indexes.sqlite`, so the module only
+     needs enough SWORD metadata to appear as an installed Bible translation in the real picker.
+     */
+    private func seedUITestBibleModule() throws {
+        let swordURL = paths.documentsURL.appendingPathComponent("sword", isDirectory: true)
+        let modsDURL = swordURL.appendingPathComponent("mods.d", isDirectory: true)
+        let dataURL = swordURL.appendingPathComponent(
+            "modules/texts/rawtext/uitestweb",
+            isDirectory: true
+        )
+        try fileManager.createDirectory(at: modsDURL, withIntermediateDirectories: true)
+        try fileManager.createDirectory(at: dataURL, withIntermediateDirectories: true)
+        try removeCachedSwordModuleConfig(in: modsDURL)
+
+        let conf = """
+        [UITESTWEB]
+        Description=UI Test Web Bible
+        DataPath=./modules/texts/rawtext/uitestweb/
+        ModDrv=RawText
+        SourceType=OSIS
+        Encoding=UTF-8
+        Lang=en
+        Versification=KJV
+        About=Deterministic empty Bible module for iOS multi-translation Search UI automation.
+        """
+        try conf.write(
+            to: modsDURL.appendingPathComponent("uitestweb.conf", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        for fileName in ["ot", "ot.vss", "nt", "nt.vss"] {
+            let url = dataURL.appendingPathComponent(fileName, isDirectory: false)
+            if !fileManager.fileExists(atPath: url.path) {
+                try Data().write(to: url)
+            }
+        }
     }
 
     /**
