@@ -53,6 +53,45 @@ struct MyNotesAccessibilitySnapshot: Equatable {
     }
 }
 
+struct StudyPadAccessibilityTextToken: Equatable {
+    let orderNumber: Int
+    let textToken: String
+
+    var encodedValue: String {
+        "|\(orderNumber)=\(textToken)|"
+    }
+}
+
+struct StudyPadAccessibilitySnapshot: Equatable {
+    let isVisible: Bool
+    let isEditing: Bool
+    let revision: Int
+    let labelToken: String
+    let textEntryCount: Int
+    let textTokens: [StudyPadAccessibilityTextToken]
+
+    static let empty = StudyPadAccessibilitySnapshot(
+        isVisible: false,
+        isEditing: false,
+        revision: 0,
+        labelToken: "none",
+        textEntryCount: 0,
+        textTokens: []
+    )
+
+    var encodedValue: String {
+        let texts = textTokens.map(\.encodedValue).joined(separator: ",")
+        return [
+            "studyPadVisible=\(isVisible)",
+            "studyPadEditing=\(isEditing)",
+            "studyPadRevision=\(revision)",
+            "studyPadLabel=\(labelToken)",
+            "studyPadTextEntryCount=\(textEntryCount)",
+            "studyPadTexts=\(texts)",
+        ].joined(separator: ";")
+    }
+}
+
 /**
  Coordinates BibleView bridge events, SWORD content loading, and native presentation callbacks.
 
@@ -94,6 +133,10 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
     /// Whether the WebView is currently showing a StudyPad document.
     private(set) var showingStudyPad = false
+    /// Monotonic marker used by lightweight UI-test exports when StudyPad state mutates.
+    private(set) var studyPadMutationRevision = 0
+    /// Prevents a launch-seeded UI-test StudyPad note from firing more than once per reader session.
+    private var didApplyUITestStudyPadCreatedNoteText = false
     /// The label ID of the currently active StudyPad.
     private(set) var activeStudyPadLabelId: UUID?
     /// The name of the currently active StudyPad label (for the header).
@@ -237,6 +280,44 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     /// Compact My Notes state used by UI tests after opening the real visible My Notes document.
     var myNotesAccessibilityState: String {
         myNotesAccessibilitySnapshot.encodedValue
+    }
+
+    /// Typed StudyPad state used to produce compact UI-test accessibility exports.
+    var studyPadAccessibilitySnapshot: StudyPadAccessibilitySnapshot {
+        guard showingStudyPad,
+              let labelId = activeStudyPadLabelId,
+              let service = bookmarkService else {
+            return StudyPadAccessibilitySnapshot(
+                isVisible: showingStudyPad,
+                isEditing: editingInWebView,
+                revision: studyPadMutationRevision,
+                labelToken: Self.contentStateToken(activeStudyPadLabelName),
+                textEntryCount: 0,
+                textTokens: []
+            )
+        }
+
+        let entries = service.studyPadEntries(labelId: labelId)
+        let exportedEntries = entries.prefix(UITestRuntimeConfiguration.detailedAccessibilityRowTokenLimit)
+        let textTokens = exportedEntries.map { entry in
+            StudyPadAccessibilityTextToken(
+                orderNumber: entry.orderNumber,
+                textToken: Self.contentStateToken(entry.textEntry?.text)
+            )
+        }
+        return StudyPadAccessibilitySnapshot(
+            isVisible: showingStudyPad,
+            isEditing: editingInWebView,
+            revision: studyPadMutationRevision,
+            labelToken: Self.contentStateToken(activeStudyPadLabelName),
+            textEntryCount: entries.count,
+            textTokens: textTokens
+        )
+    }
+
+    /// Compact StudyPad state used by UI tests after opening the real visible StudyPad document.
+    var studyPadAccessibilityState: String {
+        studyPadAccessibilitySnapshot.encodedValue
     }
 
     /// Records the latest content identity that native requested the reader WebView to display.
@@ -2189,6 +2270,42 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         return saveBookmarkNoteAndNotify(bookmarkId: bookmark.id, note: currentNote + text)
     }
 
+    private func applyUITestStudyPadCreatedNoteTextIfNeeded() {
+        guard !didApplyUITestStudyPadCreatedNoteText,
+              let noteText = UITestRuntimeConfiguration.studyPadCreatedNoteText,
+              updateNewestVisibleStudyPadTextEntry(noteText) else {
+            return
+        }
+        didApplyUITestStudyPadCreatedNoteText = true
+    }
+
+    @discardableResult
+    private func updateNewestVisibleStudyPadTextEntry(_ text: String) -> Bool {
+        guard UITestRuntimeConfiguration.enablesDetailedAccessibilityExports,
+              showingStudyPad,
+              !text.isEmpty,
+              let service = bookmarkService,
+              let labelId = activeStudyPadLabelId,
+              let entry = service.studyPadEntries(labelId: labelId).max(by: { lhs, rhs in
+                  if lhs.orderNumber != rhs.orderNumber {
+                      return lhs.orderNumber < rhs.orderNumber
+                  }
+                  return lhs.id.uuidString < rhs.id.uuidString
+              })
+        else {
+            return false
+        }
+
+        service.updateStudyPadTextEntryText(id: entry.id, text: text)
+        studyPadMutationRevision += 1
+        let updatedEntry = service.studyPadEntry(id: entry.id) ?? entry
+        let entryJSON = buildStudyPadEntryJSON(updatedEntry)
+        bridge.emit(event: "add_or_update_study_pad", data: """
+        {"studyPadTextEntry":\(entryJSON),"bookmarkToLabelsOrdered":[],"genericBookmarkToLabelsOrdered":[],"studyPadItemsOrdered":[]}
+        """)
+        return true
+    }
+
     @discardableResult
     private func saveBookmarkNoteAndNotify(bookmarkId: UUID, note: String?) -> Bool {
         guard let service = bookmarkService else { return false }
@@ -2344,6 +2461,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
         guard let result = service.createStudyPadEntry(labelId: lblId, afterOrderNumber: afterOrder) else { return }
         let (entry, changedBtls, changedGbtls, changedEntries) = result
+        studyPadMutationRevision += 1
 
         emitStudyPadOrderEvent(
             newEntry: entry,
@@ -2363,6 +2481,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
         guard let result = service.deleteStudyPadEntry(id: uuid) else { return }
         let (deletedId, _, changedBtls, changedGbtls, changedEntries) = result
+        studyPadMutationRevision += 1
 
         // Emit delete event
         bridge.emit(event: "delete_study_pad_text_entry", data: "\"\(deletedId.uuidString)\"")
@@ -2390,6 +2509,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         let orderNumber = dict["orderNumber"] as? Int
         let indentLevel = dict["indentLevel"] as? Int
         service.updateStudyPadTextEntry(id: uuid, orderNumber: orderNumber, indentLevel: indentLevel)
+        studyPadMutationRevision += 1
 
         // Emit update back to Vue.js
         if let entry = service.studyPadEntry(id: uuid) {
@@ -2408,6 +2528,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         guard let service = bookmarkService,
               let uuid = UUID(uuidString: id) else { return }
         service.updateStudyPadTextEntryText(id: uuid, text: text)
+        studyPadMutationRevision += 1
     }
 
     /**
@@ -2432,6 +2553,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             genericBookmarkOrders: genericOrders,
             studyPadEntryOrders: entryOrders
         )
+        studyPadMutationRevision += 1
 
         // Emit updated order numbers back to Vue.js
         let btls = service.bibleBookmarkToLabels(labelId: lblId)
@@ -2540,6 +2662,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         editingInWebView = enabled
         if enabled {
             applyUITestMyNotesAppendTextIfNeeded()
+            applyUITestStudyPadCreatedNoteTextIfNeeded()
         }
     }
 

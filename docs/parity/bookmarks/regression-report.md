@@ -1,6 +1,6 @@
 # BOOKMARKS-702 Regression Report
 
-Date: 2026-05-14
+Date: 2026-05-16
 
 ## Scope
 
@@ -10,6 +10,7 @@ Regression verification for the current bookmark parity surface, covering:
 - generic bookmark visibility plus label assignment from the native bookmark list
 - label assignment and label-manager mutation flows
 - StudyPad handoff from a real bookmark workflow
+- StudyPad text-entry creation from the visible StudyPad document with persisted rebuild evidence
 - visible My Notes note update/delete from the production reader path
 - service-layer My Notes/note-row persistence semantics
 - local Android bookmark reference comparison
@@ -51,6 +52,7 @@ Verification matrix:
 - `AndBibleUITests/testBookmarkListLabelAssignmentRemovalHidesBookmarkUnderFilter`
 - `AndBibleUITests/testLabelManagerCreateRenameDeleteFlow`
 - `AndBibleUITests/testBookmarkListOpensStudyPadForSelectedLabel`
+- `AndBibleUITests/testStudyPadCreateTextEntryPersistsAcrossReopen`
 - `AndBibleUITests/testMyNotesNoteUpdateAndDeletePersistsFromVisibleWorkflow`
 
 ## Expected Assertions Covered
@@ -76,6 +78,8 @@ Verification matrix:
 ### StudyPad and My Notes
 
 - opening StudyPad from a selected bookmark label reaches the embedded StudyPad document path
+- adding a StudyPad text entry from the visible document updates the visible state export and
+  remains present after returning to Bible and reopening the StudyPad from storage
 - opening My Notes from the reader reaches the embedded My Notes document path
 - editing a visible My Notes note persists through the bridge and is present after rebuilding
   the document
@@ -96,23 +100,21 @@ stale because three UI tests from that report no longer exist in `AndBibleUITest
 rerunnable named subset in this report is:
 
 - unit: `5` tests
-- UI: `12` tests
+- UI: `13` tests
 
-This doc refresh did not rerun the simulator suite, so do not treat the old runtime or the
-old UI count as current evidence. The checked-in named subset still gives the bookmark
-domain rerunnable evidence for:
+This doc refresh reran the focused StudyPad handoff and text-entry creation UI tests, but did not
+rerun the full simulator suite. Do not treat the old runtime as current evidence. The checked-in
+named subset still gives the bookmark domain rerunnable evidence for:
 
 - bookmark-list search, filter, sort, selection, and deletion
 - generic-bookmark visibility and label assignment from the bookmark list
 - label assignment and label-manager CRUD
-- StudyPad handoff from a selected label
+- StudyPad handoff from a selected label and focused text-entry creation persistence
 - visible My Notes update/delete from the reader-owned document path
 - shared bookmark-note persistence semantics in the service layer
 
 ## Remaining Gap
 
-The current bookmark parity gap is:
-
-- deeper StudyPad mutation coverage beyond handoff
-
-That area remains `Partial` in `verification-matrix.md` until it has focused regression coverage.
+No bookmark parity gap is currently tracked in this report. The first StudyPad mutation regression
+locks text-entry creation beyond handoff; reorder and delete breadth can be added later as focused
+hardening without keeping the bookmark matrix partial.

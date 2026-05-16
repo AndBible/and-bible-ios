@@ -22,9 +22,16 @@
     </div>
     <div v-if="journalEntries.length === 0 && !exportMode">
       {{ strings.emptyStudyPad }}
-      <span class="journal-button" v-if="!exportMode" @click="addNewEntry">
+      <button
+          type="button"
+          class="journal-button"
+          v-if="!exportMode"
+          :aria-label="addStudyPadNoteAccessibilityLabel"
+          :title="addStudyPadNoteAccessibilityLabel"
+          @click="addNewEntry"
+      >
         <FontAwesomeIcon icon="plus-circle"/>
-      </span>
+      </button>
     </div>
     <draggable
         v-model="journalEntries"
@@ -78,9 +85,15 @@
             @click="editLastNote">
         <FontAwesomeIcon icon="edit"/>
       </span>
-      <span class="journal-button" @click="appendNewEntry">
+      <button
+          type="button"
+          class="journal-button"
+          :aria-label="appendStudyPadNoteAccessibilityLabel"
+          :title="appendStudyPadNoteAccessibilityLabel"
+          @click="appendNewEntry"
+      >
         <FontAwesomeIcon icon="plus-circle"/>
-      </span>
+      </button>
     </div>
   </div>
 </template>
@@ -281,6 +294,9 @@ const isAutoAssignLabel = computed<boolean>(() => {
 const showCursor = computed<boolean>(() => {
     return isAutoAssignLabel.value && !exportMode.value;
 });
+
+const addStudyPadNoteAccessibilityLabel = computed(() => `Add StudyPad note for ${label.name}`);
+const appendStudyPadNoteAccessibilityLabel = computed(() => `Add StudyPad note after last entry for ${label.name}`);
 
 function moveCursorTo(orderNumber: number): void {
     android.setStudyPadCursor(label.id, orderNumber);

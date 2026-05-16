@@ -1,6 +1,6 @@
 # Parity Status Overview
 
-Date: 2026-05-10
+Date: 2026-05-16
 
 ## Purpose
 
@@ -26,7 +26,7 @@ give you the fuller human context behind it.
 |---|---|---|---|
 | [settings](settings/README.md) | Mature: `24 Pass`, `9 Adapted Pass`, `0 Partial`, `2 Documented Divergence` | Dedicated localization guardrail script, committed baselines, CI integration, focused simulator/unit validation | Broader machine-readable guardrails beyond localization if the settings surface grows materially |
 | [sync](sync/README.md) | Strong for supported Android categories: `6 Pass`, `2 Adapted Pass`, `2 Partial` | Focused unit/integration coverage, focused Sync UI coverage, explicit guardrails | Android-only category breadth (`mydocuments`, `ai_settings`, `progress`) and adopt/create confirmation UI still partial |
-| [bookmarks](bookmarks/README.md) | Strong bookmark-list and My Notes lifecycle coverage: `5 Pass`, `2 Adapted Pass`, `2 Partial` | Focused bookmark UI workflows, visible My Notes lifecycle coverage, plus note-persistence unit regressions | Generic-bookmark visible workflows and broader StudyPad mutation breadth |
+| [bookmarks](bookmarks/README.md) | Strong bookmark-list, StudyPad, and My Notes lifecycle coverage: `7 Pass`, `2 Adapted Pass`, `0 Partial` | Focused bookmark UI workflows, visible StudyPad create coverage, visible My Notes lifecycle coverage, plus note-persistence unit regressions | No bookmark parity gap currently tracked; StudyPad reorder/delete breadth remains optional future hardening |
 | [search](search/README.md) | Strong semantic coverage: `5 Pass`, `2 Adapted Pass`, `1 Partial` | Focused search UI workflows plus Strong's unit regressions | Multi-translation search still lacks focused regression coverage |
 | [reading-plans](reading-plans/README.md) | Strong sync and progression coverage: `5 Pass`, `1 Adapted Pass`, `3 Partial` | Focused daily-reading UI coverage plus restore/upload/patch unit coverage | Custom plan import, reading-plan list/start/import breadth, and additive iOS-only plan lifecycle coverage |
 | [reader](reader/README.md) | Reader shell/menu parity is stronger, with the remaining gap concentrated in the Strong's modal branch: `8 Pass`, `1 Adapted Pass`, `1 Partial` | Focused reader-shell UI coverage, restored-position/config-payload/gesture-policy/compare-payload unit regressions, and full local UI validation | Strong's modal coverage still needs tighter focused regression locking |
@@ -119,8 +119,7 @@ every domain. That is deliberate for now. The current posture is:
   `python3 scripts/check_bridge_parity_inventory.py --android-root ../and-bible`
   workflow
 - strong focused regression evidence in `sync`, `search`, and `reading-plans`
-- strong bookmark-list and visible My Notes evidence in `bookmarks`, with broader
-  StudyPad mutation still partial
+- strong bookmark-list, visible StudyPad create, and visible My Notes evidence in `bookmarks`
 - meaningful but still partial protection in `reader` and `bridge` where the
   remaining gaps are mostly focused workflow coverage, Android-only breadth, and
   payload-schema breadth

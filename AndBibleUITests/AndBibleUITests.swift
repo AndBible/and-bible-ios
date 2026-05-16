@@ -932,6 +932,53 @@ final class AndBibleUITests: XCTestCase {
     }
 
     /**
+     Verifies that adding a text entry inside the visible StudyPad document persists after the
+     StudyPad is rebuilt from storage.
+     *
+     * - Side effects:
+     *   - launches the reader shell with one deterministic label-backed StudyPad fixture
+     *   - opens StudyPad from the production bookmark-list label handoff
+     *   - taps the visible web StudyPad add-note control and applies deterministic text through the
+     *     gated UI-test edit bridge
+     *   - returns to Bible, reopens StudyPad from the same handoff, and verifies the created text
+     *     entry is still present in the rebuilt document state
+     * - Failure modes:
+     *   - fails if the StudyPad handoff, visible add-note control, mutation export, or persisted
+     *     rebuild never reaches the expected state
+     */
+    func testStudyPadCreateTextEntryPersistsAcrossReopen() {
+        let app = makeApp()
+        let createdNoteText = "UI Test StudyPad Created Note"
+        let createdNoteToken = "UI Test StudyPad Created Note"
+        app.launchEnvironment["UITEST_STUDYPAD_CREATED_NOTE_TEXT"] = createdNoteText
+        app.launchArguments += ["-UITEST_STUDYPAD_CREATED_NOTE_TEXT", createdNoteText]
+        app.launch()
+
+        _ = openBookmarkList(in: app)
+        openSeedStudyPadFromBookmarkList(in: app)
+        dismissBookmarkListIfVisible(in: app, timeout: 10)
+        waitForStudyPadPresentation(in: app, timeout: 20)
+        waitForVisibleStudyPadState(containing: "studyPadTextEntryCount=1", in: app, timeout: 20)
+
+        tapElementReliably(
+            requireStudyPadWebControl(named: "Add StudyPad note after last entry for UI Test Seed", in: app, timeout: 20),
+            timeout: 10
+        )
+        waitForVisibleStudyPadState(containing: "studyPadTextEntryCount=2", in: app, timeout: 20)
+        waitForVisibleStudyPadState(containing: createdNoteToken, in: app, timeout: 20)
+        dismissStudyPadEditor(in: app, timeout: 15)
+
+        returnFromStudyPadIfVisible(in: app, timeout: 20)
+
+        _ = openBookmarkList(in: app)
+        openSeedStudyPadFromBookmarkList(in: app)
+        dismissBookmarkListIfVisible(in: app, timeout: 10)
+        waitForStudyPadPresentation(in: app, timeout: 20)
+        waitForVisibleStudyPadState(containing: "studyPadTextEntryCount=2", in: app, timeout: 20)
+        waitForVisibleStudyPadState(containing: createdNoteToken, in: app, timeout: 20)
+    }
+
+    /**
      Verifies that the visible My Notes document can update and delete a note-backed bookmark.
      *
      * - Side effects:
@@ -5317,7 +5364,7 @@ final class AndBibleUITests: XCTestCase {
                 app.navigationBars.staticTexts[identifier].firstMatch,
                 app.otherElements[identifier].firstMatch,
             ]
-        case "readerReturnFromMyNotesButton":
+        case "readerReturnFromMyNotesButton", "readerReturnFromStudyPadButton":
             return [
                 app.buttons[identifier].firstMatch,
                 app.navigationBars.buttons[identifier].firstMatch,
@@ -8470,6 +8517,207 @@ final class AndBibleUITests: XCTestCase {
         } while Date() < deadline
 
         return candidates.first(where: { $0.exists })
+    }
+
+    /**
+     Waits for a compact StudyPad export that is both visible and contains one token.
+     */
+    private func waitForVisibleStudyPadState(
+        containing token: String,
+        in app: XCUIApplication,
+        timeout: TimeInterval = 10,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        waitForResolvedSemanticState(
+            named: "readerRenderedContentState",
+            timeout: timeout,
+            valueProvider: { readerRenderedContentStateValue(in: app) },
+            success: { $0.contains("studyPadVisible=true") && $0.contains(token) },
+            failureDescription: { finalValue in
+                "Expected visible StudyPad state to contain '\(token)' within \(timeout) seconds. Final value: '\(finalValue)'."
+            },
+            file: file,
+            line: line
+        )
+    }
+
+    /**
+     Waits for the reader's compact StudyPad state export to contain one token.
+     */
+    private func waitForStudyPadState(
+        containing token: String,
+        in app: XCUIApplication,
+        timeout: TimeInterval = 10,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        waitForResolvedSemanticState(
+            named: "readerRenderedContentState",
+            timeout: timeout,
+            valueProvider: { readerRenderedContentStateValue(in: app) },
+            success: { $0.contains(token) },
+            failureDescription: { finalValue in
+                "Expected StudyPad state to contain '\(token)' within \(timeout) seconds. Final value: '\(finalValue)'."
+            },
+            file: file,
+            line: line
+        )
+    }
+
+    /**
+     Returns from StudyPad when the document is still visible.
+     */
+    private func returnFromStudyPadIfVisible(
+        in app: XCUIApplication,
+        timeout: TimeInterval = 10,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            let button = app.buttons["readerReturnFromStudyPadButton"].firstMatch
+            if waitForElementToBecomeHittable(
+                button,
+                timeout: min(2, max(0.2, deadline.timeIntervalSinceNow))
+            ) {
+                button.tap()
+                waitForStudyPadState(
+                    containing: "studyPadVisible=false",
+                    in: app,
+                    timeout: timeout,
+                    file: file,
+                    line: line
+                )
+                return
+            }
+            if elementHasUsableFrame(button) {
+                button.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+                waitForStudyPadState(
+                    containing: "studyPadVisible=false",
+                    in: app,
+                    timeout: timeout,
+                    file: file,
+                    line: line
+                )
+                return
+            }
+
+            let state = readerRenderedContentStateValue(in: app)
+            if state?.contains("studyPadVisible=false") == true {
+                return
+            }
+
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        } while Date() < deadline
+
+        let finalState = readerRenderedContentStateValue(in: app) ?? "nil"
+        XCTFail(
+            "Expected StudyPad to be hidden or expose its return button within \(timeout) seconds. Final state: '\(finalState)'.",
+            file: file,
+            line: line
+        )
+    }
+
+    /**
+     Resolves one accessibility-labelled control inside the embedded StudyPad web document.
+     */
+    private func requireStudyPadWebControl(
+        named label: String,
+        in app: XCUIApplication,
+        timeout: TimeInterval = 10,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) -> XCUIElement {
+        if let element = optionalStudyPadWebControl(named: label, in: app, timeout: timeout) {
+            return element
+        }
+        XCTFail(
+            "Expected StudyPad web control named '\(label)' to exist within \(timeout) seconds.",
+            file: file,
+            line: line
+        )
+        return app.webViews.buttons[label].firstMatch
+    }
+
+    /**
+     Dismisses the inline StudyPad editor after a UI-test mutation has been persisted.
+     */
+    private func dismissStudyPadEditor(
+        in app: XCUIApplication,
+        timeout: TimeInterval = 10,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            if let closeButton = optionalStudyPadWebControl(named: "Close", in: app, timeout: 0.2) {
+                let frame = closeButton.frame
+                if !frame.isEmpty {
+                    app.coordinate(withNormalizedOffset: .zero).withOffset(
+                        CGVector(dx: frame.midX, dy: frame.midY)
+                    ).tap()
+                } else {
+                    tapElementReliably(closeButton, timeout: timeout, file: file, line: line)
+                }
+                waitForVisibleStudyPadState(
+                    containing: "studyPadEditing=false",
+                    in: app,
+                    timeout: timeout,
+                    file: file,
+                    line: line
+                )
+                return
+            }
+
+            if readerRenderedContentStateContains("studyPadEditing=false", in: app) {
+                return
+            }
+
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        } while Date() < deadline
+
+        let finalState = readerRenderedContentStateValue(in: app) ?? "nil"
+        XCTFail(
+            "Expected StudyPad editor to expose a Close control or report studyPadEditing=false within \(timeout) seconds. Final state: '\(finalState)'.",
+            file: file,
+            line: line
+        )
+    }
+
+    /**
+     Resolves one accessibility-labelled StudyPad control without recording an XCTest failure.
+     */
+    private func optionalStudyPadWebControl(
+        named label: String,
+        in app: XCUIApplication,
+        timeout: TimeInterval = 10
+    ) -> XCUIElement? {
+        let candidates = [
+            app.webViews.buttons[label].firstMatch,
+            app.webViews.textViews[label].firstMatch,
+            app.webViews.textFields[label].firstMatch,
+            app.webViews.otherElements[label].firstMatch,
+            app.buttons[label].firstMatch,
+            app.textViews[label].firstMatch,
+            app.textFields[label].firstMatch,
+            app.otherElements[label].firstMatch,
+        ]
+        return firstExistingMyNotesWebControl(candidates, timeout: timeout)
+    }
+
+    /**
+     Dismisses the bookmark list sheet if the StudyPad handoff leaves it visible over the reader.
+     */
+    private func dismissBookmarkListIfVisible(
+        in app: XCUIApplication,
+        timeout: TimeInterval = 10
+    ) {
+        let doneButton = app.buttons["bookmarkListDoneButton"].firstMatch
+        guard doneButton.exists || doneButton.waitForExistence(timeout: min(timeout, 2)) else {
+            return
+        }
+        tapElementReliably(doneButton, timeout: timeout)
     }
 
     /**

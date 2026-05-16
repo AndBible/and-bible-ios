@@ -71,6 +71,8 @@
           :edit-directly="textEntry.new ?? false"
           :text="journalText"
           :disable-click-to-edit="props.disableClickToEdit"
+          :display-accessibility-label="studyPadEditAccessibilityLabel"
+          :editor-accessibility-label="studyPadEditorAccessibilityLabel"
           @opened="$emit('edit-opened')"
           @save="journalTextChanged"
       />
@@ -146,6 +148,18 @@ const journalText = computed(() => {
     else if (props.journalEntry.type === "journal") return (props.journalEntry as StudyPadTextItem).text;
     return null;
 });
+
+const studyPadEntryAccessibilityName = computed(() => {
+    if (props.journalEntry.type === "journal") return "note";
+    if (props.journalEntry.type === "generic-bookmark") return genericBookmarkEntry.value.keyName;
+    return bookmarkEntry.value.verseRangeAbbreviated;
+});
+const studyPadEditAccessibilityLabel = computed(
+    () => `Edit StudyPad ${studyPadEntryAccessibilityName.value} for ${props.label.name}`
+);
+const studyPadEditorAccessibilityLabel = computed(
+    () => `StudyPad ${studyPadEntryAccessibilityName.value} editor for ${props.label.name}`
+);
 
 function editBookmark(event: MouseEvent) {
     ebEmit("bookmark_clicked", props.journalEntry.id, {openInfo: true, locateTop: isBottomHalfClicked(event)})

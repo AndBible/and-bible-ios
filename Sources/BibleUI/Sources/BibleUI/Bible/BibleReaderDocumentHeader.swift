@@ -123,6 +123,7 @@ struct BibleReaderDocumentHeader<ToolbarActions: View>: View {
                 backToBibleLabel
             }
             .accessibilityLabel(String(localized: "back_to_bible"))
+            .accessibilityIdentifier("readerReturnFromStudyPadButton")
 
             Spacer()
 

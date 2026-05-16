@@ -425,6 +425,8 @@ public struct BibleReaderView: View {
             ?? BibleReaderController.emptyRenderedContentState
         let myNotesToken = exportController?.myNotesAccessibilityState
             ?? MyNotesAccessibilitySnapshot.empty.encodedValue
+        let studyPadToken = exportController?.studyPadAccessibilityState
+            ?? StudyPadAccessibilitySnapshot.empty.encodedValue
         let strongsMode = resolvedDisplaySettings(for: windowManager.activeWindow).strongsMode
             ?? TextDisplaySettings.appDefaults.strongsMode
             ?? 0
@@ -433,7 +435,7 @@ public struct BibleReaderView: View {
         let sheetToken = "readerSheet=\(activeReaderSheet?.rawValue ?? "none")"
         let modalToken = "readerModal=\(activeReaderModal?.rawValue ?? "none")"
         let searchToken = "searchVisible=\(showSearch ? "true" : "false")"
-        return "\(windowToken);\(contentToken);\(myNotesToken);strongsMode=\(strongsMode);\(drawerToken);\(overflowToken);\(sheetToken);\(modalToken);\(searchToken)"
+        return "\(windowToken);\(contentToken);\(myNotesToken);\(studyPadToken);strongsMode=\(strongsMode);\(drawerToken);\(overflowToken);\(sheetToken);\(modalToken);\(searchToken)"
     }
 
     /// Compact dedicated state export used by UI tests instead of snapshotting the full reader.
