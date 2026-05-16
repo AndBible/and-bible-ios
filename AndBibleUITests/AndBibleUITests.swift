@@ -4507,14 +4507,6 @@ final class AndBibleUITests: XCTestCase {
         let picker = requireElement("syncBackendPicker", in: app, timeout: timeout)
         tapElementReliably(picker, timeout: timeout)
 
-        let optionIdentifier = "syncBackendOption::\(backendRawValue)"
-        if let identifiedOption = resolvedElement(optionIdentifier, in: app),
-           identifiedOption.exists
-        {
-            tapElementReliably(identifiedOption, timeout: timeout)
-            return
-        }
-
         let backendLabel: String = switch backendRawValue {
         case "GOOGLE_DRIVE":
             "Google Drive"
