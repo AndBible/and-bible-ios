@@ -128,6 +128,38 @@ final class AndBibleUITests: XCTestCase {
     }
 
     /**
+     Verifies that selecting a second Search translation reruns the query and reports grouped totals.
+     *
+     * - Side effects:
+     *   - launches Search with deterministic KJV and UITESTWEB index rows for `earth`
+     *   - opens the real translation picker and uses Search All to include UITESTWEB
+     *   - waits for the active query to rerun and export grouped per-translation counts
+     * - Failure modes:
+     *   - fails if the translation picker is not reachable from Search options
+     *   - fails if selecting a second translation does not rerun the active query
+     *   - fails if grouped totals collapse to single-translation results
+     */
+    func testSearchMultiTranslationSelectionUpdatesGroupedTotals() {
+        let app = makeApp(searchQuery: "earth")
+        app.launch()
+
+        _ = openSearch(in: app)
+        waitForSearchState(containing: "query=earth", in: app, timeout: 20)
+        waitForSearchState(containing: "selectedModules=KJV", in: app, timeout: 20)
+        waitForSearchResultRow("searchResultRow::Genesis_1_2", in: app, shouldExist: true, timeout: 20)
+
+        tapSearchTranslationPicker(in: app, timeout: 10)
+        tapSearchTranslationSelectAll(in: app, timeout: 10)
+        tapSearchTranslationDone(in: app, timeout: 10)
+
+        waitForSearchState(containing: "UITESTWEB", in: app, timeout: 20)
+        waitForSearchState(containing: "groupedTotal=3", in: app, timeout: 20)
+        waitForSearchState(containing: "KJV:1", in: app, timeout: 20)
+        waitForSearchState(containing: "UITESTWEB:2", in: app, timeout: 20)
+        waitForSearchResultCount(atLeast: 3, in: app, timeout: 20)
+    }
+
+    /**
      Verifies that changing Search scope reruns the current query and updates the result set.
      *
      * - Side effects:
@@ -2996,6 +3028,106 @@ final class AndBibleUITests: XCTestCase {
         }
 
         XCTFail("Expected Search scope button '\(scopeToken.fallbackLabel)' to exist within \(timeout) seconds.")
+    }
+
+    /**
+     Opens the Search translation picker through its stable Search options control.
+     *
+     * - Parameters:
+     *   - app: Running application under test.
+     *   - timeout: Maximum time to wait for the picker affordance.
+     * - Side effects:
+     *   - reveals Search options when needed and taps the translation picker button
+     * - Failure modes:
+     *   - fails when the translation picker affordance is not exposed by Search
+     */
+    private func tapSearchTranslationPicker(
+        in app: XCUIApplication,
+        timeout: TimeInterval
+    ) {
+        let deadline = Date().addingTimeInterval(timeout)
+
+        repeat {
+            dismissSearchFieldFocusIfNeeded(in: app)
+            revealSearchControls(in: app)
+            let searchScreen = unresolvedElement("searchScreen", in: app)
+            let candidates = [
+                searchScreen.buttons["searchTranslationPickerButton"].firstMatch,
+                searchScreen.otherElements["searchTranslationPickerButton"].firstMatch,
+                app.buttons["searchTranslationPickerButton"].firstMatch,
+                app.otherElements["searchTranslationPickerButton"].firstMatch,
+            ]
+
+            if let picker = candidates.first(where: {
+                ($0.exists || $0.waitForExistence(timeout: 0.2))
+                    && waitForElementToBecomeHittable($0, timeout: 0.5)
+            }) {
+                picker.tap()
+                return
+            }
+
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        } while Date() < deadline
+
+        XCTFail("Expected Search translation picker button to exist within \(timeout) seconds.")
+    }
+
+    /**
+     Selects every module in the Search translation picker.
+     *
+     * - Parameters:
+     *   - app: Running application under test.
+     *   - timeout: Maximum time to wait for the toolbar action.
+     * - Side effects:
+     *   - taps the picker toolbar Search All action
+     * - Failure modes:
+     *   - fails when the Search All action is not reachable
+     */
+    private func tapSearchTranslationSelectAll(
+        in app: XCUIApplication,
+        timeout: TimeInterval
+    ) {
+        let selectAll = app.buttons["searchTranslationSelectAllButton"].firstMatch
+        if selectAll.waitForExistence(timeout: timeout) {
+            tapElementReliably(selectAll, timeout: timeout)
+            return
+        }
+
+        let fallbackSelectAll = app.buttons["Search All"].firstMatch
+        XCTAssertTrue(
+            fallbackSelectAll.waitForExistence(timeout: timeout),
+            "Expected Search translation Search All button to exist within \(timeout) seconds."
+        )
+        tapElementReliably(fallbackSelectAll, timeout: timeout)
+    }
+
+    /**
+     Closes the Search translation picker.
+     *
+     * - Parameters:
+     *   - app: Running application under test.
+     *   - timeout: Maximum time to wait for the Done action.
+     * - Side effects:
+     *   - taps the picker toolbar Done action
+     * - Failure modes:
+     *   - fails when the Done action is not reachable
+     */
+    private func tapSearchTranslationDone(
+        in app: XCUIApplication,
+        timeout: TimeInterval
+    ) {
+        let done = app.buttons["searchTranslationDoneButton"].firstMatch
+        if done.waitForExistence(timeout: timeout) {
+            tapElementReliably(done, timeout: timeout)
+            return
+        }
+
+        let fallbackDone = app.buttons["Done"].firstMatch
+        XCTAssertTrue(
+            fallbackDone.waitForExistence(timeout: timeout),
+            "Expected Search translation Done button to exist within \(timeout) seconds."
+        )
+        tapElementReliably(fallbackDone, timeout: timeout)
     }
 
     /**

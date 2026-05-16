@@ -309,6 +309,11 @@ public struct SearchView: View {
                 performSearch()
             }
         }
+        .onChange(of: selectedModules) { _, _ in
+            if case .ready = viewState, !query.trimmingCharacters(in: .whitespaces).isEmpty {
+                performSearch()
+            }
+        }
     }
 
     /// Navigation title derived from the active state and latest result summary.
@@ -341,7 +346,23 @@ public struct SearchView: View {
         guard UITestRuntimeConfiguration.enablesDetailedAccessibilityExports else {
             return baseState
         }
-        return "\(baseState);rows=\(searchAccessibilityRowsToken)"
+        return "\(baseState);\(searchAccessibilitySelectionToken);\(searchAccessibilityGroupToken);rows=\(searchAccessibilityRowsToken)"
+    }
+
+    /// Stable selected-translation token exported for UI automation.
+    private var searchAccessibilitySelectionToken: String {
+        "selectedModules=\(selectedModules.sorted().joined(separator: ","))"
+    }
+
+    /// Stable grouped-result totals exported for UI automation.
+    private var searchAccessibilityGroupToken: String {
+        guard let multiResults else {
+            return "groupedTotal=none;groupedCounts=none"
+        }
+        let counts = multiResults.perModule
+            .map { "\($0.name):\($0.count)" }
+            .joined(separator: ",")
+        return "groupedTotal=\(multiResults.totalCount);groupedCounts=\(counts)"
     }
 
     /// Compact dedicated state export used by the UI harness instead of the full Search container.
@@ -585,6 +606,8 @@ public struct SearchView: View {
                     .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
                 }
                 .buttonStyle(.plain)
+                .accessibilityIdentifier("searchTranslationPickerButton")
+                .accessibilityValue(searchAccessibilitySelectionToken)
             }
         }
         .padding(.horizontal)
@@ -718,6 +741,10 @@ public struct SearchView: View {
                             .padding(.horizontal, 10)
                             .padding(.vertical, 5)
                             .background(.quaternary, in: Capsule())
+                            .accessibilityElement(children: .ignore)
+                            .accessibilityLabel(entry.name)
+                            .accessibilityValue("count=\(entry.count)")
+                            .accessibilityIdentifier("searchResultGroupPill::\(sanitizedAccessibilitySegment(entry.name))")
                         }
                     }
                 }
@@ -895,6 +922,7 @@ public struct SearchView: View {
                     translationRow(mod)
                 }
             }
+            .accessibilityIdentifier("searchTranslationPickerList")
             .navigationTitle(String(localized: "search_translations"))
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
@@ -902,11 +930,13 @@ public struct SearchView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button(String(localized: "done")) { showTranslationPicker = false }
+                        .accessibilityIdentifier("searchTranslationDoneButton")
                 }
                 ToolbarItem(placement: .primaryAction) {
                     Button(String(localized: "search_all")) {
                         selectedModules = Set(installedBibleModules.map(\.name))
                     }
+                    .accessibilityIdentifier("searchTranslationSelectAllButton")
                 }
             }
         }
@@ -943,6 +973,8 @@ public struct SearchView: View {
             }
         }
         .buttonStyle(.plain)
+        .accessibilityIdentifier("searchTranslationRow::\(sanitizedAccessibilitySegment(modName))")
+        .accessibilityValue(isSelected ? "selected" : "unselected")
     }
 
     // MARK: - Navigation
