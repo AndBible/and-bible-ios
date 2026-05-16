@@ -1001,7 +1001,7 @@ final class AndBibleUITests: XCTestCase {
         app.launchArguments += ["-UITEST_MY_NOTES_APPEND_TEXT", " \(updatedNoteMarker)"]
         app.launch()
 
-        let editNoteLabel = "Edit My Notes note for \(referenceLabel)"
+        let openNoteEditorLabel = "Open My Notes note editor for \(referenceLabel)"
         let actionsLabel = "My Notes actions for \(referenceLabel)"
         let deleteLabel = "Delete My Notes note for \(referenceLabel)"
 
@@ -1009,7 +1009,9 @@ final class AndBibleUITests: XCTestCase {
         waitForVisibleMyNotesState(containing: "myNotesCount=1", in: app, timeout: 20)
         waitForVisibleMyNotesState(containing: "|\(rowToken)=\(originalNote)|", in: app, timeout: 20)
 
-        tapElementReliably(requireMyNotesWebControl(named: editNoteLabel, in: app, timeout: 15), timeout: 10)
+        tapElementReliably(requireMyNotesWebControl(named: actionsLabel, in: app, timeout: 15), timeout: 10)
+        tapElementReliably(requireMyNotesWebControl(named: openNoteEditorLabel, in: app, timeout: 15), timeout: 10)
+        waitForVisibleMyNotesState(containing: "myNotesEditing=true", in: app, timeout: 20)
         waitForVisibleMyNotesState(containing: updatedNoteMarker, in: app, timeout: 20)
         dismissMyNotesEditor(in: app, timeout: 15)
         waitForVisibleMyNotesState(containing: "myNotesEditing=false", in: app, timeout: 20)
