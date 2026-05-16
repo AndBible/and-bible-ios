@@ -311,7 +311,7 @@ public struct SearchView: View {
         }
         .onChange(of: selectedModules) { _, _ in
             if case .ready = viewState, !query.trimmingCharacters(in: .whitespaces).isEmpty {
-                performSearch()
+                checkIndex()
             }
         }
     }
@@ -971,6 +971,8 @@ public struct SearchView: View {
                     Image(systemName: "circle").foregroundStyle(.secondary)
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("searchTranslationRow::\(sanitizedAccessibilitySegment(modName))")
@@ -992,7 +994,7 @@ public struct SearchView: View {
     // MARK: - Index Management
 
     /**
-     Checks whether the active module already has an index and updates `viewState` accordingly.
+     Checks whether the selected modules already have indexes and updates `viewState` accordingly.
 
      Side effects:
      - mutates `viewState` to `.ready`, `.needsIndex`, or `.creatingIndex`
@@ -1017,15 +1019,35 @@ public struct SearchView: View {
             return
         }
 
-        if service.hasIndex(for: mod.info.name) {
+        let moduleNames = selectedModules.isEmpty ? [mod.info.name] : Array(selectedModules)
+        if let missingModuleName = moduleNames.sorted().first(where: { !service.hasIndex(for: $0) }) {
+            viewState = .needsIndex(
+                moduleName: missingModuleName,
+                moduleDescription: moduleDescription(for: missingModuleName)
+            )
+        } else {
             viewState = .ready
             autoSearchIfNeeded()
-        } else {
-            viewState = .needsIndex(
-                moduleName: mod.info.name,
-                moduleDescription: mod.info.description.isEmpty ? mod.info.name : mod.info.description
-            )
         }
+    }
+
+    /**
+     Resolves a user-visible description for one installed module name.
+
+     - Parameter moduleName: SWORD module abbreviation to describe.
+     - Returns: Module description when available, otherwise the module abbreviation.
+     */
+    private func moduleDescription(for moduleName: String) -> String {
+        if let info = installedBibleModules.first(where: { $0.name == moduleName }) {
+            return info.description.isEmpty ? info.name : info.description
+        }
+        if let mod = swordModule, mod.info.name == moduleName {
+            return mod.info.description.isEmpty ? mod.info.name : mod.info.description
+        }
+        if let mod = swordManager?.module(named: moduleName) {
+            return mod.info.description.isEmpty ? mod.info.name : mod.info.description
+        }
+        return moduleName
     }
 
     /**

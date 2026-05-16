@@ -69,6 +69,7 @@ Verification matrix:
 - grouped Search state reports the selected translation set
 - grouped Search state reports a combined total plus per-translation counts
 - the regression fixture returns more hits only when both KJV and UITESTWEB participate
+- selecting a grouped UITESTWEB result navigates the reader away from its original passage
 
 ### Strong's behavior
 
@@ -98,6 +99,7 @@ This gives the search domain current regression evidence for:
 - scope mutation
 - word-mode mutation
 - multi-translation grouped totals
+- grouped-result navigation
 - Strong's normalization/hit search
 - result navigation into the reader
 

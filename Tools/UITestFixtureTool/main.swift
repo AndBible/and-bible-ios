@@ -567,6 +567,7 @@ private final class FixtureContext {
      Records the seeded module metadata expected by `SearchIndexService.hasIndex`.
      *
      * - Parameters:
+     *   - moduleName: Module abbreviation to record as indexed.
      *   - db: Open SQLite handle for `search_indexes.sqlite`.
      *   - verseCount: Number of seeded verse rows for the module.
      * - Throws: `FixtureToolError.sqlite` when the metadata row cannot be written.
