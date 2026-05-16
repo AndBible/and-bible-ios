@@ -43,6 +43,11 @@ noMyNotesDescription: >
 emptyStudyPad: >
   Empty study pad. Start adding to this study pad by creating text entries here
   or by creating bookmarks with a bookmark label that corresponds with this study pad.
+addStudyPadNoteAccessibilityLabel: Add StudyPad note for %s
+appendStudyPadNoteAccessibilityLabel: Add StudyPad note after last entry for %s
+studyPadNoteEntryAccessibilityName: note
+editStudyPadEntryAccessibilityLabel: Edit StudyPad %s for %s
+studyPadEntryEditorAccessibilityLabel: StudyPad %s editor for %s
 doYouWantToDeleteEntry: Delete this study pad entry?
 removeStudyPadConfirmationTitle: Remove study pad entry?
 dragHelp: Drag to reorder

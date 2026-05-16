@@ -8498,13 +8498,13 @@ final class AndBibleUITests: XCTestCase {
             app.textFields[label].firstMatch,
             app.otherElements[label].firstMatch,
         ]
-        return firstExistingMyNotesWebControl(candidates, timeout: timeout)
+        return firstExistingDocumentWebControl(candidates, timeout: timeout)
     }
 
     /**
-     Polls a small My Notes candidate set using a shared timeout across all accessibility types.
+     Polls a small embedded-document candidate set using a shared timeout across all accessibility types.
      */
-    private func firstExistingMyNotesWebControl(
+    private func firstExistingDocumentWebControl(
         _ candidates: [XCUIElement],
         timeout: TimeInterval
     ) -> XCUIElement? {
@@ -8703,7 +8703,7 @@ final class AndBibleUITests: XCTestCase {
             app.textFields[label].firstMatch,
             app.otherElements[label].firstMatch,
         ]
-        return firstExistingMyNotesWebControl(candidates, timeout: timeout)
+        return firstExistingDocumentWebControl(candidates, timeout: timeout)
     }
 
     /**

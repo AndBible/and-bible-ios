@@ -39,6 +39,11 @@ openFootnote: ""
 noMyNotesTitle: No My Notes for this chapter.
 noMyNotesDescription: >
 emptyStudyPad: >
+addStudyPadNoteAccessibilityLabel: ""
+appendStudyPadNoteAccessibilityLabel: ""
+studyPadNoteEntryAccessibilityName: ""
+editStudyPadEntryAccessibilityLabel: ""
+studyPadEntryEditorAccessibilityLabel: ""
 doYouWantToDeleteEntry: ""
 removeStudyPadConfirmationTitle: ""
 dragHelp: ""

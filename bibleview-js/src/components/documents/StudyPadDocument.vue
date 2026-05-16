@@ -134,7 +134,7 @@ const {
     genericBookmarkToLabels: genericBookmarkToLabels_,
 } = props.document;
 
-const {strings, appSettings} = useCommon()
+const {strings, appSettings, sprintf} = useCommon()
 
 const journal = useStudyPad(label);
 provide(journalKey, journal);
@@ -295,8 +295,12 @@ const showCursor = computed<boolean>(() => {
     return isAutoAssignLabel.value && !exportMode.value;
 });
 
-const addStudyPadNoteAccessibilityLabel = computed(() => `Add StudyPad note for ${label.name}`);
-const appendStudyPadNoteAccessibilityLabel = computed(() => `Add StudyPad note after last entry for ${label.name}`);
+const addStudyPadNoteAccessibilityLabel = computed(
+    () => sprintf(strings.addStudyPadNoteAccessibilityLabel, label.name)
+);
+const appendStudyPadNoteAccessibilityLabel = computed(
+    () => sprintf(strings.appendStudyPadNoteAccessibilityLabel, label.name)
+);
 
 function moveCursorTo(orderNumber: number): void {
     android.setStudyPadCursor(label.id, orderNumber);

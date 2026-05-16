@@ -87,6 +87,11 @@ type TranslatedStrings = {
     noMyNotesTitle: string
     noMyNotesDescription: string
     emptyStudyPad: string
+    addStudyPadNoteAccessibilityLabel: string
+    appendStudyPadNoteAccessibilityLabel: string
+    studyPadNoteEntryAccessibilityName: string
+    editStudyPadEntryAccessibilityLabel: string
+    studyPadEntryEditorAccessibilityLabel: string
     doYouWantToDeleteEntry: string
     removeStudyPadConfirmationTitle: string
     dragHelp: string

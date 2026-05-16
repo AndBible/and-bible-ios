@@ -150,15 +150,15 @@ const journalText = computed(() => {
 });
 
 const studyPadEntryAccessibilityName = computed(() => {
-    if (props.journalEntry.type === "journal") return "note";
+    if (props.journalEntry.type === "journal") return strings.studyPadNoteEntryAccessibilityName;
     if (props.journalEntry.type === "generic-bookmark") return genericBookmarkEntry.value.keyName;
     return bookmarkEntry.value.verseRangeAbbreviated;
 });
 const studyPadEditAccessibilityLabel = computed(
-    () => `Edit StudyPad ${studyPadEntryAccessibilityName.value} for ${props.label.name}`
+    () => sprintf(strings.editStudyPadEntryAccessibilityLabel, studyPadEntryAccessibilityName.value, props.label.name)
 );
 const studyPadEditorAccessibilityLabel = computed(
-    () => `StudyPad ${studyPadEntryAccessibilityName.value} editor for ${props.label.name}`
+    () => sprintf(strings.studyPadEntryEditorAccessibilityLabel, studyPadEntryAccessibilityName.value, props.label.name)
 );
 
 function editBookmark(event: MouseEvent) {
