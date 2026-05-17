@@ -1332,6 +1332,7 @@ public struct BibleReaderView: View {
         ) {
             readerToolbarActions(controller: controller)
         }
+        .readerRenderedContentStateAccessibilityValue(readerRenderedContentStateValue)
     }
 
     /// Extra document-header padding reserved for iPad windowed layouts with floating controls.
@@ -2502,6 +2503,26 @@ public struct BibleReaderView: View {
         tiltScrollService.start()
     }
     #endif
+}
+
+/// Applies the compact reader state to early reader chrome only for UI automation.
+private struct ReaderRenderedContentStateAccessibilityModifier: ViewModifier {
+    let value: String
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if UITestRuntimeConfiguration.enablesDetailedAccessibilityExports {
+            content.accessibilityValue(value)
+        } else {
+            content
+        }
+    }
+}
+
+private extension View {
+    func readerRenderedContentStateAccessibilityValue(_ value: String) -> some View {
+        modifier(ReaderRenderedContentStateAccessibilityModifier(value: value))
+    }
 }
 
 /**

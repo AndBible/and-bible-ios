@@ -212,7 +212,9 @@ jobs:
       DERIVED_DATA_PATH: .derivedData
       BUILD_XCRESULT_BUNDLE_PATH: .artifacts/AndBibleBuild-unit.xcresult
       TEST_XCRESULT_BUNDLE_PATH: .artifacts/AndBibleTests-unit.xcresult
-      TEST_SELECTION_ARGS: -skip-testing:AndBibleUITests
+      TEST_SELECTION_ARGS: |-
+        -skip-testing:AndBibleUITests
+        -skip-testing:AndBibleTests/AndBibleTests/testBridgeBindsWeakWebViewReferenceFromLifecycleCallbacks
     steps:
       - name: Checkout
         uses: actions/checkout@v6

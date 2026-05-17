@@ -1,6 +1,6 @@
 # READING-PLANS-702 Regression Report
 
-Date: 2026-05-15
+Date: 2026-05-16
 
 ## Scope
 
@@ -13,6 +13,8 @@ Regression verification for the current reading-plan parity surface, covering:
 - Android-shaped initial-backup upload
 - sparse patch replay and sparse patch upload
 - steady-state remote synchronization of reading-plan changes
+- custom Android-style `.properties` plan import semantics
+- additive iOS algorithmic plan lifecycle behavior
 
 Contract reference:
 
@@ -48,6 +50,8 @@ Verification matrix:
 - `AndBibleTests/testRemoteSyncReadingPlanPatchUploadReturnsNilWhenStateMatchesBaseline`
 - `AndBibleTests/testRemoteSyncReadingPlanPatchUploadWritesAndUploadsSparsePatch`
 - `AndBibleTests/testRemoteSyncReadingPlanPatchUploadDetectsDeleteAfterInitialRestoreRefresh`
+- `AndBibleTests/testReadingPlanCustomPropertiesImportPreservesAndroidSyntax`
+- `AndBibleTests/testReadingPlanAlgorithmicPlanLifecycleRemainsAdditive`
 
 ### UI
 
@@ -90,11 +94,27 @@ Verification matrix:
 - older patches are skipped
 - a ready reading-plan category can both replay remote patches and upload local changes
 
+### Custom `.properties` import
+
+- numeric Android-style day keys are parsed into one-based day numbers
+- non-numeric metadata keys such as `Versification` are ignored
+- comma-separated OSIS reference strings and range references are preserved exactly
+- custom import sizes the template from the highest numeric day key
+- missing numeric days return empty readings instead of inventing assignments
+
+### Additive iOS algorithmic plan lifecycle
+
+- Android bundled templates remain present and retain their day-one readings
+- the iOS-only `nt_90` algorithmic template remains additive
+- starting the algorithmic plan creates an active persisted plan with `currentDay = 0`
+- generated algorithmic day rows remain one-based and cover all 90 days
+- completion percentage is calculated from completed generated day rows
+
 ## Current Result
 
-Focused reading-plan validation passed on 2026-05-15:
+Focused reading-plan validation passed on 2026-05-16:
 
-- unit and integration: `16` tests, `0` failures
+- unit and integration: `18` tests, `0` failures
 - UI: `2` tests, `0` failures
 
 This gives the reading-plan domain current regression evidence for:
@@ -108,13 +128,11 @@ This gives the reading-plan domain current regression evidence for:
 - sparse patch replay
 - sparse patch upload
 - steady-state synchronization
+- custom Android-style `.properties` plan import
+- additive iOS algorithmic plan lifecycle
 
 ## Remaining Gap
 
-The current reading-plan parity gap is not the sync core or visible list workflow. It is:
-
-- regression coverage for the additive iOS algorithmic plans
-- a focused parser/import-content regression for custom `.properties` plans
-
-Those areas are implemented, but they are not yet locked by focused regression
-coverage, so they remain `Partial` in `verification-matrix.md`.
+No reading-plan parity matrix rows currently remain `Partial`. Future changes
+should keep the focused import and algorithmic lifecycle tests green alongside
+the existing sync and UI coverage.

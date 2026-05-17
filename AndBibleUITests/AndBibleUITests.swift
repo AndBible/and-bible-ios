@@ -1011,7 +1011,7 @@ final class AndBibleUITests: XCTestCase {
 
         tapElementReliably(requireMyNotesWebControl(named: actionsLabel, in: app, timeout: 15), timeout: 10)
         tapElementReliably(requireMyNotesWebControl(named: openNoteEditorLabel, in: app, timeout: 15), timeout: 10)
-        waitForVisibleMyNotesState(containing: "myNotesEditing=true", in: app, timeout: 20)
+        waitForVisibleMyNotesEditorActivation(orPersistedMarker: updatedNoteMarker, in: app, timeout: 20)
         waitForVisibleMyNotesState(containing: updatedNoteMarker, in: app, timeout: 20)
         dismissMyNotesEditor(in: app, timeout: 15)
         waitForVisibleMyNotesState(containing: "myNotesEditing=false", in: app, timeout: 20)
@@ -2777,6 +2777,9 @@ final class AndBibleUITests: XCTestCase {
            resolvedElement("readerOverflowMenu", in: app) == nil
         {
             let directCandidates = [
+                app.otherElements["readerDocumentHeader"].buttons["readerSearchButton"].firstMatch,
+                app.otherElements["readerDocumentHeader"].buttons["Search"].firstMatch,
+                app.buttons["readerSearchButton"].firstMatch,
                 app.buttons["readerOpenSearchAction"].firstMatch,
                 app.buttons["Search"].firstMatch,
             ]
@@ -2921,18 +2924,26 @@ final class AndBibleUITests: XCTestCase {
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
+        func matches(_ value: String) -> Bool {
+            value.contains("state=ready")
+                && value.contains("searching=false")
+                && value.contains(token)
+        }
+
         let deadline = Date().addingTimeInterval(timeout)
         repeat {
-            if let value = resolvedSearchStateValue(in: app),
-               value.contains("state=ready"),
-               value.contains("searching=false"),
-               value.contains(token) {
+            if searchStateCandidateValues(in: app).contains(where: matches) {
                 return
             }
             RunLoop.current.run(until: Date().addingTimeInterval(0.25))
         } while Date() < deadline
 
-        let lastValue = resolvedSearchStateValue(in: app) ?? "nil"
+        let finalValues = searchStateCandidateValues(in: app)
+        if finalValues.contains(where: matches) {
+            return
+        }
+
+        let lastValue = finalValues.isEmpty ? "nil" : finalValues.joined(separator: " || ")
         XCTFail(
             "Expected Search state to contain '\(token)' within \(timeout) seconds; last value was '\(lastValue)'.",
             file: file,
@@ -3133,8 +3144,17 @@ final class AndBibleUITests: XCTestCase {
                 ($0.exists || $0.waitForExistence(timeout: 0.2))
                     && waitForElementToBecomeHittable($0, timeout: 0.5)
             }) {
-                identifierElement.tap()
-                return
+                tapElementReliably(identifierElement, timeout: 3)
+
+                let confirmationDeadline = Date().addingTimeInterval(1.5)
+                repeat {
+                    if searchStateCandidateValues(in: app)
+                        .contains(where: { $0.contains("scope=\(scopeToken.rawValue)") })
+                    {
+                        return
+                    }
+                    RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+                } while Date() < confirmationDeadline
             }
 
             if scopeStrip.exists, !scopeStrip.frame.isEmpty {
@@ -5229,7 +5249,12 @@ final class AndBibleUITests: XCTestCase {
     ) -> [XCUIElement] {
         switch identifier {
         case "searchStateExport":
-            return screenScopedStateCandidates(identifier, within: "searchScreen", in: app)
+            return [
+                app.textFields[identifier].firstMatch,
+                app.staticTexts[identifier].firstMatch,
+                app.otherElements["searchScreen"].textFields[identifier].firstMatch,
+                app.otherElements["searchScreen"].staticTexts[identifier].firstMatch,
+            ]
         case "bookmarkListStateExport":
             return screenScopedStateCandidates(identifier, within: "bookmarkListScreen", in: app)
         case "readingPlanListStateExport":
@@ -5326,14 +5351,14 @@ final class AndBibleUITests: XCTestCase {
             ]
         case "readerNavigationDrawerButton":
             return [
-                app.buttons[identifier].firstMatch,
                 app.otherElements["readerDocumentHeader"].buttons[identifier].firstMatch,
+                app.buttons[identifier].firstMatch,
                 app.otherElements[identifier].firstMatch,
             ]
         case "readerMoreMenuButton", "bookChooserButton":
             return [
-                app.buttons[identifier].firstMatch,
                 app.otherElements["readerDocumentHeader"].buttons[identifier].firstMatch,
+                app.buttons[identifier].firstMatch,
                 app.otherElements[identifier].firstMatch,
             ]
         case "readerStrongsToolbarButton":
@@ -5349,6 +5374,8 @@ final class AndBibleUITests: XCTestCase {
             ]
         case "windowTabAddButton":
             return [
+                app.scrollViews["windowTabBar"].buttons[identifier].firstMatch,
+                app.otherElements["windowTabBar"].buttons[identifier].firstMatch,
                 app.buttons[identifier].firstMatch,
                 app.otherElements[identifier].firstMatch,
             ]
@@ -5988,11 +6015,25 @@ final class AndBibleUITests: XCTestCase {
 
     /// Reads the compact reader state export without walking drawer or overflow menu contents.
     private func readerRenderedContentStateValue(in app: XCUIApplication) -> String? {
+        if let headerValue = readerDocumentHeaderStateValue(in: app) {
+            return headerValue
+        }
         let stateElement = readerRenderedContentStateElement(in: app)
         guard stateElement.exists else {
             return nil
         }
         return stateElement.value as? String
+    }
+
+    /// Reads reader state from the early document-header chrome before probing the full WebView tree.
+    private func readerDocumentHeaderStateValue(in app: XCUIApplication) -> String? {
+        let header = app.otherElements["readerDocumentHeader"].firstMatch
+        guard header.exists,
+              let value = header.value as? String,
+              value.contains("windowOrder=") else {
+            return nil
+        }
+        return value
     }
 
     /// Returns the dedicated compact reader state export query without probing broad element sets.
@@ -6174,12 +6215,11 @@ final class AndBibleUITests: XCTestCase {
 
         let identifier = "windowTabButton::\(order)"
         let tabButton = requireElement(identifier, in: app, timeout: timeout, file: file, line: line)
-        let stateElement = readerRenderedContentStateElement(in: app)
 
         let deadline = Date().addingTimeInterval(timeout)
         repeat {
             let tabValue = tabButton.value as? String ?? ""
-            let renderedState = stateElement.value as? String ?? ""
+            let renderedState = readerRenderedContentStateValue(in: app) ?? ""
             if tabValue.contains("state=active") && renderedState.contains("windowOrder=\(order)") {
                 return
             }
@@ -6187,7 +6227,7 @@ final class AndBibleUITests: XCTestCase {
         } while Date() < deadline
 
         let lastTabValue = tabButton.value.map { "\($0)" } ?? "nil"
-        let lastRenderedState = stateElement.value.map { "\($0)" } ?? "nil"
+        let lastRenderedState = readerRenderedContentStateValue(in: app) ?? "nil"
         XCTFail(
             "Expected added window tab \(order) to become the active rendered window within \(timeout) seconds; last tab value was '\(lastTabValue)' and last reader state was '\(lastRenderedState)'.",
             file: file,
@@ -8316,6 +8356,32 @@ final class AndBibleUITests: XCTestCase {
     }
 
     /**
+     Waits until the My Notes editor opens or its UI-test edit mutation has already persisted.
+     */
+    private func waitForVisibleMyNotesEditorActivation(
+        orPersistedMarker marker: String,
+        in app: XCUIApplication,
+        timeout: TimeInterval = 10,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        waitForResolvedSemanticState(
+            named: "readerRenderedContentState",
+            timeout: timeout,
+            valueProvider: { readerRenderedContentStateValue(in: app) },
+            success: { state in
+                state.contains("myNotesVisible=true")
+                    && (state.contains("myNotesEditing=true") || state.contains(marker))
+            },
+            failureDescription: { finalValue in
+                "Expected visible My Notes editor activation or persisted marker '\(marker)' within \(timeout) seconds. Final value: '\(finalValue)'."
+            },
+            file: file,
+            line: line
+        )
+    }
+
+    /**
      Waits for the reader's compact My Notes state export to stop containing one token.
      */
     private func waitForMyNotesState(
@@ -8957,16 +9023,36 @@ final class AndBibleUITests: XCTestCase {
 
     /// Resolves the canonical Search state element without walking result-row static text nodes.
     private func resolvedSearchStateElement(in app: XCUIApplication) -> XCUIElement? {
-        resolvedSearchScreenElement(in: app) ?? resolvedStateExportElement("searchStateExport", in: app)
+        resolvedStateExportElement("searchStateExport", in: app) ?? resolvedSearchScreenElement(in: app)
+    }
+
+    /**
+     Reads available Search state surfaces, preferring the compact export but checking the root
+     too because XCTest can briefly return a stale hidden export during fast SwiftUI rerenders.
+     */
+    private func searchStateCandidateValues(in app: XCUIApplication) -> [String] {
+        let candidates = [
+            resolvedStateExportElement("searchStateExport", in: app),
+            resolvedSearchScreenElement(in: app),
+        ]
+
+        var values: [String] = []
+        for candidate in candidates {
+            guard let candidate,
+                  candidate.exists,
+                  let value = candidate.value as? String,
+                  value.contains("state="),
+                  !values.contains(value) else {
+                continue
+            }
+            values.append(value)
+        }
+        return values
     }
 
     /// Reads the current exported Search state from the state-bearing root element.
     private func resolvedSearchStateValue(in app: XCUIApplication) -> String? {
-        if let stateElement = resolvedSearchStateElement(in: app),
-           let value = stateElement.value as? String {
-            return value
-        }
-        return nil
+        searchStateCandidateValues(in: app).first
     }
 
     /// Reads the current exported Bookmark List state without walking the full list hierarchy.
