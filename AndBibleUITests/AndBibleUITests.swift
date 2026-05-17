@@ -2924,18 +2924,26 @@ final class AndBibleUITests: XCTestCase {
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
+        func matches(_ value: String) -> Bool {
+            value.contains("state=ready")
+                && value.contains("searching=false")
+                && value.contains(token)
+        }
+
         let deadline = Date().addingTimeInterval(timeout)
         repeat {
-            if let value = resolvedSearchStateValue(in: app),
-               value.contains("state=ready"),
-               value.contains("searching=false"),
-               value.contains(token) {
+            if searchStateCandidateValues(in: app).contains(where: matches) {
                 return
             }
             RunLoop.current.run(until: Date().addingTimeInterval(0.25))
         } while Date() < deadline
 
-        let lastValue = resolvedSearchStateValue(in: app) ?? "nil"
+        let finalValues = searchStateCandidateValues(in: app)
+        if finalValues.contains(where: matches) {
+            return
+        }
+
+        let lastValue = finalValues.isEmpty ? "nil" : finalValues.joined(separator: " || ")
         XCTFail(
             "Expected Search state to contain '\(token)' within \(timeout) seconds; last value was '\(lastValue)'.",
             file: file,
@@ -3136,8 +3144,17 @@ final class AndBibleUITests: XCTestCase {
                 ($0.exists || $0.waitForExistence(timeout: 0.2))
                     && waitForElementToBecomeHittable($0, timeout: 0.5)
             }) {
-                identifierElement.tap()
-                return
+                tapElementReliably(identifierElement, timeout: 3)
+
+                let confirmationDeadline = Date().addingTimeInterval(1.5)
+                repeat {
+                    if searchStateCandidateValues(in: app)
+                        .contains(where: { $0.contains("scope=\(scopeToken.rawValue)") })
+                    {
+                        return
+                    }
+                    RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+                } while Date() < confirmationDeadline
             }
 
             if scopeStrip.exists, !scopeStrip.frame.isEmpty {
@@ -8975,7 +8992,7 @@ final class AndBibleUITests: XCTestCase {
 
     /// Resolves the Search root element that owns the canonical UI-test state value.
     private func resolvedSearchScreenElement(in app: XCUIApplication) -> XCUIElement? {
-        resolvedStateExportElement("searchStateExport", in: app) ?? resolvedElement("searchScreen", in: app)
+        resolvedElement("searchScreen", in: app)
     }
 
     /// Resolves the canonical Search state element without walking result-row static text nodes.
@@ -8983,13 +9000,31 @@ final class AndBibleUITests: XCTestCase {
         resolvedStateExportElement("searchStateExport", in: app) ?? resolvedSearchScreenElement(in: app)
     }
 
+    /// Reads available Search state surfaces, preferring the compact export but checking the root
+    /// too because XCTest can briefly return a stale hidden export during fast SwiftUI rerenders.
+    private func searchStateCandidateValues(in app: XCUIApplication) -> [String] {
+        let candidates = [
+            resolvedStateExportElement("searchStateExport", in: app),
+            resolvedSearchScreenElement(in: app),
+        ]
+
+        var values: [String] = []
+        for candidate in candidates {
+            guard let candidate,
+                  candidate.exists,
+                  let value = candidate.value as? String,
+                  value.contains("state="),
+                  !values.contains(value) else {
+                continue
+            }
+            values.append(value)
+        }
+        return values
+    }
+
     /// Reads the current exported Search state from the state-bearing root element.
     private func resolvedSearchStateValue(in app: XCUIApplication) -> String? {
-        if let stateElement = resolvedSearchStateElement(in: app),
-           let value = stateElement.value as? String {
-            return value
-        }
-        return nil
+        searchStateCandidateValues(in: app).first
     }
 
     /// Reads the current exported Bookmark List state without walking the full list hierarchy.
