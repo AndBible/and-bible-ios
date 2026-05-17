@@ -2777,6 +2777,9 @@ final class AndBibleUITests: XCTestCase {
            resolvedElement("readerOverflowMenu", in: app) == nil
         {
             let directCandidates = [
+                app.otherElements["readerDocumentHeader"].buttons["readerSearchButton"].firstMatch,
+                app.otherElements["readerDocumentHeader"].buttons["Search"].firstMatch,
+                app.buttons["readerSearchButton"].firstMatch,
                 app.buttons["readerOpenSearchAction"].firstMatch,
                 app.buttons["Search"].firstMatch,
             ]
@@ -5229,7 +5232,12 @@ final class AndBibleUITests: XCTestCase {
     ) -> [XCUIElement] {
         switch identifier {
         case "searchStateExport":
-            return screenScopedStateCandidates(identifier, within: "searchScreen", in: app)
+            return [
+                app.textFields[identifier].firstMatch,
+                app.staticTexts[identifier].firstMatch,
+                app.otherElements["searchScreen"].textFields[identifier].firstMatch,
+                app.otherElements["searchScreen"].staticTexts[identifier].firstMatch,
+            ]
         case "bookmarkListStateExport":
             return screenScopedStateCandidates(identifier, within: "bookmarkListScreen", in: app)
         case "readingPlanListStateExport":
@@ -5326,14 +5334,14 @@ final class AndBibleUITests: XCTestCase {
             ]
         case "readerNavigationDrawerButton":
             return [
-                app.buttons[identifier].firstMatch,
                 app.otherElements["readerDocumentHeader"].buttons[identifier].firstMatch,
+                app.buttons[identifier].firstMatch,
                 app.otherElements[identifier].firstMatch,
             ]
         case "readerMoreMenuButton", "bookChooserButton":
             return [
-                app.buttons[identifier].firstMatch,
                 app.otherElements["readerDocumentHeader"].buttons[identifier].firstMatch,
+                app.buttons[identifier].firstMatch,
                 app.otherElements[identifier].firstMatch,
             ]
         case "readerStrongsToolbarButton":
@@ -5349,6 +5357,8 @@ final class AndBibleUITests: XCTestCase {
             ]
         case "windowTabAddButton":
             return [
+                app.scrollViews["windowTabBar"].buttons[identifier].firstMatch,
+                app.otherElements["windowTabBar"].buttons[identifier].firstMatch,
                 app.buttons[identifier].firstMatch,
                 app.otherElements[identifier].firstMatch,
             ]
@@ -5988,11 +5998,25 @@ final class AndBibleUITests: XCTestCase {
 
     /// Reads the compact reader state export without walking drawer or overflow menu contents.
     private func readerRenderedContentStateValue(in app: XCUIApplication) -> String? {
+        if let headerValue = readerDocumentHeaderStateValue(in: app) {
+            return headerValue
+        }
         let stateElement = readerRenderedContentStateElement(in: app)
         guard stateElement.exists else {
             return nil
         }
         return stateElement.value as? String
+    }
+
+    /// Reads reader state from the early document-header chrome before probing the full WebView tree.
+    private func readerDocumentHeaderStateValue(in app: XCUIApplication) -> String? {
+        let header = app.otherElements["readerDocumentHeader"].firstMatch
+        guard header.exists,
+              let value = header.value as? String,
+              value.contains("windowOrder=") else {
+            return nil
+        }
+        return value
     }
 
     /// Returns the dedicated compact reader state export query without probing broad element sets.
@@ -6174,12 +6198,11 @@ final class AndBibleUITests: XCTestCase {
 
         let identifier = "windowTabButton::\(order)"
         let tabButton = requireElement(identifier, in: app, timeout: timeout, file: file, line: line)
-        let stateElement = readerRenderedContentStateElement(in: app)
 
         let deadline = Date().addingTimeInterval(timeout)
         repeat {
             let tabValue = tabButton.value as? String ?? ""
-            let renderedState = stateElement.value as? String ?? ""
+            let renderedState = readerRenderedContentStateValue(in: app) ?? ""
             if tabValue.contains("state=active") && renderedState.contains("windowOrder=\(order)") {
                 return
             }
@@ -6187,7 +6210,7 @@ final class AndBibleUITests: XCTestCase {
         } while Date() < deadline
 
         let lastTabValue = tabButton.value.map { "\($0)" } ?? "nil"
-        let lastRenderedState = stateElement.value.map { "\($0)" } ?? "nil"
+        let lastRenderedState = readerRenderedContentStateValue(in: app) ?? "nil"
         XCTFail(
             "Expected added window tab \(order) to become the active rendered window within \(timeout) seconds; last tab value was '\(lastTabValue)' and last reader state was '\(lastRenderedState)'.",
             file: file,
@@ -8952,12 +8975,12 @@ final class AndBibleUITests: XCTestCase {
 
     /// Resolves the Search root element that owns the canonical UI-test state value.
     private func resolvedSearchScreenElement(in app: XCUIApplication) -> XCUIElement? {
-        resolvedElement("searchScreen", in: app)
+        resolvedStateExportElement("searchStateExport", in: app) ?? resolvedElement("searchScreen", in: app)
     }
 
     /// Resolves the canonical Search state element without walking result-row static text nodes.
     private func resolvedSearchStateElement(in app: XCUIApplication) -> XCUIElement? {
-        resolvedSearchScreenElement(in: app) ?? resolvedStateExportElement("searchStateExport", in: app)
+        resolvedStateExportElement("searchStateExport", in: app) ?? resolvedSearchScreenElement(in: app)
     }
 
     /// Reads the current exported Search state from the state-bearing root element.
