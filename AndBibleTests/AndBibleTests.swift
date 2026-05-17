@@ -2623,6 +2623,92 @@ final class AndBibleTests: XCTestCase {
         )
     }
 
+    func testReadingPlanCustomPropertiesImportPreservesAndroidSyntax() throws {
+        let propertiesText = """
+        # Android-style custom plan
+        Versification=KJV
+        1 = Gen.1-Gen.2
+        2=Matt.1, Mark.1
+        day3=Ignored
+        3 = 1Cor.13, 2Tim.1-2Tim.2
+        6 = Rev.21-Rev.22
+        """
+
+        let parsedReadings = ReadingPlanService.parseProperties(propertiesText)
+
+        XCTAssertEqual(
+            parsedReadings,
+            [
+                1: "Gen.1-Gen.2",
+                2: "Matt.1, Mark.1",
+                3: "1Cor.13, 2Tim.1-2Tim.2",
+                6: "Rev.21-Rev.22",
+            ]
+        )
+        XCTAssertNil(parsedReadings[0])
+
+        let template = try XCTUnwrap(
+            ReadingPlanService.importCustomPlan(
+                name: "Custom Android Plan",
+                propertiesText: propertiesText
+            )
+        )
+
+        XCTAssertTrue(template.code.hasPrefix("custom_"))
+        XCTAssertEqual(template.name, "Custom Android Plan")
+        XCTAssertEqual(template.description, "Custom imported reading plan (6 days).")
+        XCTAssertEqual(template.totalDays, 6)
+        XCTAssertEqual(template.readingsForDay(1), "Gen.1-Gen.2")
+        XCTAssertEqual(template.readingsForDay(2), "Matt.1, Mark.1")
+        XCTAssertEqual(template.readingsForDay(3), "1Cor.13, 2Tim.1-2Tim.2")
+        XCTAssertEqual(template.readingsForDay(4), "")
+        XCTAssertEqual(template.readingsForDay(6), "Rev.21-Rev.22")
+    }
+
+    func testReadingPlanAlgorithmicPlanLifecycleRemainsAdditive() throws {
+        let androidTemplate = try XCTUnwrap(
+            ReadingPlanService.availablePlans.first(where: { $0.code == "y1ot1nt1_OTthenNT" })
+        )
+        let algorithmicTemplate = try XCTUnwrap(
+            ReadingPlanService.availablePlans.first(where: { $0.code == "nt_90" })
+        )
+
+        XCTAssertEqual(androidTemplate.readingsForDay(1), "Gen.1-Gen.4")
+        XCTAssertEqual(algorithmicTemplate.name, "New Testament in 90 Days")
+        XCTAssertEqual(algorithmicTemplate.totalDays, 90)
+        XCTAssertEqual(algorithmicTemplate.readingsForDay(1), "Matt.1,Matt.2,Matt.3")
+
+        let container = try makeReadingPlanRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        let plan = ReadingPlanService.startPlan(
+            template: algorithmicTemplate,
+            modelContext: modelContext
+        )
+
+        XCTAssertEqual(plan.planCode, "nt_90")
+        XCTAssertEqual(plan.planName, "New Testament in 90 Days")
+        XCTAssertEqual(plan.currentDay, 0)
+        XCTAssertEqual(plan.totalDays, 90)
+        XCTAssertTrue(plan.isActive)
+        XCTAssertEqual(ReadingPlanService.expectedDay(for: plan), 1)
+
+        let days = (plan.days ?? []).sorted { $0.dayNumber < $1.dayNumber }
+        XCTAssertEqual(days.count, 90)
+        XCTAssertEqual(Array(days.prefix(3).map(\.dayNumber)), [1, 2, 3])
+        XCTAssertEqual(days.first?.readings, "Matt.1,Matt.2,Matt.3")
+        XCTAssertEqual(days.last?.dayNumber, 90)
+        XCTAssertFalse(days[0].isCompleted)
+
+        days[0].isCompleted = true
+        try modelContext.save()
+
+        XCTAssertEqual(
+            ReadingPlanService.completionPercentage(for: plan),
+            1.0 / 90.0,
+            accuracy: 0.0001
+        )
+    }
+
     func testRemoteSyncReadingPlanRestoreReadsAndroidSnapshot() throws {
         let service = RemoteSyncReadingPlanRestoreService()
         let databaseURL = try makeAndroidReadingPlansDatabase(

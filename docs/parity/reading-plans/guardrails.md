@@ -76,11 +76,11 @@ focused coverage rather than relying on the existing subset alone.
   integration coverage for restore, upload, and patch behavior.
 - Current protection is a combination of:
   - reading-plan workflow tests in `AndBibleUITests`
+  - custom import and additive algorithmic lifecycle tests in `AndBibleTests`
   - restore/apply/upload regressions in `AndBibleTests`
   - explicit parity documentation in this directory
 
 ## Potential Improvements
 
-- add focused regression coverage for custom `.properties` plan import
-- add focused UI coverage for reading-plan list, start, delete, and import behavior
-- add focused lifecycle coverage for the additive iOS-only algorithmic plans
+- broaden UI coverage around actual custom file-import success paths when an
+  automation-safe file-picker harness exists
