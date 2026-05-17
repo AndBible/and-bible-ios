@@ -9000,8 +9000,10 @@ final class AndBibleUITests: XCTestCase {
         resolvedStateExportElement("searchStateExport", in: app) ?? resolvedSearchScreenElement(in: app)
     }
 
-    /// Reads available Search state surfaces, preferring the compact export but checking the root
-    /// too because XCTest can briefly return a stale hidden export during fast SwiftUI rerenders.
+    /**
+     Reads available Search state surfaces, preferring the compact export but checking the root
+     too because XCTest can briefly return a stale hidden export during fast SwiftUI rerenders.
+     */
     private func searchStateCandidateValues(in app: XCUIApplication) -> [String] {
         let candidates = [
             resolvedStateExportElement("searchStateExport", in: app),
