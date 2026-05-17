@@ -7,6 +7,7 @@
   "AndBibleUITests/AndBibleUITests/testBookmarkListLabelFilterNarrowsAndClearsVisibleRows": "bookmark-filter",
   "AndBibleUITests/AndBibleUITests/testBookmarkListOpensLabelAssignmentForSeededBookmark": "bookmark-row-label",
   "AndBibleUITests/AndBibleUITests/testBookmarkListOpensStudyPadForSelectedLabel": "bookmark-studypad",
+  "AndBibleUITests/AndBibleUITests/testStudyPadCreateTextEntryPersistsAcrossReopen": "bookmark-studypad",
   "AndBibleUITests/AndBibleUITests/testMyNotesNoteUpdateAndDeletePersistsFromVisibleWorkflow": "my-notes-single",
   "AndBibleUITests/AndBibleUITests/testBookmarkListSearchNarrowsAndClearsVisibleRows": "bookmark-multirow",
   "AndBibleUITests/AndBibleUITests/testBookmarkListSortMenuReordersRows": "bookmark-multirow",

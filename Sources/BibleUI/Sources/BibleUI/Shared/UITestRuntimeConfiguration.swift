@@ -6,6 +6,8 @@ enum UITestRuntimeConfiguration {
     private static let detailedAccessibilityExportsArgument = "-UITEST_ENABLE_DETAILED_ACCESSIBILITY_EXPORTS"
     private static let myNotesAppendTextEnvironmentKey = "UITEST_MY_NOTES_APPEND_TEXT"
     private static let myNotesAppendTextArgument = "-UITEST_MY_NOTES_APPEND_TEXT"
+    private static let studyPadCreatedNoteTextEnvironmentKey = "UITEST_STUDYPAD_CREATED_NOTE_TEXT"
+    private static let studyPadCreatedNoteTextArgument = "-UITEST_STUDYPAD_CREATED_NOTE_TEXT"
     private static let remoteSyncBootstrapScenarioEnvironmentKey = "UITEST_REMOTE_SYNC_BOOTSTRAP_SCENARIO"
     private static let remoteSyncBootstrapScenarioArgument = "-UITEST_REMOTE_SYNC_BOOTSTRAP_SCENARIO"
 
@@ -32,6 +34,18 @@ enum UITestRuntimeConfiguration {
             return value
         }
         guard let value = argumentValue(after: myNotesAppendTextArgument), !value.isEmpty else {
+            return nil
+        }
+        return value
+    }
+
+    /// Optional text for deterministic StudyPad create-note actions exposed only during UI tests.
+    static var studyPadCreatedNoteText: String? {
+        if let value = ProcessInfo.processInfo.environment[studyPadCreatedNoteTextEnvironmentKey],
+           !value.isEmpty {
+            return value
+        }
+        guard let value = argumentValue(after: studyPadCreatedNoteTextArgument), !value.isEmpty else {
             return nil
         }
         return value

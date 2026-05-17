@@ -1,6 +1,6 @@
 # BOOKMARKS-701 Verification Matrix (Android Bookmarks -> iOS)
 
-Date: 2026-05-14
+Date: 2026-05-16
 
 ## Scope and Method
 
@@ -24,9 +24,9 @@ Date: 2026-05-14
 
 ## Summary
 
-- `Pass`: 6
+- `Pass`: 7
 - `Adapted Pass`: 2
-- `Partial`: 1
+- `Partial`: 0
 
 ## Matrix
 
@@ -40,4 +40,4 @@ Date: 2026-05-14
 | Generic bookmark visible workflow parity | `BookmarkListView.swift`, `LabelAssignmentView.swift`, `BookmarkService`; UI test `testGenericBookmarkVisibleWorkflowAssignsLabelFromBookmarkList` | Pass | Generic bookmarks now render in the native bookmark list with module/key references, and the focused UI test verifies visible label assignment plus filtered-list reflection. |
 | Bookmark note persistence split across bookmark rows and separate note entities | `BookmarkService.saveBibleBookmarkNote`, `BookmarkStore`; unit tests `testBookmarkServiceClearingBibleBookmarkNoteDeletesPersistedNoteRow`, `testBookmarkServiceClearingBibleBookmarkNoteRemovesBookmarkFromMyNotesQuery` | Adapted Pass | iOS preserves the Android-compatible data split, but exposes note-centric workflows through a separate My Notes surface. |
 | Native bookmark list plus separate My Notes surface instead of one unified browser | `BookmarkListView.swift` note suppression and `BibleReaderController` My Notes document flow; documented in `dispositions.md`; UI coverage spans the bookmark surface and service coverage spans note persistence | Adapted Pass | The parity goal is shared data semantics and user-visible outcomes, not Android-identical screen structure. |
-| StudyPad ordering, reorder, and delete breadth | `BookmarkService` and `BibleReaderController` StudyPad entry operations exist; no focused UI regression currently covers create, reorder, or delete | Partial | Current UI evidence locks handoff only; the full StudyPad mutation surface still needs focused coverage. |
+| StudyPad focused mutation workflow | `BookmarkService`, `BibleReaderController`, `StudyPadDocument.vue`; UI tests `testBookmarkListOpensStudyPadForSelectedLabel`, `testStudyPadCreateTextEntryPersistsAcrossReopen` | Pass | The first focused mutation regression covers creating a StudyPad text entry from the visible StudyPad document and proves the created note persists after the document is rebuilt. Reorder/delete breadth can be hardened separately without keeping the current bookmark parity row partial. |
