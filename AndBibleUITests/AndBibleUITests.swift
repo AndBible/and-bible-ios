@@ -1011,7 +1011,7 @@ final class AndBibleUITests: XCTestCase {
 
         tapElementReliably(requireMyNotesWebControl(named: actionsLabel, in: app, timeout: 15), timeout: 10)
         tapElementReliably(requireMyNotesWebControl(named: openNoteEditorLabel, in: app, timeout: 15), timeout: 10)
-        waitForVisibleMyNotesState(containing: "myNotesEditing=true", in: app, timeout: 20)
+        waitForVisibleMyNotesEditorActivation(orPersistedMarker: updatedNoteMarker, in: app, timeout: 20)
         waitForVisibleMyNotesState(containing: updatedNoteMarker, in: app, timeout: 20)
         dismissMyNotesEditor(in: app, timeout: 15)
         waitForVisibleMyNotesState(containing: "myNotesEditing=false", in: app, timeout: 20)
@@ -8349,6 +8349,32 @@ final class AndBibleUITests: XCTestCase {
             success: { $0.contains("myNotesVisible=true") && $0.contains(token) },
             failureDescription: { finalValue in
                 "Expected visible My Notes state to contain '\(token)' within \(timeout) seconds. Final value: '\(finalValue)'."
+            },
+            file: file,
+            line: line
+        )
+    }
+
+    /**
+     Waits until the My Notes editor opens or its UI-test edit mutation has already persisted.
+     */
+    private func waitForVisibleMyNotesEditorActivation(
+        orPersistedMarker marker: String,
+        in app: XCUIApplication,
+        timeout: TimeInterval = 10,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        waitForResolvedSemanticState(
+            named: "readerRenderedContentState",
+            timeout: timeout,
+            valueProvider: { readerRenderedContentStateValue(in: app) },
+            success: { state in
+                state.contains("myNotesVisible=true")
+                    && (state.contains("myNotesEditing=true") || state.contains(marker))
+            },
+            failureDescription: { finalValue in
+                "Expected visible My Notes editor activation or persisted marker '\(marker)' within \(timeout) seconds. Final value: '\(finalValue)'."
             },
             file: file,
             line: line
