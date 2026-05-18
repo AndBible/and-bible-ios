@@ -2469,6 +2469,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             changedGenericBtls: changedGbtls,
             changedEntries: changedEntries
         )
+        applyUITestStudyPadCreatedNoteTextIfNeeded()
     }
 
     /**
