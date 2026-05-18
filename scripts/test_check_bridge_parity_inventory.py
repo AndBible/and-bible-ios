@@ -70,11 +70,12 @@ class BridgeParityInventoryTests(unittest.TestCase):
                     {
                         "references": {
                             "iosBundledMethodCount": 2,
-                            "androidMethodCount": 3,
+                            "androidMethodCount": 4,
                             "androidInterfaceRelativePath": "android.ts",
                         },
                         "missingAndroidMethods": [
-                            {"method": "missing", "status": "missing_needs_triage"}
+                            {"method": "missing", "status": "missing_needs_triage"},
+                            {"method": "deferredMissing", "status": "missing_deferred_with_issue"},
                         ],
                         "iosNoOpMethods": [
                             {"method": "noOp", "status": "ios_no_op_needs_decision"}
@@ -89,13 +90,14 @@ class BridgeParityInventoryTests(unittest.TestCase):
                 "    implemented: () => void,\n"
                 "    noOp: () => void,\n"
                 "    missing: () => void,\n"
+                "    deferredMissing: () => void,\n"
                 "}\n"
             )
 
             messages = validate_inventory(inventory, ios_interface, android_root)
 
         self.assertEqual(messages[0], "Bridge parity alignment summary")
-        self.assertIn("- tracked Android-only methods: 1", messages)
+        self.assertIn("- tracked Android-only methods: 2", messages)
         self.assertIn("- new Android-only methods: none", messages)
         self.assertIn("- stale inventory entries: none", messages)
         self.assertTrue(

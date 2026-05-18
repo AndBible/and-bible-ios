@@ -110,7 +110,8 @@ Notes:
 - `addParagraphBreakBookmark` and `addGenericParagraphBreakBookmark` create native bookmarks
   with the reserved paragraph-break label so the web renderer inserts the break marker.
 - `memorize` validates its Android-style arguments but remains a deferred no-op on iOS until
-  native memorization/progress parity is implemented.
+  native memorization/progress parity is implemented. The #50 disposition splits that work into
+  the iOS model/storage contract (#77), bridge state behavior (#76), and speech-loop parity (#78).
 
 ### StudyPad
 

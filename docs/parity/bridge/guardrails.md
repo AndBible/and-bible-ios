@@ -54,8 +54,10 @@ rules explicit for changes in:
    `addGenericParagraphBreakBookmark` remain part of the contract because the
    shared frontend still knows about them. Paragraph-break actions now create
    native bookmarks with the reserved paragraph-break label; `memorize` remains
-   a validated deferred no-op linked to the memorization parity issue. Removing
-   or weakening these branches requires coordinated contract work, not
+   a validated deferred no-op linked to the memorization parity decision. The
+   broader Android memorization family is split across #77 for model/storage,
+   #76 for bridge state behavior, and #78 for speech-loop parity. Removing or
+   weakening these branches requires coordinated contract work, not
    opportunistic cleanup.
 
 6. Do not change `BridgeTypes.swift` payload keys casually.

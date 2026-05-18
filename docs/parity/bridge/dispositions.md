@@ -44,7 +44,7 @@ Current dispositions:
   with the reserved paragraph-break label.
 - `addGenericParagraphBreakBookmark`: implemented on iOS by creating a generic
   bookmark with the reserved paragraph-break label.
-- `memorize`: validated no-op deferred to #50 because Android parity depends on
+- `memorize`: validated no-op deferred by #50 because Android parity depends on
   native memorization/progress state that iOS does not have yet.
 
 Why this is no longer fuzzy:
@@ -54,7 +54,35 @@ Why this is no longer fuzzy:
 - Memorization remains visible in the bridge inventory as deferred work rather
   than an accidental silent no-op.
 
-## 4. Fullscreen and compare are handled through iOS-native presentation paths
+## 4. Android memorization bridge parity is a deferred method family
+
+- Status: documented deferred parity target
+- Scope: `memorize`, `addMemorizationTarget`, `markAsMemorized`,
+  `removeMemorizationTarget`, `unmarkMemorized`, and
+  `speakMemorizationLoop`
+
+Disposition:
+
+- iOS should not implement these as independent bridge stubs.
+- Android routes the state methods through `ProgressControl`, the progress
+  database, KJV-normalized memorized verses, memorization targets, and Bible
+  document decorations for `memorizedOrdinals` and `targetOrdinals`.
+- Android routes `speakMemorizationLoop` through a distinct native speech-loop
+  path rather than the existing generic `speak` behavior.
+- The first iOS slice is therefore the native memorization/progress model in
+  #77. Bridge behavior follows in #76. Speech-loop parity is tracked separately
+  in #78.
+- The existing iOS `memorize` bridge method remains a validated no-op until
+  #76 replaces it with real behavior.
+
+Reason:
+
+- Implementing only the bridge method names would create false parity because
+  iOS would still lack the product state those calls mutate or present.
+- This also keeps #73 blocked on a real iOS progress model instead of inventing
+  remote sync behavior before the local product surface exists.
+
+## 5. Fullscreen and compare are handled through iOS-native presentation paths
 
 - Status: intentional adaptation
 
@@ -70,7 +98,7 @@ Why this is fine:
 - The user-facing behavior remains parity-oriented, but UIKit/SwiftUI
   presentation constraints differ from Android's activity/dialog model.
 
-## 5. Strong's modal uses a dedicated embedded-client route inside a native iOS sheet
+## 6. Strong's modal uses a dedicated embedded-client route inside a native iOS sheet
 
 - Status: intentional adaptation
 
@@ -89,7 +117,7 @@ Why this is fine:
 - iOS still needs native sheet ownership for presentation, dismissal, and
   nested reader coordination.
 
-## 6. Android-only bridge breadth is not fully implemented on iOS
+## 7. Android-only bridge breadth is not fully implemented on iOS
 
 - Status: current parity gap
 
@@ -101,6 +129,9 @@ What we do:
   while the iOS-bundled frontend exposes 62. The Android-only methods cover
   areas such as memorization, reading progress, AI document actions, chapter
   navigation, and document-page editing.
+- The memorization subset has a recorded disposition in #50 and follow-up
+  issues #77, #76, and #78, but it remains Android-only until those slices are
+  implemented.
 
 Why this is still a gap:
 

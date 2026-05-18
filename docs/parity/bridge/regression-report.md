@@ -103,7 +103,9 @@ Related domain references:
   than an invented bookmark dictionary payload
 - intentionally supported no-argument branches such as `helpBookmarks` remain handled
 - paragraph-break bridge actions validate required arguments before creating native bookmarks
-- `memorize` remains handled only for valid positional arguments while its native feature scope is deferred
+- `memorize` remains handled only for valid positional arguments while #50 defers its native
+  feature scope to the model/storage (#77), bridge behavior (#76), and speech-loop (#78)
+  follow-ups
 
 ### Payload shapes
 

@@ -171,4 +171,6 @@ Android-only categories into distinct deferred parity targets:
 - #74 tracks `ai_settings`, blocked on the shared AI backend/settings direction
   in #5.
 - #73 tracks `progress`, blocked on the iOS reader/memorization/progress product
-  direction and related to the memorization bridge decision in #50.
+  direction. The #50 memorization bridge decision keeps it blocked on the iOS
+  model/storage contract in #77 before remote progress sync behavior is
+  designed.
