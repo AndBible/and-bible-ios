@@ -75,9 +75,9 @@ Reason:
 - This matches Android's top-level synchronization branch point and avoids
   accidental destructive behavior during remote bootstrap.
 
-## 5. iOS currently implements a narrower category set than Android
+## 5. Android-only categories are split into distinct deferred parity targets
 
-- Status: current parity gap
+- Status: documented deferred parity targets
 - Scope: remote sync categories
 
 Disposition:
@@ -85,10 +85,26 @@ Disposition:
 - iOS currently implements Android-aligned sync for `bookmarks`, `workspaces`,
   and `readingplans`.
 - Android currently also exposes `mydocuments`, `ai_settings`, and `progress`.
-  Those categories are not implemented on iOS yet.
+  Those categories are not implemented on iOS yet and must not be treated as one
+  broad implementation task.
+- `mydocuments` is tracked separately in #72. It depends on a clear iOS My
+  Documents/document-content product surface and the related bridge gaps before
+  remote sync storage is added.
+- `ai_settings` is tracked separately in #74. It is deferred behind #5 so iOS
+  does not invent an AI settings sync schema before the shared AI backend and
+  settings contract exist.
+- `progress` is tracked separately in #73. It is deferred until the
+  reader/memorization/progress product surface is explicit, and it should not be
+  folded into `readingplans` without an explicit compatibility decision.
 
 Reason:
 
 - The current iOS product surface does not yet expose the matching Android
-  document, AI-settings, or reading-progress sync flows. Adding them should be
-  treated as new parity work with service, UI, and regression coverage.
+  document, AI-settings, or reading-progress sync flows.
+- Android exposes these as separate sync categories, so each needs its own
+  product ownership, Android schema reference, iOS data mapping, settings UI
+  decision, and regression plan.
+
+Reference:
+
+- #49 records the decision to split the categories into distinct parity targets.

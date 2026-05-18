@@ -1,6 +1,6 @@
 # SYNC-702 Regression Report
 
-Date: 2026-05-15
+Date: 2026-05-18
 
 ## Scope
 
@@ -152,11 +152,23 @@ The checked-in shared-scheme test set gives the sync domain rerunnable regressio
 
 ## Remaining Gap
 
-The current sync parity gap is not the core bootstrap or patch engine. It is:
+The current sync parity gap is not the core bootstrap or patch engine. It is
+implementation breadth beyond the supported category set:
 
-- Android category breadth beyond iOS's supported `bookmarks`, `workspaces`, and `readingplans`
-  categories: Android also exposes `mydocuments`, `ai_settings`, and `progress`
+- Android category breadth beyond iOS's supported `bookmarks`, `workspaces`, and
+  `readingplans` categories.
+- Android also exposes `mydocuments`, `ai_settings`, and `progress`.
 
 The adopt-versus-create branch is now covered both below the UI through coordinator and
 synchronization tests and through a focused simulator workflow. The remaining `Partial` sync parity
 area is Android category breadth beyond the currently supported iOS categories.
+
+Issue #49 resolves the category-breadth decision by splitting the remaining
+Android-only categories into distinct deferred parity targets:
+
+- #72 tracks `mydocuments`, blocked on the iOS My Documents/document-content
+  product surface and related bridge gaps.
+- #74 tracks `ai_settings`, blocked on the shared AI backend/settings direction
+  in #5.
+- #73 tracks `progress`, blocked on the iOS reader/memorization/progress product
+  direction and related to the memorization bridge decision in #50.

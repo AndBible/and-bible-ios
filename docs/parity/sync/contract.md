@@ -53,7 +53,15 @@ These categories are tracked independently for:
 
 The current Android app also defines `mydocuments`, `ai_settings`, and
 `progress` sync categories. Those are Android contract surface, but they are not
-implemented in the current iOS sync surface yet.
+implemented in the current iOS sync surface yet. Issue #49 records the decision
+to treat them as separate deferred parity targets:
+
+- `mydocuments`: tracked by #72, pending the iOS My Documents/document-content
+  product surface and related bridge gaps.
+- `ai_settings`: tracked by #74, pending the shared AI backend/settings contract
+  from #5.
+- `progress`: tracked by #73, pending the iOS reader/memorization/progress
+  product direction and related to #50.
 
 ## Bootstrap Contract
 

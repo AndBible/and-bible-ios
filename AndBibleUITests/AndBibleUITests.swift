@@ -8513,6 +8513,10 @@ final class AndBibleUITests: XCTestCase {
     ) {
         let deadline = Date().addingTimeInterval(timeout)
         repeat {
+            if readerRenderedContentStateContains("myNotesEditing=false", in: app) {
+                return
+            }
+
             if let closeButton = optionalMyNotesWebControl(named: "Close", in: app, timeout: 0.2) {
                 let frame = closeButton.frame
                 if !frame.isEmpty {
@@ -8522,10 +8526,6 @@ final class AndBibleUITests: XCTestCase {
                 } else {
                     tapElementReliably(closeButton, timeout: timeout, file: file, line: line)
                 }
-                return
-            }
-
-            if readerRenderedContentStateContains("myNotesEditing=false", in: app) {
                 return
             }
 
@@ -8550,12 +8550,10 @@ final class AndBibleUITests: XCTestCase {
     ) -> XCUIElement? {
         let candidates = [
             app.webViews.buttons[label].firstMatch,
-            app.webViews.textViews[label].firstMatch,
-            app.webViews.textFields[label].firstMatch,
+            app.webViews.links[label].firstMatch,
             app.webViews.otherElements[label].firstMatch,
             app.buttons[label].firstMatch,
-            app.textViews[label].firstMatch,
-            app.textFields[label].firstMatch,
+            app.links[label].firstMatch,
             app.otherElements[label].firstMatch,
         ]
         return firstExistingDocumentWebControl(candidates, timeout: timeout)
@@ -8711,6 +8709,10 @@ final class AndBibleUITests: XCTestCase {
     ) {
         let deadline = Date().addingTimeInterval(timeout)
         repeat {
+            if readerRenderedContentStateContains("studyPadEditing=false", in: app) {
+                return
+            }
+
             if let closeButton = optionalStudyPadWebControl(named: "Close", in: app, timeout: 0.2) {
                 let frame = closeButton.frame
                 if !frame.isEmpty {
@@ -8727,10 +8729,6 @@ final class AndBibleUITests: XCTestCase {
                     file: file,
                     line: line
                 )
-                return
-            }
-
-            if readerRenderedContentStateContains("studyPadEditing=false", in: app) {
                 return
             }
 
@@ -8755,12 +8753,10 @@ final class AndBibleUITests: XCTestCase {
     ) -> XCUIElement? {
         let candidates = [
             app.webViews.buttons[label].firstMatch,
-            app.webViews.textViews[label].firstMatch,
-            app.webViews.textFields[label].firstMatch,
+            app.webViews.links[label].firstMatch,
             app.webViews.otherElements[label].firstMatch,
             app.buttons[label].firstMatch,
-            app.textViews[label].firstMatch,
-            app.textFields[label].firstMatch,
+            app.links[label].firstMatch,
             app.otherElements[label].firstMatch,
         ]
         return firstExistingDocumentWebControl(candidates, timeout: timeout)
@@ -9023,17 +9019,16 @@ final class AndBibleUITests: XCTestCase {
 
     /// Resolves the canonical Search state element without walking result-row static text nodes.
     private func resolvedSearchStateElement(in app: XCUIApplication) -> XCUIElement? {
-        resolvedStateExportElement("searchStateExport", in: app) ?? resolvedSearchScreenElement(in: app)
+        resolvedStateExportElement("searchStateExport", in: app)
     }
 
     /**
-     Reads available Search state surfaces, preferring the compact export but checking the root
-     too because XCTest can briefly return a stale hidden export during fast SwiftUI rerenders.
+     Reads Search state from the compact export only. The full Search root is intentionally not a
+     fallback here because XCTest can time out snapshotting that container while results rerender.
      */
     private func searchStateCandidateValues(in app: XCUIApplication) -> [String] {
         let candidates = [
             resolvedStateExportElement("searchStateExport", in: app),
-            resolvedSearchScreenElement(in: app),
         ]
 
         var values: [String] = []

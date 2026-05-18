@@ -34,7 +34,8 @@ rules explicit for changes in:
    Any category rename or remapping is a compatibility change.
    Current iOS-supported Android-aligned categories are `bookmarks`, `workspaces`, and
    `readingplans`. Android also exposes `mydocuments`, `ai_settings`, and `progress`, which are
-   not implemented on iOS yet; adding them is new parity surface, not a local cleanup.
+   not implemented on iOS yet. Issue #49 records these as separate deferred parity targets tracked
+   by #72, #74, and #73; adding any one of them is new parity surface, not a local cleanup.
 
 3. Treat bootstrap markers and remote-folder ownership semantics as contract
    surface.
@@ -111,5 +112,4 @@ focused coverage rather than relying on the existing subset alone.
 
 - add a machine-readable snapshot of Android-compatible sync keys and category names
 - expand iOS coverage to Android's remaining `mydocuments`, `ai_settings`, and `progress`
-  sync categories if those surfaces become product scope
-- add a focused XCUITest for the adopt-versus-create confirmation branch
+  sync categories only through their separate tracking issues (#72, #74, #73)
