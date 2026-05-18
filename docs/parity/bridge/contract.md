@@ -88,7 +88,9 @@ Paragraph-break bridge actions are part of the supported iOS subset:
 `addParagraphBreakBookmark` and `addGenericParagraphBreakBookmark` create native
 bookmarks with the reserved paragraph-break label. `memorize` remains exposed
 and validates its positional arguments, but the native memorization workflow is
-deferred to the dedicated memorization parity issue.
+deferred by #50. Android's broader memorization bridge family is tracked as
+separate iOS slices: native model/storage in #77, bridge state behavior in #76,
+and speech-loop parity in #78.
 
 The current bridge gap inventory lives at:
 

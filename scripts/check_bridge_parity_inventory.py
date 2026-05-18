@@ -21,7 +21,10 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_INVENTORY = REPO_ROOT / "docs/parity/bridge/baselines/android-bridge-gap-inventory.json"
 ANDROID_ROOT_ENV = "ANDBIBLE_ANDROID_ROOT"
 RECOMMENDED_ANDROID_ROOT = "../and-bible"
-ALLOWED_MISSING_STATUSES = {"missing_needs_triage"}
+ALLOWED_MISSING_STATUSES = {
+    "missing_needs_triage",
+    "missing_deferred_with_issue",
+}
 NO_OP_NEEDS_DECISION_STATUS = "ios_no_op_needs_decision"
 ALLOWED_NO_OP_STATUSES = {
     NO_OP_NEEDS_DECISION_STATUS,

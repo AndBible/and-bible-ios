@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updated": "2026-05-07",
+  "updated": "2026-05-18",
   "purpose": "Track Android bridge surface that is not true iOS parity yet, plus resolved dispositions for formerly silent iOS no-ops.",
   "references": {
     "androidInterfaceRelativePath": "app/bibleview-js/src/composables/android.ts",
@@ -10,6 +10,7 @@
   },
   "statusLegend": {
     "missing_needs_triage": "Android exposes the method and iOS does not. Treat as a parity gap until implemented or explicitly recorded as an iOS divergence.",
+    "missing_deferred_with_issue": "Android exposes the method and iOS does not. The gap is triaged and deferred to the linked issue family rather than ready for direct implementation.",
     "ios_no_op_needs_decision": "iOS exposes the method only as a stable no-op. Treat as a parity gap until implemented or explicitly recorded as an iOS divergence.",
     "implemented": "The former no-op now has native iOS behavior while preserving the shared bridge method name.",
     "deferred_with_issue": "The method remains a validated iOS no-op because the native feature scope is deferred to the linked issue.",
@@ -20,8 +21,8 @@
       "method": "addMemorizationTarget",
       "androidSignature": "(bookInitials: string, startOrdinal: number, endOrdinal: number) => void",
       "domain": "memorization",
-      "status": "missing_needs_triage",
-      "nextStep": "Implement iOS memorization target handling or record a product divergence."
+      "status": "missing_deferred_with_issue",
+      "nextStep": "Deferred by issue #50. Requires the iOS memorization model in #77 before bridge behavior is implemented in #76."
     },
     {
       "method": "copyMyDocumentContent",
@@ -83,8 +84,8 @@
       "method": "markAsMemorized",
       "androidSignature": "(bookInitials: string, startOrdinal: number, endOrdinal: number) => void",
       "domain": "memorization",
-      "status": "missing_needs_triage",
-      "nextStep": "Implement memorized-state updates or record a product divergence."
+      "status": "missing_deferred_with_issue",
+      "nextStep": "Deferred by issue #50. Requires the iOS memorization model in #77 before bridge behavior is implemented in #76."
     },
     {
       "method": "markChapterRead",
@@ -153,8 +154,8 @@
       "method": "removeMemorizationTarget",
       "androidSignature": "(bookInitials: string, startOrdinal: number, endOrdinal: number) => void",
       "domain": "memorization",
-      "status": "missing_needs_triage",
-      "nextStep": "Implement memorization target removal or record a product divergence."
+      "status": "missing_deferred_with_issue",
+      "nextStep": "Deferred by issue #50. Requires the iOS memorization model in #77 before bridge behavior is implemented in #76."
     },
     {
       "method": "saveMyDocumentPageContent",
@@ -181,8 +182,8 @@
       "method": "speakMemorizationLoop",
       "androidSignature": "(bookInitials: string, v11n: string, startOrdinal: number, endOrdinal: number) => void",
       "domain": "memorization",
-      "status": "missing_needs_triage",
-      "nextStep": "Implement memorization speech loop or record a product divergence."
+      "status": "missing_deferred_with_issue",
+      "nextStep": "Deferred by issue #50. Track native speech-loop parity separately in #78."
     },
     {
       "method": "unmarkChapterRead",
@@ -195,8 +196,8 @@
       "method": "unmarkMemorized",
       "androidSignature": "(bookInitials: string, startOrdinal: number, endOrdinal: number) => void",
       "domain": "memorization",
-      "status": "missing_needs_triage",
-      "nextStep": "Implement memorized-state removal or record a product divergence."
+      "status": "missing_deferred_with_issue",
+      "nextStep": "Deferred by issue #50. Requires the iOS memorization model in #77 before bridge behavior is implemented in #76."
     }
   ],
   "iosNoOpMethods": [
@@ -219,7 +220,7 @@
       "iosSignature": "(bookInitials: string, verseOrdinal: number, endOrdinal: number) => void",
       "domain": "memorization",
       "status": "deferred_with_issue",
-      "nextStep": "Deferred to issue #50 because iOS does not yet have the native memorization/progress model needed for Android parity."
+      "nextStep": "Deferred by issue #50 because iOS does not yet have the native memorization/progress model needed for Android parity. Model work is tracked in #77, bridge behavior in #76, and speech-loop parity in #78."
     }
   ]
 }
