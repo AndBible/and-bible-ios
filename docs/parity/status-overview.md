@@ -1,6 +1,6 @@
 # Parity Status Overview
 
-Date: 2026-05-16
+Date: 2026-05-18
 
 ## Purpose
 
@@ -25,7 +25,7 @@ give you the fuller human context behind it.
 | Domain | Current Posture | Automation State | Primary Remaining Gap |
 |---|---|---|---|
 | [settings](settings/README.md) | Mature: `24 Pass`, `9 Adapted Pass`, `0 Partial`, `2 Documented Divergence` | Dedicated localization guardrail script, committed baselines, CI integration, focused simulator/unit validation | Broader machine-readable guardrails beyond localization if the settings surface grows materially |
-| [sync](sync/README.md) | Strong for supported Android categories: `6 Pass`, `2 Adapted Pass`, `2 Partial` | Focused unit/integration coverage, focused Sync UI coverage, explicit guardrails | Android-only category breadth (`mydocuments`, `ai_settings`, `progress`) and adopt/create confirmation UI still partial |
+| [sync](sync/README.md) | Strong for supported Android categories: `7 Pass`, `2 Adapted Pass`, `1 Partial` | Focused unit/integration coverage, focused Sync UI coverage, explicit guardrails | Android-only category implementation breadth is split into deferred parity targets: `mydocuments` (#72), `ai_settings` (#74), and `progress` (#73) |
 | [bookmarks](bookmarks/README.md) | Strong bookmark-list, StudyPad, and My Notes lifecycle coverage: `7 Pass`, `2 Adapted Pass`, `0 Partial` | Focused bookmark UI workflows, visible StudyPad create coverage, visible My Notes lifecycle coverage, plus note-persistence unit regressions | No bookmark parity gap currently tracked; StudyPad reorder/delete breadth remains optional future hardening |
 | [search](search/README.md) | Strong semantic coverage: `5 Pass`, `2 Adapted Pass`, `1 Partial` | Focused search UI workflows plus Strong's unit regressions | Multi-translation search still lacks focused regression coverage |
 | [reading-plans](reading-plans/README.md) | Strong sync and progression coverage: `5 Pass`, `1 Adapted Pass`, `3 Partial` | Focused daily-reading UI coverage plus restore/upload/patch unit coverage | Custom plan import, reading-plan list/start/import breadth, and additive iOS-only plan lifecycle coverage |
