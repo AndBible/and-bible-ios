@@ -28,8 +28,8 @@
       "method": "copyMyDocumentContent",
       "androidSignature": "(bookInitials: string, pageKey: string) => void",
       "domain": "my_documents",
-      "status": "missing_needs_triage",
-      "nextStep": "Implement iOS My Documents content copy or record a product divergence."
+      "status": "missing_deferred_with_issue",
+      "nextStep": "Deferred by issue #51. Requires the iOS My Documents model in #80 before read/copy/share bridge behavior is implemented in #81."
     },
     {
       "method": "createWholePageBookmark",
@@ -42,15 +42,15 @@
       "method": "deleteMyDocumentPage",
       "androidSignature": "(pageId: string) => void",
       "domain": "my_documents",
-      "status": "missing_needs_triage",
-      "nextStep": "Implement iOS My Documents page deletion or record a product divergence."
+      "status": "missing_deferred_with_issue",
+      "nextStep": "Deferred by issue #51. Requires the iOS My Documents model in #80 before AI page delete behavior is implemented in #83."
     },
     {
       "method": "getMyDocumentPageRawContent",
       "androidSignature": "(callId: number, bookInitials: string, pageKey: string) => void",
       "domain": "my_documents",
-      "status": "missing_needs_triage",
-      "nextStep": "Implement async raw-content response semantics for iOS My Documents or record a product divergence."
+      "status": "missing_deferred_with_issue",
+      "nextStep": "Deferred by issue #51. Requires the iOS My Documents model in #80 before async raw-content bridge behavior is implemented in #81."
     },
     {
       "method": "goToNextChapter",
@@ -140,15 +140,15 @@
       "method": "regenerateMyDocumentPage",
       "androidSignature": "(pageId: string) => void",
       "domain": "my_documents",
-      "status": "missing_needs_triage",
-      "nextStep": "Implement My Documents page regeneration or record a product divergence."
+      "status": "missing_deferred_with_issue",
+      "nextStep": "Deferred by issue #51. Requires the iOS My Documents model in #80 and shared AI support before regeneration behavior is implemented in #83."
     },
     {
       "method": "reloadMyDocumentPage",
       "androidSignature": "(bookInitials: string) => void",
       "domain": "my_documents",
-      "status": "missing_needs_triage",
-      "nextStep": "Implement My Documents page reload or record a product divergence."
+      "status": "missing_deferred_with_issue",
+      "nextStep": "Deferred by issue #51. Requires the iOS My Documents model in #80 before edit/reload bridge behavior is implemented in #82."
     },
     {
       "method": "removeMemorizationTarget",
@@ -161,8 +161,8 @@
       "method": "saveMyDocumentPageContent",
       "androidSignature": "(bookInitials: string, pageId: string, content: string, title: string | null) => void",
       "domain": "my_documents",
-      "status": "missing_needs_triage",
-      "nextStep": "Implement My Documents content save or record a product divergence."
+      "status": "missing_deferred_with_issue",
+      "nextStep": "Deferred by issue #51. Requires the iOS My Documents model in #80 before edit/reload bridge behavior is implemented in #82."
     },
     {
       "method": "setReadingProgressSettings",
@@ -175,8 +175,8 @@
       "method": "shareMyDocumentContent",
       "androidSignature": "(bookInitials: string, pageKey: string) => void",
       "domain": "my_documents",
-      "status": "missing_needs_triage",
-      "nextStep": "Implement My Documents sharing or record a product divergence."
+      "status": "missing_deferred_with_issue",
+      "nextStep": "Deferred by issue #51. Requires the iOS My Documents model in #80 before read/copy/share bridge behavior is implemented in #81."
     },
     {
       "method": "speakMemorizationLoop",

@@ -166,8 +166,8 @@ area is Android category breadth beyond the currently supported iOS categories.
 Issue #49 resolves the category-breadth decision by splitting the remaining
 Android-only categories into distinct deferred parity targets:
 
-- #72 tracks `mydocuments`, blocked on the iOS My Documents/document-content
-  product surface and related bridge gaps.
+- #72 tracks `mydocuments`, blocked on the iOS My Documents model/storage
+  contract in #80 and the bridge disposition from #51.
 - #74 tracks `ai_settings`, blocked on the shared AI backend/settings direction
   in #5.
 - #73 tracks `progress`, blocked on the iOS reader/memorization/progress product

@@ -60,6 +60,14 @@ rules explicit for changes in:
    weakening these branches requires coordinated contract work, not
    opportunistic cleanup.
 
+   Android's My Documents bridge family is also documented deferred surface.
+   Do not add `getMyDocumentPageRawContent`, `copyMyDocumentContent`,
+   `shareMyDocumentContent`, `saveMyDocumentPageContent`,
+   `reloadMyDocumentPage`, `regenerateMyDocumentPage`, or
+   `deleteMyDocumentPage` as method-name-only stubs. #80 owns the native
+   model/storage prerequisite, #81 owns raw-content/copy/share behavior, #82
+   owns edit/reload behavior, and #83 owns AI page regenerate/delete behavior.
+
 6. Do not change `BridgeTypes.swift` payload keys casually.
 
    Payload drift between Swift Codable models and `bibleview-js/src/types/`
@@ -75,8 +83,8 @@ rules explicit for changes in:
    - `docs/bridge-guide.md`
    - `docs/parity/bridge/verification-matrix.md` if status changes
    - `docs/parity/bridge/baselines/android-bridge-gap-inventory.json` if an
-     Android-only method is implemented, intentionally no-oped, or declared an
-     explicit iOS product divergence
+     Android-only method is implemented, deferred to a linked issue family,
+     intentionally no-oped, or declared an explicit iOS product divergence
 
 ## Validation Expectations
 

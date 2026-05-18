@@ -112,6 +112,14 @@ Notes:
 - `memorize` validates its Android-style arguments but remains a deferred no-op on iOS until
   native memorization/progress parity is implemented. The #50 disposition splits that work into
   the iOS model/storage contract (#77), bridge state behavior (#76), and speech-loop parity (#78).
+- Android's My Documents bridge family is also accepted but deferred. iOS should not add
+  `getMyDocumentPageRawContent`, `copyMyDocumentContent`, `shareMyDocumentContent`,
+  `saveMyDocumentPageContent`, `reloadMyDocumentPage`, `regenerateMyDocumentPage`, or
+  `deleteMyDocumentPage` as standalone bridge names before the native document model exists.
+  #80 owns the iOS model/storage and rendering contract, #81 owns raw-content/copy/share
+  behavior, #82 owns edit/reload behavior, and #83 owns AI-generated page regenerate/delete
+  behavior. The related `mydocuments` sync category remains tracked in #72 after the local
+  model exists.
 
 ### StudyPad
 

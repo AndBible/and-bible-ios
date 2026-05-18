@@ -147,7 +147,9 @@ The pieces that still need tighter protection are:
   methods versus `62` iOS-bundled methods in
   `bibleview-js/src/composables/android.ts`)
 - the tracked bridge gap inventory: 26 missing Android methods plus 3 former no-op method
-  dispositions; no current iOS no-op method remains in "needs decision" status
+  dispositions; memorization is deferred through #77, #76, and #78, My Documents is
+  deferred through #80, #81, #82, and #83, and no current iOS no-op method remains in
+  "needs decision" status
 - raw `window.android.*` compatibility-shim behavior on a per-method basis
 - Strong's sheet bridge coverage, especially the dedicated `contentType: "strongs"` route
 - fullscreen, compare, help, and full reference-dialog UI workflows
