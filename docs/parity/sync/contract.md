@@ -59,7 +59,9 @@ to treat them as separate deferred parity targets:
 - `mydocuments`: tracked by #72, pending the iOS My Documents model/storage
   contract in #80 and the related bridge slices from #51.
 - `ai_settings`: tracked by #74, pending the shared AI backend/settings contract
-  from #5.
+  from #5. The AI bridge disposition in #53 and bridge shell contract in #89
+  keep bridge-facing settings ownership aligned with that shared backend
+  direction.
 - `progress`: tracked by #73, pending the iOS reader/memorization/progress
   product direction. The reading-progress bridge decision in #52 keeps this
   blocked on the native reading-progress model/storage and settings contract in

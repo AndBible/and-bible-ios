@@ -147,7 +147,42 @@ Reason:
   Android `progress` sync category from being folded into `readingplans`
   without an explicit compatibility decision.
 
-## 7. Fullscreen and compare are handled through iOS-native presentation paths
+## 7. Android AI bridge parity is a deferred method family
+
+- Status: documented deferred parity target
+- Scope: `llmAction`, `llmActionGeneric`, `noteEditorLlmAction`,
+  `openAiDocPage`, `openAiDocPageChooser`, and `openPromptEditor`
+
+Disposition:
+
+- iOS should treat Android AI bridge behavior as an accepted parity target, but
+  should not add these as standalone bridge stubs.
+- Android's AI methods depend on prompt definitions, provider/model settings,
+  execution semantics, AI document state, prompt editing, and platform
+  integration that should be shared or explicitly platform-owned by #5.
+- The first iOS bridge slice is therefore the AI bridge shell contract in #89,
+  after the shared AI backend direction in #5 is concrete enough to define
+  ownership.
+- Text-action bridge behavior for `llmAction`, `llmActionGeneric`, and
+  `noteEditorLlmAction` follows in #90.
+- AI document navigation behavior for `openAiDocPage` and
+  `openAiDocPageChooser` follows in #91.
+- Prompt editor bridge behavior for `openPromptEditor` follows in #92.
+- Remote sync for Android's `ai_settings` category remains blocked on the
+  shared AI settings/backend contract and is tracked separately in #74.
+- AI My Documents regeneration/deletion stays in the My Documents bridge slice
+  #83 and also depends on the shared AI direction in #5.
+
+Reason:
+
+- Implementing only the bridge method names would create false parity because
+  iOS would still lack the AI backend, prompt/settings model, document state,
+  and platform shell those calls invoke.
+- Keeping #89 as the first bridge slice prevents this repo from growing a
+  parallel iOS-only AI architecture that would conflict with the backend-first
+  direction in #5.
+
+## 8. Fullscreen and compare are handled through iOS-native presentation paths
 
 - Status: intentional adaptation
 
@@ -163,7 +198,7 @@ Why this is fine:
 - The user-facing behavior remains parity-oriented, but UIKit/SwiftUI
   presentation constraints differ from Android's activity/dialog model.
 
-## 8. Strong's modal uses a dedicated embedded-client route inside a native iOS sheet
+## 9. Strong's modal uses a dedicated embedded-client route inside a native iOS sheet
 
 - Status: intentional adaptation
 
@@ -182,7 +217,7 @@ Why this is fine:
 - iOS still needs native sheet ownership for presentation, dismissal, and
   nested reader coordination.
 
-## 9. Android-only bridge breadth is not fully implemented on iOS
+## 10. Android-only bridge breadth is not fully implemented on iOS
 
 - Status: current parity gap
 
@@ -203,6 +238,9 @@ What we do:
 - The reading-progress subset has a recorded disposition in #52 and follow-up
   issues #85, #86, and #87, but it remains Android-only until those slices are
   implemented.
+- The AI bridge subset has a recorded disposition in #53 and follow-up issues
+  #89, #90, #91, and #92, but it remains Android-only until the shared backend
+  and bridge shell slices are implemented.
 
 Why this is still a gap:
 

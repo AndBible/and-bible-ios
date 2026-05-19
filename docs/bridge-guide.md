@@ -126,6 +126,13 @@ Notes:
   before the native reading-progress model exists. #85 owns the model/storage and settings
   contract, #86 owns mark/unmark behavior, and #87 owns UI/settings behavior. The related
   `progress` sync category remains tracked in #73 and distinct from `readingplans`.
+- Android's AI bridge family is accepted but deferred. iOS should not add
+  `llmAction`, `llmActionGeneric`, `noteEditorLlmAction`, `openAiDocPage`,
+  `openAiDocPageChooser`, or `openPromptEditor` as standalone bridge names before the
+  shared AI backend and iOS bridge shell contract exist. #89 owns the bridge shell
+  contract after #5, #90 owns text-action behavior, #91 owns AI document navigation, and
+  #92 owns prompt editor behavior. The related `ai_settings` sync category remains tracked
+  in #74 and must wait for the shared AI settings contract.
 
 ### StudyPad
 

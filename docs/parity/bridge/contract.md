@@ -107,6 +107,15 @@ follows in #87. The related Android `progress` sync category stays blocked in
 #73 until the local product surface exists and remains distinct from
 `readingplans`.
 
+Android's AI bridge family is accepted as iOS parity work, but it remains
+deferred behind the shared AI backend direction in #5. The first bridge slice is
+the iOS AI bridge shell contract in #89. Text-action methods `llmAction`,
+`llmActionGeneric`, and `noteEditorLlmAction` follow in #90. AI document
+navigation methods `openAiDocPage` and `openAiDocPageChooser` follow in #91.
+Prompt editor behavior for `openPromptEditor` follows in #92. The related
+Android `ai_settings` sync category stays blocked in #74 until the shared AI
+settings contract exists.
+
 The current bridge gap inventory lives at:
 
 - `docs/parity/bridge/baselines/android-bridge-gap-inventory.json`

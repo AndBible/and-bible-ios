@@ -92,7 +92,9 @@ Disposition:
   before remote sync storage is added.
 - `ai_settings` is tracked separately in #74. It is deferred behind #5 so iOS
   does not invent an AI settings sync schema before the shared AI backend and
-  settings contract exist.
+  settings contract exist. The #53 AI bridge disposition and #89 bridge shell
+  contract keep bridge-facing AI settings ownership aligned with that shared
+  backend direction.
 - `progress` is tracked separately in #73. It is deferred until the
   reader/memorization/progress product surface is explicit, and it should not be
   folded into `readingplans` without an explicit compatibility decision. The

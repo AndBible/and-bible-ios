@@ -70,15 +70,15 @@
       "method": "llmAction",
       "androidSignature": "(bookInitials: string, startOrdinal: number, endOrdinal: number, text: string) => void",
       "domain": "ai_actions",
-      "status": "missing_needs_triage",
-      "nextStep": "Implement iOS AI action handoff or record a product divergence."
+      "status": "missing_deferred_with_issue",
+      "nextStep": "Deferred by issue #53. Requires the shared AI backend direction in #5 and iOS AI bridge shell contract in #89 before text-action bridge behavior is implemented in #90."
     },
     {
       "method": "llmActionGeneric",
       "androidSignature": "(bookInitials: string, osisRef: string, startOrdinal: number, endOrdinal: number, text: string) => void",
       "domain": "ai_actions",
-      "status": "missing_needs_triage",
-      "nextStep": "Implement iOS generic-document AI action handoff or record a product divergence."
+      "status": "missing_deferred_with_issue",
+      "nextStep": "Deferred by issue #53. Requires the shared AI backend direction in #5 and iOS AI bridge shell contract in #89 before text-action bridge behavior is implemented in #90."
     },
     {
       "method": "markAsMemorized",
@@ -98,29 +98,29 @@
       "method": "noteEditorLlmAction",
       "androidSignature": "(contextJson: string) => void",
       "domain": "ai_actions",
-      "status": "missing_needs_triage",
-      "nextStep": "Implement note-editor AI action handoff or record a product divergence."
+      "status": "missing_deferred_with_issue",
+      "nextStep": "Deferred by issue #53. Requires the shared AI backend direction in #5 and iOS AI bridge shell contract in #89 before note-editor bridge behavior is implemented in #90."
     },
     {
       "method": "openAiDocPage",
       "androidSignature": "(documentInitials: string, pageKey: string) => void",
       "domain": "ai_documents",
-      "status": "missing_needs_triage",
-      "nextStep": "Implement AI document page navigation or record a product divergence."
+      "status": "missing_deferred_with_issue",
+      "nextStep": "Deferred by issue #53. Requires the shared AI backend direction in #5, iOS AI bridge shell contract in #89, and My Documents model in #80 before AI document navigation is implemented in #91."
     },
     {
       "method": "openAiDocPageChooser",
       "androidSignature": "(markersJson: string) => void",
       "domain": "ai_documents",
-      "status": "missing_needs_triage",
-      "nextStep": "Implement AI document page chooser or record a product divergence."
+      "status": "missing_deferred_with_issue",
+      "nextStep": "Deferred by issue #53. Requires the shared AI backend direction in #5, iOS AI bridge shell contract in #89, and My Documents model in #80 before AI document chooser behavior is implemented in #91."
     },
     {
       "method": "openPromptEditor",
       "androidSignature": "(promptId: string) => void",
       "domain": "ai_actions",
-      "status": "missing_needs_triage",
-      "nextStep": "Implement prompt editor handoff or record a product divergence."
+      "status": "missing_deferred_with_issue",
+      "nextStep": "Deferred by issue #53. Requires the shared AI backend/settings direction in #5 and iOS AI bridge shell contract in #89 before prompt editor bridge behavior is implemented in #92."
     },
     {
       "method": "openReadingProgress",

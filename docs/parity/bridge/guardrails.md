@@ -77,6 +77,15 @@ rules explicit for changes in:
    sync category remains separate in #73 and must not be folded into
    `readingplans` casually.
 
+   Android's AI bridge family is documented deferred surface too. Do not add
+   `llmAction`, `llmActionGeneric`, `noteEditorLlmAction`, `openAiDocPage`,
+   `openAiDocPageChooser`, or `openPromptEditor` as method-name-only stubs.
+   #89 owns the iOS AI bridge shell contract after #5 defines the shared AI
+   backend direction, #90 owns text-action bridge behavior, #91 owns AI
+   document navigation, and #92 owns prompt editor handoff. The related
+   Android `ai_settings` sync category remains separate in #74 and must not
+   invent an iOS-only AI settings schema.
+
 6. Do not change `BridgeTypes.swift` payload keys casually.
 
    Payload drift between Swift Codable models and `bibleview-js/src/types/`
