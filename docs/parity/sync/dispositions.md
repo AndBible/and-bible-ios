@@ -87,9 +87,9 @@ Disposition:
 - Android currently also exposes `mydocuments`, `ai_settings`, and `progress`.
   Those categories are not implemented on iOS yet and must not be treated as one
   broad implementation task.
-- `mydocuments` is tracked separately in #72. It depends on a clear iOS My
-  Documents/document-content product surface and the related bridge gaps before
-  remote sync storage is added.
+- `mydocuments` is tracked separately in #72. It depends on the iOS My
+  Documents model/storage contract in #80 and the bridge disposition from #51
+  before remote sync storage is added.
 - `ai_settings` is tracked separately in #74. It is deferred behind #5 so iOS
   does not invent an AI settings sync schema before the shared AI backend and
   settings contract exist.

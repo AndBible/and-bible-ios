@@ -82,7 +82,41 @@ Reason:
 - This also keeps #73 blocked on a real iOS progress model instead of inventing
   remote sync behavior before the local product surface exists.
 
-## 5. Fullscreen and compare are handled through iOS-native presentation paths
+## 5. Android My Documents bridge parity is a deferred method family
+
+- Status: documented deferred parity target
+- Scope: `getMyDocumentPageRawContent`, `copyMyDocumentContent`,
+  `shareMyDocumentContent`, `saveMyDocumentPageContent`,
+  `reloadMyDocumentPage`, `regenerateMyDocumentPage`, and
+  `deleteMyDocumentPage`
+
+Disposition:
+
+- iOS should treat My Documents as an accepted parity target, but should not
+  add these as standalone bridge stubs.
+- Android My Documents depends on a dedicated `mydocuments.sqlite3` Room
+  database, page metadata, separately stored page content, AI-page cache
+  metadata, generated JSword general-book registration, native clipboard/share
+  behavior, editor save/reload behavior, and AI page regeneration/deletion.
+- The first iOS slice is therefore the native My Documents model/storage and
+  rendering contract in #80.
+- Read-only bridge behavior for raw content, copy, and share follows in #81.
+- Editor save/reload behavior follows in #82.
+- AI-generated page regeneration and deletion follow in #83, with regeneration
+  also depending on the shared AI direction in #5.
+- Remote sync for Android's `mydocuments` category remains blocked on this
+  local product surface and is tracked separately in #72.
+
+Reason:
+
+- Implementing only the bridge method names would create false parity because
+  iOS would still lack the document/page state those calls read, mutate, render,
+  or share.
+- Keeping read/share, edit/reload, and AI-page actions separate prevents the
+  first implementation PR from becoming a full document editor plus AI feature
+  migration.
+
+## 6. Fullscreen and compare are handled through iOS-native presentation paths
 
 - Status: intentional adaptation
 
@@ -98,7 +132,7 @@ Why this is fine:
 - The user-facing behavior remains parity-oriented, but UIKit/SwiftUI
   presentation constraints differ from Android's activity/dialog model.
 
-## 6. Strong's modal uses a dedicated embedded-client route inside a native iOS sheet
+## 7. Strong's modal uses a dedicated embedded-client route inside a native iOS sheet
 
 - Status: intentional adaptation
 
@@ -117,7 +151,7 @@ Why this is fine:
 - iOS still needs native sheet ownership for presentation, dismissal, and
   nested reader coordination.
 
-## 7. Android-only bridge breadth is not fully implemented on iOS
+## 8. Android-only bridge breadth is not fully implemented on iOS
 
 - Status: current parity gap
 
@@ -132,6 +166,9 @@ What we do:
 - The memorization subset has a recorded disposition in #50 and follow-up
   issues #77, #76, and #78, but it remains Android-only until those slices are
   implemented.
+- The My Documents subset has a recorded disposition in #51 and follow-up
+  issues #80, #81, #82, and #83, but it remains Android-only until those slices
+  are implemented.
 
 Why this is still a gap:
 

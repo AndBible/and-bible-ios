@@ -92,6 +92,13 @@ deferred by #50. Android's broader memorization bridge family is tracked as
 separate iOS slices: native model/storage in #77, bridge state behavior in #76,
 and speech-loop parity in #78.
 
+Android's My Documents bridge family is also accepted as iOS parity work, but
+it remains deferred until iOS has a native My Documents model/storage and
+rendering contract. That first slice is #80. Raw-content/copy/share bridge
+behavior follows in #81, edit/reload follows in #82, and AI page
+regenerate/delete follows in #83. The related `mydocuments` sync category stays
+blocked in #72 until the local product surface exists.
+
 The current bridge gap inventory lives at:
 
 - `docs/parity/bridge/baselines/android-bridge-gap-inventory.json`

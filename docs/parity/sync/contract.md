@@ -56,8 +56,8 @@ The current Android app also defines `mydocuments`, `ai_settings`, and
 implemented in the current iOS sync surface yet. Issue #49 records the decision
 to treat them as separate deferred parity targets:
 
-- `mydocuments`: tracked by #72, pending the iOS My Documents/document-content
-  product surface and related bridge gaps.
+- `mydocuments`: tracked by #72, pending the iOS My Documents model/storage
+  contract in #80 and the related bridge slices from #51.
 - `ai_settings`: tracked by #74, pending the shared AI backend/settings contract
   from #5.
 - `progress`: tracked by #73, pending the iOS reader/memorization/progress

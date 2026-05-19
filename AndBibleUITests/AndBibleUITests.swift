@@ -3113,7 +3113,7 @@ final class AndBibleUITests: XCTestCase {
      *     hittable.
      * - Side effects:
      *   - resolves the requested Search scope button from the accessibility hierarchy and taps
-     *     its center point directly
+     *     its center point directly; callers verify the resulting Search state separately
      * - Failure modes:
      *   - fails if the requested scope button never appears or never becomes hittable within the
      *     allotted timeout
@@ -3145,16 +3145,7 @@ final class AndBibleUITests: XCTestCase {
                     && waitForElementToBecomeHittable($0, timeout: 0.5)
             }) {
                 tapElementReliably(identifierElement, timeout: 3)
-
-                let confirmationDeadline = Date().addingTimeInterval(1.5)
-                repeat {
-                    if searchStateCandidateValues(in: app)
-                        .contains(where: { $0.contains("scope=\(scopeToken.rawValue)") })
-                    {
-                        return
-                    }
-                    RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-                } while Date() < confirmationDeadline
+                return
             }
 
             if scopeStrip.exists, !scopeStrip.frame.isEmpty {
