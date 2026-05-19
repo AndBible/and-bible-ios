@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updated": "2026-05-18",
+  "updated": "2026-05-19",
   "purpose": "Track Android bridge surface that is not true iOS parity yet, plus resolved dispositions for formerly silent iOS no-ops.",
   "references": {
     "androidInterfaceRelativePath": "app/bibleview-js/src/composables/android.ts",
@@ -91,8 +91,8 @@
       "method": "markChapterRead",
       "androidSignature": "(bookInitials: string, startOrdinal: number, chapter: number, source: string) => void",
       "domain": "reading_progress",
-      "status": "missing_needs_triage",
-      "nextStep": "Implement chapter-read progress mutation or record a product divergence."
+      "status": "missing_deferred_with_issue",
+      "nextStep": "Deferred by issue #52. Requires the iOS reading-progress model/settings contract in #85 before mark/unmark bridge behavior is implemented in #86."
     },
     {
       "method": "noteEditorLlmAction",
@@ -126,15 +126,15 @@
       "method": "openReadingProgress",
       "androidSignature": "(tab: number) => void",
       "domain": "reading_progress",
-      "status": "missing_needs_triage",
-      "nextStep": "Implement reading-progress UI handoff or record a product divergence."
+      "status": "missing_deferred_with_issue",
+      "nextStep": "Deferred by issue #52. Requires the iOS reading-progress model/settings contract in #85 before UI bridge behavior is implemented in #87."
     },
     {
       "method": "openReadingProgressSettings",
       "androidSignature": "() => void",
       "domain": "reading_progress",
-      "status": "missing_needs_triage",
-      "nextStep": "Implement reading-progress settings handoff or record a product divergence."
+      "status": "missing_deferred_with_issue",
+      "nextStep": "Deferred by issue #52. Requires the iOS reading-progress model/settings contract in #85 before settings UI bridge behavior is implemented in #87."
     },
     {
       "method": "regenerateMyDocumentPage",
@@ -168,8 +168,8 @@
       "method": "setReadingProgressSettings",
       "androidSignature": "(json: string) => void",
       "domain": "reading_progress",
-      "status": "missing_needs_triage",
-      "nextStep": "Implement reading-progress setting persistence or record a product divergence."
+      "status": "missing_deferred_with_issue",
+      "nextStep": "Deferred by issue #52. Requires the iOS reading-progress model/settings contract in #85 before settings persistence bridge behavior is implemented in #87."
     },
     {
       "method": "shareMyDocumentContent",
@@ -189,8 +189,8 @@
       "method": "unmarkChapterRead",
       "androidSignature": "(bookInitials: string, startOrdinal: number, chapter: number) => void",
       "domain": "reading_progress",
-      "status": "missing_needs_triage",
-      "nextStep": "Implement chapter-read progress removal or record a product divergence."
+      "status": "missing_deferred_with_issue",
+      "nextStep": "Deferred by issue #52. Requires the iOS reading-progress model/settings contract in #85 before mark/unmark bridge behavior is implemented in #86."
     },
     {
       "method": "unmarkMemorized",

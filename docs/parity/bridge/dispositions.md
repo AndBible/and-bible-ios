@@ -116,7 +116,38 @@ Reason:
   first implementation PR from becoming a full document editor plus AI feature
   migration.
 
-## 6. Fullscreen and compare are handled through iOS-native presentation paths
+## 6. Android reading-progress bridge parity is a deferred method family
+
+- Status: documented deferred parity target
+- Scope: `markChapterRead`, `unmarkChapterRead`, `openReadingProgress`,
+  `openReadingProgressSettings`, and `setReadingProgressSettings`
+
+Disposition:
+
+- iOS should treat Android reading progress as an accepted parity target, but
+  should not add these as standalone bridge stubs.
+- Android's method family mutates or presents general reading-progress state
+  and settings, which are distinct from iOS reading-plan completion state.
+- The first iOS slice is therefore the native reading-progress model, storage,
+  and settings contract in #85.
+- Chapter-read mutation behavior for `markChapterRead` and
+  `unmarkChapterRead` follows in #86.
+- Reading-progress UI and settings bridge behavior for `openReadingProgress`,
+  `openReadingProgressSettings`, and `setReadingProgressSettings` follows in
+  #87.
+- Remote sync for Android's `progress` category remains blocked on this local
+  product surface and is tracked separately in #73.
+
+Reason:
+
+- Implementing only the bridge method names would create false parity because
+  iOS would still lack the reading-progress state and settings those calls
+  mutate or present.
+- Keeping reading-progress separate from reading-plan completion prevents the
+  Android `progress` sync category from being folded into `readingplans`
+  without an explicit compatibility decision.
+
+## 7. Fullscreen and compare are handled through iOS-native presentation paths
 
 - Status: intentional adaptation
 
@@ -132,7 +163,7 @@ Why this is fine:
 - The user-facing behavior remains parity-oriented, but UIKit/SwiftUI
   presentation constraints differ from Android's activity/dialog model.
 
-## 7. Strong's modal uses a dedicated embedded-client route inside a native iOS sheet
+## 8. Strong's modal uses a dedicated embedded-client route inside a native iOS sheet
 
 - Status: intentional adaptation
 
@@ -151,7 +182,7 @@ Why this is fine:
 - iOS still needs native sheet ownership for presentation, dismissal, and
   nested reader coordination.
 
-## 8. Android-only bridge breadth is not fully implemented on iOS
+## 9. Android-only bridge breadth is not fully implemented on iOS
 
 - Status: current parity gap
 
@@ -169,6 +200,9 @@ What we do:
 - The My Documents subset has a recorded disposition in #51 and follow-up
   issues #80, #81, #82, and #83, but it remains Android-only until those slices
   are implemented.
+- The reading-progress subset has a recorded disposition in #52 and follow-up
+  issues #85, #86, and #87, but it remains Android-only until those slices are
+  implemented.
 
 Why this is still a gap:
 

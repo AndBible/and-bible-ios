@@ -99,6 +99,14 @@ behavior follows in #81, edit/reload follows in #82, and AI page
 regenerate/delete follows in #83. The related `mydocuments` sync category stays
 blocked in #72 until the local product surface exists.
 
+Android's reading-progress bridge family is accepted as iOS parity work, but it
+also remains deferred until iOS has a native reading-progress model, storage,
+and settings contract. That first slice is #85. Chapter-read mark/unmark bridge
+behavior follows in #86, while reading-progress UI/settings bridge behavior
+follows in #87. The related Android `progress` sync category stays blocked in
+#73 until the local product surface exists and remains distinct from
+`readingplans`.
+
 The current bridge gap inventory lives at:
 
 - `docs/parity/bridge/baselines/android-bridge-gap-inventory.json`

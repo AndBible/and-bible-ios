@@ -120,6 +120,12 @@ Notes:
   behavior, #82 owns edit/reload behavior, and #83 owns AI-generated page regenerate/delete
   behavior. The related `mydocuments` sync category remains tracked in #72 after the local
   model exists.
+- Android's reading-progress bridge family is accepted but deferred. iOS should not add
+  `markChapterRead`, `unmarkChapterRead`, `openReadingProgress`,
+  `openReadingProgressSettings`, or `setReadingProgressSettings` as standalone bridge names
+  before the native reading-progress model exists. #85 owns the model/storage and settings
+  contract, #86 owns mark/unmark behavior, and #87 owns UI/settings behavior. The related
+  `progress` sync category remains tracked in #73 and distinct from `readingplans`.
 
 ### StudyPad
 
