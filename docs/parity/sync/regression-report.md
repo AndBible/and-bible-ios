@@ -169,7 +169,8 @@ Android-only categories into distinct deferred parity targets:
 - #72 tracks `mydocuments`, blocked on the iOS My Documents model/storage
   contract in #80 and the bridge disposition from #51.
 - #74 tracks `ai_settings`, blocked on the shared AI backend/settings direction
-  in #5.
+  in #5. The #53 AI bridge disposition and #89 bridge shell contract keep
+  bridge-facing settings ownership aligned with that shared backend direction.
 - #73 tracks `progress`, blocked on the iOS reader/memorization/progress product
   direction. The #52 reading-progress bridge decision keeps it blocked on the
   native reading-progress model/storage and settings contract in #85 before

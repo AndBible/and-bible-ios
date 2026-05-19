@@ -37,6 +37,8 @@ rules explicit for changes in:
    not implemented on iOS yet. Issue #49 records these as separate deferred parity targets tracked
    by #72, #74, and #73; adding any one of them is new parity surface, not a local cleanup.
    `mydocuments` also depends on the iOS My Documents model/storage contract in #80.
+   `ai_settings` depends on the shared AI backend/settings direction in #5 and the bridge
+   shell ownership contract in #89; it must not introduce an iOS-only AI settings schema.
    `progress` depends on the iOS reading-progress model/storage and settings contract in #85
    and must stay distinct from reading-plan completion unless a later compatibility decision
    explicitly changes that.
@@ -117,4 +119,4 @@ focused coverage rather than relying on the existing subset alone.
 - add a machine-readable snapshot of Android-compatible sync keys and category names
 - expand iOS coverage to Android's remaining `mydocuments`, `ai_settings`, and `progress`
   sync categories only through their separate tracking issues (#72, #74, #73), with
-  `mydocuments` gated by #80 and `progress` gated by #85
+  `mydocuments` gated by #80, `ai_settings` gated by #5/#89, and `progress` gated by #85
