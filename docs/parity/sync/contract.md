@@ -61,8 +61,11 @@ to treat them as separate deferred parity targets:
 - `ai_settings`: tracked by #74, pending the shared AI backend/settings contract
   from #5.
 - `progress`: tracked by #73, pending the iOS reader/memorization/progress
-  product direction. The memorization bridge decision in #50 keeps this blocked
-  on the iOS model/storage contract in #77 before sync behavior is designed.
+  product direction. The reading-progress bridge decision in #52 keeps this
+  blocked on the native reading-progress model/storage and settings contract in
+  #85 before sync behavior is designed. The memorization bridge decision in #50
+  separately keeps memorization/progress state blocked on the iOS model/storage
+  contract in #77.
 
 ## Bootstrap Contract
 

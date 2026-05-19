@@ -96,8 +96,10 @@ Disposition:
 - `progress` is tracked separately in #73. It is deferred until the
   reader/memorization/progress product surface is explicit, and it should not be
   folded into `readingplans` without an explicit compatibility decision. The
-  #50 memorization bridge disposition keeps this blocked on the iOS
-  model/storage contract in #77.
+  #52 reading-progress bridge disposition keeps this blocked on the native
+  reading-progress model/storage and settings contract in #85. The #50
+  memorization bridge disposition separately keeps memorization/progress state
+  blocked on the iOS model/storage contract in #77.
 
 Reason:
 

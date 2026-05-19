@@ -68,6 +68,15 @@ rules explicit for changes in:
    model/storage prerequisite, #81 owns raw-content/copy/share behavior, #82
    owns edit/reload behavior, and #83 owns AI page regenerate/delete behavior.
 
+   Android's reading-progress bridge family is documented deferred surface too.
+   Do not add `markChapterRead`, `unmarkChapterRead`, `openReadingProgress`,
+   `openReadingProgressSettings`, or `setReadingProgressSettings` as
+   method-name-only stubs. #85 owns the native reading-progress model/storage
+   and settings contract, #86 owns chapter-read mark/unmark bridge behavior,
+   and #87 owns UI/settings bridge behavior. The related Android `progress`
+   sync category remains separate in #73 and must not be folded into
+   `readingplans` casually.
+
 6. Do not change `BridgeTypes.swift` payload keys casually.
 
    Payload drift between Swift Codable models and `bibleview-js/src/types/`
