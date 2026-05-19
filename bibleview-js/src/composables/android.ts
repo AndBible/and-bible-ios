@@ -77,6 +77,10 @@ export type BibleJavascriptInterface = {
     addGenericParagraphBreakBookmark: (bookInitials: string, osisRef: string, startOrdinal: number, endOrdinal: number) => void,
     compare: (bookInitials: string, verseOrdinal: number, endOrdinal: number) => void,
     memorize: (bookInitials: string, verseOrdinal: number, endOrdinal: number) => void,
+    markAsMemorized: (bookInitials: string, startOrdinal: number, endOrdinal: number) => void,
+    addMemorizationTarget: (bookInitials: string, startOrdinal: number, endOrdinal: number) => void,
+    unmarkMemorized: (bookInitials: string, startOrdinal: number, endOrdinal: number) => void,
+    removeMemorizationTarget: (bookInitials: string, startOrdinal: number, endOrdinal: number) => void,
     openStudyPad: (labelId: IdType, bookmarkId: IdType) => void,
     openMyNotes: (v11n: string, ordinal: number) => void,
     speak: (bookInitials: string, v11n: string, startOrdinal: number, endOrdinal: number) => void,
@@ -407,6 +411,22 @@ export function useAndroid({bookmarks}: { bookmarks: Ref<BaseBookmark[]> }, conf
         android.memorize(bookInitials, startOrdinal, endOrdinal ? endOrdinal : -1);
     }
 
+    function markAsMemorized(bookInitials: string, startOrdinal: number, endOrdinal?: number) {
+        android.markAsMemorized(bookInitials, startOrdinal, endOrdinal ? endOrdinal : -1);
+    }
+
+    function addMemorizationTarget(bookInitials: string, startOrdinal: number, endOrdinal?: number) {
+        android.addMemorizationTarget(bookInitials, startOrdinal, endOrdinal ? endOrdinal : -1);
+    }
+
+    function unmarkMemorized(bookInitials: string, startOrdinal: number, endOrdinal?: number) {
+        android.unmarkMemorized(bookInitials, startOrdinal, endOrdinal ? endOrdinal : -1);
+    }
+
+    function removeMemorizationTarget(bookInitials: string, startOrdinal: number, endOrdinal?: number) {
+        android.removeMemorizationTarget(bookInitials, startOrdinal, endOrdinal ? endOrdinal : -1);
+    }
+
     function openStudyPad(labelId: IdType, bookmark: BaseBookmark) {
         if(isBibleBookmark(bookmark) || isGenericBookmark(bookmark)) {
             // Exceptionally here bookmark type does not matter
@@ -591,6 +611,10 @@ export function useAndroid({bookmarks}: { bookmarks: Ref<BaseBookmark[]> }, conf
         addGenericParagraphBreakBookmark,
         compare,
         memorize,
+        markAsMemorized,
+        addMemorizationTarget,
+        unmarkMemorized,
+        removeMemorizationTarget,
         speak,
         speakGeneric,
         helpDialog,

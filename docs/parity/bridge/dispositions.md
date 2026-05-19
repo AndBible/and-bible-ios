@@ -44,43 +44,45 @@ Current dispositions:
   with the reserved paragraph-break label.
 - `addGenericParagraphBreakBookmark`: implemented on iOS by creating a generic
   bookmark with the reserved paragraph-break label.
-- `memorize`: validated no-op deferred by #50 because Android parity depends on
-  native memorization/progress state that iOS does not have yet.
+- `memorize`: implemented on iOS by adding the selected range as a local
+  memorization target and opening the bundled Memorize document.
 
 Why this is no longer fuzzy:
 
 - Paragraph-break actions now mutate native bookmark state and preserve the
   shared method surface used by the frontend.
-- Memorization remains visible in the bridge inventory as deferred work rather
-  than an accidental silent no-op.
+- Memorization bridge state now mutates local native state rather than staying
+  an accidental silent no-op.
 
-## 4. Android memorization bridge parity is a deferred method family
+## 4. Android memorization bridge state parity is partially implemented
 
-- Status: documented deferred parity target
+- Status: implemented bridge state slice with remaining deferred speech/sync work
 - Scope: `memorize`, `addMemorizationTarget`, `markAsMemorized`,
   `removeMemorizationTarget`, `unmarkMemorized`, and
   `speakMemorizationLoop`
 
 Disposition:
 
-- iOS should not implement these as independent bridge stubs.
-- Android routes the state methods through `ProgressControl`, the progress
-  database, KJV-normalized memorized verses, memorization targets, and Bible
-  document decorations for `memorizedOrdinals` and `targetOrdinals`.
+- iOS now backs `memorize`, `addMemorizationTarget`, `markAsMemorized`,
+  `removeMemorizationTarget`, and `unmarkMemorized` with a local
+  `SettingsStore`-backed memorization state model.
+- `memorize` preserves Android's `endOrdinal < 0` single-verse semantics, adds
+  the selected range as a target if needed, and presents the bundled
+  `MemorizeDocument`.
+- Bible and Memorize document payloads now carry `memorizedOrdinals` and
+  `targetOrdinals` arrays for the loaded ordinal range.
 - Android routes `speakMemorizationLoop` through a distinct native speech-loop
   path rather than the existing generic `speak` behavior.
-- The first iOS slice is therefore the native memorization/progress model in
-  #77. Bridge behavior follows in #76. Speech-loop parity is tracked separately
-  in #78.
-- The existing iOS `memorize` bridge method remains a validated no-op until
-  #76 replaces it with real behavior.
+- Speech-loop parity remains tracked separately in #78. Remote Android
+  `progress` sync remains blocked on #73 and the broader progress-model
+  compatibility decisions.
 
 Reason:
 
-- Implementing only the bridge method names would create false parity because
-  iOS would still lack the product state those calls mutate or present.
-- This also keeps #73 blocked on a real iOS progress model instead of inventing
-  remote sync behavior before the local product surface exists.
+- The bridge state methods now have native product state to mutate, so they no
+  longer need to remain missing from the iOS bundle.
+- Keeping speech-loop and remote sync separate prevents this bridge slice from
+  expanding into a full Android progress database and TTS-loop migration.
 
 ## 5. Android My Documents bridge parity is a deferred method family
 
@@ -225,13 +227,12 @@ What we do:
 
 - iOS preserves the bridge methods needed by this repo's bundled frontend and
   native feature set.
-- Android currently exposes 88 methods in its `BibleJavascriptInterface` type,
-  while the iOS-bundled frontend exposes 62. The Android-only methods cover
+- Android currently exposes 89 methods in its `BibleJavascriptInterface` type,
+  while the iOS-bundled frontend exposes 66. The Android-only methods cover
   areas such as memorization, reading progress, AI document actions, chapter
-  navigation, and document-page editing.
-- The memorization subset has a recorded disposition in #50 and follow-up
-  issues #77, #76, and #78, but it remains Android-only until those slices are
-  implemented.
+  navigation, scoped help, and document-page editing.
+- The memorization state-method subset has a recorded disposition in #50 and is
+  implemented on iOS; `speakMemorizationLoop` remains deferred to #78.
 - The My Documents subset has a recorded disposition in #51 and follow-up
   issues #80, #81, #82, and #83, but it remains Android-only until those slices
   are implemented.

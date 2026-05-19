@@ -65,9 +65,9 @@ to treat them as separate deferred parity targets:
 - `progress`: tracked by #73, pending the iOS reader/memorization/progress
   product direction. The reading-progress bridge decision in #52 keeps this
   blocked on the native reading-progress model/storage and settings contract in
-  #85 before sync behavior is designed. The memorization bridge decision in #50
-  separately keeps memorization/progress state blocked on the iOS model/storage
-  contract in #77.
+  #85 before sync behavior is designed. The memorization bridge state slice now
+  has local iOS storage, but Android `progress` sync compatibility still needs
+  an explicit #73 model decision before remote sync behavior is designed.
 
 ## Bootstrap Contract
 

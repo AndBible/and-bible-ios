@@ -4,9 +4,9 @@
   "purpose": "Track Android bridge surface that is not true iOS parity yet, plus resolved dispositions for formerly silent iOS no-ops.",
   "references": {
     "androidInterfaceRelativePath": "app/bibleview-js/src/composables/android.ts",
-    "androidMethodCount": 88,
+    "androidMethodCount": 89,
     "iosInterfacePath": "bibleview-js/src/composables/android.ts",
-    "iosBundledMethodCount": 62
+    "iosBundledMethodCount": 66
   },
   "statusLegend": {
     "missing_needs_triage": "Android exposes the method and iOS does not. Treat as a parity gap until implemented or explicitly recorded as an iOS divergence.",
@@ -17,13 +17,6 @@
     "intentional_ios_divergence": "The method remains a validated iOS no-op because iOS has an explicit product or platform divergence."
   },
   "missingAndroidMethods": [
-    {
-      "method": "addMemorizationTarget",
-      "androidSignature": "(bookInitials: string, startOrdinal: number, endOrdinal: number) => void",
-      "domain": "memorization",
-      "status": "missing_deferred_with_issue",
-      "nextStep": "Deferred by issue #50. Requires the iOS memorization model in #77 before bridge behavior is implemented in #76."
-    },
     {
       "method": "copyMyDocumentContent",
       "androidSignature": "(bookInitials: string, pageKey: string) => void",
@@ -81,20 +74,6 @@
       "nextStep": "Deferred by issue #53. Requires the shared AI backend direction in #5 and iOS AI bridge shell contract in #89 before text-action bridge behavior is implemented in #90."
     },
     {
-      "method": "markAsMemorized",
-      "androidSignature": "(bookInitials: string, startOrdinal: number, endOrdinal: number) => void",
-      "domain": "memorization",
-      "status": "missing_deferred_with_issue",
-      "nextStep": "Deferred by issue #50. Requires the iOS memorization model in #77 before bridge behavior is implemented in #76."
-    },
-    {
-      "method": "markChapterRead",
-      "androidSignature": "(bookInitials: string, startOrdinal: number, chapter: number, source: string) => void",
-      "domain": "reading_progress",
-      "status": "missing_deferred_with_issue",
-      "nextStep": "Deferred by issue #52. Requires the iOS reading-progress model/settings contract in #85 before mark/unmark bridge behavior is implemented in #86."
-    },
-    {
       "method": "noteEditorLlmAction",
       "androidSignature": "(contextJson: string) => void",
       "domain": "ai_actions",
@@ -114,6 +93,13 @@
       "domain": "ai_documents",
       "status": "missing_deferred_with_issue",
       "nextStep": "Deferred by issue #53. Requires the shared AI backend direction in #5, iOS AI bridge shell contract in #89, and My Documents model in #80 before AI document chooser behavior is implemented in #91."
+    },
+    {
+      "method": "openChapterReadHistory",
+      "androidSignature": "(bookInitials: string, startOrdinal: number, chapter: number) => void",
+      "domain": "reading_progress",
+      "status": "missing_deferred_with_issue",
+      "nextStep": "Deferred by issue #52. Requires the iOS reading-progress model/settings contract in #85 before chapter-read history bridge behavior is implemented."
     },
     {
       "method": "openPromptEditor",
@@ -137,6 +123,13 @@
       "nextStep": "Deferred by issue #52. Requires the iOS reading-progress model/settings contract in #85 before settings UI bridge behavior is implemented in #87."
     },
     {
+      "method": "recordChapterRead",
+      "androidSignature": "(bookInitials: string, startOrdinal: number, chapter: number, source: ReadingSource) => void",
+      "domain": "reading_progress",
+      "status": "missing_deferred_with_issue",
+      "nextStep": "Deferred by issue #52. Requires the iOS reading-progress model/settings contract in #85 before chapter-read mutation bridge behavior is implemented in #86."
+    },
+    {
       "method": "regenerateMyDocumentPage",
       "androidSignature": "(pageId: string) => void",
       "domain": "my_documents",
@@ -149,13 +142,6 @@
       "domain": "my_documents",
       "status": "missing_deferred_with_issue",
       "nextStep": "Deferred by issue #51. Requires the iOS My Documents model in #80 before edit/reload bridge behavior is implemented in #82."
-    },
-    {
-      "method": "removeMemorizationTarget",
-      "androidSignature": "(bookInitials: string, startOrdinal: number, endOrdinal: number) => void",
-      "domain": "memorization",
-      "status": "missing_deferred_with_issue",
-      "nextStep": "Deferred by issue #50. Requires the iOS memorization model in #77 before bridge behavior is implemented in #76."
     },
     {
       "method": "saveMyDocumentPageContent",
@@ -179,25 +165,18 @@
       "nextStep": "Deferred by issue #51. Requires the iOS My Documents model in #80 before read/copy/share bridge behavior is implemented in #81."
     },
     {
+      "method": "showHelpDialog",
+      "androidSignature": "(scopeKey: string) => void",
+      "domain": "help",
+      "status": "missing_needs_triage",
+      "nextStep": "Implement scoped help-dialog behavior or record an iOS help-presentation divergence."
+    },
+    {
       "method": "speakMemorizationLoop",
       "androidSignature": "(bookInitials: string, v11n: string, startOrdinal: number, endOrdinal: number) => void",
       "domain": "memorization",
       "status": "missing_deferred_with_issue",
       "nextStep": "Deferred by issue #50. Track native speech-loop parity separately in #78."
-    },
-    {
-      "method": "unmarkChapterRead",
-      "androidSignature": "(bookInitials: string, startOrdinal: number, chapter: number) => void",
-      "domain": "reading_progress",
-      "status": "missing_deferred_with_issue",
-      "nextStep": "Deferred by issue #52. Requires the iOS reading-progress model/settings contract in #85 before mark/unmark bridge behavior is implemented in #86."
-    },
-    {
-      "method": "unmarkMemorized",
-      "androidSignature": "(bookInitials: string, startOrdinal: number, endOrdinal: number) => void",
-      "domain": "memorization",
-      "status": "missing_deferred_with_issue",
-      "nextStep": "Deferred by issue #50. Requires the iOS memorization model in #77 before bridge behavior is implemented in #76."
     }
   ],
   "iosNoOpMethods": [
@@ -219,8 +198,8 @@
       "method": "memorize",
       "iosSignature": "(bookInitials: string, verseOrdinal: number, endOrdinal: number) => void",
       "domain": "memorization",
-      "status": "deferred_with_issue",
-      "nextStep": "Deferred by issue #50 because iOS does not yet have the native memorization/progress model needed for Android parity. Model work is tracked in #77, bridge behavior in #76, and speech-loop parity in #78."
+      "status": "implemented",
+      "nextStep": "Implemented by adding a local iOS memorization state store, adding the selected range as a target, and opening the bundled Memorize document. Speech-loop parity remains deferred to #78."
     }
   ]
 }

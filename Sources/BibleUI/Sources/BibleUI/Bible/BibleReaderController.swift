@@ -404,8 +404,15 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     /// Callback for presenting native label assignment UI (bookmarkId).
     var onAssignLabels: ((UUID) -> Void)?
 
-    /// Settings store for reading preferred dictionary setting.
-    var settingsStore: SettingsStore?
+    /// Settings store for reading preferred dictionary setting and local bridge-backed state.
+    var settingsStore: SettingsStore? {
+        didSet {
+            memorizationProgressStore = settingsStore.map(MemorizationProgressStore.init(settingsStore:))
+        }
+    }
+
+    /// Local iOS memorization state backing Android-style memorization bridge methods.
+    var memorizationProgressStore: MemorizationProgressStore?
 
     /// Callback to persist SwiftData changes (called after PageManager updates).
     var onPersistState: (() -> Void)?
@@ -2956,6 +2963,62 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         speakVerseRange(startOrdinal: startOrdinal, endOrdinal: endOrdinal)
     }
 
+    /**
+     Adds the selected verse range as a memorization target and opens the bundled Memorize document.
+     */
+    public func bridge(_ bridge: BibleBridge, memorize bookInitials: String, startOrdinal: Int, endOrdinal: Int) {
+        memorizationProgressStore?.addMemorizationTargetIfNeeded(
+            bookInitials: bookInitials,
+            startOrdinal: startOrdinal,
+            endOrdinal: endOrdinal
+        )
+        loadMemorizeDocument(bookInitials: bookInitials, startOrdinal: startOrdinal, endOrdinal: endOrdinal)
+    }
+
+    /**
+     Marks the selected verse range as memorized in local iOS memorization state.
+     */
+    public func bridge(_ bridge: BibleBridge, markAsMemorized bookInitials: String, startOrdinal: Int, endOrdinal: Int) {
+        memorizationProgressStore?.markAsMemorized(
+            bookInitials: bookInitials,
+            startOrdinal: startOrdinal,
+            endOrdinal: endOrdinal
+        )
+    }
+
+    /**
+     Adds the selected verse range to local iOS memorization targets.
+     */
+    public func bridge(_ bridge: BibleBridge, addMemorizationTarget bookInitials: String, startOrdinal: Int, endOrdinal: Int) {
+        memorizationProgressStore?.addMemorizationTarget(
+            bookInitials: bookInitials,
+            startOrdinal: startOrdinal,
+            endOrdinal: endOrdinal
+        )
+    }
+
+    /**
+     Removes the selected verse range from local iOS memorization targets.
+     */
+    public func bridge(_ bridge: BibleBridge, removeMemorizationTarget bookInitials: String, startOrdinal: Int, endOrdinal: Int) {
+        memorizationProgressStore?.removeMemorizationTarget(
+            bookInitials: bookInitials,
+            startOrdinal: startOrdinal,
+            endOrdinal: endOrdinal
+        )
+    }
+
+    /**
+     Removes the selected verse range from local iOS memorized ranges.
+     */
+    public func bridge(_ bridge: BibleBridge, unmarkMemorized bookInitials: String, startOrdinal: Int, endOrdinal: Int) {
+        memorizationProgressStore?.unmarkMemorized(
+            bookInitials: bookInitials,
+            startOrdinal: startOrdinal,
+            endOrdinal: endOrdinal
+        )
+    }
+
     // MARK: - BibleBridgeDelegate — Navigation Actions
 
     /**
@@ -3025,6 +3088,48 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         )
 
         myNotesMutationRevision += 1
+    }
+
+    /**
+     Opens the bundled Memorize document for the selected verse range.
+
+     The document is backed by the same local `MemorizationProgressStore` state that the bridge
+     mutation methods update. The current frontend renders the practice modes from `texts`; the
+     extra metadata keeps the payload aligned with Android's document shape for future client-side
+     target/memorized controls.
+     */
+    private func loadMemorizeDocument(bookInitials: String, startOrdinal: Int, endOrdinal: Int) {
+        guard clientReady,
+              let document = buildMemorizeDocumentJSON(
+                bookInitials: bookInitials,
+                startOrdinal: startOrdinal,
+                endOrdinal: endOrdinal
+              ) else {
+            return
+        }
+
+        showingMyNotes = false
+        showingStudyPad = false
+        activeStudyPadLabelId = nil
+        activeStudyPadLabelName = nil
+        editingInWebView = false
+        hasActiveSelection = false
+        selectedText = ""
+
+        bridge.emit(event: "clear_document")
+        bridge.emit(event: "add_documents", data: document)
+        bridge.emit(event: "setup_content", data: """
+        {"jumpToOrdinal":null,"jumpToAnchor":null,"jumpToId":null,"topOffset":0,"bottomOffset":0}
+        """)
+        setRenderedContentState(
+            category: .bible,
+            moduleName: activeModuleName,
+            book: "Memorize",
+            chapter: currentChapter,
+            key: "memorize:\(bookInitials):\(startOrdinal)-\(endOrdinal)"
+        )
+        bridge.clearSelection()
+        applyNightModeBackground()
     }
 
     /// Return from My Notes to the Bible text view.
@@ -4761,6 +4866,117 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         return text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    private func buildMemorizeDocumentJSON(
+        bookInitials: String,
+        startOrdinal: Int,
+        endOrdinal: Int
+    ) -> String? {
+        let textItems = memorizeTextItems(startOrdinal: startOrdinal, endOrdinal: endOrdinal)
+        guard !textItems.isEmpty else { return nil }
+
+        let document: [String: Any] = [
+            "id": "memorize-\(bookInitials)-\(startOrdinal)-\(endOrdinal)",
+            "type": "memorize",
+            "title": memorizeReferenceTitle(startOrdinal: startOrdinal, endOrdinal: endOrdinal),
+            "texts": textItems,
+            "state": [
+                "memorize": [
+                    "mode": "blur",
+                    "modeConfig": [String: Any](),
+                ] as [String: Any],
+            ] as [String: Any],
+            "bookInitials": bookInitials,
+            "v11n": "KJVA",
+            "osisRef": memorizeOsisRef(startOrdinal: startOrdinal, endOrdinal: endOrdinal),
+            "startOrdinal": startOrdinal,
+            "endOrdinal": endOrdinal,
+            "memorizedOrdinals": memorizationProgressStore?.memorizedOrdinals(
+                bookInitials: bookInitials,
+                startOrdinal: startOrdinal,
+                endOrdinal: endOrdinal
+            ) ?? [],
+            "targetOrdinals": memorizationProgressStore?.targetOrdinals(
+                bookInitials: bookInitials,
+                startOrdinal: startOrdinal,
+                endOrdinal: endOrdinal
+            ) ?? [],
+        ]
+
+        guard JSONSerialization.isValidJSONObject(document),
+              let data = try? JSONSerialization.data(withJSONObject: document, options: [.sortedKeys]),
+              let json = String(data: data, encoding: .utf8) else {
+            logger.error("Failed to serialize Memorize document JSON")
+            return nil
+        }
+        return json
+    }
+
+    private func memorizeTextItems(startOrdinal: Int, endOrdinal: Int) -> [[String: String]] {
+        guard let startVerse = ordinalToVerse(startOrdinal),
+              let endVerse = ordinalToVerse(endOrdinal),
+              startVerse <= endVerse else {
+            return []
+        }
+
+        let osisBookId = osisBookId(for: currentBook)
+        let chapter = currentChapter
+
+        guard let module = activeModule else {
+            let verseCount = Self.verseCount(for: currentBook, chapter: chapter)
+            let boundedEndVerse = min(endVerse, verseCount)
+            guard startVerse <= boundedEndVerse else { return [] }
+            return (startVerse...boundedEndVerse).map { verse in
+                [
+                    "key": "\(osisBookId).\(chapter).\(verse)",
+                    "text": Self.placeholderVerseText(book: currentBook, chapter: chapter, verse: verse),
+                ]
+            }
+        }
+
+        module.setKey("\(osisBookId) \(chapter):1")
+        var items: [[String: String]] = []
+
+        while true {
+            let key = module.currentKey()
+            guard let (_, parsedChapter, parsedVerse) = parseVerseKey(key) else { break }
+            if parsedChapter != chapter { break }
+
+            if parsedVerse >= startVerse && parsedVerse <= endVerse {
+                let verseText = module.stripText().trimmingCharacters(in: .whitespacesAndNewlines)
+                if !verseText.isEmpty {
+                    items.append([
+                        "key": "\(osisBookId).\(chapter).\(parsedVerse)",
+                        "text": verseText,
+                    ])
+                }
+            }
+            if parsedVerse > endVerse { break }
+            if !module.next() { break }
+        }
+
+        return items
+    }
+
+    private func memorizeReferenceTitle(startOrdinal: Int, endOrdinal: Int) -> String {
+        guard let startVerse = ordinalToVerse(startOrdinal),
+              let endVerse = ordinalToVerse(endOrdinal) else {
+            return "\(currentBook) \(currentChapter)"
+        }
+        let verseSuffix = startVerse == endVerse ? "\(startVerse)" : "\(startVerse)-\(endVerse)"
+        return "\(currentBook) \(currentChapter):\(verseSuffix)"
+    }
+
+    private func memorizeOsisRef(startOrdinal: Int, endOrdinal: Int) -> String {
+        let osisBookId = osisBookId(for: currentBook)
+        guard let startVerse = ordinalToVerse(startOrdinal),
+              let endVerse = ordinalToVerse(endOrdinal) else {
+            return "\(osisBookId).\(currentChapter)"
+        }
+        let startRef = "\(osisBookId).\(currentChapter).\(startVerse)"
+        let endRef = "\(osisBookId).\(currentChapter).\(endVerse)"
+        return startVerse == endVerse ? startRef : "\(startRef)-\(endRef)"
+    }
+
     // MARK: - Content Loading
 
     /**
@@ -5663,6 +5879,16 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             "addChapter": addChapter,
             "chapterNumber": chapter,
             "originalOrdinalRange": originalOrdinalRange ?? NSNull(),
+            "memorizedOrdinals": memorizationProgressStore?.memorizedOrdinals(
+                bookInitials: initials,
+                startOrdinal: ordinalStart,
+                endOrdinal: ordinalEnd
+            ) ?? [],
+            "targetOrdinals": memorizationProgressStore?.targetOrdinals(
+                bookInitials: initials,
+                startOrdinal: ordinalStart,
+                endOrdinal: ordinalEnd
+            ) ?? [],
         ]
 
         guard let data = try? JSONSerialization.data(withJSONObject: doc, options: [.sortedKeys]),

@@ -53,12 +53,11 @@ rules explicit for changes in:
    `memorize`, `addParagraphBreakBookmark`, and
    `addGenericParagraphBreakBookmark` remain part of the contract because the
    shared frontend still knows about them. Paragraph-break actions now create
-   native bookmarks with the reserved paragraph-break label; `memorize` remains
-   a validated deferred no-op linked to the memorization parity decision. The
-   broader Android memorization family is split across #77 for model/storage,
-   #76 for bridge state behavior, and #78 for speech-loop parity. Removing or
-   weakening these branches requires coordinated contract work, not
-   opportunistic cleanup.
+   native bookmarks with the reserved paragraph-break label; `memorize` now
+   adds a local memorization target and opens the bundled Memorize document.
+   The related state methods mutate the same local iOS state, while
+   `speakMemorizationLoop` remains deferred to #78. Removing or weakening these
+   branches requires coordinated contract work, not opportunistic cleanup.
 
    Android's My Documents bridge family is also documented deferred surface.
    Do not add `getMyDocumentPageRawContent`, `copyMyDocumentContent`,
