@@ -568,6 +568,21 @@ final class StrongsSheetDelegate: NSObject, BibleBridgeDelegate {
     /// No-op because TTS actions are handled in the main reader.
     func bridge(_ bridge: BibleBridge, speak bookInitials: String, v11n: String, startOrdinal: Int, endOrdinal: Int) {}
 
+    /// No-op because memorization actions are handled in the main reader.
+    func bridge(_ bridge: BibleBridge, memorize bookInitials: String, startOrdinal: Int, endOrdinal: Int) {}
+
+    /// No-op because memorization actions are handled in the main reader.
+    func bridge(_ bridge: BibleBridge, markAsMemorized bookInitials: String, startOrdinal: Int, endOrdinal: Int) {}
+
+    /// No-op because memorization actions are handled in the main reader.
+    func bridge(_ bridge: BibleBridge, addMemorizationTarget bookInitials: String, startOrdinal: Int, endOrdinal: Int) {}
+
+    /// No-op because memorization actions are handled in the main reader.
+    func bridge(_ bridge: BibleBridge, removeMemorizationTarget bookInitials: String, startOrdinal: Int, endOrdinal: Int) {}
+
+    /// No-op because memorization actions are handled in the main reader.
+    func bridge(_ bridge: BibleBridge, unmarkMemorized bookInitials: String, startOrdinal: Int, endOrdinal: Int) {}
+
     /// No-op because Study Pad navigation is not initiated from the Strong's sheet.
     func bridge(_ bridge: BibleBridge, openStudyPad labelId: String, bookmarkId: String) {}
 

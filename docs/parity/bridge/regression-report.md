@@ -103,9 +103,9 @@ Related domain references:
   than an invented bookmark dictionary payload
 - intentionally supported no-argument branches such as `helpBookmarks` remain handled
 - paragraph-break bridge actions validate required arguments before creating native bookmarks
-- `memorize` remains handled only for valid positional arguments while #50 defers its native
-  feature scope to the model/storage (#77), bridge behavior (#76), and speech-loop (#78)
-  follow-ups
+- memorization bridge state methods validate required arguments, preserve single-verse
+  `endOrdinal < 0` behavior, and mutate local native memorization state; speech-loop parity
+  remains deferred to #78
 
 ### Payload shapes
 
@@ -143,14 +143,15 @@ while full valid delegate-call coverage still needs more direct protection.
 
 The pieces that still need tighter protection are:
 
-- full current Android bridge breadth beyond the shared iOS subset (`88` Android
-  methods versus `62` iOS-bundled methods in
+- full current Android bridge breadth beyond the shared iOS subset (`89` Android
+  methods versus `66` iOS-bundled methods in
   `bibleview-js/src/composables/android.ts`)
-- the tracked bridge gap inventory: 26 missing Android methods plus 3 former no-op method
-  dispositions; memorization is deferred through #77, #76, and #78, My Documents is
-  deferred through #80, #81, #82, and #83, reading progress is deferred through #85, #86,
-  and #87, AI bridge methods are deferred through #89, #90, #91, and #92, and no current
-  iOS no-op method remains in "needs decision" status
+- the tracked bridge gap inventory: 23 missing Android methods plus 3 former no-op method
+  dispositions; memorization bridge state is implemented while `speakMemorizationLoop`
+  remains deferred through #78, My Documents is deferred through #80, #81, #82, and #83,
+  reading progress is deferred through #85, #86, and #87, AI bridge methods are deferred
+  through #89, #90, #91, and #92, and no current iOS no-op method remains in
+  "needs decision" status
 - raw `window.android.*` compatibility-shim behavior on a per-method basis
 - Strong's sheet bridge coverage, especially the dedicated `contentType: "strongs"` route
 - fullscreen, compare, help, and full reference-dialog UI workflows

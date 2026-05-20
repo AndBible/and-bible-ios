@@ -174,6 +174,6 @@ Android-only categories into distinct deferred parity targets:
 - #73 tracks `progress`, blocked on the iOS reader/memorization/progress product
   direction. The #52 reading-progress bridge decision keeps it blocked on the
   native reading-progress model/storage and settings contract in #85 before
-  remote progress sync behavior is designed. The #50 memorization bridge
-  decision separately keeps memorization/progress state blocked on the iOS
-  model/storage contract in #77.
+  remote progress sync behavior is designed. The #50 memorization bridge state
+  slice now has local iOS storage, but remote Android `progress` sync
+  compatibility still belongs to #73.

@@ -83,6 +83,8 @@ export interface BibleDocumentType extends BaseOsisDocument {
     addChapter: boolean
     chapterNumber: number
     originalOrdinalRange: Nullable<OrdinalRange>
+    memorizedOrdinals?: number[]
+    targetOrdinals?: number[]
 }
 
 export interface MyNotesDocument extends BaseDocument {
@@ -149,6 +151,13 @@ export interface MemorizeDocument extends BaseDocument{
     title: string
     texts: MemorizeTextItem[]
     state?: DocumentState
+    bookInitials?: string
+    v11n?: string
+    osisRef?: string
+    startOrdinal?: number
+    endOrdinal?: number
+    memorizedOrdinals?: number[]
+    targetOrdinals?: number[]
 }
 
 export function isOsisDocument(t: AnyDocument): t is OsisDocument {

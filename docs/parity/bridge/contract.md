@@ -86,11 +86,12 @@ persisted bookmark natively before sharing the saved verse range.
 
 Paragraph-break bridge actions are part of the supported iOS subset:
 `addParagraphBreakBookmark` and `addGenericParagraphBreakBookmark` create native
-bookmarks with the reserved paragraph-break label. `memorize` remains exposed
-and validates its positional arguments, but the native memorization workflow is
-deferred by #50. Android's broader memorization bridge family is tracked as
-separate iOS slices: native model/storage in #77, bridge state behavior in #76,
-and speech-loop parity in #78.
+bookmarks with the reserved paragraph-break label. Memorization bridge state is
+also part of the supported iOS subset: `memorize` adds the selected range as a
+local target and opens the bundled Memorize document, while
+`addMemorizationTarget`, `markAsMemorized`, `removeMemorizationTarget`, and
+`unmarkMemorized` mutate the same local state. Native speech-loop parity for
+`speakMemorizationLoop` remains tracked separately in #78.
 
 Android's My Documents bridge family is also accepted as iOS parity work, but
 it remains deferred until iOS has a native My Documents model/storage and

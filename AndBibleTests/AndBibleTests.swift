@@ -161,6 +161,10 @@ final class AndBibleTests: XCTestCase {
             ("speak", ["KJV", "KJV", 1]),
             ("speakGeneric", ["KJV", "Gen.1.1", 1]),
             ("memorize", ["KJV", 1]),
+            ("markAsMemorized", ["KJV", 1]),
+            ("addMemorizationTarget", ["KJV", 1]),
+            ("removeMemorizationTarget", ["KJV", 1]),
+            ("unmarkMemorized", ["KJV", 1]),
             ("addParagraphBreakBookmark", ["KJV", 1]),
             ("addGenericParagraphBreakBookmark", ["KJV", "Gen.1.1", 1]),
             ("openStudyPad", ["label-id"]),
@@ -1089,6 +1093,56 @@ final class AndBibleTests: XCTestCase {
             .handled
         )
         XCTAssertEqual(bridge.dispatchMessage(method: "missingMethod", args: []), .unhandled)
+    }
+
+    func testMemorizationProgressStorePersistsRangesAndSplitsTargets() throws {
+        let settingsStore = try makeInMemorySettingsStore()
+        let store = MemorizationProgressStore(settingsStore: settingsStore)
+
+        store.addMemorizationTarget(bookInitials: "KJV", startOrdinal: 1, endOrdinal: 5)
+        let rawAfterInitialTarget = try XCTUnwrap(settingsStore.getString(MemorizationProgressStore.settingsKey))
+        store.addMemorizationTargetIfNeeded(bookInitials: "KJV", startOrdinal: 2, endOrdinal: 4)
+        XCTAssertEqual(settingsStore.getString(MemorizationProgressStore.settingsKey), rawAfterInitialTarget)
+
+        store.removeMemorizationTarget(bookInitials: "KJV", startOrdinal: 2, endOrdinal: 4)
+        store.markAsMemorized(bookInitials: "KJV", startOrdinal: 3, endOrdinal: 5)
+        store.unmarkMemorized(bookInitials: "KJV", startOrdinal: 4, endOrdinal: 4)
+
+        let reloadedStore = MemorizationProgressStore(settingsStore: settingsStore)
+        XCTAssertEqual(
+            reloadedStore.targetOrdinals(bookInitials: "KJV", startOrdinal: 1, endOrdinal: 5),
+            [1, 5]
+        )
+        XCTAssertEqual(
+            reloadedStore.memorizedOrdinals(bookInitials: "KJV", startOrdinal: 1, endOrdinal: 5),
+            [3, 5]
+        )
+        XCTAssertEqual(
+            reloadedStore.targetOrdinals(bookInitials: "ESV", startOrdinal: 1, endOrdinal: 5),
+            []
+        )
+    }
+
+    func testBridgeMemorizationMessagesMutateNativeStore() throws {
+        let bridge = BibleBridge()
+        let controller = BibleReaderController(bridge: bridge)
+        controller.settingsStore = try makeInMemorySettingsStore()
+        let store = try XCTUnwrap(controller.memorizationProgressStore)
+
+        XCTAssertEqual(bridge.dispatchMessage(method: "memorize", args: ["KJV", 1, -1]), .handled)
+        XCTAssertEqual(store.targetOrdinals(bookInitials: "KJV", startOrdinal: 1, endOrdinal: 3), [1])
+
+        XCTAssertEqual(bridge.dispatchMessage(method: "addMemorizationTarget", args: ["KJV", 2, 3]), .handled)
+        XCTAssertEqual(store.targetOrdinals(bookInitials: "KJV", startOrdinal: 1, endOrdinal: 3), [1, 2, 3])
+
+        XCTAssertEqual(bridge.dispatchMessage(method: "markAsMemorized", args: ["KJV", 1, 3]), .handled)
+        XCTAssertEqual(store.memorizedOrdinals(bookInitials: "KJV", startOrdinal: 1, endOrdinal: 3), [1, 2, 3])
+
+        XCTAssertEqual(bridge.dispatchMessage(method: "removeMemorizationTarget", args: ["KJV", 2, 2]), .handled)
+        XCTAssertEqual(store.targetOrdinals(bookInitials: "KJV", startOrdinal: 1, endOrdinal: 3), [1, 3])
+
+        XCTAssertEqual(bridge.dispatchMessage(method: "unmarkMemorized", args: ["KJV", 2, 3]), .handled)
+        XCTAssertEqual(store.memorizedOrdinals(bookInitials: "KJV", startOrdinal: 1, endOrdinal: 3), [1])
     }
 
     func testReaderCompareBridgeRequestBuildsNativePresentationPayload() throws {

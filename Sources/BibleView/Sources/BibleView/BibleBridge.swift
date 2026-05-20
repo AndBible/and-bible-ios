@@ -186,6 +186,16 @@ public protocol BibleBridgeDelegate: AnyObject {
     func bridge(_ bridge: BibleBridge, compareVerses bookInitials: String, startOrdinal: Int, endOrdinal: Int)
     /// Starts text-to-speech playback for the selected verse range and versification.
     func bridge(_ bridge: BibleBridge, speak bookInitials: String, v11n: String, startOrdinal: Int, endOrdinal: Int)
+    /// Opens the memorization workflow for the selected verse range.
+    func bridge(_ bridge: BibleBridge, memorize bookInitials: String, startOrdinal: Int, endOrdinal: Int)
+    /// Marks the selected verse range as a memorized range.
+    func bridge(_ bridge: BibleBridge, markAsMemorized bookInitials: String, startOrdinal: Int, endOrdinal: Int)
+    /// Adds the selected verse range to memorization targets.
+    func bridge(_ bridge: BibleBridge, addMemorizationTarget bookInitials: String, startOrdinal: Int, endOrdinal: Int)
+    /// Removes the selected verse range from memorization targets.
+    func bridge(_ bridge: BibleBridge, removeMemorizationTarget bookInitials: String, startOrdinal: Int, endOrdinal: Int)
+    /// Removes the selected verse range from memorized ranges.
+    func bridge(_ bridge: BibleBridge, unmarkMemorized bookInitials: String, startOrdinal: Int, endOrdinal: Int)
 
     // MARK: - Navigation Actions
     /// Opens the StudyPad view focused on the supplied label and bookmark.
@@ -260,6 +270,23 @@ public protocol BibleBridgeDelegate: AnyObject {
     // MARK: - Fullscreen
     /// Toggles native fullscreen mode in response to a client-side double tap gesture.
     func bridgeDidRequestToggleFullScreen(_ bridge: BibleBridge)
+}
+
+public extension BibleBridgeDelegate {
+    /// Default no-op to preserve source compatibility for clients that do not handle memorization.
+    func bridge(_ bridge: BibleBridge, memorize bookInitials: String, startOrdinal: Int, endOrdinal: Int) {}
+
+    /// Default no-op to preserve source compatibility for clients that do not handle memorization.
+    func bridge(_ bridge: BibleBridge, markAsMemorized bookInitials: String, startOrdinal: Int, endOrdinal: Int) {}
+
+    /// Default no-op to preserve source compatibility for clients that do not handle memorization.
+    func bridge(_ bridge: BibleBridge, addMemorizationTarget bookInitials: String, startOrdinal: Int, endOrdinal: Int) {}
+
+    /// Default no-op to preserve source compatibility for clients that do not handle memorization.
+    func bridge(_ bridge: BibleBridge, removeMemorizationTarget bookInitials: String, startOrdinal: Int, endOrdinal: Int) {}
+
+    /// Default no-op to preserve source compatibility for clients that do not handle memorization.
+    func bridge(_ bridge: BibleBridge, unmarkMemorized bookInitials: String, startOrdinal: Int, endOrdinal: Int) {}
 }
 
 /**
@@ -531,10 +558,35 @@ public final class BibleBridge: NSObject, WKScriptMessageHandler {
             delegate?.bridge(self, speak: initials, v11n: v11n, startOrdinal: start, endOrdinal: end < 0 ? start : end)
             return .handled
         case "memorize":
-            guard arguments.string(0) != nil,
-                  arguments.int(1) != nil,
-                  arguments.int(2) != nil else { return .malformed }
-            return .handled // Memorization is deferred on iOS; keep the bridge surface validated.
+            guard let initials = arguments.string(0),
+                  let start = arguments.int(1),
+                  let end = arguments.int(2) else { return .malformed }
+            delegate?.bridge(self, memorize: initials, startOrdinal: start, endOrdinal: end < 0 ? start : end)
+            return .handled
+        case "markAsMemorized":
+            guard let initials = arguments.string(0),
+                  let start = arguments.int(1),
+                  let end = arguments.int(2) else { return .malformed }
+            delegate?.bridge(self, markAsMemorized: initials, startOrdinal: start, endOrdinal: end < 0 ? start : end)
+            return .handled
+        case "addMemorizationTarget":
+            guard let initials = arguments.string(0),
+                  let start = arguments.int(1),
+                  let end = arguments.int(2) else { return .malformed }
+            delegate?.bridge(self, addMemorizationTarget: initials, startOrdinal: start, endOrdinal: end < 0 ? start : end)
+            return .handled
+        case "removeMemorizationTarget":
+            guard let initials = arguments.string(0),
+                  let start = arguments.int(1),
+                  let end = arguments.int(2) else { return .malformed }
+            delegate?.bridge(self, removeMemorizationTarget: initials, startOrdinal: start, endOrdinal: end < 0 ? start : end)
+            return .handled
+        case "unmarkMemorized":
+            guard let initials = arguments.string(0),
+                  let start = arguments.int(1),
+                  let end = arguments.int(2) else { return .malformed }
+            delegate?.bridge(self, unmarkMemorized: initials, startOrdinal: start, endOrdinal: end < 0 ? start : end)
+            return .handled
         case "addParagraphBreakBookmark":
             guard let initials = arguments.string(0),
                   let start = arguments.int(1),
