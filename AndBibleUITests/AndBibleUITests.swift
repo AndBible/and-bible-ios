@@ -956,7 +956,6 @@ final class AndBibleUITests: XCTestCase {
 
         _ = openBookmarkList(in: app)
         openSeedStudyPadFromBookmarkList(in: app)
-        dismissBookmarkListIfVisible(in: app, timeout: 10)
         waitForStudyPadPresentation(in: app, timeout: 20)
         waitForVisibleStudyPadState(containing: "studyPadTextEntryCount=1", in: app, timeout: 20)
 
@@ -972,7 +971,6 @@ final class AndBibleUITests: XCTestCase {
 
         _ = openBookmarkList(in: app)
         openSeedStudyPadFromBookmarkList(in: app)
-        dismissBookmarkListIfVisible(in: app, timeout: 10)
         waitForStudyPadPresentation(in: app, timeout: 20)
         waitForVisibleStudyPadState(containing: "studyPadTextEntryCount=2", in: app, timeout: 20)
         waitForVisibleStudyPadState(containing: createdNoteToken, in: app, timeout: 20)
@@ -3887,10 +3885,40 @@ final class AndBibleUITests: XCTestCase {
             dismissSheetByDraggingDown(requireElement("bookmarkListScreen", in: app, timeout: 10))
         }
         XCTAssertTrue(
-            waitForReaderShellReady(in: app, timeout: 20),
+            waitForBookmarkListDismissal(in: app, timeout: 20),
             "Expected bookmark list dismissal to return to the reader shell."
         )
         _ = openBookmarkList(in: app, timeout: 20)
+    }
+
+    /// Waits until bookmark-list dismissal leaves the reader chrome available again.
+    private func waitForBookmarkListDismissal(
+        in app: XCUIApplication,
+        timeout: TimeInterval
+    ) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            if waitForReaderShellReady(in: app, timeout: 0) {
+                return true
+            }
+            if readerDocumentHeaderStateValue(in: app) != nil,
+               !bookmarkListSurfaceIsVisible(in: app) {
+                return true
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        } while Date() < deadline
+
+        return waitForReaderShellReady(in: app, timeout: 0.5)
+            || (readerDocumentHeaderStateValue(in: app) != nil && !bookmarkListSurfaceIsVisible(in: app))
+    }
+
+    /// Returns whether the bookmark-list sheet still exposes one of its lightweight sentinels.
+    private func bookmarkListSurfaceIsVisible(in app: XCUIApplication) -> Bool {
+        let doneButton = app.buttons["bookmarkListDoneButton"].firstMatch
+        if doneButton.exists {
+            return true
+        }
+        return app.staticTexts["bookmarkListStateExport"].firstMatch.exists
     }
 
     /**
@@ -5240,12 +5268,7 @@ final class AndBibleUITests: XCTestCase {
     ) -> [XCUIElement] {
         switch identifier {
         case "searchStateExport":
-            return [
-                app.textFields[identifier].firstMatch,
-                app.staticTexts[identifier].firstMatch,
-                app.otherElements["searchScreen"].textFields[identifier].firstMatch,
-                app.otherElements["searchScreen"].staticTexts[identifier].firstMatch,
-            ]
+            return screenScopedStateCandidates(identifier, within: "searchScreen", in: app)
         case "bookmarkListStateExport":
             return screenScopedStateCandidates(identifier, within: "bookmarkListScreen", in: app)
         case "readingPlanListStateExport":
@@ -6009,11 +6032,14 @@ final class AndBibleUITests: XCTestCase {
         if let headerValue = readerDocumentHeaderStateValue(in: app) {
             return headerValue
         }
-        let stateElement = readerRenderedContentStateElement(in: app)
-        guard stateElement.exists else {
-            return nil
+        for stateElement in readerRenderedContentStateElements(in: app) {
+            guard stateElement.exists,
+                  let value = stateElement.value as? String else {
+                continue
+            }
+            return value
         }
-        return stateElement.value as? String
+        return nil
     }
 
     /// Reads reader state from the early document-header chrome before probing the full WebView tree.
@@ -6027,9 +6053,12 @@ final class AndBibleUITests: XCTestCase {
         return value
     }
 
-    /// Returns the dedicated compact reader state export query without probing broad element sets.
-    private func readerRenderedContentStateElement(in app: XCUIApplication) -> XCUIElement {
-        app.textFields["readerRenderedContentState"].firstMatch
+    /// Returns compact reader state export queries without probing broad element sets.
+    private func readerRenderedContentStateElements(in app: XCUIApplication) -> [XCUIElement] {
+        [
+            app.staticTexts["readerRenderedContentState"].firstMatch,
+            app.textFields["readerRenderedContentState"].firstMatch,
+        ]
     }
 
     /// Returns whether the compact reader state export currently contains one token.
@@ -8765,6 +8794,7 @@ final class AndBibleUITests: XCTestCase {
             return
         }
         tapElementReliably(doneButton, timeout: timeout)
+        _ = waitForBookmarkListDismissal(in: app, timeout: timeout)
     }
 
     /**
@@ -8843,12 +8873,14 @@ final class AndBibleUITests: XCTestCase {
      * - Side effects:
      *   - selects the real `UI Test Seed` filter chip
      *   - taps the production StudyPad handoff button shown for the selected label
+     *   - dismisses the bookmark-list sheet if the handoff leaves it covering the reader
      * - Failure modes:
      *   - fails if the production label-filter or StudyPad handoff controls are unavailable
      */
     private func openSeedStudyPadFromBookmarkList(in app: XCUIApplication) {
         selectBookmarkListFilterChip("UI_Test_Seed", in: app, timeout: 10)
         tapElementReliably(requireElement("bookmarkListOpenStudyPadButton::UI_Test_Seed", in: app, timeout: 10), timeout: 10)
+        dismissBookmarkListIfVisible(in: app, timeout: 10)
     }
 
     /**
@@ -9808,9 +9840,9 @@ final class AndBibleUITests: XCTestCase {
     /**
      Focuses a prompt-owned text-entry control without polling `isHittable`.
 
-     SwiftUI alert text fields can occasionally stall XCTest while resolving hittability even after
-     the prompt-specific resolver has found the field. A coordinate tap against the resolved field
-     frame is enough to attach the keyboard and avoids that flaky snapshot path.
+     SwiftUI alert text fields can occasionally stall XCTest while resolving frame-based taps even
+     after the prompt-specific resolver has found the field. Try the native tap first and reserve
+     the coordinate path as a fallback after focus has failed.
      */
     private func focusResolvedPromptTextEntryElement(
         _ element: XCUIElement,
@@ -9826,13 +9858,15 @@ final class AndBibleUITests: XCTestCase {
             let remaining = deadline.timeIntervalSinceNow
             let exists = element.exists || (remaining > 0 && element.waitForExistence(timeout: min(0.2, remaining)))
             if exists {
-                if !element.frame.isEmpty {
-                    element.coordinate(withNormalizedOffset: tapOffset).tap()
-                } else {
-                    element.tap()
-                }
+                element.tap()
                 if waitForElementKeyboardFocus(element, timeout: 0.75) {
                     return
+                }
+                if elementHasUsableFrame(element) {
+                    element.coordinate(withNormalizedOffset: tapOffset).tap()
+                    if waitForElementKeyboardFocus(element, timeout: 0.75) {
+                        return
+                    }
                 }
             }
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
