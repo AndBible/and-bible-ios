@@ -272,6 +272,23 @@ public protocol BibleBridgeDelegate: AnyObject {
     func bridgeDidRequestToggleFullScreen(_ bridge: BibleBridge)
 }
 
+public extension BibleBridgeDelegate {
+    /// Default no-op to preserve source compatibility for clients that do not handle memorization.
+    func bridge(_ bridge: BibleBridge, memorize bookInitials: String, startOrdinal: Int, endOrdinal: Int) {}
+
+    /// Default no-op to preserve source compatibility for clients that do not handle memorization.
+    func bridge(_ bridge: BibleBridge, markAsMemorized bookInitials: String, startOrdinal: Int, endOrdinal: Int) {}
+
+    /// Default no-op to preserve source compatibility for clients that do not handle memorization.
+    func bridge(_ bridge: BibleBridge, addMemorizationTarget bookInitials: String, startOrdinal: Int, endOrdinal: Int) {}
+
+    /// Default no-op to preserve source compatibility for clients that do not handle memorization.
+    func bridge(_ bridge: BibleBridge, removeMemorizationTarget bookInitials: String, startOrdinal: Int, endOrdinal: Int) {}
+
+    /// Default no-op to preserve source compatibility for clients that do not handle memorization.
+    func bridge(_ bridge: BibleBridge, unmarkMemorized bookInitials: String, startOrdinal: Int, endOrdinal: Int) {}
+}
+
 /**
  WKScriptMessageHandler that bridges all 56+ methods between Vue.js and Swift.
 

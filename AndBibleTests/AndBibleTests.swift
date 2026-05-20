@@ -1100,6 +1100,10 @@ final class AndBibleTests: XCTestCase {
         let store = MemorizationProgressStore(settingsStore: settingsStore)
 
         store.addMemorizationTarget(bookInitials: "KJV", startOrdinal: 1, endOrdinal: 5)
+        let rawAfterInitialTarget = try XCTUnwrap(settingsStore.getString(MemorizationProgressStore.settingsKey))
+        store.addMemorizationTargetIfNeeded(bookInitials: "KJV", startOrdinal: 2, endOrdinal: 4)
+        XCTAssertEqual(settingsStore.getString(MemorizationProgressStore.settingsKey), rawAfterInitialTarget)
+
         store.removeMemorizationTarget(bookInitials: "KJV", startOrdinal: 2, endOrdinal: 4)
         store.markAsMemorized(bookInitials: "KJV", startOrdinal: 3, endOrdinal: 5)
         store.unmarkMemorized(bookInitials: "KJV", startOrdinal: 4, endOrdinal: 4)

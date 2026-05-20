@@ -82,7 +82,7 @@ public final class MemorizationProgressStore {
             return
         }
         var snapshot = snapshot()
-        guard !snapshot.targetRanges.contains(range) else { return }
+        guard !Self.contains(range, in: snapshot.targetRanges) else { return }
         snapshot.targetRanges = Self.add(range, to: snapshot.targetRanges)
         save(snapshot)
     }
@@ -225,6 +225,17 @@ public final class MemorizationProgressStore {
         to ranges: [MemorizationProgressRange]
     ) -> [MemorizationProgressRange] {
         normalized(ranges + [range])
+    }
+
+    private static func contains(
+        _ candidate: MemorizationProgressRange,
+        in ranges: [MemorizationProgressRange]
+    ) -> Bool {
+        ranges.contains { range in
+            range.bookInitials == candidate.bookInitials &&
+                range.startOrdinal <= candidate.startOrdinal &&
+                range.endOrdinal >= candidate.endOrdinal
+        }
     }
 
     private static func subtract(
