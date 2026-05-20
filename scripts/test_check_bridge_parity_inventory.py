@@ -101,10 +101,10 @@ class BridgeParityInventoryTests(unittest.TestCase):
         self.assertIn("- new Android-only methods: none", messages)
         self.assertIn("- stale inventory entries: none", messages)
         self.assertTrue(
-            any("iOS no-op method dispositions: 1 (noOp)" in message for message in messages)
+            any("resolved iOS bridge dispositions: 1 (noOp)" in message for message in messages)
         )
         self.assertTrue(
-            any("iOS no-op methods needing decision: 1 (noOp)" in message for message in messages)
+            any("resolved iOS bridge methods needing decision: 1 (noOp)" in message for message in messages)
         )
         self.assertEqual(messages[-1], "Bridge parity inventory passed.")
 
@@ -129,10 +129,10 @@ class BridgeParityInventoryTests(unittest.TestCase):
             messages = validate_inventory(inventory, ios_interface, None)
 
         self.assertIn(
-            "- iOS no-op method dispositions: 2 (converted, deferred)",
+            "- resolved iOS bridge dispositions: 2 (converted, deferred)",
             messages,
         )
-        self.assertIn("- iOS no-op methods needing decision: 0 (none)", messages)
+        self.assertIn("- resolved iOS bridge methods needing decision: 0 (none)", messages)
 
     def test_validate_inventory_fails_when_missing_method_is_added_to_ios(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

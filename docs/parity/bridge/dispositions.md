@@ -56,7 +56,7 @@ Why this is no longer fuzzy:
 
 ## 4. Android memorization bridge state parity is partially implemented
 
-- Status: implemented bridge state slice with remaining deferred speech/sync work
+- Status: implemented bridge state and speech-loop slice with remaining deferred sync work
 - Scope: `memorize`, `addMemorizationTarget`, `markAsMemorized`,
   `removeMemorizationTarget`, `unmarkMemorized`, and
   `speakMemorizationLoop`
@@ -71,18 +71,19 @@ Disposition:
   `MemorizeDocument`.
 - Bible and Memorize document payloads now carry `memorizedOrdinals` and
   `targetOrdinals` arrays for the loaded ordinal range.
-- Android routes `speakMemorizationLoop` through a distinct native speech-loop
-  path rather than the existing generic `speak` behavior.
-- Speech-loop parity remains tracked separately in #78. Remote Android
-  `progress` sync remains blocked on #73 and the broader progress-model
+- iOS exposes `speakMemorizationLoop` with Android-style
+  `(bookInitials, v11n, startOrdinal, endOrdinal)` bridge validation and routes
+  it through a native `SpeakService` memorization loop instead of generic
+  chapter auto-advance speech.
+- Remote Android `progress` sync remains blocked on #73 and the broader progress-model
   compatibility decisions.
 
 Reason:
 
 - The bridge state methods now have native product state to mutate, so they no
   longer need to remain missing from the iOS bundle.
-- Keeping speech-loop and remote sync separate prevents this bridge slice from
-  expanding into a full Android progress database and TTS-loop migration.
+- Keeping remote sync separate prevents this bridge slice from expanding into a
+  full Android progress database migration.
 
 ## 5. Android My Documents bridge parity is a deferred method family
 
@@ -228,11 +229,12 @@ What we do:
 - iOS preserves the bridge methods needed by this repo's bundled frontend and
   native feature set.
 - Android currently exposes 89 methods in its `BibleJavascriptInterface` type,
-  while the iOS-bundled frontend exposes 66. The Android-only methods cover
+  while the iOS-bundled frontend exposes 67. The Android-only methods cover
   areas such as memorization, reading progress, AI document actions, chapter
   navigation, scoped help, and document-page editing.
 - The memorization state-method subset has a recorded disposition in #50 and is
-  implemented on iOS; `speakMemorizationLoop` remains deferred to #78.
+  implemented on iOS; `speakMemorizationLoop` has a recorded implementation
+  disposition in #78.
 - The My Documents subset has a recorded disposition in #51 and follow-up
   issues #80, #81, #82, and #83, but it remains Android-only until those slices
   are implemented.

@@ -100,6 +100,7 @@ Messages:
 - `compare`
 - `speak`
 - `speakGeneric`
+- `speakMemorizationLoop`
 
 Dispatcher section: `Sources/BibleView/Sources/BibleView/BibleBridge.swift:491`
 
@@ -111,8 +112,9 @@ Notes:
   with the reserved paragraph-break label so the web renderer inserts the break marker.
 - `memorize` now adds the selected range as a local memorization target and opens the bundled
   Memorize document. The related state methods `addMemorizationTarget`, `markAsMemorized`,
-  `removeMemorizationTarget`, and `unmarkMemorized` mutate the same local iOS state. Native
-  speech-loop parity remains tracked separately in #78.
+  `removeMemorizationTarget`, and `unmarkMemorized` mutate the same local iOS state.
+- `speakMemorizationLoop` accepts Android-style `(bookInitials, v11n, startOrdinal, endOrdinal)`
+  arguments and delegates to the native speech service's selected-range repeat mode.
 - Android's My Documents bridge family is also accepted but deferred. iOS should not add
   `getMyDocumentPageRawContent`, `copyMyDocumentContent`, `shareMyDocumentContent`,
   `saveMyDocumentPageContent`, `reloadMyDocumentPage`, `regenerateMyDocumentPage`, or

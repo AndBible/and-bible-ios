@@ -11,6 +11,22 @@ import MediaPlayer
 
 private let logger = Logger(subsystem: "org.andbible", category: "SpeakService")
 
+protocol SpeechSynthesizing: AnyObject {
+    var delegate: AVSpeechSynthesizerDelegate? { get set }
+
+    func speak(_ utterance: AVSpeechUtterance)
+    func stopSpeaking(at boundary: AVSpeechBoundary) -> Bool
+    func pauseSpeaking(at boundary: AVSpeechBoundary) -> Bool
+    func continueSpeaking() -> Bool
+}
+
+extension AVSpeechSynthesizer: SpeechSynthesizing {}
+
+private struct MemorizationLoopPayload {
+    let text: String
+    let language: String
+}
+
 /**
  Text-to-Speech service using AVSpeechSynthesizer.
 
@@ -22,13 +38,16 @@ private let logger = Logger(subsystem: "org.andbible", category: "SpeakService")
  the reader view uses for controls and highlighting.
  */
 public final class SpeakService: NSObject, ObservableObject, AVSpeechSynthesizerDelegate, @unchecked Sendable {
-    private let synthesizer = AVSpeechSynthesizer()
+    private let synthesizer: SpeechSynthesizing
 
     /// Whether speech is currently playing.
     @Published public private(set) var isSpeaking = false
 
     /// Whether speech is paused.
     @Published public private(set) var isPaused = false
+
+    /// Whether the current utterance is replaying as a memorization loop.
+    @Published public private(set) var isMemorizationLoop = false
 
     /// User-facing speed (0.5x–2.0x). Persisted to SettingsStore.
     @Published public var userSpeed: Double = 1.0 {
@@ -69,6 +88,8 @@ public final class SpeakService: NSObject, ObservableObject, AVSpeechSynthesizer
     /// The full text of the current utterance (for range lookups).
     private var currentText: String = ""
 
+    private var memorizationLoopPayload: MemorizationLoopPayload?
+
     /// Tracks whether the user explicitly stopped playback (vs. natural completion).
     private var userStopped = false
 
@@ -89,9 +110,14 @@ public final class SpeakService: NSObject, ObservableObject, AVSpeechSynthesizer
      On iOS this applies the default Bluetooth/media-control preference,
      registers audio interruption observers, and prepares remote command handling.
      */
-    public override init() {
+    public override convenience init() {
+        self.init(synthesizer: AVSpeechSynthesizer())
+    }
+
+    init(synthesizer: SpeechSynthesizing) {
+        self.synthesizer = synthesizer
         super.init()
-        synthesizer.delegate = self
+        self.synthesizer.delegate = self
         #if os(iOS)
         setRemoteCommandHandlingEnabled(AppPreferenceRegistry.boolDefault(for: .enableBluetoothPref) ?? true)
         setupAudioNotifications()
@@ -143,7 +169,37 @@ public final class SpeakService: NSObject, ObservableObject, AVSpeechSynthesizer
        configures the audio session, and publishes fresh Now Playing metadata on iOS.
      */
     public func speak(text: String, language: String = "en-US") {
-        stop()
+        memorizationLoopPayload = nil
+        isMemorizationLoop = false
+        startSpeaking(text: text, language: language, stopExisting: true)
+    }
+
+    /**
+     Starts speaking a text payload and repeats it until playback is stopped or replaced.
+     - Parameters:
+       - text: Fully rendered memorization range text.
+       - language: BCP-47 language code used to resolve the speech voice.
+     */
+    public func speakMemorizationLoop(text: String, language: String = "en-US") {
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            stop()
+            return
+        }
+
+        memorizationLoopPayload = MemorizationLoopPayload(text: text, language: language)
+        isMemorizationLoop = true
+        startSpeaking(text: text, language: language, stopExisting: true, preservingMemorizationLoop: true)
+    }
+
+    private func startSpeaking(
+        text: String,
+        language: String,
+        stopExisting: Bool,
+        preservingMemorizationLoop: Bool = false
+    ) {
+        if stopExisting {
+            stop(preservingMemorizationLoop: preservingMemorizationLoop)
+        }
 
         currentText = text
         let utterance = AVSpeechUtterance(string: text)
@@ -165,7 +221,7 @@ public final class SpeakService: NSObject, ObservableObject, AVSpeechSynthesizer
 
     /// Pauses playback at the next word boundary.
     public func pause() {
-        synthesizer.pauseSpeaking(at: .word)
+        _ = synthesizer.pauseSpeaking(at: .word)
         isPaused = true
         #if os(iOS)
         updateNowPlayingInfo()
@@ -178,7 +234,7 @@ public final class SpeakService: NSObject, ObservableObject, AVSpeechSynthesizer
      */
     public func resume() {
         configureAudioSession()
-        synthesizer.continueSpeaking()
+        _ = synthesizer.continueSpeaking()
         isPaused = false
         #if os(iOS)
         updateNowPlayingInfo()
@@ -191,10 +247,18 @@ public final class SpeakService: NSObject, ObservableObject, AVSpeechSynthesizer
        `onSpeechStopped`, and removes Now Playing metadata on iOS.
      */
     public func stop() {
+        stop(preservingMemorizationLoop: false)
+    }
+
+    private func stop(preservingMemorizationLoop: Bool) {
         userStopped = true
-        synthesizer.stopSpeaking(at: .immediate)
+        _ = synthesizer.stopSpeaking(at: .immediate)
         isSpeaking = false
         isPaused = false
+        if !preservingMemorizationLoop {
+            memorizationLoopPayload = nil
+            isMemorizationLoop = false
+        }
         cancelSleepTimer()
         onSpeechStopped?()
         #if os(iOS)
@@ -444,8 +508,20 @@ public final class SpeakService: NSObject, ObservableObject, AVSpeechSynthesizer
      - Note: Natural completion triggers `onFinishedSpeaking`; user-triggered stops use `didCancel` instead.
      */
     public func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
+        if !userStopped, let memorizationLoopPayload {
+            startSpeaking(
+                text: memorizationLoopPayload.text,
+                language: memorizationLoopPayload.language,
+                stopExisting: false,
+                preservingMemorizationLoop: true
+            )
+            return
+        }
+
         isSpeaking = false
         isPaused = false
+        memorizationLoopPayload = nil
+        isMemorizationLoop = false
         onSpeechStopped?()
         #if os(iOS)
         clearNowPlayingInfo()
@@ -466,6 +542,8 @@ public final class SpeakService: NSObject, ObservableObject, AVSpeechSynthesizer
     public func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) {
         isSpeaking = false
         isPaused = false
+        memorizationLoopPayload = nil
+        isMemorizationLoop = false
         onSpeechStopped?()
         #if os(iOS)
         clearNowPlayingInfo()

@@ -232,11 +232,11 @@ def validate_inventory(
         f"- inventory: {display_path(inventory_path)}",
         f"- iOS interface: {display_path(ios_interface_path)} ({len(ios_methods)} methods)",
         (
-            "- iOS no-op method dispositions: "
+            "- resolved iOS bridge dispositions: "
             f"{len(no_op_methods)} ({format_method_names(no_op_methods)})"
         ),
         (
-            "- iOS no-op methods needing decision: "
+            "- resolved iOS bridge methods needing decision: "
             f"{len(no_ops_needing_decision)} ({format_method_names(no_ops_needing_decision)})"
         ),
     ]
