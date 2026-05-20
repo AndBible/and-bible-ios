@@ -88,6 +88,8 @@ public final class SpeakService: NSObject, ObservableObject, AVSpeechSynthesizer
     /// The full text of the current utterance (for range lookups).
     private var currentText: String = ""
 
+    private var currentUtterance: AVSpeechUtterance?
+    private var utteranceToIgnoreOnCancel: AVSpeechUtterance?
     private var memorizationLoopPayload: MemorizationLoopPayload?
 
     /// Tracks whether the user explicitly stopped playback (vs. natural completion).
@@ -210,6 +212,7 @@ public final class SpeakService: NSObject, ObservableObject, AVSpeechSynthesizer
 
         userStopped = false
         wasInterrupted = false
+        currentUtterance = utterance
         synthesizer.speak(utterance)
         isSpeaking = true
         isPaused = false
@@ -252,10 +255,18 @@ public final class SpeakService: NSObject, ObservableObject, AVSpeechSynthesizer
 
     private func stop(preservingMemorizationLoop: Bool) {
         userStopped = true
-        _ = synthesizer.stopSpeaking(at: .immediate)
+        if preservingMemorizationLoop {
+            utteranceToIgnoreOnCancel = currentUtterance
+        }
+        let didRequestStop = synthesizer.stopSpeaking(at: .immediate)
+        if preservingMemorizationLoop && !didRequestStop {
+            utteranceToIgnoreOnCancel = nil
+        }
         isSpeaking = false
         isPaused = false
+        currentUtterance = nil
         if !preservingMemorizationLoop {
+            utteranceToIgnoreOnCancel = nil
             memorizationLoopPayload = nil
             isMemorizationLoop = false
         }
@@ -508,6 +519,10 @@ public final class SpeakService: NSObject, ObservableObject, AVSpeechSynthesizer
      - Note: Natural completion triggers `onFinishedSpeaking`; user-triggered stops use `didCancel` instead.
      */
     public func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
+        if currentUtterance === utterance {
+            currentUtterance = nil
+        }
+
         if !userStopped, let memorizationLoopPayload {
             startSpeaking(
                 text: memorizationLoopPayload.text,
@@ -540,8 +555,17 @@ public final class SpeakService: NSObject, ObservableObject, AVSpeechSynthesizer
      - Note: Cancellation clears state and highlights but deliberately does not call `onFinishedSpeaking`.
      */
     public func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) {
+        if let ignoredUtterance = utteranceToIgnoreOnCancel, ignoredUtterance === utterance {
+            utteranceToIgnoreOnCancel = nil
+            return
+        }
+
+        if currentUtterance === utterance {
+            currentUtterance = nil
+        }
         isSpeaking = false
         isPaused = false
+        utteranceToIgnoreOnCancel = nil
         memorizationLoopPayload = nil
         isMemorizationLoop = false
         onSpeechStopped?()

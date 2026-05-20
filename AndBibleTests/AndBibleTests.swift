@@ -1168,6 +1168,34 @@ final class AndBibleTests: XCTestCase {
         )
     }
 
+    func testSpeakServiceMemorizationLoopIgnoresCancelledReplacedUtterance() {
+        let synthesizer = FakeSpeechSynthesizer()
+        let service = SpeakService(synthesizer: synthesizer)
+
+        service.speak(text: "Read once", language: "en-US")
+        let replacedUtterance = synthesizer.spokenUtterances[0]
+
+        service.speakMemorizationLoop(text: "Repeat this", language: "en-US")
+        service.speechSynthesizer(AVSpeechSynthesizer(), didCancel: replacedUtterance)
+
+        XCTAssertTrue(service.isMemorizationLoop)
+        XCTAssertTrue(service.isSpeaking)
+        XCTAssertEqual(
+            synthesizer.spokenUtterances.map(\.speechString),
+            ["Read once", "Repeat this"]
+        )
+
+        let loopUtterance = synthesizer.spokenUtterances[1]
+        service.speechSynthesizer(AVSpeechSynthesizer(), didFinish: loopUtterance)
+
+        XCTAssertTrue(service.isMemorizationLoop)
+        XCTAssertTrue(service.isSpeaking)
+        XCTAssertEqual(
+            synthesizer.spokenUtterances.map(\.speechString),
+            ["Read once", "Repeat this", "Repeat this"]
+        )
+    }
+
     func testMemorizationProgressStorePersistsRangesAndSplitsTargets() throws {
         let settingsStore = try makeInMemorySettingsStore()
         let store = MemorizationProgressStore(settingsStore: settingsStore)
