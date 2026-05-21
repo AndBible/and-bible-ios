@@ -147,9 +147,9 @@ The rendered document payload should include:
 - `sourceModelName`
 - `aiDocMarkers`
 
-The iOS-bundled frontend currently lacks the Android My Documents fields and
-action menu behavior. #81, #82, and #83 should update the client schema and UI
-only as their bridge behavior becomes real.
+The iOS-bundled frontend now exposes the #81 raw-content/copy/share bridge
+methods. The remaining Android My Documents fields and action menu behavior
+should only be added as the #82 and #83 bridge behavior becomes real.
 
 Content rendering should preserve Android's content-type meanings:
 
@@ -173,12 +173,12 @@ The raw-content payload needed by #81 is:
 }
 ```
 
-`getMyDocumentPageRawContent(callId, bookInitials, pageKey)` should respond
-with that payload through `bibleView.response(callId, payload)`. Missing
-documents or pages should respond with `bibleView.response(callId, null)`.
+`getMyDocumentPageRawContent(callId, bookInitials, pageKey)` responds with that
+payload through `bibleView.response(callId, payload)`. Missing documents or
+pages respond with `bibleView.response(callId, null)`.
 
-`copyMyDocumentContent` and `shareMyDocumentContent` should use the same raw
-lookup path and operate on the stored page `content`, not the rendered HTML.
+`copyMyDocumentContent` and `shareMyDocumentContent` use the same raw lookup
+path and operate on the stored page `content`, not the rendered HTML.
 `saveMyDocumentPageContent` should update `MyDocumentPageContent.content` and
 optionally `MyDocumentPage.title`, while `reloadMyDocumentPage` should rebuild
 or refresh the visible rendered document for the matching `bookInitials`.
@@ -206,11 +206,11 @@ This #80 decision does not add a remote sync category by itself.
 The first code slice after this decision should be small enough to test without
 porting every Android My Documents behavior:
 
-- Add the SwiftData models and `MyDocumentStore`.
+- Add the SwiftData models and `MyDocumentStore`. (Done for #81.)
 - Cover document creation, page creation, page lookup by `(initials, pageKey)`,
   raw-content retrieval, content update, title update, and cascade deletion.
 - Add a minimal renderer or builder that can produce one My Documents
   `type: "osis"` page payload from stored content.
 
-#81 can then add read-only bridge methods, #82 can add edit/reload behavior,
-and #83 can add AI regenerate/delete behavior.
+#81 adds read-only bridge methods, #82 can add edit/reload behavior, and #83
+can add AI regenerate/delete behavior.

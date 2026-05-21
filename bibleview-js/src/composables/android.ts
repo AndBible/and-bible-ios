@@ -43,6 +43,7 @@ export type BibleJavascriptInterface = {
     requestMoreToEnd: AsyncFunc,
     refChooserDialog: AsyncFunc,
     parseRef: (callId: number, s: String) => void,
+    getMyDocumentPageRawContent: (callId: number, bookInitials: string, pageKey: string) => void,
     saveBookmarkNote: (bookmarkId: IdType, note: Nullable<string>) => void,
     saveGenericBookmarkNote: (bookmarkId: IdType, note: Nullable<string>) => void,
     removeBookmark: (bookmarkId: IdType) => void,
@@ -71,6 +72,8 @@ export type BibleJavascriptInterface = {
     shareBookmarkVerse: (bookmarkId: IdType) => void,
     shareVerse: (bookInitials: string, startOrdinal: number, endOrdinal: number) => void,
     copyVerse: (bookInitials: string, startOrdinal: number, endOrdinal: number) => void,
+    shareMyDocumentContent: (bookInitials: string, pageKey: string) => void,
+    copyMyDocumentContent: (bookInitials: string, pageKey: string) => void,
     addBookmark: (bookInitials: string, startOrdinal: number, endOrdinal: number, addNote: boolean) => void,
     addGenericBookmark: (bookInitials: string, osisRef: string, startOrdinal: number, endOrdinal: number, addNote: boolean) => void,
     addParagraphBreakBookmark: (bookInitials: string, startOrdinal: number, endOrdinal: number) => void,
@@ -460,6 +463,18 @@ export function useAndroid({bookmarks}: { bookmarks: Ref<BaseBookmark[]> }, conf
         return result ?? ""
     }
 
+    async function getMyDocumentPageRawContent(bookInitials: string, pageKey: string): Promise<any> {
+        return deferredCall((callId) => android.getMyDocumentPageRawContent(callId, bookInitials, pageKey))
+    }
+
+    function shareMyDocumentContent(bookInitials: string, pageKey: string) {
+        android.shareMyDocumentContent(bookInitials, pageKey);
+    }
+
+    function copyMyDocumentContent(bookInitials: string, pageKey: string) {
+        android.copyMyDocumentContent(bookInitials, pageKey);
+    }
+
     function updateOrderNumber(
         labelId: IdType,
         bookmarks: StudyPadBibleBookmarkItem[],
@@ -598,6 +613,9 @@ export function useAndroid({bookmarks}: { bookmarks: Ref<BaseBookmark[]> }, conf
         toast,
         shareBookmarkVerse,
         openStudyPad,
+        getMyDocumentPageRawContent,
+        shareMyDocumentContent,
+        copyMyDocumentContent,
         setAsPrimaryLabel,
         toggleBookmarkLabel,
         reportModalState,

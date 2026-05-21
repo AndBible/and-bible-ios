@@ -196,6 +196,10 @@ struct AndBibleApp: App {
             Label.self,
             StudyPadTextEntry.self,
             StudyPadTextEntryText.self,
+            MyDocument.self,
+            MyDocumentPage.self,
+            MyDocumentPageContent.self,
+            AiPageCacheEntry.self,
             ReadingPlan.self,
             ReadingPlanDay.self,
         ]

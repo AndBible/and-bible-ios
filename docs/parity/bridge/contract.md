@@ -96,13 +96,14 @@ payload contract for that state is recorded in
 `speakMemorizationLoop`, which validates Android-style bridge arguments and
 repeats the selected range through `SpeakService`.
 
-Android's My Documents bridge family is also accepted as iOS parity work, but
-it remains deferred until iOS has a native My Documents model/storage and
-rendering contract. That accepted local model is recorded in
-`my-documents-model.md`. Raw-content/copy/share bridge behavior follows in
-#81, edit/reload follows in #82, and AI page regenerate/delete follows in #83.
-The related `mydocuments` sync category stays blocked in #72 until the local
-product surface is implemented.
+Android's My Documents bridge family is also accepted as iOS parity work. The
+read bridge slice from #81 is implemented: `getMyDocumentPageRawContent`
+responds through `bibleView.response(callId, payload|null)` using the
+`MyDocumentStore` lookup, while `copyMyDocumentContent` and
+`shareMyDocumentContent` operate on the stored raw page content. The accepted
+local model is recorded in `my-documents-model.md`. Edit/reload follows in #82,
+and AI page regenerate/delete follows in #83. The related `mydocuments` sync
+category stays blocked in #72 until the local product surface is implemented.
 
 Android's reading-progress bridge family is accepted as iOS parity work, but it
 also remains deferred until iOS has a native reading-progress model, storage,

@@ -1,12 +1,12 @@
 {
   "schemaVersion": 1,
-  "updated": "2026-05-19",
+  "updated": "2026-05-21",
   "purpose": "Track Android bridge surface that is not true iOS parity yet, plus resolved iOS bridge dispositions.",
     "references": {
       "androidInterfaceRelativePath": "app/bibleview-js/src/composables/android.ts",
       "androidMethodCount": 89,
       "iosInterfacePath": "bibleview-js/src/composables/android.ts",
-    "iosBundledMethodCount": 67
+    "iosBundledMethodCount": 70
   },
   "statusLegend": {
     "missing_needs_triage": "Android exposes the method and iOS does not. Treat as a parity gap until implemented or explicitly recorded as an iOS divergence.",
@@ -17,13 +17,6 @@
     "intentional_ios_divergence": "The method remains a validated iOS no-op because iOS has an explicit product or platform divergence."
   },
   "missingAndroidMethods": [
-    {
-      "method": "copyMyDocumentContent",
-      "androidSignature": "(bookInitials: string, pageKey: string) => void",
-      "domain": "my_documents",
-      "status": "missing_deferred_with_issue",
-      "nextStep": "Deferred by issue #51. Requires the iOS My Documents model in #80 before read/copy/share bridge behavior is implemented in #81."
-    },
     {
       "method": "createWholePageBookmark",
       "androidSignature": "(bookInitials: string, bookKey: string) => void",
@@ -37,13 +30,6 @@
       "domain": "my_documents",
       "status": "missing_deferred_with_issue",
       "nextStep": "Deferred by issue #51. Requires the iOS My Documents model in #80 before AI page delete behavior is implemented in #83."
-    },
-    {
-      "method": "getMyDocumentPageRawContent",
-      "androidSignature": "(callId: number, bookInitials: string, pageKey: string) => void",
-      "domain": "my_documents",
-      "status": "missing_deferred_with_issue",
-      "nextStep": "Deferred by issue #51. Requires the iOS My Documents model in #80 before async raw-content bridge behavior is implemented in #81."
     },
     {
       "method": "goToNextChapter",
@@ -158,13 +144,6 @@
       "nextStep": "Deferred by issue #52. Requires the iOS reading-progress model/settings contract in #85 before settings persistence bridge behavior is implemented in #87."
     },
     {
-      "method": "shareMyDocumentContent",
-      "androidSignature": "(bookInitials: string, pageKey: string) => void",
-      "domain": "my_documents",
-      "status": "missing_deferred_with_issue",
-      "nextStep": "Deferred by issue #51. Requires the iOS My Documents model in #80 before read/copy/share bridge behavior is implemented in #81."
-    },
-    {
       "method": "showHelpDialog",
       "androidSignature": "(scopeKey: string) => void",
       "domain": "help",
@@ -193,6 +172,27 @@
       "domain": "memorization",
       "status": "implemented",
       "nextStep": "Implemented by adding a local iOS memorization state store, adding the selected range as a target, and opening the bundled Memorize document."
+    },
+    {
+      "method": "copyMyDocumentContent",
+      "iosSignature": "(bookInitials: string, pageKey: string) => void",
+      "domain": "my_documents",
+      "status": "implemented",
+      "nextStep": "Implemented by resolving the My Documents page through MyDocumentStore and copying the stored raw content to the platform pasteboard."
+    },
+    {
+      "method": "getMyDocumentPageRawContent",
+      "iosSignature": "(callId: number, bookInitials: string, pageKey: string) => void",
+      "domain": "my_documents",
+      "status": "implemented",
+      "nextStep": "Implemented by resolving the My Documents page through MyDocumentStore and responding with Android-compatible raw-content JSON or null."
+    },
+    {
+      "method": "shareMyDocumentContent",
+      "iosSignature": "(bookInitials: string, pageKey: string) => void",
+      "domain": "my_documents",
+      "status": "implemented",
+      "nextStep": "Implemented by resolving the My Documents page through MyDocumentStore and sharing the stored title plus raw content through native sharing UI."
     },
     {
       "method": "speakMemorizationLoop",

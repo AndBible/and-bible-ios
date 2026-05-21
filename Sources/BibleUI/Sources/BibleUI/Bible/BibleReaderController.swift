@@ -119,6 +119,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
     let bridge: BibleBridge
     var bookmarkService: BookmarkService?
+    var myDocumentStore: MyDocumentStore?
     private(set) var currentBook: String = "Genesis"
     private(set) var currentChapter: Int = 1
     private(set) var currentVerse: Int = 1
@@ -2971,6 +2972,51 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(copyText, forType: .string)
         #endif
+    }
+
+    /**
+     Returns the Android-compatible raw My Documents page payload for the supplied document/page key.
+     */
+    public func bridge(_ bridge: BibleBridge, getMyDocumentPageRawContent callId: Int, bookInitials: String, pageKey: String) {
+        guard let payload = myDocumentStore?.rawContentPayload(bookInitials: bookInitials, pageKey: pageKey) else {
+            bridge.sendResponse(callId: callId, value: "null")
+            return
+        }
+
+        bridge.sendResponse(callId: callId, value: payload)
+    }
+
+    /**
+     Copies the stored raw My Documents page content to the platform pasteboard.
+     */
+    public func bridge(_ bridge: BibleBridge, copyMyDocumentContent bookInitials: String, pageKey: String) {
+        guard let payload = myDocumentStore?.rawContentPayload(bookInitials: bookInitials, pageKey: pageKey) else {
+            return
+        }
+
+        #if os(iOS)
+        UIPasteboard.general.string = payload.content
+        #elseif os(macOS)
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(payload.content, forType: .string)
+        #endif
+    }
+
+    /**
+     Shares the stored raw My Documents page content through native sharing UI.
+     */
+    public func bridge(_ bridge: BibleBridge, shareMyDocumentContent bookInitials: String, pageKey: String) {
+        guard let payload = myDocumentStore?.rawContentPayload(bookInitials: bookInitials, pageKey: pageKey) else {
+            return
+        }
+
+        let shareText: String
+        if payload.title.isEmpty {
+            shareText = payload.content
+        } else {
+            shareText = "\(payload.title)\n\n\(payload.content)"
+        }
+        onShareVerseText?(shareText)
     }
 
     /**
