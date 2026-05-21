@@ -100,8 +100,9 @@ Disposition:
   folded into `readingplans` without an explicit compatibility decision. The
   #52 reading-progress bridge disposition keeps this blocked on the native
   reading-progress model/storage and settings contract in #85. The #50
-  memorization bridge state slice now has local iOS storage, but remote
-  Android `progress` sync compatibility still belongs to #73.
+  memorization bridge state slice now has local iOS storage, with the #77 model
+  recorded in `../bridge/memorization-progress-model.md`, but remote Android
+  `progress` sync compatibility still belongs to #73.
 
 Reason:
 

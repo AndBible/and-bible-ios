@@ -71,6 +71,8 @@ Disposition:
   `MemorizeDocument`.
 - Bible and Memorize document payloads now carry `memorizedOrdinals` and
   `targetOrdinals` arrays for the loaded ordinal range.
+- The local model, range-normalization decision, and Android owner references
+  are recorded in `memorization-progress-model.md`.
 - iOS exposes `speakMemorizationLoop` with Android-style
   `(bookInitials, v11n, startOrdinal, endOrdinal)` bridge validation and routes
   it through a native `SpeakService` memorization loop instead of generic
