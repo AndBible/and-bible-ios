@@ -103,8 +103,9 @@ Disposition:
   database, page metadata, separately stored page content, AI-page cache
   metadata, generated JSword general-book registration, native clipboard/share
   behavior, editor save/reload behavior, and AI page regeneration/deletion.
-- The first iOS slice is therefore the native My Documents model/storage and
-  rendering contract in #80.
+- The native iOS My Documents model/storage, rendering path, raw-content
+  payload, and Android owner references are recorded in
+  `my-documents-model.md`.
 - Read-only bridge behavior for raw content, copy, and share follows in #81.
 - Editor save/reload behavior follows in #82.
 - AI-generated page regeneration and deletion follow in #83, with regeneration

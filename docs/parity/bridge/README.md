@@ -9,9 +9,11 @@ the Vue.js client and native iOS code.
 2. [dispositions.md](dispositions.md): explicit iOS adaptations and no-op dispositions
 3. [memorization-progress-model.md](memorization-progress-model.md): accepted
    local iOS memorization progress model and Android references
-4. [verification-matrix.md](verification-matrix.md): current status by bridge contract area
-5. [regression-report.md](regression-report.md): focused bridge-adjacent validation evidence
-6. [guardrails.md](guardrails.md): maintenance rules for high-risk bridge changes
+4. [my-documents-model.md](my-documents-model.md): accepted local iOS My
+   Documents model, storage, rendering, and raw-content contract
+5. [verification-matrix.md](verification-matrix.md): current status by bridge contract area
+6. [regression-report.md](regression-report.md): focused bridge-adjacent validation evidence
+7. [guardrails.md](guardrails.md): maintenance rules for high-risk bridge changes
 
 Machine-readable tracking:
 

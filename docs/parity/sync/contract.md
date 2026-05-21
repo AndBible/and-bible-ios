@@ -56,8 +56,9 @@ The current Android app also defines `mydocuments`, `ai_settings`, and
 implemented in the current iOS sync surface yet. Issue #49 records the decision
 to treat them as separate deferred parity targets:
 
-- `mydocuments`: tracked by #72, pending the iOS My Documents model/storage
-  contract in #80 and the related bridge slices from #51.
+- `mydocuments`: tracked by #72 and mapped to the local My Documents model
+  recorded in `../bridge/my-documents-model.md`; remote sync still waits for
+  local model implementation and the related bridge slices from #51.
 - `ai_settings`: tracked by #74, pending the shared AI backend/settings contract
   from #5. The AI bridge disposition in #53 and bridge shell contract in #89
   keep bridge-facing settings ownership aligned with that shared backend

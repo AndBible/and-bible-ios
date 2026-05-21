@@ -36,7 +36,8 @@ rules explicit for changes in:
    `readingplans`. Android also exposes `mydocuments`, `ai_settings`, and `progress`, which are
    not implemented on iOS yet. Issue #49 records these as separate deferred parity targets tracked
    by #72, #74, and #73; adding any one of them is new parity surface, not a local cleanup.
-   `mydocuments` also depends on the iOS My Documents model/storage contract in #80.
+   `mydocuments` also depends on the iOS My Documents model/storage contract recorded in
+   `../bridge/my-documents-model.md`.
    `ai_settings` depends on the shared AI backend/settings direction in #5 and the bridge
    shell ownership contract in #89; it must not introduce an iOS-only AI settings schema.
    `progress` depends on the iOS reading-progress model/storage and settings contract in #85

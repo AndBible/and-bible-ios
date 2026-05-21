@@ -124,10 +124,11 @@ Notes:
   `getMyDocumentPageRawContent`, `copyMyDocumentContent`, `shareMyDocumentContent`,
   `saveMyDocumentPageContent`, `reloadMyDocumentPage`, `regenerateMyDocumentPage`, or
   `deleteMyDocumentPage` as standalone bridge names before the native document model exists.
-  #80 owns the iOS model/storage and rendering contract, #81 owns raw-content/copy/share
-  behavior, #82 owns edit/reload behavior, and #83 owns AI-generated page regenerate/delete
-  behavior. The related `mydocuments` sync category remains tracked in #72 after the local
-  model exists.
+  The accepted iOS model/storage, rendering, and raw-content contract is recorded in
+  `docs/parity/bridge/my-documents-model.md`. #81 owns raw-content/copy/share behavior,
+  #82 owns edit/reload behavior, and #83 owns AI-generated page regenerate/delete behavior.
+  The related `mydocuments` sync category remains tracked in #72 after the local model
+  is implemented.
 - Android's reading-progress bridge family is accepted but deferred. iOS should not add
   `markChapterRead`, `unmarkChapterRead`, `openReadingProgress`,
   `openReadingProgressSettings`, or `setReadingProgressSettings` as standalone bridge names
