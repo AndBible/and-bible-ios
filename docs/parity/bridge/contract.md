@@ -98,10 +98,11 @@ repeats the selected range through `SpeakService`.
 
 Android's My Documents bridge family is also accepted as iOS parity work, but
 it remains deferred until iOS has a native My Documents model/storage and
-rendering contract. That first slice is #80. Raw-content/copy/share bridge
-behavior follows in #81, edit/reload follows in #82, and AI page
-regenerate/delete follows in #83. The related `mydocuments` sync category stays
-blocked in #72 until the local product surface exists.
+rendering contract. That accepted local model is recorded in
+`my-documents-model.md`. Raw-content/copy/share bridge behavior follows in
+#81, edit/reload follows in #82, and AI page regenerate/delete follows in #83.
+The related `mydocuments` sync category stays blocked in #72 until the local
+product surface is implemented.
 
 Android's reading-progress bridge family is accepted as iOS parity work, but it
 also remains deferred until iOS has a native reading-progress model, storage,

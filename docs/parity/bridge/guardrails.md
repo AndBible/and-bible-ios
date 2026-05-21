@@ -64,9 +64,10 @@ rules explicit for changes in:
    Do not add `getMyDocumentPageRawContent`, `copyMyDocumentContent`,
    `shareMyDocumentContent`, `saveMyDocumentPageContent`,
    `reloadMyDocumentPage`, `regenerateMyDocumentPage`, or
-   `deleteMyDocumentPage` as method-name-only stubs. #80 owns the native
-   model/storage prerequisite, #81 owns raw-content/copy/share behavior, #82
-   owns edit/reload behavior, and #83 owns AI page regenerate/delete behavior.
+   `deleteMyDocumentPage` as method-name-only stubs. The native model/storage
+   prerequisite is recorded in `my-documents-model.md`, #81 owns
+   raw-content/copy/share behavior, #82 owns edit/reload behavior, and #83 owns
+   AI page regenerate/delete behavior.
 
    Android's reading-progress bridge family is documented deferred surface too.
    Do not add `markChapterRead`, `unmarkChapterRead`, `openReadingProgress`,

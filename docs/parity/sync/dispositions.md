@@ -88,7 +88,8 @@ Disposition:
   Those categories are not implemented on iOS yet and must not be treated as one
   broad implementation task.
 - `mydocuments` is tracked separately in #72. It depends on the iOS My
-  Documents model/storage contract in #80 and the bridge disposition from #51
+  Documents model/storage and rendering contract recorded in
+  `../bridge/my-documents-model.md`, plus the bridge disposition from #51,
   before remote sync storage is added.
 - `ai_settings` is tracked separately in #74. It is deferred behind #5 so iOS
   does not invent an AI settings sync schema before the shared AI backend and
