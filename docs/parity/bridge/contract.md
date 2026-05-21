@@ -90,8 +90,9 @@ bookmarks with the reserved paragraph-break label. Memorization bridge state is
 also part of the supported iOS subset: `memorize` adds the selected range as a
 local target and opens the bundled Memorize document, while
 `addMemorizationTarget`, `markAsMemorized`, `removeMemorizationTarget`, and
-`unmarkMemorized` mutate the same local state. Native speech-loop parity for
-`speakMemorizationLoop` remains tracked separately in #78.
+`unmarkMemorized` mutate the same local state. Native speech-loop parity is
+implemented by `speakMemorizationLoop`, which validates Android-style bridge
+arguments and repeats the selected range through `SpeakService`.
 
 Android's My Documents bridge family is also accepted as iOS parity work, but
 it remains deferred until iOS has a native My Documents model/storage and

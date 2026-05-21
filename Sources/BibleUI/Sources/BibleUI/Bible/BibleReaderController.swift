@@ -567,20 +567,15 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         service.speak(text: text, language: speechLang)
     }
 
-    /**
-     Speak a specific verse range using TTS.
+    private struct VerseRangeSpeechPayload {
+        let text: String
+        let language: String
+    }
 
-     See `speakCurrentChapter()` for details on why Strong's/Morphology options
-     are temporarily disabled during text extraction.
-     */
-    private func speakVerseRange(startOrdinal: Int, endOrdinal: Int) {
-        guard let module = activeModule, let service = speakService else { return }
+    private func speechPayloadForVerseRange(startOrdinal: Int, endOrdinal: Int) -> VerseRangeSpeechPayload? {
+        guard let module = activeModule else { return nil }
         let osisBookId = osisBookId(for: currentBook)
         let chapter = currentChapter
-
-        // Set Now Playing metadata before speaking
-        service.currentTitle = "\(currentBook) \(currentChapter)"
-        service.currentSubtitle = activeModuleName
 
         // Temporarily disable Strong's/morphology so stripText() returns clean plain text.
         let mgr = swordManager
@@ -588,6 +583,10 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         let morphWasOn = displaySettings.showMorphology ?? false
         if strongsWasOn { mgr?.setGlobalOption(.strongsNumbers, enabled: false) }
         if morphWasOn { mgr?.setGlobalOption(.morphology, enabled: false) }
+        defer {
+            if strongsWasOn { mgr?.setGlobalOption(.strongsNumbers, enabled: true) }
+            if morphWasOn { mgr?.setGlobalOption(.morphology, enabled: true) }
+        }
 
         // Collect text for the specified ordinal range
         module.setKey("\(osisBookId) \(chapter):1")
@@ -609,15 +608,43 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             if !module.next() { break }
         }
 
-        // Restore Strong's/morphology options
-        if strongsWasOn { mgr?.setGlobalOption(.strongsNumbers, enabled: true) }
-        if morphWasOn { mgr?.setGlobalOption(.morphology, enabled: true) }
+        let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedText.isEmpty else { return nil }
 
-        if !text.isEmpty {
-            let lang = module.info.language
-            let speechLang = lang.hasPrefix("en") ? "en-US" : lang
-            service.speak(text: text, language: speechLang)
+        let lang = module.info.language
+        let speechLang = lang.hasPrefix("en") ? "en-US" : lang
+        return VerseRangeSpeechPayload(text: trimmedText, language: speechLang)
+    }
+
+    /**
+     Speak a specific verse range using TTS.
+
+     See `speakCurrentChapter()` for details on why Strong's/Morphology options
+     are temporarily disabled during text extraction.
+     */
+    private func speakVerseRange(startOrdinal: Int, endOrdinal: Int) {
+        guard let service = speakService,
+              let payload = speechPayloadForVerseRange(startOrdinal: startOrdinal, endOrdinal: endOrdinal) else {
+            return
         }
+
+        service.currentTitle = "\(currentBook) \(currentChapter)"
+        service.currentSubtitle = activeModuleName
+        service.speak(text: payload.text, language: payload.language)
+    }
+
+    /**
+     Speak a specific verse range repeatedly for Android memorization-loop parity.
+     */
+    private func speakMemorizationLoopRange(startOrdinal: Int, endOrdinal: Int) {
+        guard let service = speakService,
+              let payload = speechPayloadForVerseRange(startOrdinal: startOrdinal, endOrdinal: endOrdinal) else {
+            return
+        }
+
+        service.currentTitle = "\(currentBook) \(currentChapter)"
+        service.currentSubtitle = activeModuleName
+        service.speakMemorizationLoop(text: payload.text, language: payload.language)
     }
 
     // MARK: - TTS Word Highlighting
@@ -2961,6 +2988,13 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      */
     public func bridge(_ bridge: BibleBridge, speak bookInitials: String, v11n: String, startOrdinal: Int, endOrdinal: Int) {
         speakVerseRange(startOrdinal: startOrdinal, endOrdinal: endOrdinal)
+    }
+
+    /**
+     Starts repeated TTS playback for the selected memorization range.
+     */
+    public func bridge(_ bridge: BibleBridge, speakMemorizationLoop bookInitials: String, v11n: String, startOrdinal: Int, endOrdinal: Int) {
+        speakMemorizationLoopRange(startOrdinal: startOrdinal, endOrdinal: endOrdinal)
     }
 
     /**

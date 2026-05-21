@@ -85,6 +85,7 @@ export type BibleJavascriptInterface = {
     openMyNotes: (v11n: string, ordinal: number) => void,
     speak: (bookInitials: string, v11n: string, startOrdinal: number, endOrdinal: number) => void,
     speakGeneric: (bookInitials: string, osisRef: string, startOrdinal: number, endOrdinal: number) => void,
+    speakMemorizationLoop: (bookInitials: string, v11n: string, startOrdinal: number, endOrdinal: number) => void,
     setAsPrimaryLabel: (bookmarkId: IdType, labelId: IdType) => void,
     setAsPrimaryLabelGeneric: (bookmarkId: IdType, labelId: IdType) => void,
     toggleBookmarkLabel: (bookmarkId: IdType, labelId: IdType) => void,
@@ -380,51 +381,51 @@ export function useAndroid({bookmarks}: { bookmarks: Ref<BaseBookmark[]> }, conf
     }
 
     function shareVerse(bookInitials: string, startOrdinal: number, endOrdinal?: number) {
-        android.shareVerse(bookInitials, startOrdinal, endOrdinal ? endOrdinal : -1);
+        android.shareVerse(bookInitials, startOrdinal, endOrdinal ?? -1);
     }
 
     function copyVerse(bookInitials: string, startOrdinal: number, endOrdinal?: number) {
-        android.copyVerse(bookInitials, startOrdinal, endOrdinal ? endOrdinal : -1);
+        android.copyVerse(bookInitials, startOrdinal, endOrdinal ?? -1);
     }
 
     function addBookmark(bookInitials: string, startOrdinal: number, endOrdinal?: number, addNote: boolean = false) {
-        android.addBookmark(bookInitials, startOrdinal, endOrdinal ? endOrdinal : -1, addNote);
+        android.addBookmark(bookInitials, startOrdinal, endOrdinal ?? -1, addNote);
     }
 
     function addGenericBookmark(bookInitials: string, osisRef: string, startOrdinal: number, endOrdinal?: number, addNote: boolean = false) {
-        android.addGenericBookmark(bookInitials, osisRef, startOrdinal, endOrdinal ? endOrdinal : -1, addNote);
+        android.addGenericBookmark(bookInitials, osisRef, startOrdinal, endOrdinal ?? -1, addNote);
     }
 
     function addParagraphBreakBookmark(bookInitials: string, startOrdinal: number, endOrdinal?: number) {
-        android.addParagraphBreakBookmark(bookInitials, startOrdinal, endOrdinal ? endOrdinal : -1);
+        android.addParagraphBreakBookmark(bookInitials, startOrdinal, endOrdinal ?? -1);
     }
 
     function addGenericParagraphBreakBookmark(bookInitials: string, osisRef: string, startOrdinal: number, endOrdinal?: number) {
-        android.addGenericParagraphBreakBookmark(bookInitials, osisRef, startOrdinal, endOrdinal ? endOrdinal : -1);
+        android.addGenericParagraphBreakBookmark(bookInitials, osisRef, startOrdinal, endOrdinal ?? -1);
     }
 
     function compare(bookInitials: string, startOrdinal: number, endOrdinal?: number) {
-        android.compare(bookInitials, startOrdinal, endOrdinal ? endOrdinal : -1);
+        android.compare(bookInitials, startOrdinal, endOrdinal ?? -1);
     }
 
     function memorize(bookInitials: string, startOrdinal: number, endOrdinal?: number) {
-        android.memorize(bookInitials, startOrdinal, endOrdinal ? endOrdinal : -1);
+        android.memorize(bookInitials, startOrdinal, endOrdinal ?? -1);
     }
 
     function markAsMemorized(bookInitials: string, startOrdinal: number, endOrdinal?: number) {
-        android.markAsMemorized(bookInitials, startOrdinal, endOrdinal ? endOrdinal : -1);
+        android.markAsMemorized(bookInitials, startOrdinal, endOrdinal ?? -1);
     }
 
     function addMemorizationTarget(bookInitials: string, startOrdinal: number, endOrdinal?: number) {
-        android.addMemorizationTarget(bookInitials, startOrdinal, endOrdinal ? endOrdinal : -1);
+        android.addMemorizationTarget(bookInitials, startOrdinal, endOrdinal ?? -1);
     }
 
     function unmarkMemorized(bookInitials: string, startOrdinal: number, endOrdinal?: number) {
-        android.unmarkMemorized(bookInitials, startOrdinal, endOrdinal ? endOrdinal : -1);
+        android.unmarkMemorized(bookInitials, startOrdinal, endOrdinal ?? -1);
     }
 
     function removeMemorizationTarget(bookInitials: string, startOrdinal: number, endOrdinal?: number) {
-        android.removeMemorizationTarget(bookInitials, startOrdinal, endOrdinal ? endOrdinal : -1);
+        android.removeMemorizationTarget(bookInitials, startOrdinal, endOrdinal ?? -1);
     }
 
     function openStudyPad(labelId: IdType, bookmark: BaseBookmark) {
@@ -439,11 +440,15 @@ export function useAndroid({bookmarks}: { bookmarks: Ref<BaseBookmark[]> }, conf
     }
 
     function speak(bookInitials: string, v11n: string, startOrdinal: number, endOrdinal?: number) {
-        android.speak(bookInitials, v11n, startOrdinal, endOrdinal ? endOrdinal : -1);
+        android.speak(bookInitials, v11n, startOrdinal, endOrdinal ?? -1);
     }
 
     function speakGeneric(bookInitials: string, osisRef: string, startOrdinal: number, endOrdinal?: number) {
-        android.speakGeneric(bookInitials, osisRef, startOrdinal, endOrdinal ? endOrdinal : -1);
+        android.speakGeneric(bookInitials, osisRef, startOrdinal, endOrdinal ?? -1);
+    }
+
+    function speakMemorizationLoop(bookInitials: string, v11n: string, startOrdinal: number, endOrdinal?: number) {
+        android.speakMemorizationLoop(bookInitials, v11n, startOrdinal, endOrdinal ?? -1);
     }
 
     function openDownloads() {
@@ -617,6 +622,7 @@ export function useAndroid({bookmarks}: { bookmarks: Ref<BaseBookmark[]> }, conf
         removeMemorizationTarget,
         speak,
         speakGeneric,
+        speakMemorizationLoop,
         helpDialog,
         onKeyDown,
         parseRef,

@@ -14,7 +14,7 @@ the Vue.js client and native iOS code.
 Machine-readable tracking:
 
 - [baselines/android-bridge-gap-inventory.json](baselines/android-bridge-gap-inventory.json):
-  Android bridge methods plus iOS no-op and former no-op dispositions
+  Android bridge methods plus resolved iOS bridge dispositions
 
 Recurring alignment check:
 

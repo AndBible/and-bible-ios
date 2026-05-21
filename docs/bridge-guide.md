@@ -6,8 +6,8 @@ This guide describes the current Swift <-> Vue.js bridge used by `BibleView`.
 
 - Native message handler registration: `Sources/BibleView/Sources/BibleView/BibleWebView.swift:272`
 - Android compatibility shim injected into the web page: `Sources/BibleView/Sources/BibleView/BibleWebView.swift:182`
-- Central Swift dispatcher: `Sources/BibleView/Sources/BibleView/BibleBridge.swift:330`
-- Bridge delegate contract: `Sources/BibleView/Sources/BibleView/BibleBridge.swift:122`
+- Central Swift dispatcher: `BibleBridge.dispatchMessage(method:args:)` in `Sources/BibleView/Sources/BibleView/BibleBridge.swift`
+- Bridge delegate contract: `BibleBridgeDelegate` in `Sources/BibleView/Sources/BibleView/BibleBridge.swift`
 - Main controller implementation: `Sources/BibleUI/Sources/BibleUI/Bible/BibleReaderController.swift`
 
 ## Transport Model
@@ -24,8 +24,8 @@ window.webkit.messageHandlers.bibleView.postMessage({
 ```
 
 Swift receives that in `BibleBridge.userContentController(...)`, then routes it
-through `BibleBridge.dispatchMessage(method:args:)`:
-`Sources/BibleView/Sources/BibleView/BibleBridge.swift:330`.
+through `BibleBridge.dispatchMessage(method:args:)` in
+`Sources/BibleView/Sources/BibleView/BibleBridge.swift`.
 
 ### Swift -> JavaScript
 
@@ -35,7 +35,8 @@ Native code pushes events with:
 bridge.emit(event: "set_config", data: buildConfigJSON())
 ```
 
-That is implemented in `BibleBridge.emit(...)`: `Sources/BibleView/Sources/BibleView/BibleBridge.swift:698`.
+That is implemented by `BibleBridge.emit(event:data:)` in
+`Sources/BibleView/Sources/BibleView/BibleBridge.swift`.
 
 ### Async request/response
 
@@ -45,7 +46,8 @@ Some JS calls expect a deferred response. Native answers them with:
 bridge.sendResponse(callId: callId, value: json)
 ```
 
-Implementation: `Sources/BibleView/Sources/BibleView/BibleBridge.swift:680`.
+Implementation: `BibleBridge.sendResponse(callId:value:)` in
+`Sources/BibleView/Sources/BibleView/BibleBridge.swift`.
 
 Examples:
 - Expand content above/below current range: `.../BibleReaderController.swift:1751` and `:1795`
@@ -54,7 +56,8 @@ Examples:
 
 ## JS -> Swift Message Catalog
 
-The authoritative grouped catalog is the `BibleBridgeDelegate` protocol at `Sources/BibleView/Sources/BibleView/BibleBridge.swift:122`.
+The authoritative grouped catalog is the `BibleBridgeDelegate` protocol in
+`Sources/BibleView/Sources/BibleView/BibleBridge.swift`.
 
 ### Navigation and scroll
 
@@ -89,7 +92,8 @@ Messages:
 - `setBookmarkCustomIcon`
 - `setGenericBookmarkCustomIcon`
 
-Dispatcher section: `Sources/BibleView/Sources/BibleView/BibleBridge.swift:424`
+Dispatcher section: `BibleBridge.dispatchMessage(method:args:)` bookmark cases in
+`Sources/BibleView/Sources/BibleView/BibleBridge.swift`
 
 ### Content actions
 
@@ -100,8 +104,10 @@ Messages:
 - `compare`
 - `speak`
 - `speakGeneric`
+- `speakMemorizationLoop`
 
-Dispatcher section: `Sources/BibleView/Sources/BibleView/BibleBridge.swift:491`
+Dispatcher section: `BibleBridge.dispatchMessage(method:args:)` content-action cases in
+`Sources/BibleView/Sources/BibleView/BibleBridge.swift`
 
 Notes:
 - The bridge normalizes `endOrdinal < 0` to `startOrdinal` for single-verse operations.
@@ -111,8 +117,9 @@ Notes:
   with the reserved paragraph-break label so the web renderer inserts the break marker.
 - `memorize` now adds the selected range as a local memorization target and opens the bundled
   Memorize document. The related state methods `addMemorizationTarget`, `markAsMemorized`,
-  `removeMemorizationTarget`, and `unmarkMemorized` mutate the same local iOS state. Native
-  speech-loop parity remains tracked separately in #78.
+  `removeMemorizationTarget`, and `unmarkMemorized` mutate the same local iOS state.
+- `speakMemorizationLoop` accepts Android-style `(bookInitials, v11n, startOrdinal, endOrdinal)`
+  arguments and delegates to the native speech service's selected-range repeat mode.
 - Android's My Documents bridge family is also accepted but deferred. iOS should not add
   `getMyDocumentPageRawContent`, `copyMyDocumentContent`, `shareMyDocumentContent`,
   `saveMyDocumentPageContent`, `reloadMyDocumentPage`, `regenerateMyDocumentPage`, or
@@ -150,7 +157,8 @@ Messages:
 - `updateGenericBookmarkToLabel`
 - `setBookmarkEditAction`
 
-Dispatcher section: `Sources/BibleView/Sources/BibleView/BibleBridge.swift:526`
+Dispatcher section: `BibleBridge.dispatchMessage(method:args:)` StudyPad cases in
+`Sources/BibleView/Sources/BibleView/BibleBridge.swift`
 
 ### Navigation, dialogs, and external links
 
@@ -166,7 +174,8 @@ Messages:
 - `shareHtml`
 - `toggleFullScreen`
 
-Dispatcher section: `Sources/BibleView/Sources/BibleView/BibleBridge.swift:580`
+Dispatcher section: `BibleBridge.dispatchMessage(method:args:)` navigation, dialog, and external-link cases in
+`Sources/BibleView/Sources/BibleView/BibleBridge.swift`
 
 ### Passive state/reporting messages
 
@@ -184,7 +193,8 @@ Messages:
 - `saveState`
 - `onKeyDown`
 
-Dispatcher section: `Sources/BibleView/Sources/BibleView/BibleBridge.swift:355`
+Dispatcher section: `BibleBridge.dispatchMessage(method:args:)` passive state/reporting cases in
+`Sources/BibleView/Sources/BibleView/BibleBridge.swift`
 
 ## Native -> JS Event Catalog
 
@@ -271,21 +281,24 @@ The Vue.js bundle still calls `window.android.*` in many places. On iOS, `BibleW
 
 - Shim creation: `Sources/BibleView/Sources/BibleView/BibleWebView.swift:182`
 - `getActiveLanguages()` is handled synchronously by reading `window.__activeLanguages__`: `.../BibleWebView.swift:184`
-- Native refresh of that cache happens in `BibleBridge.updateActiveLanguages(...)`: `Sources/BibleView/Sources/BibleView/BibleBridge.swift:772`
+- Native refresh of that cache happens in `BibleBridge.updateActiveLanguages(_:)` in
+  `Sources/BibleView/Sources/BibleView/BibleBridge.swift`
 
 ## Logging and Error Handling
 
 - Browser console output is rerouted to native with `jsLog`: `Sources/BibleView/Sources/BibleView/BibleWebView.swift:219`
-- `BibleBridge.emit(...)` wraps JS emission in a `try/catch` and reports failures back through the console bridge: `Sources/BibleView/Sources/BibleView/BibleBridge.swift:698`
+- `BibleBridge.emit(event:data:)` wraps JS emission in a `try/catch` and reports failures
+  back through the console bridge in `Sources/BibleView/Sources/BibleView/BibleBridge.swift`
 - Known methods with missing or wrong-type required arguments classify as malformed and log
   argument type diagnostics.
-- Unknown methods are logged at debug level instead of crashing: `Sources/BibleView/Sources/BibleView/BibleBridge.swift:619`
+- Unknown methods are logged at debug level instead of crashing in
+  `BibleBridge.dispatchMessage(method:args:)`.
 
 ## Selection Queries
 
 There are two selection-query paths.
 
-1. Lightweight DOM query in `BibleBridge.querySelection()`: `Sources/BibleView/Sources/BibleView/BibleBridge.swift:721`
+1. Lightweight DOM query in `BibleBridge.querySelection()`
 2. Richer Vue.js query used by bookmark-selection flows in `BibleReaderController.querySelectionDetails()`: `Sources/BibleUI/Sources/BibleUI/Bible/BibleReaderController.swift:2392`
 
 Use the richer path when you need start/end offsets. Use the bridge fallback when you only need text and verse ordinals.
@@ -294,8 +307,8 @@ Use the richer path when you need start/end offsets. Use the bridge fallback whe
 
 See [howto/adding-a-bridge-method.md](howto/adding-a-bridge-method.md) for the expanded workflow. The concrete implementation pattern is:
 
-1. Add a delegate method in `BibleBridgeDelegate`: `Sources/BibleView/Sources/BibleView/BibleBridge.swift:122`
-2. Route the JS `method` in `dispatchMessage(method:args:)`: `Sources/BibleView/Sources/BibleView/BibleBridge.swift:330`
+1. Add a delegate method in `BibleBridgeDelegate` in `Sources/BibleView/Sources/BibleView/BibleBridge.swift`
+2. Route the JS `method` in `BibleBridge.dispatchMessage(method:args:)` in `Sources/BibleView/Sources/BibleView/BibleBridge.swift`
 3. Implement the delegate in `BibleReaderController`
 4. If it is async, return through `sendResponse(...)`
 5. If it mutates client state, emit the matching update event back to JS

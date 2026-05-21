@@ -186,6 +186,8 @@ public protocol BibleBridgeDelegate: AnyObject {
     func bridge(_ bridge: BibleBridge, compareVerses bookInitials: String, startOrdinal: Int, endOrdinal: Int)
     /// Starts text-to-speech playback for the selected verse range and versification.
     func bridge(_ bridge: BibleBridge, speak bookInitials: String, v11n: String, startOrdinal: Int, endOrdinal: Int)
+    /// Starts repeated text-to-speech playback for the selected memorization range and versification.
+    func bridge(_ bridge: BibleBridge, speakMemorizationLoop bookInitials: String, v11n: String, startOrdinal: Int, endOrdinal: Int)
     /// Opens the memorization workflow for the selected verse range.
     func bridge(_ bridge: BibleBridge, memorize bookInitials: String, startOrdinal: Int, endOrdinal: Int)
     /// Marks the selected verse range as a memorized range.
@@ -273,6 +275,9 @@ public protocol BibleBridgeDelegate: AnyObject {
 }
 
 public extension BibleBridgeDelegate {
+    /// Default no-op to preserve source compatibility for clients that do not handle TTS loops.
+    func bridge(_ bridge: BibleBridge, speakMemorizationLoop bookInitials: String, v11n: String, startOrdinal: Int, endOrdinal: Int) {}
+
     /// Default no-op to preserve source compatibility for clients that do not handle memorization.
     func bridge(_ bridge: BibleBridge, memorize bookInitials: String, startOrdinal: Int, endOrdinal: Int) {}
 
@@ -556,6 +561,19 @@ public final class BibleBridge: NSObject, WKScriptMessageHandler {
                   let start = arguments.int(2),
                   let end = arguments.int(3) else { return .malformed }
             delegate?.bridge(self, speak: initials, v11n: v11n, startOrdinal: start, endOrdinal: end < 0 ? start : end)
+            return .handled
+        case "speakMemorizationLoop":
+            guard let initials = arguments.string(0),
+                  let v11n = arguments.string(1),
+                  let start = arguments.int(2),
+                  let end = arguments.int(3) else { return .malformed }
+            delegate?.bridge(
+                self,
+                speakMemorizationLoop: initials,
+                v11n: v11n,
+                startOrdinal: start,
+                endOrdinal: end < 0 ? start : end
+            )
             return .handled
         case "memorize":
             guard let initials = arguments.string(0),

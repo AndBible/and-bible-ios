@@ -1,4 +1,5 @@
 import XCTest
+import AVFoundation
 @testable import BibleCore
 import CLibSword
 import SwordKit
@@ -17,6 +18,34 @@ import struct SwiftUI.Color
 #endif
 
 private let sqliteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+
+private final class FakeSpeechSynthesizer: SpeechSynthesizing {
+    weak var delegate: AVSpeechSynthesizerDelegate?
+
+    private(set) var spokenUtterances: [AVSpeechUtterance] = []
+    private(set) var stopBoundaries: [AVSpeechBoundary] = []
+    private(set) var pauseBoundaries: [AVSpeechBoundary] = []
+    private(set) var continueCount = 0
+
+    func speak(_ utterance: AVSpeechUtterance) {
+        spokenUtterances.append(utterance)
+    }
+
+    func stopSpeaking(at boundary: AVSpeechBoundary) -> Bool {
+        stopBoundaries.append(boundary)
+        return true
+    }
+
+    func pauseSpeaking(at boundary: AVSpeechBoundary) -> Bool {
+        pauseBoundaries.append(boundary)
+        return true
+    }
+
+    func continueSpeaking() -> Bool {
+        continueCount += 1
+        return true
+    }
+}
 
 final class AndBibleTests: XCTestCase {
     #if os(iOS)
@@ -160,6 +189,7 @@ final class AndBibleTests: XCTestCase {
             ("compare", ["KJV", 1]),
             ("speak", ["KJV", "KJV", 1]),
             ("speakGeneric", ["KJV", "Gen.1.1", 1]),
+            ("speakMemorizationLoop", ["KJV", "KJV", 1]),
             ("memorize", ["KJV", 1]),
             ("markAsMemorized", ["KJV", 1]),
             ("addMemorizationTarget", ["KJV", 1]),
@@ -1086,6 +1116,7 @@ final class AndBibleTests: XCTestCase {
         XCTAssertEqual(bridge.dispatchMessage(method: "helpDialog", args: ["content", NSNull()]), .handled)
         XCTAssertEqual(bridge.dispatchMessage(method: "scrolledToOrdinal", args: ["main", 1]), .handled)
         XCTAssertEqual(bridge.dispatchMessage(method: "helpBookmarks", args: []), .handled)
+        XCTAssertEqual(bridge.dispatchMessage(method: "speakMemorizationLoop", args: ["KJV", "KJV", 1, -1]), .handled)
         XCTAssertEqual(bridge.dispatchMessage(method: "memorize", args: ["KJV", 1, -1]), .handled)
         XCTAssertEqual(bridge.dispatchMessage(method: "addParagraphBreakBookmark", args: ["KJV", 1, -1]), .handled)
         XCTAssertEqual(
@@ -1093,6 +1124,76 @@ final class AndBibleTests: XCTestCase {
             .handled
         )
         XCTAssertEqual(bridge.dispatchMessage(method: "missingMethod", args: []), .unhandled)
+    }
+
+    func testSpeakServiceMemorizationLoopRepeatsUntilStopped() {
+        let synthesizer = FakeSpeechSynthesizer()
+        let service = SpeakService(synthesizer: synthesizer)
+
+        service.speakMemorizationLoop(text: "In the beginning", language: "en-US")
+
+        XCTAssertTrue(service.isMemorizationLoop)
+        XCTAssertTrue(service.isSpeaking)
+        XCTAssertEqual(synthesizer.spokenUtterances.map(\.speechString), ["In the beginning"])
+
+        let firstUtterance = synthesizer.spokenUtterances[0]
+        service.speechSynthesizer(AVSpeechSynthesizer(), didFinish: firstUtterance)
+
+        XCTAssertTrue(service.isMemorizationLoop)
+        XCTAssertTrue(service.isSpeaking)
+        XCTAssertEqual(
+            synthesizer.spokenUtterances.map(\.speechString),
+            ["In the beginning", "In the beginning"]
+        )
+
+        service.stop()
+
+        XCTAssertFalse(service.isMemorizationLoop)
+        XCTAssertFalse(service.isSpeaking)
+        XCTAssertEqual(synthesizer.stopBoundaries.last, .immediate)
+    }
+
+    func testSpeakServiceRegularSpeechClearsMemorizationLoop() {
+        let synthesizer = FakeSpeechSynthesizer()
+        let service = SpeakService(synthesizer: synthesizer)
+
+        service.speakMemorizationLoop(text: "Remember this", language: "en-US")
+        service.speak(text: "Read once", language: "en-US")
+
+        XCTAssertFalse(service.isMemorizationLoop)
+        XCTAssertTrue(service.isSpeaking)
+        XCTAssertEqual(
+            synthesizer.spokenUtterances.map(\.speechString),
+            ["Remember this", "Read once"]
+        )
+    }
+
+    func testSpeakServiceMemorizationLoopIgnoresCancelledReplacedUtterance() {
+        let synthesizer = FakeSpeechSynthesizer()
+        let service = SpeakService(synthesizer: synthesizer)
+
+        service.speak(text: "Read once", language: "en-US")
+        let replacedUtterance = synthesizer.spokenUtterances[0]
+
+        service.speakMemorizationLoop(text: "Repeat this", language: "en-US")
+        service.speechSynthesizer(AVSpeechSynthesizer(), didCancel: replacedUtterance)
+
+        XCTAssertTrue(service.isMemorizationLoop)
+        XCTAssertTrue(service.isSpeaking)
+        XCTAssertEqual(
+            synthesizer.spokenUtterances.map(\.speechString),
+            ["Read once", "Repeat this"]
+        )
+
+        let loopUtterance = synthesizer.spokenUtterances[1]
+        service.speechSynthesizer(AVSpeechSynthesizer(), didFinish: loopUtterance)
+
+        XCTAssertTrue(service.isMemorizationLoop)
+        XCTAssertTrue(service.isSpeaking)
+        XCTAssertEqual(
+            synthesizer.spokenUtterances.map(\.speechString),
+            ["Read once", "Repeat this", "Repeat this"]
+        )
     }
 
     func testMemorizationProgressStorePersistsRangesAndSplitsTargets() throws {

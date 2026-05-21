@@ -48,7 +48,7 @@ rules explicit for changes in:
    synchronous answer. Replacing it with an async-only path is a behavioral
    contract break.
 
-5. Treat documented no-op and former no-op methods as stable surface, not dead code.
+5. Treat documented bridge dispositions as stable surface, not dead code.
 
    `memorize`, `addParagraphBreakBookmark`, and
    `addGenericParagraphBreakBookmark` remain part of the contract because the
@@ -56,8 +56,9 @@ rules explicit for changes in:
    native bookmarks with the reserved paragraph-break label; `memorize` now
    adds a local memorization target and opens the bundled Memorize document.
    The related state methods mutate the same local iOS state, while
-   `speakMemorizationLoop` remains deferred to #78. Removing or weakening these
-   branches requires coordinated contract work, not opportunistic cleanup.
+   `speakMemorizationLoop` validates Android-style arguments and delegates to
+   native selected-range repeat playback. Removing or weakening these branches
+   requires coordinated contract work, not opportunistic cleanup.
 
    Android's My Documents bridge family is also documented deferred surface.
    Do not add `getMyDocumentPageRawContent`, `copyMyDocumentContent`,
@@ -157,8 +158,8 @@ summary that can be pasted into an issue or PR. That summary should show:
 - tracked Android-only methods
 - new Android-only methods
 - stale inventory entries
-- iOS no-op and former no-op method dispositions, including any methods that
-  still need a disposition decision
+- resolved iOS bridge dispositions, including any methods that still need a
+  decision
 
 Run the Android-backed check when:
 

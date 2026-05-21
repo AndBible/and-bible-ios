@@ -1,18 +1,18 @@
 {
   "schemaVersion": 1,
   "updated": "2026-05-19",
-  "purpose": "Track Android bridge surface that is not true iOS parity yet, plus resolved dispositions for formerly silent iOS no-ops.",
-  "references": {
-    "androidInterfaceRelativePath": "app/bibleview-js/src/composables/android.ts",
-    "androidMethodCount": 89,
-    "iosInterfacePath": "bibleview-js/src/composables/android.ts",
-    "iosBundledMethodCount": 66
+  "purpose": "Track Android bridge surface that is not true iOS parity yet, plus resolved iOS bridge dispositions.",
+    "references": {
+      "androidInterfaceRelativePath": "app/bibleview-js/src/composables/android.ts",
+      "androidMethodCount": 89,
+      "iosInterfacePath": "bibleview-js/src/composables/android.ts",
+    "iosBundledMethodCount": 67
   },
   "statusLegend": {
     "missing_needs_triage": "Android exposes the method and iOS does not. Treat as a parity gap until implemented or explicitly recorded as an iOS divergence.",
     "missing_deferred_with_issue": "Android exposes the method and iOS does not. The gap is triaged and deferred to the linked issue family rather than ready for direct implementation.",
     "ios_no_op_needs_decision": "iOS exposes the method only as a stable no-op. Treat as a parity gap until implemented or explicitly recorded as an iOS divergence.",
-    "implemented": "The former no-op now has native iOS behavior while preserving the shared bridge method name.",
+    "implemented": "The method now has native iOS behavior while preserving the shared bridge method name.",
     "deferred_with_issue": "The method remains a validated iOS no-op because the native feature scope is deferred to the linked issue.",
     "intentional_ios_divergence": "The method remains a validated iOS no-op because iOS has an explicit product or platform divergence."
   },
@@ -170,13 +170,6 @@
       "domain": "help",
       "status": "missing_needs_triage",
       "nextStep": "Implement scoped help-dialog behavior or record an iOS help-presentation divergence."
-    },
-    {
-      "method": "speakMemorizationLoop",
-      "androidSignature": "(bookInitials: string, v11n: string, startOrdinal: number, endOrdinal: number) => void",
-      "domain": "memorization",
-      "status": "missing_deferred_with_issue",
-      "nextStep": "Deferred by issue #50. Track native speech-loop parity separately in #78."
     }
   ],
   "iosNoOpMethods": [
@@ -199,7 +192,14 @@
       "iosSignature": "(bookInitials: string, verseOrdinal: number, endOrdinal: number) => void",
       "domain": "memorization",
       "status": "implemented",
-      "nextStep": "Implemented by adding a local iOS memorization state store, adding the selected range as a target, and opening the bundled Memorize document. Speech-loop parity remains deferred to #78."
+      "nextStep": "Implemented by adding a local iOS memorization state store, adding the selected range as a target, and opening the bundled Memorize document."
+    },
+    {
+      "method": "speakMemorizationLoop",
+      "iosSignature": "(bookInitials: string, v11n: string, startOrdinal: number, endOrdinal: number) => void",
+      "domain": "memorization",
+      "status": "implemented",
+      "nextStep": "Implemented by validating Android-style bridge arguments, extracting the selected iOS verse range, and delegating to a native SpeakService memorization loop."
     }
   ]
 }

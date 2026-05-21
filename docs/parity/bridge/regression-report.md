@@ -16,7 +16,7 @@ covers:
 - representative Swift bridge payload key shapes consumed by `bibleview-js`
 - paragraph-break bookmark persistence for the former no-op bridge actions
 - local Android bridge surface comparison
-- machine-readable gap inventory for Android-only and iOS no-op/former no-op bridge methods
+- machine-readable gap inventory for Android-only methods and resolved iOS bridge dispositions
 - pasteable bridge inventory summaries for parity issues and PR validation notes
 
 Contract reference:
@@ -104,8 +104,9 @@ Related domain references:
 - intentionally supported no-argument branches such as `helpBookmarks` remain handled
 - paragraph-break bridge actions validate required arguments before creating native bookmarks
 - memorization bridge state methods validate required arguments, preserve single-verse
-  `endOrdinal < 0` behavior, and mutate local native memorization state; speech-loop parity
-  remains deferred to #78
+  `endOrdinal < 0` behavior, and mutate local native memorization state
+- `speakMemorizationLoop` validates Android-style required arguments and delegates to native
+  selected-range repeat playback
 
 ### Payload shapes
 
@@ -144,13 +145,13 @@ while full valid delegate-call coverage still needs more direct protection.
 The pieces that still need tighter protection are:
 
 - full current Android bridge breadth beyond the shared iOS subset (`89` Android
-  methods versus `66` iOS-bundled methods in
+  methods versus `67` iOS-bundled methods in
   `bibleview-js/src/composables/android.ts`)
-- the tracked bridge gap inventory: 23 missing Android methods plus 3 former no-op method
-  dispositions; memorization bridge state is implemented while `speakMemorizationLoop`
-  remains deferred through #78, My Documents is deferred through #80, #81, #82, and #83,
-  reading progress is deferred through #85, #86, and #87, AI bridge methods are deferred
-  through #89, #90, #91, and #92, and no current iOS no-op method remains in
+- the tracked bridge gap inventory: 22 missing Android methods plus 4 resolved iOS
+  bridge dispositions; memorization bridge state and `speakMemorizationLoop` are
+  implemented, My Documents is deferred through #80, #81, #82, and #83, reading progress
+  is deferred through #85, #86, and #87, AI bridge methods are deferred through #89, #90,
+  #91, and #92, and no current iOS no-op method remains in
   "needs decision" status
 - raw `window.android.*` compatibility-shim behavior on a per-method basis
 - Strong's sheet bridge coverage, especially the dedicated `contentType: "strongs"` route

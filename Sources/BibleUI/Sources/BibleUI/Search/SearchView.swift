@@ -369,11 +369,7 @@ public struct SearchView: View {
     @ViewBuilder
     private var searchStateExport: some View {
         if UITestRuntimeConfiguration.enablesDetailedAccessibilityExports {
-            TextField(
-                "searchStateExport",
-                text: .constant(searchAccessibilityValue)
-            )
-                .textFieldStyle(.plain)
+            Text(searchAccessibilityValue)
                 .font(.system(size: 1))
                 .frame(width: 1, height: 1)
                 .opacity(0.01)
