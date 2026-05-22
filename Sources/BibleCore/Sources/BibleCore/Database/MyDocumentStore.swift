@@ -222,7 +222,6 @@ public final class MyDocumentStore {
         let now = Date()
         if let document = page.document {
             document.updatedAt = now
-            document.pages = document.pages?.filter { $0.id != page.id }
         }
 
         modelContext.delete(page)
@@ -231,6 +230,7 @@ public final class MyDocumentStore {
             try modelContext.save()
             return .deleted(context)
         } catch {
+            modelContext.rollback()
             return .saveFailed
         }
     }

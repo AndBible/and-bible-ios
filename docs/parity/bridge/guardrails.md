@@ -65,10 +65,13 @@ rules explicit for changes in:
    `shareMyDocumentContent`, `saveMyDocumentPageContent`, and
    `reloadMyDocumentPage` backed by `MyDocumentStore` lookup/mutation and reader
    document rebuilds; do not downgrade them to method-name-only stubs.
-   `regenerateMyDocumentPage` and `deleteMyDocumentPage` remain deferred
-   surface. The native model/storage contract is recorded in
-   `my-documents-model.md`, #82 owns edit/reload behavior, and #83 owns AI page
-   regenerate/delete behavior.
+   `regenerateMyDocumentPage` and `deleteMyDocumentPage` are implemented only
+   for pages with source prompt metadata: delete removes AI-generated pages and
+   refreshes the reader, while regenerate validates the same metadata and hands
+   native context to the iOS regeneration callback. User-authored pages must not
+   be deleted through the AI action path. The native model/storage contract is
+   recorded in `my-documents-model.md`, #82 owns edit/reload behavior, and #83
+   owns AI page regenerate/delete behavior.
 
    Android's reading-progress bridge family is documented deferred surface too.
    Do not add `markChapterRead`, `unmarkChapterRead`, `openReadingProgress`,

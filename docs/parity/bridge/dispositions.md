@@ -89,16 +89,16 @@ Reason:
 
 ## 5. Android My Documents bridge parity is a staged method family
 
-- Status: read/copy/share/edit/reload implemented; AI page operations deferred
+- Status: read/copy/share/edit/reload and AI page action bridge behavior implemented
 - Implemented scope: `getMyDocumentPageRawContent`, `copyMyDocumentContent`,
   `shareMyDocumentContent`, `saveMyDocumentPageContent`, and
-  `reloadMyDocumentPage`
-- Deferred scope: `regenerateMyDocumentPage` and `deleteMyDocumentPage`
+  `reloadMyDocumentPage`, `regenerateMyDocumentPage`, and
+  `deleteMyDocumentPage`
 
 Disposition:
 
-- iOS should treat My Documents as an accepted parity target, but should not
-  add deferred methods as standalone bridge stubs.
+- iOS treats My Documents as an accepted parity target, but bridge methods must
+  remain backed by native model behavior rather than method-name-only stubs.
 - Android My Documents depends on a dedicated `mydocuments.sqlite3` Room
   database, page metadata, separately stored page content, AI-page cache
   metadata, generated JSword general-book registration, native clipboard/share
@@ -109,16 +109,18 @@ Disposition:
   #81 through `MyDocumentStore`.
 - Editor save/reload behavior is implemented in #82 through
   `MyDocumentStore` mutations and reader document rebuilds.
-- AI-generated page regeneration and deletion follow in #83, with regeneration
-  also depending on the shared AI direction in #5.
+- AI-generated page deletion and regeneration handoff are implemented in #83.
+  Delete is limited to pages with source prompt metadata, removes the AI page,
+  and refreshes the reader. Regenerate validates the same metadata and hands a
+  native action context to iOS. The shared AI dialog/backend remains tracked by
+  #5/#89.
 - Remote sync for Android's `mydocuments` category remains blocked on this
   local product surface and is tracked separately in #72.
 
 Reason:
 
 - Implementing only deferred bridge method names would create false parity
-  because iOS would still lack the editor, reload, regeneration, and deletion
-  behavior those calls need.
+  because iOS would still lack the native behavior those calls need.
 - Keeping read/share, edit/reload, and AI-page actions separate prevents the
   first implementation PR from becoming a full document editor plus AI feature
   migration.
@@ -233,15 +235,15 @@ What we do:
 - iOS preserves the bridge methods needed by this repo's bundled frontend and
   native feature set.
 - Android currently exposes 89 methods in its `BibleJavascriptInterface` type,
-  while the iOS-bundled frontend exposes 72. The Android-only methods cover
-  areas such as reading progress, AI document actions, My Documents AI page
-  actions, chapter navigation, scoped help, and whole-page bookmarks.
+  while the iOS-bundled frontend exposes 74. The Android-only methods cover
+  areas such as reading progress, AI document actions, chapter navigation,
+  scoped help, and whole-page bookmarks.
 - The memorization state-method subset has a recorded disposition in #50 and is
   implemented on iOS; `speakMemorizationLoop` has a recorded implementation
   disposition in #78.
 - The My Documents subset has a recorded disposition in #51; #81 read/copy/share
-  behavior and #82 edit/reload behavior are implemented, while #83 AI page
-  operations remain Android-only until that slice is implemented.
+  behavior, #82 edit/reload behavior, and #83 AI page delete/regenerate handoff
+  behavior are implemented.
 - The reading-progress subset has a recorded disposition in #52 and follow-up
   issues #85, #86, and #87, but it remains Android-only until those slices are
   implemented.
