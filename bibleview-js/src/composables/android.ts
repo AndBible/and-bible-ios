@@ -108,6 +108,14 @@ export type BibleJavascriptInterface = {
     saveState: (newState: string) => void,
 }
 
+export type MyDocumentPageRawContent = {
+    pageId: string,
+    contentType: string,
+    content: string,
+    title: string,
+    sourcePromptId: Nullable<string>,
+}
+
 export type UseAndroid = ReturnType<typeof useAndroid>
 
 let callId = 0;
@@ -463,8 +471,12 @@ export function useAndroid({bookmarks}: { bookmarks: Ref<BaseBookmark[]> }, conf
         return result ?? ""
     }
 
-    async function getMyDocumentPageRawContent(bookInitials: string, pageKey: string): Promise<any> {
-        return deferredCall((callId) => android.getMyDocumentPageRawContent(callId, bookInitials, pageKey))
+    async function getMyDocumentPageRawContent(
+        bookInitials: string,
+        pageKey: string,
+    ): Promise<MyDocumentPageRawContent | null> {
+        const result = await deferredCall((callId) => android.getMyDocumentPageRawContent(callId, bookInitials, pageKey))
+        return result as MyDocumentPageRawContent | null
     }
 
     function shareMyDocumentContent(bookInitials: string, pageKey: string) {

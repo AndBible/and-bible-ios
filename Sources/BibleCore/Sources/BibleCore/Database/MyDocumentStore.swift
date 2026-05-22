@@ -35,10 +35,20 @@ public struct MyDocumentRawContentPayload: Codable, Equatable, Sendable {
 
  This store deliberately resolves pages by Android-compatible `(initials,
  pageKey)` pairs because those values are what the WebView bridge receives.
+
+ - Important: This store inherits the thread/actor confinement of the supplied
+   `ModelContext`.
  */
 public final class MyDocumentStore {
+    /// SwiftData context supplied by the owning UI/app actor.
     private let modelContext: ModelContext
 
+    /**
+     Creates a My Documents store for the supplied SwiftData context.
+
+     - Important: The caller owns the context lifetime and must use this store
+       on the same actor/thread as `modelContext`.
+     */
     public init(modelContext: ModelContext) {
         self.modelContext = modelContext
     }
@@ -58,8 +68,13 @@ public final class MyDocumentStore {
      Resolves one page by the Android-compatible document initials and page key.
      */
     public func page(bookInitials: String, pageKey: String) -> MyDocumentPage? {
-        guard let document = document(initials: bookInitials) else { return nil }
-        return document.pages?.first { $0.pageKey == pageKey }
+        var descriptor = FetchDescriptor<MyDocumentPage>(
+            predicate: #Predicate {
+                $0.pageKey == pageKey && $0.document?.initials == bookInitials
+            }
+        )
+        descriptor.fetchLimit = 1
+        return try? modelContext.fetch(descriptor).first
     }
 
     /**

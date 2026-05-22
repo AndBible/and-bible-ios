@@ -47,6 +47,56 @@ final class MyDocumentStoreTests: XCTestCase {
         XCTAssertNil(store.rawContentPayload(bookInitials: "UNKNOWN", pageKey: "intro"))
     }
 
+    func testRawContentPayloadScopesDuplicatePageKeysByDocumentInitials() throws {
+        let container = try makeMyDocumentModelContainer()
+        let context = ModelContext(container)
+        let store = MyDocumentStore(modelContext: context)
+
+        let firstDocument = MyDocument(name: "First Document", initials: "FIRST")
+        let firstPageId = try XCTUnwrap(UUID(uuidString: "33333333-3333-3333-3333-333333333333"))
+        let firstPage = MyDocumentPage(
+            id: firstPageId,
+            title: "Shared Page",
+            pageKey: "shared",
+            contentType: .markdown
+        )
+        let firstContent = MyDocumentPageContent(pageId: firstPageId, content: "First content")
+        firstPage.pageContent = firstContent
+        firstPage.document = firstDocument
+        firstDocument.pages = [firstPage]
+
+        let secondDocument = MyDocument(name: "Second Document", initials: "SECOND")
+        let secondPageId = try XCTUnwrap(UUID(uuidString: "44444444-4444-4444-4444-444444444444"))
+        let secondPage = MyDocumentPage(
+            id: secondPageId,
+            title: "Shared Page",
+            pageKey: "shared",
+            contentType: .html
+        )
+        let secondContent = MyDocumentPageContent(pageId: secondPageId, content: "Second content")
+        secondPage.pageContent = secondContent
+        secondPage.document = secondDocument
+        secondDocument.pages = [secondPage]
+
+        context.insert(firstDocument)
+        context.insert(firstPage)
+        context.insert(firstContent)
+        context.insert(secondDocument)
+        context.insert(secondPage)
+        context.insert(secondContent)
+        try context.save()
+
+        let firstPayload = try XCTUnwrap(store.rawContentPayload(bookInitials: "FIRST", pageKey: "shared"))
+        XCTAssertEqual(firstPayload.pageId, "33333333-3333-3333-3333-333333333333")
+        XCTAssertEqual(firstPayload.contentType, "MARKDOWN")
+        XCTAssertEqual(firstPayload.content, "First content")
+
+        let secondPayload = try XCTUnwrap(store.rawContentPayload(bookInitials: "SECOND", pageKey: "shared"))
+        XCTAssertEqual(secondPayload.pageId, "44444444-4444-4444-4444-444444444444")
+        XCTAssertEqual(secondPayload.contentType, "HTML")
+        XCTAssertEqual(secondPayload.content, "Second content")
+    }
+
     private func makeMyDocumentModelContainer() throws -> ModelContainer {
         let schema = Schema([
             MyDocument.self,
