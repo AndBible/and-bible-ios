@@ -61,13 +61,14 @@ rules explicit for changes in:
    requires coordinated contract work, not opportunistic cleanup.
 
    Android's My Documents bridge family is partially implemented. Keep
-   `getMyDocumentPageRawContent`, `copyMyDocumentContent`, and
-   `shareMyDocumentContent` backed by `MyDocumentStore` raw-content lookup; do
-   not downgrade them to method-name-only stubs. `saveMyDocumentPageContent`,
-   `reloadMyDocumentPage`, `regenerateMyDocumentPage`, and
-   `deleteMyDocumentPage` remain deferred surface. The native model/storage
-   contract is recorded in `my-documents-model.md`, #82 owns edit/reload
-   behavior, and #83 owns AI page regenerate/delete behavior.
+   `getMyDocumentPageRawContent`, `copyMyDocumentContent`,
+   `shareMyDocumentContent`, `saveMyDocumentPageContent`, and
+   `reloadMyDocumentPage` backed by `MyDocumentStore` lookup/mutation and reader
+   document rebuilds; do not downgrade them to method-name-only stubs.
+   `regenerateMyDocumentPage` and `deleteMyDocumentPage` remain deferred
+   surface. The native model/storage contract is recorded in
+   `my-documents-model.md`, #82 owns edit/reload behavior, and #83 owns AI page
+   regenerate/delete behavior.
 
    Android's reading-progress bridge family is documented deferred surface too.
    Do not add `markChapterRead`, `unmarkChapterRead`, `openReadingProgress`,
@@ -140,7 +141,9 @@ xcodebuild -project AndBible.xcodeproj -scheme AndBible \
   -only-testing:AndBibleTests/AndBibleTests/testBridgePayloadKeysMatchWebClientContracts \
   -only-testing:AndBibleTests/AndBibleTests/testRequestMoreToBeginningSendsDocumentResponseWithOriginalCallId \
   -only-testing:AndBibleTests/AndBibleTests/testRefChooserDialogSendsResponseWithOriginalCallId \
-  -only-testing:AndBibleTests/AndBibleTests/testParseRefSendsResponseWithOriginalCallId
+  -only-testing:AndBibleTests/AndBibleTests/testParseRefSendsResponseWithOriginalCallId \
+  -only-testing:AndBibleTests/AndBibleTests/testMyDocumentRawContentBridgeSendsAndroidCompatiblePayloadAndNullFallback \
+  -only-testing:AndBibleTests/AndBibleTests/testMyDocumentEditBridgePersistsContentAndReloadsVisiblePage
 ```
 
 For parity-sensitive bridge work, run the Android alignment check against a

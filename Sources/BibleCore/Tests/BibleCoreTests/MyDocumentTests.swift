@@ -147,6 +147,101 @@ final class MyDocumentStoreTests: XCTestCase {
         XCTAssertEqual(payload.content, "First by order")
     }
 
+    func testSavePageContentUpdatesRawContentAndOptionalTitle() throws {
+        let container = try makeMyDocumentModelContainer()
+        let context = ModelContext(container)
+        let store = MyDocumentStore(modelContext: context)
+        let pageId = try XCTUnwrap(UUID(uuidString: "77777777-7777-7777-7777-777777777777"))
+        let createdAt = try XCTUnwrap(DateComponents(
+            calendar: Calendar(identifier: .gregorian),
+            timeZone: TimeZone(secondsFromGMT: 0),
+            year: 2026,
+            month: 5,
+            day: 22
+        ).date)
+        let document = MyDocument(name: "My Document", initials: "MYDOC", updatedAt: createdAt)
+        let page = MyDocumentPage(
+            id: pageId,
+            title: "Intro",
+            pageKey: "intro",
+            createdAt: createdAt,
+            updatedAt: createdAt
+        )
+        let content = MyDocumentPageContent(pageId: pageId, content: "Original")
+
+        page.pageContent = content
+        page.document = document
+        document.pages = [page]
+        context.insert(document)
+        context.insert(page)
+        context.insert(content)
+        try context.save()
+
+        XCTAssertTrue(store.savePageContent(
+            bookInitials: "MYDOC",
+            pageId: pageId,
+            content: "Edited **markdown**",
+            title: "Renamed"
+        ))
+
+        let payload = try XCTUnwrap(store.rawContentPayload(bookInitials: "MYDOC", pageKey: "intro"))
+        XCTAssertEqual(payload.content, "Edited **markdown**")
+        XCTAssertEqual(payload.title, "Renamed")
+        XCTAssertGreaterThan(page.updatedAt, createdAt)
+        XCTAssertGreaterThan(document.updatedAt, createdAt)
+
+        XCTAssertTrue(store.savePageContent(
+            bookInitials: "MYDOC",
+            pageId: pageId,
+            content: "Edited again",
+            title: nil
+        ))
+
+        let preservedTitlePayload = try XCTUnwrap(store.rawContentPayload(bookInitials: "MYDOC", pageKey: "intro"))
+        XCTAssertEqual(preservedTitlePayload.content, "Edited again")
+        XCTAssertEqual(preservedTitlePayload.title, "Renamed")
+    }
+
+    func testSavePageContentCreatesMissingContentAndScopesByDocumentInitials() throws {
+        let container = try makeMyDocumentModelContainer()
+        let context = ModelContext(container)
+        let store = MyDocumentStore(modelContext: context)
+        let pageId = try XCTUnwrap(UUID(uuidString: "88888888-8888-8888-8888-888888888888"))
+        let document = MyDocument(name: "My Document", initials: "MYDOC")
+        let page = MyDocumentPage(
+            id: pageId,
+            title: "Intro",
+            pageKey: "intro",
+            contentType: .html
+        )
+
+        page.document = document
+        document.pages = [page]
+        context.insert(document)
+        context.insert(page)
+        try context.save()
+
+        XCTAssertFalse(store.savePageContent(
+            bookInitials: "OTHER",
+            pageId: pageId,
+            content: "Wrong document",
+            title: "Wrong"
+        ))
+
+        XCTAssertTrue(store.savePageContent(
+            bookInitials: "MYDOC",
+            pageId: pageId,
+            content: "<p>Edited</p>",
+            title: nil
+        ))
+
+        let payload = try XCTUnwrap(store.rawContentPayload(bookInitials: "MYDOC", pageKey: "intro"))
+        XCTAssertEqual(payload.contentType, "HTML")
+        XCTAssertEqual(payload.content, "<p>Edited</p>")
+        XCTAssertEqual(payload.title, "Intro")
+        XCTAssertNotNil(page.pageContent)
+    }
+
     private func makeMyDocumentModelContainer() throws -> ModelContainer {
         let schema = Schema([
             MyDocument.self,

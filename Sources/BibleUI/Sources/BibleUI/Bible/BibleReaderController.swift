@@ -198,6 +198,10 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     static let emptyRenderedContentState = "category=none;module=none;book=none;chapter=none;key=none"
     private static let issueTrackerURLString = "https://github.com/AndBible/and-bible/issues"
     private(set) var renderedContentState: String = BibleReaderController.emptyRenderedContentState
+    /// Current My Documents page rendered through the local store rather than a SWORD module.
+    private var activeMyDocumentBookInitials: String?
+    /// Current My Documents page key rendered through the local store rather than a SWORD module.
+    private var activeMyDocumentPageKey: String?
 
     /// Infinite scroll: tracks the range of chapters/books currently loaded in the WebView.
     private var minLoadedChapter: Int = 0
@@ -329,6 +333,10 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         chapter: Int? = nil,
         key: String? = nil
     ) {
+        if category != .generalBook || moduleName != activeMyDocumentBookInitials {
+            activeMyDocumentBookInitials = nil
+            activeMyDocumentPageKey = nil
+        }
         renderedContentState = [
             "category=\(category.pageManagerKey)",
             "module=\(Self.contentStateToken(moduleName))",
@@ -2987,6 +2995,120 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     }
 
     /**
+     Renders one locally stored My Documents page into the WebView document stream.
+
+     - Returns: `true` when the page exists and a document payload was emitted.
+     */
+    @discardableResult
+    public func loadMyDocumentPage(bookInitials: String, pageKey: String) -> Bool {
+        guard let store = myDocumentStore,
+              let document = store.document(initials: bookInitials),
+              let page = store.page(bookInitials: bookInitials, pageKey: pageKey) else {
+            return false
+        }
+
+        showingMyNotes = false
+        showingStudyPad = false
+        activeStudyPadLabelId = nil
+        activeStudyPadLabelName = nil
+        editingInWebView = false
+        hasActiveSelection = false
+        selectedText = ""
+        currentCategory = .generalBook
+        activeMyDocumentBookInitials = bookInitials
+        activeMyDocumentPageKey = pageKey
+        setRenderedContentState(
+            category: .generalBook,
+            moduleName: document.initials,
+            book: document.name,
+            key: page.pageKey
+        )
+
+        let documentJSON = buildMyDocumentDocumentJSON(document: document, page: page)
+        bridge.emit(event: "clear_document")
+        bridge.emit(event: "add_documents", data: documentJSON)
+        bridge.emit(
+            event: "setup_content",
+            data: "{\"jumpToOrdinal\":null,\"jumpToAnchor\":null,\"jumpToId\":null,\"topOffset\":0,\"bottomOffset\":0}"
+        )
+        bridge.clearSelection()
+        applyNightModeBackground()
+        return true
+    }
+
+    /**
+     Builds the Vue.js `OsisDocument` payload for one stored My Documents page.
+     */
+    private func buildMyDocumentDocumentJSON(document: MyDocument, page: MyDocumentPage) -> String {
+        let content = page.pageContent?.content ?? ""
+        let xml = renderedMyDocumentXML(content: content, contentType: page.contentType)
+        let promptId: Any = page.sourcePromptId?.uuidString ?? NSNull()
+
+        let osisFragment: [String: Any] = [
+            "xml": xml,
+            "key": page.pageKey,
+            "keyName": page.title,
+            "v11n": "KJVA",
+            "bookCategory": DocumentCategory.generalBook.rawValue,
+            "bookInitials": document.initials,
+            "bookAbbreviation": document.initials,
+            "osisRef": page.pageKey,
+            "isNewTestament": false,
+            "features": [String: Any](),
+            "ordinalRange": [0, 0],
+            "language": page.languageCode ?? Locale.current.languageCode ?? "en",
+            "direction": "ltr",
+        ]
+
+        let renderedDocument: [String: Any] = [
+            "id": "my-document-\(page.id.uuidString)",
+            "type": "osis",
+            "osisFragment": osisFragment,
+            "bookInitials": document.initials,
+            "bookCategory": DocumentCategory.generalBook.rawValue,
+            "bookAbbreviation": document.initials,
+            "bookName": document.name,
+            "key": page.pageKey,
+            "v11n": "KJVA",
+            "osisRef": page.pageKey,
+            "annotateRef": page.pageKey,
+            "genericBookmarks": [Any](),
+            "ordinalRange": [0, 0],
+            "isNativeHtml": false,
+            "highlightedOrdinalRange": NSNull(),
+            "isMyDocument": true,
+            "isAiDocument": document.initials == "AIDocuments",
+            "myDocumentPageId": page.id.uuidString,
+            "sourcePromptId": promptId,
+            "sourcePromptName": NSNull(),
+            "sourceModelName": NSNull(),
+            "aiDocMarkers": [Any](),
+        ]
+
+        guard let data = try? JSONSerialization.data(withJSONObject: renderedDocument, options: [.sortedKeys]),
+              let json = String(data: data, encoding: .utf8) else {
+            logger.error("Failed to serialize My Documents page JSON for \(document.initials, privacy: .public)")
+            return "{}"
+        }
+
+        return json
+    }
+
+    /**
+     Converts stored raw My Documents content into the OSIS-template fragment consumed by Vue.js.
+     */
+    private func renderedMyDocumentXML(content: String, contentType: MyDocumentContentType) -> String {
+        switch contentType {
+        case .markdown:
+            return "<div class=\"mydoc-markdown\"><markdown>\(escapeXML(content))</markdown></div>"
+        case .html:
+            return "<div class=\"mydoc-html\"><html>\(escapeXML(content))</html></div>"
+        case .osis:
+            return content
+        }
+    }
+
+    /**
      Copies the stored raw My Documents page content to the platform pasteboard.
      */
     public func bridge(_ bridge: BibleBridge, copyMyDocumentContent bookInitials: String, pageKey: String) {
@@ -3017,6 +3139,38 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             shareText = "\(payload.title)\n\n\(payload.content)"
         }
         onShareVerseText?(shareText)
+    }
+
+    /**
+     Persists raw My Documents editor content without rebuilding the document immediately.
+     */
+    public func bridge(_ bridge: BibleBridge, saveMyDocumentPageContent bookInitials: String, pageId: String, content: String, title: String?) {
+        guard let pageUUID = UUID(uuidString: pageId) else {
+            logger.warning("saveMyDocumentPageContent: malformed page id=\(pageId, privacy: .public)")
+            return
+        }
+
+        guard myDocumentStore?.savePageContent(
+            bookInitials: bookInitials,
+            pageId: pageUUID,
+            content: content,
+            title: title
+        ) == true else {
+            logger.warning("saveMyDocumentPageContent: page not found or save failed for document=\(bookInitials, privacy: .public)")
+            return
+        }
+    }
+
+    /**
+     Reloads the currently visible My Documents page when it belongs to the supplied document.
+     */
+    public func bridge(_ bridge: BibleBridge, reloadMyDocumentPage bookInitials: String) {
+        guard activeMyDocumentBookInitials == bookInitials,
+              let pageKey = activeMyDocumentPageKey else {
+            return
+        }
+
+        loadMyDocumentPage(bookInitials: bookInitials, pageKey: pageKey)
     }
 
     /**

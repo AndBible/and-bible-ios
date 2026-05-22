@@ -1,12 +1,12 @@
 {
   "schemaVersion": 1,
-  "updated": "2026-05-21",
+  "updated": "2026-05-22",
   "purpose": "Track Android bridge surface that is not true iOS parity yet, plus resolved iOS bridge dispositions.",
-    "references": {
-      "androidInterfaceRelativePath": "app/bibleview-js/src/composables/android.ts",
-      "androidMethodCount": 89,
-      "iosInterfacePath": "bibleview-js/src/composables/android.ts",
-    "iosBundledMethodCount": 70
+  "references": {
+    "androidInterfaceRelativePath": "app/bibleview-js/src/composables/android.ts",
+    "androidMethodCount": 89,
+    "iosInterfacePath": "bibleview-js/src/composables/android.ts",
+    "iosBundledMethodCount": 72
   },
   "statusLegend": {
     "missing_needs_triage": "Android exposes the method and iOS does not. Treat as a parity gap until implemented or explicitly recorded as an iOS divergence.",
@@ -123,20 +123,6 @@
       "nextStep": "Deferred by issue #51. Requires the iOS My Documents model in #80 and shared AI support before regeneration behavior is implemented in #83."
     },
     {
-      "method": "reloadMyDocumentPage",
-      "androidSignature": "(bookInitials: string) => void",
-      "domain": "my_documents",
-      "status": "missing_deferred_with_issue",
-      "nextStep": "Deferred by issue #51. Requires the iOS My Documents model in #80 before edit/reload bridge behavior is implemented in #82."
-    },
-    {
-      "method": "saveMyDocumentPageContent",
-      "androidSignature": "(bookInitials: string, pageId: string, content: string, title: string | null) => void",
-      "domain": "my_documents",
-      "status": "missing_deferred_with_issue",
-      "nextStep": "Deferred by issue #51. Requires the iOS My Documents model in #80 before edit/reload bridge behavior is implemented in #82."
-    },
-    {
       "method": "setReadingProgressSettings",
       "androidSignature": "(json: string) => void",
       "domain": "reading_progress",
@@ -186,6 +172,20 @@
       "domain": "my_documents",
       "status": "implemented",
       "nextStep": "Implemented by resolving the My Documents page through MyDocumentStore and responding with Android-compatible raw-content JSON or null."
+    },
+    {
+      "method": "reloadMyDocumentPage",
+      "iosSignature": "(bookInitials: string) => void",
+      "domain": "my_documents",
+      "status": "implemented",
+      "nextStep": "Implemented by rebuilding the visible My Documents page from MyDocumentStore when the supplied document initials match the active page."
+    },
+    {
+      "method": "saveMyDocumentPageContent",
+      "iosSignature": "(bookInitials: string, pageId: string, content: string, title: string | null) => void",
+      "domain": "my_documents",
+      "status": "implemented",
+      "nextStep": "Implemented by resolving the My Documents page by document initials and stable page ID, then saving raw content and optional title updates through MyDocumentStore."
     },
     {
       "method": "shareMyDocumentContent",

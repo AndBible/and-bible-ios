@@ -189,6 +189,9 @@ final class AndBibleTests: XCTestCase {
             ("copyVerse", ["KJV", 1]),
             ("copyMyDocumentContent", ["MYDOC"]),
             ("shareMyDocumentContent", ["MYDOC"]),
+            ("saveMyDocumentPageContent", ["MYDOC", "page-id"]),
+            ("saveMyDocumentPageContent", ["MYDOC", "page-id", "content", 7]),
+            ("reloadMyDocumentPage", []),
             ("shareBookmarkVerse", [["id": "bookmark-id"]]),
             ("compare", ["KJV", 1]),
             ("speak", ["KJV", "KJV", 1]),
@@ -1123,6 +1126,15 @@ final class AndBibleTests: XCTestCase {
         XCTAssertEqual(bridge.dispatchMessage(method: "shareBookmarkVerse", args: ["bookmark-id"]), .handled)
         XCTAssertEqual(bridge.dispatchMessage(method: "copyMyDocumentContent", args: ["MYDOC", "intro"]), .handled)
         XCTAssertEqual(bridge.dispatchMessage(method: "shareMyDocumentContent", args: ["MYDOC", "intro"]), .handled)
+        XCTAssertEqual(
+            bridge.dispatchMessage(method: "saveMyDocumentPageContent", args: ["MYDOC", "page-id", "content", NSNull()]),
+            .handled
+        )
+        XCTAssertEqual(
+            bridge.dispatchMessage(method: "saveMyDocumentPageContent", args: ["MYDOC", "page-id", "content", "Renamed"]),
+            .handled
+        )
+        XCTAssertEqual(bridge.dispatchMessage(method: "reloadMyDocumentPage", args: ["MYDOC"]), .handled)
         XCTAssertEqual(bridge.dispatchMessage(method: "saveBookmarkNote", args: ["bookmark-id", NSNull()]), .handled)
         XCTAssertEqual(bridge.dispatchMessage(method: "helpDialog", args: ["content", NSNull()]), .handled)
         XCTAssertEqual(bridge.dispatchMessage(method: "scrolledToOrdinal", args: ["main", 1]), .handled)
@@ -2064,6 +2076,72 @@ final class AndBibleTests: XCTestCase {
         XCTAssertTrue(payloadScript.contains(#""sourcePromptId":"22222222-2222-2222-2222-222222222222""#))
         XCTAssertEqual(sharedText, "Intro\n\nRaw *markdown*")
         XCTAssertEqual(recordedScripts().last, "bibleView.response(3705, null);")
+    }
+
+    @MainActor
+    func testMyDocumentEditBridgePersistsContentAndReloadsVisiblePage() throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let container = try makeMyDocumentModelContainer()
+        let context = ModelContext(container)
+        let store = MyDocumentStore(modelContext: context)
+        let pageId = try XCTUnwrap(UUID(uuidString: "33333333-3333-3333-3333-333333333333"))
+        let document = MyDocument(name: "My Document", initials: "MYDOC")
+        let page = MyDocumentPage(
+            id: pageId,
+            title: "Intro",
+            pageKey: "intro",
+            contentType: .markdown,
+            languageCode: "en"
+        )
+        let content = MyDocumentPageContent(pageId: pageId, content: "Original *markdown*")
+        page.pageContent = content
+        page.document = document
+        document.pages = [page]
+        context.insert(document)
+        context.insert(page)
+        context.insert(content)
+        try context.save()
+
+        let controller = BibleReaderController(bridge: bridge)
+        controller.myDocumentStore = store
+        controller.bridge(bridge, selectionChanged: "Selected text")
+        controller.bridge(bridge, setEditing: true)
+
+        XCTAssertTrue(controller.loadMyDocumentPage(bookInitials: "MYDOC", pageKey: "intro"))
+        XCTAssertEqual(
+            controller.renderedContentState,
+            "category=general_book;module=MYDOC;book=My Document;chapter=none;key=intro"
+        )
+        XCTAssertFalse(controller.hasActiveSelection)
+        XCTAssertEqual(controller.selectedText, "")
+        XCTAssertFalse(controller.editingInWebView)
+        XCTAssertTrue(recordedScripts().contains("window.getSelection().removeAllRanges();"))
+
+        controller.bridge(
+            bridge,
+            saveMyDocumentPageContent: "MYDOC",
+            pageId: pageId.uuidString,
+            content: "Edited **markdown**",
+            title: "Renamed"
+        )
+
+        let savedPayload = try XCTUnwrap(store.rawContentPayload(bookInitials: "MYDOC", pageKey: "intro"))
+        XCTAssertEqual(savedPayload.content, "Edited **markdown**")
+        XCTAssertEqual(savedPayload.title, "Renamed")
+
+        controller.bridge(bridge, reloadMyDocumentPage: "MYDOC")
+
+        let addDocumentScripts = recordedScripts().filter { $0.contains("emit('add_documents'") }
+        XCTAssertEqual(addDocumentScripts.count, 2)
+
+        let reloadedScript = try XCTUnwrap(addDocumentScripts.last)
+        XCTAssertTrue(reloadedScript.contains(#""bookInitials":"MYDOC""#))
+        XCTAssertTrue(reloadedScript.contains(#""bookCategory":"GENERAL_BOOK""#))
+        XCTAssertTrue(reloadedScript.contains(#""isMyDocument":true"#))
+        XCTAssertTrue(reloadedScript.contains(#""myDocumentPageId":"33333333-3333-3333-3333-333333333333""#))
+        XCTAssertTrue(reloadedScript.contains(#""keyName":"Renamed""#))
+        XCTAssertTrue(reloadedScript.contains("Edited **markdown**"))
+        XCTAssertFalse(reloadedScript.contains("Original *markdown*"))
     }
 
     func testOpenExternalLinkRoutesAbErrorToIssueTrackerURL() {

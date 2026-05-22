@@ -205,6 +205,10 @@ public protocol BibleBridgeDelegate: AnyObject {
     func bridge(_ bridge: BibleBridge, copyMyDocumentContent bookInitials: String, pageKey: String)
     /// Shares one My Documents page's raw editable content through native sharing UI.
     func bridge(_ bridge: BibleBridge, shareMyDocumentContent bookInitials: String, pageKey: String)
+    /// Persists raw editable content for one My Documents page.
+    func bridge(_ bridge: BibleBridge, saveMyDocumentPageContent bookInitials: String, pageId: String, content: String, title: String?)
+    /// Reloads the visible rendered My Documents page for the supplied document initials.
+    func bridge(_ bridge: BibleBridge, reloadMyDocumentPage bookInitials: String)
 
     // MARK: - Navigation Actions
     /// Opens the StudyPad view focused on the supplied label and bookmark.
@@ -310,6 +314,12 @@ public extension BibleBridgeDelegate {
 
     /// Default no-op to preserve source compatibility for clients without My Documents storage.
     func bridge(_ bridge: BibleBridge, shareMyDocumentContent bookInitials: String, pageKey: String) {}
+
+    /// Default no-op to preserve source compatibility for clients without My Documents storage.
+    func bridge(_ bridge: BibleBridge, saveMyDocumentPageContent bookInitials: String, pageId: String, content: String, title: String?) {}
+
+    /// Default no-op to preserve source compatibility for clients without My Documents storage.
+    func bridge(_ bridge: BibleBridge, reloadMyDocumentPage bookInitials: String) {}
 }
 
 /**
@@ -572,6 +582,17 @@ public final class BibleBridge: NSObject, WKScriptMessageHandler {
             guard let initials = arguments.string(0),
                   let pageKey = arguments.string(1) else { return .malformed }
             delegate?.bridge(self, shareMyDocumentContent: initials, pageKey: pageKey)
+            return .handled
+        case "saveMyDocumentPageContent":
+            guard let initials = arguments.string(0),
+                  let pageId = arguments.string(1),
+                  let content = arguments.string(2) else { return .malformed }
+            guard case .value(let title) = arguments.optionalString(3) else { return .malformed }
+            delegate?.bridge(self, saveMyDocumentPageContent: initials, pageId: pageId, content: content, title: title)
+            return .handled
+        case "reloadMyDocumentPage":
+            guard let initials = arguments.string(0) else { return .malformed }
+            delegate?.bridge(self, reloadMyDocumentPage: initials)
             return .handled
         case "shareBookmarkVerse":
             guard let bookmarkId = arguments.string(0) else { return .malformed }
