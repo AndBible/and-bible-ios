@@ -91,7 +91,7 @@ public final class MyDocumentPage {
     /// User-visible page title.
     public var title: String
 
-    /// Stable key unique within the parent document and used by bridge calls.
+    /// Stable key scoped to the parent document and used by bridge calls.
     public var pageKey: String
 
     /// Persisted raw content type value.

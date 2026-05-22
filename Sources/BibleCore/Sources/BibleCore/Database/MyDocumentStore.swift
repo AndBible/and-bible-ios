@@ -71,7 +71,13 @@ public final class MyDocumentStore {
         var descriptor = FetchDescriptor<MyDocumentPage>(
             predicate: #Predicate {
                 $0.pageKey == pageKey && $0.document?.initials == bookInitials
-            }
+            },
+            sortBy: [
+                SortDescriptor(\.orderNumber),
+                SortDescriptor(\.createdAt),
+                SortDescriptor(\.updatedAt),
+                SortDescriptor(\.title),
+            ]
         )
         descriptor.fetchLimit = 1
         return try? modelContext.fetch(descriptor).first

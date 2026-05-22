@@ -9847,8 +9847,8 @@ final class AndBibleUITests: XCTestCase {
      Focuses a prompt-owned text-entry control without polling `isHittable`.
 
      SwiftUI alert text fields can occasionally stall XCTest while resolving frame-based taps even
-     after the prompt-specific resolver has found the field. Try the native tap first and reserve
-     the coordinate path as a fallback after focus has failed.
+     after the prompt-specific resolver has found the field. Use XCTest's native tap only when the
+     field is already hittable, then reserve the coordinate path as a fallback.
      */
     private func focusResolvedPromptTextEntryElement(
         _ element: XCUIElement,
@@ -9861,11 +9861,14 @@ final class AndBibleUITests: XCTestCase {
         let tapOffset = CGVector(dx: preferTrailingEdge ? 0.92 : 0.5, dy: 0.5)
 
         repeat {
-            element.tap()
-            if waitForElementKeyboardFocus(element, timeout: 0.75) {
-                return
+            let frame = element.frame
+            if elementFrameIsUsable(frame) && element.isHittable {
+                element.tap()
+                if waitForElementKeyboardFocus(element, timeout: 0.75) {
+                    return
+                }
             }
-            if elementFrameIsUsable(element.frame) {
+            if elementFrameIsUsable(frame) {
                 element.coordinate(withNormalizedOffset: tapOffset).tap()
                 if waitForElementKeyboardFocus(element, timeout: 0.75) {
                     return

@@ -97,6 +97,56 @@ final class MyDocumentStoreTests: XCTestCase {
         XCTAssertEqual(secondPayload.content, "Second content")
     }
 
+    func testRawContentPayloadResolvesDuplicatePageKeysDeterministicallyByDisplayOrder() throws {
+        let container = try makeMyDocumentModelContainer()
+        let context = ModelContext(container)
+        let store = MyDocumentStore(modelContext: context)
+        let createdAt = try XCTUnwrap(DateComponents(
+            calendar: Calendar(identifier: .gregorian),
+            timeZone: TimeZone(secondsFromGMT: 0),
+            year: 2026,
+            month: 5,
+            day: 22
+        ).date)
+        let document = MyDocument(name: "My Document", initials: "MYDOC")
+        let firstPageId = try XCTUnwrap(UUID(uuidString: "55555555-5555-5555-5555-555555555555"))
+        let secondPageId = try XCTUnwrap(UUID(uuidString: "66666666-6666-6666-6666-666666666666"))
+        let firstPage = MyDocumentPage(
+            id: firstPageId,
+            title: "A",
+            pageKey: "duplicate",
+            orderNumber: 1,
+            createdAt: createdAt,
+            updatedAt: createdAt
+        )
+        let secondPage = MyDocumentPage(
+            id: secondPageId,
+            title: "B",
+            pageKey: "duplicate",
+            orderNumber: 2,
+            createdAt: createdAt,
+            updatedAt: createdAt
+        )
+        let firstContent = MyDocumentPageContent(pageId: firstPageId, content: "First by order")
+        let secondContent = MyDocumentPageContent(pageId: secondPageId, content: "Second by order")
+
+        firstPage.pageContent = firstContent
+        firstPage.document = document
+        secondPage.pageContent = secondContent
+        secondPage.document = document
+        document.pages = [secondPage, firstPage]
+        context.insert(document)
+        context.insert(firstPage)
+        context.insert(firstContent)
+        context.insert(secondPage)
+        context.insert(secondContent)
+        try context.save()
+
+        let payload = try XCTUnwrap(store.rawContentPayload(bookInitials: "MYDOC", pageKey: "duplicate"))
+        XCTAssertEqual(payload.pageId, "55555555-5555-5555-5555-555555555555")
+        XCTAssertEqual(payload.content, "First by order")
+    }
+
     private func makeMyDocumentModelContainer() throws -> ModelContainer {
         let schema = Schema([
             MyDocument.self,
