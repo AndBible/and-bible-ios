@@ -76,6 +76,7 @@ type TranslatedStrings = {
     yes: string
     ambiguousSelection: string
     cancel: string
+    saveMyDocumentPageAccessibilityLabel: string
     removeBookmarkConfirmationTitle: string
     removeBookmarkConfirmation: string
     createdAt: string

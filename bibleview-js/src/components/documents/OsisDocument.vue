@@ -34,8 +34,8 @@
         <button
             type="button"
             class="journal-button"
-            aria-label="Save My Document page"
-            title="Save My Document page"
+            :aria-label="strings.saveMyDocumentPageAccessibilityLabel"
+            :title="strings.saveMyDocumentPageAccessibilityLabel"
             @click="saveEditor"
         >
           <FontAwesomeIcon icon="save"/>

@@ -28,6 +28,7 @@ ok: OK
 yes: "Yes"
 ambiguousSelection: Which action do you wish to take?
 cancel: Cancel
+saveMyDocumentPageAccessibilityLabel: Save My Document page
 removeBookmarkConfirmationTitle: Remove bookmark?
 removeBookmarkConfirmation: Are you sure you want to remove this bookmark?
 createdAt: "Created: %s"

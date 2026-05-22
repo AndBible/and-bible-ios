@@ -3156,7 +3156,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             content: content,
             title: title
         ) == true else {
-            logger.warning("saveMyDocumentPageContent: page not found for document=\(bookInitials, privacy: .public)")
+            logger.warning("saveMyDocumentPageContent: page not found or save failed for document=\(bookInitials, privacy: .public)")
             return
         }
     }
