@@ -148,8 +148,9 @@ The rendered document payload should include:
 - `aiDocMarkers`
 
 The iOS-bundled frontend now exposes the #81 raw-content/copy/share bridge
-methods. The remaining Android My Documents fields and action menu behavior
-should only be added as the #82 and #83 bridge behavior becomes real.
+methods and the #82 save/reload bridge methods. The remaining Android My
+Documents fields and action menu behavior should only be added as the #83
+AI-page behavior becomes real.
 
 Content rendering should preserve Android's content-type meanings:
 
@@ -179,9 +180,9 @@ pages respond with `bibleView.response(callId, null)`.
 
 `copyMyDocumentContent` and `shareMyDocumentContent` use the same raw lookup
 path and operate on the stored page `content`, not the rendered HTML.
-`saveMyDocumentPageContent` should update `MyDocumentPageContent.content` and
-optionally `MyDocumentPage.title`, while `reloadMyDocumentPage` should rebuild
-or refresh the visible rendered document for the matching `bookInitials`.
+`saveMyDocumentPageContent` updates `MyDocumentPageContent.content` and
+optionally `MyDocumentPage.title`, while `reloadMyDocumentPage` rebuilds the
+visible rendered document for the matching `bookInitials`.
 
 ## Sync Boundary
 
@@ -212,5 +213,5 @@ porting every Android My Documents behavior:
 - Add a minimal renderer or builder that can produce one My Documents
   `type: "osis"` page payload from stored content.
 
-#81 adds read-only bridge methods, #82 can add edit/reload behavior, and #83
-can add AI regenerate/delete behavior.
+#81 adds read-only bridge methods, #82 adds edit/reload behavior, and #83 can
+add AI regenerate/delete behavior.

@@ -45,6 +45,7 @@ import Figure from "@/components/OSIS/Figure.vue";
 import A from "@/components/OSIS/A.vue";
 import Abbr from "@/components/OSIS/Abbr.vue";
 import Html from "@/components/OSIS/Html.vue";
+import Markdown from "@/components/OSIS/Markdown.vue";
 import Sense from "@/components/OSIS/Sense.vue";
 import BibleViewAnchor from "@/components/BibleViewAnchor.vue";
 import AndBibleLink from "@/components/OSIS/AndBibleLink.vue";
@@ -81,7 +82,7 @@ const osisComponents = {
     Verse, W, Div, Chapter, Reference, Note, TransChange,
     DivineName, Seg, Milestone, Title, Q, Hi, CatchWord, List, Item, P,
     Cell, L, Lb, Lg, Row, Table, Foreign, Figure, A, Abbr,
-    Html,
+    Html, Markdown,
 }
 
 const allComponents = {

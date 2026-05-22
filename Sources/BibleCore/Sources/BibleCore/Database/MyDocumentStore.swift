@@ -84,6 +84,19 @@ public final class MyDocumentStore {
     }
 
     /**
+     Resolves one page by its stable page identifier and parent document initials.
+     */
+    public func page(bookInitials: String, pageId: UUID) -> MyDocumentPage? {
+        var descriptor = FetchDescriptor<MyDocumentPage>(
+            predicate: #Predicate {
+                $0.id == pageId && $0.document?.initials == bookInitials
+            }
+        )
+        descriptor.fetchLimit = 1
+        return try? modelContext.fetch(descriptor).first
+    }
+
+    /**
      Builds the raw-content bridge payload for one page.
      */
     public func rawContentPayload(bookInitials: String, pageKey: String) -> MyDocumentRawContentPayload? {
@@ -105,6 +118,51 @@ public final class MyDocumentStore {
      */
     public func rawContent(bookInitials: String, pageKey: String) -> String? {
         rawContentPayload(bookInitials: bookInitials, pageKey: pageKey)?.content
+    }
+
+    /**
+     Persists raw editable content for one My Documents page.
+
+     - Parameters:
+       - bookInitials: Parent document initials supplied by the bridge.
+       - pageId: Stable page UUID supplied by the editor payload.
+       - content: Replacement raw page body.
+       - title: Optional replacement page title; `nil` preserves the current title.
+     - Returns: `true` when a matching page was found and saved.
+     */
+    @discardableResult
+    public func savePageContent(
+        bookInitials: String,
+        pageId: UUID,
+        content: String,
+        title: String?
+    ) -> Bool {
+        guard let page = page(bookInitials: bookInitials, pageId: pageId) else {
+            return false
+        }
+
+        let now = Date()
+        if let title {
+            page.title = title
+        }
+        page.updatedAt = now
+        page.document?.updatedAt = now
+
+        if let pageContent = page.pageContent {
+            pageContent.content = content
+        } else {
+            let pageContent = MyDocumentPageContent(pageId: page.id, content: content)
+            pageContent.page = page
+            page.pageContent = pageContent
+            modelContext.insert(pageContent)
+        }
+
+        do {
+            try modelContext.save()
+            return true
+        } catch {
+            return false
+        }
     }
 
     /**

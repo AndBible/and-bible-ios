@@ -100,10 +100,13 @@ Android's My Documents bridge family is also accepted as iOS parity work. The
 read bridge slice from #81 is implemented: `getMyDocumentPageRawContent`
 responds through `bibleView.response(callId, payload|null)` using the
 `MyDocumentStore` lookup, while `copyMyDocumentContent` and
-`shareMyDocumentContent` operate on the stored raw page content. The accepted
-local model is recorded in `my-documents-model.md`. Edit/reload follows in #82,
-and AI page regenerate/delete follows in #83. The related `mydocuments` sync
-category stays blocked in #72 until the local product surface is implemented.
+`shareMyDocumentContent` operate on the stored raw page content. The edit/reload
+slice from #82 is implemented: `saveMyDocumentPageContent` persists raw content
+and optional title changes, while `reloadMyDocumentPage` rebuilds the visible
+stored page. The accepted local model is recorded in
+`my-documents-model.md`. AI page regenerate/delete follows in #83. The related
+`mydocuments` sync category stays blocked in #72 until the local product surface
+is implemented.
 
 Android's reading-progress bridge family is accepted as iOS parity work, but it
 also remains deferred until iOS has a native reading-progress model, storage,

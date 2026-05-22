@@ -22,21 +22,48 @@
       :data-book-initials="bookInitials"
       :data-osis-ref="osisRef"
   >
-    <OsisFragment :is-native-html="document.isNativeHtml" :fragment="osisFragment"/>
-    <OpenAllLink v-if="document.bookCategory != 'GENERAL_BOOK'" :v11n="document.v11n"/>
-    <FeaturesLink :fragment="osisFragment"/>
+    <div v-if="editMode" class="mydoc-edit-container">
+      <EditableText
+          :text="editContent"
+          :edit-directly="true"
+          @save="handleSave"
+          @closed="handleEditClosed"
+      />
+    </div>
+
+    <template v-else>
+      <button
+          v-if="isMyDocument && myDocumentPageId"
+          type="button"
+          class="journal-button mydoc-edit-button"
+          :aria-label="strings.editTextPlaceholder"
+          :title="strings.editTextPlaceholder"
+          @click.stop="startEditing"
+      >
+        <FontAwesomeIcon icon="edit"/>
+      </button>
+      <OsisFragment :is-native-html="document.isNativeHtml" :fragment="osisFragment"/>
+      <div v-if="isMyDocument && isContentEmpty" class="mydoc-placeholder" @click="startEditing">
+        <FontAwesomeIcon icon="edit" class="placeholder-icon"/>
+        <span>{{ strings.editTextPlaceholder }}</span>
+      </div>
+      <OpenAllLink v-if="document.bookCategory != 'GENERAL_BOOK'" :v11n="document.v11n"/>
+      <FeaturesLink :fragment="osisFragment"/>
+    </template>
   </div>
 </template>
 
 <script setup lang="ts">
 import OsisFragment from "@/components/documents/OsisFragment.vue";
+import EditableText from "@/components/EditableText.vue";
 import FeaturesLink from "@/components/FeaturesLink.vue";
 import OpenAllLink from "@/components/OpenAllLink.vue";
 import {useCommon, useReferenceCollector} from "@/composables";
-import {customCssKey, globalBookmarksKey, osisDocumentInfoKey, referenceCollectorKey} from "@/types/constants";
-import {inject, provide, ref} from "vue";
+import {androidKey, customCssKey, globalBookmarksKey, osisDocumentInfoKey, referenceCollectorKey} from "@/types/constants";
+import {computed, inject, provide, ref} from "vue";
 import {OsisDocument} from "@/types/documents";
 import {useBookmarks} from "@/composables/bookmarks";
+import {FontAwesomeIcon} from "@fortawesome/vue-fontawesome";
 
 const props = defineProps<{ document: OsisDocument }>();
 
@@ -51,14 +78,23 @@ const {
     osisRef,
     genericBookmarks,
     highlightedOrdinalRange,
+    isMyDocument = false,
+    myDocumentPageId = null,
 } = props.document;
 const referenceCollector = useReferenceCollector();
 
 const globalBookmarks = inject(globalBookmarksKey)!;
 const {registerBook} = inject(customCssKey)!;
+const android = inject(androidKey)!;
 globalBookmarks.updateBookmarks(genericBookmarks);
 
 const {config, appSettings, ...common} = useCommon();
+const strings = common.strings;
+
+const isContentEmpty = computed(() => {
+    const xml = osisFragment.xml || "";
+    return xml.replace(/<[^>]*>/g, "").trim().length === 0;
+});
 
 useBookmarks(id, ordinalRange, globalBookmarks, bookInitials, annotateRef, false, ref(true), common, config, appSettings);
 provide(osisDocumentInfoKey, {bookInitials, highlightedOrdinalRange, osisRef: annotateRef})
@@ -68,4 +104,68 @@ registerBook(`epub/${bookInitials}/${osisRef}`)
 if (bookCategory === "COMMENTARY" || bookCategory === "GENERAL_BOOK") {
     provide(referenceCollectorKey, referenceCollector);
 }
+
+const editMode = ref(false);
+const editContent = ref("");
+const editPageId = ref("");
+
+async function startEditing() {
+    if (!isMyDocument) return;
+
+    const info = await android.getMyDocumentPageRawContent(bookInitials, osisRef);
+    if (!info) return;
+
+    editPageId.value = info.pageId;
+    editContent.value = info.content;
+    editMode.value = true;
+}
+
+function handleSave(newText: string) {
+    editContent.value = newText;
+    android.saveMyDocumentPageContent(bookInitials, editPageId.value, newText, null);
+}
+
+function handleEditClosed() {
+    editMode.value = false;
+    android.reloadMyDocumentPage(bookInitials);
+}
 </script>
+
+<style lang="scss" scoped>
+.document {
+  overflow: hidden;
+}
+
+.mydoc-edit-button {
+  float: right;
+  margin: 0 0 0.5em 0.5em;
+}
+
+.mydoc-edit-container {
+  border: 2px solid rgba(0, 0, 255, 0.5);
+  border-radius: 5px;
+  margin: 4px;
+
+  .monochrome & {
+    border-color: black;
+  }
+
+  .monochrome.night & {
+    border-color: white;
+  }
+}
+
+.mydoc-placeholder {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  padding: 2em;
+  opacity: 0.5;
+  cursor: pointer;
+  font-style: italic;
+}
+
+.placeholder-icon {
+  font-size: 1.2em;
+}
+</style>

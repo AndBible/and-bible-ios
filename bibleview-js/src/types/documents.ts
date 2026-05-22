@@ -68,6 +68,13 @@ interface BaseOsisDocument extends BaseDocument {
 export interface OsisDocument extends BaseOsisDocument {
     type: "osis",
     highlightedOrdinalRange: Nullable<OrdinalRange>
+    isMyDocument?: boolean
+    isAiDocument?: boolean
+    myDocumentPageId?: Nullable<string>
+    sourcePromptId?: Nullable<string>
+    sourcePromptName?: Nullable<string>
+    sourceModelName?: Nullable<string>
+    aiDocMarkers?: GenericBookmark[]
 }
 
 export interface ErrorDocument extends BaseDocument {

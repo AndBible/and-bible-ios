@@ -61,6 +61,8 @@ Related domain references:
 - `AndBibleTests/testRequestMoreToBeginningSendsDocumentResponseWithOriginalCallId`
 - `AndBibleTests/testRefChooserDialogSendsResponseWithOriginalCallId`
 - `AndBibleTests/testParseRefSendsResponseWithOriginalCallId`
+- `AndBibleTests/testMyDocumentRawContentBridgeSendsAndroidCompatiblePayloadAndNullFallback`
+- `AndBibleTests/testMyDocumentEditBridgePersistsContentAndReloadsVisiblePage`
 
 ### UI
 
@@ -135,6 +137,7 @@ evidence. The checked-in named subset gives the bridge domain rerunnable evidenc
   reference workflows
 - malformed known-message classification for positional JS-to-native dispatch
 - representative bridge payload key shapes for OSIS fragments, labels/styles, and selection query
+- My Documents raw-content response, save bridge persistence, and visible page reload
 
 So the bridge story is not "everything is shaky." It is more specific than
 that: the StudyPad handoff, visible My Notes lifecycle, and note persistence support are present,
@@ -145,12 +148,13 @@ while full valid delegate-call coverage still needs more direct protection.
 The pieces that still need tighter protection are:
 
 - full current Android bridge breadth beyond the shared iOS subset (`89` Android
-  methods versus `70` iOS-bundled methods in
+  methods versus `72` iOS-bundled methods in
   `bibleview-js/src/composables/android.ts`)
-- the tracked bridge gap inventory: 19 missing Android methods plus 7 resolved iOS
+- the tracked bridge gap inventory: 17 missing Android methods plus 9 resolved iOS
   bridge dispositions; memorization bridge state and `speakMemorizationLoop` are
-  implemented, My Documents read/copy/share is implemented in #81 while edit/reload
-  and AI page operations remain deferred through #82 and #83, reading progress
+  implemented, My Documents read/copy/share is implemented in #81, My Documents
+  edit/reload is implemented in #82, and AI page operations remain deferred
+  through #83, reading progress
   is deferred through #85, #86, and #87, AI bridge methods are deferred through #89, #90,
   #91, and #92, and no current iOS no-op method remains in
   "needs decision" status
