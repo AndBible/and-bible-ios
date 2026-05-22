@@ -23,12 +23,33 @@
       :data-osis-ref="osisRef"
   >
     <div v-if="editMode" class="mydoc-edit-container">
-      <EditableText
-          :text="editContent"
-          :edit-directly="true"
-          @save="handleSave"
-          @closed="handleEditClosed"
+      <textarea
+          v-model="editContent"
+          class="mydoc-raw-editor"
+          rows="12"
+          :aria-label="strings.editTextPlaceholder"
+          @keydown.escape.prevent.stop="closeEditor"
       />
+      <div class="mydoc-editor-actions">
+        <button
+            type="button"
+            class="journal-button"
+            aria-label="Save My Document page"
+            title="Save My Document page"
+            @click="saveEditor"
+        >
+          <FontAwesomeIcon icon="save"/>
+        </button>
+        <button
+            type="button"
+            class="journal-button"
+            :aria-label="strings.cancel || 'Cancel'"
+            :title="strings.cancel || 'Cancel'"
+            @click="closeEditor"
+        >
+          <FontAwesomeIcon icon="times"/>
+        </button>
+      </div>
     </div>
 
     <template v-else>
@@ -43,10 +64,15 @@
         <FontAwesomeIcon icon="edit"/>
       </button>
       <OsisFragment :is-native-html="document.isNativeHtml" :fragment="osisFragment"/>
-      <div v-if="isMyDocument && isContentEmpty" class="mydoc-placeholder" @click="startEditing">
+      <button
+          v-if="isMyDocument && isContentEmpty"
+          type="button"
+          class="mydoc-placeholder"
+          @click="startEditing"
+      >
         <FontAwesomeIcon icon="edit" class="placeholder-icon"/>
         <span>{{ strings.editTextPlaceholder }}</span>
-      </div>
+      </button>
       <OpenAllLink v-if="document.bookCategory != 'GENERAL_BOOK'" :v11n="document.v11n"/>
       <FeaturesLink :fragment="osisFragment"/>
     </template>
@@ -55,7 +81,6 @@
 
 <script setup lang="ts">
 import OsisFragment from "@/components/documents/OsisFragment.vue";
-import EditableText from "@/components/EditableText.vue";
 import FeaturesLink from "@/components/FeaturesLink.vue";
 import OpenAllLink from "@/components/OpenAllLink.vue";
 import {useCommon, useReferenceCollector} from "@/composables";
@@ -120,12 +145,14 @@ async function startEditing() {
     editMode.value = true;
 }
 
-function handleSave(newText: string) {
-    editContent.value = newText;
-    android.saveMyDocumentPageContent(bookInitials, editPageId.value, newText, null);
+function saveEditor() {
+    if (!editPageId.value) return;
+
+    android.saveMyDocumentPageContent(bookInitials, editPageId.value, editContent.value, null);
+    closeEditor();
 }
 
-function handleEditClosed() {
+function closeEditor() {
     editMode.value = false;
     android.reloadMyDocumentPage(bookInitials);
 }
@@ -145,6 +172,7 @@ function handleEditClosed() {
   border: 2px solid rgba(0, 0, 255, 0.5);
   border-radius: 5px;
   margin: 4px;
+  overflow: hidden;
 
   .monochrome & {
     border-color: black;
@@ -155,14 +183,42 @@ function handleEditClosed() {
   }
 }
 
+.mydoc-raw-editor {
+  box-sizing: border-box;
+  display: block;
+  width: 100%;
+  min-height: 16rem;
+  padding: 0.75em;
+  border: 0;
+  resize: vertical;
+  background: var(--background-color);
+  color: var(--text-color);
+  font: inherit;
+  line-height: 1.4;
+}
+
+.mydoc-editor-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.25em;
+  padding: 0.4em;
+  border-top: 1px solid rgba(0, 0, 0, 0.15);
+}
+
 .mydoc-placeholder {
   display: flex;
   align-items: center;
   gap: 0.5em;
+  width: 100%;
+  border: 0;
   padding: 2em;
+  background: transparent;
+  color: inherit;
   opacity: 0.5;
   cursor: pointer;
+  font: inherit;
   font-style: italic;
+  text-align: start;
 }
 
 .placeholder-icon {

@@ -2104,12 +2104,18 @@ final class AndBibleTests: XCTestCase {
 
         let controller = BibleReaderController(bridge: bridge)
         controller.myDocumentStore = store
+        controller.bridge(bridge, selectionChanged: "Selected text")
+        controller.bridge(bridge, setEditing: true)
 
         XCTAssertTrue(controller.loadMyDocumentPage(bookInitials: "MYDOC", pageKey: "intro"))
         XCTAssertEqual(
             controller.renderedContentState,
             "category=general_book;module=MYDOC;book=My Document;chapter=none;key=intro"
         )
+        XCTAssertFalse(controller.hasActiveSelection)
+        XCTAssertEqual(controller.selectedText, "")
+        XCTAssertFalse(controller.editingInWebView)
+        XCTAssertTrue(recordedScripts().contains("window.getSelection().removeAllRanges();"))
 
         controller.bridge(
             bridge,

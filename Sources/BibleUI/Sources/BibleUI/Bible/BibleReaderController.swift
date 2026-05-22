@@ -3009,7 +3009,11 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
         showingMyNotes = false
         showingStudyPad = false
+        activeStudyPadLabelId = nil
+        activeStudyPadLabelName = nil
         editingInWebView = false
+        hasActiveSelection = false
+        selectedText = ""
         currentCategory = .generalBook
         activeMyDocumentBookInitials = bookInitials
         activeMyDocumentPageKey = pageKey
@@ -3027,6 +3031,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             event: "setup_content",
             data: "{\"jumpToOrdinal\":null,\"jumpToAnchor\":null,\"jumpToId\":null,\"topOffset\":0,\"bottomOffset\":0}"
         )
+        bridge.clearSelection()
+        applyNightModeBackground()
         return true
     }
 
