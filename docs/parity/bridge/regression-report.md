@@ -145,11 +145,12 @@ while full valid delegate-call coverage still needs more direct protection.
 The pieces that still need tighter protection are:
 
 - full current Android bridge breadth beyond the shared iOS subset (`89` Android
-  methods versus `67` iOS-bundled methods in
+  methods versus `70` iOS-bundled methods in
   `bibleview-js/src/composables/android.ts`)
-- the tracked bridge gap inventory: 22 missing Android methods plus 4 resolved iOS
+- the tracked bridge gap inventory: 19 missing Android methods plus 7 resolved iOS
   bridge dispositions; memorization bridge state and `speakMemorizationLoop` are
-  implemented, My Documents is deferred through #80, #81, #82, and #83, reading progress
+  implemented, My Documents read/copy/share is implemented in #81 while edit/reload
+  and AI page operations remain deferred through #82 and #83, reading progress
   is deferred through #85, #86, and #87, AI bridge methods are deferred through #89, #90,
   #91, and #92, and no current iOS no-op method remains in
   "needs decision" status

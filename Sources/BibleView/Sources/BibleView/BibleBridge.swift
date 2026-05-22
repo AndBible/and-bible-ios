@@ -23,6 +23,7 @@ enum BibleBridgeCallIdRequest: Equatable {
     case requestMoreToEnd(Int)
     case refChooserDialog(Int)
     case parseRef(callId: Int, text: String)
+    case getMyDocumentPageRawContent(callId: Int, bookInitials: String, pageKey: String)
 }
 
 enum BibleBridgeCallIdRequestParseResult: Equatable {
@@ -198,6 +199,12 @@ public protocol BibleBridgeDelegate: AnyObject {
     func bridge(_ bridge: BibleBridge, removeMemorizationTarget bookInitials: String, startOrdinal: Int, endOrdinal: Int)
     /// Removes the selected verse range from memorized ranges.
     func bridge(_ bridge: BibleBridge, unmarkMemorized bookInitials: String, startOrdinal: Int, endOrdinal: Int)
+    /// Resolves one My Documents page and returns its raw editable content payload.
+    func bridge(_ bridge: BibleBridge, getMyDocumentPageRawContent callId: Int, bookInitials: String, pageKey: String)
+    /// Copies one My Documents page's raw editable content to the system pasteboard.
+    func bridge(_ bridge: BibleBridge, copyMyDocumentContent bookInitials: String, pageKey: String)
+    /// Shares one My Documents page's raw editable content through native sharing UI.
+    func bridge(_ bridge: BibleBridge, shareMyDocumentContent bookInitials: String, pageKey: String)
 
     // MARK: - Navigation Actions
     /// Opens the StudyPad view focused on the supplied label and bookmark.
@@ -292,6 +299,17 @@ public extension BibleBridgeDelegate {
 
     /// Default no-op to preserve source compatibility for clients that do not handle memorization.
     func bridge(_ bridge: BibleBridge, unmarkMemorized bookInitials: String, startOrdinal: Int, endOrdinal: Int) {}
+
+    /// Default null response to preserve source compatibility for clients without My Documents storage.
+    func bridge(_ bridge: BibleBridge, getMyDocumentPageRawContent callId: Int, bookInitials: String, pageKey: String) {
+        bridge.sendResponse(callId: callId, value: "null")
+    }
+
+    /// Default no-op to preserve source compatibility for clients without My Documents storage.
+    func bridge(_ bridge: BibleBridge, copyMyDocumentContent bookInitials: String, pageKey: String) {}
+
+    /// Default no-op to preserve source compatibility for clients without My Documents storage.
+    func bridge(_ bridge: BibleBridge, shareMyDocumentContent bookInitials: String, pageKey: String) {}
 }
 
 /**
@@ -545,6 +563,16 @@ public final class BibleBridge: NSObject, WKScriptMessageHandler {
                   let end = arguments.int(2) else { return .malformed }
             delegate?.bridge(self, copyVerse: initials, startOrdinal: start, endOrdinal: end < 0 ? start : end)
             return .handled
+        case "copyMyDocumentContent":
+            guard let initials = arguments.string(0),
+                  let pageKey = arguments.string(1) else { return .malformed }
+            delegate?.bridge(self, copyMyDocumentContent: initials, pageKey: pageKey)
+            return .handled
+        case "shareMyDocumentContent":
+            guard let initials = arguments.string(0),
+                  let pageKey = arguments.string(1) else { return .malformed }
+            delegate?.bridge(self, shareMyDocumentContent: initials, pageKey: pageKey)
+            return .handled
         case "shareBookmarkVerse":
             guard let bookmarkId = arguments.string(0) else { return .malformed }
             delegate?.bridge(self, shareBookmarkVerse: bookmarkId)
@@ -736,6 +764,15 @@ public final class BibleBridge: NSObject, WKScriptMessageHandler {
             guard let callId = args[safe: 0] as? Int,
                   let text = args[safe: 1] as? String else { return .malformed }
             return .request(.parseRef(callId: callId, text: text))
+        case "getMyDocumentPageRawContent":
+            guard let callId = args[safe: 0] as? Int,
+                  let bookInitials = args[safe: 1] as? String,
+                  let pageKey = args[safe: 2] as? String else { return .malformed }
+            return .request(.getMyDocumentPageRawContent(
+                callId: callId,
+                bookInitials: bookInitials,
+                pageKey: pageKey
+            ))
         default:
             return nil
         }
@@ -761,6 +798,13 @@ public final class BibleBridge: NSObject, WKScriptMessageHandler {
             delegate?.bridge(self, refChooserDialog: callId)
         case .parseRef(let callId, let text):
             delegate?.bridge(self, parseRef: callId, text: text)
+        case .getMyDocumentPageRawContent(let callId, let bookInitials, let pageKey):
+            delegate?.bridge(
+                self,
+                getMyDocumentPageRawContent: callId,
+                bookInitials: bookInitials,
+                pageKey: pageKey
+            )
         }
 
         return .handled

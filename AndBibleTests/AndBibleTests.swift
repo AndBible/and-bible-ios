@@ -145,6 +145,8 @@ final class AndBibleTests: XCTestCase {
             ("refChooserDialog", ["43"]),
             ("parseRef", [44]),
             ("parseRef", ["Genesis 1:1", 44]),
+            ("getMyDocumentPageRawContent", [45, "MYDOC"]),
+            ("getMyDocumentPageRawContent", ["MYDOC", "intro", 45]),
         ]
     }
 
@@ -185,6 +187,8 @@ final class AndBibleTests: XCTestCase {
             ("setGenericBookmarkCustomIcon", ["bookmark-id", 7]),
             ("shareVerse", ["KJV", 1]),
             ("copyVerse", ["KJV", 1]),
+            ("copyMyDocumentContent", ["MYDOC"]),
+            ("shareMyDocumentContent", ["MYDOC"]),
             ("shareBookmarkVerse", [["id": "bookmark-id"]]),
             ("compare", ["KJV", 1]),
             ("speak", ["KJV", "KJV", 1]),
@@ -1069,6 +1073,10 @@ final class AndBibleTests: XCTestCase {
             bridge.callIdRequest(method: "parseRef", args: [44, "Genesis 1:1"]),
             .request(.parseRef(callId: 44, text: "Genesis 1:1"))
         )
+        XCTAssertEqual(
+            bridge.callIdRequest(method: "getMyDocumentPageRawContent", args: [45, "MYDOC", "intro"]),
+            .request(.getMyDocumentPageRawContent(callId: 45, bookInitials: "MYDOC", pageKey: "intro"))
+        )
 
         for malformedRequest in malformedCallIdRequests {
             XCTAssertEqual(
@@ -1078,7 +1086,7 @@ final class AndBibleTests: XCTestCase {
             )
         }
 
-        XCTAssertNil(bridge.callIdRequest(method: "helpDialog", args: [45]))
+        XCTAssertNil(bridge.callIdRequest(method: "helpDialog", args: [46]))
     }
 
     func testBridgeCallIdDispatchClassifiesKnownMalformedMessages() {
@@ -1097,7 +1105,8 @@ final class AndBibleTests: XCTestCase {
             )
         }
 
-        XCTAssertEqual(bridge.dispatchCallIdRequest(method: "helpDialog", args: [45]), .notCallIdRequest)
+        XCTAssertEqual(bridge.dispatchCallIdRequest(method: "getMyDocumentPageRawContent", args: [45, "MYDOC", "intro"]), .handled)
+        XCTAssertEqual(bridge.dispatchCallIdRequest(method: "helpDialog", args: [46]), .notCallIdRequest)
     }
 
     func testBridgeMessageDispatchClassifiesKnownMalformedMessages() {
@@ -1112,6 +1121,8 @@ final class AndBibleTests: XCTestCase {
         }
 
         XCTAssertEqual(bridge.dispatchMessage(method: "shareBookmarkVerse", args: ["bookmark-id"]), .handled)
+        XCTAssertEqual(bridge.dispatchMessage(method: "copyMyDocumentContent", args: ["MYDOC", "intro"]), .handled)
+        XCTAssertEqual(bridge.dispatchMessage(method: "shareMyDocumentContent", args: ["MYDOC", "intro"]), .handled)
         XCTAssertEqual(bridge.dispatchMessage(method: "saveBookmarkNote", args: ["bookmark-id", NSNull()]), .handled)
         XCTAssertEqual(bridge.dispatchMessage(method: "helpDialog", args: ["content", NSNull()]), .handled)
         XCTAssertEqual(bridge.dispatchMessage(method: "scrolledToOrdinal", args: ["main", 1]), .handled)
@@ -2008,6 +2019,51 @@ final class AndBibleTests: XCTestCase {
         controller.bridge(bridge, parseRef: 3703, text: "Genesis 1:1")
 
         XCTAssertEqual(recordedScripts().last, #"bibleView.response(3703, "Gen.1.1");"#)
+    }
+
+    @MainActor
+    func testMyDocumentRawContentBridgeSendsAndroidCompatiblePayloadAndNullFallback() throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let container = try makeMyDocumentModelContainer()
+        let context = ModelContext(container)
+        let store = MyDocumentStore(modelContext: context)
+        let pageId = try XCTUnwrap(UUID(uuidString: "11111111-1111-1111-1111-111111111111"))
+        let sourcePromptId = try XCTUnwrap(UUID(uuidString: "22222222-2222-2222-2222-222222222222"))
+        let document = MyDocument(name: "My Document", initials: "MYDOC")
+        let page = MyDocumentPage(
+            id: pageId,
+            title: "Intro",
+            pageKey: "intro",
+            contentType: .markdown,
+            sourcePromptId: sourcePromptId
+        )
+        let content = MyDocumentPageContent(pageId: pageId, content: "Raw *markdown*")
+        page.pageContent = content
+        page.document = document
+        document.pages = [page]
+        context.insert(document)
+        context.insert(page)
+        context.insert(content)
+        try context.save()
+
+        let controller = BibleReaderController(bridge: bridge)
+        controller.myDocumentStore = store
+        var sharedText: String?
+        controller.onShareVerseText = { sharedText = $0 }
+
+        controller.bridge(bridge, getMyDocumentPageRawContent: 3704, bookInitials: "MYDOC", pageKey: "intro")
+        controller.bridge(bridge, shareMyDocumentContent: "MYDOC", pageKey: "intro")
+        controller.bridge(bridge, getMyDocumentPageRawContent: 3705, bookInitials: "MYDOC", pageKey: "missing")
+
+        let payloadScript = try XCTUnwrap(recordedScripts().first { $0.contains("bibleView.response(3704") })
+        XCTAssertTrue(payloadScript.hasPrefix("bibleView.response(3704, {"))
+        XCTAssertTrue(payloadScript.contains(#""pageId":"11111111-1111-1111-1111-111111111111""#))
+        XCTAssertTrue(payloadScript.contains(#""contentType":"MARKDOWN""#))
+        XCTAssertTrue(payloadScript.contains(#""content":"Raw *markdown*""#))
+        XCTAssertTrue(payloadScript.contains(#""title":"Intro""#))
+        XCTAssertTrue(payloadScript.contains(#""sourcePromptId":"22222222-2222-2222-2222-222222222222""#))
+        XCTAssertEqual(sharedText, "Intro\n\nRaw *markdown*")
+        XCTAssertEqual(recordedScripts().last, "bibleView.response(3705, null);")
     }
 
     func testOpenExternalLinkRoutesAbErrorToIssueTrackerURL() {
@@ -10879,6 +10935,17 @@ private func makeWorkspaceModelContainer() throws -> ModelContainer {
         Window.self,
         PageManager.self,
         HistoryItem.self,
+    ])
+    let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
+    return try ModelContainer(for: schema, configurations: [configuration])
+}
+
+private func makeMyDocumentModelContainer() throws -> ModelContainer {
+    let schema = Schema([
+        MyDocument.self,
+        MyDocumentPage.self,
+        MyDocumentPageContent.self,
+        AiPageCacheEntry.self,
     ])
     let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
     return try ModelContainer(for: schema, configurations: [configuration])

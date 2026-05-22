@@ -386,6 +386,7 @@ struct BibleWindowPane: View {
         ctrl.workspaceStore = workspaceStore
         ctrl.activeWindow = window
         ctrl.settingsStore = store
+        ctrl.myDocumentStore = MyDocumentStore(modelContext: modelContext)
 
         ctrl.onShareVerseText = { text in onShareText?(text) }
         ctrl.onRequestOpenDownloads = { onShowDownloads?() }
