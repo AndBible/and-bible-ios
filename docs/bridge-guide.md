@@ -120,16 +120,21 @@ Notes:
   `removeMemorizationTarget`, and `unmarkMemorized` mutate the same local iOS state.
 - `speakMemorizationLoop` accepts Android-style `(bookInitials, v11n, startOrdinal, endOrdinal)`
   arguments and delegates to the native speech service's selected-range repeat mode.
-- Android's My Documents read/edit bridge is now partially implemented. iOS
+- Android's My Documents read/edit/action bridge is now partially implemented. iOS
   accepts `getMyDocumentPageRawContent`, `copyMyDocumentContent`,
   `shareMyDocumentContent`, `saveMyDocumentPageContent`, and
   `reloadMyDocumentPage`; the controller resolves pages through
   `MyDocumentStore`, returns Android-compatible raw-content JSON or `null` via
   `bibleView.response(callId, ...)`, copies/shares stored raw content, persists
   raw editor updates with optional title changes, and rebuilds the visible page
-  after edit close. `regenerateMyDocumentPage` and `deleteMyDocumentPage` remain
-  deferred to #83. The related `mydocuments` sync category remains tracked
-  separately in #72.
+  after edit close. iOS also accepts `regenerateMyDocumentPage` and
+  `deleteMyDocumentPage` for pages with `sourcePromptId` metadata. Delete removes
+  only AI-generated pages and refreshes the active reader document, falling back
+  to the current Bible chapter when the visible page was deleted. Regenerate
+  validates the AI-page metadata and hands native context to the iOS regeneration
+  callback; the shared AI dialog/backend remains tracked separately in #5/#89.
+  User-authored pages without source prompt metadata are ignored and logged. The
+  related `mydocuments` sync category remains tracked separately in #72.
 - Android's reading-progress bridge family is accepted but deferred. iOS should not add
   `markChapterRead`, `unmarkChapterRead`, `openReadingProgress`,
   `openReadingProgressSettings`, or `setReadingProgressSettings` as standalone bridge names

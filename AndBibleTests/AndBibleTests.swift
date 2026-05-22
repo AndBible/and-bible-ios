@@ -192,6 +192,8 @@ final class AndBibleTests: XCTestCase {
             ("saveMyDocumentPageContent", ["MYDOC", "page-id"]),
             ("saveMyDocumentPageContent", ["MYDOC", "page-id", "content", 7]),
             ("reloadMyDocumentPage", []),
+            ("regenerateMyDocumentPage", []),
+            ("deleteMyDocumentPage", []),
             ("shareBookmarkVerse", [["id": "bookmark-id"]]),
             ("compare", ["KJV", 1]),
             ("speak", ["KJV", "KJV", 1]),
@@ -1135,6 +1137,8 @@ final class AndBibleTests: XCTestCase {
             .handled
         )
         XCTAssertEqual(bridge.dispatchMessage(method: "reloadMyDocumentPage", args: ["MYDOC"]), .handled)
+        XCTAssertEqual(bridge.dispatchMessage(method: "regenerateMyDocumentPage", args: ["page-id"]), .handled)
+        XCTAssertEqual(bridge.dispatchMessage(method: "deleteMyDocumentPage", args: ["page-id"]), .handled)
         XCTAssertEqual(bridge.dispatchMessage(method: "saveBookmarkNote", args: ["bookmark-id", NSNull()]), .handled)
         XCTAssertEqual(bridge.dispatchMessage(method: "helpDialog", args: ["content", NSNull()]), .handled)
         XCTAssertEqual(bridge.dispatchMessage(method: "scrolledToOrdinal", args: ["main", 1]), .handled)
@@ -2142,6 +2146,94 @@ final class AndBibleTests: XCTestCase {
         XCTAssertTrue(reloadedScript.contains(#""keyName":"Renamed""#))
         XCTAssertTrue(reloadedScript.contains("Edited **markdown**"))
         XCTAssertFalse(reloadedScript.contains("Original *markdown*"))
+    }
+
+    @MainActor
+    func testMyDocumentAIPageBridgeDeletesActivePageAndHandsOffRegeneration() throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let container = try makeMyDocumentModelContainer()
+        let context = ModelContext(container)
+        let store = MyDocumentStore(modelContext: context)
+        let aiPageId = try XCTUnwrap(UUID(uuidString: "44444444-4444-4444-4444-444444444444"))
+        let userPageId = try XCTUnwrap(UUID(uuidString: "55555555-5555-5555-5555-555555555555"))
+        let promptId = try XCTUnwrap(UUID(uuidString: "66666666-6666-6666-6666-666666666666"))
+        let document = MyDocument(name: "AI Documents", initials: "AIDocuments")
+        let aiPage = MyDocumentPage(
+            id: aiPageId,
+            title: "AI Page",
+            pageKey: "ai",
+            contentType: .markdown,
+            sourcePromptId: promptId,
+            languageCode: "en"
+        )
+        let aiContent = MyDocumentPageContent(pageId: aiPageId, content: "AI generated content")
+        let aiCacheEntry = AiPageCacheEntry(
+            pageId: aiPageId,
+            sourcePromptId: promptId,
+            sourceContext: #"{"osisRef":"Gen.1"}"#,
+            kjvOrdinalStart: 1,
+            kjvOrdinalEnd: 31,
+            sourceModelName: "model"
+        )
+        let userPage = MyDocumentPage(
+            id: userPageId,
+            title: "User Page",
+            pageKey: "user",
+            contentType: .markdown
+        )
+        let userContent = MyDocumentPageContent(pageId: userPageId, content: "User content")
+
+        aiPage.pageContent = aiContent
+        aiPage.document = document
+        aiCacheEntry.page = aiPage
+        aiPage.aiPageCacheEntries = [aiCacheEntry]
+        userPage.pageContent = userContent
+        userPage.document = document
+        document.pages = [aiPage, userPage]
+        context.insert(document)
+        context.insert(aiPage)
+        context.insert(aiContent)
+        context.insert(aiCacheEntry)
+        context.insert(userPage)
+        context.insert(userContent)
+        try context.save()
+
+        let controller = BibleReaderController(bridge: bridge)
+        controller.myDocumentStore = store
+        var regeneratedContext: MyDocumentAIPageActionContext?
+        var persistCount = 0
+        controller.onRegenerateMyDocumentPage = { regeneratedContext = $0 }
+        controller.onPersistState = { persistCount += 1 }
+
+        controller.bridge(bridge, regenerateMyDocumentPage: aiPageId.uuidString)
+        XCTAssertEqual(regeneratedContext?.pageId, aiPageId)
+        XCTAssertEqual(regeneratedContext?.sourcePromptId, promptId)
+        XCTAssertEqual(regeneratedContext?.sourceContext, #"{"osisRef":"Gen.1"}"#)
+        XCTAssertEqual(regeneratedContext?.sourceModelName, "model")
+
+        regeneratedContext = nil
+        controller.bridge(bridge, regenerateMyDocumentPage: userPageId.uuidString)
+        XCTAssertNil(regeneratedContext)
+
+        controller.bridge(bridge, deleteMyDocumentPage: userPageId.uuidString)
+        XCTAssertNotNil(store.rawContentPayload(bookInitials: "AIDocuments", pageKey: "user"))
+
+        XCTAssertTrue(controller.loadMyDocumentPage(bookInitials: "AIDocuments", pageKey: "ai"))
+        let clearDocumentCountBeforeDelete = recordedScripts().filter { $0.contains("emit('clear_document'") }.count
+
+        controller.bridge(bridge, deleteMyDocumentPage: aiPageId.uuidString)
+
+        XCTAssertNil(store.rawContentPayload(bookInitials: "AIDocuments", pageKey: "ai"))
+        XCTAssertNotNil(store.rawContentPayload(bookInitials: "AIDocuments", pageKey: "user"))
+        XCTAssertEqual(persistCount, 1)
+        XCTAssertEqual(
+            controller.renderedContentState,
+            "category=bible;module=KJV;book=Genesis;chapter=1;key=Gen.1"
+        )
+        XCTAssertGreaterThan(
+            recordedScripts().filter { $0.contains("emit('clear_document'") }.count,
+            clearDocumentCountBeforeDelete
+        )
     }
 
     func testOpenExternalLinkRoutesAbErrorToIssueTrackerURL() {

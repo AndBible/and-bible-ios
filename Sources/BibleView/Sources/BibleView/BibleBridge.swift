@@ -209,6 +209,10 @@ public protocol BibleBridgeDelegate: AnyObject {
     func bridge(_ bridge: BibleBridge, saveMyDocumentPageContent bookInitials: String, pageId: String, content: String, title: String?)
     /// Reloads the visible rendered My Documents page for the supplied document initials.
     func bridge(_ bridge: BibleBridge, reloadMyDocumentPage bookInitials: String)
+    /// Requests regeneration for an AI-generated My Documents page.
+    func bridge(_ bridge: BibleBridge, regenerateMyDocumentPage pageId: String)
+    /// Deletes an AI-generated My Documents page.
+    func bridge(_ bridge: BibleBridge, deleteMyDocumentPage pageId: String)
 
     // MARK: - Navigation Actions
     /// Opens the StudyPad view focused on the supplied label and bookmark.
@@ -320,6 +324,12 @@ public extension BibleBridgeDelegate {
 
     /// Default no-op to preserve source compatibility for clients without My Documents storage.
     func bridge(_ bridge: BibleBridge, reloadMyDocumentPage bookInitials: String) {}
+
+    /// Default no-op to preserve source compatibility for clients without My Documents AI actions.
+    func bridge(_ bridge: BibleBridge, regenerateMyDocumentPage pageId: String) {}
+
+    /// Default no-op to preserve source compatibility for clients without My Documents AI actions.
+    func bridge(_ bridge: BibleBridge, deleteMyDocumentPage pageId: String) {}
 }
 
 /**
@@ -593,6 +603,14 @@ public final class BibleBridge: NSObject, WKScriptMessageHandler {
         case "reloadMyDocumentPage":
             guard let initials = arguments.string(0) else { return .malformed }
             delegate?.bridge(self, reloadMyDocumentPage: initials)
+            return .handled
+        case "regenerateMyDocumentPage":
+            guard let pageId = arguments.string(0) else { return .malformed }
+            delegate?.bridge(self, regenerateMyDocumentPage: pageId)
+            return .handled
+        case "deleteMyDocumentPage":
+            guard let pageId = arguments.string(0) else { return .malformed }
+            delegate?.bridge(self, deleteMyDocumentPage: pageId)
             return .handled
         case "shareBookmarkVerse":
             guard let bookmarkId = arguments.string(0) else { return .malformed }

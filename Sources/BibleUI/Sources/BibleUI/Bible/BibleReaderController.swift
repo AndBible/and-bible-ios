@@ -410,6 +410,9 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     /// Callback for presenting compare view (book, chapter, moduleName, startVerse?, endVerse?).
     var onCompareVerses: ((String, Int, String, Int?, Int?) -> Void)?
 
+    /// Callback for presenting native AI regeneration for a validated My Documents page.
+    var onRegenerateMyDocumentPage: ((MyDocumentAIPageActionContext) -> Void)?
+
     /// Callback for presenting native label assignment UI (bookmarkId).
     var onAssignLabels: ((UUID) -> Void)?
 
@@ -3171,6 +3174,81 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         }
 
         loadMyDocumentPage(bookInitials: bookInitials, pageKey: pageKey)
+    }
+
+    /**
+     Hands off regeneration for one AI-generated My Documents page.
+
+     The shared AI regeneration dialog is tracked separately, so this bridge
+     method validates source prompt metadata and forwards the context to the
+     owning native surface.
+     */
+    public func bridge(_ bridge: BibleBridge, regenerateMyDocumentPage pageId: String) {
+        guard let pageUUID = UUID(uuidString: pageId) else {
+            logger.warning("regenerateMyDocumentPage: malformed page id=\(pageId, privacy: .public)")
+            return
+        }
+
+        guard let context = myDocumentStore?.aiPageActionContext(pageId: pageUUID) else {
+            logger.warning("regenerateMyDocumentPage: source prompt metadata missing for page id=\(pageId, privacy: .public)")
+            return
+        }
+
+        onRegenerateMyDocumentPage?(context)
+    }
+
+    /**
+     Deletes one AI-generated My Documents page and refreshes reader content.
+
+     Non-AI/user-authored pages are refused because Android only exposes this
+     action for sourcePromptId-backed pages.
+     */
+    public func bridge(_ bridge: BibleBridge, deleteMyDocumentPage pageId: String) {
+        guard let pageUUID = UUID(uuidString: pageId) else {
+            logger.warning("deleteMyDocumentPage: malformed page id=\(pageId, privacy: .public)")
+            return
+        }
+
+        guard let store = myDocumentStore else {
+            logger.warning("deleteMyDocumentPage: My Documents store unavailable")
+            return
+        }
+
+        switch store.deleteAIPage(pageId: pageUUID) {
+        case .deleted(let context):
+            refreshMyDocumentAfterDeletingPage(context)
+        case .notAIPage:
+            logger.warning("deleteMyDocumentPage: refusing non-AI page id=\(pageId, privacy: .public)")
+        case .pageNotFound:
+            logger.warning("deleteMyDocumentPage: page not found id=\(pageId, privacy: .public)")
+        case .saveFailed:
+            logger.warning("deleteMyDocumentPage: save failed for page id=\(pageId, privacy: .public)")
+        }
+    }
+
+    /**
+     Keeps the visible WebView in sync after an AI My Documents page deletion.
+     */
+    private func refreshMyDocumentAfterDeletingPage(_ context: MyDocumentAIPageActionContext) {
+        guard activeMyDocumentBookInitials == context.bookInitials else {
+            return
+        }
+
+        if activeMyDocumentPageKey == context.pageKey {
+            activeMyDocumentBookInitials = nil
+            activeMyDocumentPageKey = nil
+            currentCategory = .bible
+            if let pageManager = activeWindow?.pageManager {
+                pageManager.currentCategoryName = DocumentCategory.bible.pageManagerKey
+            }
+            onPersistState?()
+            loadCurrentChapter()
+            return
+        }
+
+        if let pageKey = activeMyDocumentPageKey {
+            loadMyDocumentPage(bookInitials: context.bookInitials, pageKey: pageKey)
+        }
     }
 
     /**

@@ -22,6 +22,12 @@
       :data-book-initials="bookInitials"
       :data-osis-ref="osisRef"
   >
+    <AreYouSure ref="areYouSureDelete">
+      <template #title>
+        {{ strings.deleteMyDocumentPageConfirmationTitle }}
+      </template>
+      {{ strings.deleteMyDocumentPageConfirmation }}
+    </AreYouSure>
     <div v-if="editMode" class="mydoc-edit-container">
       <textarea
           v-model="editContent"
@@ -53,16 +59,40 @@
     </div>
 
     <template v-else>
-      <button
+      <div
           v-if="isMyDocument && myDocumentPageId"
-          type="button"
-          class="journal-button mydoc-edit-button"
-          :aria-label="strings.editTextPlaceholder"
-          :title="strings.editTextPlaceholder"
-          @click.stop="startEditing"
+          class="mydoc-actions"
       >
-        <FontAwesomeIcon icon="edit"/>
-      </button>
+        <button
+            type="button"
+            class="journal-button"
+            :aria-label="strings.editTextPlaceholder"
+            :title="strings.editTextPlaceholder"
+            @click.stop="startEditing"
+        >
+          <FontAwesomeIcon icon="edit"/>
+        </button>
+        <button
+            v-if="sourcePromptId"
+            type="button"
+            class="journal-button"
+            :aria-label="strings.regenerateMyDocumentPageAccessibilityLabel"
+            :title="strings.regenerateMyDocumentPageAccessibilityLabel"
+            @click.stop="regenerateAIPage"
+        >
+          <FontAwesomeIcon icon="arrows-rotate"/>
+        </button>
+        <button
+            v-if="sourcePromptId"
+            type="button"
+            class="journal-button"
+            :aria-label="strings.deleteMyDocumentPageAccessibilityLabel"
+            :title="strings.deleteMyDocumentPageAccessibilityLabel"
+            @click.stop="deleteAIPage"
+        >
+          <FontAwesomeIcon icon="trash"/>
+        </button>
+      </div>
       <OsisFragment :is-native-html="document.isNativeHtml" :fragment="osisFragment"/>
       <button
           v-if="isMyDocument && isContentEmpty"
@@ -83,6 +113,7 @@
 import OsisFragment from "@/components/documents/OsisFragment.vue";
 import FeaturesLink from "@/components/FeaturesLink.vue";
 import OpenAllLink from "@/components/OpenAllLink.vue";
+import AreYouSure from "@/components/modals/AreYouSure.vue";
 import {useCommon, useReferenceCollector} from "@/composables";
 import {androidKey, customCssKey, globalBookmarksKey, osisDocumentInfoKey, referenceCollectorKey} from "@/types/constants";
 import {computed, inject, provide, ref} from "vue";
@@ -105,6 +136,7 @@ const {
     highlightedOrdinalRange,
     isMyDocument = false,
     myDocumentPageId = null,
+    sourcePromptId = null,
 } = props.document;
 const referenceCollector = useReferenceCollector();
 
@@ -133,6 +165,7 @@ if (bookCategory === "COMMENTARY" || bookCategory === "GENERAL_BOOK") {
 const editMode = ref(false);
 const editContent = ref("");
 const editPageId = ref("");
+const areYouSureDelete = ref<InstanceType<typeof AreYouSure> | null>(null);
 
 async function startEditing() {
     if (!isMyDocument) return;
@@ -156,6 +189,20 @@ function closeEditor() {
     editMode.value = false;
     android.reloadMyDocumentPage(bookInitials);
 }
+
+function regenerateAIPage() {
+    if (!myDocumentPageId || !sourcePromptId) return;
+
+    android.regenerateMyDocumentPage(myDocumentPageId);
+}
+
+async function deleteAIPage() {
+    if (!myDocumentPageId || !sourcePromptId) return;
+
+    if (await areYouSureDelete.value!.areYouSure()) {
+        android.deleteMyDocumentPage(myDocumentPageId);
+    }
+}
 </script>
 
 <style lang="scss" scoped>
@@ -163,8 +210,10 @@ function closeEditor() {
   overflow: hidden;
 }
 
-.mydoc-edit-button {
+.mydoc-actions {
   float: right;
+  display: flex;
+  gap: 0.25em;
   margin: 0 0 0.5em 0.5em;
 }
 
