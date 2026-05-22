@@ -7504,7 +7504,13 @@ final class AndBibleUITests: XCTestCase {
         guard element.exists else {
             return false
         }
-        let frame = element.frame
+        return elementFrameIsUsable(element.frame)
+    }
+
+    /**
+     Returns true when one already sampled frame is finite and usable for coordinate taps.
+     */
+    private func elementFrameIsUsable(_ frame: CGRect) -> Bool {
         return !frame.isNull &&
             !frame.isEmpty &&
             frame.origin.x.isFinite &&
@@ -9855,18 +9861,14 @@ final class AndBibleUITests: XCTestCase {
         let tapOffset = CGVector(dx: preferTrailingEdge ? 0.92 : 0.5, dy: 0.5)
 
         repeat {
-            let remaining = deadline.timeIntervalSinceNow
-            let exists = element.exists || (remaining > 0 && element.waitForExistence(timeout: min(0.2, remaining)))
-            if exists {
-                element.tap()
+            element.tap()
+            if waitForElementKeyboardFocus(element, timeout: 0.75) {
+                return
+            }
+            if elementFrameIsUsable(element.frame) {
+                element.coordinate(withNormalizedOffset: tapOffset).tap()
                 if waitForElementKeyboardFocus(element, timeout: 0.75) {
                     return
-                }
-                if elementHasUsableFrame(element) {
-                    element.coordinate(withNormalizedOffset: tapOffset).tap()
-                    if waitForElementKeyboardFocus(element, timeout: 0.75) {
-                        return
-                    }
                 }
             }
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
