@@ -128,8 +128,8 @@ Reason:
 ## 6. Android reading-progress bridge parity has a recorded local model contract
 
 - Status: local model/settings contract recorded; bridge methods still deferred
-- Scope: `markChapterRead`, `unmarkChapterRead`, `recordChapterRead`,
-  `openChapterReadHistory`, `openReadingProgress`,
+- Scope: Android bridge names `recordChapterRead`, `openChapterReadHistory`,
+  `openReadingProgress`,
   `openReadingProgressSettings`, and
   `setReadingProgressSettings`
 
@@ -143,9 +143,10 @@ Disposition:
 - iOS reading progress is append-only Bible chapter-read history. Read state is
   derived from `chapterReadCount > 0` for the active cycle, not from reading-plan
   completion state.
-- Chapter-read mutation behavior for `markChapterRead` and
-  `unmarkChapterRead` follows in #86, along with Android's current
-  `recordChapterRead` and `openChapterReadHistory` bridge names.
+- Chapter-read mutation and history behavior for Android's current
+  `recordChapterRead` and `openChapterReadHistory` bridge names follows in #86.
+  Earlier planning names `markChapterRead` and `unmarkChapterRead` describe
+  product operations, not Android bridge methods tracked by the gap inventory.
 - Reading-progress UI and settings bridge behavior for `openReadingProgress`,
   `openReadingProgressSettings`, and `setReadingProgressSettings` follows in
   #87.

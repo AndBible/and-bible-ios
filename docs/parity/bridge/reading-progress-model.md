@@ -103,21 +103,29 @@ separate compatibility decision.
 
 ## Bridge Argument Mapping
 
-Android currently exposes the mutation bridge as `recordChapterRead`, while
-earlier iOS parity planning also uses `markChapterRead` and
-`unmarkChapterRead` as product-operation names. The iOS contract is:
+Android currently exposes the mutation bridge as `recordChapterRead`, and the
+gap inventory tracks `recordChapterRead` plus `openChapterReadHistory` as the
+chapter-read bridge surface. Earlier iOS parity planning also uses
+`markChapterRead` and `unmarkChapterRead` as product-operation labels; those
+are not Android bridge method names unless a later shared frontend change adds
+them explicitly.
 
-- `recordChapterRead` or `markChapterRead` appends one chapter-read history row.
+The iOS contract is:
+
+- Android-facing `recordChapterRead` appends one chapter-read history row.
+- Any internal "mark chapter read" operation should delegate to the same append
+  behavior rather than storing a boolean flag.
 - Read state is `chapterReadCount > 0` for the active cycle.
 - A chapter's count may be greater than one.
-- `unmarkChapterRead` clears read status for the addressed chapter in the
-  active cycle by deleting all matching rows for `kjvBookOrdinal`, `chapter`,
-  and `cycle`.
+- There is no current Android `unmarkChapterRead` bridge method. If #86 adds an
+  internal "unmark chapter read" operation for local UI behavior, it should
+  clear read status for the addressed chapter in the active cycle by deleting
+  all matching rows for `kjvBookOrdinal`, `chapter`, and `cycle`.
 
 Android's row-level deletion is driven by history UI with row IDs. A bridge
-unmark call that only carries chapter identity cannot target one Android
-history row reliably, so iOS should treat it as "make this chapter unread" for
-the current cycle.
+or internal unmark call that only carries chapter identity cannot target one
+Android history row reliably, so iOS should treat it as "make this chapter
+unread" for the current cycle.
 
 For chapter-read mutation and history-open calls:
 

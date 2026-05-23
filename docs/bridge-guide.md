@@ -139,10 +139,12 @@ Notes:
   native iOS reading-progress model, storage, settings contract, and Android
   owner references are recorded in
   `docs/parity/bridge/reading-progress-model.md`. iOS should not add
-  `markChapterRead`, `unmarkChapterRead`, `recordChapterRead`,
-  `openChapterReadHistory`, `openReadingProgress`,
+  Android bridge names `recordChapterRead`, `openChapterReadHistory`,
+  `openReadingProgress`,
   `openReadingProgressSettings`, or `setReadingProgressSettings` as standalone
-  bridge names without that model-backed behavior. #86 owns chapter-read
+  bridge names without that model-backed behavior. Earlier planning names
+  `markChapterRead` and `unmarkChapterRead` are product-operation labels, not
+  Android bridge surface tracked by the gap inventory. #86 owns chapter-read
   mutation/history behavior, and #87 owns UI/settings behavior. The related
   `progress` sync category remains tracked in #73 and distinct from
   `readingplans`.
