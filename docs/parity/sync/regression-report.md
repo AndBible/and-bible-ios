@@ -167,8 +167,10 @@ Issue #49 resolves the category-breadth decision by splitting the remaining
 Android-only categories into distinct deferred parity targets:
 
 - #72 tracks `mydocuments`, mapped to the iOS My Documents model/storage
-  contract in `../bridge/my-documents-model.md` and still blocked on local
-  model implementation plus the bridge disposition from #51.
+  contract in `../bridge/my-documents-model.md`. #104 records the
+  Android-backed sync schema and policy contract in `mydocuments-schema.md`;
+  runtime work is split into initial restore (#105), initial upload (#106),
+  patch replay (#108), patch upload (#107), and settings/docs exposure (#109).
 - #74 tracks `ai_settings`, blocked on the shared AI backend/settings direction
   in #5. The #53 AI bridge disposition and #89 bridge shell contract keep
   bridge-facing settings ownership aligned with that shared backend direction.

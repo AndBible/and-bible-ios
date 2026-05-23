@@ -5,10 +5,12 @@ This directory holds Android-aligned sync parity documentation for iOS.
 ## Reading Order
 
 1. [contract.md](contract.md): current sync contract and supported flows
-2. [dispositions.md](dispositions.md): explicit iOS deviations and operational constraints
-3. [verification-matrix.md](verification-matrix.md): current status by contract area
-4. [regression-report.md](regression-report.md): focused validation evidence
-5. [guardrails.md](guardrails.md): maintenance rules for high-risk sync changes
+2. [mydocuments-schema.md](mydocuments-schema.md): Android-backed `mydocuments`
+   schema and policy contract for #104
+3. [dispositions.md](dispositions.md): explicit iOS deviations and operational constraints
+4. [verification-matrix.md](verification-matrix.md): current status by contract area
+5. [regression-report.md](regression-report.md): focused validation evidence
+6. [guardrails.md](guardrails.md): maintenance rules for high-risk sync changes
 
 Operational companion docs:
 

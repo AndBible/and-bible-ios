@@ -37,7 +37,8 @@ rules explicit for changes in:
    not implemented on iOS yet. Issue #49 records these as separate deferred parity targets tracked
    by #72, #74, and #73; adding any one of them is new parity surface, not a local cleanup.
    `mydocuments` also depends on the iOS My Documents model/storage contract recorded in
-   `../bridge/my-documents-model.md`.
+   `../bridge/my-documents-model.md` and the Android-backed sync schema contract in
+   `mydocuments-schema.md`.
    `ai_settings` depends on the shared AI backend/settings direction in #5 and the bridge
    shell ownership contract in #89; it must not introduce an iOS-only AI settings schema.
    `progress` depends on the iOS reading-progress model/storage and settings contract in
@@ -86,6 +87,7 @@ rules explicit for changes in:
    When adding or changing sync contract behavior, update:
 
    - `docs/parity/sync/contract.md`
+   - `docs/parity/sync/mydocuments-schema.md` when My Documents sync behavior changes
    - `docs/parity/sync/dispositions.md` when behavior is iOS-specific
    - `docs/parity/sync/verification-matrix.md` if status changes
    - `docs/parity/sync/regression-report.md` when validation scope changes
@@ -120,5 +122,6 @@ focused coverage rather than relying on the existing subset alone.
 - add a machine-readable snapshot of Android-compatible sync keys and category names
 - expand iOS coverage to Android's remaining `mydocuments`, `ai_settings`, and `progress`
   sync categories only through their separate tracking issues (#72, #74, #73), with
-  `mydocuments` gated by #80, `ai_settings` gated by #5/#89, and `progress` gated by
-  the local model in `../bridge/reading-progress-model.md`
+  `mydocuments` gated by the #104 schema contract plus #105/#106/#108/#107 services,
+  `ai_settings` gated by #5/#89, and `progress` gated by the local model in
+  `../bridge/reading-progress-model.md`

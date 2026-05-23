@@ -87,10 +87,12 @@ Disposition:
 - Android currently also exposes `mydocuments`, `ai_settings`, and `progress`.
   Those categories are not implemented on iOS yet and must not be treated as one
   broad implementation task.
-- `mydocuments` is tracked separately in #72. It depends on the iOS My
-  Documents model/storage and rendering contract recorded in
-  `../bridge/my-documents-model.md`, plus the bridge disposition from #51,
-  before remote sync storage is added.
+- `mydocuments` is tracked separately in #72. The local model, rendering, and
+  bridge prerequisites are recorded in `../bridge/my-documents-model.md`.
+  #104 records the Android-source-backed sync schema and policy contract in
+  `mydocuments-schema.md`; implementation is split into restore (#105),
+  initial upload (#106), patch replay (#108), patch upload (#107), and
+  settings/docs exposure (#109).
 - `ai_settings` is tracked separately in #74. It is deferred behind #5 so iOS
   does not invent an AI settings sync schema before the shared AI backend and
   settings contract exist. The #53 AI bridge disposition and #89 bridge shell

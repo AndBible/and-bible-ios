@@ -190,15 +190,15 @@ Android exposes My Documents as the separate `mydocuments` sync category backed
 by `mydocuments.sqlite3`. iOS must keep it separate from `bookmarks`,
 `workspaces`, and `readingplans`.
 
-#72 owns remote sync behavior. It should use this model as its local
-prerequisite and then define:
+#104 records the Android-source-backed sync schema and policy contract in
+`../sync/mydocuments-schema.md`. That contract maps the Android tables
+`MyDocument`, `MyDocumentPage`, `MyDocumentPageContent`, and
+`AiPageCacheEntry` to the iOS model owners in this document, and keeps Android
+sync metadata tables separate from user data.
 
-- Android table mapping for `MyDocument`, `MyDocumentPage`,
-  `MyDocumentPageContent`, and `AiPageCacheEntry`.
-- Initial-backup restore/upload behavior for the separate category.
-- Patch replay/upload behavior, including content-only page updates.
-- Remote adoption and conflict behavior.
-- How AI cache rows are preserved when shared AI support is not yet enabled.
+#72 remains the parent runtime parity target. Its implementation work is split
+into initial restore (#105), initial upload (#106), patch replay (#108), patch
+upload (#107), and settings/docs exposure (#109).
 
 This #80 decision does not add a remote sync category by itself.
 
