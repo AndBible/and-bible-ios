@@ -3349,15 +3349,17 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      */
     public func bridge(_ bridge: BibleBridge, recordChapterRead bookInitials: String, startOrdinal: Int, chapter: Int, source: String) {
         guard let store = readingProgressStore,
-              currentCategory == .bible,
-              isValidReadingProgressBridgeInput(bookInitials: bookInitials, startOrdinal: startOrdinal, chapter: chapter),
-              let kjvBookOrdinal = kjvBookOrdinal(for: currentBook) else {
+              let target = readingProgressBridgeTarget(
+                bookInitials: bookInitials,
+                startOrdinal: startOrdinal,
+                chapter: chapter
+              ) else {
             return
         }
         let count = store.recordChapterRead(
             bookInitials: bookInitials,
             startOrdinal: startOrdinal,
-            kjvBookOrdinal: kjvBookOrdinal,
+            kjvBookOrdinal: target.kjvBookOrdinal,
             chapter: chapter,
             source: ReadingProgressSource(bridgeValue: source)
         )
@@ -3369,17 +3371,19 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      */
     public func bridge(_ bridge: BibleBridge, openChapterReadHistory bookInitials: String, startOrdinal: Int, chapter: Int) {
         guard readingProgressStore != nil,
-              currentCategory == .bible,
-              isValidReadingProgressBridgeInput(bookInitials: bookInitials, startOrdinal: startOrdinal, chapter: chapter),
-              let kjvBookOrdinal = kjvBookOrdinal(for: currentBook) else {
+              let target = readingProgressBridgeTarget(
+                bookInitials: bookInitials,
+                startOrdinal: startOrdinal,
+                chapter: chapter
+              ) else {
             return
         }
         onShowChapterReadHistory?(
             ChapterReadHistoryTarget(
                 bookInitials: bookInitials,
                 startOrdinal: startOrdinal,
-                kjvBookOrdinal: kjvBookOrdinal,
-                bookName: currentBook,
+                kjvBookOrdinal: target.kjvBookOrdinal,
+                bookName: target.bookName,
                 chapter: chapter
             )
         )
@@ -3415,12 +3419,14 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      */
     public func bridge(_ bridge: BibleBridge, unmarkChapterRead bookInitials: String, startOrdinal: Int, chapter: Int) {
         guard let store = readingProgressStore,
-              currentCategory == .bible,
-              isValidReadingProgressBridgeInput(bookInitials: bookInitials, startOrdinal: startOrdinal, chapter: chapter),
-              let kjvBookOrdinal = kjvBookOrdinal(for: currentBook) else {
+              let target = readingProgressBridgeTarget(
+                bookInitials: bookInitials,
+                startOrdinal: startOrdinal,
+                chapter: chapter
+              ) else {
             return
         }
-        let count = store.clearChapterReadStatus(kjvBookOrdinal: kjvBookOrdinal, chapter: chapter)
+        let count = store.clearChapterReadStatus(kjvBookOrdinal: target.kjvBookOrdinal, chapter: chapter)
         emitChapterReadStatus(chapter: chapter, count: count)
     }
 
@@ -6461,8 +6467,27 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         return Self.jswordBibleBookOrdinalByOsisId[osisId]
     }
 
-    private func isValidReadingProgressBridgeInput(bookInitials: String, startOrdinal: Int, chapter: Int) -> Bool {
-        !bookInitials.isEmpty && startOrdinal > 0 && chapter > 0
+    private struct ReadingProgressBridgeTarget {
+        let kjvBookOrdinal: Int
+        let bookName: String
+    }
+
+    private func readingProgressBridgeTarget(
+        bookInitials: String,
+        startOrdinal: Int,
+        chapter: Int
+    ) -> ReadingProgressBridgeTarget? {
+        let chapterRange = currentChapterOrdinalRange()
+        guard currentCategory == .bible,
+              !bookInitials.isEmpty,
+              bookInitials == activeModuleName,
+              startOrdinal >= chapterRange.start,
+              startOrdinal <= chapterRange.end,
+              chapter == currentChapter,
+              let kjvBookOrdinal = kjvBookOrdinal(for: currentBook) else {
+            return nil
+        }
+        return ReadingProgressBridgeTarget(kjvBookOrdinal: kjvBookOrdinal, bookName: currentBook)
     }
 
     private func emitChapterReadStatus(chapter: Int, count: Int) {

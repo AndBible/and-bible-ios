@@ -1454,7 +1454,12 @@ final class AndBibleTests: XCTestCase {
         XCTAssertEqual(historyTargets.first?.bookInitials, "KJV")
         XCTAssertEqual(historyTargets.first?.startOrdinal, 41)
         XCTAssertEqual(historyTargets.first?.kjvBookOrdinal, 3)
+        XCTAssertEqual(historyTargets.first?.bookName, "Exodus")
         XCTAssertEqual(historyTargets.first?.chapter, 2)
+
+        XCTAssertEqual(bridge.dispatchMessage(method: "openChapterReadHistory", args: ["KJV", 1, 1]), .handled)
+        XCTAssertEqual(bridge.dispatchMessage(method: "openChapterReadHistory", args: ["NIV", 41, 2]), .handled)
+        XCTAssertEqual(historyTargets.count, 1)
 
         XCTAssertEqual(
             bridge.dispatchMessage(method: "setReadingProgressSettings", args: ["""

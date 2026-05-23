@@ -46,7 +46,7 @@ struct ReadingProgressView: View {
 
     var body: some View {
         Form {
-            Picker(String(localized: "reading_progress"), selection: $selectedTab) {
+            Picker(String(localized: "reading_progress", defaultValue: "Reading Progress"), selection: $selectedTab) {
                 ForEach(ReadingProgressTab.allCases) { tab in
                     Text(tab.title).tag(tab)
                 }
