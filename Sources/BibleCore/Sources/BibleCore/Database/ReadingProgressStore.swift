@@ -149,6 +149,25 @@ public struct ReadingProgressSnapshot: Codable, Equatable {
     }
 }
 
+public struct ReadingProgressSummary: Equatable {
+    public let cycle: Int
+    public let distinctChapterCount: Int
+    public let readingCount: Int
+    public let recentRows: [ReadingProgressHistoryRow]
+
+    public init(
+        cycle: Int,
+        distinctChapterCount: Int,
+        readingCount: Int,
+        recentRows: [ReadingProgressHistoryRow]
+    ) {
+        self.cycle = cycle
+        self.distinctChapterCount = distinctChapterCount
+        self.readingCount = readingCount
+        self.recentRows = recentRows
+    }
+}
+
 /**
  * Local store for Android-compatible chapter reading progress.
  *
@@ -195,6 +214,15 @@ public final class ReadingProgressStore {
 
     public func currentCycle() -> Int {
         Self.currentCycle(in: snapshot())
+    }
+
+    public func readingSummary(recentLimit: Int = 20) -> ReadingProgressSummary {
+        let snapshot = snapshot()
+        return Self.readingSummary(
+            in: snapshot,
+            cycle: Self.currentCycle(in: snapshot),
+            recentLimit: recentLimit
+        )
     }
 
     @discardableResult
@@ -289,7 +317,7 @@ public final class ReadingProgressStore {
         guard let data = json.data(using: .utf8),
               let object = try? JSONSerialization.jsonObject(with: data),
               let dictionary = object as? [String: Any],
-              Set(dictionary.keys).isSubset(of: Self.settingsBundleKeys),
+              Set(dictionary.keys) == Self.settingsBundleKeys,
               !dictionary.values.contains(where: { $0 is NSNull }),
               let patch = try? decoder.decode(ReadingProgressSettingsPatch.self, from: data) else {
             return false
@@ -346,6 +374,47 @@ public final class ReadingProgressStore {
                 row.chapter == chapter &&
                 row.cycle == cycle
         }.count
+    }
+
+    private static func readingSummary(
+        in snapshot: ReadingProgressSnapshot,
+        cycle: Int,
+        recentLimit: Int
+    ) -> ReadingProgressSummary {
+        var chapterKeys = Set<ChapterKey>()
+        var readingCount = 0
+        var recentRows: [ReadingProgressHistoryRow] = []
+
+        for row in snapshot.history where row.cycle == cycle {
+            readingCount += 1
+            chapterKeys.insert(ChapterKey(kjvBookOrdinal: row.kjvBookOrdinal, chapter: row.chapter))
+
+            guard recentLimit > 0 else { continue }
+            recentRows.append(row)
+            recentRows.sort(by: isMoreRecent)
+            if recentRows.count > recentLimit {
+                recentRows.removeLast()
+            }
+        }
+
+        return ReadingProgressSummary(
+            cycle: cycle,
+            distinctChapterCount: chapterKeys.count,
+            readingCount: readingCount,
+            recentRows: recentRows
+        )
+    }
+
+    private struct ChapterKey: Hashable {
+        let kjvBookOrdinal: Int
+        let chapter: Int
+    }
+
+    private static func isMoreRecent(_ lhs: ReadingProgressHistoryRow, _ rhs: ReadingProgressHistoryRow) -> Bool {
+        if lhs.readAt != rhs.readAt {
+            return lhs.readAt > rhs.readAt
+        }
+        return lhs.id.uuidString < rhs.id.uuidString
     }
 
     private static func currentCycle(in snapshot: ReadingProgressSnapshot) -> Int {

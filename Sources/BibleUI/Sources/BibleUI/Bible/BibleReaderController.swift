@@ -3368,13 +3368,12 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      Opens native chapter-read history for the active Bible chapter identity.
      */
     public func bridge(_ bridge: BibleBridge, openChapterReadHistory bookInitials: String, startOrdinal: Int, chapter: Int) {
-        guard let store = readingProgressStore,
+        guard readingProgressStore != nil,
               currentCategory == .bible,
               isValidReadingProgressBridgeInput(bookInitials: bookInitials, startOrdinal: startOrdinal, chapter: chapter),
               let kjvBookOrdinal = kjvBookOrdinal(for: currentBook) else {
             return
         }
-        _ = store.chapterReadHistory(kjvBookOrdinal: kjvBookOrdinal, chapter: chapter)
         onShowChapterReadHistory?(
             ChapterReadHistoryTarget(
                 bookInitials: bookInitials,

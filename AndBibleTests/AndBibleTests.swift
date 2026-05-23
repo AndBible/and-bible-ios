@@ -1333,6 +1333,12 @@ final class AndBibleTests: XCTestCase {
             [.autoScroll, .autoTts]
         )
         XCTAssertEqual(reloadedStore.snapshot().history.map(\.startOrdinal), [41, 41])
+        let summary = reloadedStore.readingSummary(recentLimit: 1)
+        XCTAssertEqual(summary.cycle, 1)
+        XCTAssertEqual(summary.distinctChapterCount, 1)
+        XCTAssertEqual(summary.readingCount, 2)
+        XCTAssertEqual(summary.recentRows.map(\.source), [.autoTts])
+        XCTAssertTrue(reloadedStore.readingSummary(recentLimit: 0).recentRows.isEmpty)
 
         XCTAssertEqual(reloadedStore.clearChapterReadStatus(kjvBookOrdinal: 3, chapter: 2), 0)
         XCTAssertTrue(ReadingProgressStore(settingsStore: settingsStore).snapshot().history.isEmpty)
@@ -1366,6 +1372,8 @@ final class AndBibleTests: XCTestCase {
         XCTAssertEqual(updated.memorizeScrambleHideUsed, true)
         XCTAssertEqual(updated.memorizeIncludeReference, false)
 
+        XCTAssertFalse(store.applySettingsBundle(json: #"{}"#))
+        XCTAssertFalse(store.applySettingsBundle(json: #"{"autoMarkMemorized":true}"#))
         XCTAssertFalse(store.applySettingsBundle(json: #"{"memorizeWordVisibility":"opaque"}"#))
         XCTAssertFalse(store.applySettingsBundle(json: #"{"autoMarkMemorized":true,"unexpected":true}"#))
         XCTAssertFalse(store.applySettingsBundle(json: #"{"autoMarkMemorized":null}"#))

@@ -65,29 +65,25 @@ struct ReadingProgressView: View {
 
     @ViewBuilder
     private var readingSection: some View {
-        let snapshot = readingStore?.snapshot() ?? ReadingProgressSnapshot()
-        let cycle = readingStore?.currentCycle() ?? 1
-        let activeRows = snapshot.history.filter { $0.cycle == cycle }
-        let distinctChapters = Set(activeRows.map { "\($0.kjvBookOrdinal):\($0.chapter)" }).count
+        let summary = readingStore?.readingSummary() ?? ReadingProgressSummary(
+            cycle: 1,
+            distinctChapterCount: 0,
+            readingCount: 0,
+            recentRows: []
+        )
 
         Section(String(localized: "summary", defaultValue: "Summary")) {
-            LabeledContent(String(localized: "cycle", defaultValue: "Cycle"), value: "\(cycle)")
-            LabeledContent(String(localized: "chapters", defaultValue: "Chapters"), value: "\(distinctChapters)")
-            LabeledContent(String(localized: "readings", defaultValue: "Readings"), value: "\(activeRows.count)")
+            LabeledContent(String(localized: "cycle", defaultValue: "Cycle"), value: "\(summary.cycle)")
+            LabeledContent(String(localized: "chapters", defaultValue: "Chapters"), value: "\(summary.distinctChapterCount)")
+            LabeledContent(String(localized: "readings", defaultValue: "Readings"), value: "\(summary.readingCount)")
         }
 
         Section(String(localized: "recent", defaultValue: "Recent")) {
-            let recentRows = activeRows.sorted {
-                if $0.readAt != $1.readAt {
-                    return $0.readAt > $1.readAt
-                }
-                return $0.id.uuidString < $1.id.uuidString
-            }.prefix(20)
-            if recentRows.isEmpty {
+            if summary.recentRows.isEmpty {
                 Text(String(localized: "no_reading_history", defaultValue: "No reading history"))
                     .foregroundStyle(.secondary)
             } else {
-                ForEach(Array(recentRows), id: \.id) { row in
+                ForEach(summary.recentRows, id: \.id) { row in
                     ReadingProgressHistoryRowView(row: row)
                 }
             }
