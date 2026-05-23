@@ -77,8 +77,8 @@ Disposition:
   `(bookInitials, v11n, startOrdinal, endOrdinal)` bridge validation and routes
   it through a native `SpeakService` memorization loop instead of generic
   chapter auto-advance speech.
-- Remote Android `progress` sync remains blocked on #73 and the broader progress-model
-  compatibility decisions.
+- Remote Android `progress` sync remains blocked on #73 and the broader
+  progress-model compatibility decisions.
 
 Reason:
 
@@ -125,27 +125,33 @@ Reason:
   first implementation PR from becoming a full document editor plus AI feature
   migration.
 
-## 6. Android reading-progress bridge parity is a deferred method family
+## 6. Android reading-progress bridge parity has a recorded local model contract
 
-- Status: documented deferred parity target
-- Scope: `markChapterRead`, `unmarkChapterRead`, `openReadingProgress`,
-  `openReadingProgressSettings`, and `setReadingProgressSettings`
+- Status: local model/settings contract recorded; bridge methods still deferred
+- Scope: `markChapterRead`, `unmarkChapterRead`, `recordChapterRead`,
+  `openChapterReadHistory`, `openReadingProgress`,
+  `openReadingProgressSettings`, and
+  `setReadingProgressSettings`
 
 Disposition:
 
 - iOS should treat Android reading progress as an accepted parity target, but
   should not add these as standalone bridge stubs.
-- Android's method family mutates or presents general reading-progress state
-  and settings, which are distinct from iOS reading-plan completion state.
-- The first iOS slice is therefore the native reading-progress model, storage,
-  and settings contract in #85.
+- The native iOS reading-progress model, storage, settings, Android owner
+  references, and bridge argument mapping are recorded in
+  `reading-progress-model.md`.
+- iOS reading progress is append-only Bible chapter-read history. Read state is
+  derived from `chapterReadCount > 0` for the active cycle, not from reading-plan
+  completion state.
 - Chapter-read mutation behavior for `markChapterRead` and
-  `unmarkChapterRead` follows in #86.
+  `unmarkChapterRead` follows in #86, along with Android's current
+  `recordChapterRead` and `openChapterReadHistory` bridge names.
 - Reading-progress UI and settings bridge behavior for `openReadingProgress`,
   `openReadingProgressSettings`, and `setReadingProgressSettings` follows in
   #87.
-- Remote sync for Android's `progress` category remains blocked on this local
-  product surface and is tracked separately in #73.
+- Remote sync for Android's `progress` category remains tracked separately in
+  #73, after the local product surface and KJVA compatibility decisions are
+  explicit.
 
 Reason:
 
@@ -244,9 +250,9 @@ What we do:
 - The My Documents subset has a recorded disposition in #51; #81 read/copy/share
   behavior, #82 edit/reload behavior, and #83 AI page delete/regenerate handoff
   behavior are implemented.
-- The reading-progress subset has a recorded disposition in #52 and follow-up
-  issues #85, #86, and #87, but it remains Android-only until those slices are
-  implemented.
+- The reading-progress subset has a recorded disposition in #52 and a local
+  model/settings contract in #85. Bridge behavior remains Android-only until
+  follow-up issues #86 and #87 are implemented.
 - The AI bridge subset has a recorded disposition in #53 and follow-up issues
   #89, #90, #91, and #92, but it remains Android-only until the shared backend
   and bridge shell slices are implemented.
