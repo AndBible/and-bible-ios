@@ -110,8 +110,10 @@ is implemented.
 
 Android's reading-progress bridge family is accepted as iOS parity work. The
 local iOS model, storage, settings, Android owner references, and bridge
-argument mapping are recorded in `reading-progress-model.md`. Chapter-read
-mark/unmark bridge behavior follows in #86, while reading-progress UI/settings
+argument mapping are recorded in `reading-progress-model.md`.
+`recordChapterRead` plus the local `markChapterRead`/`unmarkChapterRead`
+operation aliases now mutate native chapter-read history and update
+`chapterReadCount`. Reading-progress history presentation, UI, and settings
 bridge behavior follows in #87. The related Android `progress` sync category
 stays blocked in #73 until remote compatibility is designed and remains
 distinct from `readingplans`.

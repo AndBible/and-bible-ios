@@ -35,6 +35,8 @@ import {
 import {AnyDocument} from "@/types/documents";
 import {isBibleBookmark, isGenericBookmark} from "@/composables/bookmarks";
 
+export type ReadingProgressSource = "MANUAL" | "AUTO_SCROLL" | "AUTO_TTS"
+
 export type BibleJavascriptInterface = {
     scrolledToOrdinal: (key: string, ordinal: number, atChapterTop: boolean) => void,
     setClientReady: () => void,
@@ -88,6 +90,9 @@ export type BibleJavascriptInterface = {
     addMemorizationTarget: (bookInitials: string, startOrdinal: number, endOrdinal: number) => void,
     unmarkMemorized: (bookInitials: string, startOrdinal: number, endOrdinal: number) => void,
     removeMemorizationTarget: (bookInitials: string, startOrdinal: number, endOrdinal: number) => void,
+    recordChapterRead: (bookInitials: string, startOrdinal: number, chapter: number, source: ReadingProgressSource) => void,
+    markChapterRead: (bookInitials: string, startOrdinal: number, chapter: number, source: ReadingProgressSource) => void,
+    unmarkChapterRead: (bookInitials: string, startOrdinal: number, chapter: number) => void,
     openStudyPad: (labelId: IdType, bookmarkId: IdType) => void,
     openMyNotes: (v11n: string, ordinal: number) => void,
     speak: (bookInitials: string, v11n: string, startOrdinal: number, endOrdinal: number) => void,
@@ -443,6 +448,18 @@ export function useAndroid({bookmarks}: { bookmarks: Ref<BaseBookmark[]> }, conf
         android.removeMemorizationTarget(bookInitials, startOrdinal, endOrdinal ?? -1);
     }
 
+    function recordChapterRead(bookInitials: string, startOrdinal: number, chapter: number, source: ReadingProgressSource) {
+        android.recordChapterRead(bookInitials, startOrdinal, chapter, source);
+    }
+
+    function markChapterRead(bookInitials: string, startOrdinal: number, chapter: number, source: ReadingProgressSource) {
+        android.markChapterRead(bookInitials, startOrdinal, chapter, source);
+    }
+
+    function unmarkChapterRead(bookInitials: string, startOrdinal: number, chapter: number) {
+        android.unmarkChapterRead(bookInitials, startOrdinal, chapter);
+    }
+
     function openStudyPad(labelId: IdType, bookmark: BaseBookmark) {
         if(isBibleBookmark(bookmark) || isGenericBookmark(bookmark)) {
             // Exceptionally here bookmark type does not matter
@@ -674,6 +691,9 @@ export function useAndroid({bookmarks}: { bookmarks: Ref<BaseBookmark[]> }, conf
         addMemorizationTarget,
         unmarkMemorized,
         removeMemorizationTarget,
+        recordChapterRead,
+        markChapterRead,
+        unmarkChapterRead,
         speak,
         speakGeneric,
         speakMemorizationLoop,

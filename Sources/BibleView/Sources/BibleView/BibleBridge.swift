@@ -199,6 +199,10 @@ public protocol BibleBridgeDelegate: AnyObject {
     func bridge(_ bridge: BibleBridge, removeMemorizationTarget bookInitials: String, startOrdinal: Int, endOrdinal: Int)
     /// Removes the selected verse range from memorized ranges.
     func bridge(_ bridge: BibleBridge, unmarkMemorized bookInitials: String, startOrdinal: Int, endOrdinal: Int)
+    /// Records one chapter-read history row for Android-compatible reading progress.
+    func bridge(_ bridge: BibleBridge, recordChapterRead bookInitials: String, startOrdinal: Int, chapter: Int, source: String)
+    /// Clears read status for one chapter in the active reading-progress cycle.
+    func bridge(_ bridge: BibleBridge, unmarkChapterRead bookInitials: String, startOrdinal: Int, chapter: Int)
     /// Resolves one My Documents page and returns its raw editable content payload.
     func bridge(_ bridge: BibleBridge, getMyDocumentPageRawContent callId: Int, bookInitials: String, pageKey: String)
     /// Copies one My Documents page's raw editable content to the system pasteboard.
@@ -307,6 +311,12 @@ public extension BibleBridgeDelegate {
 
     /// Default no-op to preserve source compatibility for clients that do not handle memorization.
     func bridge(_ bridge: BibleBridge, unmarkMemorized bookInitials: String, startOrdinal: Int, endOrdinal: Int) {}
+
+    /// Default no-op to preserve source compatibility for clients that do not handle reading progress.
+    func bridge(_ bridge: BibleBridge, recordChapterRead bookInitials: String, startOrdinal: Int, chapter: Int, source: String) {}
+
+    /// Default no-op to preserve source compatibility for clients that do not handle reading progress.
+    func bridge(_ bridge: BibleBridge, unmarkChapterRead bookInitials: String, startOrdinal: Int, chapter: Int) {}
 
     /// Default null response to preserve source compatibility for clients without My Documents storage.
     func bridge(_ bridge: BibleBridge, getMyDocumentPageRawContent callId: Int, bookInitials: String, pageKey: String) {
@@ -671,6 +681,19 @@ public final class BibleBridge: NSObject, WKScriptMessageHandler {
                   let start = arguments.int(1),
                   let end = arguments.int(2) else { return .malformed }
             delegate?.bridge(self, unmarkMemorized: initials, startOrdinal: start, endOrdinal: end < 0 ? start : end)
+            return .handled
+        case "recordChapterRead", "markChapterRead":
+            guard let initials = arguments.string(0),
+                  let start = arguments.int(1),
+                  let chapter = arguments.int(2),
+                  let source = arguments.string(3) else { return .malformed }
+            delegate?.bridge(self, recordChapterRead: initials, startOrdinal: start, chapter: chapter, source: source)
+            return .handled
+        case "unmarkChapterRead":
+            guard let initials = arguments.string(0),
+                  let start = arguments.int(1),
+                  let chapter = arguments.int(2) else { return .malformed }
+            delegate?.bridge(self, unmarkChapterRead: initials, startOrdinal: start, chapter: chapter)
             return .handled
         case "addParagraphBreakBookmark":
             guard let initials = arguments.string(0),
