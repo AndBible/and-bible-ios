@@ -142,6 +142,22 @@ The stored row should normalize book identity to KJVA before deriving
 original `bookInitials` and `startOrdinal` for local provenance and future
 migration.
 
+## UI Bridge Behavior
+
+The iOS #87 UI/settings contract is:
+
+- `openChapterReadHistory(bookInitials,startOrdinal,chapter)` presents a native
+  chapter-history sheet for the active-cycle rows matching the normalized KJVA
+  book ordinal and chapter.
+- `openReadingProgress(tab)` presents a native reading-progress sheet. Android
+  tab position `0` maps to Reading, tab position `1` maps to Memorization, and
+  any other value falls back to Reading.
+- `openReadingProgressSettings()` presents native reading-progress settings
+  backed by the same `ReadingProgressStore` snapshot.
+- `setReadingProgressSettings(json)` persists the supported Android JavaScript
+  settings bundle and emits `update_reading_progress_settings` after a valid
+  update.
+
 ## Settings Contract
 
 Android has a global reading-progress settings singleton and a narrower
@@ -181,7 +197,7 @@ and `hidden`.
 Normal Bible document payloads expose the active chapter's `chapterReadCount`
 so the embedded reading tracker can avoid auto-marking an already-read chapter.
 
-When #87 adds UI/settings behavior, iOS should also expose:
+iOS also exposes:
 
 - `autoTrackReading` in the document/config path that controls auto-scroll
   tracking
@@ -206,12 +222,12 @@ and the local iOS model should keep the same product boundary:
 
 ## Follow-Up Boundaries
 
-This model unblocks reading-progress bridge work, but it does not implement the
-method family itself.
+This model keeps local reading-progress bridge behavior separate from remote
+Android `progress` sync.
 
 - #86 owns chapter-read mutation, document payload counts, and focused
   regression coverage.
-- #87 owns `openChapterReadHistory`, `openReadingProgress`,
+- #87 owns implemented `openChapterReadHistory`, `openReadingProgress`,
   `openReadingProgressSettings`, settings persistence through
   `setReadingProgressSettings`, and focused UI/settings coverage.
 - #73 owns Android `progress` sync compatibility, KJVA persistence migration,

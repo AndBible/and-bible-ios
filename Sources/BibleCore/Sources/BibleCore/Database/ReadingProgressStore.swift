@@ -44,6 +44,8 @@ public struct ReadingProgressHistoryRow: Codable, Equatable, Hashable {
 }
 
 public struct ReadingProgressSettingsSnapshot: Codable, Equatable {
+    public static let wordVisibilityValues = ["light", "dim", "hidden"]
+
     public var autoTrackReading: Bool
     public var activeCycle: Int
     public var autoMarkMemorized: Bool
@@ -67,11 +69,71 @@ public struct ReadingProgressSettingsSnapshot: Codable, Equatable {
         self.activeCycle = max(0, activeCycle)
         self.autoMarkMemorized = autoMarkMemorized
         self.memorizeTypeFullWords = memorizeTypeFullWords
-        self.memorizeWordVisibility = memorizeWordVisibility
+        self.memorizeWordVisibility = Self.normalizedWordVisibility(memorizeWordVisibility)
         self.memorizeErrorHeatmap = memorizeErrorHeatmap
         self.memorizeScrambleHideUsed = memorizeScrambleHideUsed
         self.memorizeIncludeReference = memorizeIncludeReference
     }
+
+    public static func isValidWordVisibility(_ value: String) -> Bool {
+        wordVisibilityValues.contains(value)
+    }
+
+    public static func normalizedWordVisibility(_ value: String) -> String {
+        isValidWordVisibility(value) ? value : "light"
+    }
+}
+
+public struct ReadingProgressSettingsBundle: Codable, Equatable {
+    public var autoMarkMemorized: Bool
+    public var memorizeTypeFullWords: Bool
+    public var memorizeWordVisibility: String
+    public var memorizeErrorHeatmap: Bool
+    public var memorizeScrambleHideUsed: Bool
+    public var memorizeIncludeReference: Bool
+
+    public init(
+        autoMarkMemorized: Bool = true,
+        memorizeTypeFullWords: Bool = false,
+        memorizeWordVisibility: String = "light",
+        memorizeErrorHeatmap: Bool = true,
+        memorizeScrambleHideUsed: Bool = false,
+        memorizeIncludeReference: Bool = true
+    ) {
+        self.autoMarkMemorized = autoMarkMemorized
+        self.memorizeTypeFullWords = memorizeTypeFullWords
+        self.memorizeWordVisibility = ReadingProgressSettingsSnapshot.normalizedWordVisibility(memorizeWordVisibility)
+        self.memorizeErrorHeatmap = memorizeErrorHeatmap
+        self.memorizeScrambleHideUsed = memorizeScrambleHideUsed
+        self.memorizeIncludeReference = memorizeIncludeReference
+    }
+
+    public init(settings: ReadingProgressSettingsSnapshot) {
+        self.init(
+            autoMarkMemorized: settings.autoMarkMemorized,
+            memorizeTypeFullWords: settings.memorizeTypeFullWords,
+            memorizeWordVisibility: settings.memorizeWordVisibility,
+            memorizeErrorHeatmap: settings.memorizeErrorHeatmap,
+            memorizeScrambleHideUsed: settings.memorizeScrambleHideUsed,
+            memorizeIncludeReference: settings.memorizeIncludeReference
+        )
+    }
+
+    public func jsonString() -> String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        guard let data = try? encoder.encode(self),
+              let rawValue = String(data: data, encoding: .utf8) else {
+            return Self.fallbackJSONString
+        }
+        return rawValue
+    }
+
+    public static let defaultJSONString = ReadingProgressSettingsBundle().jsonString()
+
+    private static let fallbackJSONString = """
+    {"autoMarkMemorized":true,"memorizeErrorHeatmap":true,"memorizeIncludeReference":true,"memorizeScrambleHideUsed":false,"memorizeTypeFullWords":false,"memorizeWordVisibility":"light"}
+    """
 }
 
 public struct ReadingProgressSnapshot: Codable, Equatable {
@@ -96,10 +158,27 @@ public struct ReadingProgressSnapshot: Codable, Equatable {
  */
 public final class ReadingProgressStore {
     public static let settingsKey = "reading_progress_state_v1"
+    private static let settingsBundleKeys: Set<String> = [
+        "autoMarkMemorized",
+        "memorizeTypeFullWords",
+        "memorizeWordVisibility",
+        "memorizeErrorHeatmap",
+        "memorizeScrambleHideUsed",
+        "memorizeIncludeReference",
+    ]
 
     private let settingsStore: SettingsStore
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
+
+    private struct ReadingProgressSettingsPatch: Decodable {
+        let autoMarkMemorized: Bool?
+        let memorizeTypeFullWords: Bool?
+        let memorizeWordVisibility: String?
+        let memorizeErrorHeatmap: Bool?
+        let memorizeScrambleHideUsed: Bool?
+        let memorizeIncludeReference: Bool?
+    }
 
     public init(settingsStore: SettingsStore) {
         self.settingsStore = settingsStore
@@ -172,6 +251,79 @@ public final class ReadingProgressStore {
         Self.chapterReadCount(in: snapshot(), kjvBookOrdinal: kjvBookOrdinal, chapter: chapter)
     }
 
+    public func chapterReadHistory(kjvBookOrdinal: Int, chapter: Int) -> [ReadingProgressHistoryRow] {
+        guard kjvBookOrdinal > 0, chapter > 0 else { return [] }
+        let snapshot = snapshot()
+        let cycle = Self.currentCycle(in: snapshot)
+        return snapshot.history
+            .filter { row in
+                row.kjvBookOrdinal == kjvBookOrdinal &&
+                    row.chapter == chapter &&
+                    row.cycle == cycle
+            }
+            .sorted {
+                if $0.readAt != $1.readAt {
+                    return $0.readAt > $1.readAt
+                }
+                return $0.id.uuidString < $1.id.uuidString
+            }
+    }
+
+    public func settingsBundle() -> ReadingProgressSettingsBundle {
+        ReadingProgressSettingsBundle(settings: snapshot().settings)
+    }
+
+    public func settingsBundleJSON() -> String {
+        settingsBundle().jsonString()
+    }
+
+    @discardableResult
+    public func saveSettings(_ settings: ReadingProgressSettingsSnapshot) -> ReadingProgressSettingsSnapshot {
+        var snapshot = snapshot()
+        snapshot.settings = settings
+        return save(snapshot).settings
+    }
+
+    @discardableResult
+    public func applySettingsBundle(json: String) -> Bool {
+        guard let data = json.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data),
+              let dictionary = object as? [String: Any],
+              Set(dictionary.keys).isSubset(of: Self.settingsBundleKeys),
+              !dictionary.values.contains(where: { $0 is NSNull }),
+              let patch = try? decoder.decode(ReadingProgressSettingsPatch.self, from: data) else {
+            return false
+        }
+
+        var snapshot = snapshot()
+        var settings = snapshot.settings
+        if let autoMarkMemorized = patch.autoMarkMemorized {
+            settings.autoMarkMemorized = autoMarkMemorized
+        }
+        if let memorizeTypeFullWords = patch.memorizeTypeFullWords {
+            settings.memorizeTypeFullWords = memorizeTypeFullWords
+        }
+        if let memorizeWordVisibility = patch.memorizeWordVisibility {
+            guard ReadingProgressSettingsSnapshot.isValidWordVisibility(memorizeWordVisibility) else {
+                return false
+            }
+            settings.memorizeWordVisibility = memorizeWordVisibility
+        }
+        if let memorizeErrorHeatmap = patch.memorizeErrorHeatmap {
+            settings.memorizeErrorHeatmap = memorizeErrorHeatmap
+        }
+        if let memorizeScrambleHideUsed = patch.memorizeScrambleHideUsed {
+            settings.memorizeScrambleHideUsed = memorizeScrambleHideUsed
+        }
+        if let memorizeIncludeReference = patch.memorizeIncludeReference {
+            settings.memorizeIncludeReference = memorizeIncludeReference
+        }
+
+        snapshot.settings = settings
+        save(snapshot)
+        return true
+    }
+
     @discardableResult
     private func save(_ snapshot: ReadingProgressSnapshot) -> ReadingProgressSnapshot {
         let normalized = Self.normalized(snapshot)
@@ -226,7 +378,9 @@ public final class ReadingProgressStore {
                 activeCycle: snapshot.settings.activeCycle,
                 autoMarkMemorized: snapshot.settings.autoMarkMemorized,
                 memorizeTypeFullWords: snapshot.settings.memorizeTypeFullWords,
-                memorizeWordVisibility: snapshot.settings.memorizeWordVisibility,
+                memorizeWordVisibility: ReadingProgressSettingsSnapshot.normalizedWordVisibility(
+                    snapshot.settings.memorizeWordVisibility
+                ),
                 memorizeErrorHeatmap: snapshot.settings.memorizeErrorHeatmap,
                 memorizeScrambleHideUsed: snapshot.settings.memorizeScrambleHideUsed,
                 memorizeIncludeReference: snapshot.settings.memorizeIncludeReference

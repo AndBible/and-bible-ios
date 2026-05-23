@@ -13,6 +13,8 @@ struct BibleReaderActiveSheetContent: View {
     @Binding var displaySettings: TextDisplaySettings
     @Binding var nightMode: Bool
     @Binding var nightModeMode: String
+    let readingProgressInitialTab: ReadingProgressTab
+    let chapterReadHistoryTarget: ChapterReadHistoryTarget?
     let onDismiss: () -> Void
     let onSettingsChanged: () -> Void
 
@@ -72,6 +74,40 @@ struct BibleReaderActiveSheetContent: View {
                             Button(String(localized: "done"), action: onDismiss)
                         }
                     }
+            }
+        case .readingProgress:
+            NavigationStack {
+                ReadingProgressView(
+                    readingStore: controller?.readingProgressStore,
+                    memorizationStore: controller?.memorizationProgressStore,
+                    initialTab: readingProgressInitialTab
+                )
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button(String(localized: "done"), action: onDismiss)
+                    }
+                }
+            }
+        case .readingProgressSettings:
+            NavigationStack {
+                ReadingProgressSettingsView(controller: controller)
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button(String(localized: "done"), action: onDismiss)
+                        }
+                    }
+            }
+        case .chapterReadHistory:
+            NavigationStack {
+                ChapterReadHistoryView(
+                    store: controller?.readingProgressStore,
+                    target: chapterReadHistoryTarget
+                )
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button(String(localized: "done"), action: onDismiss)
+                    }
+                }
             }
         case .workspaces:
             NavigationStack {

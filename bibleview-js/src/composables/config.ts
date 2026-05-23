@@ -20,7 +20,7 @@ import {computed, nextTick, reactive, Ref, shallowRef, triggerRef} from "vue";
 import {emit, setupEventBusListener} from "@/eventbus";
 import {isEqual} from "lodash";
 import {Deferred, setupWindowEventListener} from "@/utils";
-import {BibleViewDocumentType} from "@/types/documents";
+import {BibleViewDocumentType, ReadingProgressSettings} from "@/types/documents";
 
 export type StrongsMode = 0 | 1 | 2 | 3
 export const strongsModes: Record<string, StrongsMode> = {off: 0, inline: 1, links: 2, hidden: 3}
@@ -121,6 +121,8 @@ export type AppSettings = {
     disableClickToEdit: boolean,
     fontSizeMultiplier: number,
     enabledExperimentalFeatures: Feature[],
+    autoTrackReading: boolean,
+    readingProgressSettings: ReadingProgressSettings,
 }
 
 export type CalculatedConfig = Ref<{
@@ -210,6 +212,15 @@ export function useConfig(documentType: Ref<BibleViewDocumentType>) {
         disableClickToEdit: false,
         fontSizeMultiplier: 1.0,
         enabledExperimentalFeatures: [],
+        autoTrackReading: false,
+        readingProgressSettings: {
+            autoMarkMemorized: true,
+            memorizeTypeFullWords: false,
+            memorizeWordVisibility: "light",
+            memorizeErrorHeatmap: true,
+            memorizeScrambleHideUsed: false,
+            memorizeIncludeReference: true,
+        },
     });
 
     function calcMmInPx() {

@@ -6,7 +6,7 @@
     "androidInterfaceRelativePath": "app/bibleview-js/src/composables/android.ts",
     "androidMethodCount": 89,
     "iosInterfacePath": "bibleview-js/src/composables/android.ts",
-    "iosBundledMethodCount": 77
+    "iosBundledMethodCount": 81
   },
   "statusLegend": {
     "missing_needs_triage": "Android exposes the method and iOS does not. Treat as a parity gap until implemented or explicitly recorded as an iOS divergence.",
@@ -74,39 +74,11 @@
       "nextStep": "Deferred by issue #53. Requires the shared AI backend direction in #5, iOS AI bridge shell contract in #89, and My Documents model in #80 before AI document chooser behavior is implemented in #91."
     },
     {
-      "method": "openChapterReadHistory",
-      "androidSignature": "(bookInitials: string, startOrdinal: number, chapter: number) => void",
-      "domain": "reading_progress",
-      "status": "missing_deferred_with_issue",
-      "nextStep": "Deferred by issue #52. The iOS reading-progress model/settings contract is recorded in docs/parity/bridge/reading-progress-model.md; chapter-read history presentation remains follow-up work in #87."
-    },
-    {
       "method": "openPromptEditor",
       "androidSignature": "(promptId: string) => void",
       "domain": "ai_actions",
       "status": "missing_deferred_with_issue",
       "nextStep": "Deferred by issue #53. Requires the shared AI backend/settings direction in #5 and iOS AI bridge shell contract in #89 before prompt editor bridge behavior is implemented in #92."
-    },
-    {
-      "method": "openReadingProgress",
-      "androidSignature": "(tab: number) => void",
-      "domain": "reading_progress",
-      "status": "missing_deferred_with_issue",
-      "nextStep": "Deferred by issue #52. The iOS reading-progress model/settings contract is recorded in docs/parity/bridge/reading-progress-model.md; UI bridge behavior remains follow-up work in #87."
-    },
-    {
-      "method": "openReadingProgressSettings",
-      "androidSignature": "() => void",
-      "domain": "reading_progress",
-      "status": "missing_deferred_with_issue",
-      "nextStep": "Deferred by issue #52. The iOS reading-progress model/settings contract is recorded in docs/parity/bridge/reading-progress-model.md; settings UI bridge behavior remains follow-up work in #87."
-    },
-    {
-      "method": "setReadingProgressSettings",
-      "androidSignature": "(json: string) => void",
-      "domain": "reading_progress",
-      "status": "missing_deferred_with_issue",
-      "nextStep": "Deferred by issue #52. The iOS reading-progress model/settings contract is recorded in docs/parity/bridge/reading-progress-model.md; settings persistence bridge behavior remains follow-up work in #87."
     },
     {
       "method": "showHelpDialog",
@@ -200,6 +172,34 @@
       "domain": "reading_progress",
       "status": "implemented",
       "nextStep": "Implemented by appending local ReadingProgressStore history rows, updating chapterReadCount, and emitting update_chapter_read_status."
+    },
+    {
+      "method": "openChapterReadHistory",
+      "iosSignature": "(bookInitials: string, startOrdinal: number, chapter: number) => void",
+      "domain": "reading_progress",
+      "status": "implemented",
+      "nextStep": "Implemented by presenting native active-cycle chapter-read history for the normalized KJVA book ordinal and chapter."
+    },
+    {
+      "method": "openReadingProgress",
+      "iosSignature": "(tab: number) => void",
+      "domain": "reading_progress",
+      "status": "implemented",
+      "nextStep": "Implemented by presenting native reading-progress UI with Android tab 0 mapped to Reading and tab 1 mapped to Memorization."
+    },
+    {
+      "method": "openReadingProgressSettings",
+      "iosSignature": "() => void",
+      "domain": "reading_progress",
+      "status": "implemented",
+      "nextStep": "Implemented by presenting native reading-progress settings backed by ReadingProgressStore."
+    },
+    {
+      "method": "setReadingProgressSettings",
+      "iosSignature": "(json: string) => void",
+      "domain": "reading_progress",
+      "status": "implemented",
+      "nextStep": "Implemented by validating and persisting the six-field Android JavaScript settings bundle, preserving native-only fields, and emitting update_reading_progress_settings."
     }
   ]
 }

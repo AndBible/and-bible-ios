@@ -110,6 +110,15 @@ struct BibleWindowPane: View {
     /// Requests the parent reader to present reading-plan UI.
     var onShowReadingPlans: (() -> Void)?
 
+    /// Requests the parent reader to present reading-progress UI.
+    var onShowReadingProgress: ((Int) -> Void)?
+
+    /// Requests the parent reader to present reading-progress settings UI.
+    var onShowReadingProgressSettings: (() -> Void)?
+
+    /// Requests the parent reader to present chapter read-history UI.
+    var onShowChapterReadHistory: ((ChapterReadHistoryTarget) -> Void)?
+
     /// Requests the parent reader to present speak controls.
     var onShowSpeakControls: (() -> Void)?
 
@@ -393,6 +402,9 @@ struct BibleWindowPane: View {
         ctrl.onShowStrongsDefinition = { json, config in onShowStrongsSheet?(json, config) }
         ctrl.onShowStrongsSearch = { strongsNum in onSearchForStrongs?(strongsNum) }
         ctrl.onShowCrossReferences = { refs in onShowCrossReferences?(refs) }
+        ctrl.onShowReadingProgress = { tab in onShowReadingProgress?(tab) }
+        ctrl.onShowReadingProgressSettings = { onShowReadingProgressSettings?() }
+        ctrl.onShowChapterReadHistory = { target in onShowChapterReadHistory?(target) }
         ctrl.onCompareVerses = { [weak ctrl] book, chapter, moduleName, startVerse, endVerse in
             #if os(iOS)
             let osisId = ctrl?.osisBookId(for: book)

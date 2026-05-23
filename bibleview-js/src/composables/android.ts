@@ -32,7 +32,7 @@ import {
     StudyPadItem,
     StudyPadTextItem
 } from "@/types/client-objects";
-import {AnyDocument} from "@/types/documents";
+import {AnyDocument, ReadingProgressSettings} from "@/types/documents";
 import {isBibleBookmark, isGenericBookmark} from "@/composables/bookmarks";
 
 export type ReadingProgressSource = "MANUAL" | "AUTO_SCROLL" | "AUTO_TTS"
@@ -90,9 +90,12 @@ export type BibleJavascriptInterface = {
     addMemorizationTarget: (bookInitials: string, startOrdinal: number, endOrdinal: number) => void,
     unmarkMemorized: (bookInitials: string, startOrdinal: number, endOrdinal: number) => void,
     removeMemorizationTarget: (bookInitials: string, startOrdinal: number, endOrdinal: number) => void,
+    openReadingProgress: (tab: number) => void,
+    openReadingProgressSettings: () => void,
     recordChapterRead: (bookInitials: string, startOrdinal: number, chapter: number, source: ReadingProgressSource) => void,
     markChapterRead: (bookInitials: string, startOrdinal: number, chapter: number, source: ReadingProgressSource) => void,
     unmarkChapterRead: (bookInitials: string, startOrdinal: number, chapter: number) => void,
+    openChapterReadHistory: (bookInitials: string, startOrdinal: number, chapter: number) => void,
     openStudyPad: (labelId: IdType, bookmarkId: IdType) => void,
     openMyNotes: (v11n: string, ordinal: number) => void,
     speak: (bookInitials: string, v11n: string, startOrdinal: number, endOrdinal: number) => void,
@@ -115,6 +118,7 @@ export type BibleJavascriptInterface = {
     helpBookmarks: () => void,
     onKeyDown: (key: string) => void,
     saveState: (newState: string) => void,
+    setReadingProgressSettings: (json: string) => void,
 }
 
 export type MyDocumentPageRawContent = {
@@ -448,6 +452,14 @@ export function useAndroid({bookmarks}: { bookmarks: Ref<BaseBookmark[]> }, conf
         android.removeMemorizationTarget(bookInitials, startOrdinal, endOrdinal ?? -1);
     }
 
+    function openReadingProgress(tab: number = 0) {
+        android.openReadingProgress(tab);
+    }
+
+    function openReadingProgressSettings() {
+        android.openReadingProgressSettings();
+    }
+
     function recordChapterRead(bookInitials: string, startOrdinal: number, chapter: number, source: ReadingProgressSource) {
         android.recordChapterRead(bookInitials, startOrdinal, chapter, source);
     }
@@ -458,6 +470,10 @@ export function useAndroid({bookmarks}: { bookmarks: Ref<BaseBookmark[]> }, conf
 
     function unmarkChapterRead(bookInitials: string, startOrdinal: number, chapter: number) {
         android.unmarkChapterRead(bookInitials, startOrdinal, chapter);
+    }
+
+    function openChapterReadHistory(bookInitials: string, startOrdinal: number, chapter: number) {
+        android.openChapterReadHistory(bookInitials, startOrdinal, chapter);
     }
 
     function openStudyPad(labelId: IdType, bookmark: BaseBookmark) {
@@ -636,6 +652,10 @@ export function useAndroid({bookmarks}: { bookmarks: Ref<BaseBookmark[]> }, conf
         android.saveState(JSON.stringify(newState));
     }
 
+    function setReadingProgressSettings(settings: ReadingProgressSettings) {
+        android.setReadingProgressSettings(JSON.stringify(settings));
+    }
+
     const exposed = {
         shareHtml,
         helpBookmarks,
@@ -691,9 +711,12 @@ export function useAndroid({bookmarks}: { bookmarks: Ref<BaseBookmark[]> }, conf
         addMemorizationTarget,
         unmarkMemorized,
         removeMemorizationTarget,
+        openReadingProgress,
+        openReadingProgressSettings,
         recordChapterRead,
         markChapterRead,
         unmarkChapterRead,
+        openChapterReadHistory,
         speak,
         speakGeneric,
         speakMemorizationLoop,
@@ -701,6 +724,7 @@ export function useAndroid({bookmarks}: { bookmarks: Ref<BaseBookmark[]> }, conf
         onKeyDown,
         parseRef,
         saveState,
+        setReadingProgressSettings,
     }
 
     if (config.developmentMode) return {

@@ -156,6 +156,9 @@ public struct BibleReaderView: View {
         case downloads
         case history
         case readingPlans
+        case readingProgress
+        case readingProgressSettings
+        case chapterReadHistory
         case workspaces
         case about
 
@@ -232,6 +235,12 @@ public struct BibleReaderView: View {
 
     /// Presents the current top-level reader sheet driven by the overflow menu and shortcuts.
     @State private var activeReaderSheet: ReaderSheet?
+
+    /// Initial tab requested by the Android-compatible reading-progress bridge.
+    @State private var readingProgressInitialTab: ReadingProgressTab = .reading
+
+    /// Chapter history target requested by the embedded reader bridge.
+    @State private var chapterReadHistoryTarget: ChapterReadHistoryTarget?
 
     /// Presents the current coordinator-owned modal flow.
     @State private var activeReaderModal: ReaderModal?
@@ -672,6 +681,8 @@ public struct BibleReaderView: View {
                 displaySettings: $globalDisplaySettings,
                 nightMode: $nightMode,
                 nightModeMode: $nightModeMode,
+                readingProgressInitialTab: readingProgressInitialTab,
+                chapterReadHistoryTarget: chapterReadHistoryTarget,
                 onDismiss: dismissReaderSheet,
                 onSettingsChanged: applyGlobalDisplaySettingsChange
             )
@@ -789,6 +800,7 @@ public struct BibleReaderView: View {
     /// Closes the currently active top-level reader sheet.
     private func dismissReaderSheet() {
         activeReaderSheet = nil
+        chapterReadHistoryTarget = nil
     }
 
     /// Presents a follow-up top-level sheet after another flow already captured the pane target.
@@ -1228,6 +1240,17 @@ public struct BibleReaderView: View {
                 presentReaderModal(.compare, from: window.id)
             },
             onShowReadingPlans: { presentReaderSheet(.readingPlans, from: window.id) },
+            onShowReadingProgress: { tab in
+                readingProgressInitialTab = ReadingProgressTab(androidTab: tab)
+                presentReaderSheet(.readingProgress, from: window.id)
+            },
+            onShowReadingProgressSettings: {
+                presentReaderSheet(.readingProgressSettings, from: window.id)
+            },
+            onShowChapterReadHistory: { target in
+                chapterReadHistoryTarget = target
+                presentReaderSheet(.chapterReadHistory, from: window.id)
+            },
             onShowSpeakControls: { presentReaderModal(.speakControls, from: window.id) },
             onShareText: { text in shareText = text },
             onShowCrossReferences: { refs in

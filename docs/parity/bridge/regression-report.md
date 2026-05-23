@@ -150,13 +150,13 @@ The pieces that still need tighter protection are:
 - full current Android bridge breadth beyond the shared iOS subset (`89` Android
   methods versus `72` iOS-bundled methods in
   `bibleview-js/src/composables/android.ts`)
-- the tracked bridge gap inventory: 14 missing Android methods plus 12 resolved iOS
+- the tracked bridge gap inventory: 10 missing Android methods plus 16 resolved iOS
   bridge dispositions; memorization bridge state and `speakMemorizationLoop` are
   implemented, My Documents read/copy/share is implemented in #81, My Documents
   edit/reload is implemented in #82, AI page operations are implemented through
-  #83, reading progress has the #85 model/settings contract and #86
-  `recordChapterRead` mutation behavior while history/UI/settings remains
-  deferred through #87, AI bridge methods are deferred through #89, #90, #91,
+  #83, reading progress has the #85 model/settings contract, #86
+  `recordChapterRead` mutation behavior, and #87 history/UI/settings bridge
+  behavior, AI bridge methods are deferred through #89, #90, #91,
   and #92, and no current iOS no-op method remains in "needs decision" status
 - raw `window.android.*` compatibility-shim behavior on a per-method basis
 - Strong's sheet bridge coverage, especially the dedicated `contentType: "strongs"` route
