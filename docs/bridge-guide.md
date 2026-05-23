@@ -135,18 +135,18 @@ Notes:
   callback; the shared AI dialog/backend remains tracked separately in #5/#89.
   User-authored pages without source prompt metadata are ignored and logged. The
   related `mydocuments` sync category remains tracked separately in #72.
-- Android's reading-progress bridge family is accepted but still staged. The
-  native iOS reading-progress model, storage, settings contract, and Android
+- Android's reading-progress bridge family is accepted and model-backed on iOS.
+  The native iOS reading-progress model, storage, settings contract, and Android
   owner references are recorded in
-  `docs/parity/bridge/reading-progress-model.md`. `recordChapterRead` now
-  appends local chapter-read history, updates `chapterReadCount`, and emits
+  `docs/parity/bridge/reading-progress-model.md`. `recordChapterRead` appends
+  local chapter-read history, updates `chapterReadCount`, and emits
   `update_chapter_read_status`; iOS also exposes local `markChapterRead` and
-  `unmarkChapterRead` operation aliases for #86. iOS should not add
+  `unmarkChapterRead` operation aliases for #86. #87 adds
   `openChapterReadHistory`, `openReadingProgress`,
-  `openReadingProgressSettings`, or `setReadingProgressSettings` as standalone
-  bridge names without model-backed presentation/settings behavior. #87 owns
-  history/UI/settings behavior. The related `progress` sync category remains
-  tracked in #73 and distinct from `readingplans`.
+  `openReadingProgressSettings`, and `setReadingProgressSettings` with native
+  sheet presentation, Android tab-position mapping, settings validation, and
+  `update_reading_progress_settings` events. The related `progress` sync
+  category remains tracked in #73 and distinct from `readingplans`.
 - Android's AI bridge family is accepted but deferred. iOS should not add
   `llmAction`, `llmActionGeneric`, `noteEditorLlmAction`, `openAiDocPage`,
   `openAiDocPageChooser`, or `openPromptEditor` as standalone bridge names before the

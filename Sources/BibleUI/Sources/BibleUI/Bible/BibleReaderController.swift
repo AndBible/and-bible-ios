@@ -416,6 +416,15 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     /// Callback for presenting native label assignment UI (bookmarkId).
     var onAssignLabels: ((UUID) -> Void)?
 
+    /// Callback for presenting native reading-progress UI with Android tab index semantics.
+    var onShowReadingProgress: ((Int) -> Void)?
+
+    /// Callback for presenting native reading-progress settings UI.
+    var onShowReadingProgressSettings: (() -> Void)?
+
+    /// Callback for presenting native chapter-read history UI.
+    var onShowChapterReadHistory: ((ChapterReadHistoryTarget) -> Void)?
+
     /// Settings store for reading preferred dictionary setting and local bridge-backed state.
     var settingsStore: SettingsStore? {
         didSet {
@@ -3340,15 +3349,17 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      */
     public func bridge(_ bridge: BibleBridge, recordChapterRead bookInitials: String, startOrdinal: Int, chapter: Int, source: String) {
         guard let store = readingProgressStore,
-              currentCategory == .bible,
-              isValidReadingProgressBridgeInput(bookInitials: bookInitials, startOrdinal: startOrdinal, chapter: chapter),
-              let kjvBookOrdinal = kjvBookOrdinal(for: currentBook) else {
+              let target = readingProgressBridgeTarget(
+                bookInitials: bookInitials,
+                startOrdinal: startOrdinal,
+                chapter: chapter
+              ) else {
             return
         }
         let count = store.recordChapterRead(
             bookInitials: bookInitials,
             startOrdinal: startOrdinal,
-            kjvBookOrdinal: kjvBookOrdinal,
+            kjvBookOrdinal: target.kjvBookOrdinal,
             chapter: chapter,
             source: ReadingProgressSource(bridgeValue: source)
         )
@@ -3356,16 +3367,66 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     }
 
     /**
+     Opens native chapter-read history for the active Bible chapter identity.
+     */
+    public func bridge(_ bridge: BibleBridge, openChapterReadHistory bookInitials: String, startOrdinal: Int, chapter: Int) {
+        guard readingProgressStore != nil,
+              let target = readingProgressBridgeTarget(
+                bookInitials: bookInitials,
+                startOrdinal: startOrdinal,
+                chapter: chapter
+              ) else {
+            return
+        }
+        onShowChapterReadHistory?(
+            ChapterReadHistoryTarget(
+                bookInitials: bookInitials,
+                startOrdinal: startOrdinal,
+                kjvBookOrdinal: target.kjvBookOrdinal,
+                bookName: target.bookName,
+                chapter: chapter
+            )
+        )
+    }
+
+    /**
+     Opens native reading-progress UI using Android's numeric tab positions.
+     */
+    public func bridge(_ bridge: BibleBridge, openReadingProgress tab: Int) {
+        onShowReadingProgress?(tab)
+    }
+
+    /**
+     Opens native reading-progress settings UI.
+     */
+    public func bridgeDidRequestOpenReadingProgressSettings(_ bridge: BibleBridge) {
+        onShowReadingProgressSettings?()
+    }
+
+    /**
+     Persists Android-compatible reading-progress settings and notifies the embedded client.
+     */
+    public func bridge(_ bridge: BibleBridge, setReadingProgressSettings json: String) {
+        guard readingProgressStore?.applySettingsBundle(json: json) == true else {
+            return
+        }
+        emitReadingProgressSettings()
+        bridge.emit(event: "set_config", data: buildConfigJSON())
+    }
+
+    /**
      Clears chapter-read status for the active reading-progress cycle.
      */
     public func bridge(_ bridge: BibleBridge, unmarkChapterRead bookInitials: String, startOrdinal: Int, chapter: Int) {
         guard let store = readingProgressStore,
-              currentCategory == .bible,
-              isValidReadingProgressBridgeInput(bookInitials: bookInitials, startOrdinal: startOrdinal, chapter: chapter),
-              let kjvBookOrdinal = kjvBookOrdinal(for: currentBook) else {
+              let target = readingProgressBridgeTarget(
+                bookInitials: bookInitials,
+                startOrdinal: startOrdinal,
+                chapter: chapter
+              ) else {
             return
         }
-        let count = store.clearChapterReadStatus(kjvBookOrdinal: kjvBookOrdinal, chapter: chapter)
+        let count = store.clearChapterReadStatus(kjvBookOrdinal: target.kjvBookOrdinal, chapter: chapter)
         emitChapterReadStatus(chapter: chapter, count: count)
     }
 
@@ -5250,6 +5311,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
                 startOrdinal: startOrdinal,
                 endOrdinal: endOrdinal
             ) ?? [],
+            "readingProgressSettings": readingProgressSettingsPayload(),
         ]
 
         guard JSONSerialization.isValidJSONObject(document),
@@ -6045,6 +6107,18 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         settingsStore?.getStringSet(key) ?? []
     }
 
+    private func readingProgressSettingsPayload() -> [String: Any] {
+        let bundle = readingProgressStore?.settingsBundle() ?? ReadingProgressSettingsBundle()
+        return [
+            "autoMarkMemorized": bundle.autoMarkMemorized,
+            "memorizeTypeFullWords": bundle.memorizeTypeFullWords,
+            "memorizeWordVisibility": bundle.memorizeWordVisibility,
+            "memorizeErrorHeatmap": bundle.memorizeErrorHeatmap,
+            "memorizeScrambleHideUsed": bundle.memorizeScrambleHideUsed,
+            "memorizeIncludeReference": bundle.memorizeIncludeReference,
+        ]
+    }
+
     /**
      Escapes a string array into a JSON array literal without allocating an intermediate encoder.
 
@@ -6087,6 +6161,9 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         let disableBibleModalButtonsJSON = Self.jsonStringArray(appPreferenceStringSet(.disableBibleBookmarkModalButtons))
         let disableGenericModalButtonsJSON = Self.jsonStringArray(appPreferenceStringSet(.disableGenBookmarkModalButtons))
         let enabledExperimentalFeaturesJSON = Self.jsonStringArray(appPreferenceStringSet(.experimentalFeatures))
+        let readingProgressSettings = readingProgressStore?.snapshot().settings ?? ReadingProgressSettingsSnapshot()
+        let readingProgressSettingsJSON = readingProgressStore?.settingsBundleJSON()
+            ?? ReadingProgressSettingsBundle.defaultJSONString
 
         // Build recent labels JSON array
         let recentJSON = "[" + recentLabelIds.map { "\"\($0)\"" }.joined(separator: ",") + "]"
@@ -6112,7 +6189,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         let hideCompareJSON = "[" + hiddenCompareDocuments.map { "\"\($0)\"" }.joined(separator: ",") + "]"
 
         return """
-        {"config":{"developmentMode":false,"testMode":false,"showAnnotations":true,"showChapterNumbers":true,"showVerseNumbers":\(s.showVerseNumbers ?? d.showVerseNumbers ?? true),"strongsMode":\(s.strongsMode ?? d.strongsMode ?? 0),"showMorphology":\(s.showMorphology ?? d.showMorphology ?? false),"showRedLetters":\(s.showRedLetters ?? d.showRedLetters ?? true),"showVersePerLine":\(s.showVersePerLine ?? d.showVersePerLine ?? false),"showNonCanonical":true,"makeNonCanonicalItalic":true,"showSectionTitles":\(s.showSectionTitles ?? d.showSectionTitles ?? true),"showStrongsSeparately":false,"showFootNotes":\(s.showFootNotes ?? d.showFootNotes ?? false),"showFootNotesInline":\(s.showFootNotesInline ?? d.showFootNotesInline ?? false),"showXrefs":\(s.showXrefs ?? d.showXrefs ?? false),"expandXrefs":\(s.expandXrefs ?? d.expandXrefs ?? false),"fontFamily":"\(s.fontFamily ?? d.fontFamily ?? "sans-serif")","fontSize":\(s.fontSize ?? d.fontSize ?? 18),"disableBookmarking":false,"showBookmarks":\(s.showBookmarks ?? d.showBookmarks ?? true),"showMyNotes":\(s.showMyNotes ?? d.showMyNotes ?? true),"bookmarksHideLabels":[],"bookmarksAssignLabels":[],"colors":{"dayBackground":\(s.dayBackground ?? d.dayBackground ?? -1),"dayNoise":\(s.dayNoise ?? d.dayNoise ?? 0),"nightBackground":\(s.nightBackground ?? d.nightBackground ?? -16777216),"nightNoise":\(s.nightNoise ?? d.nightNoise ?? 0),"dayTextColor":\(s.dayTextColor ?? d.dayTextColor ?? -16777216),"nightTextColor":\(s.nightTextColor ?? d.nightTextColor ?? -1)},"hyphenation":\(s.hyphenation ?? d.hyphenation ?? true),"lineSpacing":\(s.lineSpacing ?? d.lineSpacing ?? 10),"justifyText":\(s.justifyText ?? d.justifyText ?? false),"marginSize":{"marginLeft":\(s.marginLeft ?? d.marginLeft ?? 2),"marginRight":\(s.marginRight ?? d.marginRight ?? 2),"maxWidth":\(s.maxWidth ?? d.maxWidth ?? 600)},"topMargin":\(s.topMargin ?? d.topMargin ?? 0),"showPageNumber":\(s.showPageNumber ?? d.showPageNumber ?? false)},"appSettings":{"nightMode":\(nightMode),"errorBox":\(showErrorBox),"favouriteLabels":\(favouriteJSON),"recentLabels":\(recentJSON),"studyPadCursors":\(cursorsJSON),"autoAssignLabels":\(autoAssignJSON),"hideCompareDocuments":\(hideCompareJSON),"activeWindow":\(isActiveWindow),"rightToLeft":false,"actionMode":false,"hasActiveIndicator":\(hasActiveIndicator),"activeSince":\(Int(Date().timeIntervalSince1970 * 1000) - 1000),"limitAmbiguousModalSize":false,"windowId":"","disableBibleModalButtons":\(disableBibleModalButtonsJSON),"disableGenericModalButtons":\(disableGenericModalButtonsJSON),"monochromeMode":\(monochromeMode),"disableAnimations":\(disableAnimations),"disableClickToEdit":\(disableClickToEdit),"fontSizeMultiplier":\(fontSizeMultiplier),"enabledExperimentalFeatures":\(enabledExperimentalFeaturesJSON)},"initial":false}
+        {"config":{"developmentMode":false,"testMode":false,"showAnnotations":true,"showChapterNumbers":true,"showVerseNumbers":\(s.showVerseNumbers ?? d.showVerseNumbers ?? true),"strongsMode":\(s.strongsMode ?? d.strongsMode ?? 0),"showMorphology":\(s.showMorphology ?? d.showMorphology ?? false),"showRedLetters":\(s.showRedLetters ?? d.showRedLetters ?? true),"showVersePerLine":\(s.showVersePerLine ?? d.showVersePerLine ?? false),"showNonCanonical":true,"makeNonCanonicalItalic":true,"showSectionTitles":\(s.showSectionTitles ?? d.showSectionTitles ?? true),"showStrongsSeparately":false,"showFootNotes":\(s.showFootNotes ?? d.showFootNotes ?? false),"showFootNotesInline":\(s.showFootNotesInline ?? d.showFootNotesInline ?? false),"showXrefs":\(s.showXrefs ?? d.showXrefs ?? false),"expandXrefs":\(s.expandXrefs ?? d.expandXrefs ?? false),"fontFamily":"\(s.fontFamily ?? d.fontFamily ?? "sans-serif")","fontSize":\(s.fontSize ?? d.fontSize ?? 18),"disableBookmarking":false,"showBookmarks":\(s.showBookmarks ?? d.showBookmarks ?? true),"showMyNotes":\(s.showMyNotes ?? d.showMyNotes ?? true),"bookmarksHideLabels":[],"bookmarksAssignLabels":[],"colors":{"dayBackground":\(s.dayBackground ?? d.dayBackground ?? -1),"dayNoise":\(s.dayNoise ?? d.dayNoise ?? 0),"nightBackground":\(s.nightBackground ?? d.nightBackground ?? -16777216),"nightNoise":\(s.nightNoise ?? d.nightNoise ?? 0),"dayTextColor":\(s.dayTextColor ?? d.dayTextColor ?? -16777216),"nightTextColor":\(s.nightTextColor ?? d.nightTextColor ?? -1)},"hyphenation":\(s.hyphenation ?? d.hyphenation ?? true),"lineSpacing":\(s.lineSpacing ?? d.lineSpacing ?? 10),"justifyText":\(s.justifyText ?? d.justifyText ?? false),"marginSize":{"marginLeft":\(s.marginLeft ?? d.marginLeft ?? 2),"marginRight":\(s.marginRight ?? d.marginRight ?? 2),"maxWidth":\(s.maxWidth ?? d.maxWidth ?? 600)},"topMargin":\(s.topMargin ?? d.topMargin ?? 0),"showPageNumber":\(s.showPageNumber ?? d.showPageNumber ?? false)},"appSettings":{"nightMode":\(nightMode),"errorBox":\(showErrorBox),"favouriteLabels":\(favouriteJSON),"recentLabels":\(recentJSON),"studyPadCursors":\(cursorsJSON),"autoAssignLabels":\(autoAssignJSON),"hideCompareDocuments":\(hideCompareJSON),"activeWindow":\(isActiveWindow),"rightToLeft":false,"actionMode":false,"hasActiveIndicator":\(hasActiveIndicator),"activeSince":\(Int(Date().timeIntervalSince1970 * 1000) - 1000),"limitAmbiguousModalSize":false,"windowId":"","disableBibleModalButtons":\(disableBibleModalButtonsJSON),"disableGenericModalButtons":\(disableGenericModalButtonsJSON),"monochromeMode":\(monochromeMode),"disableAnimations":\(disableAnimations),"disableClickToEdit":\(disableClickToEdit),"fontSizeMultiplier":\(fontSizeMultiplier),"enabledExperimentalFeatures":\(enabledExperimentalFeaturesJSON),"autoTrackReading":\(readingProgressSettings.autoTrackReading),"readingProgressSettings":\(readingProgressSettingsJSON)},"initial":false}
         """
     }
 
@@ -6390,8 +6467,27 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         return Self.jswordBibleBookOrdinalByOsisId[osisId]
     }
 
-    private func isValidReadingProgressBridgeInput(bookInitials: String, startOrdinal: Int, chapter: Int) -> Bool {
-        !bookInitials.isEmpty && startOrdinal > 0 && chapter > 0
+    private struct ReadingProgressBridgeTarget {
+        let kjvBookOrdinal: Int
+        let bookName: String
+    }
+
+    private func readingProgressBridgeTarget(
+        bookInitials: String,
+        startOrdinal: Int,
+        chapter: Int
+    ) -> ReadingProgressBridgeTarget? {
+        let chapterRange = currentChapterOrdinalRange()
+        guard currentCategory == .bible,
+              !bookInitials.isEmpty,
+              bookInitials == activeModuleName,
+              startOrdinal >= chapterRange.start,
+              startOrdinal <= chapterRange.end,
+              chapter == currentChapter,
+              let kjvBookOrdinal = kjvBookOrdinal(for: currentBook) else {
+            return nil
+        }
+        return ReadingProgressBridgeTarget(kjvBookOrdinal: kjvBookOrdinal, bookName: currentBook)
     }
 
     private func emitChapterReadStatus(chapter: Int, count: Int) {
@@ -6399,6 +6495,20 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             event: "update_chapter_read_status",
             data: "{\"chapter\":\(chapter),\"count\":\(count)}"
         )
+    }
+
+    @discardableResult
+    func saveReadingProgressSettings(_ settings: ReadingProgressSettingsSnapshot) -> ReadingProgressSettingsSnapshot? {
+        guard let store = readingProgressStore else { return nil }
+        let savedSettings = store.saveSettings(settings)
+        emitReadingProgressSettings()
+        bridge.emit(event: "set_config", data: buildConfigJSON())
+        return savedSettings
+    }
+
+    private func emitReadingProgressSettings() {
+        guard let settingsJSON = readingProgressStore?.settingsBundleJSON() else { return }
+        bridge.emit(event: "update_reading_progress_settings", data: settingsJSON)
     }
 
     /// Static OSIS book ID lookup using the default list.

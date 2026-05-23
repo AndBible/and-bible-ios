@@ -208,6 +208,13 @@ final class AndBibleTests: XCTestCase {
             ("recordChapterRead", ["KJV", 1, 1, 7]),
             ("markChapterRead", ["KJV", 1, 1]),
             ("markChapterRead", ["KJV", 1, 1, 7]),
+            ("openChapterReadHistory", ["KJV", 1]),
+            ("openChapterReadHistory", ["KJV", 1, "1"]),
+            ("openReadingProgress", []),
+            ("openReadingProgress", ["1"]),
+            ("openReadingProgressSettings", [1]),
+            ("setReadingProgressSettings", []),
+            ("setReadingProgressSettings", [["autoMarkMemorized": true]]),
             ("unmarkChapterRead", ["KJV", 1]),
             ("unmarkChapterRead", ["KJV", 1, "1"]),
             ("addParagraphBreakBookmark", ["KJV", 1]),
@@ -521,6 +528,8 @@ final class AndBibleTests: XCTestCase {
             displaySettings: Binding.constant(TextDisplaySettings()),
             nightMode: Binding.constant(false),
             nightModeMode: Binding.constant("system"),
+            readingProgressInitialTab: .reading,
+            chapterReadHistoryTarget: nil,
             onDismiss: {},
             onSettingsChanged: {}
         )
@@ -1153,6 +1162,13 @@ final class AndBibleTests: XCTestCase {
         XCTAssertEqual(bridge.dispatchMessage(method: "memorize", args: ["KJV", 1, -1]), .handled)
         XCTAssertEqual(bridge.dispatchMessage(method: "recordChapterRead", args: ["KJV", 1, 1, "AUTO_SCROLL"]), .handled)
         XCTAssertEqual(bridge.dispatchMessage(method: "markChapterRead", args: ["KJV", 1, 1, "MANUAL"]), .handled)
+        XCTAssertEqual(bridge.dispatchMessage(method: "openChapterReadHistory", args: ["KJV", 1, 1]), .handled)
+        XCTAssertEqual(bridge.dispatchMessage(method: "openReadingProgress", args: [1]), .handled)
+        XCTAssertEqual(bridge.dispatchMessage(method: "openReadingProgressSettings", args: []), .handled)
+        XCTAssertEqual(
+            bridge.dispatchMessage(method: "setReadingProgressSettings", args: [#"{"autoMarkMemorized":true}"#]),
+            .handled
+        )
         XCTAssertEqual(bridge.dispatchMessage(method: "unmarkChapterRead", args: ["KJV", 1, 1]), .handled)
         XCTAssertEqual(bridge.dispatchMessage(method: "addParagraphBreakBookmark", args: ["KJV", 1, -1]), .handled)
         XCTAssertEqual(
@@ -1317,9 +1333,51 @@ final class AndBibleTests: XCTestCase {
             [.autoScroll, .autoTts]
         )
         XCTAssertEqual(reloadedStore.snapshot().history.map(\.startOrdinal), [41, 41])
+        let summary = reloadedStore.readingSummary(recentLimit: 1)
+        XCTAssertEqual(summary.cycle, 1)
+        XCTAssertEqual(summary.distinctChapterCount, 1)
+        XCTAssertEqual(summary.readingCount, 2)
+        XCTAssertEqual(summary.recentRows.map(\.source), [.autoTts])
+        XCTAssertTrue(reloadedStore.readingSummary(recentLimit: 0).recentRows.isEmpty)
 
         XCTAssertEqual(reloadedStore.clearChapterReadStatus(kjvBookOrdinal: 3, chapter: 2), 0)
         XCTAssertTrue(ReadingProgressStore(settingsStore: settingsStore).snapshot().history.isEmpty)
+    }
+
+    func testReadingProgressStorePersistsSettingsBundleAndPreservesNativeFields() throws {
+        let settingsStore = try makeInMemorySettingsStore()
+        let store = ReadingProgressStore(settingsStore: settingsStore)
+        var nativeSettings = ReadingProgressSettingsSnapshot(autoTrackReading: true, activeCycle: 4)
+        nativeSettings.memorizeWordVisibility = "hidden"
+        store.saveSettings(nativeSettings)
+
+        XCTAssertTrue(store.applySettingsBundle(json: """
+        {
+          "autoMarkMemorized": false,
+          "memorizeTypeFullWords": true,
+          "memorizeWordVisibility": "dim",
+          "memorizeErrorHeatmap": false,
+          "memorizeScrambleHideUsed": true,
+          "memorizeIncludeReference": false
+        }
+        """))
+
+        let updated = store.snapshot().settings
+        XCTAssertEqual(updated.autoTrackReading, true)
+        XCTAssertEqual(updated.activeCycle, 4)
+        XCTAssertEqual(updated.autoMarkMemorized, false)
+        XCTAssertEqual(updated.memorizeTypeFullWords, true)
+        XCTAssertEqual(updated.memorizeWordVisibility, "dim")
+        XCTAssertEqual(updated.memorizeErrorHeatmap, false)
+        XCTAssertEqual(updated.memorizeScrambleHideUsed, true)
+        XCTAssertEqual(updated.memorizeIncludeReference, false)
+
+        XCTAssertFalse(store.applySettingsBundle(json: #"{}"#))
+        XCTAssertFalse(store.applySettingsBundle(json: #"{"autoMarkMemorized":true}"#))
+        XCTAssertFalse(store.applySettingsBundle(json: #"{"memorizeWordVisibility":"opaque"}"#))
+        XCTAssertFalse(store.applySettingsBundle(json: #"{"autoMarkMemorized":true,"unexpected":true}"#))
+        XCTAssertFalse(store.applySettingsBundle(json: #"{"autoMarkMemorized":null}"#))
+        XCTAssertEqual(store.snapshot().settings, updated)
     }
 
     func testBridgeReadingProgressMessagesMutateNativeStoreAndEmitCounts() throws {
@@ -1368,6 +1426,77 @@ final class AndBibleTests: XCTestCase {
                     script.contains(#""count":0"#)
             }
         )
+    }
+
+    func testBridgeReadingProgressSettingsAndPresentationHandoffs() throws {
+        let bridge = BibleBridge()
+        var scripts: [String] = []
+        bridge.javaScriptEvaluationObserver = { scripts.append($0) }
+        let controller = BibleReaderController(bridge: bridge)
+        controller.settingsStore = try makeInMemorySettingsStore()
+        controller.navigateTo(book: "Exodus", chapter: 2)
+
+        var openedTabs: [Int] = []
+        var openedSettingsCount = 0
+        var historyTargets: [ChapterReadHistoryTarget] = []
+        controller.onShowReadingProgress = { openedTabs.append($0) }
+        controller.onShowReadingProgressSettings = { openedSettingsCount += 1 }
+        controller.onShowChapterReadHistory = { historyTargets.append($0) }
+
+        XCTAssertEqual(bridge.dispatchMessage(method: "openReadingProgress", args: [1]), .handled)
+        XCTAssertEqual(openedTabs, [1])
+
+        XCTAssertEqual(bridge.dispatchMessage(method: "openReadingProgressSettings", args: []), .handled)
+        XCTAssertEqual(openedSettingsCount, 1)
+
+        XCTAssertEqual(bridge.dispatchMessage(method: "openChapterReadHistory", args: ["KJV", 41, 2]), .handled)
+        XCTAssertEqual(historyTargets.count, 1)
+        XCTAssertEqual(historyTargets.first?.bookInitials, "KJV")
+        XCTAssertEqual(historyTargets.first?.startOrdinal, 41)
+        XCTAssertEqual(historyTargets.first?.kjvBookOrdinal, 3)
+        XCTAssertEqual(historyTargets.first?.bookName, "Exodus")
+        XCTAssertEqual(historyTargets.first?.chapter, 2)
+
+        XCTAssertEqual(bridge.dispatchMessage(method: "openChapterReadHistory", args: ["KJV", 1, 1]), .handled)
+        XCTAssertEqual(bridge.dispatchMessage(method: "openChapterReadHistory", args: ["NIV", 41, 2]), .handled)
+        XCTAssertEqual(historyTargets.count, 1)
+
+        XCTAssertEqual(
+            bridge.dispatchMessage(method: "setReadingProgressSettings", args: ["""
+            {
+              "autoMarkMemorized": false,
+              "memorizeTypeFullWords": true,
+              "memorizeWordVisibility": "hidden",
+              "memorizeErrorHeatmap": false,
+              "memorizeScrambleHideUsed": true,
+              "memorizeIncludeReference": false
+            }
+            """]),
+            .handled
+        )
+
+        let settings = try XCTUnwrap(controller.readingProgressStore?.snapshot().settings)
+        XCTAssertEqual(settings.autoMarkMemorized, false)
+        XCTAssertEqual(settings.memorizeTypeFullWords, true)
+        XCTAssertEqual(settings.memorizeWordVisibility, "hidden")
+        XCTAssertEqual(settings.memorizeErrorHeatmap, false)
+        XCTAssertEqual(settings.memorizeScrambleHideUsed, true)
+        XCTAssertEqual(settings.memorizeIncludeReference, false)
+        XCTAssertTrue(
+            scripts.contains { script in
+                script.contains("bibleView.emit('update_reading_progress_settings'") &&
+                    script.contains(#""memorizeWordVisibility":"hidden""#)
+            }
+        )
+        XCTAssertTrue(scripts.contains { $0.contains("bibleView.emit('set_config'") })
+
+        let scriptCount = scripts.count
+        XCTAssertEqual(
+            bridge.dispatchMessage(method: "setReadingProgressSettings", args: [#"{"memorizeWordVisibility":"opaque"}"#]),
+            .handled
+        )
+        XCTAssertEqual(scripts.count, scriptCount)
+        XCTAssertEqual(controller.readingProgressStore?.snapshot().settings, settings)
     }
 
     func testReaderCompareBridgeRequestBuildsNativePresentationPayload() throws {
@@ -1901,6 +2030,17 @@ final class AndBibleTests: XCTestCase {
 
         let controller = BibleReaderController(bridge: bridge)
         controller.settingsStore = settingsStore
+        controller.readingProgressStore?.saveSettings(
+            ReadingProgressSettingsSnapshot(
+                autoTrackReading: true,
+                autoMarkMemorized: false,
+                memorizeTypeFullWords: true,
+                memorizeWordVisibility: "dim",
+                memorizeErrorHeatmap: false,
+                memorizeScrambleHideUsed: true,
+                memorizeIncludeReference: false
+            )
+        )
         controller.displaySettings = display
         controller.nightMode = true
         controller.activeWindow = firstWindow
@@ -1973,6 +2113,8 @@ final class AndBibleTests: XCTestCase {
                 "disableClickToEdit",
                 "fontSizeMultiplier",
                 "enabledExperimentalFeatures",
+                "autoTrackReading",
+                "readingProgressSettings",
             ]
         )
         let colors = try XCTUnwrap(config["colors"] as? [String: Any])
@@ -2025,7 +2167,26 @@ final class AndBibleTests: XCTestCase {
         XCTAssertEqual(appSettings["disableAnimations"] as? Bool, true)
         XCTAssertEqual(appSettings["disableClickToEdit"] as? Bool, true)
         XCTAssertEqual(appSettings["fontSizeMultiplier"] as? Double, 1.25)
+        XCTAssertEqual(appSettings["autoTrackReading"] as? Bool, true)
         XCTAssertNotNil(appSettings["activeSince"] as? Int)
+        let readingProgressSettings = try XCTUnwrap(appSettings["readingProgressSettings"] as? [String: Any])
+        assertJSONKeys(
+            readingProgressSettings,
+            [
+                "autoMarkMemorized",
+                "memorizeTypeFullWords",
+                "memorizeWordVisibility",
+                "memorizeErrorHeatmap",
+                "memorizeScrambleHideUsed",
+                "memorizeIncludeReference",
+            ]
+        )
+        XCTAssertEqual(readingProgressSettings["autoMarkMemorized"] as? Bool, false)
+        XCTAssertEqual(readingProgressSettings["memorizeTypeFullWords"] as? Bool, true)
+        XCTAssertEqual(readingProgressSettings["memorizeWordVisibility"] as? String, "dim")
+        XCTAssertEqual(readingProgressSettings["memorizeErrorHeatmap"] as? Bool, false)
+        XCTAssertEqual(readingProgressSettings["memorizeScrambleHideUsed"] as? Bool, true)
+        XCTAssertEqual(readingProgressSettings["memorizeIncludeReference"] as? Bool, false)
         XCTAssertEqual(
             appSettings["studyPadCursors"] as? [String: Int],
             [studyPadCursorId.uuidString: 7]

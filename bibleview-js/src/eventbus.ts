@@ -42,6 +42,8 @@ type EventTypeNames =
     | "config_changed"
     | "reload_addons"
     | "bookmark_note_modified"
+    | "update_chapter_read_status"
+    | "update_reading_progress_settings"
     | "scroll_up"
     | "scroll_down"
     | "adjust_loading_count"

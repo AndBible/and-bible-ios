@@ -125,9 +125,9 @@ Reason:
   first implementation PR from becoming a full document editor plus AI feature
   migration.
 
-## 6. Android reading-progress bridge parity has local chapter-read mutation
+## 6. Android reading-progress bridge parity has local UI/settings behavior
 
-- Status: local model/settings contract recorded; chapter-read mutation implemented
+- Status: local model/settings contract recorded; chapter-read mutation and UI/settings bridge behavior implemented
 - Scope: Android bridge names `recordChapterRead`, `openChapterReadHistory`,
   `openReadingProgress`,
   `openReadingProgressSettings`, and
@@ -135,8 +135,8 @@ Reason:
 
 Disposition:
 
-- iOS should treat Android reading progress as an accepted parity target, but
-  should not add remaining methods as standalone bridge stubs.
+- iOS treats Android reading progress as an accepted parity target backed by
+  native local state and SwiftUI presentation.
 - The native iOS reading-progress model, storage, settings, Android owner
   references, and bridge argument mapping are recorded in
   `reading-progress-model.md`.
@@ -149,11 +149,14 @@ Disposition:
 - iOS also exposes `markChapterRead` and `unmarkChapterRead` as local
   product-operation aliases for #86. They are not Android bridge methods
   tracked by the gap inventory.
-- Chapter-read history presentation for Android's `openChapterReadHistory`
-  follows in #87 with the rest of the reading-progress UI surface.
-- Reading-progress UI and settings bridge behavior for `openReadingProgress`,
-  `openReadingProgressSettings`, and `setReadingProgressSettings` follows in
-  #87.
+- `openChapterReadHistory` presents a native chapter-history sheet for the
+  active-cycle rows keyed by KJVA book ordinal and chapter.
+- `openReadingProgress(tab)` presents the native reading-progress sheet and maps
+  Android tab `0` to Reading and tab `1` to Memorization.
+- `openReadingProgressSettings` presents native reading-progress settings.
+- `setReadingProgressSettings(json)` validates the six-field Android JavaScript
+  settings bundle, preserves native-only `autoTrackReading` and `activeCycle`,
+  persists the supported fields, and emits `update_reading_progress_settings`.
 - Remote sync for Android's `progress` category remains tracked separately in
   #73, after the local product surface and KJVA compatibility decisions are
   explicit.
@@ -246,9 +249,9 @@ What we do:
 - iOS preserves the bridge methods needed by this repo's bundled frontend and
   native feature set.
 - Android currently exposes 89 methods in its `BibleJavascriptInterface` type,
-  while the iOS-bundled frontend exposes 74. The Android-only methods cover
-  areas such as reading progress, AI document actions, chapter navigation,
-  scoped help, and whole-page bookmarks.
+  while the iOS-bundled frontend exposes 81. The remaining Android-only methods
+  cover areas such as AI document actions, chapter navigation, scoped help, and
+  whole-page bookmarks.
 - The memorization state-method subset has a recorded disposition in #50 and is
   implemented on iOS; `speakMemorizationLoop` has a recorded implementation
   disposition in #78.
@@ -256,9 +259,8 @@ What we do:
   behavior, #82 edit/reload behavior, and #83 AI page delete/regenerate handoff
   behavior are implemented.
 - The reading-progress subset has a recorded disposition in #52, a local
-  model/settings contract in #85, and chapter-read mutation behavior in #86.
-  History/UI/settings bridge behavior remains Android-only until follow-up
-  issue #87 is implemented.
+  model/settings contract in #85, chapter-read mutation behavior in #86, and
+  history/UI/settings bridge behavior in #87.
 - The AI bridge subset has a recorded disposition in #53 and follow-up issues
   #89, #90, #91, and #92, but it remains Android-only until the shared backend
   and bridge shell slices are implemented.

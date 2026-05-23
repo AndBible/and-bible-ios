@@ -52,6 +52,8 @@ private struct BibleBridgeMessageArguments {
     let method: String
     let values: [Any]
 
+    var isEmpty: Bool { values.isEmpty }
+
     func string(_ index: Int) -> String? {
         value(index, as: String.self, expected: "String")
     }
@@ -201,6 +203,14 @@ public protocol BibleBridgeDelegate: AnyObject {
     func bridge(_ bridge: BibleBridge, unmarkMemorized bookInitials: String, startOrdinal: Int, endOrdinal: Int)
     /// Records one chapter-read history row for Android-compatible reading progress.
     func bridge(_ bridge: BibleBridge, recordChapterRead bookInitials: String, startOrdinal: Int, chapter: Int, source: String)
+    /// Opens native chapter-read history for the supplied Bible chapter identity.
+    func bridge(_ bridge: BibleBridge, openChapterReadHistory bookInitials: String, startOrdinal: Int, chapter: Int)
+    /// Opens native reading-progress UI with Android-compatible tab position semantics.
+    func bridge(_ bridge: BibleBridge, openReadingProgress tab: Int)
+    /// Opens native reading-progress settings UI.
+    func bridgeDidRequestOpenReadingProgressSettings(_ bridge: BibleBridge)
+    /// Persists Android-compatible reading-progress settings JSON.
+    func bridge(_ bridge: BibleBridge, setReadingProgressSettings json: String)
     /// Clears read status for one chapter in the active reading-progress cycle.
     func bridge(_ bridge: BibleBridge, unmarkChapterRead bookInitials: String, startOrdinal: Int, chapter: Int)
     /// Resolves one My Documents page and returns its raw editable content payload.
@@ -314,6 +324,18 @@ public extension BibleBridgeDelegate {
 
     /// Default no-op to preserve source compatibility for clients that do not handle reading progress.
     func bridge(_ bridge: BibleBridge, recordChapterRead bookInitials: String, startOrdinal: Int, chapter: Int, source: String) {}
+
+    /// Default no-op to preserve source compatibility for clients that do not handle reading progress.
+    func bridge(_ bridge: BibleBridge, openChapterReadHistory bookInitials: String, startOrdinal: Int, chapter: Int) {}
+
+    /// Default no-op to preserve source compatibility for clients that do not handle reading progress.
+    func bridge(_ bridge: BibleBridge, openReadingProgress tab: Int) {}
+
+    /// Default no-op to preserve source compatibility for clients that do not handle reading progress.
+    func bridgeDidRequestOpenReadingProgressSettings(_ bridge: BibleBridge) {}
+
+    /// Default no-op to preserve source compatibility for clients that do not handle reading progress.
+    func bridge(_ bridge: BibleBridge, setReadingProgressSettings json: String) {}
 
     /// Default no-op to preserve source compatibility for clients that do not handle reading progress.
     func bridge(_ bridge: BibleBridge, unmarkChapterRead bookInitials: String, startOrdinal: Int, chapter: Int) {}
@@ -688,6 +710,24 @@ public final class BibleBridge: NSObject, WKScriptMessageHandler {
                   let chapter = arguments.int(2),
                   let source = arguments.string(3) else { return .malformed }
             delegate?.bridge(self, recordChapterRead: initials, startOrdinal: start, chapter: chapter, source: source)
+            return .handled
+        case "openChapterReadHistory":
+            guard let initials = arguments.string(0),
+                  let start = arguments.int(1),
+                  let chapter = arguments.int(2) else { return .malformed }
+            delegate?.bridge(self, openChapterReadHistory: initials, startOrdinal: start, chapter: chapter)
+            return .handled
+        case "openReadingProgress":
+            guard let tab = arguments.int(0) else { return .malformed }
+            delegate?.bridge(self, openReadingProgress: tab)
+            return .handled
+        case "openReadingProgressSettings":
+            guard arguments.isEmpty else { return .malformed }
+            delegate?.bridgeDidRequestOpenReadingProgressSettings(self)
+            return .handled
+        case "setReadingProgressSettings":
+            guard let json = arguments.string(0) else { return .malformed }
+            delegate?.bridge(self, setReadingProgressSettings: json)
             return .handled
         case "unmarkChapterRead":
             guard let initials = arguments.string(0),

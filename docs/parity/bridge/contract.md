@@ -113,10 +113,12 @@ local iOS model, storage, settings, Android owner references, and bridge
 argument mapping are recorded in `reading-progress-model.md`.
 `recordChapterRead` plus the local `markChapterRead`/`unmarkChapterRead`
 operation aliases now mutate native chapter-read history and update
-`chapterReadCount`. Reading-progress history presentation, UI, and settings
-bridge behavior follows in #87. The related Android `progress` sync category
-stays blocked in #73 until remote compatibility is designed and remains
-distinct from `readingplans`.
+`chapterReadCount`. #87 implements `openChapterReadHistory`,
+`openReadingProgress`, `openReadingProgressSettings`, and
+`setReadingProgressSettings` through native presentation and validated settings
+persistence. The related Android `progress` sync category stays blocked in #73
+until remote compatibility is designed and remains distinct from
+`readingplans`.
 
 Android's AI bridge family is accepted as iOS parity work, but it remains
 deferred behind the shared AI backend direction in #5. The first bridge slice is
