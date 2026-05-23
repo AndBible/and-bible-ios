@@ -40,9 +40,9 @@ rules explicit for changes in:
    `../bridge/my-documents-model.md`.
    `ai_settings` depends on the shared AI backend/settings direction in #5 and the bridge
    shell ownership contract in #89; it must not introduce an iOS-only AI settings schema.
-   `progress` depends on the iOS reading-progress model/storage and settings contract in #85
-   and must stay distinct from reading-plan completion unless a later compatibility decision
-   explicitly changes that.
+   `progress` depends on the iOS reading-progress model/storage and settings contract in
+   `../bridge/reading-progress-model.md` and must stay distinct from reading-plan completion
+   unless a later compatibility decision explicitly changes that.
 
 3. Treat bootstrap markers and remote-folder ownership semantics as contract
    surface.
@@ -120,4 +120,5 @@ focused coverage rather than relying on the existing subset alone.
 - add a machine-readable snapshot of Android-compatible sync keys and category names
 - expand iOS coverage to Android's remaining `mydocuments`, `ai_settings`, and `progress`
   sync categories only through their separate tracking issues (#72, #74, #73), with
-  `mydocuments` gated by #80, `ai_settings` gated by #5/#89, and `progress` gated by #85
+  `mydocuments` gated by #80, `ai_settings` gated by #5/#89, and `progress` gated by
+  the local model in `../bridge/reading-progress-model.md`

@@ -78,7 +78,7 @@
       "androidSignature": "(bookInitials: string, startOrdinal: number, chapter: number) => void",
       "domain": "reading_progress",
       "status": "missing_deferred_with_issue",
-      "nextStep": "Deferred by issue #52. Requires the iOS reading-progress model/settings contract in #85 before chapter-read history bridge behavior is implemented."
+      "nextStep": "Deferred by issue #52. The iOS reading-progress model/settings contract is recorded in docs/parity/bridge/reading-progress-model.md; chapter-read history bridge behavior remains follow-up work in #86."
     },
     {
       "method": "openPromptEditor",
@@ -92,28 +92,28 @@
       "androidSignature": "(tab: number) => void",
       "domain": "reading_progress",
       "status": "missing_deferred_with_issue",
-      "nextStep": "Deferred by issue #52. Requires the iOS reading-progress model/settings contract in #85 before UI bridge behavior is implemented in #87."
+      "nextStep": "Deferred by issue #52. The iOS reading-progress model/settings contract is recorded in docs/parity/bridge/reading-progress-model.md; UI bridge behavior remains follow-up work in #87."
     },
     {
       "method": "openReadingProgressSettings",
       "androidSignature": "() => void",
       "domain": "reading_progress",
       "status": "missing_deferred_with_issue",
-      "nextStep": "Deferred by issue #52. Requires the iOS reading-progress model/settings contract in #85 before settings UI bridge behavior is implemented in #87."
+      "nextStep": "Deferred by issue #52. The iOS reading-progress model/settings contract is recorded in docs/parity/bridge/reading-progress-model.md; settings UI bridge behavior remains follow-up work in #87."
     },
     {
       "method": "recordChapterRead",
       "androidSignature": "(bookInitials: string, startOrdinal: number, chapter: number, source: ReadingSource) => void",
       "domain": "reading_progress",
       "status": "missing_deferred_with_issue",
-      "nextStep": "Deferred by issue #52. Requires the iOS reading-progress model/settings contract in #85 before chapter-read mutation bridge behavior is implemented in #86."
+      "nextStep": "Deferred by issue #52. The iOS reading-progress model/settings contract is recorded in docs/parity/bridge/reading-progress-model.md; chapter-read mutation bridge behavior remains follow-up work in #86."
     },
     {
       "method": "setReadingProgressSettings",
       "androidSignature": "(json: string) => void",
       "domain": "reading_progress",
       "status": "missing_deferred_with_issue",
-      "nextStep": "Deferred by issue #52. Requires the iOS reading-progress model/settings contract in #85 before settings persistence bridge behavior is implemented in #87."
+      "nextStep": "Deferred by issue #52. The iOS reading-progress model/settings contract is recorded in docs/parity/bridge/reading-progress-model.md; settings persistence bridge behavior remains follow-up work in #87."
     },
     {
       "method": "showHelpDialog",

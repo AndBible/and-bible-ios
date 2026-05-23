@@ -63,12 +63,13 @@ to treat them as separate deferred parity targets:
   from #5. The AI bridge disposition in #53 and bridge shell contract in #89
   keep bridge-facing settings ownership aligned with that shared backend
   direction.
-- `progress`: tracked by #73, pending the iOS reader/memorization/progress
-  product direction. The reading-progress bridge decision in #52 keeps this
-  blocked on the native reading-progress model/storage and settings contract in
-  #85 before sync behavior is designed. The memorization bridge state slice now
-  has local iOS storage, but Android `progress` sync compatibility still needs
-  an explicit #73 model decision before remote sync behavior is designed.
+- `progress`: tracked by #73, pending Android remote `progress` compatibility
+  design. The reading-progress bridge decision in #52 now has a local
+  model/storage/settings contract in `../bridge/reading-progress-model.md`, and
+  memorization bridge state has local iOS storage in
+  `../bridge/memorization-progress-model.md`. Remote Android `progress` sync
+  still needs an explicit #73 model decision for KJVA persistence, adoption,
+  and conflicts before sync behavior is implemented.
 
 ## Bootstrap Contract
 

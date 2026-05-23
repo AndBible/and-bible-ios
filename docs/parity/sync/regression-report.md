@@ -172,9 +172,9 @@ Android-only categories into distinct deferred parity targets:
 - #74 tracks `ai_settings`, blocked on the shared AI backend/settings direction
   in #5. The #53 AI bridge disposition and #89 bridge shell contract keep
   bridge-facing settings ownership aligned with that shared backend direction.
-- #73 tracks `progress`, blocked on the iOS reader/memorization/progress product
-  direction. The #52 reading-progress bridge decision keeps it blocked on the
-  native reading-progress model/storage and settings contract in #85 before
-  remote progress sync behavior is designed. The #50 memorization bridge state
-  slice now has local iOS storage, but remote Android `progress` sync
-  compatibility still belongs to #73.
+- #73 tracks `progress`. The #52 reading-progress bridge decision now has the
+  local model/storage/settings contract recorded in
+  `../bridge/reading-progress-model.md`, and the #50 memorization bridge state
+  slice has local iOS storage. Remote Android `progress` sync compatibility,
+  including KJVA persistence, adoption, and conflict behavior, still belongs to
+  #73.

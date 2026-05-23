@@ -153,11 +153,11 @@ The pieces that still need tighter protection are:
 - the tracked bridge gap inventory: 17 missing Android methods plus 9 resolved iOS
   bridge dispositions; memorization bridge state and `speakMemorizationLoop` are
   implemented, My Documents read/copy/share is implemented in #81, My Documents
-  edit/reload is implemented in #82, and AI page operations remain deferred
-  through #83, reading progress
-  is deferred through #85, #86, and #87, AI bridge methods are deferred through #89, #90,
-  #91, and #92, and no current iOS no-op method remains in
-  "needs decision" status
+  edit/reload is implemented in #82, AI page operations remain deferred through
+  #83, reading progress has the #85 model/settings contract in
+  `reading-progress-model.md` while bridge behavior remains deferred through
+  #86 and #87, AI bridge methods are deferred through #89, #90, #91, and #92,
+  and no current iOS no-op method remains in "needs decision" status
 - raw `window.android.*` compatibility-shim behavior on a per-method basis
 - Strong's sheet bridge coverage, especially the dedicated `contentType: "strongs"` route
 - fullscreen, compare, help, and full reference-dialog UI workflows

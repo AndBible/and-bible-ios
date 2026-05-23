@@ -107,6 +107,7 @@ coverage, but it does not close the broader progress parity surface.
   adding Android remote sync.
 - #73 owns Android `progress` sync compatibility, KJVA persistence mapping,
   remote adoption behavior, and conflict handling.
-- #85 and its follow-ups own reading-progress model/settings work. Reading
-  progress must stay separate from memorized-verses and memorization-target
-  state unless a later compatibility decision explicitly combines them.
+- `reading-progress-model.md` records the #85 reading-progress model/settings
+  contract. Reading progress must stay separate from memorized-verses and
+  memorization-target state unless a later compatibility decision explicitly
+  combines them.

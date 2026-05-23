@@ -96,14 +96,14 @@ Disposition:
   settings contract exist. The #53 AI bridge disposition and #89 bridge shell
   contract keep bridge-facing AI settings ownership aligned with that shared
   backend direction.
-- `progress` is tracked separately in #73. It is deferred until the
-  reader/memorization/progress product surface is explicit, and it should not be
-  folded into `readingplans` without an explicit compatibility decision. The
-  #52 reading-progress bridge disposition keeps this blocked on the native
-  reading-progress model/storage and settings contract in #85. The #50
-  memorization bridge state slice now has local iOS storage, with the #77 model
-  recorded in `../bridge/memorization-progress-model.md`, but remote Android
-  `progress` sync compatibility still belongs to #73.
+- `progress` is tracked separately in #73. It should not be folded into
+  `readingplans` without an explicit compatibility decision. The #52
+  reading-progress bridge disposition now has a local model/storage/settings
+  contract in `../bridge/reading-progress-model.md`. The #50 memorization
+  bridge state slice also has local iOS storage, with the #77 model recorded in
+  `../bridge/memorization-progress-model.md`. Remote Android `progress` sync
+  compatibility, including KJVA persistence, remote adoption, and conflicts,
+  still belongs to #73.
 
 Reason:
 

@@ -108,13 +108,13 @@ stored page. The accepted local model is recorded in
 `mydocuments` sync category stays blocked in #72 until the local product surface
 is implemented.
 
-Android's reading-progress bridge family is accepted as iOS parity work, but it
-also remains deferred until iOS has a native reading-progress model, storage,
-and settings contract. That first slice is #85. Chapter-read mark/unmark bridge
-behavior follows in #86, while reading-progress UI/settings bridge behavior
-follows in #87. The related Android `progress` sync category stays blocked in
-#73 until the local product surface exists and remains distinct from
-`readingplans`.
+Android's reading-progress bridge family is accepted as iOS parity work. The
+local iOS model, storage, settings, Android owner references, and bridge
+argument mapping are recorded in `reading-progress-model.md`. Chapter-read
+mark/unmark bridge behavior follows in #86, while reading-progress UI/settings
+bridge behavior follows in #87. The related Android `progress` sync category
+stays blocked in #73 until remote compatibility is designed and remains
+distinct from `readingplans`.
 
 Android's AI bridge family is accepted as iOS parity work, but it remains
 deferred behind the shared AI backend direction in #5. The first bridge slice is
