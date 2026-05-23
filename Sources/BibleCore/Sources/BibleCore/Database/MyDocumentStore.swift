@@ -174,8 +174,15 @@ public final class MyDocumentStore {
      cache row. User-authored pages intentionally return `nil`.
      */
     public func aiPageActionContext(pageId: UUID) -> MyDocumentAIPageActionContext? {
-        guard let page = page(pageId: pageId),
-              let document = page.document else {
+        guard let page = page(pageId: pageId) else {
+            return nil
+        }
+
+        return aiPageActionContext(page: page)
+    }
+
+    private func aiPageActionContext(page: MyDocumentPage) -> MyDocumentAIPageActionContext? {
+        guard let document = page.document else {
             return nil
         }
 
@@ -215,7 +222,7 @@ public final class MyDocumentStore {
             return .pageNotFound
         }
 
-        guard let context = aiPageActionContext(pageId: pageId) else {
+        guard let context = aiPageActionContext(page: page) else {
             return .notAIPage
         }
 

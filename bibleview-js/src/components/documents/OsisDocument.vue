@@ -22,7 +22,7 @@
       :data-book-initials="bookInitials"
       :data-osis-ref="osisRef"
   >
-    <AreYouSure ref="areYouSureDelete">
+    <AreYouSure v-if="canUseMyDocumentAIPageActions" ref="areYouSureDelete">
       <template #title>
         {{ strings.deleteMyDocumentPageConfirmationTitle }}
       </template>
@@ -60,7 +60,7 @@
 
     <template v-else>
       <div
-          v-if="isMyDocument && myDocumentPageId"
+          v-if="canUseMyDocumentActions"
           class="mydoc-actions"
       >
         <button
@@ -73,7 +73,7 @@
           <FontAwesomeIcon icon="edit"/>
         </button>
         <button
-            v-if="sourcePromptId"
+            v-if="canUseMyDocumentAIPageActions"
             type="button"
             class="journal-button"
             :aria-label="strings.regenerateMyDocumentPageAccessibilityLabel"
@@ -83,7 +83,7 @@
           <FontAwesomeIcon icon="arrows-rotate"/>
         </button>
         <button
-            v-if="sourcePromptId"
+            v-if="canUseMyDocumentAIPageActions"
             type="button"
             class="journal-button"
             :aria-label="strings.deleteMyDocumentPageAccessibilityLabel"
@@ -152,6 +152,8 @@ const isContentEmpty = computed(() => {
     const xml = osisFragment.xml || "";
     return xml.replace(/<[^>]*>/g, "").trim().length === 0;
 });
+const canUseMyDocumentActions = computed(() => isMyDocument && Boolean(myDocumentPageId));
+const canUseMyDocumentAIPageActions = computed(() => canUseMyDocumentActions.value && Boolean(sourcePromptId));
 
 useBookmarks(id, ordinalRange, globalBookmarks, bookInitials, annotateRef, false, ref(true), common, config, appSettings);
 provide(osisDocumentInfoKey, {bookInitials, highlightedOrdinalRange, osisRef: annotateRef})
@@ -199,7 +201,7 @@ function regenerateAIPage() {
 async function deleteAIPage() {
     if (!myDocumentPageId || !sourcePromptId) return;
 
-    if (await areYouSureDelete.value!.areYouSure()) {
+    if (await areYouSureDelete.value?.areYouSure()) {
         android.deleteMyDocumentPage(myDocumentPageId);
     }
 }
