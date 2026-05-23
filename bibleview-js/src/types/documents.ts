@@ -92,6 +92,7 @@ export interface BibleDocumentType extends BaseOsisDocument {
     originalOrdinalRange: Nullable<OrdinalRange>
     memorizedOrdinals?: number[]
     targetOrdinals?: number[]
+    chapterReadCount?: number
 }
 
 export interface MyNotesDocument extends BaseDocument {

@@ -73,17 +73,18 @@ rules explicit for changes in:
    recorded in `my-documents-model.md`, #82 owns edit/reload behavior, and #83
    owns AI page regenerate/delete behavior.
 
-   Android's reading-progress bridge family is documented deferred surface too.
-   Do not add Android bridge names `recordChapterRead`,
-   `openChapterReadHistory`, `openReadingProgress`,
+   Android's reading-progress bridge family is staged surface too.
+   `recordChapterRead` is implemented through `ReadingProgressStore`; keep it
+   model-backed and do not downgrade it to a method-name-only branch. Do not add
+   remaining Android bridge names `openChapterReadHistory`, `openReadingProgress`,
    `openReadingProgressSettings`, or `setReadingProgressSettings` as
    method-name-only stubs. The native reading-progress model/storage, settings
    contract, and Android owner references are recorded in
    `reading-progress-model.md`. Planning names `markChapterRead` and
-   `unmarkChapterRead` are product-operation labels, not Android bridge methods
-   in the gap inventory. #86 owns chapter-read mutation/history bridge behavior,
-   and #87 owns UI/settings bridge behavior. The related Android `progress`
-   sync category remains separate in #73 and must not be folded into
+   `unmarkChapterRead` are local product-operation aliases, not Android bridge
+   methods in the gap inventory. #87 owns history/UI/settings bridge behavior.
+   The related Android `progress` sync category remains separate in #73 and must
+   not be folded into
    `readingplans` casually.
 
    Android's AI bridge family is documented deferred surface too. Do not add

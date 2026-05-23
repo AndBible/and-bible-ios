@@ -110,7 +110,7 @@ chapter-read bridge surface. Earlier iOS parity planning also uses
 are not Android bridge method names unless a later shared frontend change adds
 them explicitly.
 
-The iOS contract is:
+The iOS #86 mutation contract is:
 
 - Android-facing `recordChapterRead` appends one chapter-read history row.
 - Any internal "mark chapter read" operation should delegate to the same append
@@ -137,8 +137,10 @@ For chapter-read mutation and history-open calls:
   to `MANUAL`.
 
 The stored row should normalize book identity to KJVA before deriving
-`kjvBookOrdinal`, while preserving the original `bookInitials` and
-`startOrdinal` for local provenance and future migration.
+`kjvBookOrdinal`. The persisted value mirrors Android's JSword
+`BibleBook.ordinal`, not a 1-based 66-book index, while preserving the
+original `bookInitials` and `startOrdinal` for local provenance and future
+migration.
 
 ## Settings Contract
 
@@ -176,9 +178,8 @@ and `hidden`.
 
 ## Document Payload And Events
 
-When #86 adds mutation behavior, normal Bible document payloads should expose
-the active chapter's `chapterReadCount` so the embedded reading tracker can
-avoid auto-marking an already-read chapter.
+Normal Bible document payloads expose the active chapter's `chapterReadCount`
+so the embedded reading tracker can avoid auto-marking an already-read chapter.
 
 When #87 adds UI/settings behavior, iOS should also expose:
 
@@ -208,11 +209,11 @@ and the local iOS model should keep the same product boundary:
 This model unblocks reading-progress bridge work, but it does not implement the
 method family itself.
 
-- #86 owns chapter-read mutation, read-history bridge behavior, document
-  payload counts, and focused regression coverage.
-- #87 owns `openReadingProgress`, `openReadingProgressSettings`, settings
-  persistence through `setReadingProgressSettings`, and focused UI/settings
-  coverage.
+- #86 owns chapter-read mutation, document payload counts, and focused
+  regression coverage.
+- #87 owns `openChapterReadHistory`, `openReadingProgress`,
+  `openReadingProgressSettings`, settings persistence through
+  `setReadingProgressSettings`, and focused UI/settings coverage.
 - #73 owns Android `progress` sync compatibility, KJVA persistence migration,
   remote adoption behavior, and conflict handling.
 - Reading-plan completion must stay separate unless a later compatibility

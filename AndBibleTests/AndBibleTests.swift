@@ -204,6 +204,12 @@ final class AndBibleTests: XCTestCase {
             ("addMemorizationTarget", ["KJV", 1]),
             ("removeMemorizationTarget", ["KJV", 1]),
             ("unmarkMemorized", ["KJV", 1]),
+            ("recordChapterRead", ["KJV", 1, 1]),
+            ("recordChapterRead", ["KJV", 1, 1, 7]),
+            ("markChapterRead", ["KJV", 1, 1]),
+            ("markChapterRead", ["KJV", 1, 1, 7]),
+            ("unmarkChapterRead", ["KJV", 1]),
+            ("unmarkChapterRead", ["KJV", 1, "1"]),
             ("addParagraphBreakBookmark", ["KJV", 1]),
             ("addGenericParagraphBreakBookmark", ["KJV", "Gen.1.1", 1]),
             ("openStudyPad", ["label-id"]),
@@ -1145,6 +1151,9 @@ final class AndBibleTests: XCTestCase {
         XCTAssertEqual(bridge.dispatchMessage(method: "helpBookmarks", args: []), .handled)
         XCTAssertEqual(bridge.dispatchMessage(method: "speakMemorizationLoop", args: ["KJV", "KJV", 1, -1]), .handled)
         XCTAssertEqual(bridge.dispatchMessage(method: "memorize", args: ["KJV", 1, -1]), .handled)
+        XCTAssertEqual(bridge.dispatchMessage(method: "recordChapterRead", args: ["KJV", 1, 1, "AUTO_SCROLL"]), .handled)
+        XCTAssertEqual(bridge.dispatchMessage(method: "markChapterRead", args: ["KJV", 1, 1, "MANUAL"]), .handled)
+        XCTAssertEqual(bridge.dispatchMessage(method: "unmarkChapterRead", args: ["KJV", 1, 1]), .handled)
         XCTAssertEqual(bridge.dispatchMessage(method: "addParagraphBreakBookmark", args: ["KJV", 1, -1]), .handled)
         XCTAssertEqual(
             bridge.dispatchMessage(method: "addGenericParagraphBreakBookmark", args: ["KJV", "Gen.1.1", 1, -1]),
@@ -1271,6 +1280,94 @@ final class AndBibleTests: XCTestCase {
 
         XCTAssertEqual(bridge.dispatchMessage(method: "unmarkMemorized", args: ["KJV", 2, 3]), .handled)
         XCTAssertEqual(store.memorizedOrdinals(bookInitials: "KJV", startOrdinal: 1, endOrdinal: 3), [1])
+    }
+
+    func testReadingProgressStorePersistsChapterHistoryAndClearsActiveCycle() throws {
+        let settingsStore = try makeInMemorySettingsStore()
+        let store = ReadingProgressStore(settingsStore: settingsStore)
+
+        XCTAssertEqual(
+            store.recordChapterRead(
+                bookInitials: "KJV",
+                startOrdinal: 41,
+                kjvBookOrdinal: 3,
+                chapter: 2,
+                source: .autoScroll,
+                readAt: 100
+            ),
+            1
+        )
+        XCTAssertEqual(
+            store.recordChapterRead(
+                bookInitials: "KJV",
+                startOrdinal: 41,
+                kjvBookOrdinal: 3,
+                chapter: 2,
+                source: ReadingProgressSource(bridgeValue: "AUTO_TTS"),
+                readAt: 200
+            ),
+            2
+        )
+        XCTAssertEqual(ReadingProgressSource(bridgeValue: "unknown"), .manual)
+
+        let reloadedStore = ReadingProgressStore(settingsStore: settingsStore)
+        XCTAssertEqual(reloadedStore.chapterReadCount(kjvBookOrdinal: 3, chapter: 2), 2)
+        XCTAssertEqual(
+            reloadedStore.snapshot().history.map(\.source),
+            [.autoScroll, .autoTts]
+        )
+        XCTAssertEqual(reloadedStore.snapshot().history.map(\.startOrdinal), [41, 41])
+
+        XCTAssertEqual(reloadedStore.clearChapterReadStatus(kjvBookOrdinal: 3, chapter: 2), 0)
+        XCTAssertTrue(ReadingProgressStore(settingsStore: settingsStore).snapshot().history.isEmpty)
+    }
+
+    func testBridgeReadingProgressMessagesMutateNativeStoreAndEmitCounts() throws {
+        let bridge = BibleBridge()
+        var scripts: [String] = []
+        bridge.javaScriptEvaluationObserver = { scripts.append($0) }
+        let controller = BibleReaderController(bridge: bridge)
+        controller.settingsStore = try makeInMemorySettingsStore()
+        let store = try XCTUnwrap(controller.readingProgressStore)
+        controller.navigateTo(book: "Exodus", chapter: 2)
+
+        XCTAssertEqual(
+            bridge.dispatchMessage(method: "recordChapterRead", args: ["KJV", 41, 0, "AUTO_SCROLL"]),
+            .handled
+        )
+        XCTAssertEqual(
+            bridge.dispatchMessage(method: "unmarkChapterRead", args: ["KJV", 41, -1]),
+            .handled
+        )
+        XCTAssertTrue(scripts.isEmpty)
+        XCTAssertEqual(store.snapshot().history.count, 0)
+
+        XCTAssertEqual(
+            bridge.dispatchMessage(method: "recordChapterRead", args: ["KJV", 41, 2, "AUTO_SCROLL"]),
+            .handled
+        )
+        XCTAssertEqual(store.chapterReadCount(kjvBookOrdinal: 3, chapter: 2), 1)
+        XCTAssertEqual(store.snapshot().history.last?.source, .autoScroll)
+
+        XCTAssertEqual(
+            bridge.dispatchMessage(method: "markChapterRead", args: ["KJV", 41, 2, "not-a-source"]),
+            .handled
+        )
+        XCTAssertEqual(store.chapterReadCount(kjvBookOrdinal: 3, chapter: 2), 2)
+        XCTAssertEqual(store.snapshot().history.last?.source, .manual)
+
+        XCTAssertEqual(
+            bridge.dispatchMessage(method: "unmarkChapterRead", args: ["KJV", 41, 2]),
+            .handled
+        )
+        XCTAssertEqual(store.chapterReadCount(kjvBookOrdinal: 3, chapter: 2), 0)
+        XCTAssertTrue(
+            scripts.contains { script in
+                script.contains("bibleView.emit('update_chapter_read_status'") &&
+                    script.contains(#""chapter":2"#) &&
+                    script.contains(#""count":0"#)
+            }
+        )
     }
 
     func testReaderCompareBridgeRequestBuildsNativePresentationPayload() throws {

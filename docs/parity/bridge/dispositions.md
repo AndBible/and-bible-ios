@@ -125,9 +125,9 @@ Reason:
   first implementation PR from becoming a full document editor plus AI feature
   migration.
 
-## 6. Android reading-progress bridge parity has a recorded local model contract
+## 6. Android reading-progress bridge parity has local chapter-read mutation
 
-- Status: local model/settings contract recorded; bridge methods still deferred
+- Status: local model/settings contract recorded; chapter-read mutation implemented
 - Scope: Android bridge names `recordChapterRead`, `openChapterReadHistory`,
   `openReadingProgress`,
   `openReadingProgressSettings`, and
@@ -136,17 +136,21 @@ Reason:
 Disposition:
 
 - iOS should treat Android reading progress as an accepted parity target, but
-  should not add these as standalone bridge stubs.
+  should not add remaining methods as standalone bridge stubs.
 - The native iOS reading-progress model, storage, settings, Android owner
   references, and bridge argument mapping are recorded in
   `reading-progress-model.md`.
 - iOS reading progress is append-only Bible chapter-read history. Read state is
   derived from `chapterReadCount > 0` for the active cycle, not from reading-plan
   completion state.
-- Chapter-read mutation and history behavior for Android's current
-  `recordChapterRead` and `openChapterReadHistory` bridge names follows in #86.
-  Earlier planning names `markChapterRead` and `unmarkChapterRead` describe
-  product operations, not Android bridge methods tracked by the gap inventory.
+- `recordChapterRead` is implemented on iOS by appending local
+  `ReadingProgressStore` history rows, updating `chapterReadCount`, and
+  emitting `update_chapter_read_status`.
+- iOS also exposes `markChapterRead` and `unmarkChapterRead` as local
+  product-operation aliases for #86. They are not Android bridge methods
+  tracked by the gap inventory.
+- Chapter-read history presentation for Android's `openChapterReadHistory`
+  follows in #87 with the rest of the reading-progress UI surface.
 - Reading-progress UI and settings bridge behavior for `openReadingProgress`,
   `openReadingProgressSettings`, and `setReadingProgressSettings` follows in
   #87.
@@ -251,9 +255,10 @@ What we do:
 - The My Documents subset has a recorded disposition in #51; #81 read/copy/share
   behavior, #82 edit/reload behavior, and #83 AI page delete/regenerate handoff
   behavior are implemented.
-- The reading-progress subset has a recorded disposition in #52 and a local
-  model/settings contract in #85. Bridge behavior remains Android-only until
-  follow-up issues #86 and #87 are implemented.
+- The reading-progress subset has a recorded disposition in #52, a local
+  model/settings contract in #85, and chapter-read mutation behavior in #86.
+  History/UI/settings bridge behavior remains Android-only until follow-up
+  issue #87 is implemented.
 - The AI bridge subset has a recorded disposition in #53 and follow-up issues
   #89, #90, #91, and #92, but it remains Android-only until the shared backend
   and bridge shell slices are implemented.

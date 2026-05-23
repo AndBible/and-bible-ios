@@ -420,11 +420,15 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     var settingsStore: SettingsStore? {
         didSet {
             memorizationProgressStore = settingsStore.map(MemorizationProgressStore.init(settingsStore:))
+            readingProgressStore = settingsStore.map(ReadingProgressStore.init(settingsStore:))
         }
     }
 
     /// Local iOS memorization state backing Android-style memorization bridge methods.
     var memorizationProgressStore: MemorizationProgressStore?
+
+    /// Local iOS reading-progress state backing Android-style chapter-read bridge methods.
+    var readingProgressStore: ReadingProgressStore?
 
     /// Callback to persist SwiftData changes (called after PageManager updates).
     var onPersistState: (() -> Void)?
@@ -3331,6 +3335,40 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         )
     }
 
+    /**
+     Records one chapter-read history row in local iOS reading-progress state.
+     */
+    public func bridge(_ bridge: BibleBridge, recordChapterRead bookInitials: String, startOrdinal: Int, chapter: Int, source: String) {
+        guard let store = readingProgressStore,
+              currentCategory == .bible,
+              isValidReadingProgressBridgeInput(bookInitials: bookInitials, startOrdinal: startOrdinal, chapter: chapter),
+              let kjvBookOrdinal = kjvBookOrdinal(for: currentBook) else {
+            return
+        }
+        let count = store.recordChapterRead(
+            bookInitials: bookInitials,
+            startOrdinal: startOrdinal,
+            kjvBookOrdinal: kjvBookOrdinal,
+            chapter: chapter,
+            source: ReadingProgressSource(bridgeValue: source)
+        )
+        emitChapterReadStatus(chapter: chapter, count: count)
+    }
+
+    /**
+     Clears chapter-read status for the active reading-progress cycle.
+     */
+    public func bridge(_ bridge: BibleBridge, unmarkChapterRead bookInitials: String, startOrdinal: Int, chapter: Int) {
+        guard let store = readingProgressStore,
+              currentCategory == .bible,
+              isValidReadingProgressBridgeInput(bookInitials: bookInitials, startOrdinal: startOrdinal, chapter: chapter),
+              let kjvBookOrdinal = kjvBookOrdinal(for: currentBook) else {
+            return
+        }
+        let count = store.clearChapterReadStatus(kjvBookOrdinal: kjvBookOrdinal, chapter: chapter)
+        emitChapterReadStatus(chapter: chapter, count: count)
+    }
+
     // MARK: - BibleBridgeDelegate — Navigation Actions
 
     /**
@@ -6170,8 +6208,15 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         }
 
         let bookmarkObjects = bookmarks.compactMap { jsonObject(from: buildBookmarkJSON($0)) }
+        let chapterReadCount = readingProgressStore.flatMap { store -> Int? in
+            guard bookCategory == "BIBLE",
+                  let kjvBookOrdinal = kjvBookOrdinal(for: bookName) else {
+                return nil
+            }
+            return store.chapterReadCount(kjvBookOrdinal: kjvBookOrdinal, chapter: chapter)
+        }
 
-        let doc: [String: Any] = [
+        var doc: [String: Any] = [
             "id": "doc-1",
             "type": "bible",
             "osisFragment": osisFragmentObject(xml: xml, ordinalRange: [ordinalStart, ordinalEnd], keySuffix: key),
@@ -6202,6 +6247,9 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
                 endOrdinal: ordinalEnd
             ) ?? [],
         ]
+        if let chapterReadCount {
+            doc["chapterReadCount"] = chapterReadCount
+        }
 
         guard let data = try? JSONSerialization.data(withJSONObject: doc, options: [.sortedKeys]),
               let json = String(data: data, encoding: .utf8) else {
@@ -6266,6 +6314,28 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         return books.map { BookInfo(name: $0.0, osisId: $0.1, abbreviation: $0.2, chapterCount: $0.3, testament: $0.4) }
     }()
 
+    /// JSword `BibleBook.ordinal` values persisted by Android reading-progress rows.
+    private static let jswordBibleBookOrdinalByOsisId: [String: Int] = [
+        "Gen": 2, "Exod": 3, "Lev": 4, "Num": 5, "Deut": 6,
+        "Josh": 7, "Judg": 8, "Ruth": 9, "1Sam": 10, "2Sam": 11,
+        "1Kgs": 12, "2Kgs": 13, "1Chr": 14, "2Chr": 15, "Ezra": 16,
+        "Neh": 17, "Esth": 18, "Job": 19, "Ps": 20, "Prov": 21,
+        "Eccl": 22, "Song": 23, "Isa": 24, "Jer": 25, "Lam": 26,
+        "Ezek": 27, "Dan": 28, "Hos": 29, "Joel": 30, "Amos": 31,
+        "Obad": 32, "Jonah": 33, "Mic": 34, "Nah": 35, "Hab": 36,
+        "Zeph": 37, "Hag": 38, "Zech": 39, "Mal": 40,
+        "Matt": 42, "Mark": 43, "Luke": 44, "John": 45, "Acts": 46,
+        "Rom": 47, "1Cor": 48, "2Cor": 49, "Gal": 50, "Eph": 51,
+        "Phil": 52, "Col": 53, "1Thess": 54, "2Thess": 55,
+        "1Tim": 56, "2Tim": 57, "Titus": 58, "Phlm": 59, "Heb": 60,
+        "Jas": 61, "1Pet": 62, "2Pet": 63, "1John": 64,
+        "2John": 65, "3John": 66, "Jude": 67, "Rev": 68,
+        "1Esd": 84, "2Esd": 85, "Tob": 69, "Jdt": 70, "AddEsth": 71,
+        "Wis": 72, "WisSol": 72, "Sir": 73, "Bar": 74, "EpJer": 75,
+        "PrAzar": 76, "Sus": 77, "Bel": 78, "PrMan": 83,
+        "1Macc": 79, "2Macc": 80,
+    ]
+
     /// Backward-compatible static accessor — returns just the book names from the default list.
     static let allBooks: [String] = defaultBooks.map(\.name)
 
@@ -6312,6 +6382,23 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     /// OSIS book ID lookup, using the active module's versification.
     func osisBookId(for bookName: String) -> String {
         bookList.first(where: { $0.name == bookName })?.osisId ?? bookName.prefix(3).description
+    }
+
+    /// KJVA-compatible ordinal for the canonical book position used by local reading progress.
+    private func kjvBookOrdinal(for bookName: String) -> Int? {
+        let osisId = osisBookId(for: bookName)
+        return Self.jswordBibleBookOrdinalByOsisId[osisId]
+    }
+
+    private func isValidReadingProgressBridgeInput(bookInitials: String, startOrdinal: Int, chapter: Int) -> Bool {
+        !bookInitials.isEmpty && startOrdinal > 0 && chapter > 0
+    }
+
+    private func emitChapterReadStatus(chapter: Int, count: Int) {
+        bridge.emit(
+            event: "update_chapter_read_status",
+            data: "{\"chapter\":\(chapter),\"count\":\(count)}"
+        )
     }
 
     /// Static OSIS book ID lookup using the default list.
