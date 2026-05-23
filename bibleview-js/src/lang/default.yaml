@@ -29,6 +29,10 @@ yes: "Yes"
 ambiguousSelection: Which action do you wish to take?
 cancel: Cancel
 saveMyDocumentPageAccessibilityLabel: Save My Document page
+regenerateMyDocumentPageAccessibilityLabel: Regenerate My Document page
+deleteMyDocumentPageAccessibilityLabel: Delete My Document page
+deleteMyDocumentPageConfirmationTitle: Delete AI-generated page?
+deleteMyDocumentPageConfirmation: Delete this AI-generated My Documents page?
 removeBookmarkConfirmationTitle: Remove bookmark?
 removeBookmarkConfirmation: Are you sure you want to remove this bookmark?
 createdAt: "Created: %s"

@@ -31,6 +31,41 @@ public struct MyDocumentRawContentPayload: Codable, Equatable, Sendable {
 }
 
 /**
+ Native context for source-prompt-backed My Documents page actions.
+
+ iOS does not yet own the shared AI regeneration dialog, so the reader bridge
+ passes this validated context to its native callback instead of regenerating
+ directly in the persistence layer.
+ */
+public struct MyDocumentAIPageActionContext: Equatable, Sendable {
+    public let pageId: UUID
+    public let documentId: UUID
+    public let bookInitials: String
+    public let documentName: String
+    public let pageKey: String
+    public let pageTitle: String
+    public let sourcePromptId: UUID
+    public let sourceContext: String?
+    public let kjvOrdinalStart: Int?
+    public let kjvOrdinalEnd: Int?
+    public let contextHash: String?
+    public let usedWriteTools: Bool
+    public let sourceModelName: String?
+    public let sourceBookInitials: String?
+    public let sourceBookKey: String?
+}
+
+/**
+ Result of attempting to delete one source-prompt-backed My Documents page.
+ */
+public enum MyDocumentAIPageDeletionResult: Equatable, Sendable {
+    case deleted(MyDocumentAIPageActionContext)
+    case notAIPage
+    case pageNotFound
+    case saveFailed
+}
+
+/**
  Low-level persistence API for My Documents pages and raw content.
 
  This store deliberately resolves pages by Android-compatible `(initials,
@@ -97,6 +132,18 @@ public final class MyDocumentStore {
     }
 
     /**
+     Resolves one page by its stable page identifier without requiring the
+     parent document initials.
+     */
+    public func page(pageId: UUID) -> MyDocumentPage? {
+        var descriptor = FetchDescriptor<MyDocumentPage>(
+            predicate: #Predicate { $0.id == pageId }
+        )
+        descriptor.fetchLimit = 1
+        return try? modelContext.fetch(descriptor).first
+    }
+
+    /**
      Builds the raw-content bridge payload for one page.
      */
     public func rawContentPayload(bookInitials: String, pageKey: String) -> MyDocumentRawContentPayload? {
@@ -118,6 +165,81 @@ public final class MyDocumentStore {
      */
     public func rawContent(bookInitials: String, pageKey: String) -> String? {
         rawContentPayload(bookInitials: bookInitials, pageKey: pageKey)?.content
+    }
+
+    /**
+     Builds the native action context for an AI-generated My Documents page.
+
+     A page must carry source prompt metadata either directly or through its AI
+     cache row. User-authored pages intentionally return `nil`.
+     */
+    public func aiPageActionContext(pageId: UUID) -> MyDocumentAIPageActionContext? {
+        guard let page = page(pageId: pageId) else {
+            return nil
+        }
+
+        return aiPageActionContext(page: page)
+    }
+
+    private func aiPageActionContext(page: MyDocumentPage) -> MyDocumentAIPageActionContext? {
+        guard let document = page.document else {
+            return nil
+        }
+
+        let cacheEntry = page.aiPageCacheEntries?.first
+        guard let sourcePromptId = page.sourcePromptId ?? cacheEntry?.sourcePromptId else {
+            return nil
+        }
+
+        return MyDocumentAIPageActionContext(
+            pageId: page.id,
+            documentId: document.id,
+            bookInitials: document.initials,
+            documentName: document.name,
+            pageKey: page.pageKey,
+            pageTitle: page.title,
+            sourcePromptId: sourcePromptId,
+            sourceContext: cacheEntry?.sourceContext,
+            kjvOrdinalStart: cacheEntry?.kjvOrdinalStart,
+            kjvOrdinalEnd: cacheEntry?.kjvOrdinalEnd,
+            contextHash: cacheEntry?.contextHash,
+            usedWriteTools: cacheEntry?.usedWriteTools ?? false,
+            sourceModelName: cacheEntry?.sourceModelName,
+            sourceBookInitials: cacheEntry?.sourceBookInitials,
+            sourceBookKey: cacheEntry?.sourceBookKey
+        )
+    }
+
+    /**
+     Deletes one AI-generated My Documents page and its cascaded content/cache.
+
+     User-authored pages are refused so the Android action-menu gate stays
+     sourcePromptId-driven on iOS too.
+     */
+    @discardableResult
+    public func deleteAIPage(pageId: UUID) -> MyDocumentAIPageDeletionResult {
+        guard let page = page(pageId: pageId) else {
+            return .pageNotFound
+        }
+
+        guard let context = aiPageActionContext(page: page) else {
+            return .notAIPage
+        }
+
+        let now = Date()
+        if let document = page.document {
+            document.updatedAt = now
+        }
+
+        modelContext.delete(page)
+
+        do {
+            try modelContext.save()
+            return .deleted(context)
+        } catch {
+            modelContext.rollback()
+            return .saveFailed
+        }
     }
 
     /**

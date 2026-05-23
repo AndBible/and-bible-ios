@@ -6,7 +6,7 @@
     "androidInterfaceRelativePath": "app/bibleview-js/src/composables/android.ts",
     "androidMethodCount": 89,
     "iosInterfacePath": "bibleview-js/src/composables/android.ts",
-    "iosBundledMethodCount": 72
+    "iosBundledMethodCount": 74
   },
   "statusLegend": {
     "missing_needs_triage": "Android exposes the method and iOS does not. Treat as a parity gap until implemented or explicitly recorded as an iOS divergence.",
@@ -23,13 +23,6 @@
       "domain": "bookmarks",
       "status": "missing_needs_triage",
       "nextStep": "Implement whole-page bookmark behavior or record a product divergence."
-    },
-    {
-      "method": "deleteMyDocumentPage",
-      "androidSignature": "(pageId: string) => void",
-      "domain": "my_documents",
-      "status": "missing_deferred_with_issue",
-      "nextStep": "Deferred by issue #51. Requires the iOS My Documents model in #80 before AI page delete behavior is implemented in #83."
     },
     {
       "method": "goToNextChapter",
@@ -116,13 +109,6 @@
       "nextStep": "Deferred by issue #52. Requires the iOS reading-progress model/settings contract in #85 before chapter-read mutation bridge behavior is implemented in #86."
     },
     {
-      "method": "regenerateMyDocumentPage",
-      "androidSignature": "(pageId: string) => void",
-      "domain": "my_documents",
-      "status": "missing_deferred_with_issue",
-      "nextStep": "Deferred by issue #51. Requires the iOS My Documents model in #80 and shared AI support before regeneration behavior is implemented in #83."
-    },
-    {
       "method": "setReadingProgressSettings",
       "androidSignature": "(json: string) => void",
       "domain": "reading_progress",
@@ -167,6 +153,13 @@
       "nextStep": "Implemented by resolving the My Documents page through MyDocumentStore and copying the stored raw content to the platform pasteboard."
     },
     {
+      "method": "deleteMyDocumentPage",
+      "iosSignature": "(pageId: string) => void",
+      "domain": "my_documents",
+      "status": "implemented",
+      "nextStep": "Implemented by deleting only sourcePromptId-backed My Documents pages through MyDocumentStore, then refreshing or returning the active reader document."
+    },
+    {
       "method": "getMyDocumentPageRawContent",
       "iosSignature": "(callId: number, bookInitials: string, pageKey: string) => void",
       "domain": "my_documents",
@@ -179,6 +172,13 @@
       "domain": "my_documents",
       "status": "implemented",
       "nextStep": "Implemented by rebuilding the visible My Documents page from MyDocumentStore when the supplied document initials match the active page."
+    },
+    {
+      "method": "regenerateMyDocumentPage",
+      "iosSignature": "(pageId: string) => void",
+      "domain": "my_documents",
+      "status": "implemented",
+      "nextStep": "Implemented by validating the sourcePromptId-backed page and handing its action context to the native regeneration callback; the shared AI dialog remains tracked separately by #5/#89."
     },
     {
       "method": "saveMyDocumentPageContent",

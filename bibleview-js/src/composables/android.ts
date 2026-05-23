@@ -46,6 +46,8 @@ export type BibleJavascriptInterface = {
     getMyDocumentPageRawContent: (callId: number, bookInitials: string, pageKey: string) => void,
     saveMyDocumentPageContent: (bookInitials: string, pageId: string, content: string, title: string | null) => void,
     reloadMyDocumentPage: (bookInitials: string) => void,
+    regenerateMyDocumentPage: (pageId: string) => void,
+    deleteMyDocumentPage: (pageId: string) => void,
     saveBookmarkNote: (bookmarkId: IdType, note: Nullable<string>) => void,
     saveGenericBookmarkNote: (bookmarkId: IdType, note: Nullable<string>) => void,
     removeBookmark: (bookmarkId: IdType) => void,
@@ -497,6 +499,14 @@ export function useAndroid({bookmarks}: { bookmarks: Ref<BaseBookmark[]> }, conf
         android.reloadMyDocumentPage(bookInitials);
     }
 
+    function regenerateMyDocumentPage(pageId: string) {
+        android.regenerateMyDocumentPage(pageId);
+    }
+
+    function deleteMyDocumentPage(pageId: string) {
+        android.deleteMyDocumentPage(pageId);
+    }
+
     function updateOrderNumber(
         labelId: IdType,
         bookmarks: StudyPadBibleBookmarkItem[],
@@ -640,6 +650,8 @@ export function useAndroid({bookmarks}: { bookmarks: Ref<BaseBookmark[]> }, conf
         copyMyDocumentContent,
         saveMyDocumentPageContent,
         reloadMyDocumentPage,
+        regenerateMyDocumentPage,
+        deleteMyDocumentPage,
         setAsPrimaryLabel,
         toggleBookmarkLabel,
         reportModalState,

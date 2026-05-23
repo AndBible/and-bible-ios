@@ -3878,17 +3878,47 @@ final class AndBibleUITests: XCTestCase {
      *   - fails when the bookmark list cannot be dismissed or reopened
      */
     private func reopenBookmarkList(in app: XCUIApplication) {
-        let doneButton = app.buttons["bookmarkListDoneButton"].firstMatch
-        if doneButton.exists || doneButton.waitForExistence(timeout: 2) {
-            tapElementReliably(doneButton, timeout: 10)
-        } else {
-            dismissSheetByDraggingDown(requireElement("bookmarkListScreen", in: app, timeout: 10))
-        }
         XCTAssertTrue(
-            waitForBookmarkListDismissal(in: app, timeout: 20),
+            dismissBookmarkList(in: app, timeout: 20),
             "Expected bookmark list dismissal to return to the reader shell."
         )
         _ = openBookmarkList(in: app, timeout: 20)
+    }
+
+    /// Dismisses the bookmark-list sheet, retrying the real close affordance while search focus settles.
+    private func dismissBookmarkList(
+        in app: XCUIApplication,
+        timeout: TimeInterval,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            if waitForBookmarkListDismissal(in: app, timeout: min(0.5, max(0, deadline.timeIntervalSinceNow))) {
+                return true
+            }
+
+            let remaining = max(0.1, deadline.timeIntervalSinceNow)
+            let doneButton = app.buttons["bookmarkListDoneButton"].firstMatch
+            if tapElementIfPossible(doneButton, timeout: min(1, remaining)) {
+                continue
+            }
+
+            dismissKeyboardIfPresent(in: app)
+            let refreshedDoneButton = app.buttons["bookmarkListDoneButton"].firstMatch
+            if tapElementIfPossible(refreshedDoneButton, timeout: min(1, max(0.1, deadline.timeIntervalSinceNow))) {
+                continue
+            }
+
+            let sheet = unresolvedElement("bookmarkListScreen", in: app)
+            if elementHasUsableFrame(sheet) {
+                dismissSheetByDraggingDown(sheet, file: file, line: line)
+            } else {
+                RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+            }
+        } while Date() < deadline
+
+        return waitForBookmarkListDismissal(in: app, timeout: 0.5)
     }
 
     /// Waits until bookmark-list dismissal leaves the reader chrome available again.
@@ -3898,7 +3928,8 @@ final class AndBibleUITests: XCTestCase {
     ) -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
         repeat {
-            if waitForReaderShellReady(in: app, timeout: 0) {
+            if waitForReaderShellReady(in: app, timeout: 0),
+               !bookmarkListSurfaceIsVisible(in: app) {
                 return true
             }
             if readerDocumentHeaderStateValue(in: app) != nil,
@@ -3908,8 +3939,9 @@ final class AndBibleUITests: XCTestCase {
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         } while Date() < deadline
 
-        return waitForReaderShellReady(in: app, timeout: 0.5)
-            || (readerDocumentHeaderStateValue(in: app) != nil && !bookmarkListSurfaceIsVisible(in: app))
+        let bookmarkListHidden = !bookmarkListSurfaceIsVisible(in: app)
+        return (waitForReaderShellReady(in: app, timeout: 0.5) && bookmarkListHidden)
+            || (readerDocumentHeaderStateValue(in: app) != nil && bookmarkListHidden)
     }
 
     /// Returns whether the bookmark-list sheet still exposes one of its lightweight sentinels.
@@ -6066,6 +6098,23 @@ final class AndBibleUITests: XCTestCase {
         readerRenderedContentStateValue(in: app)?.contains(token) == true
     }
 
+    /// Polls the compact reader state export for one token without recording a failure.
+    private func waitForReaderRenderedContentStateIfPresent(
+        containing token: String,
+        in app: XCUIApplication,
+        timeout: TimeInterval
+    ) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            if readerRenderedContentStateContains(token, in: app) {
+                return true
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        } while Date() < deadline
+
+        return readerRenderedContentStateContains(token, in: app)
+    }
+
     /// Reads a boolean key from the compact reader state export.
     private func readerRenderedContentStateFlag(_ key: String, in app: XCUIApplication) -> Bool? {
         guard let stateValue = readerRenderedContentStateValue(in: app) else {
@@ -7603,6 +7652,23 @@ final class AndBibleUITests: XCTestCase {
         )
     }
 
+    /// Taps an element when it is currently actionable, falling back to its center coordinate.
+    @discardableResult
+    private func tapElementIfPossible(
+        _ element: XCUIElement,
+        timeout: TimeInterval = 1
+    ) -> Bool {
+        if waitForElementToBecomeHittable(element, timeout: timeout) {
+            element.tap()
+            return true
+        }
+        if elementHasUsableFrame(element) {
+            element.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+            return true
+        }
+        return false
+    }
+
     /**
      Returns whether one resolved element exposes a visible leading-edge tap point within a
      container viewport.
@@ -8559,6 +8625,9 @@ final class AndBibleUITests: XCTestCase {
         } while Date() < deadline
 
         let finalState = readerRenderedContentStateValue(in: app) ?? "nil"
+        if finalState.contains("myNotesEditing=false") {
+            return
+        }
         XCTFail(
             "Expected My Notes editor to expose a Close control or report myNotesEditing=false within \(timeout) seconds. Final state: '\(finalState)'.",
             file: file,
@@ -8627,29 +8696,6 @@ final class AndBibleUITests: XCTestCase {
     }
 
     /**
-     Waits for the reader's compact StudyPad state export to contain one token.
-     */
-    private func waitForStudyPadState(
-        containing token: String,
-        in app: XCUIApplication,
-        timeout: TimeInterval = 10,
-        file: StaticString = #filePath,
-        line: UInt = #line
-    ) {
-        waitForResolvedSemanticState(
-            named: "readerRenderedContentState",
-            timeout: timeout,
-            valueProvider: { readerRenderedContentStateValue(in: app) },
-            success: { $0.contains(token) },
-            failureDescription: { finalValue in
-                "Expected StudyPad state to contain '\(token)' within \(timeout) seconds. Final value: '\(finalValue)'."
-            },
-            file: file,
-            line: line
-        )
-    }
-
-    /**
      Returns from StudyPad when the document is still visible.
      */
     private func returnFromStudyPadIfVisible(
@@ -8660,36 +8706,20 @@ final class AndBibleUITests: XCTestCase {
     ) {
         let deadline = Date().addingTimeInterval(timeout)
         repeat {
-            let button = app.buttons["readerReturnFromStudyPadButton"].firstMatch
-            if waitForElementToBecomeHittable(
-                button,
-                timeout: min(2, max(0.2, deadline.timeIntervalSinceNow))
-            ) {
-                button.tap()
-                waitForStudyPadState(
-                    containing: "studyPadVisible=false",
-                    in: app,
-                    timeout: timeout,
-                    file: file,
-                    line: line
-                )
-                return
-            }
-            if elementHasUsableFrame(button) {
-                button.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
-                waitForStudyPadState(
-                    containing: "studyPadVisible=false",
-                    in: app,
-                    timeout: timeout,
-                    file: file,
-                    line: line
-                )
+            if readerRenderedContentStateContains("studyPadVisible=false", in: app) {
                 return
             }
 
-            let state = readerRenderedContentStateValue(in: app)
-            if state?.contains("studyPadVisible=false") == true {
-                return
+            let button = app.buttons["readerReturnFromStudyPadButton"].firstMatch
+            let remaining = max(0.1, deadline.timeIntervalSinceNow)
+            if tapElementIfPossible(button, timeout: min(2, remaining)) {
+                if waitForReaderRenderedContentStateIfPresent(
+                    containing: "studyPadVisible=false",
+                    in: app,
+                    timeout: min(2, max(0.1, deadline.timeIntervalSinceNow))
+                ) {
+                    return
+                }
             }
 
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
@@ -8762,6 +8792,9 @@ final class AndBibleUITests: XCTestCase {
         } while Date() < deadline
 
         let finalState = readerRenderedContentStateValue(in: app) ?? "nil"
+        if finalState.contains("studyPadEditing=false") {
+            return
+        }
         XCTFail(
             "Expected StudyPad editor to expose a Close control or report studyPadEditing=false within \(timeout) seconds. Final state: '\(finalState)'.",
             file: file,

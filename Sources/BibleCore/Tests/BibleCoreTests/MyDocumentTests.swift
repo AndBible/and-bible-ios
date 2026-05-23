@@ -242,6 +242,133 @@ final class MyDocumentStoreTests: XCTestCase {
         XCTAssertNotNil(page.pageContent)
     }
 
+    func testAIPageActionContextRequiresSourcePromptMetadata() throws {
+        let container = try makeMyDocumentModelContainer()
+        let context = ModelContext(container)
+        let store = MyDocumentStore(modelContext: context)
+        let aiPageId = try XCTUnwrap(UUID(uuidString: "99999999-9999-9999-9999-999999999999"))
+        let userPageId = try XCTUnwrap(UUID(uuidString: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"))
+        let promptId = try XCTUnwrap(UUID(uuidString: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"))
+        let document = MyDocument(name: "My Document", initials: "MYDOC")
+        let aiPage = MyDocumentPage(
+            id: aiPageId,
+            title: "AI Page",
+            pageKey: "ai",
+            sourcePromptId: promptId
+        )
+        let userPage = MyDocumentPage(
+            id: userPageId,
+            title: "User Page",
+            pageKey: "user"
+        )
+        let cacheEntry = AiPageCacheEntry(
+            pageId: aiPageId,
+            sourcePromptId: promptId,
+            sourceContext: #"{"osisRef":"Gen.1"}"#,
+            kjvOrdinalStart: 1,
+            kjvOrdinalEnd: 31,
+            contextHash: "hash",
+            usedWriteTools: true,
+            sourceModelName: "model",
+            sourceBookInitials: "KJV",
+            sourceBookKey: "Gen.1"
+        )
+
+        aiPage.document = document
+        userPage.document = document
+        cacheEntry.page = aiPage
+        aiPage.aiPageCacheEntries = [cacheEntry]
+        document.pages = [aiPage, userPage]
+        context.insert(document)
+        context.insert(aiPage)
+        context.insert(userPage)
+        context.insert(cacheEntry)
+        try context.save()
+
+        let contextPayload = try XCTUnwrap(store.aiPageActionContext(pageId: aiPageId))
+        XCTAssertEqual(contextPayload.pageId, aiPageId)
+        XCTAssertEqual(contextPayload.bookInitials, "MYDOC")
+        XCTAssertEqual(contextPayload.pageKey, "ai")
+        XCTAssertEqual(contextPayload.pageTitle, "AI Page")
+        XCTAssertEqual(contextPayload.sourcePromptId, promptId)
+        XCTAssertEqual(contextPayload.sourceContext, #"{"osisRef":"Gen.1"}"#)
+        XCTAssertEqual(contextPayload.kjvOrdinalStart, 1)
+        XCTAssertEqual(contextPayload.kjvOrdinalEnd, 31)
+        XCTAssertEqual(contextPayload.contextHash, "hash")
+        XCTAssertTrue(contextPayload.usedWriteTools)
+        XCTAssertEqual(contextPayload.sourceModelName, "model")
+        XCTAssertEqual(contextPayload.sourceBookInitials, "KJV")
+        XCTAssertEqual(contextPayload.sourceBookKey, "Gen.1")
+        XCTAssertNil(store.aiPageActionContext(pageId: userPageId))
+    }
+
+    func testDeleteAIPageRemovesContentCacheAndRefusesUserPages() throws {
+        let container = try makeMyDocumentModelContainer()
+        let context = ModelContext(container)
+        let store = MyDocumentStore(modelContext: context)
+        let aiPageId = try XCTUnwrap(UUID(uuidString: "cccccccc-cccc-cccc-cccc-cccccccccccc"))
+        let userPageId = try XCTUnwrap(UUID(uuidString: "dddddddd-dddd-dddd-dddd-dddddddddddd"))
+        let missingPageId = try XCTUnwrap(UUID(uuidString: "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee"))
+        let promptId = try XCTUnwrap(UUID(uuidString: "ffffffff-ffff-ffff-ffff-ffffffffffff"))
+        let document = MyDocument(name: "My Document", initials: "MYDOC")
+        let aiPage = MyDocumentPage(
+            id: aiPageId,
+            title: "AI Page",
+            pageKey: "ai",
+            sourcePromptId: promptId
+        )
+        let aiContent = MyDocumentPageContent(pageId: aiPageId, content: "AI content")
+        let cacheEntry = AiPageCacheEntry(pageId: aiPageId, sourcePromptId: promptId)
+        let userPage = MyDocumentPage(
+            id: userPageId,
+            title: "User Page",
+            pageKey: "user"
+        )
+        let userContent = MyDocumentPageContent(pageId: userPageId, content: "User content")
+
+        aiPage.pageContent = aiContent
+        aiPage.document = document
+        cacheEntry.page = aiPage
+        aiPage.aiPageCacheEntries = [cacheEntry]
+        userPage.pageContent = userContent
+        userPage.document = document
+        document.pages = [aiPage, userPage]
+        context.insert(document)
+        context.insert(aiPage)
+        context.insert(aiContent)
+        context.insert(cacheEntry)
+        context.insert(userPage)
+        context.insert(userContent)
+        try context.save()
+
+        XCTAssertEqual(store.deleteAIPage(pageId: userPageId), .notAIPage)
+        XCTAssertEqual(store.deleteAIPage(pageId: missingPageId), .pageNotFound)
+        XCTAssertNotNil(store.rawContentPayload(bookInitials: "MYDOC", pageKey: "user"))
+
+        switch store.deleteAIPage(pageId: aiPageId) {
+        case .deleted(let actionContext):
+            XCTAssertEqual(actionContext.pageId, aiPageId)
+            XCTAssertEqual(actionContext.sourcePromptId, promptId)
+            XCTAssertEqual(actionContext.bookInitials, "MYDOC")
+            XCTAssertEqual(actionContext.pageKey, "ai")
+        default:
+            XCTFail("Expected AI page deletion to succeed")
+        }
+
+        XCTAssertNil(store.page(pageId: aiPageId))
+        XCTAssertNil(store.rawContentPayload(bookInitials: "MYDOC", pageKey: "ai"))
+        XCTAssertNotNil(store.rawContentPayload(bookInitials: "MYDOC", pageKey: "user"))
+
+        let deletedContentDescriptor = FetchDescriptor<MyDocumentPageContent>(
+            predicate: #Predicate { $0.pageId == aiPageId }
+        )
+        let deletedCacheDescriptor = FetchDescriptor<AiPageCacheEntry>(
+            predicate: #Predicate { $0.pageId == aiPageId }
+        )
+        XCTAssertTrue(try context.fetch(deletedContentDescriptor).isEmpty)
+        XCTAssertTrue(try context.fetch(deletedCacheDescriptor).isEmpty)
+    }
+
     private func makeMyDocumentModelContainer() throws -> ModelContainer {
         let schema = Schema([
             MyDocument.self,
