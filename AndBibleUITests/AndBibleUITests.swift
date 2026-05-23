@@ -8559,6 +8559,9 @@ final class AndBibleUITests: XCTestCase {
         } while Date() < deadline
 
         let finalState = readerRenderedContentStateValue(in: app) ?? "nil"
+        if finalState.contains("myNotesEditing=false") {
+            return
+        }
         XCTFail(
             "Expected My Notes editor to expose a Close control or report myNotesEditing=false within \(timeout) seconds. Final state: '\(finalState)'.",
             file: file,
@@ -8762,6 +8765,9 @@ final class AndBibleUITests: XCTestCase {
         } while Date() < deadline
 
         let finalState = readerRenderedContentStateValue(in: app) ?? "nil"
+        if finalState.contains("studyPadEditing=false") {
+            return
+        }
         XCTFail(
             "Expected StudyPad editor to expose a Close control or report studyPadEditing=false within \(timeout) seconds. Final state: '\(finalState)'.",
             file: file,
