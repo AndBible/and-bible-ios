@@ -13,6 +13,9 @@ import SwiftData
 public enum RemoteSyncSynchronizationError: Error, Equatable {
     /// A remotely adopted sync folder did not contain the required Android initial-backup archive.
     case missingInitialBackup(RemoteSyncCategory)
+
+    /// The requested category does not yet support this synchronization phase.
+    case unsupportedCategory(RemoteSyncCategory)
 }
 
 /**
@@ -676,6 +679,8 @@ public final class RemoteSyncSynchronizationService {
                     settingsStore: settingsStore
                 )
             )
+        case .myDocuments:
+            throw RemoteSyncSynchronizationError.unsupportedCategory(category)
         }
     }
 
@@ -729,6 +734,8 @@ public final class RemoteSyncSynchronizationService {
             ) {
                 return .workspaces(report)
             }
+            return nil
+        case .myDocuments:
             return nil
         }
     }

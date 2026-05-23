@@ -1258,6 +1258,8 @@ public struct SyncSettingsView: View {
             return String(localized: "help_workspaces_title")
         case .readingPlans:
             return String(localized: "reading_plans_plural")
+        case .myDocuments:
+            return String(localized: "my_documents")
         }
     }
 
@@ -1277,6 +1279,8 @@ public struct SyncSettingsView: View {
             return String(localized: "workspaces_contents")
         case .readingPlans:
             return String(localized: "reading_plans_content")
+        case .myDocuments:
+            return String(localized: "my_documents_contents")
         }
     }
 

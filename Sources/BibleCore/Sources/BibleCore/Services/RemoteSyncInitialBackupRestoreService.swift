@@ -18,6 +18,9 @@ public enum RemoteSyncInitialBackupRestoreReport: Sendable, Equatable {
 
     /// Successful restore report for the workspace sync category.
     case workspaces(RemoteSyncWorkspaceRestoreReport)
+
+    /// Successful restore report for the My Documents sync category.
+    case myDocuments(RemoteSyncMyDocumentRestoreReport)
 }
 
 /**
@@ -32,6 +35,7 @@ through one generic SQLite importer.
  - `RemoteSyncBookmarkRestoreService` restores staged Android `bookmarks.sqlite3` backups
  - `RemoteSyncReadingPlanRestoreService` restores staged Android `readingplans.sqlite3` backups
  - `RemoteSyncWorkspaceRestoreService` restores staged Android `workspaces.sqlite3` backups
+ - `RemoteSyncMyDocumentRestoreService` restores staged Android `mydocuments.sqlite3` backups
  - `RemoteSyncInitialBackupMetadataRestoreService` preserves staged Android `LogEntry` and
    `SyncStatus` rows needed for later patch replay
  - `RemoteSyncBookmarkSnapshotService` refreshes outbound bookmark fingerprint baselines after
@@ -62,6 +66,7 @@ public final class RemoteSyncInitialBackupRestoreService {
     private let bookmarkRestoreService: RemoteSyncBookmarkRestoreService
     private let readingPlanRestoreService: RemoteSyncReadingPlanRestoreService
     private let workspaceRestoreService: RemoteSyncWorkspaceRestoreService
+    private let myDocumentRestoreService: RemoteSyncMyDocumentRestoreService
     private let metadataRestoreService: RemoteSyncInitialBackupMetadataRestoreService
     private let bookmarkSnapshotService: RemoteSyncBookmarkSnapshotService
     private let workspaceSnapshotService: RemoteSyncWorkspaceSnapshotService
@@ -74,6 +79,7 @@ public final class RemoteSyncInitialBackupRestoreService {
        - bookmarkRestoreService: Restore service used for the bookmark category.
        - readingPlanRestoreService: Restore service used for the reading-plan category.
        - workspaceRestoreService: Restore service used for the workspace category.
+       - myDocumentRestoreService: Restore service used for the My Documents category.
        - metadataRestoreService: Restore service used to preserve Android `LogEntry` and `SyncStatus`
          rows after content restore succeeds.
        - bookmarkSnapshotService: Snapshot service used to refresh outbound bookmark fingerprint
@@ -89,6 +95,7 @@ public final class RemoteSyncInitialBackupRestoreService {
         bookmarkRestoreService: RemoteSyncBookmarkRestoreService = RemoteSyncBookmarkRestoreService(),
         readingPlanRestoreService: RemoteSyncReadingPlanRestoreService = RemoteSyncReadingPlanRestoreService(),
         workspaceRestoreService: RemoteSyncWorkspaceRestoreService = RemoteSyncWorkspaceRestoreService(),
+        myDocumentRestoreService: RemoteSyncMyDocumentRestoreService = RemoteSyncMyDocumentRestoreService(),
         metadataRestoreService: RemoteSyncInitialBackupMetadataRestoreService = RemoteSyncInitialBackupMetadataRestoreService(),
         bookmarkSnapshotService: RemoteSyncBookmarkSnapshotService = RemoteSyncBookmarkSnapshotService(),
         workspaceSnapshotService: RemoteSyncWorkspaceSnapshotService = RemoteSyncWorkspaceSnapshotService(),
@@ -97,6 +104,7 @@ public final class RemoteSyncInitialBackupRestoreService {
         self.bookmarkRestoreService = bookmarkRestoreService
         self.readingPlanRestoreService = readingPlanRestoreService
         self.workspaceRestoreService = workspaceRestoreService
+        self.myDocumentRestoreService = myDocumentRestoreService
         self.metadataRestoreService = metadataRestoreService
         self.bookmarkSnapshotService = bookmarkSnapshotService
         self.workspaceSnapshotService = workspaceSnapshotService
@@ -156,6 +164,13 @@ public final class RemoteSyncInitialBackupRestoreService {
                 settingsStore: settingsStore
             )
             report = .workspaces(workspaceReport)
+        case .myDocuments:
+            let snapshot = try myDocumentRestoreService.readSnapshot(from: stagedBackup.databaseFileURL)
+            let myDocumentReport = try myDocumentRestoreService.replaceLocalMyDocuments(
+                from: snapshot,
+                modelContext: modelContext
+            )
+            report = .myDocuments(myDocumentReport)
         }
 
         _ = metadataRestoreService.replaceLocalMetadata(

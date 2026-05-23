@@ -661,6 +661,8 @@ struct AndBibleApp: App {
             return String(localized: "workspaces_contents")
         case .readingPlans:
             return String(localized: "reading_plans_content")
+        case .myDocuments:
+            return String(localized: "my_documents_contents")
         }
     }
 

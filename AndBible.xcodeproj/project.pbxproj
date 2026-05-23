@@ -15,6 +15,7 @@
 		605562C8D06E0B4B1A1C232B /* AndBibleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC344294A2096586A9E7F9C1 /* AndBibleTests.swift */; };
 		A1B2C3D4E5F60718293A4B5C /* AndBibleUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B5E /* AndBibleUITests.swift */; };
 		8A7E540F7B4E4D0C9E1A2B3C /* WorkspaceSyncRestoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B8F65108C5F5E1DAF2B3C4D /* WorkspaceSyncRestoreTests.swift */; };
+		D10500000000000000000002 /* RemoteSyncMyDocumentRestoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D10500000000000000000001 /* RemoteSyncMyDocumentRestoreTests.swift */; };
 		64688F48FF7396937F81D0B5 /* SwordSetup.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1CA144AB77AEE518F1465DCC /* SwordSetup.swift */; };
 		793CB31DA9E0B8F6F4AC7677 /* AndBibleApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB1FB2406B7E9DD316E296F7 /* AndBibleApp.swift */; };
 		7F60442468E70DF184FADD66 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0ABFA8AEBF4A6CA89CDD4AF5 /* ContentView.swift */; };
@@ -52,6 +53,7 @@
 		A1B2C3D4E5F60718293A4B5E /* AndBibleUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AndBibleUITests.swift; sourceTree = "<group>"; };
 		8174AF1F3D15BAFB4EB66A1E /* AndBible.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = AndBible.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		9B8F65108C5F5E1DAF2B3C4D /* WorkspaceSyncRestoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceSyncRestoreTests.swift; sourceTree = "<group>"; };
+		D10500000000000000000001 /* RemoteSyncMyDocumentRestoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteSyncMyDocumentRestoreTests.swift; sourceTree = "<group>"; };
 		AB1FB2406B7E9DD316E296F7 /* AndBibleApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AndBibleApp.swift; sourceTree = "<group>"; };
 		DC344294A2096586A9E7F9C1 /* AndBibleTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AndBibleTests.swift; sourceTree = "<group>"; };
 		CA1C01A1D3E74B1F00A1C001 /* CalculatorIcon.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = CalculatorIcon.png; sourceTree = "<group>"; };
@@ -189,6 +191,7 @@
 			children = (
 				DC344294A2096586A9E7F9C1 /* AndBibleTests.swift */,
 				9B8F65108C5F5E1DAF2B3C4D /* WorkspaceSyncRestoreTests.swift */,
+				D10500000000000000000001 /* RemoteSyncMyDocumentRestoreTests.swift */,
 			);
 			path = AndBibleTests;
 			sourceTree = "<group>";
@@ -393,6 +396,7 @@
 			files = (
 				605562C8D06E0B4B1A1C232B /* AndBibleTests.swift in Sources */,
 				8A7E540F7B4E4D0C9E1A2B3C /* WorkspaceSyncRestoreTests.swift in Sources */,
+				D10500000000000000000002 /* RemoteSyncMyDocumentRestoreTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

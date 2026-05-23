@@ -18,6 +18,9 @@ public enum RemoteSyncInitialBackupUploadError: Error, Equatable {
 
     /// The temporary SQLite database could not be opened or written safely.
     case invalidSQLiteDatabase
+
+    /// The requested category does not yet have an initial-backup export pipeline.
+    case unsupportedCategory(RemoteSyncCategory)
 }
 
 /**
@@ -248,6 +251,8 @@ public final class RemoteSyncInitialBackupUploadService {
                 settingsStore: settingsStore,
                 schemaVersion: schemaVersion
             )
+        case .myDocuments:
+            throw RemoteSyncInitialBackupUploadError.unsupportedCategory(category)
         }
     }
 
@@ -317,6 +322,8 @@ public final class RemoteSyncInitialBackupUploadService {
                 modelContext: modelContext,
                 settingsStore: settingsStore
             )
+        case .myDocuments:
+            break
         }
     }
 
