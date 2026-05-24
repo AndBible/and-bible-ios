@@ -1,5 +1,6 @@
 // RemoteSyncMyDocumentRestoreTests.swift -- Android My Documents initial-backup restore tests
 
+import CLibSword
 import XCTest
 import SQLite3
 import SwiftData
@@ -269,6 +270,415 @@ final class RemoteSyncMyDocumentRestoreTests: XCTestCase {
             RemoteSyncPatchStatusStore(settingsStore: settingsStore).statuses(for: .myDocuments),
             [patchStatus]
         )
+
+        let fingerprintStore = RemoteSyncRowFingerprintStore(settingsStore: settingsStore)
+        XCTAssertNotNil(
+            fingerprintStore.fingerprint(
+                for: .myDocuments,
+                tableName: "MyDocument",
+                entityID1: .blob(uuidBlob(documentID)),
+                entityID2: .text("")
+            )
+        )
+        XCTAssertNotNil(
+            fingerprintStore.fingerprint(
+                for: .myDocuments,
+                tableName: "MyDocumentPage",
+                entityID1: .blob(uuidBlob(pageID)),
+                entityID2: .text("")
+            )
+        )
+        XCTAssertNotNil(
+            fingerprintStore.fingerprint(
+                for: .myDocuments,
+                tableName: "MyDocumentPageContent",
+                entityID1: .blob(uuidBlob(pageID)),
+                entityID2: .text("")
+            )
+        )
+        XCTAssertNotNil(
+            fingerprintStore.fingerprint(
+                for: .myDocuments,
+                tableName: "AiPageCacheEntry",
+                entityID1: .blob(uuidBlob(pageID)),
+                entityID2: .text("")
+            )
+        )
+    }
+
+    func testRemoteSyncMyDocumentSnapshotFiltersOrphansAndRefreshesBaseline() throws {
+        let container = try makeModelContainer()
+        let modelContext = ModelContext(container)
+        let settingsStore = SettingsStore(modelContext: modelContext)
+        let documentID = UUID(uuidString: "f1000000-0000-0000-0000-000000000001")!
+        let validPageID = UUID(uuidString: "f1000000-0000-0000-0000-000000000011")!
+        let orphanPageID = UUID(uuidString: "f1000000-0000-0000-0000-000000000012")!
+        let missingPageID = UUID(uuidString: "f1000000-0000-0000-0000-000000000013")!
+        let promptID = UUID(uuidString: "f1000000-0000-0000-0000-000000000021")!
+        let duplicatePromptID = UUID(uuidString: "f1000000-0000-0000-0000-000000000022")!
+        let selectedCacheEntryID = UUID(uuidString: "f1000000-0000-0000-0000-000000000031")!
+        let duplicateCacheEntryID = UUID(uuidString: "f1000000-0000-0000-0000-000000000032")!
+        let staleDocumentID = UUID(uuidString: "f1000000-0000-0000-0000-000000000099")!
+
+        let document = MyDocument(
+            id: documentID,
+            name: "Snapshot",
+            initials: "SNAP"
+        )
+        let validPage = MyDocumentPage(
+            id: validPageID,
+            title: "Valid",
+            pageKey: "valid"
+        )
+        let validContent = MyDocumentPageContent(pageId: validPageID, content: "Valid content")
+        let validCacheEntry = AiPageCacheEntry(
+            id: selectedCacheEntryID,
+            pageId: validPageID,
+            sourcePromptId: promptID,
+            contextHash: "valid"
+        )
+        let duplicateCacheEntry = AiPageCacheEntry(
+            id: duplicateCacheEntryID,
+            pageId: validPageID,
+            sourcePromptId: duplicatePromptID,
+            contextHash: "duplicate"
+        )
+        document.pages = [validPage]
+        validPage.document = document
+        validPage.pageContent = validContent
+        validContent.page = validPage
+        validPage.aiPageCacheEntries = [validCacheEntry, duplicateCacheEntry]
+        validCacheEntry.page = validPage
+        duplicateCacheEntry.page = validPage
+
+        let orphanPage = MyDocumentPage(
+            id: orphanPageID,
+            title: "Orphan",
+            pageKey: "orphan"
+        )
+        let orphanContent = MyDocumentPageContent(pageId: orphanPageID, content: "Orphan content")
+        let orphanCacheEntry = AiPageCacheEntry(
+            pageId: orphanPageID,
+            sourcePromptId: promptID,
+            contextHash: "orphan"
+        )
+        orphanPage.pageContent = orphanContent
+        orphanContent.page = orphanPage
+        orphanPage.aiPageCacheEntries = [orphanCacheEntry]
+        orphanCacheEntry.page = orphanPage
+
+        let missingPageContent = MyDocumentPageContent(pageId: missingPageID, content: "Missing content")
+        let missingPageCacheEntry = AiPageCacheEntry(
+            pageId: missingPageID,
+            sourcePromptId: promptID,
+            contextHash: "missing"
+        )
+
+        modelContext.insert(document)
+        modelContext.insert(validPage)
+        modelContext.insert(validContent)
+        modelContext.insert(validCacheEntry)
+        modelContext.insert(duplicateCacheEntry)
+        modelContext.insert(orphanPage)
+        modelContext.insert(orphanContent)
+        modelContext.insert(orphanCacheEntry)
+        modelContext.insert(missingPageContent)
+        modelContext.insert(missingPageCacheEntry)
+        try modelContext.save()
+
+        let service = RemoteSyncMyDocumentSnapshotService()
+        let snapshot = service.snapshotCurrentState(
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+
+        XCTAssertEqual(Set(snapshot.documentRowsByKey.values.map(\.id)), [documentID])
+        XCTAssertEqual(Set(snapshot.pageRowsByKey.values.map(\.id)), [validPageID])
+        XCTAssertEqual(Set(snapshot.pageContentRowsByKey.values.map(\.pageId)), [validPageID])
+        XCTAssertEqual(Set(snapshot.aiPageCacheEntryRowsByKey.values.map(\.pageId)), [validPageID])
+        XCTAssertEqual(snapshot.aiPageCacheEntryRowsByKey.values.first?.contextHash, "valid")
+        XCTAssertEqual(snapshot.fingerprintsByKey.count, 4)
+
+        let fingerprintStore = RemoteSyncRowFingerprintStore(settingsStore: settingsStore)
+        fingerprintStore.setFingerprint(
+            "stale",
+            for: .myDocuments,
+            tableName: "MyDocument",
+            entityID1: .blob(uuidBlob(staleDocumentID)),
+            entityID2: .text("")
+        )
+
+        service.refreshBaselineFingerprints(
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+
+        XCTAssertNil(
+            fingerprintStore.fingerprint(
+                for: .myDocuments,
+                tableName: "MyDocument",
+                entityID1: .blob(uuidBlob(staleDocumentID)),
+                entityID2: .text("")
+            )
+        )
+        XCTAssertNotNil(
+            fingerprintStore.fingerprint(
+                for: .myDocuments,
+                tableName: "MyDocument",
+                entityID1: .blob(uuidBlob(documentID)),
+                entityID2: .text("")
+            )
+        )
+        XCTAssertNotNil(
+            fingerprintStore.fingerprint(
+                for: .myDocuments,
+                tableName: "MyDocumentPage",
+                entityID1: .blob(uuidBlob(validPageID)),
+                entityID2: .text("")
+            )
+        )
+        XCTAssertNotNil(
+            fingerprintStore.fingerprint(
+                for: .myDocuments,
+                tableName: "MyDocumentPageContent",
+                entityID1: .blob(uuidBlob(validPageID)),
+                entityID2: .text("")
+            )
+        )
+        XCTAssertNotNil(
+            fingerprintStore.fingerprint(
+                for: .myDocuments,
+                tableName: "AiPageCacheEntry",
+                entityID1: .blob(uuidBlob(validPageID)),
+                entityID2: .text("")
+            )
+        )
+    }
+
+    func testRemoteSyncInitialBackupUploadWritesMyDocumentDatabaseAndResetsBaseline() async throws {
+        let container = try makeModelContainer()
+        let modelContext = ModelContext(container)
+        let settingsStore = SettingsStore(modelContext: modelContext)
+        let documentID = UUID(uuidString: "e1000000-0000-0000-0000-000000000001")!
+        let pageID = UUID(uuidString: "e1000000-0000-0000-0000-000000000011")!
+        let documentPromptID = UUID(uuidString: "e1000000-0000-0000-0000-000000000021")!
+        let pagePromptID = UUID(uuidString: "e1000000-0000-0000-0000-000000000022")!
+        let createdAt = Date(timeIntervalSince1970: 1_735_689_600)
+        let updatedAt = Date(timeIntervalSince1970: 1_735_689_660)
+        let document = MyDocument(
+            id: documentID,
+            name: "iOS Document",
+            documentDescription: "Exported from iOS",
+            initials: "IOSDOC",
+            orderNumber: 4,
+            createdAt: createdAt,
+            updatedAt: updatedAt,
+            sourcePromptId: documentPromptID
+        )
+        let page = MyDocumentPage(
+            id: pageID,
+            title: "Intro",
+            pageKey: "intro",
+            contentType: .html,
+            orderNumber: 2,
+            createdAt: createdAt,
+            updatedAt: updatedAt,
+            sourcePromptId: pagePromptID,
+            languageCode: "en"
+        )
+        let content = MyDocumentPageContent(pageId: pageID, content: "<p>Exported</p>")
+        let cacheEntry = AiPageCacheEntry(
+            pageId: pageID,
+            sourcePromptId: pagePromptID,
+            sourceContext: #"{"osisRef":"John.3.16"}"#,
+            kjvOrdinalStart: 26_136,
+            kjvOrdinalEnd: 26_136,
+            contextHash: "ios-context",
+            usedWriteTools: true,
+            sourceModelName: "gpt-test",
+            sourceBookInitials: "KJV",
+            sourceBookKey: "John.3.16"
+        )
+        document.pages = [page]
+        page.document = document
+        page.pageContent = content
+        content.page = page
+        page.aiPageCacheEntries = [cacheEntry]
+        cacheEntry.page = page
+        modelContext.insert(document)
+        modelContext.insert(page)
+        modelContext.insert(content)
+        modelContext.insert(cacheEntry)
+        try modelContext.save()
+
+        RemoteSyncLogEntryStore(settingsStore: settingsStore).addEntry(
+            RemoteSyncLogEntry(
+                tableName: "MyDocument",
+                entityID1: .blob(uuidBlob(documentID)),
+                entityID2: .text(""),
+                type: .upsert,
+                lastUpdated: 1_735_689_600_000,
+                sourceDevice: "android"
+            ),
+            for: .myDocuments
+        )
+
+        let syncFolderID = "/org.andbible.ios-sync-mydocuments"
+        let adapter = MyDocumentMockRemoteSyncAdapter()
+        await adapter.enqueueUploadResult(
+            RemoteSyncFile(
+                id: "\(syncFolderID)/initial.sqlite3.gz",
+                name: "initial.sqlite3.gz",
+                size: 0,
+                timestamp: 2_000,
+                parentID: syncFolderID,
+                mimeType: NextCloudSyncAdapter.gzipMimeType
+            )
+        )
+        let service = RemoteSyncInitialBackupUploadService(
+            adapter: adapter,
+            deviceIdentifier: "ios-device",
+            nowProvider: { 1_900 }
+        )
+
+        let report = try await service.uploadInitialBackup(
+            for: .myDocuments,
+            bootstrapState: RemoteSyncBootstrapState(syncFolderID: syncFolderID),
+            modelContext: modelContext,
+            settingsStore: settingsStore,
+            schemaVersion: RemoteSyncMyDocumentRestoreService.supportedAndroidSchemaVersion
+        )
+
+        XCTAssertEqual(report.category, .myDocuments)
+        XCTAssertTrue(RemoteSyncLogEntryStore(settingsStore: settingsStore).entries(for: .myDocuments).isEmpty)
+        XCTAssertEqual(
+            RemoteSyncPatchStatusStore(settingsStore: settingsStore).statuses(for: .myDocuments),
+            [
+                RemoteSyncPatchStatus(
+                    sourceDevice: "ios-device",
+                    patchNumber: 0,
+                    sizeBytes: report.uploadedFile.size,
+                    appliedDate: 2_000
+                )
+            ]
+        )
+        XCTAssertEqual(RemoteSyncStateStore(settingsStore: settingsStore).progressState(for: .myDocuments).lastPatchWritten, 1_900)
+        let fingerprintStore = RemoteSyncRowFingerprintStore(settingsStore: settingsStore)
+        XCTAssertNotNil(
+            fingerprintStore.fingerprint(
+                for: .myDocuments,
+                tableName: "MyDocument",
+                entityID1: .blob(uuidBlob(documentID)),
+                entityID2: .text("")
+            )
+        )
+        XCTAssertNotNil(
+            fingerprintStore.fingerprint(
+                for: .myDocuments,
+                tableName: "MyDocumentPage",
+                entityID1: .blob(uuidBlob(pageID)),
+                entityID2: .text("")
+            )
+        )
+        XCTAssertNotNil(
+            fingerprintStore.fingerprint(
+                for: .myDocuments,
+                tableName: "MyDocumentPageContent",
+                entityID1: .blob(uuidBlob(pageID)),
+                entityID2: .text("")
+            )
+        )
+        XCTAssertNotNil(
+            fingerprintStore.fingerprint(
+                for: .myDocuments,
+                tableName: "AiPageCacheEntry",
+                entityID1: .blob(uuidBlob(pageID)),
+                entityID2: .text("")
+            )
+        )
+
+        let uploadedFiles = await adapter.uploadedFilesSnapshot()
+        let uploadedFile = try XCTUnwrap(uploadedFiles.first)
+        XCTAssertEqual(uploadedFile.name, "initial.sqlite3.gz")
+        XCTAssertEqual(uploadedFile.parentID, syncFolderID)
+        XCTAssertEqual(uploadedFile.contentType, NextCloudSyncAdapter.gzipMimeType)
+        let databaseURL = try writeUploadedMyDocumentDatabase(uploadedFile.data)
+        defer { try? FileManager.default.removeItem(at: databaseURL) }
+
+        XCTAssertEqual(try sqliteUserVersion(at: databaseURL), RemoteSyncMyDocumentRestoreService.supportedAndroidSchemaVersion)
+        XCTAssertEqual(try sqliteRoomIdentityHash(at: databaseURL), "3f0946602099d896c8d47129233c1794")
+        XCTAssertNil(try sqliteColumnDefault(tableName: "LogEntry", columnName: "entityId2", databaseURL: databaseURL))
+        let snapshot = try RemoteSyncMyDocumentRestoreService().readSnapshot(from: databaseURL)
+        XCTAssertEqual(snapshot.documents.count, 1)
+        XCTAssertEqual(snapshot.documents[0].id, documentID)
+        XCTAssertEqual(snapshot.documents[0].documentDescription, "Exported from iOS")
+        XCTAssertEqual(snapshot.pages.count, 1)
+        XCTAssertEqual(snapshot.pages[0].contentType, .html)
+        XCTAssertEqual(snapshot.pageContents, [.init(pageId: pageID, content: "<p>Exported</p>")])
+        XCTAssertEqual(snapshot.aiPageCacheEntries.count, 1)
+        XCTAssertEqual(snapshot.aiPageCacheEntries[0].sourceBookKey, "John.3.16")
+
+        let secondContainer = try makeModelContainer()
+        let secondModelContext = ModelContext(secondContainer)
+        let restoreReport = try RemoteSyncMyDocumentRestoreService().replaceLocalMyDocuments(
+            from: snapshot,
+            modelContext: secondModelContext
+        )
+        XCTAssertEqual(restoreReport.restoredDocumentCount, 1)
+        XCTAssertEqual(
+            MyDocumentStore(modelContext: secondModelContext).rawContentPayload(bookInitials: "IOSDOC", pageKey: "intro")?.content,
+            "<p>Exported</p>"
+        )
+    }
+
+    func testRemoteSyncInitialBackupUploadWritesDeterministicEmptyMyDocumentDatabase() async throws {
+        let container = try makeModelContainer()
+        let modelContext = ModelContext(container)
+        let settingsStore = SettingsStore(modelContext: modelContext)
+        let syncFolderID = "/org.andbible.ios-sync-mydocuments-empty"
+        let adapter = MyDocumentMockRemoteSyncAdapter()
+        await adapter.enqueueUploadResult(
+            RemoteSyncFile(
+                id: "\(syncFolderID)/initial.sqlite3.gz",
+                name: "initial.sqlite3.gz",
+                size: 0,
+                timestamp: 2_500,
+                parentID: syncFolderID,
+                mimeType: NextCloudSyncAdapter.gzipMimeType
+            )
+        )
+        let service = RemoteSyncInitialBackupUploadService(
+            adapter: adapter,
+            deviceIdentifier: "ios-device",
+            nowProvider: { 2_400 }
+        )
+
+        _ = try await service.uploadInitialBackup(
+            for: .myDocuments,
+            bootstrapState: RemoteSyncBootstrapState(syncFolderID: syncFolderID),
+            modelContext: modelContext,
+            settingsStore: settingsStore,
+            schemaVersion: RemoteSyncMyDocumentRestoreService.supportedAndroidSchemaVersion
+        )
+
+        let uploadedFiles = await adapter.uploadedFilesSnapshot()
+        let uploadedFile = try XCTUnwrap(uploadedFiles.first)
+        let databaseURL = try writeUploadedMyDocumentDatabase(uploadedFile.data)
+        defer { try? FileManager.default.removeItem(at: databaseURL) }
+        let snapshot = try RemoteSyncMyDocumentRestoreService().readSnapshot(from: databaseURL)
+
+        XCTAssertTrue(snapshot.documents.isEmpty)
+        XCTAssertTrue(snapshot.pages.isEmpty)
+        XCTAssertTrue(snapshot.pageContents.isEmpty)
+        XCTAssertTrue(snapshot.aiPageCacheEntries.isEmpty)
+        XCTAssertEqual(try sqliteCount(tableName: "MyDocument", databaseURL: databaseURL), 0)
+        XCTAssertEqual(try sqliteCount(tableName: "AiPageCacheEntry", databaseURL: databaseURL), 0)
+        XCTAssertTrue(
+            settingsStore.entries(
+                withPrefix: RemoteSyncRowFingerprintStore(settingsStore: settingsStore).prefix(for: .myDocuments)
+            ).isEmpty
+        )
+        XCTAssertEqual(RemoteSyncStateStore(settingsStore: settingsStore).progressState(for: .myDocuments).lastPatchWritten, 2_400)
     }
 
     private func makeModelContainer() throws -> ModelContainer {
@@ -599,4 +1009,200 @@ final class RemoteSyncMyDocumentRestoreTests: XCTestCase {
         var uuid = value.uuid
         return withUnsafeBytes(of: &uuid) { Data($0) }
     }
+}
+
+private actor MyDocumentMockRemoteSyncAdapter: RemoteSyncAdapting {
+    private var uploadResults: [RemoteSyncFile] = []
+    private var uploadedFiles: [MyDocumentMockUploadedFile] = []
+
+    func enqueueUploadResult(_ result: RemoteSyncFile) {
+        uploadResults.append(result)
+    }
+
+    func uploadedFilesSnapshot() -> [MyDocumentMockUploadedFile] {
+        uploadedFiles
+    }
+
+    func listFiles(
+        parentIDs: [String]?,
+        name: String?,
+        mimeType: String?,
+        modifiedAtLeast: Date?
+    ) async throws -> [RemoteSyncFile] {
+        []
+    }
+
+    func createNewFolder(name: String, parentID: String?) async throws -> RemoteSyncFile {
+        RemoteSyncFile(
+            id: [parentID, name].compactMap { $0 }.joined(separator: "/"),
+            name: name,
+            size: 0,
+            timestamp: 0,
+            parentID: parentID ?? "/",
+            mimeType: NextCloudSyncAdapter.folderMimeType
+        )
+    }
+
+    func download(id: String) async throws -> Data {
+        Data()
+    }
+
+    func upload(
+        name: String,
+        fileURL: URL,
+        parentID: String,
+        contentType: String
+    ) async throws -> RemoteSyncFile {
+        let data = try Data(contentsOf: fileURL)
+        uploadedFiles.append(
+            MyDocumentMockUploadedFile(
+                name: name,
+                parentID: parentID,
+                contentType: contentType,
+                data: data
+            )
+        )
+        if !uploadResults.isEmpty {
+            let result = uploadResults.removeFirst()
+            return RemoteSyncFile(
+                id: result.id,
+                name: result.name,
+                size: Int64(data.count),
+                timestamp: result.timestamp,
+                parentID: result.parentID,
+                mimeType: result.mimeType
+            )
+        }
+        return RemoteSyncFile(
+            id: [parentID, name].joined(separator: "/"),
+            name: name,
+            size: Int64(data.count),
+            timestamp: 0,
+            parentID: parentID,
+            mimeType: contentType
+        )
+    }
+
+    func delete(id: String) async throws {}
+
+    func isSyncFolderKnown(syncFolderID: String, secretFileName: String) async throws -> Bool {
+        false
+    }
+
+    func makeSyncFolderKnown(syncFolderID: String, deviceIdentifier: String) async throws -> String {
+        "device-known-\(deviceIdentifier)-secret"
+    }
+}
+
+private struct MyDocumentMockUploadedFile: Equatable {
+    let name: String
+    let parentID: String
+    let contentType: String
+    let data: Data
+}
+
+private func writeUploadedMyDocumentDatabase(_ archiveData: Data) throws -> URL {
+    let databaseURL = FileManager.default.temporaryDirectory
+        .appendingPathComponent("uploaded-mydocuments-\(UUID().uuidString).sqlite3")
+    let databaseData = try myDocumentGunzipTestData(archiveData)
+    try databaseData.write(to: databaseURL, options: .atomic)
+    return databaseURL
+}
+
+private func myDocumentGunzipTestData(_ data: Data) throws -> Data {
+    try data.withUnsafeBytes { (ptr: UnsafeRawBufferPointer) -> Data in
+        guard let baseAddress = ptr.baseAddress else {
+            throw RemoteSyncArchiveStagingError.decompressionFailed
+        }
+
+        var outputLength: UInt = 0
+        guard let output = gunzip_data(
+            baseAddress.assumingMemoryBound(to: UInt8.self),
+            UInt(data.count),
+            &outputLength
+        ) else {
+            throw RemoteSyncArchiveStagingError.decompressionFailed
+        }
+
+        defer { gunzip_free(output) }
+        return Data(bytes: output, count: Int(outputLength))
+    }
+}
+
+private func sqliteUserVersion(at databaseURL: URL) throws -> Int {
+    var db: OpaquePointer?
+    guard sqlite3_open_v2(databaseURL.path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK, let db else {
+        throw RemoteSyncMyDocumentRestoreError.invalidSQLiteDatabase
+    }
+    defer { sqlite3_close(db) }
+
+    var statement: OpaquePointer?
+    defer { sqlite3_finalize(statement) }
+    guard sqlite3_prepare_v2(db, "PRAGMA user_version;", -1, &statement, nil) == SQLITE_OK,
+          sqlite3_step(statement) == SQLITE_ROW else {
+        throw RemoteSyncMyDocumentRestoreError.invalidSQLiteDatabase
+    }
+    return Int(sqlite3_column_int(statement, 0))
+}
+
+private func sqliteRoomIdentityHash(at databaseURL: URL) throws -> String {
+    var db: OpaquePointer?
+    guard sqlite3_open_v2(databaseURL.path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK, let db else {
+        throw RemoteSyncMyDocumentRestoreError.invalidSQLiteDatabase
+    }
+    defer { sqlite3_close(db) }
+
+    var statement: OpaquePointer?
+    defer { sqlite3_finalize(statement) }
+    guard sqlite3_prepare_v2(db, "SELECT identity_hash FROM room_master_table WHERE id = 42;", -1, &statement, nil) == SQLITE_OK,
+          sqlite3_step(statement) == SQLITE_ROW,
+          let value = sqlite3_column_text(statement, 0) else {
+        throw RemoteSyncMyDocumentRestoreError.invalidSQLiteDatabase
+    }
+    return String(cString: value)
+}
+
+private func sqliteColumnDefault(tableName: String, columnName: String, databaseURL: URL) throws -> String? {
+    var db: OpaquePointer?
+    guard sqlite3_open_v2(databaseURL.path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK, let db else {
+        throw RemoteSyncMyDocumentRestoreError.invalidSQLiteDatabase
+    }
+    defer { sqlite3_close(db) }
+
+    var statement: OpaquePointer?
+    defer { sqlite3_finalize(statement) }
+    guard sqlite3_prepare_v2(db, "PRAGMA table_info(\(tableName));", -1, &statement, nil) == SQLITE_OK else {
+        throw RemoteSyncMyDocumentRestoreError.invalidSQLiteDatabase
+    }
+
+    while sqlite3_step(statement) == SQLITE_ROW {
+        guard let rawName = sqlite3_column_text(statement, 1) else {
+            continue
+        }
+        guard String(cString: rawName) == columnName else {
+            continue
+        }
+        guard sqlite3_column_type(statement, 4) != SQLITE_NULL,
+              let defaultValue = sqlite3_column_text(statement, 4) else {
+            return nil
+        }
+        return String(cString: defaultValue)
+    }
+    throw RemoteSyncMyDocumentRestoreError.invalidSQLiteDatabase
+}
+
+private func sqliteCount(tableName: String, databaseURL: URL) throws -> Int {
+    var db: OpaquePointer?
+    guard sqlite3_open_v2(databaseURL.path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK, let db else {
+        throw RemoteSyncMyDocumentRestoreError.invalidSQLiteDatabase
+    }
+    defer { sqlite3_close(db) }
+
+    var statement: OpaquePointer?
+    defer { sqlite3_finalize(statement) }
+    guard sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM \(tableName)", -1, &statement, nil) == SQLITE_OK,
+          sqlite3_step(statement) == SQLITE_ROW else {
+        throw RemoteSyncMyDocumentRestoreError.invalidSQLiteDatabase
+    }
+    return Int(sqlite3_column_int(statement, 0))
 }
