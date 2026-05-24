@@ -894,6 +894,9 @@ public final class RemoteSyncInitialBackupUploadService {
                 SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE,
                 nil
             ) == SQLITE_OK, let database else {
+                if let database {
+                    sqlite3_close(database)
+                }
                 throw RemoteSyncInitialBackupUploadError.invalidSQLiteDatabase
             }
             defer { sqlite3_close(database) }
