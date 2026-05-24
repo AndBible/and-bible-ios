@@ -402,11 +402,7 @@ final class AndBibleUITests: XCTestCase {
         waitForReadingPlanListState(containing: builtInPlanToken, in: app, timeout: 10)
 
         let activePlan = requireElement("readingPlanActivePlanLink", in: app, timeout: 10)
-        activePlan.swipeLeft()
-        tapElementReliably(
-            requireElement(readingPlanDeleteButtonIdentifier(for: builtInPlanCode), in: app, timeout: 10),
-            timeout: 10
-        )
+        deleteReadingPlan(activePlan, planCode: builtInPlanCode, in: app, timeout: 10)
         waitForReadingPlanListState(containing: "active=0", in: app, timeout: 10)
         waitForReadingPlanListState(notContaining: builtInPlanToken, in: app, timeout: 10)
 
@@ -609,7 +605,6 @@ final class AndBibleUITests: XCTestCase {
         addWindowTab(expectingOrder: 1, in: app, timeout: 15)
         addWindowTab(expectingOrder: 2, in: app, timeout: 15)
 
-        tapWindowTab(2, in: app, timeout: 10)
         waitForReaderRenderedContentState(
             containing: "windowOrder=2;category=bible;module=KJV;book=Genesis;chapter=1",
             in: app,
@@ -1127,8 +1122,7 @@ final class AndBibleUITests: XCTestCase {
         _ = openHistory(in: app)
         let exodusRow = requireHistoryRow(containing: "Exodus 2", in: app, timeout: 10)
         _ = requireHistoryRow(containing: "Matthew 3", in: app, timeout: 10)
-        exodusRow.swipeLeft()
-        tapElementReliably(requireElement("historyDeleteButton::Exod_2_1", in: app, timeout: 10), timeout: 10)
+        deleteHistoryRow(exodusRow, keyToken: "Exod_2_1", in: app, timeout: 10)
         waitForHistoryState(containing: "count=1", in: app, timeout: 10)
         waitForHistoryState(notContaining: historyRowStateToken("Exod_2_1"), in: app, timeout: 10)
         waitForHistoryState(containing: historyRowStateToken("Matt_3_1"), in: app, timeout: 10)
@@ -4131,6 +4125,53 @@ final class AndBibleUITests: XCTestCase {
         "readingPlanDeleteButton::\(sanitizedReadingPlanStateToken(planCode))"
     }
 
+    /// Performs one Reading Plan row deletion through SwiftUI's swipe affordance.
+    private func deleteReadingPlan(
+        _ row: XCUIElement,
+        planCode: String,
+        in app: XCUIApplication,
+        timeout: TimeInterval
+    ) {
+        let rowToken = readingPlanStateToken(planCode)
+        let deleteIdentifier = readingPlanDeleteButtonIdentifier(for: planCode)
+
+        row.swipeLeft()
+        if waitForReadingPlanListStateToExclude(rowToken, in: app, timeout: 1) {
+            return
+        }
+
+        if !waitForResolvedElementAppearance(deleteIdentifier, in: app, timeout: 2) {
+            row.swipeLeft()
+        }
+        tapElementReliably(requireElement(deleteIdentifier, in: app, timeout: timeout), timeout: timeout)
+
+        if !waitForReadingPlanListStateToExclude(rowToken, in: app, timeout: 3),
+           let refreshedRow = resolvedElement("readingPlanActivePlanLink", in: app) {
+            refreshedRow.swipeLeft()
+            if waitForResolvedElementAppearance(deleteIdentifier, in: app, timeout: 2) {
+                tapElementReliably(requireElement(deleteIdentifier, in: app, timeout: timeout), timeout: timeout)
+            }
+        }
+    }
+
+    /// Returns true when the Reading Plans state drops one token before the timeout.
+    private func waitForReadingPlanListStateToExclude(
+        _ token: String,
+        in app: XCUIApplication,
+        timeout: TimeInterval
+    ) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            if let currentValue = resolvedReadingPlanListStateValue(in: app),
+               !currentValue.contains(token) {
+                return true
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        } while Date() < deadline
+
+        return resolvedReadingPlanListStateValue(in: app)?.contains(token) == false
+    }
+
     /// Sanitizes one reading-plan code to match the production accessibility export.
     private func sanitizedReadingPlanStateToken(_ value: String) -> String {
         let mapped = value.unicodeScalars.map { scalar -> String in
@@ -4296,6 +4337,45 @@ final class AndBibleUITests: XCTestCase {
         timeout: TimeInterval = 10
     ) {
         waitForElementValue("historyScreen", toNotContain: token, in: app, timeout: timeout)
+    }
+
+    /// Performs one History row deletion through SwiftUI's swipe affordance.
+    private func deleteHistoryRow(
+        _ row: XCUIElement,
+        keyToken: String,
+        in app: XCUIApplication,
+        timeout: TimeInterval
+    ) {
+        let rowToken = historyRowStateToken(keyToken)
+        let deleteIdentifier = "historyDeleteButton::\(keyToken)"
+
+        row.swipeLeft()
+        if waitForHistoryStateToExclude(rowToken, in: app, timeout: 1) {
+            return
+        }
+
+        if !waitForResolvedElementAppearance(deleteIdentifier, in: app, timeout: 2) {
+            row.swipeLeft()
+        }
+        tapElementReliably(requireElement(deleteIdentifier, in: app, timeout: timeout), timeout: timeout)
+    }
+
+    /// Returns true when the History state drops one token before the timeout.
+    private func waitForHistoryStateToExclude(
+        _ token: String,
+        in app: XCUIApplication,
+        timeout: TimeInterval
+    ) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            if let currentValue = resolvedElementSemanticText("historyScreen", in: app),
+               !currentValue.contains(token) {
+                return true
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        } while Date() < deadline
+
+        return resolvedElementSemanticText("historyScreen", in: app)?.contains(token) == false
     }
 
     /**
@@ -6083,15 +6163,15 @@ final class AndBibleUITests: XCTestCase {
 
     /// Reads the compact reader state export without walking drawer or overflow menu contents.
     private func readerRenderedContentStateValue(in app: XCUIApplication) -> String? {
-        if let headerValue = readerDocumentHeaderStateValue(in: app) {
-            return headerValue
-        }
         for stateElement in readerRenderedContentStateElements(in: app) {
             guard stateElement.exists,
                   let value = stateElement.value as? String else {
                 continue
             }
             return value
+        }
+        if let headerValue = readerDocumentHeaderStateValue(in: app) {
+            return headerValue
         }
         return nil
     }
