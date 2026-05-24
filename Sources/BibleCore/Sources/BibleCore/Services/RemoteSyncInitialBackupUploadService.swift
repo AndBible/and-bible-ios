@@ -1001,17 +1001,24 @@ public final class RemoteSyncInitialBackupUploadService {
                 in: database
             )
 
-            for row in snapshot.documentRowsByKey.values.sorted(by: Self.myDocumentSort) {
-                try insertMyDocumentRow(row, in: database)
-            }
-            for row in snapshot.pageRowsByKey.values.sorted(by: Self.myDocumentPageSort) {
-                try insertMyDocumentPageRow(row, in: database)
-            }
-            for row in snapshot.pageContentRowsByKey.values.sorted(by: Self.myDocumentPageContentSort) {
-                try insertMyDocumentPageContentRow(row, in: database)
-            }
-            for row in snapshot.aiPageCacheEntryRowsByKey.values.sorted(by: Self.aiPageCacheEntrySort) {
-                try insertAiPageCacheEntryRow(row, in: database)
+            try execute("BEGIN IMMEDIATE TRANSACTION;", in: database)
+            do {
+                for row in snapshot.documentRowsByKey.values.sorted(by: Self.myDocumentSort) {
+                    try insertMyDocumentRow(row, in: database)
+                }
+                for row in snapshot.pageRowsByKey.values.sorted(by: Self.myDocumentPageSort) {
+                    try insertMyDocumentPageRow(row, in: database)
+                }
+                for row in snapshot.pageContentRowsByKey.values.sorted(by: Self.myDocumentPageContentSort) {
+                    try insertMyDocumentPageContentRow(row, in: database)
+                }
+                for row in snapshot.aiPageCacheEntryRowsByKey.values.sorted(by: Self.aiPageCacheEntrySort) {
+                    try insertAiPageCacheEntryRow(row, in: database)
+                }
+                try execute("COMMIT;", in: database)
+            } catch {
+                try? execute("ROLLBACK;", in: database)
+                throw error
             }
 
             return BuiltInitialBackup(databaseURL: databaseURL, workspaceHistoryAliases: [])
