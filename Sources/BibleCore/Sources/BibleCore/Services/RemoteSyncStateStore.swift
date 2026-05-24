@@ -28,6 +28,16 @@ public enum RemoteSyncCategory: String, CaseIterable, Sendable {
         [.bookmarks, .workspaces, .readingPlans]
     }
 
+    /// Highest Android SQLite schema version iOS can currently read and write for this category.
+    public var currentSchemaVersion: Int {
+        switch self {
+        case .myDocuments:
+            RemoteSyncMyDocumentRestoreService.supportedAndroidSchemaVersion
+        case .bookmarks, .workspaces, .readingPlans:
+            1
+        }
+    }
+
     /**
      Builds the Android-style remote sync folder name for this category.
 

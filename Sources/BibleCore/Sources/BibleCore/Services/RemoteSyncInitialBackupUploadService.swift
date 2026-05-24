@@ -252,7 +252,11 @@ public final class RemoteSyncInitialBackupUploadService {
                 schemaVersion: schemaVersion
             )
         case .myDocuments:
-            throw RemoteSyncInitialBackupUploadError.unsupportedCategory(category)
+            return try buildMyDocumentInitialBackup(
+                modelContext: modelContext,
+                settingsStore: settingsStore,
+                schemaVersion: schemaVersion
+            )
         }
     }
 
@@ -323,7 +327,10 @@ public final class RemoteSyncInitialBackupUploadService {
                 settingsStore: settingsStore
             )
         case .myDocuments:
-            break
+            RemoteSyncMyDocumentSnapshotService().refreshBaselineFingerprints(
+                modelContext: modelContext,
+                settingsStore: settingsStore
+            )
         }
     }
 
@@ -854,6 +861,173 @@ public final class RemoteSyncInitialBackupUploadService {
         }
     }
 
+    /**
+     Builds one full Android My Documents database from the current local snapshot.
+
+     - Parameters:
+       - modelContext: SwiftData context that owns the current My Documents graph.
+       - settingsStore: Local-only settings store that preserves sync bookkeeping.
+       - schemaVersion: SQLite user-version written into the exported database.
+     - Returns: Temporary SQLite database containing the current My Documents baseline.
+     - Side effects:
+       - reads My Documents rows from `modelContext`
+       - writes one temporary SQLite database beneath the configured temporary directory
+     - Failure modes:
+       - throws `RemoteSyncInitialBackupUploadError.invalidSQLiteDatabase` when SQLite rejects schema creation or row insertion
+     */
+    private func buildMyDocumentInitialBackup(
+        modelContext: ModelContext,
+        settingsStore: SettingsStore,
+        schemaVersion: Int
+    ) throws -> BuiltInitialBackup {
+        let snapshotService = RemoteSyncMyDocumentSnapshotService()
+        let snapshot = snapshotService.snapshotCurrentState(
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+        let databaseURL = temporaryURL(prefix: "remote-sync-mydocuments-initial-", suffix: ".sqlite3")
+        do {
+            var database: OpaquePointer?
+            guard sqlite3_open_v2(
+                databaseURL.path,
+                &database,
+                SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE,
+                nil
+            ) == SQLITE_OK, let database else {
+                if let database {
+                    sqlite3_close(database)
+                }
+                throw RemoteSyncInitialBackupUploadError.invalidSQLiteDatabase
+            }
+            defer { sqlite3_close(database) }
+
+            try execute(
+                """
+                PRAGMA foreign_keys = ON;
+                PRAGMA user_version = \(schemaVersion);
+                CREATE TABLE MyDocument (
+                    id BLOB NOT NULL PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    description TEXT DEFAULT NULL,
+                    initials TEXT NOT NULL,
+                    orderNumber INTEGER NOT NULL,
+                    createdAt INTEGER NOT NULL,
+                    updatedAt INTEGER NOT NULL,
+                    sourcePromptId BLOB DEFAULT NULL
+                );
+                CREATE TABLE MyDocumentPage (
+                    id BLOB NOT NULL PRIMARY KEY,
+                    documentId BLOB NOT NULL,
+                    title TEXT NOT NULL,
+                    pageKey TEXT NOT NULL,
+                    contentType TEXT NOT NULL,
+                    orderNumber INTEGER NOT NULL,
+                    createdAt INTEGER NOT NULL,
+                    updatedAt INTEGER NOT NULL,
+                    sourcePromptId BLOB DEFAULT NULL,
+                    languageCode TEXT DEFAULT NULL,
+                    FOREIGN KEY(documentId) REFERENCES MyDocument(id) ON DELETE CASCADE
+                );
+                CREATE TABLE MyDocumentPageContent (
+                    pageId BLOB NOT NULL PRIMARY KEY,
+                    content TEXT NOT NULL,
+                    FOREIGN KEY(pageId) REFERENCES MyDocumentPage(id) ON DELETE CASCADE
+                );
+                CREATE TABLE AiPageCacheEntry (
+                    pageId BLOB NOT NULL PRIMARY KEY,
+                    sourcePromptId BLOB NOT NULL,
+                    sourceContext TEXT DEFAULT NULL,
+                    kjvOrdinalStart INTEGER DEFAULT NULL,
+                    kjvOrdinalEnd INTEGER DEFAULT NULL,
+                    contextHash TEXT DEFAULT NULL,
+                    usedWriteTools INTEGER NOT NULL,
+                    sourceModelName TEXT DEFAULT NULL,
+                    sourceBookInitials TEXT DEFAULT NULL,
+                    sourceBookKey TEXT DEFAULT NULL,
+                    FOREIGN KEY(pageId) REFERENCES MyDocumentPage(id) ON DELETE CASCADE
+                );
+                CREATE TABLE LogEntry (
+                    tableName TEXT NOT NULL,
+                    entityId1 BLOB NOT NULL,
+                    entityId2 BLOB NOT NULL,
+                    type TEXT NOT NULL,
+                    lastUpdated INTEGER NOT NULL DEFAULT 0,
+                    sourceDevice TEXT NOT NULL,
+                    PRIMARY KEY(tableName, entityId1, entityId2)
+                );
+                CREATE TABLE SyncConfiguration (
+                    keyName TEXT NOT NULL,
+                    stringValue TEXT,
+                    longValue INTEGER,
+                    booleanValue INTEGER,
+                    PRIMARY KEY(keyName)
+                );
+                CREATE TABLE SyncStatus (
+                    sourceDevice TEXT NOT NULL,
+                    patchNumber INTEGER NOT NULL,
+                    sizeBytes INTEGER NOT NULL,
+                    appliedDate INTEGER NOT NULL,
+                    PRIMARY KEY(sourceDevice, patchNumber)
+                );
+                CREATE TABLE room_master_table (
+                    id INTEGER PRIMARY KEY,
+                    identity_hash TEXT
+                );
+                INSERT OR REPLACE INTO room_master_table (id, identity_hash)
+                    VALUES(42, '3f0946602099d896c8d47129233c1794');
+                CREATE UNIQUE INDEX index_MyDocument_initials ON MyDocument (initials);
+                CREATE INDEX index_MyDocumentPage_documentId ON MyDocumentPage (documentId);
+                CREATE UNIQUE INDEX index_MyDocumentPage_documentId_pageKey ON MyDocumentPage (documentId, pageKey);
+                CREATE INDEX index_AiPageCacheEntry_sourcePromptId_contextHash ON AiPageCacheEntry (sourcePromptId, contextHash);
+                CREATE INDEX index_AiPageCacheEntry_sourcePromptId_kjvOrdinalStart_kjvOrdinalEnd ON AiPageCacheEntry (sourcePromptId, kjvOrdinalStart, kjvOrdinalEnd);
+                CREATE INDEX index_AiPageCacheEntry_kjvOrdinalStart_kjvOrdinalEnd ON AiPageCacheEntry (kjvOrdinalStart, kjvOrdinalEnd);
+                CREATE INDEX index_AiPageCacheEntry_sourceBookInitials_sourceBookKey ON AiPageCacheEntry (sourceBookInitials, sourceBookKey);
+                CREATE INDEX index_LogEntry_lastUpdated ON LogEntry (lastUpdated);
+                CREATE INDEX index_LogEntry_sourceDevice ON LogEntry (sourceDevice);
+                CREATE VIEW MyDocumentPageWithContent AS
+                    SELECT p.*, c.content
+                    FROM MyDocumentPage p
+                    LEFT OUTER JOIN MyDocumentPageContent c ON p.id = c.pageId;
+                CREATE VIEW AiCachedPageWithContent AS
+                    SELECT c.pageId, c.sourcePromptId, c.sourceContext, c.kjvOrdinalStart,
+                           c.kjvOrdinalEnd, c.contextHash, c.usedWriteTools, c.sourceModelName,
+                           c.sourceBookInitials, c.sourceBookKey,
+                           p.title, p.pageKey, p.contentType, p.documentId,
+                           p.orderNumber, p.createdAt, p.updatedAt, p.languageCode, cnt.content
+                    FROM AiPageCacheEntry c
+                    INNER JOIN MyDocumentPage p ON c.pageId = p.id
+                    LEFT OUTER JOIN MyDocumentPageContent cnt ON p.id = cnt.pageId;
+                """,
+                in: database
+            )
+
+            try execute("BEGIN IMMEDIATE TRANSACTION;", in: database)
+            do {
+                for row in snapshot.documentRowsByKey.values.sorted(by: Self.myDocumentSort) {
+                    try insertMyDocumentRow(row, in: database)
+                }
+                for row in snapshot.pageRowsByKey.values.sorted(by: Self.myDocumentPageSort) {
+                    try insertMyDocumentPageRow(row, in: database)
+                }
+                for row in snapshot.pageContentRowsByKey.values.sorted(by: Self.myDocumentPageContentSort) {
+                    try insertMyDocumentPageContentRow(row, in: database)
+                }
+                for row in snapshot.aiPageCacheEntryRowsByKey.values.sorted(by: Self.aiPageCacheEntrySort) {
+                    try insertAiPageCacheEntryRow(row, in: database)
+                }
+                try execute("COMMIT;", in: database)
+            } catch {
+                try? execute("ROLLBACK;", in: database)
+                throw error
+            }
+
+            return BuiltInitialBackup(databaseURL: databaseURL, workspaceHistoryAliases: [])
+        } catch {
+            try? fileManager.removeItem(at: databaseURL)
+            throw error
+        }
+    }
+
     private struct ProjectedWorkspaceHistory {
         let rows: [RemoteSyncAndroidWorkspaceHistoryItem]
         let aliases: [RemoteSyncWorkspaceFidelityStore.HistoryItemAlias]
@@ -1131,6 +1305,55 @@ public final class RemoteSyncInitialBackupUploadService {
      */
     private static func pageManagerSort(_ lhs: RemoteSyncCurrentWorkspacePageManagerRow, _ rhs: RemoteSyncCurrentWorkspacePageManagerRow) -> Bool {
         lhs.windowID.uuidString < rhs.windowID.uuidString
+    }
+
+    /**
+     Sorts My Documents rows into a deterministic export order.
+     */
+    private static func myDocumentSort(_ lhs: RemoteSyncAndroidMyDocument, _ rhs: RemoteSyncAndroidMyDocument) -> Bool {
+        if lhs.orderNumber == rhs.orderNumber {
+            if lhs.name == rhs.name {
+                return lhs.id.uuidString < rhs.id.uuidString
+            }
+            return lhs.name < rhs.name
+        }
+        return lhs.orderNumber < rhs.orderNumber
+    }
+
+    /**
+     Sorts My Document page rows into a deterministic export order.
+     */
+    private static func myDocumentPageSort(_ lhs: RemoteSyncAndroidMyDocumentPage, _ rhs: RemoteSyncAndroidMyDocumentPage) -> Bool {
+        if lhs.documentId == rhs.documentId {
+            if lhs.orderNumber == rhs.orderNumber {
+                if lhs.title == rhs.title {
+                    return lhs.id.uuidString < rhs.id.uuidString
+                }
+                return lhs.title < rhs.title
+            }
+            return lhs.orderNumber < rhs.orderNumber
+        }
+        return lhs.documentId.uuidString < rhs.documentId.uuidString
+    }
+
+    /**
+     Sorts My Document page-content rows into a deterministic export order.
+     */
+    private static func myDocumentPageContentSort(
+        _ lhs: RemoteSyncAndroidMyDocumentPageContent,
+        _ rhs: RemoteSyncAndroidMyDocumentPageContent
+    ) -> Bool {
+        lhs.pageId.uuidString < rhs.pageId.uuidString
+    }
+
+    /**
+     Sorts AI page-cache rows into a deterministic export order.
+     */
+    private static func aiPageCacheEntrySort(
+        _ lhs: RemoteSyncAndroidAiPageCacheEntry,
+        _ rhs: RemoteSyncAndroidAiPageCacheEntry
+    ) -> Bool {
+        lhs.pageId.uuidString < rhs.pageId.uuidString
     }
 
     /**
@@ -1586,6 +1809,106 @@ public final class RemoteSyncInitialBackupUploadService {
         bindOptionalInt(row.mapAnchorOrdinal, to: statement, index: index)
         index += 1
         try bindTextDisplaySettings(row.textDisplaySettings, to: statement, index: &index)
+        guard sqlite3_step(statement) == SQLITE_DONE else {
+            throw RemoteSyncInitialBackupUploadError.invalidSQLiteDatabase
+        }
+    }
+
+    /**
+     Inserts one Android `MyDocument` row into the open initial-backup database.
+     */
+    private func insertMyDocumentRow(_ row: RemoteSyncAndroidMyDocument, in database: OpaquePointer) throws {
+        let sql = "INSERT INTO MyDocument (id, name, description, initials, orderNumber, createdAt, updatedAt, sourcePromptId) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK, let statement else {
+            throw RemoteSyncInitialBackupUploadError.invalidSQLiteDatabase
+        }
+        defer { sqlite3_finalize(statement) }
+
+        bindUUIDBlob(row.id, to: statement, index: 1)
+        bindText(row.name, to: statement, index: 2)
+        bindOptionalText(row.documentDescription, to: statement, index: 3)
+        bindText(row.initials, to: statement, index: 4)
+        sqlite3_bind_int(statement, 5, Int32(row.orderNumber))
+        sqlite3_bind_int64(statement, 6, Int64(row.createdAt.timeIntervalSince1970 * 1000.0))
+        sqlite3_bind_int64(statement, 7, Int64(row.updatedAt.timeIntervalSince1970 * 1000.0))
+        bindOptionalUUIDBlob(row.sourcePromptId, to: statement, index: 8)
+        guard sqlite3_step(statement) == SQLITE_DONE else {
+            throw RemoteSyncInitialBackupUploadError.invalidSQLiteDatabase
+        }
+    }
+
+    /**
+     Inserts one Android `MyDocumentPage` row into the open initial-backup database.
+     */
+    private func insertMyDocumentPageRow(_ row: RemoteSyncAndroidMyDocumentPage, in database: OpaquePointer) throws {
+        let sql = "INSERT INTO MyDocumentPage (id, documentId, title, pageKey, contentType, orderNumber, createdAt, updatedAt, sourcePromptId, languageCode) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK, let statement else {
+            throw RemoteSyncInitialBackupUploadError.invalidSQLiteDatabase
+        }
+        defer { sqlite3_finalize(statement) }
+
+        bindUUIDBlob(row.id, to: statement, index: 1)
+        bindUUIDBlob(row.documentId, to: statement, index: 2)
+        bindText(row.title, to: statement, index: 3)
+        bindText(row.pageKey, to: statement, index: 4)
+        bindText(row.contentType.rawValue, to: statement, index: 5)
+        sqlite3_bind_int(statement, 6, Int32(row.orderNumber))
+        sqlite3_bind_int64(statement, 7, Int64(row.createdAt.timeIntervalSince1970 * 1000.0))
+        sqlite3_bind_int64(statement, 8, Int64(row.updatedAt.timeIntervalSince1970 * 1000.0))
+        bindOptionalUUIDBlob(row.sourcePromptId, to: statement, index: 9)
+        bindOptionalText(row.languageCode, to: statement, index: 10)
+        guard sqlite3_step(statement) == SQLITE_DONE else {
+            throw RemoteSyncInitialBackupUploadError.invalidSQLiteDatabase
+        }
+    }
+
+    /**
+     Inserts one Android `MyDocumentPageContent` row into the open initial-backup database.
+     */
+    private func insertMyDocumentPageContentRow(
+        _ row: RemoteSyncAndroidMyDocumentPageContent,
+        in database: OpaquePointer
+    ) throws {
+        let sql = "INSERT INTO MyDocumentPageContent (pageId, content) VALUES (?, ?)"
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK, let statement else {
+            throw RemoteSyncInitialBackupUploadError.invalidSQLiteDatabase
+        }
+        defer { sqlite3_finalize(statement) }
+
+        bindUUIDBlob(row.pageId, to: statement, index: 1)
+        bindText(row.content, to: statement, index: 2)
+        guard sqlite3_step(statement) == SQLITE_DONE else {
+            throw RemoteSyncInitialBackupUploadError.invalidSQLiteDatabase
+        }
+    }
+
+    /**
+     Inserts one Android `AiPageCacheEntry` row into the open initial-backup database.
+     */
+    private func insertAiPageCacheEntryRow(
+        _ row: RemoteSyncAndroidAiPageCacheEntry,
+        in database: OpaquePointer
+    ) throws {
+        let sql = "INSERT INTO AiPageCacheEntry (pageId, sourcePromptId, sourceContext, kjvOrdinalStart, kjvOrdinalEnd, contextHash, usedWriteTools, sourceModelName, sourceBookInitials, sourceBookKey) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK, let statement else {
+            throw RemoteSyncInitialBackupUploadError.invalidSQLiteDatabase
+        }
+        defer { sqlite3_finalize(statement) }
+
+        bindUUIDBlob(row.pageId, to: statement, index: 1)
+        bindUUIDBlob(row.sourcePromptId, to: statement, index: 2)
+        bindOptionalText(row.sourceContext, to: statement, index: 3)
+        bindOptionalInt(row.kjvOrdinalStart, to: statement, index: 4)
+        bindOptionalInt(row.kjvOrdinalEnd, to: statement, index: 5)
+        bindOptionalText(row.contextHash, to: statement, index: 6)
+        bindBool(row.usedWriteTools, to: statement, index: 7)
+        bindOptionalText(row.sourceModelName, to: statement, index: 8)
+        bindOptionalText(row.sourceBookInitials, to: statement, index: 9)
+        bindOptionalText(row.sourceBookKey, to: statement, index: 10)
         guard sqlite3_step(statement) == SQLITE_DONE else {
             throw RemoteSyncInitialBackupUploadError.invalidSQLiteDatabase
         }

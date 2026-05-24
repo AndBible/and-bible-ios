@@ -43,7 +43,7 @@ public protocol RemoteSyncCategorySynchronizing: AnyObject {
      - Returns: Successful synchronization summary for the created remote folder.
      - Side Effects: Performs remote folder creation/deletion and may mutate local SwiftData.
      - Throws: Re-throws bootstrap, upload, or synchronization failures from the concrete service.
-     */
+    */
     func createRemoteFolderAndSynchronize(
         for category: RemoteSyncCategory,
         replacingRemoteFolderID: String?,
@@ -92,7 +92,7 @@ extension RemoteSyncSynchronizationService: RemoteSyncCategorySynchronizing {
             category,
             modelContext: modelContext,
             settingsStore: settingsStore,
-            currentSchemaVersion: 1
+            currentSchemaVersion: category.currentSchemaVersion
         )
     }
 
@@ -107,10 +107,10 @@ extension RemoteSyncSynchronizationService: RemoteSyncCategorySynchronizing {
      - Returns: Successful synchronization summary for the created remote folder.
      - Side Effects: Delegates to `RemoteSyncSynchronizationService.createRemoteFolderAndSynchronize`.
      - Failure modes: Re-throws bootstrap, upload, and synchronization failures from the underlying service.
-     */
+    */
     public func createRemoteFolderAndSynchronize(
         for category: RemoteSyncCategory,
-        replacingRemoteFolderID: String?,
+        replacingRemoteFolderID: String? = nil,
         modelContext: ModelContext,
         settingsStore: SettingsStore
     ) async throws -> RemoteSyncCategorySynchronizationReport {
@@ -119,7 +119,7 @@ extension RemoteSyncSynchronizationService: RemoteSyncCategorySynchronizing {
             replacingRemoteFolderID: replacingRemoteFolderID,
             modelContext: modelContext,
             settingsStore: settingsStore,
-            currentSchemaVersion: 1
+            currentSchemaVersion: category.currentSchemaVersion
         )
     }
 
@@ -146,7 +146,7 @@ extension RemoteSyncSynchronizationService: RemoteSyncCategorySynchronizing {
             remoteFolderID: remoteFolderID,
             modelContext: modelContext,
             settingsStore: settingsStore,
-            currentSchemaVersion: 1
+            currentSchemaVersion: category.currentSchemaVersion
         )
     }
 }

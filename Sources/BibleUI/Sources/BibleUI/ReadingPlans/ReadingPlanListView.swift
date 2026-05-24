@@ -109,10 +109,11 @@ public struct ReadingPlanListView: View {
                         .accessibilityIdentifier("readingPlanActivePlanLink")
                         .accessibilityLabel(plan.planName)
                         .accessibilityValue(plan.planCode)
-                        .swipeActions(edge: .trailing) {
-                            Button(String(localized: "delete"), role: .destructive) {
-                                modelContext.delete(plan)
-                                try? modelContext.save()
+                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                            Button(role: .destructive) {
+                                deletePlan(plan)
+                            } label: {
+                                SwiftUI.Label(String(localized: "delete"), systemImage: "trash")
                             }
                             .accessibilityIdentifier(readingPlanDeleteButtonIdentifier(for: plan))
                         }
@@ -124,10 +125,11 @@ public struct ReadingPlanListView: View {
                 Section(String(localized: "reading_plan_completed")) {
                     ForEach(completedPlans) { plan in
                         CompletedPlanRow(plan: plan)
-                            .swipeActions(edge: .trailing) {
-                                Button(String(localized: "delete"), role: .destructive) {
-                                    modelContext.delete(plan)
-                                    try? modelContext.save()
+                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                Button(role: .destructive) {
+                                    deletePlan(plan)
+                                } label: {
+                                    SwiftUI.Label(String(localized: "delete"), systemImage: "trash")
                                 }
                                 .accessibilityIdentifier(readingPlanDeleteButtonIdentifier(for: plan))
                             }
@@ -170,6 +172,14 @@ public struct ReadingPlanListView: View {
     /// Stable row-level delete button identifier for UI tests.
     private func readingPlanDeleteButtonIdentifier(for plan: ReadingPlan) -> String {
         "readingPlanDeleteButton::\(readingPlanAccessibilitySegment(plan.planCode))"
+    }
+
+    /// Deletes one persisted plan and lets the live query refresh the list sections.
+    private func deletePlan(_ plan: ReadingPlan) {
+        withAnimation {
+            modelContext.delete(plan)
+        }
+        try? modelContext.save()
     }
 }
 

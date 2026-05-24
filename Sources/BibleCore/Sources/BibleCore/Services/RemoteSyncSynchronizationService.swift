@@ -303,7 +303,7 @@ public final class RemoteSyncSynchronizationService {
         _ category: RemoteSyncCategory,
         modelContext: ModelContext,
         settingsStore: SettingsStore,
-        currentSchemaVersion: Int = 1
+        currentSchemaVersion: Int
     ) async throws -> RemoteSyncSynchronizationOutcome {
         let bootstrapCoordinator = makeBootstrapCoordinator(settingsStore: settingsStore)
 
@@ -359,7 +359,7 @@ public final class RemoteSyncSynchronizationService {
         remoteFolderID: String,
         modelContext: ModelContext,
         settingsStore: SettingsStore,
-        currentSchemaVersion: Int = 1
+        currentSchemaVersion: Int
     ) async throws -> RemoteSyncCategorySynchronizationReport {
         let stateStore = RemoteSyncStateStore(settingsStore: settingsStore)
         let patchStatusStore = RemoteSyncPatchStatusStore(settingsStore: settingsStore)
@@ -447,7 +447,7 @@ public final class RemoteSyncSynchronizationService {
         replacingRemoteFolderID: String? = nil,
         modelContext: ModelContext,
         settingsStore: SettingsStore,
-        currentSchemaVersion: Int = 1
+        currentSchemaVersion: Int
     ) async throws -> RemoteSyncCategorySynchronizationReport {
         let bootstrapCoordinator = makeBootstrapCoordinator(settingsStore: settingsStore)
 
