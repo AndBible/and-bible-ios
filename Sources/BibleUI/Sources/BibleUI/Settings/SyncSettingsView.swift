@@ -523,7 +523,7 @@ public struct SyncSettingsView: View {
      Shared Android-style remote category toggle list used by supported remote backends.
      */
     private var remoteCategoryList: some View {
-        ForEach(RemoteSyncCategory.allCases, id: \.self) { category in
+        ForEach(RemoteSyncCategory.activeSyncCases, id: \.self) { category in
             let categoryBinding = remoteCategoryBinding(for: category)
             VStack(alignment: .leading, spacing: 8) {
                 HStack(alignment: .top, spacing: 12) {
@@ -667,7 +667,7 @@ public struct SyncSettingsView: View {
      - Failure modes: This helper cannot fail.
      */
     private var syncSettingsAccessibilityValue: String {
-        let enabledCategories = RemoteSyncCategory.allCases
+        let enabledCategories = RemoteSyncCategory.activeSyncCases
             .filter(isRemoteCategoryEnabled)
             .map(\.rawValue)
             .sorted()
@@ -910,7 +910,7 @@ public struct SyncSettingsView: View {
             password = "ui-test"
             folderPath = ""
             remoteCategoryEnabled = Dictionary(
-                uniqueKeysWithValues: RemoteSyncCategory.allCases.map { category in
+                uniqueKeysWithValues: RemoteSyncCategory.activeSyncCases.map { category in
                     (category, false)
                 }
             )
@@ -927,7 +927,7 @@ public struct SyncSettingsView: View {
         }
         password = remoteSettingsStore.webDAVPassword() ?? ""
         remoteCategoryEnabled = Dictionary(
-            uniqueKeysWithValues: RemoteSyncCategory.allCases.map { category in
+            uniqueKeysWithValues: RemoteSyncCategory.activeSyncCases.map { category in
                 (category, remoteSettingsStore.isSyncEnabled(for: category))
             }
         )

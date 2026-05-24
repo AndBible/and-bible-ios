@@ -501,6 +501,8 @@
 "reading_plans_content" = "Reading plans and their statuses";
 "bookmarks_contents" = "Bookmarks, Labels and Study Pads";
 "workspaces_contents" = "סביבות עבודה וחלונות";
+"my_documents" = "My Documents";
+"my_documents_contents" = "My Documents and their pages";
 "synchronization_categories" = "קטגוריות לסנכרון";
 "sync_error" = "שגיאה בסנכרון לענן";
 "sync_cant_fetch" = "The version of database or patch file stored in Cloud is higher than the one supported by this app.";

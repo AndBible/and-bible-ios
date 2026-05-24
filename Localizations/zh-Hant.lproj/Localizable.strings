@@ -501,6 +501,8 @@
 "reading_plans_content" = "讀經計劃及其狀態";
 "bookmarks_contents" = "書籤、標籤及研習筆記";
 "workspaces_contents" = "工作區及視窗";
+"my_documents" = "My Documents";
+"my_documents_contents" = "My Documents and their pages";
 "synchronization_categories" = "同步類別";
 "sync_error" = "雲端同步時發生錯誤";
 "sync_cant_fetch" = "雲端上資料庫或修補文件版本，高於此程式的支援。";

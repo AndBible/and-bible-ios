@@ -262,19 +262,20 @@ public final class RemoteSyncMyDocumentRestoreService {
             throw RemoteSyncMyDocumentRestoreError.orphanReferences(snapshot.orphanReferences)
         }
 
-        let existingCacheEntries = (try? modelContext.fetch(FetchDescriptor<AiPageCacheEntry>())) ?? []
+        let existingCacheEntries = try modelContext.fetch(FetchDescriptor<AiPageCacheEntry>())
+        let existingContents = try modelContext.fetch(FetchDescriptor<MyDocumentPageContent>())
+        let existingPages = try modelContext.fetch(FetchDescriptor<MyDocumentPage>())
+        let existingDocuments = try modelContext.fetch(FetchDescriptor<MyDocument>())
+
         for cacheEntry in existingCacheEntries {
             modelContext.delete(cacheEntry)
         }
-        let existingContents = (try? modelContext.fetch(FetchDescriptor<MyDocumentPageContent>())) ?? []
         for content in existingContents {
             modelContext.delete(content)
         }
-        let existingPages = (try? modelContext.fetch(FetchDescriptor<MyDocumentPage>())) ?? []
         for page in existingPages {
             modelContext.delete(page)
         }
-        let existingDocuments = (try? modelContext.fetch(FetchDescriptor<MyDocument>())) ?? []
         for document in existingDocuments {
             modelContext.delete(document)
         }

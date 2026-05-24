@@ -530,6 +530,8 @@
 "reading_plans_content" = "Plány čítania a ich stavy";
 "bookmarks_contents" = "Záložky, Štítky a Študijné zložky";
 "workspaces_contents" = "Pracovné plochy a Okná";
+"my_documents" = "My Documents";
+"my_documents_contents" = "My Documents and their pages";
 "synchronization_categories" = "Synchronizačné kategórie";
 "sync_error" = "Vyskytla sa chyba pri synchronizácii s cloudom.";
 "sync_cant_fetch" = "Verzia databázy alebo súboru opravy uložená v cloude je vyššia ako verzia podporovaná touto aplikáciou.";

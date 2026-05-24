@@ -483,12 +483,12 @@ public final class RemoteSyncLifecycleService {
      Returns the enabled remote-sync categories from local settings.
 
      - Parameter remoteSettingsStore: Local remote-sync settings store.
-     - Returns: Enabled categories in Android's declared `allCases` order.
+     - Returns: Enabled categories in the current broad-sync execution order.
      - Side Effects: Reads category toggle state from `RemoteSyncSettingsStore`.
      - Failure modes: Missing toggle values decode as disabled categories.
      */
     private func enabledCategories(using remoteSettingsStore: RemoteSyncSettingsStore) -> [RemoteSyncCategory] {
-        RemoteSyncCategory.allCases.filter { remoteSettingsStore.isSyncEnabled(for: $0) }
+        RemoteSyncCategory.activeSyncCases.filter { remoteSettingsStore.isSyncEnabled(for: $0) }
     }
 
     /**

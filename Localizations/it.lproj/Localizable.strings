@@ -501,6 +501,8 @@
 "reading_plans_content" = "Piani di lettura e loro stati";
 "bookmarks_contents" = "Segnalibri, Etichette e Appunti di Studio";
 "workspaces_contents" = "Spazi di Lavoro e Finestre";
+"my_documents" = "My Documents";
+"my_documents_contents" = "My Documents and their pages";
 "synchronization_categories" = "Categorie di sincronizzazione";
 "sync_error" = "Errore nella sincronizzazione del Cloud";
 "sync_cant_fetch" = "La versione del database o del file patch memorizzato nel Cloud è superiore a quella supportata da questa app.";

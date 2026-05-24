@@ -427,7 +427,7 @@ public final class RemoteSyncBackgroundRefreshCoordinator {
             return false
         }
 
-        return RemoteSyncCategory.allCases.contains {
+        return RemoteSyncCategory.activeSyncCases.contains {
             remoteSettingsStore.isSyncEnabled(for: $0)
         }
     }

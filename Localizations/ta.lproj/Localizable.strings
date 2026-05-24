@@ -501,6 +501,8 @@
 "reading_plans_content" = "வாசிப்பு திட்டங்களும் அதன் நிலைகளும்";
 "bookmarks_contents" = "புக்மார்க்குகள், லேபிள்கள் மற்றும் ஸ்டடி பேடுகள்.";
 "workspaces_contents" = "பணியிடங்கள் மற்றும் சாரளங்கள்";
+"my_documents" = "My Documents";
+"my_documents_contents" = "My Documents and their pages";
 "synchronization_categories" = "ஒத்திசைவு வகைகள்";
 "sync_error" = "மேக சேமிப்பகத்துடன் ஒத்திசைவில் பிழை ஏற்பட்டது";
 "sync_cant_fetch" = "மேக சேமிப்பகத்தில் உள்ள தரவு தளம் அல்லது ஒட்டு கோப்பு இந்த செயலியால் பயன்படுத்தக்கூடிய பதிப்பினை விட முந்தியது ஆகும்.";

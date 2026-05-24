@@ -501,6 +501,8 @@
 "reading_plans_content" = "legplanoj kun iliaj progresoj";
 "bookmarks_contents" = "legosignoj, etikedoj, notblokoj";
 "workspaces_contents" = "laborspacoj kaj fenestroj";
+"my_documents" = "My Documents";
+"my_documents_contents" = "My Documents and their pages";
 "synchronization_categories" = "Kategorioj de samtempigo";
 "sync_error" = "Eraro okazis dum samtempigi kun nubo";
 "sync_cant_fetch" = "La versio de datumbazo aŭ dosiero konservita en la nubo estas pli alta ol versio subtenata per tiu ĉi aplikaĵo.";

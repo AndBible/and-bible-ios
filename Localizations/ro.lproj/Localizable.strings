@@ -501,6 +501,8 @@
 "reading_plans_content" = "Planuri de lectură și starea acestora";
 "bookmarks_contents" = "Semne de carte, Etichete și Notițe de studiu";
 "workspaces_contents" = "Spații de studiu și Ferestre";
+"my_documents" = "My Documents";
+"my_documents_contents" = "My Documents and their pages";
 "synchronization_categories" = "Categorii de sincronizare";
 "sync_error" = "A apărut o eroare în sincronizarea Cloud";
 "sync_cant_fetch" = "Versiunea bazei de date sau a fișierului stocat în Cloud este mai mare decît cea acceptată de această aplicație.";

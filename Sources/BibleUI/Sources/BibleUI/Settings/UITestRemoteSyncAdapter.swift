@@ -44,7 +44,7 @@ actor UITestRemoteSyncAdapter: RemoteSyncAdapting {
         guard parentIDs == nil,
               mimeType == nil,
               let name,
-              RemoteSyncCategory.allCases.contains(where: {
+              RemoteSyncCategory.activeSyncCases.contains(where: {
                   $0.syncFolderName(bundleIdentifier: bundleIdentifier) == name
               }) else {
             return []

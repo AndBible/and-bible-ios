@@ -23,8 +23,8 @@ public enum RemoteSyncCategory: String, CaseIterable, Sendable {
     /// My Documents document/page/content data.
     case myDocuments = "mydocuments"
 
-    /// Categories currently exposed through the iOS sync UI and lifecycle sweep.
-    public static var allCases: [RemoteSyncCategory] {
+    /// Categories currently ready for the broad iOS sync UI and lifecycle sweep.
+    public static var activeSyncCases: [RemoteSyncCategory] {
         [.bookmarks, .workspaces, .readingPlans]
     }
 

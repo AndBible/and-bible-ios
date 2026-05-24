@@ -530,6 +530,8 @@
 "reading_plans_content" = "Σχέδια ανάγνωσης και η κατάσταση τους";
 "bookmarks_contents" = "Σελιδοδείκτες, Ετικέτες και Μπλοκ Μελέτης";
 "workspaces_contents" = "Χώροι εργασίας και Παράθυρα";
+"my_documents" = "My Documents";
+"my_documents_contents" = "My Documents and their pages";
 "synchronization_categories" = "Κατηγορίες συγχρονισμού";
 "sync_error" = "Σφάλμα κατα τον συγχρονισμο cloud";
 "sync_cant_fetch" = "Η έκδοση της βάσης ή του αρχείου επιδιόρθωσης που βρίσκεται στο cloud είναι υψηλότερη της υποστηριζόμενης από αυτή την εφαρμογή";

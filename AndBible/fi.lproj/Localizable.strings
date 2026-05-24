@@ -530,6 +530,8 @@
 "reading_plans_content" = "Lukusuunnitelmat ja niiden tila";
 "bookmarks_contents" = "Kirjanmerkit, kirjanmerkkiryhmät ja opintoalustat";
 "workspaces_contents" = "Työtilat ja ikkunat";
+"my_documents" = "My Documents";
+"my_documents_contents" = "My Documents and their pages";
 "synchronization_categories" = "Synkronoinnin kategoriat";
 "sync_error" = "Virhe tapahtui synkronoidessa pilvipalveluun";
 "sync_cant_fetch" = "Pilvipalvelussa olevan tietokannan tai patch-tiedoston versio on uudempi kuin se mitä tämä sovellus tukee.";

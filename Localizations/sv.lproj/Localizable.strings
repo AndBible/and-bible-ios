@@ -501,6 +501,8 @@
 "reading_plans_content" = "Läsningsplaner och deras förlopp";
 "bookmarks_contents" = "Bokmärken, etiketter och studieblock";
 "workspaces_contents" = "Arbetsytor och fönster";
+"my_documents" = "My Documents";
+"my_documents_contents" = "My Documents and their pages";
 "synchronization_categories" = "Kategorier för synkronisering";
 "sync_error" = "Ett fel uppstod i molnsynkroniseringen";
 "sync_cant_fetch" = "Den molnlagrade databas- eller patch-filens version är högre än den som stöds av denna app.";
