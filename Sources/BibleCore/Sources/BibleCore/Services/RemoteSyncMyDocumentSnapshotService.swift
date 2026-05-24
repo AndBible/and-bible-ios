@@ -61,6 +61,9 @@ public struct RemoteSyncMyDocumentCurrentSnapshot: Sendable, Equatable {
    existing outbound snapshot services
  */
 public final class RemoteSyncMyDocumentSnapshotService {
+    // Android sync triggers write the SQL literal '' for entityId2 on single-key tables.
+    static let emptySecondaryEntityID = RemoteSyncSQLiteValue.text("")
+
     public init() {}
 
     /**
@@ -104,7 +107,7 @@ public final class RemoteSyncMyDocumentSnapshotService {
                 for: .myDocuments,
                 tableName: "MyDocument",
                 entityID1: .blob(Self.uuidBlob(row.id)),
-                entityID2: .text("")
+                entityID2: Self.emptySecondaryEntityID
             )
             documentRowsByKey[key] = row
             fingerprintsByKey[key] = Self.fingerprintHex(for: row)
@@ -130,7 +133,7 @@ public final class RemoteSyncMyDocumentSnapshotService {
                 for: .myDocuments,
                 tableName: "MyDocumentPage",
                 entityID1: .blob(Self.uuidBlob(row.id)),
-                entityID2: .text("")
+                entityID2: Self.emptySecondaryEntityID
             )
             pageIDs.insert(row.id)
             pageRowsByKey[key] = row
@@ -146,7 +149,7 @@ public final class RemoteSyncMyDocumentSnapshotService {
                 for: .myDocuments,
                 tableName: "MyDocumentPageContent",
                 entityID1: .blob(Self.uuidBlob(row.pageId)),
-                entityID2: .text("")
+                entityID2: Self.emptySecondaryEntityID
             )
             pageContentRowsByKey[key] = row
             fingerprintsByKey[key] = Self.fingerprintHex(for: row)
@@ -172,7 +175,7 @@ public final class RemoteSyncMyDocumentSnapshotService {
                 for: .myDocuments,
                 tableName: "AiPageCacheEntry",
                 entityID1: .blob(Self.uuidBlob(row.pageId)),
-                entityID2: .text("")
+                entityID2: Self.emptySecondaryEntityID
             )
             aiPageCacheEntryRowsByKey[key] = row
             fingerprintsByKey[key] = Self.fingerprintHex(for: row)
@@ -207,7 +210,7 @@ public final class RemoteSyncMyDocumentSnapshotService {
                 for: .myDocuments,
                 tableName: "MyDocument",
                 entityID1: .blob(Self.uuidBlob(row.id)),
-                entityID2: .text("")
+                entityID2: Self.emptySecondaryEntityID
             )
         }
 
@@ -220,7 +223,7 @@ public final class RemoteSyncMyDocumentSnapshotService {
                 for: .myDocuments,
                 tableName: "MyDocumentPage",
                 entityID1: .blob(Self.uuidBlob(row.id)),
-                entityID2: .text("")
+                entityID2: Self.emptySecondaryEntityID
             )
         }
 
@@ -233,7 +236,7 @@ public final class RemoteSyncMyDocumentSnapshotService {
                 for: .myDocuments,
                 tableName: "MyDocumentPageContent",
                 entityID1: .blob(Self.uuidBlob(row.pageId)),
-                entityID2: .text("")
+                entityID2: Self.emptySecondaryEntityID
             )
         }
 
@@ -246,7 +249,7 @@ public final class RemoteSyncMyDocumentSnapshotService {
                 for: .myDocuments,
                 tableName: "AiPageCacheEntry",
                 entityID1: .blob(Self.uuidBlob(row.pageId)),
-                entityID2: .text("")
+                entityID2: Self.emptySecondaryEntityID
             )
         }
     }
