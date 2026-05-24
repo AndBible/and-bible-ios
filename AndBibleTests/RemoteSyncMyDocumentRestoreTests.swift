@@ -681,6 +681,562 @@ final class RemoteSyncMyDocumentRestoreTests: XCTestCase {
         XCTAssertEqual(RemoteSyncStateStore(settingsStore: settingsStore).progressState(for: .myDocuments).lastPatchWritten, 2_400)
     }
 
+    func testRemoteSyncMyDocumentPatchUploadWritesAndUploadsSparsePatch() async throws {
+        let container = try makeModelContainer()
+        let modelContext = ModelContext(container)
+        let settingsStore = SettingsStore(modelContext: modelContext)
+        let logEntryStore = RemoteSyncLogEntryStore(settingsStore: settingsStore)
+        let patchStatusStore = RemoteSyncPatchStatusStore(settingsStore: settingsStore)
+        let stateStore = RemoteSyncStateStore(settingsStore: settingsStore)
+        let snapshotService = RemoteSyncMyDocumentSnapshotService()
+        let metadataRestoreService = RemoteSyncInitialBackupMetadataRestoreService()
+        let restoreService = RemoteSyncMyDocumentRestoreService()
+
+        let existingDocumentID = UUID(uuidString: "a7100000-0000-0000-0000-000000000001")!
+        let existingPageID = UUID(uuidString: "a7100000-0000-0000-0000-000000000011")!
+        let existingPromptID = UUID(uuidString: "a7100000-0000-0000-0000-000000000021")!
+        let newDocumentID = UUID(uuidString: "a7100000-0000-0000-0000-000000000002")!
+        let newPageID = UUID(uuidString: "a7100000-0000-0000-0000-000000000012")!
+        let newPromptID = UUID(uuidString: "a7100000-0000-0000-0000-000000000022")!
+        let createdAt = Date(timeIntervalSince1970: 1_735_689_600)
+        let updatedAt = Date(timeIntervalSince1970: 1_735_689_660)
+
+        let existingDocument = MyDocument(
+            id: existingDocumentID,
+            name: "Existing",
+            initials: "EXIST",
+            createdAt: createdAt,
+            updatedAt: updatedAt
+        )
+        let existingPage = MyDocumentPage(
+            id: existingPageID,
+            title: "Existing Page",
+            pageKey: "existing",
+            contentType: .markdown,
+            createdAt: createdAt,
+            updatedAt: updatedAt,
+            sourcePromptId: existingPromptID,
+            languageCode: "en"
+        )
+        let existingContent = MyDocumentPageContent(pageId: existingPageID, content: "Original content")
+        let existingCacheEntry = AiPageCacheEntry(
+            pageId: existingPageID,
+            sourcePromptId: existingPromptID,
+            contextHash: "old-context",
+            sourceBookKey: "John.1"
+        )
+        existingDocument.pages = [existingPage]
+        existingPage.document = existingDocument
+        existingPage.pageContent = existingContent
+        existingContent.page = existingPage
+        existingPage.aiPageCacheEntries = [existingCacheEntry]
+        existingCacheEntry.page = existingPage
+        modelContext.insert(existingDocument)
+        modelContext.insert(existingPage)
+        modelContext.insert(existingContent)
+        modelContext.insert(existingCacheEntry)
+        try modelContext.save()
+
+        logEntryStore.replaceEntries(
+            myDocumentLogEntries(
+                documentIDs: [existingDocumentID],
+                pageIDs: [existingPageID],
+                timestamp: 1_000,
+                sourceDevice: "pixel"
+            ),
+            for: .myDocuments
+        )
+        snapshotService.refreshBaselineFingerprints(
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+
+        existingContent.content = "Edited content only"
+        existingCacheEntry.contextHash = "updated-context"
+        let newDocument = MyDocument(
+            id: newDocumentID,
+            name: "New",
+            documentDescription: "Created locally",
+            initials: "NEWDOC",
+            orderNumber: 1,
+            createdAt: createdAt,
+            updatedAt: updatedAt
+        )
+        let newPage = MyDocumentPage(
+            id: newPageID,
+            title: "New Page",
+            pageKey: "new",
+            contentType: .html,
+            orderNumber: 1,
+            createdAt: createdAt,
+            updatedAt: updatedAt,
+            sourcePromptId: newPromptID,
+            languageCode: "en"
+        )
+        let newContent = MyDocumentPageContent(pageId: newPageID, content: "<p>New</p>")
+        let newCacheEntry = AiPageCacheEntry(
+            pageId: newPageID,
+            sourcePromptId: newPromptID,
+            sourceContext: #"{"osisRef":"Rom.8"}"#,
+            kjvOrdinalStart: 28_000,
+            kjvOrdinalEnd: 28_001,
+            contextHash: "new-context",
+            usedWriteTools: true,
+            sourceModelName: "gpt-test",
+            sourceBookInitials: "KJV",
+            sourceBookKey: "Rom.8"
+        )
+        newDocument.pages = [newPage]
+        newPage.document = newDocument
+        newPage.pageContent = newContent
+        newContent.page = newPage
+        newPage.aiPageCacheEntries = [newCacheEntry]
+        newCacheEntry.page = newPage
+        modelContext.insert(newDocument)
+        modelContext.insert(newPage)
+        modelContext.insert(newContent)
+        modelContext.insert(newCacheEntry)
+        try modelContext.save()
+
+        let adapter = MyDocumentMockRemoteSyncAdapter()
+        await adapter.enqueueUploadResult(
+            RemoteSyncFile(
+                id: "/org.andbible.ios-sync-mydocuments/ios-device/1.4.sqlite3.gz",
+                name: "1.4.sqlite3.gz",
+                size: 0,
+                timestamp: 3_000,
+                parentID: "/org.andbible.ios-sync-mydocuments/ios-device",
+                mimeType: NextCloudSyncAdapter.gzipMimeType
+            )
+        )
+        let service = RemoteSyncMyDocumentPatchUploadService(
+            adapter: adapter,
+            nowProvider: { 3_000 }
+        )
+
+        let report = try await service.uploadPendingPatch(
+            bootstrapState: RemoteSyncBootstrapState(deviceFolderID: "/org.andbible.ios-sync-mydocuments/ios-device"),
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+
+        let unwrappedReport = try XCTUnwrap(report)
+        XCTAssertEqual(unwrappedReport.patchNumber, 1)
+        XCTAssertEqual(unwrappedReport.upsertedDocumentCount, 1)
+        XCTAssertEqual(unwrappedReport.upsertedPageCount, 1)
+        XCTAssertEqual(unwrappedReport.upsertedPageContentCount, 2)
+        XCTAssertEqual(unwrappedReport.upsertedAiPageCacheEntryCount, 2)
+        XCTAssertEqual(unwrappedReport.deletedRowCount, 0)
+        XCTAssertEqual(unwrappedReport.logEntryCount, 6)
+        XCTAssertEqual(unwrappedReport.lastUpdated, 3_000)
+
+        let uploadedFiles = await adapter.uploadedFilesSnapshot()
+        let uploadedFile = try XCTUnwrap(uploadedFiles.first)
+        XCTAssertEqual(uploadedFile.name, "1.4.sqlite3.gz")
+        XCTAssertEqual(uploadedFile.parentID, "/org.andbible.ios-sync-mydocuments/ios-device")
+        XCTAssertEqual(uploadedFile.contentType, NextCloudSyncAdapter.gzipMimeType)
+        let databaseURL = try writeUploadedMyDocumentDatabase(uploadedFile.data)
+        defer { try? FileManager.default.removeItem(at: databaseURL) }
+
+        XCTAssertEqual(try sqliteUserVersion(at: databaseURL), RemoteSyncMyDocumentRestoreService.supportedAndroidSchemaVersion)
+        XCTAssertEqual(try sqliteRoomIdentityHash(at: databaseURL), "3f0946602099d896c8d47129233c1794")
+        let metadataSnapshot = try metadataRestoreService.readSnapshot(from: databaseURL)
+        XCTAssertEqual(metadataSnapshot.logEntries.map(\.type), Array(repeating: .upsert, count: 6))
+        XCTAssertEqual(Set(metadataSnapshot.logEntries.map(\.sourceDevice)), ["ios-device"])
+        XCTAssertEqual(
+            metadataSnapshot.logEntries.map(\.entityID2),
+            Array(repeating: RemoteSyncMyDocumentSnapshotService.emptySecondaryEntityID, count: 6)
+        )
+        XCTAssertEqual(
+            Set(metadataSnapshot.logEntries.map(\.tableName)),
+            ["AiPageCacheEntry", "MyDocument", "MyDocumentPage", "MyDocumentPageContent"]
+        )
+
+        let patchSnapshot = try restoreService.readSnapshot(from: databaseURL)
+        XCTAssertEqual(patchSnapshot.documents.map(\.id), [newDocumentID])
+        XCTAssertEqual(patchSnapshot.pages.map(\.id), [newPageID])
+        XCTAssertEqual(
+            patchSnapshot.pageContents.sorted { $0.pageId.uuidString < $1.pageId.uuidString },
+            [
+                .init(pageId: existingPageID, content: "Edited content only"),
+                .init(pageId: newPageID, content: "<p>New</p>"),
+            ]
+        )
+        XCTAssertEqual(Set(patchSnapshot.aiPageCacheEntries.map(\.pageId)), [existingPageID, newPageID])
+        XCTAssertEqual(patchSnapshot.aiPageCacheEntries.first(where: { $0.pageId == newPageID })?.sourceBookKey, "Rom.8")
+
+        XCTAssertEqual(
+            patchStatusStore.statuses(for: .myDocuments),
+            [
+                RemoteSyncPatchStatus(
+                    sourceDevice: "ios-device",
+                    patchNumber: 1,
+                    sizeBytes: unwrappedReport.uploadedFile.size,
+                    appliedDate: 3_000
+                )
+            ]
+        )
+        XCTAssertEqual(stateStore.progressState(for: .myDocuments).lastPatchWritten, 3_000)
+        XCTAssertEqual(logEntryStore.entries(for: .myDocuments).count, 8)
+
+        let currentSnapshot = snapshotService.snapshotCurrentState(
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+        let existingContentKey = logEntryStore.key(
+            for: .myDocuments,
+            tableName: "MyDocumentPageContent",
+            entityID1: .blob(uuidBlob(existingPageID)),
+            entityID2: .text("")
+        )
+        XCTAssertEqual(
+            RemoteSyncRowFingerprintStore(settingsStore: settingsStore).fingerprint(
+                forLogKey: existingContentKey,
+                category: .myDocuments
+            ),
+            currentSnapshot.fingerprintsByKey[existingContentKey]
+        )
+    }
+
+    func testRemoteSyncMyDocumentPatchUploadReturnsNilWhenStateMatchesBaseline() async throws {
+        let container = try makeModelContainer()
+        let modelContext = ModelContext(container)
+        let settingsStore = SettingsStore(modelContext: modelContext)
+        let documentID = UUID(uuidString: "a7200000-0000-0000-0000-000000000001")!
+        let pageID = UUID(uuidString: "a7200000-0000-0000-0000-000000000011")!
+        let promptID = UUID(uuidString: "a7200000-0000-0000-0000-000000000021")!
+
+        let document = MyDocument(id: documentID, name: "Idle", initials: "IDLE")
+        let page = MyDocumentPage(id: pageID, title: "Idle Page", pageKey: "idle", sourcePromptId: promptID)
+        let content = MyDocumentPageContent(pageId: pageID, content: "Unchanged")
+        let cacheEntry = AiPageCacheEntry(pageId: pageID, sourcePromptId: promptID, contextHash: "unchanged")
+        document.pages = [page]
+        page.document = document
+        page.pageContent = content
+        content.page = page
+        page.aiPageCacheEntries = [cacheEntry]
+        cacheEntry.page = page
+        modelContext.insert(document)
+        modelContext.insert(page)
+        modelContext.insert(content)
+        modelContext.insert(cacheEntry)
+        try modelContext.save()
+
+        RemoteSyncLogEntryStore(settingsStore: settingsStore).replaceEntries(
+            myDocumentLogEntries(
+                documentIDs: [documentID],
+                pageIDs: [pageID],
+                timestamp: 1_000,
+                sourceDevice: "pixel"
+            ),
+            for: .myDocuments
+        )
+        RemoteSyncMyDocumentSnapshotService().refreshBaselineFingerprints(
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+
+        let adapter = MyDocumentMockRemoteSyncAdapter()
+        let service = RemoteSyncMyDocumentPatchUploadService(
+            adapter: adapter,
+            nowProvider: { 4_000 }
+        )
+
+        let report = try await service.uploadPendingPatch(
+            bootstrapState: RemoteSyncBootstrapState(deviceFolderID: "/org.andbible.ios-sync-mydocuments/ios-device"),
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+
+        XCTAssertNil(report)
+        let uploadedFiles = await adapter.uploadedFilesSnapshot()
+        XCTAssertTrue(uploadedFiles.isEmpty)
+    }
+
+    func testRemoteSyncMyDocumentPatchUploadUploadsRowsWithMissingFingerprintBaseline() async throws {
+        let container = try makeModelContainer()
+        let modelContext = ModelContext(container)
+        let settingsStore = SettingsStore(modelContext: modelContext)
+        let documentID = UUID(uuidString: "a7250000-0000-0000-0000-000000000001")!
+        let document = MyDocument(id: documentID, name: "Migrated", initials: "MIG")
+        modelContext.insert(document)
+        try modelContext.save()
+
+        RemoteSyncLogEntryStore(settingsStore: settingsStore).replaceEntries(
+            myDocumentLogEntries(
+                documentIDs: [documentID],
+                pageIDs: [],
+                timestamp: 1_000,
+                sourceDevice: "pixel"
+            ),
+            for: .myDocuments
+        )
+
+        let adapter = MyDocumentMockRemoteSyncAdapter()
+        await adapter.enqueueUploadResult(
+            RemoteSyncFile(
+                id: "/org.andbible.ios-sync-mydocuments/ios-device/1.4.sqlite3.gz",
+                name: "1.4.sqlite3.gz",
+                size: 0,
+                timestamp: 4_500,
+                parentID: "/org.andbible.ios-sync-mydocuments/ios-device",
+                mimeType: NextCloudSyncAdapter.gzipMimeType
+            )
+        )
+        let service = RemoteSyncMyDocumentPatchUploadService(
+            adapter: adapter,
+            nowProvider: { 4_500 }
+        )
+
+        let report = try await service.uploadPendingPatch(
+            bootstrapState: RemoteSyncBootstrapState(deviceFolderID: "/org.andbible.ios-sync-mydocuments/ios-device"),
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+
+        let unwrappedReport = try XCTUnwrap(report)
+        XCTAssertEqual(unwrappedReport.upsertedDocumentCount, 1)
+        XCTAssertEqual(unwrappedReport.logEntryCount, 1)
+
+        let uploadedFiles = await adapter.uploadedFilesSnapshot()
+        let uploadedFile = try XCTUnwrap(uploadedFiles.first)
+        let databaseURL = try writeUploadedMyDocumentDatabase(uploadedFile.data)
+        defer { try? FileManager.default.removeItem(at: databaseURL) }
+        let patchSnapshot = try RemoteSyncMyDocumentRestoreService().readSnapshot(from: databaseURL)
+        XCTAssertEqual(patchSnapshot.documents.map(\.id), [documentID])
+    }
+
+    func testRemoteSyncMyDocumentPatchUploadRejectsMissingDeviceFolder() async throws {
+        let container = try makeModelContainer()
+        let modelContext = ModelContext(container)
+        let settingsStore = SettingsStore(modelContext: modelContext)
+        let service = RemoteSyncMyDocumentPatchUploadService(
+            adapter: MyDocumentMockRemoteSyncAdapter(),
+            nowProvider: { 4_750 }
+        )
+
+        do {
+            _ = try await service.uploadPendingPatch(
+                bootstrapState: RemoteSyncBootstrapState(deviceFolderID: "   "),
+                modelContext: modelContext,
+                settingsStore: settingsStore
+            )
+            XCTFail("Expected missing device folder error")
+        } catch {
+            XCTAssertEqual(error as? RemoteSyncMyDocumentPatchUploadError, .missingDeviceFolderID)
+        }
+    }
+
+    func testRemoteSyncMyDocumentPatchUploadDetectsDeletesAfterBaselineRefresh() async throws {
+        let container = try makeModelContainer()
+        let modelContext = ModelContext(container)
+        let settingsStore = SettingsStore(modelContext: modelContext)
+        let metadataRestoreService = RemoteSyncInitialBackupMetadataRestoreService()
+        let documentID = UUID(uuidString: "a7300000-0000-0000-0000-000000000001")!
+        let pageID = UUID(uuidString: "a7300000-0000-0000-0000-000000000011")!
+        let promptID = UUID(uuidString: "a7300000-0000-0000-0000-000000000021")!
+
+        let document = MyDocument(id: documentID, name: "Delete", initials: "DEL")
+        let page = MyDocumentPage(id: pageID, title: "Delete Page", pageKey: "delete", sourcePromptId: promptID)
+        let content = MyDocumentPageContent(pageId: pageID, content: "Delete me")
+        let cacheEntry = AiPageCacheEntry(pageId: pageID, sourcePromptId: promptID, contextHash: "delete")
+        document.pages = [page]
+        page.document = document
+        page.pageContent = content
+        content.page = page
+        page.aiPageCacheEntries = [cacheEntry]
+        cacheEntry.page = page
+        modelContext.insert(document)
+        modelContext.insert(page)
+        modelContext.insert(content)
+        modelContext.insert(cacheEntry)
+        try modelContext.save()
+
+        RemoteSyncLogEntryStore(settingsStore: settingsStore).replaceEntries(
+            myDocumentLogEntries(
+                documentIDs: [documentID],
+                pageIDs: [pageID],
+                timestamp: 1_000,
+                sourceDevice: "pixel"
+            ),
+            for: .myDocuments
+        )
+        RemoteSyncMyDocumentSnapshotService().refreshBaselineFingerprints(
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+
+        modelContext.delete(document)
+        try modelContext.save()
+
+        let adapter = MyDocumentMockRemoteSyncAdapter()
+        await adapter.enqueueUploadResult(
+            RemoteSyncFile(
+                id: "/org.andbible.ios-sync-mydocuments/ios-device/1.4.sqlite3.gz",
+                name: "1.4.sqlite3.gz",
+                size: 0,
+                timestamp: 5_000,
+                parentID: "/org.andbible.ios-sync-mydocuments/ios-device",
+                mimeType: NextCloudSyncAdapter.gzipMimeType
+            )
+        )
+        let service = RemoteSyncMyDocumentPatchUploadService(
+            adapter: adapter,
+            nowProvider: { 5_000 }
+        )
+
+        let report = try await service.uploadPendingPatch(
+            bootstrapState: RemoteSyncBootstrapState(deviceFolderID: "/org.andbible.ios-sync-mydocuments/ios-device"),
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+
+        let unwrappedReport = try XCTUnwrap(report)
+        XCTAssertEqual(unwrappedReport.upsertedDocumentCount, 0)
+        XCTAssertEqual(unwrappedReport.upsertedPageCount, 0)
+        XCTAssertEqual(unwrappedReport.upsertedPageContentCount, 0)
+        XCTAssertEqual(unwrappedReport.upsertedAiPageCacheEntryCount, 0)
+        XCTAssertEqual(unwrappedReport.deletedRowCount, 4)
+        XCTAssertEqual(unwrappedReport.logEntryCount, 4)
+
+        let uploadedFiles = await adapter.uploadedFilesSnapshot()
+        let uploadedFile = try XCTUnwrap(uploadedFiles.first)
+        let databaseURL = try writeUploadedMyDocumentDatabase(uploadedFile.data)
+        defer { try? FileManager.default.removeItem(at: databaseURL) }
+
+        let metadataSnapshot = try metadataRestoreService.readSnapshot(from: databaseURL)
+        XCTAssertEqual(metadataSnapshot.logEntries.map(\.type), Array(repeating: .delete, count: 4))
+        XCTAssertEqual(
+            Set(metadataSnapshot.logEntries.map(\.tableName)),
+            ["AiPageCacheEntry", "MyDocument", "MyDocumentPage", "MyDocumentPageContent"]
+        )
+        XCTAssertEqual(try sqliteCount(tableName: "MyDocument", databaseURL: databaseURL), 0)
+        XCTAssertEqual(try sqliteCount(tableName: "MyDocumentPageContent", databaseURL: databaseURL), 0)
+        XCTAssertEqual(try sqliteCount(tableName: "AiPageCacheEntry", databaseURL: databaseURL), 0)
+    }
+
+    func testRemoteSyncSynchronizationServiceUploadsLocalMyDocumentChangesWhenNoRemotePatchesExist() async throws {
+        let container = try makeModelContainer()
+        let modelContext = ModelContext(container)
+        let settingsStore = SettingsStore(modelContext: modelContext)
+        let stateStore = RemoteSyncStateStore(settingsStore: settingsStore)
+        let patchStatusStore = RemoteSyncPatchStatusStore(settingsStore: settingsStore)
+        let logEntryStore = RemoteSyncLogEntryStore(settingsStore: settingsStore)
+        let snapshotService = RemoteSyncMyDocumentSnapshotService()
+        let syncFolderID = "/org.andbible.ios-sync-mydocuments"
+        let deviceFolderID = "/org.andbible.ios-sync-mydocuments/ios-device"
+
+        stateStore.setBootstrapState(
+            RemoteSyncBootstrapState(
+                syncFolderID: syncFolderID,
+                deviceFolderID: deviceFolderID,
+                secretFileName: "device-known-ios-device-secret"
+            ),
+            for: .myDocuments
+        )
+
+        let documentID = UUID(uuidString: "a7400000-0000-0000-0000-000000000001")!
+        let pageID = UUID(uuidString: "a7400000-0000-0000-0000-000000000011")!
+        let promptID = UUID(uuidString: "a7400000-0000-0000-0000-000000000021")!
+        let document = MyDocument(id: documentID, name: "Sync", initials: "SYNC")
+        let page = MyDocumentPage(id: pageID, title: "Sync Page", pageKey: "sync", sourcePromptId: promptID)
+        let content = MyDocumentPageContent(pageId: pageID, content: "Sync")
+        let cacheEntry = AiPageCacheEntry(pageId: pageID, sourcePromptId: promptID)
+        document.pages = [page]
+        page.document = document
+        page.pageContent = content
+        content.page = page
+        page.aiPageCacheEntries = [cacheEntry]
+        cacheEntry.page = page
+        modelContext.insert(document)
+        modelContext.insert(page)
+        modelContext.insert(content)
+        modelContext.insert(cacheEntry)
+        try modelContext.save()
+
+        logEntryStore.replaceEntries(
+            myDocumentLogEntries(
+                documentIDs: [documentID],
+                pageIDs: [pageID],
+                timestamp: 1_000,
+                sourceDevice: "pixel"
+            ),
+            for: .myDocuments
+        )
+        snapshotService.refreshBaselineFingerprints(
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+
+        document.name = "Sync Updated"
+        try modelContext.save()
+
+        let adapter = MyDocumentMockRemoteSyncAdapter()
+        await adapter.setKnownResponse(
+            true,
+            forSyncFolderID: syncFolderID,
+            secretFileName: "device-known-ios-device-secret"
+        )
+        await adapter.enqueueUploadResult(
+            RemoteSyncFile(
+                id: "\(deviceFolderID)/1.4.sqlite3.gz",
+                name: "1.4.sqlite3.gz",
+                size: 0,
+                timestamp: 6_000,
+                parentID: deviceFolderID,
+                mimeType: NextCloudSyncAdapter.gzipMimeType
+            )
+        )
+
+        let service = RemoteSyncSynchronizationService(
+            adapter: adapter,
+            bundleIdentifier: "org.andbible.ios",
+            deviceIdentifier: "ios-device",
+            nowProvider: { 6_000 }
+        )
+
+        let outcome = try await service.synchronize(
+            .myDocuments,
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+
+        guard case .synchronized(let report) = outcome else {
+            return XCTFail("Expected synchronized outcome")
+        }
+        XCTAssertEqual(report.category, .myDocuments)
+        XCTAssertNil(report.initialRestoreReport)
+        XCTAssertNil(report.patchReplayReport)
+        XCTAssertEqual(report.discoveredPatchCount, 0)
+        XCTAssertEqual(report.lastPatchWritten, 6_000)
+        XCTAssertEqual(report.lastSynchronized, 6_000)
+
+        guard case .myDocuments(let uploadReport)? = report.patchUploadReport else {
+            return XCTFail("Expected My Documents patch upload report")
+        }
+        XCTAssertEqual(uploadReport.patchNumber, 1)
+        XCTAssertEqual(uploadReport.upsertedDocumentCount, 1)
+        XCTAssertEqual(uploadReport.upsertedPageCount, 0)
+        XCTAssertEqual(uploadReport.upsertedPageContentCount, 0)
+        XCTAssertEqual(uploadReport.upsertedAiPageCacheEntryCount, 0)
+        XCTAssertEqual(uploadReport.deletedRowCount, 0)
+        XCTAssertEqual(uploadReport.logEntryCount, 1)
+        XCTAssertEqual(uploadReport.lastUpdated, 6_000)
+        XCTAssertEqual(uploadReport.uploadedFile.name, "1.4.sqlite3.gz")
+        XCTAssertEqual(uploadReport.uploadedFile.parentID, deviceFolderID)
+        XCTAssertEqual(
+            patchStatusStore.statuses(for: .myDocuments),
+            [
+                RemoteSyncPatchStatus(
+                    sourceDevice: "ios-device",
+                    patchNumber: 1,
+                    sizeBytes: uploadReport.uploadedFile.size,
+                    appliedDate: 6_000
+                )
+            ]
+        )
+    }
+
     private func makeModelContainer() throws -> ModelContainer {
         let schema = Schema([
             MyDocument.self,
@@ -1005,6 +1561,51 @@ final class RemoteSyncMyDocumentRestoreTests: XCTestCase {
         sqlite3_bind_int(statement, index, Int32(value))
     }
 
+    private func myDocumentLogEntries(
+        documentIDs: [UUID],
+        pageIDs: [UUID],
+        timestamp: Int64,
+        sourceDevice: String
+    ) -> [RemoteSyncLogEntry] {
+        documentIDs.map {
+            RemoteSyncLogEntry(
+                tableName: "MyDocument",
+                entityID1: .blob(uuidBlob($0)),
+                entityID2: .text(""),
+                type: .upsert,
+                lastUpdated: timestamp,
+                sourceDevice: sourceDevice
+            )
+        } + pageIDs.flatMap {
+            [
+                RemoteSyncLogEntry(
+                    tableName: "MyDocumentPage",
+                    entityID1: .blob(uuidBlob($0)),
+                    entityID2: .text(""),
+                    type: .upsert,
+                    lastUpdated: timestamp,
+                    sourceDevice: sourceDevice
+                ),
+                RemoteSyncLogEntry(
+                    tableName: "MyDocumentPageContent",
+                    entityID1: .blob(uuidBlob($0)),
+                    entityID2: .text(""),
+                    type: .upsert,
+                    lastUpdated: timestamp,
+                    sourceDevice: sourceDevice
+                ),
+                RemoteSyncLogEntry(
+                    tableName: "AiPageCacheEntry",
+                    entityID1: .blob(uuidBlob($0)),
+                    entityID2: .text(""),
+                    type: .upsert,
+                    lastUpdated: timestamp,
+                    sourceDevice: sourceDevice
+                ),
+            ]
+        }
+    }
+
     private func uuidBlob(_ value: UUID) -> Data {
         var uuid = value.uuid
         return withUnsafeBytes(of: &uuid) { Data($0) }
@@ -1013,10 +1614,15 @@ final class RemoteSyncMyDocumentRestoreTests: XCTestCase {
 
 private actor MyDocumentMockRemoteSyncAdapter: RemoteSyncAdapting {
     private var uploadResults: [RemoteSyncFile] = []
+    private var knownResponses: [String: Bool] = [:]
     private var uploadedFiles: [MyDocumentMockUploadedFile] = []
 
     func enqueueUploadResult(_ result: RemoteSyncFile) {
         uploadResults.append(result)
+    }
+
+    func setKnownResponse(_ value: Bool, forSyncFolderID syncFolderID: String, secretFileName: String) {
+        knownResponses["\(syncFolderID)|\(secretFileName)"] = value
     }
 
     func uploadedFilesSnapshot() -> [MyDocumentMockUploadedFile] {
@@ -1086,7 +1692,7 @@ private actor MyDocumentMockRemoteSyncAdapter: RemoteSyncAdapting {
     func delete(id: String) async throws {}
 
     func isSyncFolderKnown(syncFolderID: String, secretFileName: String) async throws -> Bool {
-        false
+        knownResponses["\(syncFolderID)|\(secretFileName)"] ?? false
     }
 
     func makeSyncFolderKnown(syncFolderID: String, deviceIdentifier: String) async throws -> String {
