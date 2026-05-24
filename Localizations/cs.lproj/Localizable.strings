@@ -501,6 +501,8 @@
 "reading_plans_content" = "Plány čtení a jejich stav";
 "bookmarks_contents" = "Záložky, štítky a studijní složky";
 "workspaces_contents" = "Pracovní prochy a okna";
+"my_documents" = "My Documents";
+"my_documents_contents" = "My Documents and their pages";
 "synchronization_categories" = "Kategorie synchronizace";
 "sync_error" = "Nastala chyba při synchronizaci";
 "sync_cant_fetch" = "Verze databáze nebo souboru opravy uložená na síti je vyšší než verze podporovaná touto aplikací.";

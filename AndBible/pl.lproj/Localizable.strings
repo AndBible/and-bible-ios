@@ -530,6 +530,8 @@
 "reading_plans_content" = "plany czytania wraz z postępami";
 "bookmarks_contents" = "zakładki, etykiety, bloczki notatek";
 "workspaces_contents" = "obszary robocze i okna";
+"my_documents" = "My Documents";
+"my_documents_contents" = "My Documents and their pages";
 "synchronization_categories" = "Kategorie synchronizacji";
 "sync_error" = "Wystąpił błąd podczas synchronizacji z chmurą.";
 "sync_cant_fetch" = "Wersja bazy danych lub pliku przechowywana w chmurze jest wyższa niż wersja wspierana przez tą aplikację.";

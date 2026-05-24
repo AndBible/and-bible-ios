@@ -501,6 +501,8 @@
 "reading_plans_content" = "Оқу жоспарлары және олардың күйлері";
 "bookmarks_contents" = "Бетбелгілер, белгілер және оқу тақталары";
 "workspaces_contents" = "Жұмыс кеңістігі және Windows";
+"my_documents" = "My Documents";
+"my_documents_contents" = "My Documents and their pages";
 "synchronization_categories" = "Синхрондау категориялары";
 "sync_error" = "Бұлтты синхрондауда қателік орын алды";
 "sync_cant_fetch" = "Бұлтта сақталған дерекқордың немесе патч файлының нұсқасы осы қолданба қолдайтын нұсқасынан жоғары.";

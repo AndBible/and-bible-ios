@@ -3174,7 +3174,7 @@ final class AndBibleUITests: XCTestCase {
      * - Side effects:
      *   - reveals Search options when needed and taps the translation picker button
      * - Failure modes:
-     *   - fails when the translation picker affordance is not exposed by Search
+     *   - fails when the translation picker affordance does not open the picker
      */
     private func tapSearchTranslationPicker(
         in app: XCUIApplication,
@@ -3183,6 +3183,10 @@ final class AndBibleUITests: XCTestCase {
         let deadline = Date().addingTimeInterval(timeout)
 
         repeat {
+            if searchTranslationPickerIsOpen(in: app, timeout: 0.2) {
+                return
+            }
+
             dismissSearchFieldFocusIfNeeded(in: app)
             revealSearchControls(in: app)
             let searchScreen = unresolvedElement("searchScreen", in: app)
@@ -3198,13 +3202,31 @@ final class AndBibleUITests: XCTestCase {
                     && waitForElementToBecomeHittable($0, timeout: 0.5)
             }) {
                 picker.tap()
-                return
+                if searchTranslationPickerIsOpen(in: app, timeout: 2) {
+                    return
+                }
             }
 
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         } while Date() < deadline
 
-        XCTFail("Expected Search translation picker button to exist within \(timeout) seconds.")
+        XCTFail("Expected Search translation picker to open within \(timeout) seconds.")
+    }
+
+    /// Returns true once the Search translation picker sheet has exposed any stable child element.
+    private func searchTranslationPickerIsOpen(
+        in app: XCUIApplication,
+        timeout: TimeInterval
+    ) -> Bool {
+        firstExistingElement(searchTranslationPickerOpenCandidates(in: app), timeout: timeout) != nil
+    }
+
+    /// Returns stable picker descendants that prove the Search translation picker sheet is open.
+    private func searchTranslationPickerOpenCandidates(in app: XCUIApplication) -> [XCUIElement] {
+        [
+            app.buttons["searchTranslationDoneButton"].firstMatch,
+            app.navigationBars.buttons["searchTranslationDoneButton"].firstMatch,
+        ] + searchTranslationPickerListCandidates(in: app)
     }
 
     /**

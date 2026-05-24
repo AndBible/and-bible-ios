@@ -501,6 +501,8 @@
 "reading_plans_content" = "Lees planne en hul statusse";
 "bookmarks_contents" = "Boekmerke, etikette en studieblokkies";
 "workspaces_contents" = "Werkspasies en Windows";
+"my_documents" = "My Documents";
+"my_documents_contents" = "My Documents and their pages";
 "synchronization_categories" = "Sinchronisasie kategorieë";
 "sync_error" = "Fout het voorgekom in Clud sinchronisasie";
 "sync_cant_fetch" = "";

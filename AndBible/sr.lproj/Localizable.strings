@@ -530,6 +530,8 @@
 "reading_plans_content" = "Планови читања и њихови статуси";
 "bookmarks_contents" = "Обележивачи, Ознаке и Радне Свеске";
 "workspaces_contents" = "Радне површи и Прозори";
+"my_documents" = "My Documents";
+"my_documents_contents" = "My Documents and their pages";
 "synchronization_categories" = "Категорије усклађивања";
 "sync_error" = "Дошло је до грешке током усклађивања у Облаку";
 "sync_cant_fetch" = "Верзија базе података или закрпе које се држе на Облаку новија је него она коју подржава ова апликација.";

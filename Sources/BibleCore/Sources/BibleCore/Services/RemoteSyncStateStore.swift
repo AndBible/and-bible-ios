@@ -5,10 +5,10 @@ import Foundation
 /**
  Identifies the logical data categories Android syncs as separate patch streams.
 
- Android's `SyncableDatabaseDefinition` uses three independent categories: bookmarks, workspaces,
- and reading plans. The iOS remote-sync implementation preserves that separation so remote folder
- naming, bootstrap state, and patch progress can be tracked per category instead of collapsing all
- user data into one opaque sync stream.
+ Android's `SyncableDatabaseDefinition` uses independent categories for bookmarks, workspaces,
+ reading plans, and My Documents. The iOS remote-sync implementation preserves that separation so
+ remote folder naming, bootstrap state, and patch progress can be tracked per category instead of
+ collapsing all user data into one opaque sync stream.
  */
 public enum RemoteSyncCategory: String, CaseIterable, Sendable {
     /// Bookmark, label, note, and StudyPad data.
@@ -19,6 +19,14 @@ public enum RemoteSyncCategory: String, CaseIterable, Sendable {
 
     /// Reading-plan definitions and completion progress.
     case readingPlans = "readingplans"
+
+    /// My Documents document/page/content data.
+    case myDocuments = "mydocuments"
+
+    /// Categories currently ready for the broad iOS sync UI and lifecycle sweep.
+    public static var activeSyncCases: [RemoteSyncCategory] {
+        [.bookmarks, .workspaces, .readingPlans]
+    }
 
     /**
      Builds the Android-style remote sync folder name for this category.

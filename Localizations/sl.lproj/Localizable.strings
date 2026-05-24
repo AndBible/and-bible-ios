@@ -501,6 +501,8 @@
 "reading_plans_content" = "Načrti za branje in njihovo stanje";
 "bookmarks_contents" = "Zaznamki, oznake in študijske beležke";
 "workspaces_contents" = "Delovni prostori in okna";
+"my_documents" = "My Documents";
+"my_documents_contents" = "My Documents and their pages";
 "synchronization_categories" = "Kategorije sinhronizacije";
 "sync_error" = "Pri sinhronizaciji v oblaku je prišlo do napake";
 "sync_cant_fetch" = "Različica podatkovne zbirke ali datoteke popravkov, shranjene v oblaku, je višja od različice, ki jo podpira ta aplikacija.";

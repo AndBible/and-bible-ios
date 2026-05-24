@@ -501,6 +501,8 @@
 "reading_plans_content" = "Les plans de lecture et leurs statuts";
 "bookmarks_contents" = "Marque-pages, étiquettes, et bloc-notes";
 "workspaces_contents" = "Espaces et fenêtres";
+"my_documents" = "My Documents";
+"my_documents_contents" = "My Documents and their pages";
 "synchronization_categories" = "Catégories à synchroniser";
 "sync_error" = "Une erreur est survenue durant la synchronisation du Cloud";
 "sync_cant_fetch" = "La version de la base de données ou du fichier patch stockée dans le Nuage est supérieure à celle prise en charge par cette application.";

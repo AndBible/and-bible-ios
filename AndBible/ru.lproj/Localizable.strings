@@ -530,6 +530,8 @@
 "reading_plans_content" = "Планы чтения и их статусы";
 "bookmarks_contents" = "Закладки, ярлыки и блокноты";
 "workspaces_contents" = "Рабочие области и окна";
+"my_documents" = "My Documents";
+"my_documents_contents" = "My Documents and their pages";
 "synchronization_categories" = "Категории синхронизации";
 "sync_error" = "Произошла ошибка при синхронизации с облаком.";
 "sync_cant_fetch" = "Версия базы данных или файла исправления, хранящегося в облаке, выше, чем версия, поддерживаемая этим приложением.";

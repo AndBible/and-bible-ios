@@ -501,6 +501,8 @@
 "reading_plans_content" = "Skaitymo planai ir jų būsena";
 "bookmarks_contents" = "Žymės, etiketės ir bloknotai";
 "workspaces_contents" = "Darbo sritys ir langai";
+"my_documents" = "My Documents";
+"my_documents_contents" = "My Documents and their pages";
 "synchronization_categories" = "Sinchronizavimo kategorijos";
 "sync_error" = "Įvyko klaida debesijos sinchronizavime";
 "sync_cant_fetch" = "Debesijoje saugomo duomenų bazės ar pataisos failo versija yra didesnė, nei palaiko ši programėlė.";
