@@ -6782,6 +6782,10 @@ final class AndBibleUITests: XCTestCase {
 
         repeat {
             let button = unresolvedElement("readerMoreMenuButton", in: app)
+            tapReaderMoreMenuChromeCoordinate(in: app)
+            if waitForReaderOverflowMenu(in: app, timeout: min(2, max(1, deadline.timeIntervalSinceNow))) {
+                return true
+            }
             if elementHasUsableFrame(button) {
                 button.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
             } else if waitForElementToBecomeHittable(button, timeout: min(2, max(0.5, deadline.timeIntervalSinceNow))) {
@@ -6970,6 +6974,13 @@ final class AndBibleUITests: XCTestCase {
 
         repeat {
             let button = unresolvedElement("readerNavigationDrawerButton", in: app)
+            tapReaderNavigationDrawerChromeCoordinate(in: app)
+            if waitForReaderNavigationDrawer(
+                in: app,
+                timeout: min(2, max(1, deadline.timeIntervalSinceNow))
+            ) {
+                return true
+            }
             if elementHasUsableFrame(button) {
                 button.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
             } else if waitForElementToBecomeHittable(button, timeout: min(2, max(0.5, deadline.timeIntervalSinceNow))) {
@@ -6985,6 +6996,16 @@ final class AndBibleUITests: XCTestCase {
         } while Date() < deadline
 
         return false
+    }
+
+    /// Taps the reader drawer affordance without forcing XCTest to snapshot its frame first.
+    private func tapReaderNavigationDrawerChromeCoordinate(in app: XCUIApplication) {
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.06, dy: 0.06)).tap()
+    }
+
+    /// Taps the reader overflow affordance without forcing XCTest to snapshot its frame first.
+    private func tapReaderMoreMenuChromeCoordinate(in app: XCUIApplication) {
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.94, dy: 0.06)).tap()
     }
 
     /**
@@ -10310,7 +10331,7 @@ final class AndBibleUITests: XCTestCase {
         let didBecomeHittable = waitForElementToBecomeHittable(toggle, timeout: 1)
         XCTAssertTrue(
             didBecomeHittable,
-            "Expected sync category control '\(identifier)' to become hittable within \(timeout) seconds.",
+            "Expected sync category control '\(identifier)' to become hittable during the final 1-second retry.",
             file: file,
             line: line
         )
