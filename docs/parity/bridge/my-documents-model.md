@@ -2,9 +2,9 @@
 
 This records the iOS model and storage decision for #80. My Documents is an
 accepted iOS parity target, but it is not just a bridge method family. The
-local document/page/content model must exist before iOS can safely implement
-the Android bridge methods from #81, #82, and #83 or the remote `mydocuments`
-sync category from #72.
+local document/page/content model is the shared base that makes the Android
+bridge methods from #81, #82, and #83 and the remote `mydocuments` sync category
+from #72 safe to implement.
 
 ## Android Owner References
 
@@ -198,9 +198,10 @@ sync metadata tables separate from user data.
 
 #72 remains the parent runtime parity target. Its implementation work is split
 into initial restore (#105), initial upload (#106), patch replay (#108), patch
-upload (#107), and settings/docs exposure (#109).
+upload (#107), and settings/docs exposure (#109), all of which are implemented.
 
-This #80 decision does not add a remote sync category by itself.
+This #80 decision did not add a remote sync category by itself; #104 through
+#109 provide that Android-aligned sync surface.
 
 ## First Implementation Slice
 

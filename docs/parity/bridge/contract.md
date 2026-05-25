@@ -105,8 +105,7 @@ slice from #82 is implemented: `saveMyDocumentPageContent` persists raw content
 and optional title changes, while `reloadMyDocumentPage` rebuilds the visible
 stored page. The accepted local model is recorded in
 `my-documents-model.md`. AI page regenerate/delete follows in #83. The related
-`mydocuments` sync category stays blocked in #72 until the local product surface
-is implemented.
+`mydocuments` sync category is implemented separately through #72/#104/#105/#106/#108/#107/#109.
 
 Android's reading-progress bridge family is accepted as iOS parity work. The
 local iOS model, storage, settings, Android owner references, and bridge

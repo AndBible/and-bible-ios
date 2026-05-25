@@ -134,7 +134,8 @@ Notes:
   validates the AI-page metadata and hands native context to the iOS regeneration
   callback; the shared AI dialog/backend remains tracked separately in #5/#89.
   User-authored pages without source prompt metadata are ignored and logged. The
-  related `mydocuments` sync category remains tracked separately in #72.
+  related `mydocuments` sync category is implemented separately through
+  #72/#104/#105/#106/#108/#107/#109.
 - Android's reading-progress bridge family is accepted and model-backed on iOS.
   The native iOS reading-progress model, storage, settings contract, and Android
   owner references are recorded in

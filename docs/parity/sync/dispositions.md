@@ -75,24 +75,24 @@ Reason:
 - This matches Android's top-level synchronization branch point and avoids
   accidental destructive behavior during remote bootstrap.
 
-## 5. Android-only categories are split into distinct deferred parity targets
+## 5. Remaining Android-only categories stay split into distinct parity targets
 
-- Status: documented deferred parity targets
+- Status: `mydocuments` implemented; remaining Android-only categories deferred
 - Scope: remote sync categories
 
 Disposition:
 
 - iOS currently implements Android-aligned sync for `bookmarks`, `workspaces`,
-  and `readingplans`.
-- Android currently also exposes `mydocuments`, `ai_settings`, and `progress`.
-  Those categories are not implemented on iOS yet and must not be treated as one
-  broad implementation task.
-- `mydocuments` is tracked separately in #72. The local model, rendering, and
+  `readingplans`, and `mydocuments`.
+- Android currently also exposes `ai_settings` and `progress`. Those categories
+  are not implemented on iOS yet and must not be treated as one broad
+  implementation task.
+- `mydocuments` remains documented under #72. The local model, rendering, and
   bridge prerequisites are recorded in `../bridge/my-documents-model.md`.
   #104 records the Android-source-backed sync schema and policy contract in
-  `mydocuments-schema.md`; implementation is split into restore (#105),
-  initial upload (#106), patch replay (#108), patch upload (#107), and
-  settings/docs exposure (#109).
+  `mydocuments-schema.md`; restore (#105), initial upload (#106), patch replay
+  (#108), patch upload (#107), and settings/docs exposure (#109) complete the
+  runtime sync surface.
 - `ai_settings` is tracked separately in #74. It is deferred behind #5 so iOS
   does not invent an AI settings sync schema before the shared AI backend and
   settings contract exist. The #53 AI bridge disposition and #89 bridge shell
@@ -109,11 +109,11 @@ Disposition:
 
 Reason:
 
-- The current iOS product surface does not yet expose the matching Android
-  document, AI-settings, or reading-progress sync flows.
-- Android exposes these as separate sync categories, so each needs its own
-  product ownership, Android schema reference, iOS data mapping, settings UI
-  decision, and regression plan.
+- The current iOS product surface now exposes the matching Android My Documents
+  sync flow, backed by the Android schema and focused regression coverage.
+- Android exposes AI settings and reading progress as separate sync categories,
+  so each still needs its own product ownership, Android schema reference, iOS
+  data mapping, settings UI decision, and regression plan.
 
 Reference:
 

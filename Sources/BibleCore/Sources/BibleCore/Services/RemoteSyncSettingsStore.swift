@@ -328,13 +328,12 @@ public final class KeychainSecretStore: SecretStoring {
  Persists remote-sync backend selection and backend-specific local settings.
 
  This store layers on top of `SettingsStore` for non-secret fields and `SecretStoring` for
- passwords and tokens. It intentionally mirrors Android's durable preference keys for the legacy
- cloud-sync settings:
+ passwords and tokens. It intentionally preserves the remote-sync keys iOS has accepted for the
+ Android-aligned surface:
  - `sync_adapter`
- - `gdrive_server_url`
- - `gdrive_username`
- - `gdrive_folder_path`
- - `gdrive_password`
+ - legacy WebDAV fields `gdrive_server_url`, `gdrive_username`, `gdrive_folder_path`, and
+   `gdrive_password`
+ - current category toggles `sync_enable_<category>`
 
  The password is intentionally split out to Keychain because iOS should not persist secrets in the
  raw `Setting` table. The store is otherwise isolated from the current CloudKit runtime so future
@@ -345,10 +344,11 @@ public final class RemoteSyncSettingsStore {
     public static let defaultSyncIntervalSeconds: Int64 = 5 * 60
 
     /**
-     Android-compatible keys reused for NextCloud/WebDAV sync settings persistence.
+     Android-compatible keys reused for remote sync settings persistence.
 
-     Android's NextCloud adapter still uses the historical `gdrive_*` preference keys, so iOS uses
-     the same names to keep parity with the existing configuration contract.
+     The WebDAV fields remain on the previously accepted iOS `gdrive_*` keys. Android's current
+     category toggles use `sync_enable_*` keys after migrating the older `gdrive_*` category names,
+     so iOS writes the current toggle keys while still reading legacy category toggles.
      */
     private enum Keys {
         static let backend = "sync_adapter"
@@ -358,7 +358,8 @@ public final class RemoteSyncSettingsStore {
         static let webDAVPassword = "gdrive_password"
         static let syncInterval = "gdrive_sync_interval"
         static let globalLastSynchronized = "globalLastSynchronized"
-        static let syncCategoryPrefix = "gdrive_"
+        static let syncCategoryPrefix = "sync_enable_"
+        static let legacySyncCategoryPrefix = "gdrive_"
         static let deviceIdentifier = "remote_sync_device_identifier"
     }
 
@@ -409,9 +410,9 @@ public final class RemoteSyncSettingsStore {
     /**
      Returns whether Android-style remote sync is enabled for one category.
 
-     Android persists these toggles under the historical `gdrive_*` keys even when NextCloud is
-     the active backend. iOS reuses the same booleans so category enablement remains parity-safe
-     across shared settings semantics and later lifecycle-driven sync orchestration.
+     Android persists these toggles under `sync_enable_*` keys. iOS also accepts the old
+     `gdrive_*` category keys as a read-only fallback so users who enabled remote sync before the
+     key migration keep the same effective category state until the UI writes the current key.
 
      - Parameter category: Logical sync category to inspect.
      - Returns: `true` when remote sync is enabled for the category.
@@ -419,7 +420,10 @@ public final class RemoteSyncSettingsStore {
      - Failure modes: Missing or malformed stored values fall back to `false`.
      */
     public func isSyncEnabled(for category: RemoteSyncCategory) -> Bool {
-        settingsStore.getBool(syncEnabledKey(for: category), default: false)
+        if let rawValue = settingsStore.getString(syncEnabledKey(for: category)) {
+            return rawValue == "true"
+        }
+        return settingsStore.getBool(legacySyncEnabledKey(for: category), default: false)
     }
 
     /**
@@ -428,7 +432,7 @@ public final class RemoteSyncSettingsStore {
      - Parameters:
        - isEnabled: Whether the category should participate in remote sync.
        - category: Logical sync category to update.
-     - Side Effects: Writes the Android-compatible `gdrive_*` category toggle into `SettingsStore`.
+     - Side Effects: Writes the Android-compatible `sync_enable_*` category toggle into `SettingsStore`.
      - Failure modes: Underlying SwiftData save failures are swallowed by `SettingsStore`.
      */
     public func setSyncEnabled(_ isEnabled: Bool, for category: RemoteSyncCategory) {
@@ -627,14 +631,29 @@ public final class RemoteSyncSettingsStore {
     }
 
     /**
-     Builds the Android-compatible category-toggle key for one sync category.
+     Builds the current Android-compatible category-toggle key for one sync category.
 
      - Parameter category: Logical sync category to scope.
-     - Returns: Historical `gdrive_*` preference key for that category.
+     - Returns: Current `sync_enable_*` preference key for that category.
      - Side Effects: none.
      - Failure modes: This helper cannot fail.
      */
     private func syncEnabledKey(for category: RemoteSyncCategory) -> String {
         "\(Keys.syncCategoryPrefix)\(category.rawValue)"
+    }
+
+    /**
+     Builds the legacy pre-migration category-toggle key for one sync category.
+
+     Android migrated these keys to `sync_enable_*`; iOS keeps this helper only as a compatibility
+     read path so existing local settings still participate in sync until a current key is written.
+
+     - Parameter category: Logical sync category to scope.
+     - Returns: Legacy `gdrive_*` preference key for that category.
+     - Side Effects: none.
+     - Failure modes: This helper cannot fail.
+     */
+    private func legacySyncEnabledKey(for category: RemoteSyncCategory) -> String {
+        "\(Keys.legacySyncCategoryPrefix)\(category.rawValue)"
     }
 }

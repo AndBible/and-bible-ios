@@ -1572,6 +1572,40 @@ final class AndBibleUITests: XCTestCase {
     }
 
     /**
+     Verifies that the My Documents category row is exposed and starts the same manual
+     synchronization path as existing supported categories.
+     *
+     * - Side effects:
+     *   - launches Sync Settings with deterministic NextCloud settings and a UI-test remote
+     *     backend that reports one existing same-named My Documents sync folder
+     *   - scrolls to and enables the production My Documents category row
+     *   - leaves synchronization at the visible adopt-versus-create prompt, proving the category
+     *     entered the manual remote-sync branch without requiring live credentials
+     * - Failure modes:
+     *   - fails if the My Documents category row is missing from Sync Settings
+     *   - fails if enabling the row does not persist `enabled=mydocuments`
+     *   - fails if enabling the row does not surface the My Documents adopt/create prompt
+     */
+    func testSyncSettingsMyDocumentsCategoryToggleStartsManualSyncPath() {
+        let app = makeApp(remoteSyncBootstrapScenario: "adopt-existing")
+        app.launch()
+
+        _ = openSyncSettingsFromReaderAction(in: app)
+        waitForSyncState(["backend": "NEXT_CLOUD", "enabled": "none"], in: app, timeout: 10)
+
+        toggleSyncCategory(
+            "syncCategoryToggle::mydocuments",
+            in: app,
+            expectedTokens: [
+                "backend": "NEXT_CLOUD",
+                "enabled": "mydocuments",
+                "bootstrapPrompt": "adoptOrCreate:mydocuments",
+            ],
+            timeout: 15
+        )
+    }
+
+    /**
      Verifies that disabling one seeded NextCloud sync category updates the exported Sync screen
      state.
      *
@@ -10230,7 +10264,8 @@ final class AndBibleUITests: XCTestCase {
      * - Side effects:
      *   - repeatedly re-queries the exported Sync screen state and stops once the requested token
      *     values appear
-     *   - uses the real toggle control for each retry
+     *   - scrolls the Sync Settings form when needed and uses the real toggle control for each
+     *     retry
      * - Failure modes:
      *   - records an XCTest failure if the switch never appears or if the Sync screen state does
      *     not reach the requested token after the interaction
@@ -10244,14 +10279,45 @@ final class AndBibleUITests: XCTestCase {
         line: UInt = #line
     ) {
         let toggle = app.buttons[identifier].firstMatch
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            if waitForElementToBecomeHittable(toggle, timeout: min(1, timeout)) {
+                toggle.tap()
+                waitForSyncState(
+                    expectedTokens,
+                    in: app,
+                    timeout: timeout,
+                    file: file,
+                    line: line
+                )
+                return
+            }
+            let syncScreen = resolvedElement("syncSettingsScreen", in: app)
+            if syncScreen?.exists == true {
+                syncScreen?.swipeUp()
+            } else {
+                app.swipeUp()
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        } while Date() < deadline
+
         XCTAssertTrue(
-            toggle.waitForExistence(timeout: timeout),
+            toggle.exists,
             "Expected sync category control '\(identifier)' to exist within \(timeout) seconds.",
             file: file,
             line: line
         )
-        tapElementReliably(toggle, timeout: timeout, file: file, line: line)
-
+        let didBecomeHittable = waitForElementToBecomeHittable(toggle, timeout: 1)
+        XCTAssertTrue(
+            didBecomeHittable,
+            "Expected sync category control '\(identifier)' to become hittable within \(timeout) seconds.",
+            file: file,
+            line: line
+        )
+        guard didBecomeHittable else {
+            return
+        }
+        toggle.tap()
         waitForSyncState(
             expectedTokens,
             in: app,

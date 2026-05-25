@@ -1,8 +1,8 @@
 # My Documents Sync Schema
 
 This records the #104 sync-schema and policy decision for the Android
-`mydocuments` category. It is the contract that the #72 implementation slices
-must follow before iOS exposes My Documents remote sync in settings.
+`mydocuments` category. It is the contract the completed #72 implementation
+slices follow now that iOS exposes My Documents remote sync in settings.
 
 ## Android Source References
 
@@ -35,10 +35,10 @@ Android exposes My Documents as its own sync category:
 - current Android schema version: `4`
 - setting key: `sync_enable_mydocuments`
 
-iOS must keep this category separate from `bookmarks`, `workspaces`, and
-`readingplans`. The iOS settings UI must not expose `mydocuments` until the
-restore, upload, patch replay, and patch upload services exist and are covered.
-That settings exposure belongs to #109, after #105, #106, #108, and #107.
+iOS keeps this category separate from `bookmarks`, `workspaces`, and
+`readingplans`. The iOS settings UI exposes `mydocuments` only after the restore,
+initial upload, patch replay, and patch upload services exist and are covered by
+#105, #106, #108, and #107; that settings exposure belongs to #109.
 
 ## Synced Domain Tables
 
@@ -227,8 +227,8 @@ SQLite rows or `LogEntry` identities.
 
 ## Follow-Up Ownership
 
-#104 is complete when this source-backed contract is recorded. Runtime parity
-then belongs to these smaller #72 children:
+#104 is complete because this source-backed contract is recorded. Runtime parity
+is delivered by these smaller #72 children:
 
 - #105: restore Android `mydocuments` initial backups into the iOS model
 - #106: upload iOS My Documents as Android-shaped initial backups
