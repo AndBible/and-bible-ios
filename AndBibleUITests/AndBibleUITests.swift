@@ -1335,7 +1335,7 @@ final class AndBibleUITests: XCTestCase {
         _ = openLabelAssignmentFromBookmarkList(in: app)
         createFreshLabelFromAssignment(in: app)
 
-        _ = requireElement("labelAssignmentRow::\(newLabelSegment)", in: app, timeout: 10)
+        _ = requireElement("labelAssignmentRow::\(newLabelSegment)", in: app, timeout: 20)
         waitForElementValue(
             "labelAssignmentRow::\(newLabelSegment)",
             toEqual: "assigned,notFavourite",
@@ -9134,11 +9134,76 @@ final class AndBibleUITests: XCTestCase {
      *   - fails if the create-label alert cannot be presented or completed
      */
     private func createFreshLabelFromAssignment(in app: XCUIApplication) {
+        let labelName = "UI Test Fresh"
         presentLabelCreationPrompt(in: app, timeout: 10)
         let nameField = requireLabelManagerNewLabelField(in: app, timeout: 10)
-        focusResolvedPromptTextEntryElement(nameField, in: app, timeout: 10)
-        app.typeText("UI Test Fresh")
+        guard typePromptText(labelName, into: nameField, in: app, timeout: 15) else {
+            return
+        }
         tapElementReliably(requireLabelManagerCreateButton(in: app, timeout: 10), timeout: 10)
+    }
+
+    /**
+     Types text into a prompt field and waits for XCTest to observe the committed value.
+
+     - Parameters:
+       - text: Final text expected in the prompt-owned field.
+       - element: Prompt text field resolved by a modal-specific helper.
+       - app: Running application under test.
+       - timeout: Maximum number of seconds to retry focus/type verification.
+       - file: Source file used for XCTest failure attribution.
+       - line: Source line used for XCTest failure attribution.
+     - Returns: `true` when the prompt field reports the expected value before submission.
+     - Side effects:
+       - focuses the prompt field, emits keyboard input, and clears/retries if CI drops the input
+     - Failure modes:
+       - records an XCTest failure when the field value never matches `text`
+     */
+    @discardableResult
+    private func typePromptText(
+        _ text: String,
+        into element: XCUIElement,
+        in app: XCUIApplication,
+        timeout: TimeInterval = 10,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) -> Bool {
+        let placeholderHints = textEntryPlaceholderHints(for: element.identifier)
+        let deadline = Date().addingTimeInterval(timeout)
+
+        repeat {
+            focusResolvedPromptTextEntryElement(
+                element,
+                in: app,
+                timeout: min(5, max(1, deadline.timeIntervalSinceNow)),
+                file: file,
+                line: line
+            )
+            if currentTextEntryValue(in: element, placeholderHints: placeholderHints) == text {
+                return true
+            }
+
+            app.typeText(text)
+            let valueDeadline = Date().addingTimeInterval(min(3, max(0.5, deadline.timeIntervalSinceNow)))
+            repeat {
+                if currentTextEntryValue(in: element, placeholderHints: placeholderHints) == text {
+                    return true
+                }
+                RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+            } while Date() < valueDeadline
+
+            _ = clearTextEntryElement(element, app: app, placeholderHints: placeholderHints)
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        } while Date() < deadline
+
+        XCTAssertEqual(
+            currentTextEntryValue(in: element, placeholderHints: placeholderHints),
+            text,
+            "Expected prompt text input '\(element.identifier)' to contain '\(text)' before submitting.",
+            file: file,
+            line: line
+        )
+        return false
     }
 
     /**
