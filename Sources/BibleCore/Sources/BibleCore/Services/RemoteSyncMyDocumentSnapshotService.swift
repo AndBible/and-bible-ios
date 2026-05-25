@@ -73,7 +73,6 @@ public final class RemoteSyncMyDocumentSnapshotService {
         modelContext: ModelContext,
         settingsStore: SettingsStore
     ) -> RemoteSyncMyDocumentCurrentSnapshot {
-        let logEntryStore = RemoteSyncLogEntryStore(settingsStore: settingsStore)
         let documents = ((try? modelContext.fetch(FetchDescriptor<MyDocument>())) ?? [])
             .sorted(by: Self.documentSort)
         let pages = ((try? modelContext.fetch(FetchDescriptor<MyDocumentPage>())) ?? [])
@@ -83,6 +82,71 @@ public final class RemoteSyncMyDocumentSnapshotService {
         let aiPageCacheEntries = ((try? modelContext.fetch(FetchDescriptor<AiPageCacheEntry>())) ?? [])
             .sorted(by: Self.aiPageCacheEntrySort)
 
+        return buildSnapshot(
+            documents: documents,
+            pages: pages,
+            pageContents: pageContents,
+            aiPageCacheEntries: aiPageCacheEntries,
+            settingsStore: settingsStore
+        )
+    }
+
+    /**
+     Projects the current local My Documents graph into Android-shaped rows while preserving fetch failures.
+
+     Patch replay uses this throwing variant because treating a failed local fetch as an empty graph
+     could make an accepted remote patch replace local My Documents with only sparse patch rows.
+
+     - Parameters:
+       - modelContext: SwiftData context that owns the local My Documents graph.
+       - settingsStore: Local settings store used to build Android-compatible log keys.
+     - Returns: Android-shaped current-state snapshot for replay.
+     - Side effects: reads My Documents SwiftData rows.
+     - Failure modes: Rethrows SwiftData fetch failures from `ModelContext`.
+     */
+    public func snapshotCurrentStateThrowing(
+        modelContext: ModelContext,
+        settingsStore: SettingsStore
+    ) throws -> RemoteSyncMyDocumentCurrentSnapshot {
+        let documents = try modelContext.fetch(FetchDescriptor<MyDocument>())
+            .sorted(by: Self.documentSort)
+        let pages = try modelContext.fetch(FetchDescriptor<MyDocumentPage>())
+            .sorted(by: Self.pageSort)
+        let pageContents = try modelContext.fetch(FetchDescriptor<MyDocumentPageContent>())
+            .sorted { $0.pageId.uuidString < $1.pageId.uuidString }
+        let aiPageCacheEntries = try modelContext.fetch(FetchDescriptor<AiPageCacheEntry>())
+            .sorted(by: Self.aiPageCacheEntrySort)
+
+        return buildSnapshot(
+            documents: documents,
+            pages: pages,
+            pageContents: pageContents,
+            aiPageCacheEntries: aiPageCacheEntries,
+            settingsStore: settingsStore
+        )
+    }
+
+    /**
+     Builds the Android-shaped snapshot maps from already fetched and sorted SwiftData rows.
+
+     - Parameters:
+       - documents: Local document rows sorted for deterministic output.
+       - pages: Local page rows sorted for deterministic output.
+       - pageContents: Local content rows sorted for deterministic output.
+       - aiPageCacheEntries: Local AI-cache rows sorted for deterministic output.
+       - settingsStore: Local settings store used to derive Android sync keys.
+     - Returns: Current-state snapshot with Android-shaped rows and fingerprints.
+     - Side effects: none.
+     - Failure modes: This helper cannot fail.
+     */
+    private func buildSnapshot(
+        documents: [MyDocument],
+        pages: [MyDocumentPage],
+        pageContents: [MyDocumentPageContent],
+        aiPageCacheEntries: [AiPageCacheEntry],
+        settingsStore: SettingsStore
+    ) -> RemoteSyncMyDocumentCurrentSnapshot {
+        let logEntryStore = RemoteSyncLogEntryStore(settingsStore: settingsStore)
         let documentIDs = Set(documents.map(\.id))
         var pageIDs: Set<UUID> = []
         var emittedAIPageCachePageIDs: Set<UUID> = []
