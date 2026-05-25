@@ -278,12 +278,7 @@ public final class RemoteSyncMyDocumentPatchApplyService {
         let patchStatusStore = RemoteSyncPatchStatusStore(settingsStore: settingsStore)
 
         var snapshot = try currentSnapshot(from: modelContext, settingsStore: settingsStore)
-        var logEntriesByKey = Dictionary(
-            logEntryStore.entries(for: .myDocuments).map {
-                (logEntryStore.key(for: .myDocuments, entry: $0), $0)
-            },
-            uniquingKeysWith: { _, replacement in replacement }
-        )
+        var logEntriesByKey = seededLogEntriesByKey(logEntryStore: logEntryStore)
 
         var appliedPatchStatuses: [RemoteSyncPatchStatus] = []
         var appliedLogEntryCount = 0
@@ -301,7 +296,8 @@ public final class RemoteSyncMyDocumentPatchApplyService {
                 let metadataSnapshot = try metadataRestoreService.readSnapshot(from: patchDatabaseURL)
                 let patchSnapshot = try restoreService.readSnapshot(from: patchDatabaseURL)
                 let patchLogEntries = metadataSnapshot.logEntries.filter { Self.supportedTableNames.contains($0.tableName) }
-                let filteredLogEntries = patchLogEntries.filter { entry in
+                let canonicalPatchLogEntries = try patchLogEntries.map(canonicalLogEntry)
+                let filteredLogEntries = canonicalPatchLogEntries.filter { entry in
                     let key = logEntryStore.key(for: .myDocuments, entry: entry)
                     guard let localEntry = logEntriesByKey[key] else {
                         return true
@@ -377,6 +373,36 @@ public final class RemoteSyncMyDocumentPatchApplyService {
             skippedLogEntryCount: skippedLogEntryCount,
             restoreReport: restoreReport
         )
+    }
+
+    /**
+     Builds the replay conflict map from locally persisted My Documents log metadata.
+
+     My Documents tables use UUID primary keys and Android writes an empty secondary identifier for
+     these single-key tables. Older imports can still preserve UUID identifiers as SQLite text. This
+     seed step canonicalizes supported My Documents rows to blob UUID identifiers before conflict
+     comparison so text/blob representations of the same row share one baseline key.
+
+     - Parameter logEntryStore: Local metadata store to read.
+     - Returns: Canonicalized local log entries keyed by the same store key used for persistence.
+     - Side effects: reads local settings-backed log entries.
+     - Failure modes: Malformed local supported-table identifiers are retained under their raw key
+       rather than failing replay.
+     */
+    private func seededLogEntriesByKey(logEntryStore: RemoteSyncLogEntryStore) -> [String: RemoteSyncLogEntry] {
+        var entriesByKey: [String: RemoteSyncLogEntry] = [:]
+        for entry in logEntryStore.entries(for: .myDocuments) {
+            let keyedEntry = (try? canonicalLogEntry(entry)) ?? entry
+            let key = logEntryStore.key(for: .myDocuments, entry: keyedEntry)
+            guard let existingEntry = entriesByKey[key] else {
+                entriesByKey[key] = keyedEntry
+                continue
+            }
+            if Self.logEntrySort(existingEntry, keyedEntry) {
+                entriesByKey[key] = keyedEntry
+            }
+        }
+        return entriesByKey
     }
 
     /**
@@ -617,25 +643,56 @@ public final class RemoteSyncMyDocumentPatchApplyService {
         var didMutate = false
 
         for entry in upserts {
-            let rowID = try uuid(from: entry.entityID1, tableName: tableName, field: "entityId1")
+            let canonicalEntry = try canonicalLogEntry(entry)
+            let rowID = try uuid(from: canonicalEntry.entityID1, tableName: tableName, field: "entityId1")
             guard let row = patchRows[rowID] else {
                 throw RemoteSyncMyDocumentPatchApplyError.missingPatchRow(table: tableName, id: rowID)
             }
             upsert(row)
             didMutate = true
-            logEntriesByKey[logEntryStore.key(for: .myDocuments, entry: entry)] = entry
+            logEntriesByKey[logEntryStore.key(for: .myDocuments, entry: canonicalEntry)] = canonicalEntry
         }
 
         for entry in deletes {
-            let rowID = try uuid(from: entry.entityID1, tableName: tableName, field: "entityId1")
+            let canonicalEntry = try canonicalLogEntry(entry)
+            let rowID = try uuid(from: canonicalEntry.entityID1, tableName: tableName, field: "entityId1")
             delete(rowID)
             didMutate = true
-            logEntriesByKey[logEntryStore.key(for: .myDocuments, entry: entry)] = entry
+            logEntriesByKey[logEntryStore.key(for: .myDocuments, entry: canonicalEntry)] = canonicalEntry
         }
 
         if didMutate {
             afterMutation()
         }
+    }
+
+    /**
+     Canonicalizes one My Documents log-entry identifier for conflict checks and local persistence.
+
+     Android My Documents patch rows are keyed by UUID `entityId1` values. SQLite can preserve those
+     UUIDs as either 16-byte blobs or text strings depending on the writer, but iOS snapshot/upload
+     paths always use blob UUIDs. Canonical replay metadata prevents text/blob duplicates for the
+     same logical row.
+
+     - Parameter entry: Supported My Documents log entry to canonicalize.
+     - Returns: Log entry with blob UUID `entityID1` and empty-string `entityID2`.
+     - Side effects: none.
+     - Failure modes: Throws `RemoteSyncMyDocumentPatchApplyError.invalidLogEntryIdentifier` when
+       `entityID1` cannot be decoded as a UUID.
+     */
+    private func canonicalLogEntry(_ entry: RemoteSyncLogEntry) throws -> RemoteSyncLogEntry {
+        guard Self.supportedTableNames.contains(entry.tableName) else {
+            return entry
+        }
+        let rowID = try uuid(from: entry.entityID1, tableName: entry.tableName, field: "entityId1")
+        return RemoteSyncLogEntry(
+            tableName: entry.tableName,
+            entityID1: .blob(RemoteSyncMyDocumentSnapshotService.uuidBlob(rowID)),
+            entityID2: RemoteSyncMyDocumentSnapshotService.emptySecondaryEntityID,
+            type: entry.type,
+            lastUpdated: entry.lastUpdated,
+            sourceDevice: entry.sourceDevice
+        )
     }
 
     /**

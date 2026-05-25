@@ -1201,6 +1201,88 @@ final class RemoteSyncMyDocumentRestoreTests: XCTestCase {
 
         XCTAssertEqual(report.appliedLogEntryCount, 1)
         XCTAssertEqual(MyDocumentStore(modelContext: modelContext).document(initials: "TXTID")?.name, "Text Remote")
+        XCTAssertEqual(
+            RemoteSyncLogEntryStore(settingsStore: settingsStore).entries(for: .myDocuments),
+            [
+                myDocumentLogEntry(
+                    tableName: "MyDocument",
+                    rowID: documentID,
+                    type: .upsert,
+                    timestamp: 2_000,
+                    sourceDevice: "pixel"
+                )
+            ]
+        )
+    }
+
+    func testRemoteSyncMyDocumentPatchReplaySkipsOlderBlobPatchAgainstTextUUIDBaseline() throws {
+        let container = try makeModelContainer()
+        let modelContext = ModelContext(container)
+        let settingsStore = SettingsStore(modelContext: modelContext)
+        let documentID = UUID(uuidString: "a8280000-0000-0000-0000-000000000001")!
+
+        modelContext.insert(MyDocument(id: documentID, name: "Text Baseline Local", initials: "TXTBLOB"))
+        try modelContext.save()
+
+        RemoteSyncLogEntryStore(settingsStore: settingsStore).replaceEntries(
+            [
+                RemoteSyncLogEntry(
+                    tableName: "MyDocument",
+                    entityID1: .text(documentID.uuidString),
+                    entityID2: .text(""),
+                    type: .upsert,
+                    lastUpdated: 5_000,
+                    sourceDevice: "iphone"
+                )
+            ],
+            for: .myDocuments
+        )
+        let stagedArchive = try makeStagedMyDocumentPatchArchive(
+            sourceDevice: "pixel",
+            patchNumber: 6,
+            timestamp: 8_800,
+            documents: [
+                .init(id: documentID, name: "Older Blob Remote", initials: "TXTBLOB")
+            ],
+            pages: [],
+            pageContents: [],
+            aiPageCacheEntries: [],
+            logEntries: [
+                myDocumentLogEntry(
+                    tableName: "MyDocument",
+                    rowID: documentID,
+                    type: .upsert,
+                    timestamp: 1_000,
+                    sourceDevice: "pixel"
+                )
+            ]
+        )
+        defer { try? FileManager.default.removeItem(at: stagedArchive.archiveFileURL) }
+
+        let report = try RemoteSyncMyDocumentPatchApplyService().applyPatchArchives(
+            [stagedArchive],
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+
+        XCTAssertEqual(report.appliedLogEntryCount, 0)
+        XCTAssertEqual(report.skippedLogEntryCount, 1)
+        XCTAssertEqual(
+            MyDocumentStore(modelContext: modelContext).document(initials: "TXTBLOB")?.name,
+            "Text Baseline Local"
+        )
+        XCTAssertEqual(
+            RemoteSyncLogEntryStore(settingsStore: settingsStore).entries(for: .myDocuments),
+            [
+                myDocumentLogEntry(
+                    tableName: "MyDocument",
+                    rowID: documentID,
+                    type: .upsert,
+                    timestamp: 5_000,
+                    sourceDevice: "iphone"
+                )
+            ]
+        )
     }
 
     func testRemoteSyncSynchronizationServiceReplaysRemoteMyDocumentPatch() async throws {
