@@ -3417,6 +3417,24 @@ final class AndBibleUITests: XCTestCase {
             revealSearchControls(in: app)
             let searchScreen = unresolvedElement("searchScreen", in: app)
 
+            if let token = searchWordModeToken(forVisibleLabel: label) {
+                let identifier = "searchWordModeButton::\(token)"
+                let identifierCandidates = [
+                    searchScreen.buttons[identifier].firstMatch,
+                    searchScreen.otherElements[identifier].firstMatch,
+                    searchScreen.segmentedControls["searchWordModePicker"].buttons[label].firstMatch,
+                    searchScreen.segmentedControls.buttons[label].firstMatch,
+                    app.buttons[identifier].firstMatch,
+                    app.otherElements[identifier].firstMatch,
+                    app.segmentedControls["searchWordModePicker"].buttons[label].firstMatch,
+                    app.segmentedControls.buttons[label].firstMatch,
+                ]
+                for candidate in identifierCandidates where candidate.exists || candidate.waitForExistence(timeout: 0.2) {
+                    tapElementReliably(candidate, timeout: timeout)
+                    return
+                }
+            }
+
             if let segmentIndex = searchWordModeSegmentIndex(forVisibleLabel: label),
                let picker = [
                    searchScreen.segmentedControls["searchWordModePicker"].firstMatch,
@@ -3432,20 +3450,11 @@ final class AndBibleUITests: XCTestCase {
                 return
             }
 
-            if let token = searchWordModeToken(forVisibleLabel: label) {
-                let identifierCandidates = [
-                    searchScreen.buttons["searchWordModeButton::\(token)"].firstMatch,
-                    searchScreen.otherElements["searchWordModeButton::\(token)"].firstMatch,
-                ]
-                for candidate in identifierCandidates where candidate.exists || candidate.waitForExistence(timeout: 0.2) {
-                    tapElementReliably(candidate, timeout: timeout)
-                    return
-                }
-            }
-
             let fallbackCandidates = [
                 searchScreen.segmentedControls.buttons[label].firstMatch,
                 searchScreen.buttons[label].firstMatch,
+                app.segmentedControls.buttons[label].firstMatch,
+                app.buttons[label].firstMatch,
             ]
             for candidate in fallbackCandidates where candidate.exists || candidate.waitForExistence(timeout: 0.2) {
                 tapElementReliably(candidate, timeout: timeout)
