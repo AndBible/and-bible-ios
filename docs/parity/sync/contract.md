@@ -34,7 +34,7 @@ the `sync_adapter` setting:
 
 ## Category Contract
 
-The Android-style remote sync implementation preserves three independent
+The Android-style remote sync implementation preserves four independent
 category streams on iOS:
 
 | Category | Persisted value | Scope |
@@ -42,6 +42,7 @@ category streams on iOS:
 | Bookmarks | `bookmarks` | bookmarks, labels, note-bearing bookmarks, StudyPad data |
 | Workspaces | `workspaces` | workspaces, windows, page managers, workspace history |
 | Reading plans | `readingplans` | reading-plan definitions and completion state |
+| My Documents | `mydocuments` | documents, pages, page content, and AI page cache metadata |
 
 These categories are tracked independently for:
 
@@ -51,16 +52,10 @@ These categories are tracked independently for:
 - initial-backup restore/upload
 - patch replay/upload
 
-The current Android app also defines `mydocuments`, `ai_settings`, and
-`progress` sync categories. Those are Android contract surface, but they are not
-implemented in the current iOS sync surface yet. Issue #49 records the decision
-to treat them as separate deferred parity targets:
+The current Android app also defines `ai_settings` and `progress` sync
+categories that are not implemented in the current iOS sync surface yet. Issue
+#49 records the decision to keep those as separate deferred parity targets:
 
-- `mydocuments`: tracked by #72 and mapped to the local My Documents model
-  recorded in `../bridge/my-documents-model.md`. #104 records the Android
-  schema and sync-policy contract in `mydocuments-schema.md`; runtime parity is
-  split into restore (#105), initial upload (#106), patch replay (#108), patch
-  upload (#107), and UI/docs exposure (#109).
 - `ai_settings`: tracked by #74, pending the shared AI backend/settings contract
   from #5. The AI bridge disposition in #53 and bridge shell contract in #89
   keep bridge-facing settings ownership aligned with that shared backend

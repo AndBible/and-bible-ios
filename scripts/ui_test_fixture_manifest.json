@@ -37,6 +37,7 @@
   "AndBibleUITests/AndBibleUITests/testSettingsScreenShowsPrimaryNavigationRows": "baseline",
   "AndBibleUITests/AndBibleUITests/testSettingsSyncLinkOpensSyncSettings": "baseline",
   "AndBibleUITests/AndBibleUITests/testSyncSettingsAdoptCreateConfirmationCreateChoiceSynchronizesFromVisibleWorkflow": "none",
+  "AndBibleUITests/AndBibleUITests/testSyncSettingsMyDocumentsCategoryToggleStartsManualSyncPath": "none",
   "AndBibleUITests/AndBibleUITests/testSyncSettingsBackendSwitchMutatesVisibleSection": "sync-nextcloud",
   "AndBibleUITests/AndBibleUITests/testSyncSettingsBackendSwitchPersistsAcrossDirectReopen": "sync-nextcloud",
   "AndBibleUITests/AndBibleUITests/testSyncSettingsCategoryDisablePersistsAcrossDirectReopen": "sync-nextcloud-bookmarks-enabled",

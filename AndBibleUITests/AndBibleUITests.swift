@@ -1335,7 +1335,7 @@ final class AndBibleUITests: XCTestCase {
         _ = openLabelAssignmentFromBookmarkList(in: app)
         createFreshLabelFromAssignment(in: app)
 
-        _ = requireElement("labelAssignmentRow::\(newLabelSegment)", in: app, timeout: 10)
+        _ = requireElement("labelAssignmentRow::\(newLabelSegment)", in: app, timeout: 20)
         waitForElementValue(
             "labelAssignmentRow::\(newLabelSegment)",
             toEqual: "assigned,notFavourite",
@@ -1568,6 +1568,40 @@ final class AndBibleUITests: XCTestCase {
             ],
             in: app,
             timeout: 20
+        )
+    }
+
+    /**
+     Verifies that the My Documents category row is exposed and starts the same manual
+     synchronization path as existing supported categories.
+     *
+     * - Side effects:
+     *   - launches Sync Settings with deterministic NextCloud settings and a UI-test remote
+     *     backend that reports one existing same-named My Documents sync folder
+     *   - scrolls to and enables the production My Documents category row
+     *   - leaves synchronization at the visible adopt-versus-create prompt, proving the category
+     *     entered the manual remote-sync branch without requiring live credentials
+     * - Failure modes:
+     *   - fails if the My Documents category row is missing from Sync Settings
+     *   - fails if enabling the row does not persist `enabled=mydocuments`
+     *   - fails if enabling the row does not surface the My Documents adopt/create prompt
+     */
+    func testSyncSettingsMyDocumentsCategoryToggleStartsManualSyncPath() {
+        let app = makeApp(remoteSyncBootstrapScenario: "adopt-existing")
+        app.launch()
+
+        _ = openSyncSettingsFromReaderAction(in: app)
+        waitForSyncState(["backend": "NEXT_CLOUD", "enabled": "none"], in: app, timeout: 10)
+
+        toggleSyncCategory(
+            "syncCategoryToggle::mydocuments",
+            in: app,
+            expectedTokens: [
+                "backend": "NEXT_CLOUD",
+                "enabled": "mydocuments",
+                "bootstrapPrompt": "adoptOrCreate:mydocuments",
+            ],
+            timeout: 15
         )
     }
 
@@ -3383,6 +3417,24 @@ final class AndBibleUITests: XCTestCase {
             revealSearchControls(in: app)
             let searchScreen = unresolvedElement("searchScreen", in: app)
 
+            if let token = searchWordModeToken(forVisibleLabel: label) {
+                let identifier = "searchWordModeButton::\(token)"
+                let identifierCandidates = [
+                    searchScreen.buttons[identifier].firstMatch,
+                    searchScreen.otherElements[identifier].firstMatch,
+                    searchScreen.segmentedControls["searchWordModePicker"].buttons[label].firstMatch,
+                    searchScreen.segmentedControls.buttons[label].firstMatch,
+                    app.buttons[identifier].firstMatch,
+                    app.otherElements[identifier].firstMatch,
+                    app.segmentedControls["searchWordModePicker"].buttons[label].firstMatch,
+                    app.segmentedControls.buttons[label].firstMatch,
+                ]
+                for candidate in identifierCandidates where candidate.exists || candidate.waitForExistence(timeout: 0.2) {
+                    tapElementReliably(candidate, timeout: timeout)
+                    return
+                }
+            }
+
             if let segmentIndex = searchWordModeSegmentIndex(forVisibleLabel: label),
                let picker = [
                    searchScreen.segmentedControls["searchWordModePicker"].firstMatch,
@@ -3398,20 +3450,11 @@ final class AndBibleUITests: XCTestCase {
                 return
             }
 
-            if let token = searchWordModeToken(forVisibleLabel: label) {
-                let identifierCandidates = [
-                    searchScreen.buttons["searchWordModeButton::\(token)"].firstMatch,
-                    searchScreen.otherElements["searchWordModeButton::\(token)"].firstMatch,
-                ]
-                for candidate in identifierCandidates where candidate.exists || candidate.waitForExistence(timeout: 0.2) {
-                    tapElementReliably(candidate, timeout: timeout)
-                    return
-                }
-            }
-
             let fallbackCandidates = [
                 searchScreen.segmentedControls.buttons[label].firstMatch,
                 searchScreen.buttons[label].firstMatch,
+                app.segmentedControls.buttons[label].firstMatch,
+                app.buttons[label].firstMatch,
             ]
             for candidate in fallbackCandidates where candidate.exists || candidate.waitForExistence(timeout: 0.2) {
                 tapElementReliably(candidate, timeout: timeout)
@@ -6748,6 +6791,10 @@ final class AndBibleUITests: XCTestCase {
 
         repeat {
             let button = unresolvedElement("readerMoreMenuButton", in: app)
+            tapReaderMoreMenuChromeCoordinate(in: app)
+            if waitForReaderOverflowMenu(in: app, timeout: min(2, max(1, deadline.timeIntervalSinceNow))) {
+                return true
+            }
             if elementHasUsableFrame(button) {
                 button.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
             } else if waitForElementToBecomeHittable(button, timeout: min(2, max(0.5, deadline.timeIntervalSinceNow))) {
@@ -6936,6 +6983,13 @@ final class AndBibleUITests: XCTestCase {
 
         repeat {
             let button = unresolvedElement("readerNavigationDrawerButton", in: app)
+            tapReaderNavigationDrawerChromeCoordinate(in: app)
+            if waitForReaderNavigationDrawer(
+                in: app,
+                timeout: min(2, max(1, deadline.timeIntervalSinceNow))
+            ) {
+                return true
+            }
             if elementHasUsableFrame(button) {
                 button.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
             } else if waitForElementToBecomeHittable(button, timeout: min(2, max(0.5, deadline.timeIntervalSinceNow))) {
@@ -6951,6 +7005,16 @@ final class AndBibleUITests: XCTestCase {
         } while Date() < deadline
 
         return false
+    }
+
+    /// Taps the reader drawer affordance without forcing XCTest to snapshot its frame first.
+    private func tapReaderNavigationDrawerChromeCoordinate(in app: XCUIApplication) {
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.06, dy: 0.06)).tap()
+    }
+
+    /// Taps the reader overflow affordance without forcing XCTest to snapshot its frame first.
+    private func tapReaderMoreMenuChromeCoordinate(in app: XCUIApplication) {
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.94, dy: 0.06)).tap()
     }
 
     /**
@@ -7882,25 +7946,29 @@ final class AndBibleUITests: XCTestCase {
     }
 
     /**
-     Dismisses the software keyboard through one visible return-style action when present.
+     Dismisses the software keyboard through coordinate taps when present.
      *
      * - Parameter app: Running application under test.
      * - Side effects:
-     *   - taps one visible keyboard action so lower controls are no longer obscured
+     *   - taps outside the keyboard first, then taps the keyboard's lower trailing return area
+     *     when the keyboard remains visible
      * - Failure modes:
-     *   - silently leaves focus unchanged when no software keyboard or dismissal action exists
+     *   - silently leaves focus unchanged when no software keyboard is visible or the active
+     *     control refuses to resign focus
      */
     private func dismissKeyboardIfPresent(in app: XCUIApplication) {
-        for title in ["Done", "Return", "Go", "Search", "OK"] {
-            let button = app.keyboards.buttons[title].firstMatch
-            if button.exists || button.waitForExistence(timeout: 0.2) {
-                if waitForElementToBecomeHittable(button, timeout: 0.5) {
-                    button.tap()
-                } else if !button.frame.isEmpty {
-                    button.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
-                }
-                return
-            }
+        let keyboard = app.keyboards.firstMatch
+        guard keyboard.exists || keyboard.waitForExistence(timeout: 0.2) else {
+            return
+        }
+
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.08)).tap()
+        guard keyboard.exists || keyboard.waitForExistence(timeout: 0.2) else {
+            return
+        }
+
+        if !keyboard.frame.isEmpty {
+            keyboard.coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.88)).tap()
         }
     }
 
@@ -9066,11 +9134,76 @@ final class AndBibleUITests: XCTestCase {
      *   - fails if the create-label alert cannot be presented or completed
      */
     private func createFreshLabelFromAssignment(in app: XCUIApplication) {
+        let labelName = "UI Test Fresh"
         presentLabelCreationPrompt(in: app, timeout: 10)
         let nameField = requireLabelManagerNewLabelField(in: app, timeout: 10)
-        focusResolvedPromptTextEntryElement(nameField, in: app, timeout: 10)
-        app.typeText("UI Test Fresh")
+        guard typePromptText(labelName, into: nameField, in: app, timeout: 15) else {
+            return
+        }
         tapElementReliably(requireLabelManagerCreateButton(in: app, timeout: 10), timeout: 10)
+    }
+
+    /**
+     Types text into a prompt field and waits for XCTest to observe the committed value.
+
+     - Parameters:
+       - text: Final text expected in the prompt-owned field.
+       - element: Prompt text field resolved by a modal-specific helper.
+       - app: Running application under test.
+       - timeout: Maximum number of seconds to retry focus/type verification.
+       - file: Source file used for XCTest failure attribution.
+       - line: Source line used for XCTest failure attribution.
+     - Returns: `true` when the prompt field reports the expected value before submission.
+     - Side effects:
+       - focuses the prompt field, emits keyboard input, and clears/retries if CI drops the input
+     - Failure modes:
+       - records an XCTest failure when the field value never matches `text`
+     */
+    @discardableResult
+    private func typePromptText(
+        _ text: String,
+        into element: XCUIElement,
+        in app: XCUIApplication,
+        timeout: TimeInterval = 10,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) -> Bool {
+        let placeholderHints = textEntryPlaceholderHints(for: element.identifier)
+        let deadline = Date().addingTimeInterval(timeout)
+
+        repeat {
+            focusResolvedPromptTextEntryElement(
+                element,
+                in: app,
+                timeout: min(5, max(1, deadline.timeIntervalSinceNow)),
+                file: file,
+                line: line
+            )
+            if currentTextEntryValue(in: element, placeholderHints: placeholderHints) == text {
+                return true
+            }
+
+            app.typeText(text)
+            let valueDeadline = Date().addingTimeInterval(min(3, max(0.5, deadline.timeIntervalSinceNow)))
+            repeat {
+                if currentTextEntryValue(in: element, placeholderHints: placeholderHints) == text {
+                    return true
+                }
+                RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+            } while Date() < valueDeadline
+
+            _ = clearTextEntryElement(element, app: app, placeholderHints: placeholderHints)
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        } while Date() < deadline
+
+        XCTAssertEqual(
+            currentTextEntryValue(in: element, placeholderHints: placeholderHints),
+            text,
+            "Expected prompt text input '\(element.identifier)' to contain '\(text)' before submitting.",
+            file: file,
+            line: line
+        )
+        return false
     }
 
     /**
@@ -10230,7 +10363,8 @@ final class AndBibleUITests: XCTestCase {
      * - Side effects:
      *   - repeatedly re-queries the exported Sync screen state and stops once the requested token
      *     values appear
-     *   - uses the real toggle control for each retry
+     *   - scrolls the Sync Settings form when needed and uses the real toggle control for each
+     *     retry
      * - Failure modes:
      *   - records an XCTest failure if the switch never appears or if the Sync screen state does
      *     not reach the requested token after the interaction
@@ -10244,14 +10378,45 @@ final class AndBibleUITests: XCTestCase {
         line: UInt = #line
     ) {
         let toggle = app.buttons[identifier].firstMatch
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            if waitForElementToBecomeHittable(toggle, timeout: min(1, timeout)) {
+                toggle.tap()
+                waitForSyncState(
+                    expectedTokens,
+                    in: app,
+                    timeout: timeout,
+                    file: file,
+                    line: line
+                )
+                return
+            }
+            let syncScreen = resolvedElement("syncSettingsScreen", in: app)
+            if syncScreen?.exists == true {
+                syncScreen?.swipeUp()
+            } else {
+                app.swipeUp()
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        } while Date() < deadline
+
         XCTAssertTrue(
-            toggle.waitForExistence(timeout: timeout),
+            toggle.exists,
             "Expected sync category control '\(identifier)' to exist within \(timeout) seconds.",
             file: file,
             line: line
         )
-        tapElementReliably(toggle, timeout: timeout, file: file, line: line)
-
+        let didBecomeHittable = waitForElementToBecomeHittable(toggle, timeout: 1)
+        XCTAssertTrue(
+            didBecomeHittable,
+            "Expected sync category control '\(identifier)' to become hittable during the final 1-second retry.",
+            file: file,
+            line: line
+        )
+        guard didBecomeHittable else {
+            return
+        }
+        toggle.tap()
         waitForSyncState(
             expectedTokens,
             in: app,

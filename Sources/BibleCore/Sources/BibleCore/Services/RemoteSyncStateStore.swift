@@ -25,7 +25,7 @@ public enum RemoteSyncCategory: String, CaseIterable, Sendable {
 
     /// Categories currently ready for the broad iOS sync UI and lifecycle sweep.
     public static var activeSyncCases: [RemoteSyncCategory] {
-        [.bookmarks, .workspaces, .readingPlans]
+        [.bookmarks, .workspaces, .readingPlans, .myDocuments]
     }
 
     /// Highest Android SQLite schema version iOS can currently read and write for this category.

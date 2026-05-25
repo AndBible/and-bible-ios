@@ -10,9 +10,9 @@ Regression verification for the current sync parity surface, covering:
 - NextCloud/WebDAV URL normalization plus DAV request semantics
 - bootstrap ready/adopt/create decisions
 - Android-shaped initial-backup restore and initial-backup upload behavior for bookmarks,
-  workspaces, and reading plans
+  workspaces, reading plans, and My Documents
 - ready-state patch replay and steady-state outbound upload
-- Sync settings backend/category mutation and reopen persistence
+- Sync settings backend/category mutation, My Documents category exposure, and reopen persistence
 - Sync settings adopt-versus-create confirmation branch
 - the parked Google Drive auth and adapter contract
 - local Android reference comparison
@@ -62,16 +62,20 @@ Operational setup reference:
 - `AndBibleTests/testRemoteSyncInitialBackupRestoreDispatchesReadingPlanBackups`
 - `AndBibleTests/testRemoteSyncInitialBackupRestoreDispatchesBookmarkBackups`
 - `AndBibleTests/testRemoteSyncInitialBackupRestoreDispatchesWorkspaceBackups`
+- `RemoteSyncMyDocumentRestoreTests/testRemoteSyncInitialBackupRestoreDispatchesMyDocumentBackups`
 - `AndBibleTests/testRemoteSyncInitialBackupUploadWritesReadingPlanDatabaseAndResetsBaseline`
 - `AndBibleTests/testRemoteSyncInitialBackupUploadWritesBookmarkDatabaseAndResetsBaseline`
 - `AndBibleTests/testRemoteSyncInitialBackupUploadWritesWorkspaceDatabaseAndResetsBaseline`
+- `RemoteSyncMyDocumentRestoreTests/testRemoteSyncInitialBackupUploadWritesMyDocumentDatabaseAndResetsBaseline`
 - `AndBibleTests/testRemoteSyncSynchronizationServiceCreateRemoteFolderUploadsInitialBackupAndSuppressesSparseUpload`
 - `AndBibleTests/testRemoteSyncSynchronizationServiceAdoptRemoteFolderRestoresInitialAndRecordsPatchZero`
 - `AndBibleTests/testRemoteSyncSynchronizationServiceAdoptRemoteFolderReplaysRemotePatchWithoutUploadingLocally`
 - `AndBibleTests/testRemoteSyncSynchronizationServiceSynchronizesReadyReadingPlanCategory`
+- `RemoteSyncMyDocumentRestoreTests/testRemoteSyncSynchronizationServiceReplaysRemoteMyDocumentPatch`
 - `AndBibleTests/testRemoteSyncSynchronizationServiceUploadsLocalBookmarkChangesWhenNoRemotePatchesExist`
 - `AndBibleTests/testRemoteSyncSynchronizationServiceUploadsLocalReadingPlanChangesWhenNoRemotePatchesExist`
 - `AndBibleTests/testRemoteSyncSynchronizationServiceUploadsLocalWorkspaceChangesWhenNoRemotePatchesExist`
+- `RemoteSyncMyDocumentRestoreTests/testRemoteSyncSynchronizationServiceUploadsLocalMyDocumentChangesWhenNoRemotePatchesExist`
 - `AndBibleTests/testGoogleDriveSyncAdapterListsFilesFromAppDataFolderWithPagination`
 - `AndBibleTests/testGoogleDriveSyncAdapterCreatesFolderUnderAppDataRoot`
 - `AndBibleTests/testGoogleDriveSyncAdapterUploadsMultipartPatchArchive`
@@ -91,6 +95,7 @@ Operational setup reference:
 - `AndBibleUITests/testSyncSettingsCategoryToggleMutatesExportedState`
 - `AndBibleUITests/testSyncSettingsCategoryDisablePersistsAcrossDirectReopen`
 - `AndBibleUITests/testSyncSettingsAdoptCreateConfirmationCreateChoiceSynchronizesFromVisibleWorkflow`
+- `AndBibleUITests/testSyncSettingsMyDocumentsCategoryToggleStartsManualSyncPath`
 - `AndBibleUITests/testSyncSettingsBackendSwitchMutatesVisibleSection`
 - `AndBibleUITests/testSyncSettingsBackendSwitchPersistsAcrossDirectReopen`
 
@@ -104,6 +109,8 @@ Operational setup reference:
 - invalid NextCloud URL input surfaces the expected UI validation state
 - the visible adopt/create prompt can drive the create-new cloud replacement branch and complete
   synchronization with the selected category enabled
+- the My Documents category is visible in Sync Settings and starts the same manual remote-sync
+  prompt path as the other supported categories
 
 ### Bootstrap and baseline handling
 
@@ -144,33 +151,34 @@ The checked-in shared-scheme test set gives the sync domain rerunnable regressio
 - Android-compatible backend and category persistence
 - NextCloud/WebDAV normalization and transport behavior
 - bootstrap ready/adopt/create decisions
-- initial-backup restore and initial-backup upload for bookmark, workspace, and reading-plan flows
-- ready-state synchronization for bookmark, workspace, and reading-plan categories
+- initial-backup restore and initial-backup upload for bookmark, workspace, reading-plan, and
+  My Documents flows
+- ready-state synchronization for bookmark, workspace, reading-plan, and My Documents categories
 - parked Google Drive auth and adapter contracts
 - Sync settings backend/category mutation plus reopen persistence
-- Sync settings adopt-versus-create confirmation UI coverage
+- Sync settings adopt-versus-create confirmation UI coverage, including My Documents category entry
 
 ## Remaining Gap
 
 The current sync parity gap is not the core bootstrap or patch engine. It is
 implementation breadth beyond the supported category set:
 
-- Android category breadth beyond iOS's supported `bookmarks`, `workspaces`, and
-  `readingplans` categories.
-- Android also exposes `mydocuments`, `ai_settings`, and `progress`.
+- Android category breadth beyond iOS's supported `bookmarks`, `workspaces`,
+  `readingplans`, and `mydocuments` categories.
+- Android also exposes `ai_settings` and `progress`.
 
 The adopt-versus-create branch is now covered both below the UI through coordinator and
 synchronization tests and through a focused simulator workflow. The remaining `Partial` sync parity
 area is Android category breadth beyond the currently supported iOS categories.
 
-Issue #49 resolves the category-breadth decision by splitting the remaining
-Android-only categories into distinct deferred parity targets:
+Issue #49 resolves the category-breadth decision by splitting Android-only
+categories into distinct parity targets:
 
 - #72 tracks `mydocuments`, mapped to the iOS My Documents model/storage
   contract in `../bridge/my-documents-model.md`. #104 records the
   Android-backed sync schema and policy contract in `mydocuments-schema.md`;
-  runtime work is split into initial restore (#105), initial upload (#106),
-  patch replay (#108), patch upload (#107), and settings/docs exposure (#109).
+  initial restore (#105), initial upload (#106), patch replay (#108), patch
+  upload (#107), and settings/docs exposure (#109) are implemented.
 - #74 tracks `ai_settings`, blocked on the shared AI backend/settings direction
   in #5. The #53 AI bridge disposition and #89 bridge shell contract keep
   bridge-facing settings ownership aligned with that shared backend direction.

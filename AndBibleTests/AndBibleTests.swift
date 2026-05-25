@@ -6138,17 +6138,36 @@ final class AndBibleTests: XCTestCase {
         XCTAssertFalse(store.isSyncEnabled(for: .bookmarks))
         XCTAssertFalse(store.isSyncEnabled(for: .workspaces))
         XCTAssertFalse(store.isSyncEnabled(for: .readingPlans))
+        XCTAssertFalse(store.isSyncEnabled(for: .myDocuments))
 
         store.setSyncEnabled(true, for: .bookmarks)
         store.setSyncEnabled(true, for: .readingPlans)
         store.setSyncEnabled(false, for: .workspaces)
+        store.setSyncEnabled(true, for: .myDocuments)
 
-        XCTAssertEqual(settingsStore.getString("gdrive_bookmarks"), "true")
-        XCTAssertEqual(settingsStore.getString("gdrive_workspaces"), "false")
-        XCTAssertEqual(settingsStore.getString("gdrive_readingplans"), "true")
+        XCTAssertEqual(settingsStore.getString("sync_enable_bookmarks"), "true")
+        XCTAssertEqual(settingsStore.getString("sync_enable_workspaces"), "false")
+        XCTAssertEqual(settingsStore.getString("sync_enable_readingplans"), "true")
+        XCTAssertEqual(settingsStore.getString("sync_enable_mydocuments"), "true")
         XCTAssertTrue(store.isSyncEnabled(for: .bookmarks))
         XCTAssertFalse(store.isSyncEnabled(for: .workspaces))
         XCTAssertTrue(store.isSyncEnabled(for: .readingPlans))
+        XCTAssertTrue(store.isSyncEnabled(for: .myDocuments))
+    }
+
+    func testRemoteSyncSettingsStoreReadsLegacyCategoryToggleKeys() throws {
+        let settingsStore = try makeInMemorySettingsStore()
+        settingsStore.setString("gdrive_mydocuments", value: "true")
+        let store = RemoteSyncSettingsStore(
+            settingsStore: settingsStore,
+            secretStore: InMemorySecretStore()
+        )
+
+        XCTAssertTrue(store.isSyncEnabled(for: .myDocuments))
+
+        store.setSyncEnabled(false, for: .myDocuments)
+        XCTAssertEqual(settingsStore.getString("sync_enable_mydocuments"), "false")
+        XCTAssertFalse(store.isSyncEnabled(for: .myDocuments))
     }
 
     func testRemoteSyncSettingsStoreGeneratesStableLowercaseDeviceIdentifier() throws {
@@ -6252,6 +6271,17 @@ final class AndBibleTests: XCTestCase {
         XCTAssertEqual(
             RemoteSyncCategory.readingPlans.syncFolderName(bundleIdentifier: "org.andbible.ios"),
             "org.andbible.ios-sync-readingplans"
+        )
+        XCTAssertEqual(
+            RemoteSyncCategory.myDocuments.syncFolderName(bundleIdentifier: "org.andbible.ios"),
+            "org.andbible.ios-sync-mydocuments"
+        )
+    }
+
+    func testRemoteSyncCategoryActiveSyncCasesExposeMyDocuments() {
+        XCTAssertEqual(
+            RemoteSyncCategory.activeSyncCases,
+            [.bookmarks, .workspaces, .readingPlans, .myDocuments]
         )
     }
 

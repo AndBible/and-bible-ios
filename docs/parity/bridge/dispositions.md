@@ -114,8 +114,9 @@ Disposition:
   and refreshes the reader. Regenerate validates the same metadata and hands a
   native action context to iOS. The shared AI dialog/backend remains tracked by
   #5/#89.
-- Remote sync for Android's `mydocuments` category remains blocked on this
-  local product surface and is tracked separately in #72.
+- Remote sync for Android's `mydocuments` category is implemented separately
+  through #72/#104/#105/#106/#108/#107/#109 and remains outside the bridge method
+  family itself.
 
 Reason:
 

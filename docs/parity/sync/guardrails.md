@@ -32,11 +32,11 @@ rules explicit for changes in:
    - settings persistence
 
    Any category rename or remapping is a compatibility change.
-   Current iOS-supported Android-aligned categories are `bookmarks`, `workspaces`, and
-   `readingplans`. Android also exposes `mydocuments`, `ai_settings`, and `progress`, which are
+   Current iOS-supported Android-aligned categories are `bookmarks`, `workspaces`,
+   `readingplans`, and `mydocuments`. Android also exposes `ai_settings` and `progress`, which are
    not implemented on iOS yet. Issue #49 records these as separate deferred parity targets tracked
-   by #72, #74, and #73; adding any one of them is new parity surface, not a local cleanup.
-   `mydocuments` also depends on the iOS My Documents model/storage contract recorded in
+   by #74 and #73; adding either one is new parity surface, not a local cleanup. `mydocuments`
+   remains governed by the iOS My Documents model/storage contract recorded in
    `../bridge/my-documents-model.md` and the Android-backed sync schema contract in
    `mydocuments-schema.md`.
    `ai_settings` depends on the shared AI backend/settings direction in #5 and the bridge
@@ -120,8 +120,7 @@ focused coverage rather than relying on the existing subset alone.
 ## Potential Improvements
 
 - add a machine-readable snapshot of Android-compatible sync keys and category names
-- expand iOS coverage to Android's remaining `mydocuments`, `ai_settings`, and `progress`
-  sync categories only through their separate tracking issues (#72, #74, #73), with
-  `mydocuments` gated by the #104 schema contract plus #105/#106/#108/#107 services,
-  `ai_settings` gated by #5/#89, and `progress` gated by the local model in
+- expand iOS coverage to Android's remaining `ai_settings` and `progress`
+  sync categories only through their separate tracking issues (#74, #73), with
+  `ai_settings` gated by #5/#89 and `progress` gated by the local model in
   `../bridge/reading-progress-model.md`
