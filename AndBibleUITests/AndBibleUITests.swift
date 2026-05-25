@@ -495,7 +495,7 @@ final class AndBibleUITests: XCTestCase {
 
         _ = openWorkspaceCreatePrompt(in: app, timeout: 10)
         let workspaceNameField = requireWorkspaceNamePromptField(in: app, timeout: 10)
-        focusResolvedPromptTextEntryElement(workspaceNameField, timeout: 10)
+        focusResolvedPromptTextEntryElement(workspaceNameField, in: app, timeout: 10)
         app.typeText(createdName)
         tapElementReliably(requireElement("workspaceNamePromptConfirmButton", in: app, timeout: 10), timeout: 10)
 
@@ -1455,7 +1455,7 @@ final class AndBibleUITests: XCTestCase {
         tapElementReliably(requireElement("labelManagerAddButton", in: app, timeout: 10), timeout: 10)
         waitForLabelManagerState(containing: "showNewLabel=true", in: app, timeout: 10)
         let newLabelNameField = requireLabelManagerNewLabelField(in: app, timeout: 10)
-        focusResolvedPromptTextEntryElement(newLabelNameField, timeout: 10)
+        focusResolvedPromptTextEntryElement(newLabelNameField, in: app, timeout: 10)
         app.typeText(originalName)
         tapElementReliably(requireLabelManagerCreateButton(in: app, timeout: 10), timeout: 10)
         waitForLabelManagerState(containing: labelManagerRowStateToken(originalName), in: app, timeout: 10)
@@ -9068,7 +9068,7 @@ final class AndBibleUITests: XCTestCase {
     private func createFreshLabelFromAssignment(in app: XCUIApplication) {
         presentLabelCreationPrompt(in: app, timeout: 10)
         let nameField = requireLabelManagerNewLabelField(in: app, timeout: 10)
-        focusResolvedPromptTextEntryElement(nameField, timeout: 10)
+        focusResolvedPromptTextEntryElement(nameField, in: app, timeout: 10)
         app.typeText("UI Test Fresh")
         tapElementReliably(requireLabelManagerCreateButton(in: app, timeout: 10), timeout: 10)
     }
@@ -9996,32 +9996,32 @@ final class AndBibleUITests: XCTestCase {
      Focuses a prompt-owned text-entry control without polling `isHittable`.
 
      SwiftUI alert text fields can occasionally stall XCTest while resolving frame-based taps even
-     after the prompt-specific resolver has found the field. Use XCTest's native tap only when the
-     field is already hittable, then reserve the coordinate path as a fallback.
+     after the prompt-specific resolver has found the field. Prefer the alert's automatic keyboard
+     focus first, then tap the modal surface instead of the resolved field so XCTest does not rebuild
+     a slow text-field snapshot.
      */
     private func focusResolvedPromptTextEntryElement(
         _ element: XCUIElement,
+        in app: XCUIApplication,
         preferTrailingEdge: Bool = false,
         timeout: TimeInterval = 10,
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
+        if waitForElementKeyboardFocus(element, timeout: 1) {
+            return
+        }
+
         let deadline = Date().addingTimeInterval(timeout)
         let tapOffset = CGVector(dx: preferTrailingEdge ? 0.92 : 0.5, dy: 0.5)
 
         repeat {
-            let frame = element.frame
-            if elementFrameIsUsable(frame) && element.isHittable {
-                element.tap()
-                if waitForElementKeyboardFocus(element, timeout: 0.75) {
-                    return
-                }
-            }
-            if elementFrameIsUsable(frame) {
-                element.coordinate(withNormalizedOffset: tapOffset).tap()
-                if waitForElementKeyboardFocus(element, timeout: 0.75) {
-                    return
-                }
+            let coordinate = resolvedModalPrompt(in: app, timeout: 0.2)?
+                .coordinate(withNormalizedOffset: tapOffset)
+                ?? app.coordinate(withNormalizedOffset: tapOffset)
+            coordinate.tap()
+            if waitForElementKeyboardFocus(element, timeout: 0.75) {
+                return
             }
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         } while Date() < deadline
