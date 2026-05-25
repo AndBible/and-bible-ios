@@ -34,6 +34,9 @@ public enum RemoteSyncCategoryPatchReplayReport: Sendable, Equatable {
 
     /// Reading-plan-category patch replay summary.
     case readingPlans(RemoteSyncReadingPlanPatchApplyReport)
+
+    /// My Documents-category patch replay summary.
+    case myDocuments(RemoteSyncMyDocumentPatchApplyReport)
 }
 
 /**
@@ -171,6 +174,7 @@ public enum RemoteSyncSynchronizationOutcome: Sendable, Equatable {
  - `RemoteSyncBookmarkPatchUploadService` exports and uploads outbound sparse bookmark patches
  - `RemoteSyncWorkspacePatchUploadService` exports and uploads outbound sparse workspace patches
  - `RemoteSyncReadingPlanPatchUploadService` exports and uploads outbound sparse reading-plan patches
+ - `RemoteSyncMyDocumentPatchApplyService` replays inbound sparse My Documents patches
  - `RemoteSyncMyDocumentPatchUploadService` exports and uploads outbound sparse My Documents patches
  - `RemoteSyncStateStore` persists Android-aligned bootstrap and progress metadata locally
  - `RemoteSyncPatchStatusStore` records patch zero after remote initial-backup adoption, matching Android
@@ -206,6 +210,7 @@ public final class RemoteSyncSynchronizationService {
     private let bookmarkPatchUploadService: RemoteSyncBookmarkPatchUploadService
     private let workspacePatchApplyService: RemoteSyncWorkspacePatchApplyService
     private let workspacePatchUploadService: RemoteSyncWorkspacePatchUploadService
+    private let myDocumentPatchApplyService: RemoteSyncMyDocumentPatchApplyService
     private let myDocumentPatchUploadService: RemoteSyncMyDocumentPatchUploadService
     private let fileManager: FileManager
     private let temporaryDirectory: URL?
@@ -226,6 +231,7 @@ public final class RemoteSyncSynchronizationService {
        - bookmarkPatchUploadService: Bookmark outbound patch upload service.
        - workspacePatchApplyService: Workspace patch replay service.
        - workspacePatchUploadService: Workspace outbound patch upload service.
+       - myDocumentPatchApplyService: My Documents patch replay service.
        - myDocumentPatchUploadService: My Documents outbound patch upload service.
        - fileManager: File manager used for staging cleanup.
        - temporaryDirectory: Optional staging directory override.
@@ -245,6 +251,7 @@ public final class RemoteSyncSynchronizationService {
         bookmarkPatchUploadService: RemoteSyncBookmarkPatchUploadService? = nil,
         workspacePatchApplyService: RemoteSyncWorkspacePatchApplyService = RemoteSyncWorkspacePatchApplyService(),
         workspacePatchUploadService: RemoteSyncWorkspacePatchUploadService? = nil,
+        myDocumentPatchApplyService: RemoteSyncMyDocumentPatchApplyService = RemoteSyncMyDocumentPatchApplyService(),
         myDocumentPatchUploadService: RemoteSyncMyDocumentPatchUploadService? = nil,
         fileManager: FileManager = .default,
         temporaryDirectory: URL? = nil,
@@ -280,6 +287,7 @@ public final class RemoteSyncSynchronizationService {
                 adapter: adapter,
                 nowProvider: nowProvider
             )
+        self.myDocumentPatchApplyService = myDocumentPatchApplyService
         self.myDocumentPatchUploadService = myDocumentPatchUploadService
             ?? RemoteSyncMyDocumentPatchUploadService(
                 adapter: adapter,
@@ -692,7 +700,13 @@ public final class RemoteSyncSynchronizationService {
                 )
             )
         case .myDocuments:
-            throw RemoteSyncSynchronizationError.unsupportedCategory(category)
+            return .myDocuments(
+                try myDocumentPatchApplyService.applyPatchArchives(
+                    stagedArchives,
+                    modelContext: modelContext,
+                    settingsStore: settingsStore
+                )
+            )
         }
     }
 

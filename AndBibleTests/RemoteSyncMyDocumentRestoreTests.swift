@@ -681,6 +681,752 @@ final class RemoteSyncMyDocumentRestoreTests: XCTestCase {
         XCTAssertEqual(RemoteSyncStateStore(settingsStore: settingsStore).progressState(for: .myDocuments).lastPatchWritten, 2_400)
     }
 
+    func testRemoteSyncMyDocumentPatchReplayAppliesUpdatesDeletesAndSparseRows() throws {
+        let container = try makeModelContainer()
+        let modelContext = ModelContext(container)
+        let settingsStore = SettingsStore(modelContext: modelContext)
+        let logEntryStore = RemoteSyncLogEntryStore(settingsStore: settingsStore)
+
+        let documentID = UUID(uuidString: "a8100000-0000-0000-0000-000000000001")!
+        let existingPageID = UUID(uuidString: "a8100000-0000-0000-0000-000000000011")!
+        let existingPromptID = UUID(uuidString: "a8100000-0000-0000-0000-000000000021")!
+        let remotePromptID = UUID(uuidString: "a8100000-0000-0000-0000-000000000022")!
+        let newDocumentID = UUID(uuidString: "a8100000-0000-0000-0000-000000000002")!
+        let newPageID = UUID(uuidString: "a8100000-0000-0000-0000-000000000012")!
+        let deletedDocumentID = UUID(uuidString: "a8100000-0000-0000-0000-000000000003")!
+        let deletedPageID = UUID(uuidString: "a8100000-0000-0000-0000-000000000013")!
+        let orphanPageID = UUID(uuidString: "a8100000-0000-0000-0000-000000000014")!
+        let missingDocumentID = UUID(uuidString: "a8100000-0000-0000-0000-000000000099")!
+        let createdAt = Date(timeIntervalSince1970: 1_735_689_600)
+        let remoteUpdatedAt = Date(timeIntervalSince1970: 1_735_689_900)
+
+        let existingDocument = MyDocument(
+            id: documentID,
+            name: "Local",
+            initials: "LOC",
+            createdAt: createdAt,
+            updatedAt: createdAt
+        )
+        let existingPage = MyDocumentPage(
+            id: existingPageID,
+            title: "Local Page",
+            pageKey: "local",
+            sourcePromptId: existingPromptID
+        )
+        let existingContent = MyDocumentPageContent(pageId: existingPageID, content: "Local content")
+        let existingCacheEntry = AiPageCacheEntry(
+            pageId: existingPageID,
+            sourcePromptId: existingPromptID,
+            contextHash: "local-cache"
+        )
+        existingDocument.pages = [existingPage]
+        existingPage.document = existingDocument
+        existingPage.pageContent = existingContent
+        existingContent.page = existingPage
+        existingPage.aiPageCacheEntries = [existingCacheEntry]
+        existingCacheEntry.page = existingPage
+
+        let deletedDocument = MyDocument(id: deletedDocumentID, name: "Deleted", initials: "DEL")
+        let deletedPage = MyDocumentPage(id: deletedPageID, title: "Deleted Page", pageKey: "deleted")
+        let deletedContent = MyDocumentPageContent(pageId: deletedPageID, content: "Delete me")
+        deletedDocument.pages = [deletedPage]
+        deletedPage.document = deletedDocument
+        deletedPage.pageContent = deletedContent
+        deletedContent.page = deletedPage
+
+        modelContext.insert(existingDocument)
+        modelContext.insert(existingPage)
+        modelContext.insert(existingContent)
+        modelContext.insert(existingCacheEntry)
+        modelContext.insert(deletedDocument)
+        modelContext.insert(deletedPage)
+        modelContext.insert(deletedContent)
+        try modelContext.save()
+
+        logEntryStore.replaceEntries(
+            myDocumentLogEntries(
+                documentIDs: [documentID, deletedDocumentID],
+                pageIDs: [existingPageID, deletedPageID],
+                timestamp: 1_000,
+                sourceDevice: "iphone"
+            ),
+            for: .myDocuments
+        )
+
+        let patchLogEntries: [RemoteSyncLogEntry] = [
+            myDocumentLogEntry(tableName: "MyDocument", rowID: documentID, type: .upsert),
+            myDocumentLogEntry(tableName: "MyDocument", rowID: newDocumentID, type: .upsert),
+            myDocumentLogEntry(tableName: "MyDocumentPage", rowID: newPageID, type: .upsert),
+            myDocumentLogEntry(tableName: "MyDocumentPage", rowID: orphanPageID, type: .upsert),
+            myDocumentLogEntry(tableName: "MyDocumentPageContent", rowID: existingPageID, type: .upsert),
+            myDocumentLogEntry(tableName: "MyDocumentPageContent", rowID: newPageID, type: .upsert),
+            myDocumentLogEntry(tableName: "MyDocumentPageContent", rowID: orphanPageID, type: .upsert),
+            myDocumentLogEntry(tableName: "AiPageCacheEntry", rowID: existingPageID, type: .upsert),
+            myDocumentLogEntry(tableName: "MyDocument", rowID: deletedDocumentID, type: .delete),
+        ]
+        let stagedArchive = try makeStagedMyDocumentPatchArchive(
+            sourceDevice: "pixel",
+            patchNumber: 1,
+            timestamp: 7_000,
+            documents: [
+                .init(
+                    id: documentID,
+                    name: "Remote Updated",
+                    documentDescription: "Remote metadata",
+                    initials: "LOC",
+                    orderNumber: 4,
+                    createdAt: createdAt,
+                    updatedAt: remoteUpdatedAt
+                ),
+                .init(
+                    id: newDocumentID,
+                    name: "Remote New",
+                    initials: "NEW",
+                    orderNumber: 5,
+                    createdAt: createdAt,
+                    updatedAt: remoteUpdatedAt
+                ),
+            ],
+            pages: [
+                .init(
+                    id: newPageID,
+                    documentId: newDocumentID,
+                    title: "New Page",
+                    pageKey: "new",
+                    contentType: .html,
+                    orderNumber: 1,
+                    createdAt: createdAt,
+                    updatedAt: remoteUpdatedAt
+                ),
+                .init(
+                    id: orphanPageID,
+                    documentId: missingDocumentID,
+                    title: "Orphan Page",
+                    pageKey: "orphan",
+                    contentType: .markdown,
+                    orderNumber: 2,
+                    createdAt: createdAt,
+                    updatedAt: remoteUpdatedAt
+                )
+            ],
+            pageContents: [
+                .init(pageId: existingPageID, content: "Remote content only"),
+                .init(pageId: newPageID, content: "<p>Remote new</p>"),
+                .init(pageId: orphanPageID, content: "Orphan content"),
+            ],
+            aiPageCacheEntries: [
+                .init(
+                    pageId: existingPageID,
+                    sourcePromptId: remotePromptID,
+                    contextHash: "remote-cache",
+                    sourceBookKey: "Gen.1"
+                )
+            ],
+            logEntries: patchLogEntries
+        )
+        defer { try? FileManager.default.removeItem(at: stagedArchive.archiveFileURL) }
+
+        let report = try RemoteSyncMyDocumentPatchApplyService().applyPatchArchives(
+            [stagedArchive],
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+
+        XCTAssertEqual(report.appliedPatchCount, 1)
+        XCTAssertEqual(report.appliedLogEntryCount, 9)
+        XCTAssertEqual(report.skippedLogEntryCount, 0)
+        XCTAssertEqual(
+            report.restoreReport,
+            .init(
+                restoredDocumentCount: 2,
+                restoredPageCount: 2,
+                restoredContentCount: 2,
+                restoredAIPageCacheEntryCount: 1
+            )
+        )
+
+        let store = MyDocumentStore(modelContext: modelContext)
+        XCTAssertEqual(store.document(initials: "LOC")?.name, "Remote Updated")
+        XCTAssertEqual(
+            store.rawContentPayload(bookInitials: "LOC", pageKey: "local")?.content,
+            "Remote content only"
+        )
+        XCTAssertEqual(
+            store.rawContentPayload(bookInitials: "NEW", pageKey: "new")?.content,
+            "<p>Remote new</p>"
+        )
+        XCTAssertNil(store.document(initials: "DEL"))
+        XCTAssertNil(store.page(pageId: deletedPageID))
+        XCTAssertNil(store.page(pageId: orphanPageID))
+        XCTAssertEqual(
+            store.aiPageActionContext(pageId: existingPageID)?.contextHash,
+            "remote-cache"
+        )
+
+        XCTAssertEqual(
+            RemoteSyncPatchStatusStore(settingsStore: settingsStore).statuses(for: .myDocuments),
+            [
+                RemoteSyncPatchStatus(
+                    sourceDevice: "pixel",
+                    patchNumber: 1,
+                    sizeBytes: stagedArchive.patch.file.size,
+                    appliedDate: 7_000
+                )
+            ]
+        )
+        XCTAssertTrue(
+            logEntryStore.entries(for: .myDocuments).contains(
+                myDocumentLogEntry(
+                    tableName: "MyDocument",
+                    rowID: deletedDocumentID,
+                    type: .delete
+                )
+            )
+        )
+    }
+
+    func testRemoteSyncMyDocumentPatchReplaySkipsOlderRowsAndRecordsPatchStatus() throws {
+        let container = try makeModelContainer()
+        let modelContext = ModelContext(container)
+        let settingsStore = SettingsStore(modelContext: modelContext)
+        let logEntryStore = RemoteSyncLogEntryStore(settingsStore: settingsStore)
+        let documentID = UUID(uuidString: "a8200000-0000-0000-0000-000000000001")!
+
+        modelContext.insert(MyDocument(id: documentID, name: "Local Newer", initials: "SKIP"))
+        try modelContext.save()
+
+        let localLogEntry = myDocumentLogEntry(
+            tableName: "MyDocument",
+            rowID: documentID,
+            type: .upsert,
+            timestamp: 5_000,
+            sourceDevice: "iphone"
+        )
+        logEntryStore.replaceEntries([localLogEntry], for: .myDocuments)
+        let stagedArchive = try makeStagedMyDocumentPatchArchive(
+            sourceDevice: "pixel",
+            patchNumber: 2,
+            timestamp: 8_000,
+            documents: [
+                .init(id: documentID, name: "Remote Older", initials: "SKIP")
+            ],
+            pages: [],
+            pageContents: [],
+            aiPageCacheEntries: [],
+            logEntries: [
+                myDocumentLogEntry(
+                    tableName: "MyDocument",
+                    rowID: documentID,
+                    type: .upsert,
+                    timestamp: 1_000,
+                    sourceDevice: "pixel"
+                )
+            ]
+        )
+        defer { try? FileManager.default.removeItem(at: stagedArchive.archiveFileURL) }
+
+        let report = try RemoteSyncMyDocumentPatchApplyService().applyPatchArchives(
+            [stagedArchive],
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+
+        XCTAssertEqual(report.appliedPatchCount, 1)
+        XCTAssertEqual(report.appliedLogEntryCount, 0)
+        XCTAssertEqual(report.skippedLogEntryCount, 1)
+        XCTAssertEqual(report.restoreReport.restoredDocumentCount, 1)
+        XCTAssertEqual(MyDocumentStore(modelContext: modelContext).document(initials: "SKIP")?.name, "Local Newer")
+        XCTAssertEqual(logEntryStore.entries(for: .myDocuments), [localLogEntry])
+        XCTAssertEqual(
+            RemoteSyncPatchStatusStore(settingsStore: settingsStore).status(
+                for: .myDocuments,
+                sourceDevice: "pixel",
+                patchNumber: 2
+            ),
+            RemoteSyncPatchStatus(
+                sourceDevice: "pixel",
+                patchNumber: 2,
+                sizeBytes: stagedArchive.patch.file.size,
+                appliedDate: 8_000
+            )
+        )
+    }
+
+    func testRemoteSyncMyDocumentPatchReplayAppliesMultipleArchivesInOrder() throws {
+        let container = try makeModelContainer()
+        let modelContext = ModelContext(container)
+        let settingsStore = SettingsStore(modelContext: modelContext)
+        let documentID = UUID(uuidString: "a8240000-0000-0000-0000-000000000001")!
+        let pageID = UUID(uuidString: "a8240000-0000-0000-0000-000000000011")!
+
+        let document = MyDocument(id: documentID, name: "Batch Local", initials: "BATCH")
+        let page = MyDocumentPage(id: pageID, title: "Batch Page", pageKey: "batch")
+        let content = MyDocumentPageContent(pageId: pageID, content: "Before batch")
+        document.pages = [page]
+        page.document = document
+        page.pageContent = content
+        content.page = page
+        modelContext.insert(document)
+        modelContext.insert(page)
+        modelContext.insert(content)
+        try modelContext.save()
+
+        RemoteSyncLogEntryStore(settingsStore: settingsStore).replaceEntries(
+            [
+                myDocumentLogEntry(
+                    tableName: "MyDocument",
+                    rowID: documentID,
+                    type: .upsert,
+                    timestamp: 1_000,
+                    sourceDevice: "iphone"
+                ),
+                myDocumentLogEntry(
+                    tableName: "MyDocumentPage",
+                    rowID: pageID,
+                    type: .upsert,
+                    timestamp: 1_000,
+                    sourceDevice: "iphone"
+                ),
+                myDocumentLogEntry(
+                    tableName: "MyDocumentPageContent",
+                    rowID: pageID,
+                    type: .upsert,
+                    timestamp: 1_000,
+                    sourceDevice: "iphone"
+                ),
+            ],
+            for: .myDocuments
+        )
+
+        let firstArchive = try makeStagedMyDocumentPatchArchive(
+            sourceDevice: "pixel",
+            patchNumber: 1,
+            timestamp: 8_100,
+            documents: [
+                .init(id: documentID, name: "Batch Remote", initials: "BATCH")
+            ],
+            pages: [],
+            pageContents: [],
+            aiPageCacheEntries: [],
+            logEntries: [
+                myDocumentLogEntry(tableName: "MyDocument", rowID: documentID, type: .upsert, timestamp: 2_000)
+            ]
+        )
+        let secondArchive = try makeStagedMyDocumentPatchArchive(
+            sourceDevice: "pixel",
+            patchNumber: 2,
+            timestamp: 8_200,
+            documents: [],
+            pages: [],
+            pageContents: [
+                .init(pageId: pageID, content: "After batch")
+            ],
+            aiPageCacheEntries: [],
+            logEntries: [
+                myDocumentLogEntry(tableName: "MyDocumentPageContent", rowID: pageID, type: .upsert, timestamp: 3_000)
+            ]
+        )
+        defer {
+            try? FileManager.default.removeItem(at: firstArchive.archiveFileURL)
+            try? FileManager.default.removeItem(at: secondArchive.archiveFileURL)
+        }
+
+        let report = try RemoteSyncMyDocumentPatchApplyService().applyPatchArchives(
+            [firstArchive, secondArchive],
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+
+        XCTAssertEqual(report.appliedPatchCount, 2)
+        XCTAssertEqual(report.appliedLogEntryCount, 2)
+        XCTAssertEqual(MyDocumentStore(modelContext: modelContext).document(initials: "BATCH")?.name, "Batch Remote")
+        XCTAssertEqual(
+            MyDocumentStore(modelContext: modelContext).rawContentPayload(bookInitials: "BATCH", pageKey: "batch")?.content,
+            "After batch"
+        )
+        XCTAssertEqual(
+            RemoteSyncPatchStatusStore(settingsStore: settingsStore).statuses(for: .myDocuments),
+            [
+                RemoteSyncPatchStatus(
+                    sourceDevice: "pixel",
+                    patchNumber: 1,
+                    sizeBytes: firstArchive.patch.file.size,
+                    appliedDate: 8_100
+                ),
+                RemoteSyncPatchStatus(
+                    sourceDevice: "pixel",
+                    patchNumber: 2,
+                    sizeBytes: secondArchive.patch.file.size,
+                    appliedDate: 8_200
+                ),
+            ]
+        )
+    }
+
+    func testRemoteSyncMyDocumentPatchReplayRejectsMissingUpsertRowWithoutMutation() throws {
+        let container = try makeModelContainer()
+        let modelContext = ModelContext(container)
+        let settingsStore = SettingsStore(modelContext: modelContext)
+        let documentID = UUID(uuidString: "a8250000-0000-0000-0000-000000000001")!
+        let missingDocumentID = UUID(uuidString: "a8250000-0000-0000-0000-000000000002")!
+
+        modelContext.insert(MyDocument(id: documentID, name: "Existing", initials: "MISS"))
+        try modelContext.save()
+
+        let stagedArchive = try makeStagedMyDocumentPatchArchive(
+            sourceDevice: "pixel",
+            patchNumber: 3,
+            timestamp: 8_500,
+            documents: [],
+            pages: [],
+            pageContents: [],
+            aiPageCacheEntries: [],
+            logEntries: [
+                myDocumentLogEntry(tableName: "MyDocument", rowID: missingDocumentID, type: .upsert)
+            ]
+        )
+        defer { try? FileManager.default.removeItem(at: stagedArchive.archiveFileURL) }
+
+        XCTAssertThrowsError(
+            try RemoteSyncMyDocumentPatchApplyService().applyPatchArchives(
+                [stagedArchive],
+                modelContext: modelContext,
+                settingsStore: settingsStore
+            )
+        ) { error in
+            XCTAssertEqual(
+                error as? RemoteSyncMyDocumentPatchApplyError,
+                .missingPatchRow(table: "MyDocument", id: missingDocumentID)
+            )
+        }
+        XCTAssertEqual(MyDocumentStore(modelContext: modelContext).document(initials: "MISS")?.name, "Existing")
+        XCTAssertTrue(RemoteSyncPatchStatusStore(settingsStore: settingsStore).statuses(for: .myDocuments).isEmpty)
+    }
+
+    func testRemoteSyncMyDocumentPatchReplayRejectsInvalidLogEntryIdentifierWithoutMutation() throws {
+        let container = try makeModelContainer()
+        let modelContext = ModelContext(container)
+        let settingsStore = SettingsStore(modelContext: modelContext)
+        let documentID = UUID(uuidString: "a8260000-0000-0000-0000-000000000001")!
+
+        modelContext.insert(MyDocument(id: documentID, name: "Existing", initials: "BADID"))
+        try modelContext.save()
+
+        let stagedArchive = try makeStagedMyDocumentPatchArchive(
+            sourceDevice: "pixel",
+            patchNumber: 4,
+            timestamp: 8_600,
+            documents: [],
+            pages: [],
+            pageContents: [],
+            aiPageCacheEntries: [],
+            logEntries: [
+                RemoteSyncLogEntry(
+                    tableName: "MyDocument",
+                    entityID1: .text("not-a-uuid"),
+                    entityID2: .text(""),
+                    type: .upsert,
+                    lastUpdated: 2_000,
+                    sourceDevice: "pixel"
+                )
+            ]
+        )
+        defer { try? FileManager.default.removeItem(at: stagedArchive.archiveFileURL) }
+
+        XCTAssertThrowsError(
+            try RemoteSyncMyDocumentPatchApplyService().applyPatchArchives(
+                [stagedArchive],
+                modelContext: modelContext,
+                settingsStore: settingsStore
+            )
+        ) { error in
+            XCTAssertEqual(
+                error as? RemoteSyncMyDocumentPatchApplyError,
+                .invalidLogEntryIdentifier(table: "MyDocument", field: "entityId1")
+            )
+        }
+        XCTAssertEqual(MyDocumentStore(modelContext: modelContext).document(initials: "BADID")?.name, "Existing")
+        XCTAssertTrue(RemoteSyncPatchStatusStore(settingsStore: settingsStore).statuses(for: .myDocuments).isEmpty)
+    }
+
+    func testRemoteSyncMyDocumentPatchReplayAcceptsTextUUIDIdentifiers() throws {
+        let container = try makeModelContainer()
+        let modelContext = ModelContext(container)
+        let settingsStore = SettingsStore(modelContext: modelContext)
+        let documentID = UUID(uuidString: "a8270000-0000-0000-0000-000000000001")!
+
+        modelContext.insert(MyDocument(id: documentID, name: "Text Local", initials: "TXTID"))
+        try modelContext.save()
+
+        RemoteSyncLogEntryStore(settingsStore: settingsStore).replaceEntries(
+            [
+                myDocumentLogEntry(
+                    tableName: "MyDocument",
+                    rowID: documentID,
+                    type: .upsert,
+                    timestamp: 1_000,
+                    sourceDevice: "iphone"
+                )
+            ],
+            for: .myDocuments
+        )
+        let stagedArchive = try makeStagedMyDocumentPatchArchive(
+            sourceDevice: "pixel",
+            patchNumber: 5,
+            timestamp: 8_700,
+            documents: [
+                .init(id: documentID, name: "Text Remote", initials: "TXTID")
+            ],
+            pages: [],
+            pageContents: [],
+            aiPageCacheEntries: [],
+            logEntries: [
+                RemoteSyncLogEntry(
+                    tableName: "MyDocument",
+                    entityID1: .text(documentID.uuidString),
+                    entityID2: .text(""),
+                    type: .upsert,
+                    lastUpdated: 2_000,
+                    sourceDevice: "pixel"
+                )
+            ]
+        )
+        defer { try? FileManager.default.removeItem(at: stagedArchive.archiveFileURL) }
+
+        let report = try RemoteSyncMyDocumentPatchApplyService().applyPatchArchives(
+            [stagedArchive],
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+
+        XCTAssertEqual(report.appliedLogEntryCount, 1)
+        XCTAssertEqual(MyDocumentStore(modelContext: modelContext).document(initials: "TXTID")?.name, "Text Remote")
+        XCTAssertEqual(
+            RemoteSyncLogEntryStore(settingsStore: settingsStore).entries(for: .myDocuments),
+            [
+                myDocumentLogEntry(
+                    tableName: "MyDocument",
+                    rowID: documentID,
+                    type: .upsert,
+                    timestamp: 2_000,
+                    sourceDevice: "pixel"
+                )
+            ]
+        )
+    }
+
+    func testRemoteSyncMyDocumentPatchReplaySkipsOlderBlobPatchAgainstTextUUIDBaseline() throws {
+        let container = try makeModelContainer()
+        let modelContext = ModelContext(container)
+        let settingsStore = SettingsStore(modelContext: modelContext)
+        let documentID = UUID(uuidString: "a8280000-0000-0000-0000-000000000001")!
+
+        modelContext.insert(MyDocument(id: documentID, name: "Text Baseline Local", initials: "TXTBLOB"))
+        try modelContext.save()
+
+        RemoteSyncLogEntryStore(settingsStore: settingsStore).replaceEntries(
+            [
+                RemoteSyncLogEntry(
+                    tableName: "MyDocument",
+                    entityID1: .text(documentID.uuidString),
+                    entityID2: .text(""),
+                    type: .upsert,
+                    lastUpdated: 5_000,
+                    sourceDevice: "iphone"
+                )
+            ],
+            for: .myDocuments
+        )
+        let stagedArchive = try makeStagedMyDocumentPatchArchive(
+            sourceDevice: "pixel",
+            patchNumber: 6,
+            timestamp: 8_800,
+            documents: [
+                .init(id: documentID, name: "Older Blob Remote", initials: "TXTBLOB")
+            ],
+            pages: [],
+            pageContents: [],
+            aiPageCacheEntries: [],
+            logEntries: [
+                myDocumentLogEntry(
+                    tableName: "MyDocument",
+                    rowID: documentID,
+                    type: .upsert,
+                    timestamp: 1_000,
+                    sourceDevice: "pixel"
+                )
+            ]
+        )
+        defer { try? FileManager.default.removeItem(at: stagedArchive.archiveFileURL) }
+
+        let report = try RemoteSyncMyDocumentPatchApplyService().applyPatchArchives(
+            [stagedArchive],
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+
+        XCTAssertEqual(report.appliedLogEntryCount, 0)
+        XCTAssertEqual(report.skippedLogEntryCount, 1)
+        XCTAssertEqual(
+            MyDocumentStore(modelContext: modelContext).document(initials: "TXTBLOB")?.name,
+            "Text Baseline Local"
+        )
+        XCTAssertEqual(
+            RemoteSyncLogEntryStore(settingsStore: settingsStore).entries(for: .myDocuments),
+            [
+                myDocumentLogEntry(
+                    tableName: "MyDocument",
+                    rowID: documentID,
+                    type: .upsert,
+                    timestamp: 5_000,
+                    sourceDevice: "iphone"
+                )
+            ]
+        )
+    }
+
+    func testRemoteSyncSynchronizationServiceReplaysRemoteMyDocumentPatch() async throws {
+        let container = try makeModelContainer()
+        let modelContext = ModelContext(container)
+        let settingsStore = SettingsStore(modelContext: modelContext)
+        let stateStore = RemoteSyncStateStore(settingsStore: settingsStore)
+        let syncFolderID = "/org.andbible.ios-sync-mydocuments"
+        let localDeviceFolderID = "\(syncFolderID)/ios-device"
+        let remoteDeviceFolderID = "\(syncFolderID)/pixel"
+
+        stateStore.setBootstrapState(
+            RemoteSyncBootstrapState(
+                syncFolderID: syncFolderID,
+                deviceFolderID: localDeviceFolderID,
+                secretFileName: "device-known-ios-device-secret"
+            ),
+            for: .myDocuments
+        )
+
+        let documentID = UUID(uuidString: "a8300000-0000-0000-0000-000000000001")!
+        let pageID = UUID(uuidString: "a8300000-0000-0000-0000-000000000011")!
+        let document = MyDocument(id: documentID, name: "Sync Replay", initials: "REPLAY")
+        let page = MyDocumentPage(id: pageID, title: "Replay Page", pageKey: "replay")
+        let content = MyDocumentPageContent(pageId: pageID, content: "Before replay")
+        document.pages = [page]
+        page.document = document
+        page.pageContent = content
+        content.page = page
+        modelContext.insert(document)
+        modelContext.insert(page)
+        modelContext.insert(content)
+        try modelContext.save()
+
+        RemoteSyncLogEntryStore(settingsStore: settingsStore).replaceEntries(
+            [
+                myDocumentLogEntry(
+                    tableName: "MyDocument",
+                    rowID: documentID,
+                    type: .upsert,
+                    timestamp: 1_000,
+                    sourceDevice: "iphone"
+                ),
+                myDocumentLogEntry(
+                    tableName: "MyDocumentPage",
+                    rowID: pageID,
+                    type: .upsert,
+                    timestamp: 1_000,
+                    sourceDevice: "iphone"
+                ),
+                myDocumentLogEntry(
+                    tableName: "MyDocumentPageContent",
+                    rowID: pageID,
+                    type: .upsert,
+                    timestamp: 1_000,
+                    sourceDevice: "iphone"
+                ),
+            ],
+            for: .myDocuments
+        )
+
+        let stagedArchive = try makeStagedMyDocumentPatchArchive(
+            sourceDevice: "pixel",
+            patchNumber: 1,
+            timestamp: 7_500,
+            documents: [],
+            pages: [],
+            pageContents: [
+                .init(pageId: pageID, content: "After replay")
+            ],
+            aiPageCacheEntries: [],
+            logEntries: [
+                myDocumentLogEntry(tableName: "MyDocumentPageContent", rowID: pageID, type: .upsert)
+            ]
+        )
+        defer { try? FileManager.default.removeItem(at: stagedArchive.archiveFileURL) }
+        let archiveData = try Data(contentsOf: stagedArchive.archiveFileURL)
+        let remoteDeviceFolder = RemoteSyncFile(
+            id: remoteDeviceFolderID,
+            name: "pixel",
+            size: 0,
+            timestamp: 7_400,
+            parentID: syncFolderID,
+            mimeType: NextCloudSyncAdapter.folderMimeType
+        )
+        let remotePatchFile = RemoteSyncFile(
+            id: "\(remoteDeviceFolderID)/1.4.sqlite3.gz",
+            name: "1.4.sqlite3.gz",
+            size: Int64(archiveData.count),
+            timestamp: 7_500,
+            parentID: remoteDeviceFolderID,
+            mimeType: NextCloudSyncAdapter.gzipMimeType
+        )
+        let adapter = MyDocumentMockRemoteSyncAdapter()
+        await adapter.setKnownResponse(
+            true,
+            forSyncFolderID: syncFolderID,
+            secretFileName: "device-known-ios-device-secret"
+        )
+        await adapter.setListedFiles([remoteDeviceFolder], forParentID: syncFolderID)
+        await adapter.setListedFiles([remotePatchFile], forParentID: remoteDeviceFolderID)
+        await adapter.setDownloadData(archiveData, forID: remotePatchFile.id)
+        let service = RemoteSyncSynchronizationService(
+            adapter: adapter,
+            bundleIdentifier: "org.andbible.ios",
+            deviceIdentifier: "ios-device",
+            nowProvider: { 7_600 }
+        )
+
+        let outcome = try await service.synchronize(
+            .myDocuments,
+            modelContext: modelContext,
+            settingsStore: settingsStore,
+            currentSchemaVersion: RemoteSyncMyDocumentRestoreService.supportedAndroidSchemaVersion
+        )
+
+        guard case .synchronized(let report) = outcome else {
+            return XCTFail("Expected synchronized outcome")
+        }
+        XCTAssertEqual(report.category, .myDocuments)
+        XCTAssertEqual(report.discoveredPatchCount, 1)
+        XCTAssertNil(report.patchUploadReport)
+        XCTAssertEqual(report.lastPatchWritten, nil)
+        XCTAssertEqual(report.lastSynchronized, 7_600)
+        guard case .myDocuments(let replayReport)? = report.patchReplayReport else {
+            return XCTFail("Expected My Documents replay report")
+        }
+        XCTAssertEqual(replayReport.appliedPatchCount, 1)
+        XCTAssertEqual(replayReport.appliedLogEntryCount, 1)
+        XCTAssertEqual(replayReport.skippedLogEntryCount, 0)
+        XCTAssertEqual(
+            MyDocumentStore(modelContext: modelContext).rawContentPayload(bookInitials: "REPLAY", pageKey: "replay")?.content,
+            "After replay"
+        )
+        XCTAssertEqual(
+            RemoteSyncPatchStatusStore(settingsStore: settingsStore).status(
+                for: .myDocuments,
+                sourceDevice: "pixel",
+                patchNumber: 1
+            )?.appliedDate,
+            7_500
+        )
+    }
+
     func testRemoteSyncMyDocumentPatchUploadWritesAndUploadsSparsePatch() async throws {
         let container = try makeModelContainer()
         let modelContext = ModelContext(container)
@@ -1198,7 +1944,8 @@ final class RemoteSyncMyDocumentRestoreTests: XCTestCase {
         let outcome = try await service.synchronize(
             .myDocuments,
             modelContext: modelContext,
-            settingsStore: settingsStore
+            settingsStore: settingsStore,
+            currentSchemaVersion: RemoteSyncMyDocumentRestoreService.supportedAndroidSchemaVersion
         )
 
         guard case .synchronized(let report) = outcome else {
@@ -1247,6 +1994,49 @@ final class RemoteSyncMyDocumentRestoreTests: XCTestCase {
         ])
         let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
         return try ModelContainer(for: schema, configurations: [configuration])
+    }
+
+    private func makeStagedMyDocumentPatchArchive(
+        sourceDevice: String,
+        patchNumber: Int64,
+        timestamp: Int64,
+        documents: [AndroidMyDocumentRow],
+        pages: [AndroidMyDocumentPageRow],
+        pageContents: [AndroidMyDocumentPageContentRow],
+        aiPageCacheEntries: [AndroidAiPageCacheEntryRow],
+        logEntries: [RemoteSyncLogEntry]
+    ) throws -> RemoteSyncStagedPatchArchive {
+        let databaseURL = try makeAndroidMyDocumentsDatabase(
+            documents: documents,
+            pages: pages,
+            pageContents: pageContents,
+            aiPageCacheEntries: aiPageCacheEntries,
+            logEntries: logEntries
+        )
+        defer { try? FileManager.default.removeItem(at: databaseURL) }
+
+        let archiveData = try RemoteSyncArchiveStagingService.gzip(Data(contentsOf: databaseURL))
+        let archiveURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("android-mydocuments-patch-\(UUID().uuidString).sqlite3.gz")
+        try archiveData.write(to: archiveURL, options: .atomic)
+
+        let parentID = "/org.andbible.ios-sync-mydocuments/\(sourceDevice)"
+        return RemoteSyncStagedPatchArchive(
+            patch: RemoteSyncDiscoveredPatch(
+                sourceDevice: sourceDevice,
+                patchNumber: patchNumber,
+                schemaVersion: RemoteSyncMyDocumentRestoreService.supportedAndroidSchemaVersion,
+                file: RemoteSyncFile(
+                    id: "\(parentID)/\(patchNumber).\(RemoteSyncMyDocumentRestoreService.supportedAndroidSchemaVersion).sqlite3.gz",
+                    name: "\(patchNumber).\(RemoteSyncMyDocumentRestoreService.supportedAndroidSchemaVersion).sqlite3.gz",
+                    size: Int64(archiveData.count),
+                    timestamp: timestamp,
+                    parentID: parentID,
+                    mimeType: NextCloudSyncAdapter.gzipMimeType
+                )
+            ),
+            archiveFileURL: archiveURL
+        )
     }
 
     private func makeAndroidMyDocumentsDatabase(
@@ -1561,6 +2351,23 @@ final class RemoteSyncMyDocumentRestoreTests: XCTestCase {
         sqlite3_bind_int(statement, index, Int32(value))
     }
 
+    private func myDocumentLogEntry(
+        tableName: String,
+        rowID: UUID,
+        type: RemoteSyncLogEntryType,
+        timestamp: Int64 = 2_000,
+        sourceDevice: String = "pixel"
+    ) -> RemoteSyncLogEntry {
+        RemoteSyncLogEntry(
+            tableName: tableName,
+            entityID1: .blob(uuidBlob(rowID)),
+            entityID2: .text(""),
+            type: type,
+            lastUpdated: timestamp,
+            sourceDevice: sourceDevice
+        )
+    }
+
     private func myDocumentLogEntries(
         documentIDs: [UUID],
         pageIDs: [UUID],
@@ -1615,6 +2422,8 @@ final class RemoteSyncMyDocumentRestoreTests: XCTestCase {
 private actor MyDocumentMockRemoteSyncAdapter: RemoteSyncAdapting {
     private var uploadResults: [RemoteSyncFile] = []
     private var knownResponses: [String: Bool] = [:]
+    private var listedFilesByParentID: [String: [RemoteSyncFile]] = [:]
+    private var downloadDataByID: [String: Data] = [:]
     private var uploadedFiles: [MyDocumentMockUploadedFile] = []
 
     func enqueueUploadResult(_ result: RemoteSyncFile) {
@@ -1623,6 +2432,14 @@ private actor MyDocumentMockRemoteSyncAdapter: RemoteSyncAdapting {
 
     func setKnownResponse(_ value: Bool, forSyncFolderID syncFolderID: String, secretFileName: String) {
         knownResponses["\(syncFolderID)|\(secretFileName)"] = value
+    }
+
+    func setListedFiles(_ files: [RemoteSyncFile], forParentID parentID: String) {
+        listedFilesByParentID[parentID] = files
+    }
+
+    func setDownloadData(_ data: Data, forID id: String) {
+        downloadDataByID[id] = data
     }
 
     func uploadedFilesSnapshot() -> [MyDocumentMockUploadedFile] {
@@ -1635,7 +2452,28 @@ private actor MyDocumentMockRemoteSyncAdapter: RemoteSyncAdapting {
         mimeType: String?,
         modifiedAtLeast: Date?
     ) async throws -> [RemoteSyncFile] {
-        []
+        let files: [RemoteSyncFile]
+        if let parentIDs {
+            files = parentIDs.flatMap { listedFilesByParentID[$0, default: []] }
+        } else {
+            files = listedFilesByParentID.values.flatMap { $0 }
+        }
+
+        return files.filter { file in
+            if let name, file.name != name {
+                return false
+            }
+            if let mimeType, file.mimeType != mimeType {
+                return false
+            }
+            if let modifiedAtLeast {
+                let modifiedDate = Date(timeIntervalSince1970: TimeInterval(file.timestamp) / 1000.0)
+                if modifiedDate < modifiedAtLeast {
+                    return false
+                }
+            }
+            return true
+        }
     }
 
     func createNewFolder(name: String, parentID: String?) async throws -> RemoteSyncFile {
@@ -1650,7 +2488,7 @@ private actor MyDocumentMockRemoteSyncAdapter: RemoteSyncAdapting {
     }
 
     func download(id: String) async throws -> Data {
-        Data()
+        downloadDataByID[id] ?? Data()
     }
 
     func upload(

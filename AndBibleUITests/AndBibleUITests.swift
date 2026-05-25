@@ -495,7 +495,7 @@ final class AndBibleUITests: XCTestCase {
 
         _ = openWorkspaceCreatePrompt(in: app, timeout: 10)
         let workspaceNameField = requireWorkspaceNamePromptField(in: app, timeout: 10)
-        focusResolvedPromptTextEntryElement(workspaceNameField, timeout: 10)
+        focusResolvedPromptTextEntryElement(workspaceNameField, in: app, timeout: 10)
         app.typeText(createdName)
         tapElementReliably(requireElement("workspaceNamePromptConfirmButton", in: app, timeout: 10), timeout: 10)
 
@@ -1455,7 +1455,7 @@ final class AndBibleUITests: XCTestCase {
         tapElementReliably(requireElement("labelManagerAddButton", in: app, timeout: 10), timeout: 10)
         waitForLabelManagerState(containing: "showNewLabel=true", in: app, timeout: 10)
         let newLabelNameField = requireLabelManagerNewLabelField(in: app, timeout: 10)
-        focusResolvedPromptTextEntryElement(newLabelNameField, timeout: 10)
+        focusResolvedPromptTextEntryElement(newLabelNameField, in: app, timeout: 10)
         app.typeText(originalName)
         tapElementReliably(requireLabelManagerCreateButton(in: app, timeout: 10), timeout: 10)
         waitForLabelManagerState(containing: labelManagerRowStateToken(originalName), in: app, timeout: 10)
@@ -6366,6 +6366,7 @@ final class AndBibleUITests: XCTestCase {
      *   - taps the real add-window control in the reader tab bar
      *   - waits for the new tab pill to appear, become active, and export the matching
      *     `readerRenderedContentState` window order before returning
+     *   - retries the add tap once when the expected new tab never materializes
      * - Failure modes:
      *   - fails if the add control or the expected tab does not appear
      *   - fails if the new tab appears but never becomes the active rendered window
@@ -6377,28 +6378,41 @@ final class AndBibleUITests: XCTestCase {
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
-        tapElementReliably(
-            requireElement("windowTabAddButton", in: app, timeout: timeout, file: file, line: line),
-            timeout: timeout,
-            file: file,
-            line: line
-        )
-
         let identifier = "windowTabButton::\(order)"
-        let tabButton = requireElement(identifier, in: app, timeout: timeout, file: file, line: line)
+        var sawExpectedTab = false
+        var lastTabValue = "nil"
+        var lastRenderedState = "nil"
 
-        let deadline = Date().addingTimeInterval(timeout)
-        repeat {
-            let tabValue = tabButton.value as? String ?? ""
-            let renderedState = readerRenderedContentStateValue(in: app) ?? ""
-            if tabValue.contains("state=active") && renderedState.contains("windowOrder=\(order)") {
-                return
+        for attempt in 1...2 {
+            tapElementReliably(
+                requireElement("windowTabAddButton", in: app, timeout: timeout, file: file, line: line),
+                timeout: timeout,
+                file: file,
+                line: line
+            )
+
+            let deadline = Date().addingTimeInterval(timeout)
+            repeat {
+                if let tabButton = resolvedElement(identifier, in: app) {
+                    sawExpectedTab = true
+                    lastTabValue = tabButton.value.map { "\($0)" } ?? "nil"
+                    lastRenderedState = readerRenderedContentStateValue(in: app) ?? "nil"
+                    if lastTabValue.contains("state=active") && lastRenderedState.contains("windowOrder=\(order)") {
+                        return
+                    }
+                } else {
+                    lastRenderedState = readerRenderedContentStateValue(in: app) ?? "nil"
+                }
+                RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+            } while Date() < deadline
+
+            if sawExpectedTab || attempt == 2 {
+                break
             }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-        } while Date() < deadline
 
-        let lastTabValue = tabButton.value.map { "\($0)" } ?? "nil"
-        let lastRenderedState = readerRenderedContentStateValue(in: app) ?? "nil"
+            RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+        }
+
         XCTFail(
             "Expected added window tab \(order) to become the active rendered window within \(timeout) seconds; last tab value was '\(lastTabValue)' and last reader state was '\(lastRenderedState)'.",
             file: file,
@@ -9054,7 +9068,7 @@ final class AndBibleUITests: XCTestCase {
     private func createFreshLabelFromAssignment(in app: XCUIApplication) {
         presentLabelCreationPrompt(in: app, timeout: 10)
         let nameField = requireLabelManagerNewLabelField(in: app, timeout: 10)
-        focusResolvedPromptTextEntryElement(nameField, timeout: 10)
+        focusResolvedPromptTextEntryElement(nameField, in: app, timeout: 10)
         app.typeText("UI Test Fresh")
         tapElementReliably(requireLabelManagerCreateButton(in: app, timeout: 10), timeout: 10)
     }
@@ -9982,32 +9996,32 @@ final class AndBibleUITests: XCTestCase {
      Focuses a prompt-owned text-entry control without polling `isHittable`.
 
      SwiftUI alert text fields can occasionally stall XCTest while resolving frame-based taps even
-     after the prompt-specific resolver has found the field. Use XCTest's native tap only when the
-     field is already hittable, then reserve the coordinate path as a fallback.
+     after the prompt-specific resolver has found the field. Prefer the alert's automatic keyboard
+     focus first, then tap the modal surface instead of the resolved field so XCTest does not rebuild
+     a slow text-field snapshot.
      */
     private func focusResolvedPromptTextEntryElement(
         _ element: XCUIElement,
+        in app: XCUIApplication,
         preferTrailingEdge: Bool = false,
         timeout: TimeInterval = 10,
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
+        if waitForElementKeyboardFocus(element, timeout: 1) {
+            return
+        }
+
         let deadline = Date().addingTimeInterval(timeout)
         let tapOffset = CGVector(dx: preferTrailingEdge ? 0.92 : 0.5, dy: 0.5)
 
         repeat {
-            let frame = element.frame
-            if elementFrameIsUsable(frame) && element.isHittable {
-                element.tap()
-                if waitForElementKeyboardFocus(element, timeout: 0.75) {
-                    return
-                }
-            }
-            if elementFrameIsUsable(frame) {
-                element.coordinate(withNormalizedOffset: tapOffset).tap()
-                if waitForElementKeyboardFocus(element, timeout: 0.75) {
-                    return
-                }
+            let coordinate = resolvedModalPrompt(in: app, timeout: 0.2)?
+                .coordinate(withNormalizedOffset: tapOffset)
+                ?? app.coordinate(withNormalizedOffset: tapOffset)
+            coordinate.tap()
+            if waitForElementKeyboardFocus(element, timeout: 0.75) {
+                return
             }
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         } while Date() < deadline
