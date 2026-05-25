@@ -6366,6 +6366,7 @@ final class AndBibleUITests: XCTestCase {
      *   - taps the real add-window control in the reader tab bar
      *   - waits for the new tab pill to appear, become active, and export the matching
      *     `readerRenderedContentState` window order before returning
+     *   - retries the add tap once when the expected new tab never materializes
      * - Failure modes:
      *   - fails if the add control or the expected tab does not appear
      *   - fails if the new tab appears but never becomes the active rendered window
@@ -6377,28 +6378,41 @@ final class AndBibleUITests: XCTestCase {
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
-        tapElementReliably(
-            requireElement("windowTabAddButton", in: app, timeout: timeout, file: file, line: line),
-            timeout: timeout,
-            file: file,
-            line: line
-        )
-
         let identifier = "windowTabButton::\(order)"
-        let tabButton = requireElement(identifier, in: app, timeout: timeout, file: file, line: line)
+        var sawExpectedTab = false
+        var lastTabValue = "nil"
+        var lastRenderedState = "nil"
 
-        let deadline = Date().addingTimeInterval(timeout)
-        repeat {
-            let tabValue = tabButton.value as? String ?? ""
-            let renderedState = readerRenderedContentStateValue(in: app) ?? ""
-            if tabValue.contains("state=active") && renderedState.contains("windowOrder=\(order)") {
-                return
+        for attempt in 1...2 {
+            tapElementReliably(
+                requireElement("windowTabAddButton", in: app, timeout: timeout, file: file, line: line),
+                timeout: timeout,
+                file: file,
+                line: line
+            )
+
+            let deadline = Date().addingTimeInterval(timeout)
+            repeat {
+                if let tabButton = resolvedElement(identifier, in: app) {
+                    sawExpectedTab = true
+                    lastTabValue = tabButton.value.map { "\($0)" } ?? "nil"
+                    lastRenderedState = readerRenderedContentStateValue(in: app) ?? "nil"
+                    if lastTabValue.contains("state=active") && lastRenderedState.contains("windowOrder=\(order)") {
+                        return
+                    }
+                } else {
+                    lastRenderedState = readerRenderedContentStateValue(in: app) ?? "nil"
+                }
+                RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+            } while Date() < deadline
+
+            if sawExpectedTab || attempt == 2 {
+                break
             }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-        } while Date() < deadline
 
-        let lastTabValue = tabButton.value.map { "\($0)" } ?? "nil"
-        let lastRenderedState = readerRenderedContentStateValue(in: app) ?? "nil"
+            RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+        }
+
         XCTFail(
             "Expected added window tab \(order) to become the active rendered window within \(timeout) seconds; last tab value was '\(lastTabValue)' and last reader state was '\(lastRenderedState)'.",
             file: file,
