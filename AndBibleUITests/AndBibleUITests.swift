@@ -7946,25 +7946,29 @@ final class AndBibleUITests: XCTestCase {
     }
 
     /**
-     Dismisses the software keyboard through one visible return-style action when present.
+     Dismisses the software keyboard through coordinate taps when present.
      *
      * - Parameter app: Running application under test.
      * - Side effects:
-     *   - taps one visible keyboard action so lower controls are no longer obscured
+     *   - taps outside the keyboard first, then taps the keyboard's lower trailing return area
+     *     when the keyboard remains visible
      * - Failure modes:
-     *   - silently leaves focus unchanged when no software keyboard or dismissal action exists
+     *   - silently leaves focus unchanged when no software keyboard is visible or the active
+     *     control refuses to resign focus
      */
     private func dismissKeyboardIfPresent(in app: XCUIApplication) {
-        for title in ["Done", "Return", "Go", "Search", "OK"] {
-            let button = app.keyboards.buttons[title].firstMatch
-            if button.exists || button.waitForExistence(timeout: 0.2) {
-                if waitForElementToBecomeHittable(button, timeout: 0.5) {
-                    button.tap()
-                } else if !button.frame.isEmpty {
-                    button.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
-                }
-                return
-            }
+        let keyboard = app.keyboards.firstMatch
+        guard keyboard.exists || keyboard.waitForExistence(timeout: 0.2) else {
+            return
+        }
+
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.08)).tap()
+        guard keyboard.exists || keyboard.waitForExistence(timeout: 0.2) else {
+            return
+        }
+
+        if !keyboard.frame.isEmpty {
+            keyboard.coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.88)).tap()
         }
     }
 
