@@ -9,6 +9,8 @@ someone is changing:
 - `Sources/BibleUI/Sources/BibleUI/Bible/BibleReaderController.swift`
 - `Sources/BibleUI/Sources/BibleUI/Bible/BibleReaderInteractionPolicies.swift`
 - `Sources/BibleUI/Sources/BibleUI/Bible/BibleWindowPane.swift`
+- `Sources/BibleUI/Sources/BibleUI/Bible/CompareView.swift`
+- `Sources/BibleUI/Sources/BibleUI/Bible/CrossReferenceView.swift`
 - `Sources/BibleUI/Sources/BibleUI/Bible/StrongsSheetView.swift`
 - `Sources/BibleView/Sources/BibleView/WebViewCoordinator.swift`
 - `Sources/BibleUI/Sources/BibleUI/Shared/HistoryView.swift`
@@ -19,9 +21,10 @@ someone is changing:
 1. Treat the reader shell as the owner of top-level reading workflows.
 
    Drawer routing, overflow-menu routing, history presentation, workspace
-   selection, compare presentation, Strong's modal presentation, and fullscreen
-   state all belong to the reader shell. If they start drifting into ad hoc
-   view-local ownership, parity usually gets messier fast.
+   selection, Compare routing, Strong's routing, multi-reference routing, Vue
+   modal state, and fullscreen state all belong to the reader shell. If they
+   start drifting into ad hoc view-local ownership, parity usually gets messier
+   fast.
 
 2. Preserve the reader handoff from adjacent domains.
 
@@ -46,7 +49,8 @@ someone is changing:
 
    These branches are easy to break through gesture or layout refactors. Thin
    policy coverage is useful, but it is not a good reason to simplify them
-   casually.
+   casually. Vue modal-open state is part of the host-navigation contract and
+   should not be bypassed by native swipe, keyboard, or page/chapter navigation.
 
 6. Reader config emission into the embedded client is part of the parity
    surface.
@@ -74,7 +78,8 @@ At minimum, reader-adjacent changes should keep the focused workflow subset in
 - history jump-back plus clear/delete persistence
 - workspace selector create/switch from the reader shell
 - restored-position highlight behavior
-- bridge-driven compare presentation payload construction
+- bridge-driven compare presentation payload construction, until #123 replaces
+  that current path with document-pipeline coverage
 
 If a change touches one of the still-partial areas, it is worth raising the bar
 and adding focused coverage instead of leaning only on the current reader
@@ -95,5 +100,8 @@ subset.
 
 ## Useful Next Improvements
 
-- add focused regression coverage for the Strong's / dictionary modal
+- implement and cover #8 Strong's document-pipeline routing
+- implement and cover #123 Compare document-pipeline routing
+- implement and cover #124 multi-reference / cross-reference document-pipeline routing
+- implement and cover #125 Vue modal-open host-navigation gating
 - add a tighter guardrail around reader config emission into the embedded document client

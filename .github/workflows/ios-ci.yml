@@ -2,9 +2,15 @@ name: iOS CI
 
 on:
   pull_request:
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
   push:
     branches:
       - main
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
 
 concurrency:
   group: ios-ci-${{ github.event.pull_request.number || github.ref }}

@@ -18,6 +18,9 @@ Primary code references:
   `Sources/BibleView/Sources/BibleView/WebViewCoordinator.swift`
 - pane shell:
   `Sources/BibleUI/Sources/BibleUI/Bible/BibleWindowPane.swift`
+- shared document rendering:
+  `bibleview-js/src/components/documents/DocumentBroker.vue`
+  and `bibleview-js/src/components/documents/MultiDocument.vue`
 
 ## Core Reader Shape
 
@@ -78,6 +81,8 @@ The reader is also trying to preserve Android-oriented navigation semantics for:
 - current-window vs links-window navigation
 - history updates and jump-back navigation
 - fullscreen transitions triggered from document interaction
+- Vue modal-open state blocking native reader navigation while a shared modal
+  is active
 
 ## Chapter-Top and Restore Behavior
 
@@ -113,21 +118,24 @@ payload carries several Android-parity display options, including:
 - bookmark modal button disablement
 - active-window indicator visibility
 
-## Strong's and Dictionary Modal
+## Strong's and Dictionary Document Routing
 
-The Strong's / dictionary flow is now part of reader parity too. On iOS it is
-expected to preserve the richer Android-style experience through:
+The Strong's / dictionary flow is part of reader parity. It is expected to
+preserve the richer Android-style experience through:
 
-- native bottom-sheet presentation from the reader shell
 - a dedicated `contentType: "strongs"` route into the embedded client instead
   of treating Strong's content as generic multi-document content
+- normal document/window-pipeline ownership rather than a dedicated native
+  iOS-only sheet
 - per-dictionary tab selection when multiple Strong's dictionaries are installed
 - morphology fragments rendered alongside definition fragments when available
 - recursive Strong's navigation and `Find all occurrences` handoff from inside
   the modal
 
-This surface is partly native shell and partly embedded-client rendering, so
-both layers matter.
+The current iOS dedicated Strong's sheet is tracked as remaining parity drift in
+#8. Keeping `contentType: "strongs"` intact is necessary, but not sufficient, for
+closing the routing gap. The intended endpoint is Vue/document-pipeline
+presentation, not preserving the native sheet.
 
 ## Windows and Compare
 
@@ -136,5 +144,40 @@ behaviors:
 
 - focused window tracking
 - special links windows
-- compare sheet/module-picker flows
+- compare requests routed through the same embedded document/window pipeline
+  Android uses for the fake compare document
 - synchronized window scrolling and active-window signaling
+
+The current native iOS Compare sheet is tracked as remaining parity drift in
+#123. Its existing payload coverage protects the bridge request, but should not
+be read as evidence that the native sheet is the intended final parity shape.
+The intended endpoint is the shared compare document flow.
+
+## Multi-Reference and Cross-Reference Routing
+
+Reader links that resolve to multiple references should participate in the same
+embedded document pipeline Android uses for `multi://` links and the fake multi
+document. The desired behavior is:
+
+- single-reference links still navigate or open the configured links window
+- multi-reference links render through the shared Vue `MultiDocument` path
+- "open all" style flows stay compatible with the embedded document client
+
+The current native iOS `CrossReferenceView` sheet is tracked as remaining parity
+drift in #124. The intended endpoint is the shared Vue `MultiDocument` flow, not
+preserving the native sheet.
+
+## Vue Modal State
+
+The embedded Vue modal stack reports whether a modal is open. The native reader
+host should treat that as part of the reader contract:
+
+- native previous/next page or chapter movement should be blocked while a Vue
+  modal is open
+- native horizontal-swipe and keyboard navigation should not escape an open Vue
+  modal
+- any available native back/escape equivalent should close Vue modals before
+  normal reader back handling
+
+The iOS bridge currently receives `reportModalState` but does not use it; #125
+tracks the remaining host-gating parity work.

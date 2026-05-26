@@ -206,7 +206,7 @@ Reason:
   parallel iOS-only AI architecture that would conflict with the backend-first
   direction in #5.
 
-## 8. Fullscreen and compare are handled through iOS-native presentation paths
+## 8. Fullscreen is handled through iOS-native presentation paths
 
 - Status: intentional adaptation
 
@@ -214,17 +214,17 @@ What we do:
 
 - Fullscreen toggling is driven by injected web-side double-tap handling plus
   native reader state.
-- Compare presentation uses native iOS presentation paths instead of Android's
-  exact UI structure.
 
 Why this is fine:
 
 - The user-facing behavior remains parity-oriented, but UIKit/SwiftUI
   presentation constraints differ from Android's activity/dialog model.
+- Compare is no longer covered by this disposition. The native iOS Compare
+  sheet is tracked as reader parity drift by #123.
 
-## 9. Strong's modal uses a dedicated embedded-client route inside a native iOS sheet
+## 9. Strong's content uses a dedicated embedded-client route, but native sheet routing remains drift
 
-- Status: intentional adaptation
+- Status: mixed; embedded-client route accepted, native sheet routing tracked by #8
 
 What we do:
 
@@ -234,12 +234,13 @@ What we do:
   `contentType: "strongs"` route and `StrongsDocument` rendering path rather
   than the generic multi-document renderer.
 
-Why this is fine:
+What this means:
 
 - The richer Android-style Strong's experience depends on route-specific client
   behavior such as per-dictionary tabs and preserved in-modal state.
-- iOS still needs native sheet ownership for presentation, dismissal, and
-  nested reader coordination.
+- Preserving `contentType: "strongs"` is an accepted bridge requirement.
+- The remaining native sheet ownership is not an accepted final parity endpoint;
+  #8 tracks routing Strong's through the normal document/window pipeline.
 
 ## 10. Android-only bridge breadth is not fully implemented on iOS
 

@@ -1,6 +1,6 @@
 # Parity Status Overview
 
-Date: 2026-05-23
+Date: 2026-05-25
 
 ## Purpose
 
@@ -16,6 +16,11 @@ answer four questions without having to reconstruct repo history first:
 3. what validation and automation currently protect them
 4. where the remaining durable gaps still are
 
+For durable decisions behind the docs, use
+[`../adr/`](../adr/README.md). ADR 0001 defines the gradual migration of
+durable parity decisions into ADRs, and ADR 0002 records the current reader
+document/modal routing decision from the #122 audit.
+
 ## Domain Snapshot
 
 The counts below are there to orient you quickly, but they are not the whole
@@ -29,7 +34,7 @@ give you the fuller human context behind it.
 | [bookmarks](bookmarks/README.md) | Strong bookmark-list, StudyPad, and My Notes lifecycle coverage: `7 Pass`, `2 Adapted Pass`, `0 Partial` | Focused bookmark UI workflows, visible StudyPad create coverage, visible My Notes lifecycle coverage, plus note-persistence unit regressions | No bookmark parity gap currently tracked; StudyPad reorder/delete breadth remains optional future hardening |
 | [search](search/README.md) | Strong semantic coverage: `5 Pass`, `2 Adapted Pass`, `1 Partial` | Focused search UI workflows plus Strong's unit regressions | Multi-translation search still lacks focused regression coverage |
 | [reading-plans](reading-plans/README.md) | Strong sync and progression coverage: `5 Pass`, `1 Adapted Pass`, `3 Partial` | Focused daily-reading UI coverage plus restore/upload/patch unit coverage | Custom plan import, reading-plan list/start/import breadth, and additive iOS-only plan lifecycle coverage |
-| [reader](reader/README.md) | Reader shell/menu parity is stronger, with the remaining gap concentrated in the Strong's modal branch: `8 Pass`, `1 Adapted Pass`, `1 Partial` | Focused reader-shell UI coverage, restored-position/config-payload/gesture-policy/compare-payload unit regressions, and full local UI validation | Strong's modal coverage still needs tighter focused regression locking |
+| [reader](reader/README.md) | Reader shell/menu parity is stronger, but the document/modal routing audit reclassified several native reader surfaces as partial: `7 Pass`, `1 Adapted Pass`, `4 Partial` | Focused reader-shell UI coverage, restored-position/config-payload/gesture-policy/compare-payload unit regressions, and full local UI validation | Strong's document routing (#8), Compare document routing (#123), multi-reference document routing (#124), and Vue modal-open host gating (#125) |
 | [bridge](bridge/README.md) | StudyPad handoff, visible My Notes lifecycle, async `callId` flows, memorization bridge state, memorization speech loop, My Documents read/copy/share/edit/reload/AI-page actions, reading-progress local mutation/history/UI/settings behavior, and shared iOS bridge subset are present; full Android bridge breadth remains partial: `3 Pass`, `1 Adapted Pass`, `4 Partial` | Focused StudyPad handoff, visible My Notes lifecycle coverage, async `callId`, memorization state and speech-loop regressions, My Documents raw-content/action regressions, reading-progress bridge/settings regressions, note-persistence regressions, bridge guardrails, machine-readable gap inventory, and local Android-backed drift checking | Android-only bridge method breadth now centers on scoped help, whole-page/chapter navigation, AI bridge slices #89, #90, #91, and #92, plus delegate branch coverage and payload-schema breadth |
 
 ## How To Read Each Domain
@@ -121,8 +126,8 @@ every domain. That is deliberate for now. The current posture is:
 - strong focused regression evidence in `sync`, `search`, and `reading-plans`
 - strong bookmark-list, visible StudyPad create, and visible My Notes evidence in `bookmarks`
 - meaningful but still partial protection in `reader` and `bridge` where the
-  remaining gaps are mostly focused workflow coverage, Android-only breadth, and
-  payload-schema breadth
+  remaining gaps are focused document/modal routing parity, Android-only
+  breadth, and payload-schema breadth
 
 That means the docs matter. In some areas they are still the clearest way to
 understand not just what the app does, but why we are treating a behavior as

@@ -3,6 +3,9 @@
 This file records the places where iOS is deliberately taking a different path
 to get to a similar result.
 
+For the durable decision behind the reader document/modal routing split, see
+[ADR 0002](../../adr/0002-route-reader-document-modals-through-shared-document-pipeline.md).
+
 ## 1. Reader shell routing uses a native drawer plus a custom anchored overflow popup
 
 - Status: intentional adaptation
@@ -33,20 +36,28 @@ Why this is fine:
 
 - The parity goal is the resulting chapter/page/none behavior, not identical UI
   implementation.
+- This disposition covers gesture plumbing only. Vue modal-open host gating is
+  separate parity work tracked by #125.
 
-## 3. Compare presentation uses native iOS sheet presentation
+## 3. Compare native sheet presentation is reclassified as drift
 
-- Status: intentional adaptation
+- Status: confirmed parity drift, tracked by #123
 
 What we do:
 
-- Bridge-driven compare requests are presented through UIKit/SwiftUI sheet
-  presentation rather than Android's exact activity/dialog structure.
+- Bridge-driven compare requests are currently presented through UIKit/SwiftUI
+  sheet presentation.
 
-Why this is fine:
+Why this is not a disposition anymore:
 
-- The compare action must integrate with iOS presentation state and the
-  top-most visible controller.
+- Android opens Compare through the fake compare document and Vue renders it
+  with the shared `MultiDocument` path, including hide/restore translation
+  behavior.
+- The iOS native sheet is useful current behavior, but it should not be treated
+  as the intended Android-parity endpoint.
+- The intended endpoint is to replace the native sheet with the shared
+  Vue/document compare flow unless a future ADR records a real iOS-only
+  exception.
 
 ## 4. Reader fullscreen is coordinated by native shell state
 
@@ -62,9 +73,9 @@ Why this is fine:
 - On iOS, hiding chrome, overlays, and bars is coordinated above the WebView,
   not inside the client bundle alone.
 
-## 5. Strong's modal presentation is native, while Strong's content routing is embedded-client driven
+## 5. Dedicated Strong's native sheet presentation is reclassified as drift
 
-- Status: intentional adaptation
+- Status: confirmed parity drift, tracked by #8
 
 What we do:
 
@@ -73,10 +84,14 @@ What we do:
   `StrongsDocument` client path with tabbed per-dictionary rendering, rather
   than relying on generic multi-document rendering.
 
-Why this is fine:
+Why this is not a disposition anymore:
 
-- The parity goal is the richer Android-style Strong's experience, while still
-  respecting iOS-native sheet ownership and presentation state.
+- Preserving `contentType: "strongs"` fixed an important embedded-client
+  rendering gap, but Android still owns Strong's through the normal
+  document/window pipeline.
+- The remaining iOS-native sheet ownership is tracked as drift by #8.
+- The intended endpoint is to replace the native sheet with the shared
+  Vue/document pipeline while preserving the Strong's-specific route.
 
 ## 6. Some parity-sensitive reader inputs remain constrained by platform limits
 
@@ -91,3 +106,21 @@ Why this still remains a gap:
 
 - iOS does not expose app-level interception of hardware volume buttons for this
   type of custom reader action.
+
+## 7. Reader-adjacent native app surfaces remain acceptable adaptations after the modal audit
+
+- Status: intentional adaptations or acceptable platform surfaces
+
+What the #122 audit classified as acceptable for now:
+
+- Book chooser and reference chooser: Android also uses native chooser flows
+  here, so iOS sheet presentation is an adaptation rather than confirmed
+  Vue-modal drift.
+- Search, bookmarks list, history, settings, reading plans/progress, workspaces,
+  about, sync/import-export/help, speak controls, and dictionary/general-book/
+  map/EPUB browsers: these are app-level/native surfaces or Android native
+  activity equivalents, not confirmed Vue `ModalDialog` replacements.
+- Label assignment: Vue bookmark label actions call Android native
+  `assignLabels`; iOS `LabelAssignmentView` is equivalent in kind.
+- Memorize: iOS already emits the Vue memorize document, so no new reader-modal
+  drift was identified there.

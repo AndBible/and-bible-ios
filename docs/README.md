@@ -8,6 +8,7 @@ reports can grow without flattening the repo root.
 
 - `architecture/` (future): system-level design docs and long-lived technical
   overviews
+- `adr/`: durable architecture, parity, and documentation-ownership decisions
 - `howto/`: task-oriented developer guides
 - `parity/`: cross-platform parity contracts, dispositions, baselines, and
   verification evidence
@@ -16,6 +17,7 @@ reports can grow without flattening the repo root.
 ## Current Entry Points
 
 - Architecture overview: [architecture.md](architecture.md)
+- Architecture decision records: [adr/README.md](adr/README.md)
 - Module orientation: [module-structure.md](module-structure.md)
 - Build/test guide: [howto/building-and-testing.md](howto/building-and-testing.md)
 - Parity overview: [parity/README.md](parity/README.md)
