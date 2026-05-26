@@ -32,9 +32,9 @@ trust than proof.
 
 ## Summary
 
-- `Pass`: 7
+- `Pass`: 8
 - `Adapted Pass`: 1
-- `Partial`: 4
+- `Partial`: 3
 
 ## Matrix
 
@@ -50,5 +50,5 @@ trust than proof.
 | Double-tap fullscreen remains owned by the native reader shell | `BibleBridge.dispatchMessage(method:args:)`, `BibleReaderController.bridgeDidRequestToggleFullScreen(...)`, `BibleReaderView` fullscreen state/overlay ownership; unit test `testDoubleTapFullscreenPreferenceGateControlsNativeToggleRequest`; documented in `dispositions.md` | Pass | The bridge path now has focused coverage proving the `double_tap_to_fullscreen` preference gate is honored before native fullscreen state changes. |
 | Compare requests route through the shared document/window pipeline | Current iOS: `BibleReaderController.compareSelection()`, `BibleReaderController.bridge(_:compareVerses:startOrdinal:endOrdinal:)`, `presentCompareView(...)`, `CompareView.swift`; Android/Vue: fake compare document plus `MultiDocument.vue`; unit test `testReaderCompareBridgeRequestBuildsNativePresentationPayload`; tracked by #123 | Partial | Current coverage proves the bridge request reaches native presentation, but the native sheet is drift. The intended endpoint is Android's document-pipeline Compare flow, not preserving `CompareView`. |
 | Multi-reference and cross-reference links route through the shared document pipeline | Current iOS: `BibleReaderController.handleOsisLink(...)`, `BibleReaderController.handleMultiLink(...)`, `BibleReaderView` cross-reference sheet, `CrossReferenceView.swift`; Android/Vue: `multi://`, fake multi document, `OpenAllLink.vue`, `MultiDocument.vue`; tracked by #124 | Partial | iOS still diverts multi-reference links into a native Swift sheet. The intended endpoint is the embedded Vue `MultiDocument` path while preserving single-reference navigation behavior, not preserving `CrossReferenceView`. |
-| Vue modal-open state blocks native reader host navigation | Current iOS: `BibleReaderController` receives `reportModalState` as a no-op, `BibleReaderView.handleHorizontalSwipe(...)`, `BibleReaderInteractionPolicies.swift`; Android/Vue: `useModal`, `reportModalState`, `BibleView.modalOpen`, `close_modals`; tracked by #125 | Partial | Android blocks previous/next navigation while Vue modals are open and consumes back to close modals first. iOS still needs pane-scoped modal state and host-navigation gating. |
+| Vue modal-open state blocks native reader host navigation | `BibleReaderController.webModalIsOpen`, `BibleReaderController.closeWebModalIfNeeded()`, `BibleReaderView.handleHorizontalSwipe(...)`, `BibleReaderKeyboardShortcuts`, `BibleReaderInteractionPolicies.swift`; Android/Vue: `useModal`, `reportModalState`, `BibleView.modalOpen`, `close_modals`; unit tests `testReaderBridgeModalStateBlocksKeyNavigationAndRequestsClose`, `testReaderHorizontalSwipePolicyMapsConfiguredModes` | Pass | iOS now records modal state per pane, blocks native header/keyboard/swipe and bridge-forwarded chapter navigation while Vue owns the interaction, and sends `close_modals` for the native cancel equivalent. |
 | Reader config pushes active-window and display state into the embedded client | `BibleReaderController.buildConfigJSON()`, `BibleReaderController.updateConfig()`, `BibleReaderView.updateDisplaySettings(...)`; unit tests `testReaderConfigPayloadIncludesDisplaySettingsAndActiveWindowState`, `testReaderConfigPayloadMarksInactiveWindowWithoutActiveIndicator` | Pass | Focused payload-level coverage now locks the config/appSettings key shape, representative display settings, app preference values, workspace label state, and active/inactive window indicator behavior. |

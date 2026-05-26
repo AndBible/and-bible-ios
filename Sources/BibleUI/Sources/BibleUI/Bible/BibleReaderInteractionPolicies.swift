@@ -25,11 +25,32 @@ enum ReaderHorizontalSwipeAction: Equatable {
 
 /// Resolves configured Bible-view swipe behavior without touching view or controller state.
 enum ReaderHorizontalSwipePolicy {
+    /**
+     Maps a native horizontal swipe into the reader action allowed by the current pane state.
+
+     - Parameters:
+       - modeRawValue: Stored `bible_view_swipe_mode` preference value; unknown values use the
+         Android-compatible chapter-navigation default.
+       - direction: Native swipe direction reported by the web-view wrapper.
+       - hasActiveSelection: Whether the pane currently owns a text selection that should keep
+         swipe gestures from navigating away.
+       - hasOpenModal: Whether the Vue reader client reports an open modal for the pane.
+     - Returns: The navigation, page-scroll, or no-op action the host should execute.
+
+     Side effects:
+     - none; callers execute the returned action.
+
+     Failure modes:
+     - returns `.none` when a selection or Vue modal owns interaction, or when the preference
+       explicitly disables horizontal swipe handling.
+     */
     static func action(
         modeRawValue: String,
         direction: NativeHorizontalSwipeDirection,
-        hasActiveSelection: Bool
+        hasActiveSelection: Bool,
+        hasOpenModal: Bool
     ) -> ReaderHorizontalSwipeAction {
+        guard !hasOpenModal else { return .none }
         guard !hasActiveSelection else { return .none }
 
         switch BibleSwipeMode(rawValue: modeRawValue) ?? .chapter {

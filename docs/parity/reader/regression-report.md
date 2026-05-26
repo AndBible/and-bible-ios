@@ -15,6 +15,7 @@ This is the current validation snapshot for the reader surface. It covers:
 - double-tap fullscreen preference gating
 - bridge-driven compare presentation payload construction
 - horizontal swipe-mode dispatch policy
+- Vue modal-state host-navigation gating
 - auto-fullscreen scroll-threshold policy
 - documentation-only classification of the #122 reader-modal audit
 
@@ -42,6 +43,7 @@ Related domain references:
   - reader-adjacent unit regressions for payload-level restore/highlight behavior
   - focused reader/controller payload subset on `test/reader-config-payload-coverage`
   - focused reader gesture/fullscreen policy subset on `test/reader-fullscreen-swipe-coverage`
+  - focused reader modal-state bridge/policy subset on `fix/125-vue-modal-state`
   - focused reader compare bridge subset on `test/reader-compare-workflow-coverage`
 
 ## Tests Executed
@@ -55,6 +57,7 @@ Related domain references:
 - `AndBibleTests/testDoubleTapFullscreenPreferenceGateControlsNativeToggleRequest`
 - `AndBibleTests/testReaderCompareBridgeRequestBuildsNativePresentationPayload`
 - `AndBibleTests/testReaderHorizontalSwipePolicyMapsConfiguredModes`
+- `AndBibleTests/testReaderBridgeModalStateBlocksKeyNavigationAndRequestsClose`
 - `AndBibleTests/testAutoFullscreenPolicyAccumulatesThresholdByDirection`
 - `AndBibleTests/testAutoFullscreenPolicyHonorsDisabledAndDoubleTapLock`
 
@@ -142,6 +145,11 @@ Latest focused reader gesture/fullscreen validation passed on 2026-05-08:
 - focused issue #40 subset: `4/4`
 - command: `xcodebuild test -project AndBible.xcodeproj -scheme AndBible -destination 'platform=iOS Simulator,id=73679934-67DF-45BE-AEAC-186E2396213C' CODE_SIGNING_ALLOWED=NO -only-testing:AndBibleTests/AndBibleTests/testDoubleTapFullscreenPreferenceGateControlsNativeToggleRequest -only-testing:AndBibleTests/AndBibleTests/testReaderHorizontalSwipePolicyMapsConfiguredModes -only-testing:AndBibleTests/AndBibleTests/testAutoFullscreenPolicyAccumulatesThresholdByDirection -only-testing:AndBibleTests/AndBibleTests/testAutoFullscreenPolicyHonorsDisabledAndDoubleTapLock`
 
+Latest focused reader modal-state validation passed on 2026-05-25:
+
+- focused issue #125 subset: `2/2`
+- command: `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild test -project AndBible.xcodeproj -scheme AndBible -destination 'platform=iOS Simulator,name=iPhone 17' CODE_SIGNING_ALLOWED=NO -only-testing:AndBibleTests/AndBibleTests/testReaderBridgeModalStateBlocksKeyNavigationAndRequestsClose -only-testing:AndBibleTests/AndBibleTests/testReaderHorizontalSwipePolicyMapsConfiguredModes`
+
 Latest focused reader/controller validation passed on 2026-05-08:
 
 - focused shared-scheme reader/controller subset: `7/7`
@@ -166,13 +174,14 @@ Taken together, this gives the reader domain current regression evidence for:
 - double-tap fullscreen preference gating
 - bridge-driven compare presentation payload construction
 - horizontal swipe-mode dispatch policy
+- Vue modal-state host-navigation gating
 - auto-fullscreen threshold and lockout policy
 - the audited #122 classification in the reader contract, dispositions, and
   verification matrix
 
 That is a much healthier place than the branch was in earlier. The remaining
 reader risk is no longer the basic shell/menu flow; it is the deeper
-document/modal routing branches we still have not moved to the Android-aligned
+document-routing branches we still have not moved to the Android-aligned
 paths or isolated with focused checks.
 
 ## What Is Still Not Well Locked Yet
@@ -183,7 +192,6 @@ need implementation and/or tighter protection are:
 - #8 Strong's / dictionary document-pipeline routing and focused regression coverage
 - #123 Compare document-pipeline routing
 - #124 multi-reference / cross-reference document-pipeline routing
-- #125 Vue modal-open host-navigation gating
 
 Those areas show up as `Partial` in
 [verification-matrix.md](verification-matrix.md). Existing tests still protect

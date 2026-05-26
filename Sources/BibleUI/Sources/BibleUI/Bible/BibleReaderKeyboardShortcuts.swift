@@ -4,7 +4,9 @@ import SwiftUI
  Hidden keyboard shortcut surface for iPad and Mac reader commands.
 
  SwiftUI keyboard shortcuts need concrete buttons in the view tree. This view keeps those invisible
- command buttons out of `BibleReaderView` while forwarding every action to the coordinator.
+ command buttons out of `BibleReaderView` while forwarding every action to the coordinator. It also
+ routes the platform cancel action so Vue modals can be dismissed before native reader navigation
+ handles the same input.
  */
 struct BibleReaderKeyboardShortcuts: View {
     let onSearch: () -> Void
@@ -12,6 +14,7 @@ struct BibleReaderKeyboardShortcuts: View {
     let onOpenBookmarks: () -> Void
     let onNavigatePrevious: () -> Void
     let onNavigateNext: () -> Void
+    let onCloseClientModal: () -> Void
     let onOpenDownloads: () -> Void
     let onOpenSettings: () -> Void
 
@@ -27,6 +30,8 @@ struct BibleReaderKeyboardShortcuts: View {
                 .keyboardShortcut("[", modifiers: .command)
             Button("", action: onNavigateNext)
                 .keyboardShortcut("]", modifiers: .command)
+            Button("", action: onCloseClientModal)
+                .keyboardShortcut(.cancelAction)
             Button("", action: onOpenDownloads)
                 .keyboardShortcut("d", modifiers: .command)
             Button("", action: onOpenSettings)

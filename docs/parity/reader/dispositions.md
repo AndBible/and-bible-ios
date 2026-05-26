@@ -37,7 +37,7 @@ Why this is fine:
 - The parity goal is the resulting chapter/page/none behavior, not identical UI
   implementation.
 - This disposition covers gesture plumbing only. Vue modal-open host gating is
-  separate parity work tracked by #125.
+  covered separately by the modal-state contract row in the verification matrix.
 
 ## 3. Compare native sheet presentation is reclassified as drift
 
