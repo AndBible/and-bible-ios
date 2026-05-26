@@ -182,7 +182,7 @@ top-level `type` field alone.
 Important current examples:
 
 - generic multi-fragment content still routes through `type: "multi"`
-- Strong's / dictionary modal content routes through:
+- Strong's / dictionary content routes through:
   - `type: "multi"`
   - `contentType: "strongs"`
   - optional Strong's modal state such as selected dictionary tabs
@@ -194,6 +194,6 @@ document." The safe mental model is:
 - preserve the route-specific state fields the client expects
 - keep the Swift payload shape aligned with the corresponding TypeScript types
 
-This matters most for the Strong's modal because losing
+This matters most for the Strong's document path because losing
 `contentType: "strongs"` silently drops the richer Android-style tabbed path
 and falls back to generic multi-document rendering.

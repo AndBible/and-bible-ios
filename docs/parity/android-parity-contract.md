@@ -15,6 +15,11 @@ platform constraint is documented.
 Use this document as the parent contract for every domain-specific parity file
 under `docs/parity/`.
 
+Architecture Decision Records under `docs/adr/` record durable choices that
+shape this contract or a domain's parity posture. They do not replace the
+parity docs. Current status, verification evidence, and next actions belong in
+this tree.
+
 ## Source Of Truth
 
 The Android checkout is the behavior and visual oracle.
@@ -196,6 +201,9 @@ When changing parity-sensitive code:
 5. Add or update the relevant ledger when the changed surface can drift again.
 6. Avoid expanding parity-critical hub files unless there is no smaller adapter
    or coordinator to own the behavior.
+7. Add or update an ADR when the change records a durable architecture,
+   platform-divergence, or documentation-ownership decision rather than only a
+   status or validation update.
 
 ## Current Priority Interpretation
 

@@ -159,7 +159,8 @@ The pieces that still need tighter protection are:
   behavior, AI bridge methods are deferred through #89, #90, #91,
   and #92, and no current iOS no-op method remains in "needs decision" status
 - raw `window.android.*` compatibility-shim behavior on a per-method basis
-- Strong's sheet bridge coverage, especially the dedicated `contentType: "strongs"` route
+- Strong's document-route bridge coverage, especially the dedicated
+  `contentType: "strongs"` route; native sheet routing remains tracked by #8
 - fullscreen, compare, help, and full reference-dialog UI workflows
 - positive delegate-callback assertions across the full JS-to-native message surface
 - generated or full-surface payload-shape parity checks between `BridgeTypes.swift` and

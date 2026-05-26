@@ -9,6 +9,12 @@ Recommended reading order:
 2. [status-overview.md](status-overview.md): current parity posture and automation state by domain
 3. domain `README.md` files: scoped reading order for each domain
 
+Decision records that explain durable parity choices live in
+[`../adr/`](../adr/README.md). The key rule is documented in
+[ADR 0001](../adr/0001-keep-parity-docs-as-living-domain-docs.md): parity docs
+are long-lived, living domain docs, while ADRs record stable decisions and link
+back here for current status.
+
 Use domain folders so each parity area can carry, as needed:
 
 - source-of-truth contract
@@ -16,6 +22,11 @@ Use domain folders so each parity area can carry, as needed:
 - verification matrix
 - regression evidence
 - machine-readable baselines
+
+When a parity decision changes the intended long-term shape of a feature, update
+both the relevant domain docs and the ADR that records the decision. When only
+implementation status or validation evidence changes, update the parity docs
+without creating a new ADR.
 
 Current maturity:
 

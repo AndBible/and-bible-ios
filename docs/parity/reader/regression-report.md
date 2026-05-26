@@ -1,6 +1,6 @@
 # READER-702 Regression Report
 
-Date: 2026-05-09
+Date: 2026-05-25
 
 ## Scope
 
@@ -16,6 +16,7 @@ This is the current validation snapshot for the reader surface. It covers:
 - bridge-driven compare presentation payload construction
 - horizontal swipe-mode dispatch policy
 - auto-fullscreen scroll-threshold policy
+- documentation-only classification of the #122 reader-modal audit
 
 Contract reference:
 
@@ -121,6 +122,8 @@ Related domain references:
   the controller's native compare presentation callback
 - the callback receives the active reader book, chapter, current module name,
   and normalized start/end verse numbers derived from the web ordinal range
+- this protects the current bridge payload path only; #123 tracks replacing the
+  native Compare sheet with the Android-aligned document-pipeline flow
 
 ## Current Result
 
@@ -164,18 +167,25 @@ Taken together, this gives the reader domain current regression evidence for:
 - bridge-driven compare presentation payload construction
 - horizontal swipe-mode dispatch policy
 - auto-fullscreen threshold and lockout policy
+- the audited #122 classification in the reader contract, dispositions, and
+  verification matrix
 
 That is a much healthier place than the branch was in earlier. The remaining
-reader risk is no longer the basic shell/menu flow; it is the deeper behavior
-branches we still have not isolated with their own focused checks.
+reader risk is no longer the basic shell/menu flow; it is the deeper
+document/modal routing branches we still have not moved to the Android-aligned
+paths or isolated with focused checks.
 
 ## What Is Still Not Well Locked Yet
 
-The reader shell baseline is in much better shape now. The part that still
-needs tighter protection is:
+The reader shell baseline is in much better shape now. The parts that still
+need implementation and/or tighter protection are:
 
-- dedicated Strong's / dictionary modal regression coverage
+- #8 Strong's / dictionary document-pipeline routing and focused regression coverage
+- #123 Compare document-pipeline routing
+- #124 multi-reference / cross-reference document-pipeline routing
+- #125 Vue modal-open host-navigation gating
 
-That area is implemented and documented, but it is not yet locked by focused
-reader-domain regression coverage, so it still shows up as `Partial`
-in [verification-matrix.md](verification-matrix.md).
+Those areas show up as `Partial` in
+[verification-matrix.md](verification-matrix.md). Existing tests still protect
+the current implementation paths, but they should not be read as closing those
+Android parity gaps.
