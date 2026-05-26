@@ -55,6 +55,9 @@ Why this is not a disposition anymore:
   behavior.
 - The iOS native sheet is useful current behavior, but it should not be treated
   as the intended Android-parity endpoint.
+- The intended endpoint is to replace the native sheet with the shared
+  Vue/document compare flow unless a future ADR records a real iOS-only
+  exception.
 
 ## 4. Reader fullscreen is coordinated by native shell state
 
@@ -87,6 +90,8 @@ Why this is not a disposition anymore:
   rendering gap, but Android still owns Strong's through the normal
   document/window pipeline.
 - The remaining iOS-native sheet ownership is tracked as drift by #8.
+- The intended endpoint is to replace the native sheet with the shared
+  Vue/document pipeline while preserving the Strong's-specific route.
 
 ## 6. Some parity-sensitive reader inputs remain constrained by platform limits
 

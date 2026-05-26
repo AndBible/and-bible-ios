@@ -30,6 +30,18 @@ problem behind native UI or awkward bridge code.
 Reader surfaces that Android treats as document/window content should route
 through the shared Vue/document pipeline on iOS.
 
+For the audited reader surfaces, the intended implementation is the shared
+Vue/document pipeline, not the current native iOS modal/sheet:
+
+- Strong's / dictionary content should stop being owned by a dedicated native
+  iOS sheet and should be presented through the normal reader document/window
+  pipeline.
+- Compare should stop being presented by the native Swift `CompareView` sheet
+  and should use the same compare document flow Android uses.
+- Multi-reference and cross-reference content should stop being presented by
+  the native Swift `CrossReferenceView` sheet and should use the Vue
+  `MultiDocument` flow.
+
 This includes:
 
 - Strong's / dictionary content, while preserving the dedicated
@@ -41,11 +53,11 @@ This includes:
 The iOS reader host should also honor Vue modal-open state reported by the
 embedded client so native host navigation does not escape an open Vue modal.
 
-Native iOS sheets are acceptable only when they are needed for something unique
-to iOS, such as a real platform capability, platform restriction, system-owned
-presentation requirement, or an explicitly different iOS product feature.
-Convenience, current implementation shape, or "already works natively" is not
-enough.
+Native iOS sheets are acceptable for these reader document surfaces only if a
+future ADR records a real iOS-specific requirement, such as a platform
+capability, platform restriction, system-owned presentation requirement, or an
+explicitly different iOS product feature. Convenience, current implementation
+shape, or "already works natively" is not enough.
 
 Every reader parity decision should use an honest evaluation:
 
@@ -63,6 +75,8 @@ Every reader parity decision should use an honest evaluation:
 
 - Native iOS sheets for Strong's, Compare, and multi-reference content are not
   accepted final parity endpoints.
+- Until #8, #123, and #124 replace those native sheets, they remain known
+  parity gaps rather than intentional adaptations.
 - A native iOS sheet may still be the right answer for a future surface, but
   only after the evaluation above shows that it is the honest parity or platform
   answer.

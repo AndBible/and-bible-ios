@@ -134,7 +134,8 @@ preserve the richer Android-style experience through:
 
 The current iOS dedicated Strong's sheet is tracked as remaining parity drift in
 #8. Keeping `contentType: "strongs"` intact is necessary, but not sufficient, for
-closing the routing gap.
+closing the routing gap. The intended endpoint is Vue/document-pipeline
+presentation, not preserving the native sheet.
 
 ## Windows and Compare
 
@@ -150,6 +151,7 @@ behaviors:
 The current native iOS Compare sheet is tracked as remaining parity drift in
 #123. Its existing payload coverage protects the bridge request, but should not
 be read as evidence that the native sheet is the intended final parity shape.
+The intended endpoint is the shared compare document flow.
 
 ## Multi-Reference and Cross-Reference Routing
 
@@ -162,7 +164,8 @@ document. The desired behavior is:
 - "open all" style flows stay compatible with the embedded document client
 
 The current native iOS `CrossReferenceView` sheet is tracked as remaining parity
-drift in #124.
+drift in #124. The intended endpoint is the shared Vue `MultiDocument` flow, not
+preserving the native sheet.
 
 ## Vue Modal State
 
