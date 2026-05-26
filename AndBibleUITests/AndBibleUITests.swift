@@ -9137,7 +9137,13 @@ final class AndBibleUITests: XCTestCase {
         let labelName = "UI Test Fresh"
         presentLabelCreationPrompt(in: app, timeout: 10)
         let nameField = requireLabelManagerNewLabelField(in: app, timeout: 10)
-        guard typePromptText(labelName, into: nameField, in: app, timeout: 15) else {
+        guard typePromptText(
+            labelName,
+            into: nameField,
+            in: app,
+            timeout: 15,
+            accessibilityIdentifier: "labelManagerNewLabelNameField"
+        ) else {
             return
         }
         tapElementReliably(requireLabelManagerCreateButton(in: app, timeout: 10), timeout: 10)
@@ -9151,6 +9157,8 @@ final class AndBibleUITests: XCTestCase {
        - element: Prompt text field resolved by a modal-specific helper.
        - app: Running application under test.
        - timeout: Maximum number of seconds to retry focus/type verification.
+       - accessibilityIdentifier: Stable identifier for the field when resolving XCUI metadata is
+         unsafe or unnecessarily expensive.
        - file: Source file used for XCTest failure attribution.
        - line: Source line used for XCTest failure attribution.
      - Returns: `true` when the prompt field reports the expected value before submission.
@@ -9165,10 +9173,13 @@ final class AndBibleUITests: XCTestCase {
         into element: XCUIElement,
         in app: XCUIApplication,
         timeout: TimeInterval = 10,
+        accessibilityIdentifier: String? = nil,
         file: StaticString = #filePath,
         line: UInt = #line
     ) -> Bool {
-        let placeholderHints = textEntryPlaceholderHints(for: element.identifier)
+        let resolvedIdentifier = accessibilityIdentifier ?? element.identifier
+        let placeholderHints = textEntryPlaceholderHints(for: resolvedIdentifier)
+        let includeElementMetadata = accessibilityIdentifier == nil
         let deadline = Date().addingTimeInterval(timeout)
 
         repeat {
@@ -9179,27 +9190,44 @@ final class AndBibleUITests: XCTestCase {
                 file: file,
                 line: line
             )
-            if currentTextEntryValue(in: element, placeholderHints: placeholderHints) == text {
+            if currentTextEntryValue(
+                in: element,
+                placeholderHints: placeholderHints,
+                includeElementMetadata: includeElementMetadata
+            ) == text {
                 return true
             }
 
             app.typeText(text)
             let valueDeadline = Date().addingTimeInterval(min(3, max(0.5, deadline.timeIntervalSinceNow)))
             repeat {
-                if currentTextEntryValue(in: element, placeholderHints: placeholderHints) == text {
+                if currentTextEntryValue(
+                    in: element,
+                    placeholderHints: placeholderHints,
+                    includeElementMetadata: includeElementMetadata
+                ) == text {
                     return true
                 }
                 RunLoop.current.run(until: Date().addingTimeInterval(0.2))
             } while Date() < valueDeadline
 
-            _ = clearTextEntryElement(element, app: app, placeholderHints: placeholderHints)
+            _ = clearTextEntryElement(
+                element,
+                app: app,
+                placeholderHints: placeholderHints,
+                includeElementMetadata: includeElementMetadata
+            )
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         } while Date() < deadline
 
         XCTAssertEqual(
-            currentTextEntryValue(in: element, placeholderHints: placeholderHints),
+            currentTextEntryValue(
+                in: element,
+                placeholderHints: placeholderHints,
+                includeElementMetadata: includeElementMetadata
+            ),
             text,
-            "Expected prompt text input '\(element.identifier)' to contain '\(text)' before submitting.",
+            "Expected prompt text input '\(resolvedIdentifier)' to contain '\(text)' before submitting.",
             file: file,
             line: line
         )
@@ -9831,13 +9859,16 @@ final class AndBibleUITests: XCTestCase {
      *
      * - Parameter element: Focused text field or search field.
      * - Returns: The editable field contents, excluding placeholder text inferred from stable
-     *   identifiers and static hints when the control is currently empty.
+     *   identifiers, optional metadata, and static hints when the control is currently empty.
+     * - Parameter includeElementMetadata: Whether to sample `identifier` and `label` from XCUI.
+     *   Prompt callers can disable this when stable placeholder hints are already known.
      * - Side effects: none.
      * - Failure modes: This helper cannot fail.
      */
     private func currentTextEntryValue(
         in element: XCUIElement,
-        placeholderHints: [String] = []
+        placeholderHints: [String] = [],
+        includeElementMetadata: Bool = true
     ) -> String {
         guard let rawValue = element.value as? String else {
             return ""
@@ -9848,17 +9879,23 @@ final class AndBibleUITests: XCTestCase {
             return ""
         }
 
-        let placeholderCandidates = Set(
-            (
-                [element.identifier, element.label]
-                    + textEntryPlaceholderHints(for: element.identifier)
-                    + placeholderHints
-            )
+        var placeholderCandidates = placeholderHints
+        if includeElementMetadata {
+            let identifier = element.identifier
+            placeholderCandidates += [
+                identifier,
+                element.label,
+            ]
+            placeholderCandidates += textEntryPlaceholderHints(for: identifier)
+        }
+
+        let normalizedPlaceholderCandidates = Set(
+            placeholderCandidates
                 .map { normalizedTextEntrySemanticValue($0) }
                 .filter { !$0.isEmpty }
         )
         let semanticCandidates = textEntrySemanticValueCandidates(from: rawValue)
-        if semanticCandidates.contains(where: { placeholderCandidates.contains($0) }) {
+        if semanticCandidates.contains(where: { normalizedPlaceholderCandidates.contains($0) }) {
             return ""
         }
 
@@ -10210,9 +10247,14 @@ final class AndBibleUITests: XCTestCase {
     private func clearTextEntryElement(
         _ element: XCUIElement,
         app: XCUIApplication,
-        placeholderHints: [String] = []
+        placeholderHints: [String] = [],
+        includeElementMetadata: Bool = true
     ) -> Bool {
-        let existingText = currentTextEntryValue(in: element, placeholderHints: placeholderHints)
+        let existingText = currentTextEntryValue(
+            in: element,
+            placeholderHints: placeholderHints,
+            includeElementMetadata: includeElementMetadata
+        )
         if existingText.isEmpty {
             focusTextEntryElement(element, timeout: 10)
             return true
@@ -10227,21 +10269,40 @@ final class AndBibleUITests: XCTestCase {
                 count: remainingText.count
             )
             app.typeText(deleteSequence)
-            remainingText = currentTextEntryValue(in: element, placeholderHints: placeholderHints)
+            remainingText = currentTextEntryValue(
+                in: element,
+                placeholderHints: placeholderHints,
+                includeElementMetadata: includeElementMetadata
+            )
             if remainingText.isEmpty {
                 return true
             }
         }
 
         if selectAllTextIfAvailable(in: element, app: app) {
-            let selectionLength = max(currentTextEntryValue(in: element, placeholderHints: placeholderHints).count, 1)
+            let selectionLength = max(
+                currentTextEntryValue(
+                    in: element,
+                    placeholderHints: placeholderHints,
+                    includeElementMetadata: includeElementMetadata
+                ).count,
+                1
+            )
             app.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: selectionLength))
-            if currentTextEntryValue(in: element, placeholderHints: placeholderHints).isEmpty {
+            if currentTextEntryValue(
+                in: element,
+                placeholderHints: placeholderHints,
+                includeElementMetadata: includeElementMetadata
+            ).isEmpty {
                 return true
             }
         }
 
-        return currentTextEntryValue(in: element, placeholderHints: placeholderHints).isEmpty
+        return currentTextEntryValue(
+            in: element,
+            placeholderHints: placeholderHints,
+            includeElementMetadata: includeElementMetadata
+        ).isEmpty
     }
 
     /**
