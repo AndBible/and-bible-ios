@@ -16,9 +16,10 @@ Use this document as the parent contract for every domain-specific parity file
 under `docs/parity/`.
 
 Architecture Decision Records under `docs/adr/` record durable choices that
-shape this contract or a domain's parity posture. They do not replace the
-parity docs. Current status, verification evidence, and next actions belong in
-this tree.
+shape this contract or a domain's parity posture. The parity tree remains useful
+for current status, verification evidence, and next actions during migration,
+but durable decisions should move into ADRs over time rather than expanding
+tracker-style docs indefinitely.
 
 ## Source Of Truth
 
@@ -202,8 +203,8 @@ When changing parity-sensitive code:
 6. Avoid expanding parity-critical hub files unless there is no smaller adapter
    or coordinator to own the behavior.
 7. Add or update an ADR when the change records a durable architecture,
-   platform-divergence, or documentation-ownership decision rather than only a
-   status or validation update.
+   platform-divergence, or documentation-ownership decision. Keep parity docs
+   focused on current status, evidence, and links back to the ADR.
 
 ## Current Priority Interpretation
 

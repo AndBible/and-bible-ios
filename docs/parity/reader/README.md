@@ -7,7 +7,9 @@ It covers the main reading experience, including the reader shell, toolbar chrom
 The durable decision behind the current document/modal routing posture is
 recorded in
 [ADR 0002](../../adr/0002-route-reader-document-modals-through-shared-document-pipeline.md).
-Use the files in this directory for current status and validation evidence.
+Use the files in this directory for current status, validation evidence, and
+links to implementation issues rather than duplicating the full decision
+rationale.
 
 If you are new to this area, start here and read top to bottom once. The matrix
 is useful, but the surrounding notes are where the intent and the remaining rough edges are easier to understand.

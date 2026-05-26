@@ -17,9 +17,9 @@ answer four questions without having to reconstruct repo history first:
 4. where the remaining durable gaps still are
 
 For durable decisions behind the docs, use
-[`../adr/`](../adr/README.md). ADR 0001 defines why this parity tree remains
-living documentation instead of being converted into ADRs, and ADR 0002 records
-the current reader document/modal routing decision from the #122 audit.
+[`../adr/`](../adr/README.md). ADR 0001 defines the gradual migration of
+durable parity decisions into ADRs, and ADR 0002 records the current reader
+document/modal routing decision from the #122 audit.
 
 ## Domain Snapshot
 
