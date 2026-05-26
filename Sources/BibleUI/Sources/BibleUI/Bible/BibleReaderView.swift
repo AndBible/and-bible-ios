@@ -781,8 +781,9 @@ public struct BibleReaderView: View {
                 onSearch: { presentSearch(from: windowManager.activeWindow?.id) },
                 onShowBookChooser: { presentBookChooser(from: windowManager.activeWindow?.id) },
                 onOpenBookmarks: { presentReaderSheet(.bookmarks, from: windowManager.activeWindow?.id) },
-                onNavigatePrevious: { focusedController?.navigatePrevious() },
-                onNavigateNext: { focusedController?.navigateNext() },
+                onNavigatePrevious: { navigatePreviousIfReaderCanHostNavigate(focusedController) },
+                onNavigateNext: { navigateNextIfReaderCanHostNavigate(focusedController) },
+                onCloseClientModal: { _ = closeFocusedWebModalIfNeeded() },
                 onOpenDownloads: { presentReaderSheet(.downloads, from: windowManager.activeWindow?.id) },
                 onOpenSettings: { presentReaderSheet(.settings, from: windowManager.activeWindow?.id) }
             )
@@ -1332,9 +1333,9 @@ public struct BibleReaderView: View {
                     showReaderNavigationDrawer = true
                 }
             },
-            onNavigatePrevious: { controller?.navigatePrevious() },
+            onNavigatePrevious: { navigatePreviousIfReaderCanHostNavigate(controller) },
             onShowBookChooser: { presentBookChooser(from: windowManager.activeWindow?.id) },
-            onNavigateNext: { controller?.navigateNext() },
+            onNavigateNext: { navigateNextIfReaderCanHostNavigate(controller) },
             onReturnFromMyNotes: { controller?.returnFromMyNotes() },
             onReturnFromStudyPad: { controller?.returnFromStudyPad() },
             onReturnFromAuxiliary: { controller?.switchCategory(to: .bible) },
@@ -2437,6 +2438,60 @@ public struct BibleReaderView: View {
     }
 
     /**
+     Requests dismissal of a Vue modal in the currently focused pane.
+
+     - Returns: `true` when the focused controller reported an open Vue modal and received a
+       `close_modals` event request; otherwise `false`.
+
+     Side effects:
+     - may emit a `close_modals` event into the focused pane's web bridge
+
+     Failure modes:
+     - returns `false` when no pane is focused or the focused pane has no open Vue modal
+     - blocking Vue modals may remain open and report their final state later
+     */
+    @discardableResult
+    private func closeFocusedWebModalIfNeeded() -> Bool {
+        focusedController?.closeWebModalIfNeeded() ?? false
+    }
+
+    /**
+     Runs previous-chapter navigation only when the pane is not owned by a Vue modal.
+
+     - Parameter controller: Focused or header-captured reader controller for the pane requesting
+       navigation.
+
+     Side effects:
+     - calls `navigatePrevious()` on the controller when host navigation is allowed
+
+     Failure modes:
+     - returns without action when no controller is available or the controller reports an open
+       Vue modal
+     */
+    private func navigatePreviousIfReaderCanHostNavigate(_ controller: BibleReaderController?) {
+        guard let controller, !controller.webModalIsOpen else { return }
+        controller.navigatePrevious()
+    }
+
+    /**
+     Runs next-chapter navigation only when the pane is not owned by a Vue modal.
+
+     - Parameter controller: Focused or header-captured reader controller for the pane requesting
+       navigation.
+
+     Side effects:
+     - calls `navigateNext()` on the controller when host navigation is allowed
+
+     Failure modes:
+     - returns without action when no controller is available or the controller reports an open
+       Vue modal
+     */
+    private func navigateNextIfReaderCanHostNavigate(_ controller: BibleReaderController?) {
+        guard let controller, !controller.webModalIsOpen else { return }
+        controller.navigateNext()
+    }
+
+    /**
      Dispatches horizontal swipe gestures according to the configured Bible swipe mode.
 
      - Parameters:
@@ -2445,8 +2500,8 @@ public struct BibleReaderView: View {
      - Side effects: May trigger chapter navigation through the focused `BibleReaderController` or
        emit page-scroll commands into the active web view.
      - Failure modes: Returns without action when the gesture did not originate from the active
-       window, no focused controller is registered, an in-page text selection is active, or the
-       configured swipe mode is `.none`.
+       window, no focused controller is registered, an in-page text selection is active, the Vue
+       client reports an open modal, or the configured swipe mode is `.none`.
      */
     private func handleHorizontalSwipe(from window: Window, direction: NativeHorizontalSwipeDirection) {
         guard windowManager.activeWindow?.id == window.id else { return }
@@ -2454,7 +2509,8 @@ public struct BibleReaderView: View {
         switch ReaderHorizontalSwipePolicy.action(
             modeRawValue: bibleViewSwipeMode,
             direction: direction,
-            hasActiveSelection: ctrl.hasActiveSelection
+            hasActiveSelection: ctrl.hasActiveSelection,
+            hasOpenModal: ctrl.webModalIsOpen
         ) {
         case .navigateNextChapter:
             ctrl.navigateNext()

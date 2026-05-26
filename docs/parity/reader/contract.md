@@ -179,5 +179,9 @@ host should treat that as part of the reader contract:
 - any available native back/escape equivalent should close Vue modals before
   normal reader back handling
 
-The iOS bridge currently receives `reportModalState` but does not use it; #125
-tracks the remaining host-gating parity work.
+iOS stores `reportModalState` per reader pane and uses that state to block
+native header navigation, command-key reader navigation, bridge-forwarded
+left/right navigation, and horizontal swipe handling while a Vue modal is open.
+The native cancel action emits `close_modals`; blocking Vue modals remain owned
+by the embedded client and report their eventual state back through the same
+bridge callback.

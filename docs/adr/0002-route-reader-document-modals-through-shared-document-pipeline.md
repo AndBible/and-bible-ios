@@ -82,7 +82,9 @@ Every reader parity decision should use an honest evaluation:
   answer.
 - Existing tests that prove native presentation payloads still have value
   protect the current bridge path rather than closing the parity gap.
-- Focused implementation work is tracked by #8, #123, #124, and #125.
+- Focused implementation work for remaining document-pipeline gaps is tracked
+  by #8, #123, and #124. #125 implemented the related modal-open host-gating
+  behavior.
 - Future reader modal audits should first classify whether Android treats a
   surface as document-pipeline content, app-level native UI, shared Vue modal
   UI, or platform-only behavior before creating implementation work.

@@ -70,6 +70,30 @@ final class AndBibleTests: XCTestCase {
     }
 
     @MainActor
+    func testReaderBridgeModalStateBlocksKeyNavigationAndRequestsClose() {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let controller = BibleReaderController(bridge: bridge)
+
+        XCTAssertFalse(controller.webModalIsOpen)
+        XCTAssertEqual(bridge.dispatchMessage(method: "reportModalState", args: [true]), .handled)
+        XCTAssertTrue(controller.webModalIsOpen)
+
+        XCTAssertEqual(bridge.dispatchMessage(method: "onKeyDown", args: ["ArrowRight"]), .handled)
+        XCTAssertEqual(controller.currentBook, "Genesis")
+        XCTAssertEqual(controller.currentChapter, 1)
+
+        XCTAssertEqual(bridge.dispatchMessage(method: "onKeyDown", args: ["Escape"]), .handled)
+        XCTAssertTrue(recordedScripts().contains { $0.contains("bibleView.emit('close_modals'") })
+
+        XCTAssertEqual(bridge.dispatchMessage(method: "reportModalState", args: [false]), .handled)
+        XCTAssertFalse(controller.webModalIsOpen)
+
+        XCTAssertEqual(bridge.dispatchMessage(method: "onKeyDown", args: ["ArrowRight"]), .handled)
+        XCTAssertEqual(controller.currentBook, "Genesis")
+        XCTAssertEqual(controller.currentChapter, 2)
+    }
+
+    @MainActor
     private func makeRecordingBridge() -> (BibleBridge, () -> [String]) {
         let bridge = BibleBridge()
         var evaluatedScripts: [String] = []
@@ -544,6 +568,7 @@ final class AndBibleTests: XCTestCase {
             onOpenBookmarks: {},
             onNavigatePrevious: {},
             onNavigateNext: {},
+            onCloseClientModal: {},
             onOpenDownloads: {},
             onOpenSettings: {}
         )
@@ -1569,7 +1594,8 @@ final class AndBibleTests: XCTestCase {
             ReaderHorizontalSwipePolicy.action(
                 modeRawValue: "CHAPTER",
                 direction: .left,
-                hasActiveSelection: false
+                hasActiveSelection: false,
+                hasOpenModal: false
             ),
             .navigateNextChapter
         )
@@ -1577,7 +1603,8 @@ final class AndBibleTests: XCTestCase {
             ReaderHorizontalSwipePolicy.action(
                 modeRawValue: "CHAPTER",
                 direction: .right,
-                hasActiveSelection: false
+                hasActiveSelection: false,
+                hasOpenModal: false
             ),
             .navigatePreviousChapter
         )
@@ -1585,7 +1612,8 @@ final class AndBibleTests: XCTestCase {
             ReaderHorizontalSwipePolicy.action(
                 modeRawValue: "PAGE",
                 direction: .left,
-                hasActiveSelection: false
+                hasActiveSelection: false,
+                hasOpenModal: false
             ),
             .scrollPageDown
         )
@@ -1593,7 +1621,8 @@ final class AndBibleTests: XCTestCase {
             ReaderHorizontalSwipePolicy.action(
                 modeRawValue: "PAGE",
                 direction: .right,
-                hasActiveSelection: false
+                hasActiveSelection: false,
+                hasOpenModal: false
             ),
             .scrollPageUp
         )
@@ -1601,7 +1630,8 @@ final class AndBibleTests: XCTestCase {
             ReaderHorizontalSwipePolicy.action(
                 modeRawValue: "NONE",
                 direction: .left,
-                hasActiveSelection: false
+                hasActiveSelection: false,
+                hasOpenModal: false
             ),
             .none
         )
@@ -1609,7 +1639,17 @@ final class AndBibleTests: XCTestCase {
             ReaderHorizontalSwipePolicy.action(
                 modeRawValue: "PAGE",
                 direction: .left,
-                hasActiveSelection: true
+                hasActiveSelection: true,
+                hasOpenModal: false
+            ),
+            .none
+        )
+        XCTAssertEqual(
+            ReaderHorizontalSwipePolicy.action(
+                modeRawValue: "CHAPTER",
+                direction: .left,
+                hasActiveSelection: false,
+                hasOpenModal: true
             ),
             .none
         )
@@ -1617,7 +1657,8 @@ final class AndBibleTests: XCTestCase {
             ReaderHorizontalSwipePolicy.action(
                 modeRawValue: "unexpected",
                 direction: .left,
-                hasActiveSelection: false
+                hasActiveSelection: false,
+                hasOpenModal: false
             ),
             .navigateNextChapter
         )

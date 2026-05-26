@@ -144,6 +144,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     private(set) var activeStudyPadLabelName: String?
     /// Whether the WebView is in editing mode (Quill editor active).
     private(set) var editingInWebView = false
+    /// Whether the Vue reader client currently reports an open modal for this pane.
+    private(set) var webModalIsOpen = false
 
     /// SWORD module manager and active Bible module
     private(set) var swordManager: SwordManager?
@@ -1884,15 +1886,23 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     }
 
     /**
-     Receives modal open/close notifications from the web client.
+     Records Vue modal visibility for the pane owned by this controller.
 
      - Parameters:
        - bridge: Bridge reporting modal visibility.
        - isOpen: Whether a modal is currently shown inside the web client.
 
-     - Note: iOS currently does not need this signal, so the callback is intentionally a no-op.
+     Side effects:
+     - updates `webModalIsOpen`, which native swipe and keyboard handlers use to avoid navigating
+       the reader while the Vue modal stack owns interaction
+
+     Failure modes:
+     - accepts duplicate reports idempotently; malformed bridge messages are rejected before this
+       delegate method is called
      */
-    public func bridge(_ bridge: BibleBridge, reportModalState isOpen: Bool) {}
+    public func bridge(_ bridge: BibleBridge, reportModalState isOpen: Bool) {
+        webModalIsOpen = isOpen
+    }
 
     /**
      Receives web-client focus changes for text inputs.
@@ -1914,11 +1924,20 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
      Side effects:
      - navigates to the previous or next chapter for left/right arrow keys
+     - requests Vue modal dismissal for escape keys when a modal is open
 
      Failure modes:
-     - ignores keys other than `ArrowLeft` and `ArrowRight`
+     - ignores navigation keys while a Vue modal is open so host navigation does not steal focus
+     - ignores keys other than `ArrowLeft`, `ArrowRight`, `Escape`, and `Esc`
      */
     public func bridge(_ bridge: BibleBridge, onKeyDown key: String) {
+        guard !webModalIsOpen else {
+            if key == "Escape" || key == "Esc" {
+                closeWebModalIfNeeded()
+            }
+            return
+        }
+
         switch key {
         case "ArrowLeft":
             navigatePrevious()
@@ -1927,6 +1946,29 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         default:
             break
         }
+    }
+
+    /**
+     Requests that the Vue reader close any non-blocking modal before native host navigation runs.
+
+     - Returns: `true` when a close request was emitted because the last reported Vue modal state
+       was open; `false` when no modal was reported open.
+
+     Side effects:
+     - emits `close_modals` into this controller's bridge without mutating `webModalIsOpen`; the
+       next `reportModalState` callback remains the authoritative state transition
+
+     Failure modes:
+     - returns `false` and emits nothing when no modal is reported open
+     - blocking Vue modals intentionally ignore the event and must report their own eventual state
+
+     - Note: This is pane scoped because each `BibleReaderController` owns exactly one web bridge.
+     */
+    @discardableResult
+    func closeWebModalIfNeeded() -> Bool {
+        guard webModalIsOpen else { return false }
+        bridge.emit(event: "close_modals")
+        return true
     }
 
     // MARK: - BibleBridgeDelegate — Navigation & Scroll

@@ -103,5 +103,4 @@ subset.
 - implement and cover #8 Strong's document-pipeline routing
 - implement and cover #123 Compare document-pipeline routing
 - implement and cover #124 multi-reference / cross-reference document-pipeline routing
-- implement and cover #125 Vue modal-open host-navigation gating
 - add a tighter guardrail around reader config emission into the embedded document client
