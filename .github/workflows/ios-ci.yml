@@ -2,15 +2,43 @@ name: iOS CI
 
 on:
   pull_request:
-    paths-ignore:
-      - "**/*.md"
-      - "docs/**"
+    paths:
+      - ".github/workflows/**"
+      - "AndBible/**"
+      - "AndBible.xcodeproj/**"
+      - "AndBibleTests/**"
+      - "AndBibleUITests/**"
+      - "Config/**"
+      - "Localizations/**"
+      - "Package.resolved"
+      - "Package.swift"
+      - "Sources/**"
+      - "Tools/**"
+      - "bibleview-js/**"
+      - "libsword/**"
+      - "project.yml"
+      - "scripts/**"
+      - "sword-modules/**"
   push:
     branches:
       - main
-    paths-ignore:
-      - "**/*.md"
-      - "docs/**"
+    paths:
+      - ".github/workflows/**"
+      - "AndBible/**"
+      - "AndBible.xcodeproj/**"
+      - "AndBibleTests/**"
+      - "AndBibleUITests/**"
+      - "Config/**"
+      - "Localizations/**"
+      - "Package.resolved"
+      - "Package.swift"
+      - "Sources/**"
+      - "Tools/**"
+      - "bibleview-js/**"
+      - "libsword/**"
+      - "project.yml"
+      - "scripts/**"
+      - "sword-modules/**"
 
 concurrency:
   group: ios-ci-${{ github.event.pull_request.number || github.ref }}
