@@ -406,8 +406,17 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     /// Callback for opening search with a Strong's number (from "Find all occurrences" links).
     var onShowStrongsSearch: ((String) -> Void)?
 
-    /// Callback for showing cross-reference results (list of parsed references with verse text).
+    /// Legacy callback for native cross-reference sheets.
+    ///
+    /// Multi-reference Bible links intentionally bypass this callback and render Vue
+    /// `MultiDocument` payloads so iOS follows Android's shared document pipeline.
     var onShowCrossReferences: (([CrossReference]) -> Void)?
+
+    /// Callback for opening a transient multi-reference Vue document in the Android-style links window.
+    ///
+    /// The string parameter is a serialized `MultiDocument` payload. The owning pane decides whether
+    /// to route it into a dedicated links window or render it in the current controller.
+    var onOpenMultiReferenceDocumentInLinksWindow: ((String) -> Void)?
 
     /// Callback for presenting compare view (book, chapter, moduleName, startVerse?, endVerse?).
     var onCompareVerses: ((String, Int, String, Int?, Int?) -> Void)?
@@ -932,6 +941,48 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         default:
             loadCurrentChapter()
         }
+    }
+
+    /**
+     Displays a transient Vue `MultiDocument` made from Bible reference fragments.
+
+     - Parameter documentJSON: Serialized multi-document payload produced by
+       `buildBibleMultiReferenceDocumentJSON(refs:)`.
+     - Side effects: clears the current Vue document, emits labels, emits the supplied document and
+       setup payload, resets selection state, updates the rendered-content accessibility token, and
+       reapplies the reader background. It intentionally does not persist PageManager category or
+       location state because Android treats multi-reference documents as link results, not the
+       owning Bible position.
+     - Failure modes: assumes the payload is already valid JSON; invalid payloads are forwarded to
+       the Vue bridge after the transient reader state is prepared, so caller-owned builders should
+       validate or serialize before invoking this method.
+     */
+    func loadMultiReferenceDocument(_ documentJSON: String) {
+        showingMyNotes = false
+        showingStudyPad = false
+        activeStudyPadLabelId = nil
+        activeStudyPadLabelName = nil
+        editingInWebView = false
+        hasActiveSelection = false
+        selectedText = ""
+        currentCategory = .bible
+
+        bridge.emit(event: "clear_document")
+        sendLabelsToVueJS()
+        bridge.emit(event: "add_documents", data: documentJSON)
+        bridge.emit(event: "setup_content", data: """
+        {"jumpToOrdinal":null,"jumpToAnchor":null,"jumpToId":null,"topOffset":0,"bottomOffset":0}
+        """)
+        setRenderedContentState(
+            category: .bible,
+            moduleName: activeModuleName,
+            book: "Multi",
+            key: "multi"
+        )
+        emitActiveState()
+
+        bridge.clearSelection()
+        applyNightModeBackground()
     }
 
     /// Load commentary text for the current chapter using the active commentary module.
@@ -4207,6 +4258,93 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         return "{\"id\":\"\(id)\",\"type\":\"multi\",\"osisFragments\":[\(osisFragmentsJSON.joined(separator: ","))],\"compare\":false\(contentTypeField)\(stateField)}"
     }
 
+    /**
+     Builds the Vue `MultiDocument` payload Android uses for multi-reference Bible links.
+
+     - Parameter refs: Parsed OSIS references in the order supplied by `multi://` or a
+       multi-reference `osis://` link. Empty input produces no document.
+     - Returns: Serialized JSON for a transient multi-document, or `nil` if there are no references
+       or JSON serialization fails.
+     - Side effects: reads the active SWORD Bible module and moves its key cursor while extracting
+       verse OSIS. Missing module content is represented by a fallback verse label so the link still
+       opens a document instead of falling back to the native cross-reference sheet.
+     - Note: The payload intentionally omits `contentType`; Vue routes non-Strong's `type: "multi"`
+       documents to `MultiDocument`, matching Android's `FakeBookFactory.multiDocument` path.
+     */
+    private func buildBibleMultiReferenceDocumentJSON(refs: [OsisRef]) -> String? {
+        guard !refs.isEmpty else { return nil }
+
+        let moduleName = activeModuleName
+        let fragments: [[String: Any]] = refs.map { ref in
+            let osisRef = "\(ref.osisId).\(ref.chapter).\(ref.verse)"
+            let ordinal = BibleChapterDocumentBuilder.ordinal(chapter: ref.chapter, verse: ref.verse)
+            return [
+                "xml": buildBibleMultiReferenceXML(ref: ref, module: activeModule),
+                "key": "\(moduleName)--\(osisRef)",
+                "keyName": ref.displayName,
+                "v11n": "KJVA",
+                "bookCategory": DocumentCategory.bible.rawValue,
+                "bookInitials": moduleName,
+                "bookAbbreviation": ref.osisId,
+                "osisRef": osisRef,
+                "isNewTestament": isNewTestament(ref.book),
+                "features": [String: Any](),
+                "ordinalRange": [ordinal, ordinal],
+                "language": "en",
+                "direction": "ltr",
+            ]
+        }
+
+        let document: [String: Any] = [
+            "id": "multi-\(UUID().uuidString)",
+            "type": "multi",
+            "osisFragments": fragments,
+            "compare": false,
+        ]
+
+        guard let data = try? JSONSerialization.data(withJSONObject: document, options: [.sortedKeys]),
+              let json = String(data: data, encoding: .utf8) else {
+            logger.error("Failed to serialize multi-reference document JSON")
+            return nil
+        }
+        return json
+    }
+
+    /**
+     Reads one Bible verse as an OSIS fragment suitable for Vue `MultiDocument`.
+
+     - Parameters:
+       - ref: Parsed Bible reference to render.
+       - module: Active Bible module to read from. A missing module yields a fallback fragment.
+     - Returns: A `<div>` containing one `<verse>` element with the same approximate ordinal scheme
+       used by chapter rendering.
+     - Side effects: when `module` is present, changes its current SWORD key to the requested verse.
+     - Failure modes: if the module cannot resolve the exact verse or returns empty raw OSIS, the
+       fragment contains an escaped display label rather than throwing.
+     */
+    private func buildBibleMultiReferenceXML(ref: OsisRef, module: SwordModule?) -> String {
+        let osisRef = "\(ref.osisId).\(ref.chapter).\(ref.verse)"
+        let ordinal = BibleChapterDocumentBuilder.ordinal(chapter: ref.chapter, verse: ref.verse)
+        let rawText: String
+
+        if let module {
+            module.setKey("=\(osisRef)")
+            if let key = module.currentVerseKeyChildren(),
+               key.osisBookName == ref.osisId,
+               key.chapter == ref.chapter,
+               key.verse == ref.verse {
+                rawText = module.rawEntry().trimmingCharacters(in: .whitespacesAndNewlines)
+            } else {
+                rawText = ""
+            }
+        } else {
+            rawText = ""
+        }
+
+        let body = rawText.isEmpty ? escapeXML(ref.displayName) : rawText
+        return "<div><verse osisID=\"\(osisRef)\" verseOrdinal=\"\(ordinal)\">\(body) </verse></div>"
+    }
+
     /// Escape special XML characters in text content.
     private func escapeXML(_ text: String) -> String {
         text.replacingOccurrences(of: "&", with: "&amp;")
@@ -4777,8 +4915,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             }
         } else if !refs.isEmpty {
             // Multiple references in one osis param (e.g. "Matt.1.1-Matt.1.3")
-            let crossRefs = lookupCrossReferences(refs)
-            onShowCrossReferences?(crossRefs)
+            openMultiReferenceDocument(refs: refs)
         }
     }
 
@@ -4799,8 +4936,27 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         if allRefs.count == 1, let ref = allRefs.first {
             navigateTo(book: ref.book, chapter: ref.chapter)
         } else {
-            let crossRefs = lookupCrossReferences(allRefs)
-            onShowCrossReferences?(crossRefs)
+            openMultiReferenceDocument(refs: allRefs)
+        }
+    }
+
+    /**
+     Opens parsed multi-reference results through the shared Vue document pipeline.
+
+     - Parameter refs: Non-empty parsed references collected from one `osis://` range/list or a
+       `multi://` Open All link.
+     - Side effects: builds a transient multi-document from the active Bible module, then either
+       hands it to the owner for links-window routing or renders it in this controller.
+     - Failure modes: returns without side effects when JSON construction fails; single-reference
+       navigation is handled by callers before this method is reached.
+     */
+    private func openMultiReferenceDocument(refs: [OsisRef]) {
+        guard let documentJSON = buildBibleMultiReferenceDocumentJSON(refs: refs) else { return }
+
+        if let openInLinksWindow = onOpenMultiReferenceDocumentInLinksWindow {
+            openInLinksWindow(documentJSON)
+        } else {
+            loadMultiReferenceDocument(documentJSON)
         }
     }
 
