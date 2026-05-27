@@ -406,16 +406,20 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     /// Callback for opening search with a Strong's number (from "Find all occurrences" links).
     var onShowStrongsSearch: ((String) -> Void)?
 
-    /// Legacy callback for native cross-reference sheets.
-    ///
-    /// Multi-reference Bible links intentionally bypass this callback and render Vue
-    /// `MultiDocument` payloads so iOS follows Android's shared document pipeline.
+    /**
+     Legacy callback for native cross-reference sheets.
+
+     Multi-reference Bible links intentionally bypass this callback and render Vue
+     `MultiDocument` payloads so iOS follows Android's shared document pipeline.
+     */
     var onShowCrossReferences: (([CrossReference]) -> Void)?
 
-    /// Callback for opening a transient multi-reference Vue document in the Android-style links window.
-    ///
-    /// The string parameter is a serialized `MultiDocument` payload. The owning pane decides whether
-    /// to route it into a dedicated links window or render it in the current controller.
+    /**
+     Callback for opening a transient multi-reference Vue document in the Android-style links window.
+
+     The string parameter is a serialized `MultiDocument` payload. The owning pane decides whether
+     to route it into a dedicated links window or render it in the current controller.
+     */
     var onOpenMultiReferenceDocumentInLinksWindow: ((String) -> Void)?
 
     /// Callback for presenting compare view (book, chapter, moduleName, startVerse?, endVerse?).
