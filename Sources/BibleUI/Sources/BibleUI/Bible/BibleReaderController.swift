@@ -4322,7 +4322,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
        - module: Active Bible module to read from. A missing module yields a fallback fragment.
      - Returns: A `<div>` containing one `<verse>` element with the same approximate ordinal scheme
        used by chapter rendering.
-     - Side effects: when `module` is present, changes its current SWORD key to the requested verse.
+     - Side effects: when `module` is present, temporarily moves its SWORD key cursor inside one
+       serialized inspection call and restores the previous cursor before returning.
      - Failure modes: if the module cannot resolve the exact verse or returns empty raw OSIS, the
        fragment contains an escaped display label rather than throwing.
      */
@@ -4332,12 +4333,12 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         let rawText: String
 
         if let module {
-            module.setKey("=\(osisRef)")
-            if let key = module.currentVerseKeyChildren(),
+            let inspection = module.inspectVerseKeyAndRawEntryRestoringPrevious("=\(osisRef)")
+            if let key = inspection.verseKey,
                key.osisBookName == ref.osisId,
                key.chapter == ref.chapter,
                key.verse == ref.verse {
-                rawText = module.rawEntry().trimmingCharacters(in: .whitespacesAndNewlines)
+                rawText = inspection.rawEntry.trimmingCharacters(in: .whitespacesAndNewlines)
             } else {
                 rawText = ""
             }

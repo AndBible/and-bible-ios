@@ -94,39 +94,70 @@ public final class SwordModule: @unchecked Sendable {
     /// Get structured VerseKey data for the current position when the module uses VerseKey.
     public func currentVerseKeyChildren() -> VerseKeyChildren? {
         queue.sync {
-            guard let children = SWModule_getKeyChildren(handle) else { return nil }
-
-            var parts: [String] = []
-            var index = 0
-            while index < 11, let ptr = children[index] {
-                parts.append(String(cString: ptr))
-                index += 1
-            }
-
-            guard parts.count >= 11,
-                  let testament = Int(parts[0]),
-                  let book = Int(parts[1]),
-                  let chapter = Int(parts[2]),
-                  let verse = Int(parts[3]),
-                  let chapterMax = Int(parts[4]),
-                  let verseMax = Int(parts[5]) else {
-                return nil
-            }
-
-            return VerseKeyChildren(
-                testament: testament,
-                book: book,
-                chapter: chapter,
-                verse: verse,
-                chapterMax: chapterMax,
-                verseMax: verseMax,
-                bookName: parts[6],
-                osisRef: parts[7],
-                shortText: parts[8],
-                bookAbbreviation: parts[9],
-                osisBookName: parts[10]
-            )
+            Self.currentVerseKeyChildren(handle: handle)
         }
+    }
+
+    /**
+     Atomically inspects one verse key and restores the module's previous cursor.
+
+     - Parameter keyText: SWORD key text to inspect, such as `=Gen.1.1`.
+     - Returns: The resolved key text, structured VerseKey metadata when available, and raw OSIS
+       entry captured at the resolved key.
+     - Side effects: temporarily moves the SWORD module cursor inside one serialized queue block,
+       then restores the cursor that was active before the call returns.
+     - Failure modes: returns `nil` VerseKey metadata when the module is not positioned on a
+       VerseKey or SWORD cannot expose structured key children.
+     - Important: Use this instead of separate `setKey`, `currentVerseKeyChildren`, and `rawEntry`
+       calls when the key metadata and raw entry must describe the same module position.
+     */
+    public func inspectVerseKeyAndRawEntryRestoringPrevious(
+        _ keyText: String
+    ) -> (actualKey: String, verseKey: VerseKeyChildren?, rawEntry: String) {
+        queue.sync {
+            let previousKey = String(cString: SWModule_getKeyText(handle))
+            SWModule_setKeyText(handle, keyText)
+            let actualKey = String(cString: SWModule_getKeyText(handle))
+            let verseKey = Self.currentVerseKeyChildren(handle: handle)
+            let rawEntry = String(cString: SWModule_getRawEntry(handle))
+            SWModule_setKeyText(handle, previousKey)
+            return (actualKey, verseKey, rawEntry)
+        }
+    }
+
+    private static func currentVerseKeyChildren(handle: UnsafeMutableRawPointer) -> VerseKeyChildren? {
+        guard let children = SWModule_getKeyChildren(handle) else { return nil }
+
+        var parts: [String] = []
+        var index = 0
+        while index < 11, let ptr = children[index] {
+            parts.append(String(cString: ptr))
+            index += 1
+        }
+
+        guard parts.count >= 11,
+              let testament = Int(parts[0]),
+              let book = Int(parts[1]),
+              let chapter = Int(parts[2]),
+              let verse = Int(parts[3]),
+              let chapterMax = Int(parts[4]),
+              let verseMax = Int(parts[5]) else {
+            return nil
+        }
+
+        return VerseKeyChildren(
+            testament: testament,
+            book: book,
+            chapter: chapter,
+            verse: verse,
+            chapterMax: chapterMax,
+            verseMax: verseMax,
+            bookName: parts[6],
+            osisRef: parts[7],
+            shortText: parts[8],
+            bookAbbreviation: parts[9],
+            osisBookName: parts[10]
+        )
     }
 
     /**

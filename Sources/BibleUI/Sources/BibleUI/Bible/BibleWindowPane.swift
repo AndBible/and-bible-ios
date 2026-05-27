@@ -495,7 +495,8 @@ struct BibleWindowPane: View {
         }
 
         // Links window support: single OSIS references open in a links window
-        ctrl.onOpenInLinksWindow = { [weak windowManager] book, chapter in
+        ctrl.onOpenInLinksWindow = { [weak ctrl, weak windowManager] book, chapter in
+            guard let ctrl else { return }
             let useLinksWindow = store.getBool(.openLinksInSpecialWindowPref)
             guard useLinksWindow else {
                 ctrl.navigateTo(book: book, chapter: chapter)
@@ -513,7 +514,8 @@ struct BibleWindowPane: View {
             }
         }
 
-        ctrl.onOpenMultiReferenceDocumentInLinksWindow = { [weak windowManager] documentJSON in
+        ctrl.onOpenMultiReferenceDocumentInLinksWindow = { [weak ctrl, weak windowManager] documentJSON in
+            guard let ctrl else { return }
             let useLinksWindow = store.getBool(.openLinksInSpecialWindowPref)
             guard useLinksWindow else {
                 ctrl.loadMultiReferenceDocument(documentJSON)
