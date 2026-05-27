@@ -463,16 +463,17 @@ struct BibleWindowPane: View {
         // Wire WindowManager reference for synchronized scrolling
         ctrl.windowManagerRef = windowManager
 
-        // Links window support: single OSIS references open in a links window
-        ctrl.onOpenInLinksWindow = { [weak windowManager] book, chapter in
-            let useLinksWindow = store.getBool(.openLinksInSpecialWindowPref)
-            guard useLinksWindow else {
-                ctrl.navigateTo(book: book, chapter: chapter)
-                return
-            }
+        /**
+         Resolves the Android-style links target window for link results from this pane.
 
-            guard let wm = windowManager else { return }
-            // Find or create a links window for this source window
+         - Parameter wm: Window manager that owns the source window and controller registry.
+         - Returns: The existing or newly created links window, or `nil` when the manager cannot
+           create another window.
+         - Side effects: may create a window, mark it as the pinned links target, attach it to the
+           source window, unminimize an existing target, and refresh visible windows.
+         - Failure modes: returns `nil` when window creation is refused by the manager.
+         */
+        func prepareLinksWindow(using wm: WindowManager) -> Window? {
             let linksWindow: Window
             if let existingId = window.targetLinksWindowId,
                let existing = wm.allWindows.first(where: { $0.id == existingId }) {
@@ -487,13 +488,46 @@ struct BibleWindowPane: View {
                 window.targetLinksWindowId = newWindow.id
                 linksWindow = newWindow
             } else {
-                return
+                return nil
             }
             wm.refreshWindows()
+            return linksWindow
+        }
+
+        // Links window support: single OSIS references open in a links window
+        ctrl.onOpenInLinksWindow = { [weak ctrl, weak windowManager] book, chapter in
+            guard let ctrl else { return }
+            let useLinksWindow = store.getBool(.openLinksInSpecialWindowPref)
+            guard useLinksWindow else {
+                ctrl.navigateTo(book: book, chapter: chapter)
+                return
+            }
+
+            guard let wm = windowManager,
+                  let linksWindow = prepareLinksWindow(using: wm) else { return }
+
             // Navigate the links window's controller to the reference
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                 if let ctrl = wm.controllers[linksWindow.id] as? BibleReaderController {
                     ctrl.navigateTo(book: book, chapter: chapter)
+                }
+            }
+        }
+
+        ctrl.onOpenMultiReferenceDocumentInLinksWindow = { [weak ctrl, weak windowManager] documentJSON in
+            guard let ctrl else { return }
+            let useLinksWindow = store.getBool(.openLinksInSpecialWindowPref)
+            guard useLinksWindow else {
+                ctrl.loadMultiReferenceDocument(documentJSON)
+                return
+            }
+
+            guard let wm = windowManager,
+                  let linksWindow = prepareLinksWindow(using: wm) else { return }
+
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                if let ctrl = wm.controllers[linksWindow.id] as? BibleReaderController {
+                    ctrl.loadMultiReferenceDocument(documentJSON)
                 }
             }
         }

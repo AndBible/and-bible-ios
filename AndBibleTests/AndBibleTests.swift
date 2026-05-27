@@ -2007,6 +2007,70 @@ final class AndBibleTests: XCTestCase {
     }
 
     @MainActor
+    func testMultiReferenceLinkEmitsVueMultiDocumentInsteadOfCrossReferenceSheet() throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let modulePath = try makeTemporaryBundledSwordPath()
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        var showedCrossReferences = false
+        controller.onShowCrossReferences = { _ in showedCrossReferences = true }
+
+        controller.bridge(bridge, openExternalLink: "multi://?osis=Gen.1.1&osis=Exod.2.1&v11n=KJVA")
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.2))
+
+        XCTAssertFalse(showedCrossReferences)
+        let addDocumentsScript = try XCTUnwrap(
+            recordedScripts().first(where: { $0.contains("emit('add_documents'") })
+        )
+        XCTAssertTrue(
+            addDocumentsScript.contains(#""type":"multi""#),
+            "Expected multi:// to render a Vue MultiDocument. Script: \(addDocumentsScript)"
+        )
+        XCTAssertTrue(addDocumentsScript.contains(#""bookCategory":"BIBLE""#))
+        XCTAssertTrue(addDocumentsScript.contains(#""osisRef":"Gen.1.1""#))
+        XCTAssertTrue(addDocumentsScript.contains(#""osisRef":"Exod.2.1""#))
+    }
+
+    @MainActor
+    func testMultiReferenceOsisLinkEmitsVueMultiDocumentInsteadOfCrossReferenceSheet() throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let modulePath = try makeTemporaryBundledSwordPath()
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        var showedCrossReferences = false
+        controller.onShowCrossReferences = { _ in showedCrossReferences = true }
+
+        controller.bridge(bridge, openExternalLink: "osis://?osis=Gen.1.1,Exod.2.1&v11n=KJVA")
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.2))
+
+        XCTAssertFalse(showedCrossReferences)
+        let addDocumentsScript = try XCTUnwrap(
+            recordedScripts().first(where: { $0.contains("emit('add_documents'") })
+        )
+        XCTAssertTrue(
+            addDocumentsScript.contains(#""type":"multi""#),
+            "Expected multi-reference osis:// to render a Vue MultiDocument. Script: \(addDocumentsScript)"
+        )
+        XCTAssertTrue(addDocumentsScript.contains(#""osisRef":"Gen.1.1""#))
+        XCTAssertTrue(addDocumentsScript.contains(#""osisRef":"Exod.2.1""#))
+    }
+
+    @MainActor
+    func testSingleOsisReferenceStillNavigatesWithoutMultiDocument() throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let controller = BibleReaderController(bridge: bridge)
+        var showedCrossReferences = false
+        controller.onShowCrossReferences = { _ in showedCrossReferences = true }
+
+        controller.bridge(bridge, openExternalLink: "osis://?osis=Exod.2.1&v11n=KJVA")
+
+        XCTAssertFalse(showedCrossReferences)
+        XCTAssertEqual(controller.currentBook, "Exodus")
+        XCTAssertEqual(controller.currentChapter, 2)
+        XCTAssertFalse(recordedScripts().contains { $0.contains(#""type":"multi""#) })
+    }
+
+    @MainActor
     func testReaderConfigPayloadIncludesDisplaySettingsAndActiveWindowState() throws {
         let (bridge, recordedScripts) = makeRecordingBridge()
         let container = try makeWorkspaceModelContainer()
