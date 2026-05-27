@@ -9182,37 +9182,82 @@ final class AndBibleUITests: XCTestCase {
         let includeElementMetadata = accessibilityIdentifier == nil
         let deadline = Date().addingTimeInterval(timeout)
 
+        func resolvedPromptTextField() -> XCUIElement {
+            if let prompt = resolvedModalPrompt(in: app, timeout: 0.2) {
+                let promptCandidates = modalTextFieldCandidates(
+                    in: prompt,
+                    identifiers: accessibilityIdentifier.map { [$0] } ?? [],
+                    titles: placeholderHints
+                )
+                if let promptField = firstExistingElement(promptCandidates, timeout: 0.2) {
+                    return promptField
+                }
+            }
+
+            if let focusedField = firstExistingElement(focusedTextEntryCandidates(in: app), timeout: 0.2) {
+                return focusedField
+            }
+
+            return element
+        }
+
+        func observedPromptTextValue() -> String {
+            let candidates = [resolvedPromptTextField(), element] + focusedTextEntryCandidates(in: app)
+            var fallbackValue = ""
+            for candidate in candidates where candidate.exists {
+                let candidateValue = currentTextEntryValue(
+                    in: candidate,
+                    placeholderHints: placeholderHints,
+                    includeElementMetadata: includeElementMetadata
+                )
+                if candidateValue == text {
+                    return candidateValue
+                }
+                if fallbackValue.isEmpty, !candidateValue.isEmpty {
+                    fallbackValue = candidateValue
+                }
+            }
+            return fallbackValue
+        }
+
+        func waitForObservedPromptTextValue(timeout: TimeInterval) -> Bool {
+            let valueDeadline = Date().addingTimeInterval(timeout)
+            repeat {
+                if observedPromptTextValue() == text {
+                    return true
+                }
+                RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+            } while Date() < valueDeadline
+            return observedPromptTextValue() == text
+        }
+
         repeat {
+            let promptTextField = resolvedPromptTextField()
             focusResolvedPromptTextEntryElement(
-                element,
+                promptTextField,
                 in: app,
                 timeout: min(5, max(1, deadline.timeIntervalSinceNow)),
                 file: file,
                 line: line
             )
-            if currentTextEntryValue(
-                in: element,
-                placeholderHints: placeholderHints,
-                includeElementMetadata: includeElementMetadata
-            ) == text {
+            if observedPromptTextValue() == text {
                 return true
             }
 
-            app.typeText(text)
-            let valueDeadline = Date().addingTimeInterval(min(3, max(0.5, deadline.timeIntervalSinceNow)))
-            repeat {
-                if currentTextEntryValue(
-                    in: element,
-                    placeholderHints: placeholderHints,
-                    includeElementMetadata: includeElementMetadata
-                ) == text {
+            promptTextField.typeText(text)
+            if waitForObservedPromptTextValue(timeout: min(3, max(0.5, deadline.timeIntervalSinceNow))) {
+                return true
+            }
+
+            if waitForElementKeyboardFocus(promptTextField, timeout: 0.5) {
+                app.typeText(text)
+                if waitForObservedPromptTextValue(timeout: min(3, max(0.5, deadline.timeIntervalSinceNow))) {
                     return true
                 }
-                RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-            } while Date() < valueDeadline
+            }
 
             _ = clearTextEntryElement(
-                element,
+                resolvedPromptTextField(),
                 app: app,
                 placeholderHints: placeholderHints,
                 includeElementMetadata: includeElementMetadata
@@ -9221,11 +9266,7 @@ final class AndBibleUITests: XCTestCase {
         } while Date() < deadline
 
         XCTAssertEqual(
-            currentTextEntryValue(
-                in: element,
-                placeholderHints: placeholderHints,
-                includeElementMetadata: includeElementMetadata
-            ),
+            observedPromptTextValue(),
             text,
             "Expected prompt text input '\(resolvedIdentifier)' to contain '\(text)' before submitting.",
             file: file,
