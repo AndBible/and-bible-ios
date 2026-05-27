@@ -1,13 +1,13 @@
 # READER-701 Verification Matrix (Android Reader -> iOS)
 
-Date: 2026-05-26
+Date: 2026-05-27
 
 ## Scope and Method
 
 - Contract baseline: `docs/parity/reader/contract.md`
 - Verification method:
   - direct code inspection of `BibleReaderView`, `BibleReaderController`, `BibleWindowPane`,
-    `CrossReferenceView`, `StrongsSheetView`, `HistoryView`,
+    `CrossReferenceView`, `HistoryView`,
     `WorkspaceSelectorView`, `WebViewCoordinator`, `DocumentBroker.vue`,
     `MultiDocument.vue`, `StrongsDocument.vue`, Vue `useModal`, and Android
     `BibleView` / `BibleJavascriptInterface`
@@ -32,9 +32,9 @@ trust than proof.
 
 ## Summary
 
-- `Pass`: 9
+- `Pass`: 10
 - `Adapted Pass`: 1
-- `Partial`: 2
+- `Partial`: 1
 
 ## Matrix
 
@@ -45,7 +45,7 @@ trust than proof.
 | History jump-back plus destructive clear/delete flows persist through reopen | `HistoryView.swift`, `BibleReaderView.swift`, `BibleReaderController.swift`; UI tests `testHistorySelectionNavigatesReaderToSeededReference`, `testHistoryClearRemovesSeededRowAcrossReopen`, `testHistoryRowDeletePreservesOtherRowsAcrossReopen` | Pass | This now protects both the jump back into the reader and the more failure-prone destructive persistence paths. |
 | Workspace selection and switching remain coordinated by the reader shell | `BibleReaderView.swift`, `WorkspaceSelectorView.swift`, `WindowManager`; UI test `testWorkspaceSelectorCreateAndSwitchFlow` | Pass | The current check is doing useful work here: it covers creation, activation, and a clean return to the reader shell, not just low-level persistence. |
 | Restored reading position avoids stale verse highlighting while explicit verse navigation preserves its target highlight | `BibleReaderController.swift`; unit tests `testLoadCurrentContentDoesNotHighlightRestoredReadingPosition`, `testLoadCurrentContentHighlightsExplicitVerseNavigationTarget` | Pass | This is a small detail, but it is a very visible one when it breaks, so it is good to have it locked at the payload-emission layer. |
-| Strong's / dictionary content keeps the dedicated Strong's document path, but routing still uses an iOS-native sheet | `BibleReaderController.buildStrongsMultiDocJSON()`, `StrongsSheetView.swift`, `DocumentBroker.vue`, `StrongsDocument.vue`, `TabNavigation.vue`; tracked by #8 | Partial | The richer embedded-client path is present, but the dedicated native sheet remains a confirmed routing drift. The intended endpoint is Vue/document-pipeline presentation, not preserving the native sheet. |
+| Strong's / dictionary content routes through the shared document/window pipeline while keeping the dedicated Strong's document path | `BibleReaderController.buildStrongsMultiDocJSON()`, `BibleReaderController.loadDefinitionDocument(...)`, `BibleWindowPane.configureController()`, `DocumentBroker.vue`, `StrongsDocument.vue`, `TabNavigation.vue`; unit tests `testStrongsLinkEmitsVueDocumentInsteadOfNativeSheet` and `testStrongsLinkUsesLinksWindowRoutingCallbackWhenAvailable` | Pass | iOS now emits Vue `MultiDocument` payloads with `contentType: "strongs"` and uses the same links-window routing decision as other linked document content, instead of presenting the removed native sheet. |
 | Horizontal swipe modes and auto-fullscreen thresholds are implemented natively | `WebViewCoordinator.swift` native swipe/scroll callbacks; `BibleReaderView.handleHorizontalSwipe(...)`; `BibleReaderInteractionPolicies.swift`; unit tests `testReaderHorizontalSwipePolicyMapsConfiguredModes`, `testAutoFullscreenPolicyAccumulatesThresholdByDirection`, `testAutoFullscreenPolicyHonorsDisabledAndDoubleTapLock` | Pass | The base gesture callbacks stay native and the decision logic is covered at the policy layer. Modal-open blocking is tracked separately in the Vue modal state row. |
 | Double-tap fullscreen remains owned by the native reader shell | `BibleBridge.dispatchMessage(method:args:)`, `BibleReaderController.bridgeDidRequestToggleFullScreen(...)`, `BibleReaderView` fullscreen state/overlay ownership; unit test `testDoubleTapFullscreenPreferenceGateControlsNativeToggleRequest`; documented in `dispositions.md` | Pass | The bridge path now has focused coverage proving the `double_tap_to_fullscreen` preference gate is honored before native fullscreen state changes. |
 | Compare requests route through the shared document/window pipeline | `BibleReaderController.compareSelection()`, `BibleReaderController.bridge(_:compareVerses:startOrdinal:endOrdinal:)`, `BibleReaderController.loadCompareDocument(startVerse:endVerse:)`, `MultiDocument.vue`; unit test `testReaderCompareBridgeRequestEmitsVueCompareDocument`; tracked by #123 | Pass | iOS now builds the Android-style fake compare document payload with `compare: true`, one Bible fragment per installed module, hidden-translation state handled through shared Vue config, and no native Compare sheet route. |

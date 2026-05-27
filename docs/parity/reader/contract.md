@@ -132,10 +132,10 @@ preserve the richer Android-style experience through:
 - recursive Strong's navigation and `Find all occurrences` handoff from inside
   the modal
 
-The current iOS dedicated Strong's sheet is tracked as remaining parity drift in
-#8. Keeping `contentType: "strongs"` intact is necessary, but not sufficient, for
-closing the routing gap. The intended endpoint is Vue/document-pipeline
-presentation, not preserving the native sheet.
+iOS routes Strong's and dictionary results through the shared reader
+document/window pipeline while preserving `contentType: "strongs"`. The removed
+native sheet should not be restored without a new ADR documenting a real
+iOS-specific requirement.
 
 ## Windows and Compare
 

@@ -84,12 +84,11 @@ struct WindowTabBar: View {
     private func windowTab(for window: Window) -> some View {
         let isMinimized = window.layoutState == "minimized"
         let isActive = !isMinimized && window.id == windowManager.activeWindow?.id
-        let categoryName = window.pageManager?.currentCategoryName ?? "bible"
+        let renderedState = renderedContentTabState(for: window)
+        let categoryName = renderedState?.categoryName ?? window.pageManager?.currentCategoryName ?? "bible"
         let icon = categoryName == "commentary" ? "ToolbarCommentary" : "ToolbarBible"
-        let moduleName = (categoryName == "commentary"
-            ? window.pageManager?.commentaryDocument
-            : window.pageManager?.bibleDocument) ?? "KJV"
-        let reference = shortReference(for: window)
+        let moduleName = renderedState?.moduleName ?? persistedModuleName(for: window, categoryName: categoryName)
+        let reference = renderedState?.reference ?? shortReference(for: window)
 
         return Button {
             if isMinimized {
@@ -247,6 +246,96 @@ struct WindowTabBar: View {
             }
             .disabled(windowManager.allWindows.count <= 1)
         }
+    }
+
+    /// Display identity from the controller's last rendered-content token.
+    private struct RenderedContentTabState {
+        /// Page-manager style category key, such as `dictionary`.
+        let categoryName: String
+
+        /// Primary tab label.
+        let moduleName: String
+
+        /// Secondary tab label.
+        let reference: String
+    }
+
+    /**
+     Returns transient document tab labels from the active controller when it is not showing Bible text.
+
+     The persisted `PageManager` intentionally remains on the source Bible location for link-result
+     documents. Strong's and dictionary documents still need the bottom tab to mirror Android's
+     active document label, so this reads the controller's rendered-content token before falling
+     back to persisted window state.
+
+     - Parameter window: Window whose controller may have transient rendered content.
+     - Returns: Display labels for non-Bible rendered content, or `nil` for ordinary Bible content.
+     - Side effects: None.
+     - Failure modes: Missing controller state, malformed tokens, or empty module labels return
+       `nil` so the tab uses persisted `PageManager` fields.
+     */
+    private func renderedContentTabState(for window: Window) -> RenderedContentTabState? {
+        guard let ctrl = windowManager.controllers[window.id] as? BibleReaderController else { return nil }
+        let tokens = Dictionary(uniqueKeysWithValues: ctrl.renderedContentState
+            .split(separator: ";")
+            .compactMap { part -> (String, String)? in
+                let pieces = part.split(separator: "=", maxSplits: 1).map(String.init)
+                guard pieces.count == 2 else { return nil }
+                return (pieces[0], pieces[1])
+            })
+
+        guard let category = tokens["category"],
+              category != "none",
+              category != DocumentCategory.bible.pageManagerKey,
+              let moduleName = nonEmptyToken(tokens["module"]) else {
+            return nil
+        }
+
+        let reference = nonEmptyToken(tokens["book"]) ?? nonEmptyToken(tokens["key"]) ?? ""
+        return RenderedContentTabState(
+            categoryName: category,
+            moduleName: moduleName,
+            reference: reference
+        )
+    }
+
+    /**
+     Returns the persisted module label for a window/category pair.
+
+     - Parameters:
+       - window: Window whose `PageManager` stores category-specific module choices.
+       - categoryName: Page-manager style category key.
+     - Returns: Module initials for the category, falling back to `KJV` for Bible tabs.
+     - Side effects: None.
+     */
+    private func persistedModuleName(for window: Window, categoryName: String) -> String {
+        guard let pageManager = window.pageManager else { return "KJV" }
+        switch categoryName {
+        case DocumentCategory.commentary.pageManagerKey:
+            return pageManager.commentaryDocument ?? "Commentary"
+        case DocumentCategory.dictionary.pageManagerKey:
+            return pageManager.dictionaryDocument ?? "Dictionary"
+        case DocumentCategory.generalBook.pageManagerKey:
+            return pageManager.generalBookDocument ?? "General Book"
+        case DocumentCategory.map.pageManagerKey:
+            return pageManager.mapDocument ?? "Map"
+        case DocumentCategory.epub.pageManagerKey:
+            return pageManager.epubIdentifier ?? "EPUB"
+        default:
+            return pageManager.bibleDocument ?? "KJV"
+        }
+    }
+
+    /**
+     Converts rendered-content token values into optional display strings.
+
+     - Parameter token: Token emitted by `BibleReaderController.renderedContentState`.
+     - Returns: Non-empty token value unless it is the sentinel `none`.
+     - Side effects: None.
+     */
+    private func nonEmptyToken(_ token: String?) -> String? {
+        guard let token, token != "none", !token.isEmpty else { return nil }
+        return token
     }
 
     /// Stable XCUITest summary of one tab's current state.

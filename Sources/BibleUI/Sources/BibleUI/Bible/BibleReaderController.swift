@@ -200,6 +200,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     static let emptyRenderedContentState = "category=none;module=none;book=none;chapter=none;key=none"
     private static let issueTrackerURLString = "https://github.com/AndBible/and-bible/issues"
     private(set) var renderedContentState: String = BibleReaderController.emptyRenderedContentState
+    /// Transient document that should be replayed once the Vue client has finished bootstrapping.
+    private var pendingClientReadyTransientMultiDocument: TransientMultiDocumentRequest?
     /// Current My Documents page rendered through the local store rather than a SWORD module.
     private var activeMyDocumentBookInitials: String?
     /// Current My Documents page key rendered through the local store rather than a SWORD module.
@@ -219,6 +221,30 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     private var pendingVisibleVersePersistWorkItem: DispatchWorkItem?
     /// Optional verse range that should render as the explicit navigation target on the next load.
     private var originalNavigationOrdinalRange: [Int]? = nil
+
+    /**
+     Captures a transient Vue `MultiDocument` load until the web client can receive it.
+
+     Link-result panes may be created before their `BibleWebView` has sent `setClientReady`. The
+     request stores the serialized document and rendered-content labels so the initial client-ready
+     replay shows the same link result instead of briefly loading the cloned Bible location.
+     */
+    private struct TransientMultiDocumentRequest {
+        /// Serialized Vue `MultiDocument` payload to emit.
+        let documentJSON: String
+
+        /// Rendered-content book token for accessibility and tab display.
+        let renderedBook: String
+
+        /// Rendered-content key token for accessibility and tab display.
+        let renderedKey: String
+
+        /// Rendered-content category token.
+        let renderedCategory: DocumentCategory
+
+        /// Optional rendered module token.
+        let renderedModuleName: String?
+    }
 
     /// Escapes semantically important content-state tokens for accessibility export and tests.
     private static func contentStateToken(_ raw: String?) -> String {
@@ -403,8 +429,25 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         configureSwordManager(swordManagerOverride)
     }
 
-    /// Callback for showing Strong's definitions in a sheet (multiDocJSON, configJSON).
-    var onShowStrongsDefinition: ((String, String) -> Void)?
+    /**
+     Callback for pane-owned routing of transient dictionary-style documents.
+
+     The controller builds already-serialized Vue `MultiDocument` payloads for Strong's,
+     morphology, and word-lookup dictionary results. The owning pane decides whether those payloads
+     render in the current pane or in the Android-style links target window.
+
+     - Parameters:
+       - documentJSON: Serialized `MultiDocument` payload.
+       - renderedBook: Accessibility/test-state book token for the transient document.
+       - renderedKey: Accessibility/test-state key token for the transient document.
+     - Returns: The closure returns no value; the owner reports completion by rendering in the
+       selected target controller.
+     - Side effects: None in the controller until the owning closure calls back into a target
+       controller to render the payload.
+     - Failure modes: If no owner installs the closure, `openDefinitionDocument(...)` falls back
+       to rendering in the current controller.
+     */
+    var onOpenDefinitionDocumentInLinksWindow: ((String, String, String) -> Void)?
 
     /// Callback for opening search with a Strong's number (from "Find all occurrences" links).
     var onShowStrongsSearch: ((String) -> Void)?
@@ -1007,13 +1050,48 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
        - documentJSON: Serialized `MultiDocument` payload to add to the Vue document list.
        - renderedBook: Accessibility/test-state book token for the transient document.
        - renderedKey: Accessibility/test-state key token for the transient document.
+       - renderedCategory: Category token to expose through rendered-content state.
+       - renderedModuleName: Optional module token to expose through rendered-content state; defaults
+         to the active Bible module for existing Bible-backed transient documents.
      - Side effects: clears the current Vue document, emits labels, emits the supplied document and
        setup payload, resets selection/editing flags, updates rendered-content accessibility state,
        emits active-window state, clears the web selection, and reapplies the reader background.
      - Failure modes: assumes `documentJSON` is valid JSON; invalid payloads are still forwarded
        after transient reader state is prepared.
      */
-    private func loadTransientMultiDocument(_ documentJSON: String, renderedBook: String, renderedKey: String) {
+    private func loadTransientMultiDocument(
+        _ documentJSON: String,
+        renderedBook: String,
+        renderedKey: String,
+        renderedCategory: DocumentCategory = .bible,
+        renderedModuleName: String? = nil
+    ) {
+        let request = TransientMultiDocumentRequest(
+            documentJSON: documentJSON,
+            renderedBook: renderedBook,
+            renderedKey: renderedKey,
+            renderedCategory: renderedCategory,
+            renderedModuleName: renderedModuleName
+        )
+        if clientReady {
+            pendingClientReadyTransientMultiDocument = nil
+        } else {
+            pendingClientReadyTransientMultiDocument = request
+        }
+        emitTransientMultiDocument(request)
+    }
+
+    /**
+     Emits a transient Vue `MultiDocument` request to the current bridge.
+
+     - Parameter request: Stored transient document request with payload and native display labels.
+     - Side effects: Clears the current Vue document, emits labels and document/setup events,
+       resets transient selection/editing state, updates rendered-content state, emits active-window
+       state, clears web selection, and reapplies the reader background.
+     - Failure modes: Invalid JSON is forwarded unchanged to the bridge, matching the existing
+       transient document contract.
+     */
+    private func emitTransientMultiDocument(_ request: TransientMultiDocumentRequest) {
         showingMyNotes = false
         showingStudyPad = false
         activeStudyPadLabelId = nil
@@ -1025,15 +1103,15 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
         bridge.emit(event: "clear_document")
         sendLabelsToVueJS()
-        bridge.emit(event: "add_documents", data: documentJSON)
+        bridge.emit(event: "add_documents", data: request.documentJSON)
         bridge.emit(event: "setup_content", data: """
         {"jumpToOrdinal":null,"jumpToAnchor":null,"jumpToId":null,"topOffset":0,"bottomOffset":0}
         """)
         setRenderedContentState(
-            category: .bible,
-            moduleName: activeModuleName,
-            book: renderedBook,
-            key: renderedKey
+            category: request.renderedCategory,
+            moduleName: request.renderedModuleName ?? activeModuleName,
+            book: request.renderedBook,
+            key: request.renderedKey
         )
         emitActiveState()
 
@@ -1942,7 +2020,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
      Side effects:
      - marks the client ready, reloads recent labels and active-language metadata, emits config,
-       and loads the current content into the web view
+       and replays the current native document state into the web view
      */
     public func bridgeDidSetClientReady(_ bridge: BibleBridge) {
         logger.info("Client ready, sending initial content")
@@ -1959,10 +2037,17 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
      WKWebView can be recreated by SwiftUI while the pane controller survives. In that case the new
      JavaScript client has no document/config state even though native state still says the pane is
-     showing My Notes, StudyPad, or the current Bible/category document. Rehydrating from the
-     controller state keeps the WebView content and native accessibility/export state aligned.
+     showing a pending link-result document, My Notes, StudyPad, or the current Bible/category
+     document. Rehydrating from the controller state keeps the WebView content and native
+     accessibility/export state aligned.
      */
     private func reloadVisibleDocumentAfterClientReady() {
+        if let pendingClientReadyTransientMultiDocument {
+            self.pendingClientReadyTransientMultiDocument = nil
+            emitTransientMultiDocument(pendingClientReadyTransientMultiDocument)
+            return
+        }
+
         if showingMyNotes {
             loadMyNotesDocument()
             return
@@ -1985,11 +2070,76 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
      Side effects:
      - updates `activeWindow?.pageManager?.jsState`
+     - updates transient Strong's rendered-content module labels when Vue tab state changes
      - invokes `onPersistState` so the owning view can save SwiftData changes
      */
     public func bridge(_ bridge: BibleBridge, saveState state: String) {
         activeWindow?.pageManager?.jsState = state
+        updateDefinitionRenderedModuleIfNeeded(from: state)
         onPersistState?()
+    }
+
+    /**
+     Applies Strong's tab-selection state to native rendered-content labels.
+
+     Vue owns the per-dictionary tabs inside `StrongsDocument`, while Swift owns the bottom window
+     tabs. When Vue reports a new selected dictionary, this updates only the native display token so
+     the bottom tab follows the active dictionary module without treating the link result as a
+     durable PageManager category switch.
+
+     - Parameter state: Serialized Vue state from `android.saveState(...)`.
+     - Returns: No direct return value; `renderedContentState` is updated when the state applies.
+     - Side effects: May update `renderedContentState`.
+     - Failure modes: Non-Strong's rendered content, invalid JSON, or missing selected dictionary
+       fields leave the current rendered-content state unchanged.
+     */
+    private func updateDefinitionRenderedModuleIfNeeded(from state: String) {
+        let currentTokens = renderedContentStateTokens()
+        guard currentTokens["category"] == DocumentCategory.dictionary.pageManagerKey,
+              let moduleName = selectedDefinitionModuleName(from: state) else {
+            return
+        }
+
+        setRenderedContentState(
+            category: .dictionary,
+            moduleName: moduleName,
+            book: currentTokens["book"] ?? "Dictionary",
+            key: currentTokens["key"]
+        )
+    }
+
+    /**
+     Parses the current rendered-content token string into key/value fields.
+
+     - Returns: Dictionary containing fields such as `category`, `module`, `book`, `chapter`, and
+       `key`.
+     - Side effects: None.
+     */
+    private func renderedContentStateTokens() -> [String: String] {
+        Dictionary(uniqueKeysWithValues: renderedContentState
+            .split(separator: ";")
+            .compactMap { part -> (String, String)? in
+                let pieces = part.split(separator: "=", maxSplits: 1).map(String.init)
+                guard pieces.count == 2 else { return nil }
+                return (pieces[0], pieces[1])
+            })
+    }
+
+    /**
+     Extracts the selected dictionary module from serialized Strong's Vue state.
+
+     - Parameter state: JSON string produced by `StrongsDocument.saveState()`.
+     - Returns: Selected Strong's dictionary initials, selected morphology dictionary initials, or
+       `nil` when neither is present.
+     - Side effects: None.
+     */
+    private func selectedDefinitionModuleName(from state: String) -> String? {
+        guard let data = state.data(using: .utf8),
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+        return nonEmptyString(root["selectedStrongsDict"])
+            ?? nonEmptyString(root["selectedMorphDict"])
     }
 
     /**
@@ -3062,9 +3212,20 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     }
 
     /**
-     Look up the currently selected text in configured plain dictionaries.
-     Matches Android parity for `disabled_word_lookup_dictionaries`:
-     all plain dictionaries are enabled unless explicitly disabled.
+     Looks up the current text selection in configured plain dictionary modules.
+
+     This mirrors Android's `disabled_word_lookup_dictionaries` behavior: plain dictionaries are
+     enabled unless they are explicitly disabled, and successful lookups render as transient
+     document content instead of an iOS-only sheet.
+
+     - Parameters: None; the method reads the controller's current `selectedText`.
+     - Returns: No direct return value; a successful lookup emits a Vue document payload through
+       the current pane or configured links-window target.
+     - Side effects: May show a localized "not found" toast, route a dictionary document payload,
+       and clear the active WebView selection after a successful lookup.
+     - Failure modes: Empty selections, empty normalized queries, or missing dictionary payloads
+       exit without navigation and show the existing not-found toast where user-facing feedback is
+       required.
      */
     func lookupSelectionInDictionaries() {
         guard !selectedText.isEmpty else { return }
@@ -3083,8 +3244,11 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             ))
             return
         }
-        let configJSON = buildConfigJSON()
-        onShowStrongsDefinition?(multiDocJSON, configJSON)
+        openDefinitionDocument(
+            multiDocJSON,
+            renderedBook: "Dictionary",
+            renderedKey: "dictionary"
+        )
         bridge.clearSelection()
     }
 
@@ -3771,8 +3935,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      - Parameter link: Link string using one of the supported pseudo-schemes or a standard URL.
 
      Side effects:
-     - may open Strong's sheets, cross-reference sheets, search, EPUB navigation, or delegate real
-       URLs to the host platform
+     - may open transient document content, cross-reference sheets, search, EPUB navigation, or
+       delegate real URLs to the host platform
 
      Failure modes:
      - unrecognized schemes fall through to the platform URL-opening path
@@ -3881,7 +4045,21 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         #endif
     }
 
-    /// Parse Strong's/morphology from ab-w:// links and show definitions in a sheet via MultiDocument.
+    /**
+     Parses Strong's and morphology link payloads from `ab-w://` URLs.
+
+     Android routes these links through normal document/window handling. iOS follows that route by
+     building the shared Vue `MultiDocument` payload with `contentType: "strongs"` and then handing
+     it to the pane-owned definition document router.
+
+     - Parameter link: `ab-w://` URL containing one or more `strong` or `robinson` query items.
+     - Returns: No direct return value; valid links route a transient Strong's document payload.
+     - Side effects: May emit an `add_documents` event in the current pane or configured links
+       target window. Preserves saved Strong's tab state when recursive Strong's links are opened
+       from an existing Strong's document.
+     - Failure modes: Malformed URLs, links without recognized query items, or payload-build
+       failures are ignored, matching the existing bridge-link behavior.
+     */
     private func handleStrongsLink(_ link: String) {
         logger.info("handleStrongsLink: \(link)")
         guard let components = URLComponents(string: link) else {
@@ -3908,12 +4086,178 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         logger.info("handleStrongsLink: strongs=\(strongs), robinson=\(robinson)")
         if strongs.isEmpty && robinson.isEmpty { return }
 
-        let multiDocJSON = buildStrongsMultiDocJSON(strongs: strongs, robinson: robinson)
+        let multiDocJSON = buildStrongsMultiDocJSON(
+            strongs: strongs,
+            robinson: robinson,
+            stateJSON: currentStrongsDocumentStateJSON()
+        )
         guard let multiDocJSON else { return }
 
-        // Send to sheet via callback (not to the main WebView)
-        let configJSON = buildConfigJSON()
-        onShowStrongsDefinition?(multiDocJSON, configJSON)
+        openDefinitionDocument(
+            multiDocJSON,
+            renderedBook: "Strongs",
+            renderedKey: "strongs"
+        )
+    }
+
+    /**
+     Renders a Strong's or dictionary result through the shared document pipeline.
+
+     - Parameters:
+       - documentJSON: Serialized `MultiDocument` payload already shaped for Vue.
+       - renderedBook: Accessibility/test-state book token for the transient result.
+       - renderedKey: Accessibility/test-state key token for the transient result.
+     - Returns: No direct return value; the embedded document client receives an `add_documents`
+       event.
+     - Side effects: Replaces the current web document with the supplied payload and exposes the
+       resolved dictionary module/key through rendered-content state for tab labels. This does not
+       persist PageManager category or key state because Android treats Strong's and dictionary
+       results as link-result documents.
+     - Failure modes: Invalid JSON is forwarded unchanged to the Vue bridge, matching the existing
+       transient document contract.
+     */
+    func loadDefinitionDocument(_ documentJSON: String, renderedBook: String, renderedKey: String) {
+        let tabState = definitionDocumentTabState(
+            from: documentJSON,
+            fallbackBook: renderedBook,
+            fallbackKey: renderedKey
+        )
+        loadTransientMultiDocument(
+            documentJSON,
+            renderedBook: tabState.book,
+            renderedKey: tabState.key,
+            renderedCategory: .dictionary,
+            renderedModuleName: tabState.moduleName
+        )
+    }
+
+    /**
+     Routes a definition-style transient document through the pane owner when possible.
+
+     - Parameters:
+       - documentJSON: Serialized `MultiDocument` payload already shaped for Vue.
+       - renderedBook: Accessibility/test-state book token for the transient result.
+       - renderedKey: Accessibility/test-state key token for the transient result.
+     - Returns: No direct return value; rendering is delegated to the current or links-window
+       controller.
+     - Side effects: May hand off to the owning pane so it can use the configured Android-style
+       links window. If no owner is attached, the current controller renders the document directly.
+     - Failure modes: A missing links-window owner is treated as a direct render fallback; JSON
+       validation remains owned by the downstream Vue document pipeline.
+     */
+    private func openDefinitionDocument(_ documentJSON: String, renderedBook: String, renderedKey: String) {
+        if let openInLinksWindow = onOpenDefinitionDocumentInLinksWindow {
+            openInLinksWindow(documentJSON, renderedBook, renderedKey)
+        } else {
+            loadDefinitionDocument(documentJSON, renderedBook: renderedBook, renderedKey: renderedKey)
+        }
+    }
+
+    /// Display identity extracted from a transient definition document for native tab chrome.
+    private struct DefinitionDocumentTabState {
+        /// Module initials or abbreviation shown as the primary tab label.
+        let moduleName: String
+
+        /// Compact lookup key shown as the secondary tab label.
+        let key: String
+
+        /// Book token recorded in rendered-content state for UI tests and tab display.
+        let book: String
+    }
+
+    /**
+     Extracts the visible dictionary module/key from a Vue definition document payload.
+
+     Strong's documents can contain several dictionary fragments plus a saved selected-tab state.
+     The bottom window tab should reflect the active dictionary fragment, not the source Bible pane
+     that opened the link. Parsing the serialized payload keeps that display state aligned with the
+     shared Vue route without persisting a durable `PageManager` category change.
+
+     - Parameters:
+       - documentJSON: Serialized `MultiDocument` payload emitted to Vue.
+       - fallbackBook: Book token to use when parsing fails.
+       - fallbackKey: Key token to use when parsing fails.
+     - Returns: Module and key labels suitable for rendered-content state.
+     - Side effects: None.
+     - Failure modes: Invalid JSON or missing fragment fields fall back to the caller-supplied
+       labels so the document still renders.
+     */
+    private func definitionDocumentTabState(
+        from documentJSON: String,
+        fallbackBook: String,
+        fallbackKey: String
+    ) -> DefinitionDocumentTabState {
+        let fallback = DefinitionDocumentTabState(
+            moduleName: fallbackBook,
+            key: fallbackKey,
+            book: fallbackBook
+        )
+        guard let data = documentJSON.data(using: .utf8),
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let fragments = root["osisFragments"] as? [[String: Any]],
+              let firstFragment = fragments.first else {
+            return fallback
+        }
+
+        let selectedStrongsDict = (root["state"] as? [String: Any])?["selectedStrongsDict"] as? String
+        let selectedFragment = selectedStrongsDict.flatMap { selected in
+            fragments.first { ($0["bookInitials"] as? String) == selected }
+        } ?? firstFragment
+
+        let moduleName = nonEmptyString(selectedFragment["bookInitials"])
+            ?? nonEmptyString(selectedFragment["bookAbbreviation"])
+            ?? fallback.moduleName
+        let key = definitionDocumentDisplayKey(from: selectedFragment) ?? fallback.key
+        return DefinitionDocumentTabState(moduleName: moduleName, key: key, book: key)
+    }
+
+    /**
+     Builds a compact dictionary key label from one serialized definition fragment.
+
+     - Parameter fragment: JSON object for one `OsisFragment` inside a Vue `MultiDocument`.
+     - Returns: A display key such as `H00776`, `G01234`, or the fragment key name.
+     - Side effects: None.
+     - Failure modes: Returns `nil` when the fragment has no usable key fields.
+     */
+    private func definitionDocumentDisplayKey(from fragment: [String: Any]) -> String? {
+        if let features = fragment["features"] as? [String: Any],
+           let keyName = nonEmptyString(features["keyName"]) {
+            let type = nonEmptyString(features["type"])
+            let prefix = type == "hebrew" ? "H" : type == "greek" ? "G" : ""
+            return keyName.hasPrefix("H") || keyName.hasPrefix("G") ? keyName : "\(prefix)\(keyName)"
+        }
+
+        return nonEmptyString(fragment["keyName"])
+    }
+
+    /**
+     Converts a loosely typed JSON field into a non-empty string.
+
+     - Parameter value: JSON value from `JSONSerialization`.
+     - Returns: Trimmed string when the value is a non-empty string, otherwise `nil`.
+     - Side effects: None.
+     */
+    private func nonEmptyString(_ value: Any?) -> String? {
+        guard let string = value as? String else { return nil }
+        let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    /**
+     Returns the last saved Strong's tab-selection state when the current transient document is Strong's.
+
+     Vue emits tab state through `saveState`; preserving it across recursive Strong's links keeps
+     the selected dictionary tab stable without reviving the removed sheet-local history stack.
+
+     - Returns: Serialized Vue state for the active Strong's document, or `nil` when the current
+       document is not a Strong's result or no state has been saved.
+     - Side effects: None; this reads the current rendered-content token and active page-manager
+       state.
+     - Failure modes: Missing saved state produces `nil`, which lets Vue choose its default tab.
+     */
+    private func currentStrongsDocumentStateJSON() -> String? {
+        guard renderedContentState.contains("key=strongs") else { return nil }
+        return activeWindow?.pageManager?.jsState
     }
 
     private func handleStandaloneStrongsLink(_ link: String) {

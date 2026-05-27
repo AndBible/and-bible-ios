@@ -222,25 +222,25 @@ Why this is fine:
 - Compare is no longer covered by this disposition. The native iOS Compare
   sheet is tracked as reader parity drift by #123.
 
-## 9. Strong's content uses a dedicated embedded-client route, but native sheet routing remains drift
+## 9. Strong's content uses the shared document route
 
-- Status: mixed; embedded-client route accepted, native sheet routing tracked by #8
+- Status: resolved reader/bridge parity
 
 What we do:
 
-- iOS presents the Strong's surface as a native bottom sheet owned by the
-  reader shell.
-- Within that sheet, the embedded client now uses the dedicated
+- iOS routes Strong's and dictionary results through the same reader
+  document/window pipeline used for other linked document content.
+- The emitted embedded-client payload preserves the dedicated
   `contentType: "strongs"` route and `StrongsDocument` rendering path rather
-  than the generic multi-document renderer.
+  than falling back to generic multi-document rendering.
 
 What this means:
 
 - The richer Android-style Strong's experience depends on route-specific client
   behavior such as per-dictionary tabs and preserved in-modal state.
 - Preserving `contentType: "strongs"` is an accepted bridge requirement.
-- The remaining native sheet ownership is not an accepted final parity endpoint;
-  #8 tracks routing Strong's through the normal document/window pipeline.
+- The removed native sheet should not be reintroduced without a new ADR
+  documenting a real platform or product requirement.
 
 ## 10. Android-only bridge breadth is not fully implemented on iOS
 

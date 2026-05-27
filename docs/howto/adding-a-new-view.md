@@ -19,7 +19,7 @@ Use `BibleWebView` plus a controller/bridge when the feature needs the existing 
 
 Examples:
 - Main reading panes: `Sources/BibleUI/Sources/BibleUI/Bible/BibleWindowPane.swift`
-- Strong's sheet: `Sources/BibleUI/Sources/BibleUI/Bible/StrongsSheetView.swift`
+- Transient reader documents: `Sources/BibleUI/Sources/BibleUI/Bible/BibleReaderController.swift`
 
 ## 3. Wire Services Through The Existing Environment
 

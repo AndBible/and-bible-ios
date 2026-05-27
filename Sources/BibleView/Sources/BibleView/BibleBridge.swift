@@ -397,6 +397,16 @@ public final class BibleBridge: NSObject, WKScriptMessageHandler {
     /// Fires on every bridge message — used to detect user interaction for active window tracking.
     public var onAnyMessage: (() -> Void)?
 
+    /**
+     Fires when UIKit observes native interaction with the embedded web view.
+
+     This covers taps, drags, and swipes that may not produce a JavaScript bridge message, matching
+     Android's `BibleView.onTouchEvent` focus behavior. The callback has no payload; callers use it
+     only as an interaction signal. It is synchronous on the main thread because UIKit gesture
+     delivery and `WKWebView` scroll callbacks are main-thread only.
+     */
+    public var onNativeUserInteraction: (() -> Void)?
+
     /// Fires for native user-driven webview scroll deltas (positive = down).
     public var onNativeScrollDeltaY: ((Double) -> Void)?
 

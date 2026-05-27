@@ -220,7 +220,7 @@ Primary sources:
 - `Sources/BibleUI/Sources/BibleUI/Bible/BibleReaderController.swift:251`
 - `.../BibleReaderController.swift:702`
 - `.../BibleReaderController.swift:768`
-- `Sources/BibleUI/Sources/BibleUI/Bible/StrongsSheetView.swift:233`
+- `.../BibleReaderController.swift:977`
 
 Events:
 - `set_config`

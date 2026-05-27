@@ -1209,23 +1209,6 @@ public struct BibleReaderView: View {
                 resetAutoFullscreenTracking()
             },
             onSearchForStrongs: { strongsNum in presentSearch(from: window.id, initialQuery: strongsNum) },
-            onShowStrongsSheet: { json, config in
-                #if os(iOS)
-                if let ctrl = controller(for: window.id) {
-                    let d = TextDisplaySettings.appDefaults
-                    let bgInt = nightMode
-                        ? (displaySettings.nightBackground ?? d.nightBackground ?? -16777216)
-                        : (displaySettings.dayBackground ?? d.dayBackground ?? -1)
-                    presentStrongsSheet(
-                        multiDocJSON: json,
-                        configJSON: config,
-                        backgroundColorInt: bgInt,
-                        controller: ctrl,
-                        onFindAll: { strongsNum in presentSearch(from: window.id, initialQuery: strongsNum) }
-                    )
-                }
-                #endif
-            },
             onRefChooserDialog: { completion in
                 // Present book chooser and return OSIS ref
                 setPanePresentationTarget(window.id)

@@ -29,12 +29,11 @@ Primary implementation target:
 
 That controller owns reading state, services, bookmarks, navigation, and most bridge-backed behavior.
 
-## 4. Add A No-Op In Secondary Delegates If Needed
+## 4. Check Secondary Delegate Owners If Needed
 
-There is at least one secondary bridge delegate:
-- `Sources/BibleUI/Sources/BibleUI/Bible/StrongsSheetView.swift:131`
-
-`StrongsSheetDelegate` conforms to `BibleBridgeDelegate` but intentionally implements only a small subset of behaviors. If you add a required protocol method, decide whether the Strong's sheet needs real handling or an explicit no-op.
+The main reader controller owns the active document bridge. If a future feature
+adds another bridge-backed surface with its own delegate, decide whether new
+required protocol methods need real handling there or an explicit no-op.
 
 ## 5. Add Or Update Native -> JS Events
 

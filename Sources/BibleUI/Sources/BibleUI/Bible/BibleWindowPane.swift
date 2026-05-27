@@ -143,9 +143,6 @@ struct BibleWindowPane: View {
     /// Starts a Strong's-number search in the parent search UI.
     var onSearchForStrongs: ((String) -> Void)?
 
-    /// Presents the Strong's definition sheet with raw JSON/config payloads.
-    var onShowStrongsSheet: ((String, String) -> Void)?
-
     /// Requests the parent reader to open the reference chooser dialog and return a result.
     var onRefChooserDialog: ((@escaping (String?) -> Void) -> Void)?
 
@@ -230,7 +227,10 @@ struct BibleWindowPane: View {
         }
     }
 
-    /// Hamburger menu overlay providing pane-scoped content, layout, and sync actions.
+    /**
+     Hamburger menu overlay providing pane-scoped content, layout, and sync actions.
+     Opening the menu also marks this pane active, matching Android's pane menu behavior.
+     */
     private var windowMenuButton: some View {
         Menu {
             // Content actions
@@ -327,6 +327,9 @@ struct BibleWindowPane: View {
                 .frame(width: 28, height: 28)
                 .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 6))
         }
+        .simultaneousGesture(TapGesture().onEnded {
+            windowManager.activeWindow = window
+        })
     }
 
     /// Copies the pane's current reference string and triggers toast feedback.
@@ -399,7 +402,6 @@ struct BibleWindowPane: View {
 
         ctrl.onShareVerseText = { text in onShareText?(text) }
         ctrl.onRequestOpenDownloads = { onShowDownloads?() }
-        ctrl.onShowStrongsDefinition = { json, config in onShowStrongsSheet?(json, config) }
         ctrl.onShowStrongsSearch = { strongsNum in onSearchForStrongs?(strongsNum) }
         ctrl.onShowCrossReferences = { refs in onShowCrossReferences?(refs) }
         ctrl.onShowReadingProgress = { tab in onShowReadingProgress?(tab) }
@@ -430,9 +432,9 @@ struct BibleWindowPane: View {
             onRefChooserDialog?(completion)
         }
 
-        // Focus-on-interaction: any bridge message from this pane sets it as active.
-        // Wire to bridge.onAnyMessage so ANY user interaction (tap, scroll, selection)
-        // triggers focus — matching Android's onTouchEvent → activeWindow = window.
+        // Focus-on-interaction: bridge messages and native web-view gestures from this pane set it
+        // active. The native callback covers plain taps that do not emit JavaScript messages,
+        // matching Android's onTouchEvent -> activeWindow = window behavior.
         let focusHandler: () -> Void = { [weak windowManager] in
             guard let wm = windowManager else { return }
             if wm.activeWindow?.id != window.id {
@@ -447,7 +449,11 @@ struct BibleWindowPane: View {
         }
         ctrl.onInteraction = focusHandler
         ctrl.bridge.onAnyMessage = focusHandler
+        ctrl.bridge.onNativeUserInteraction = focusHandler
         ctrl.bridge.onNativeScrollDeltaY = { deltaY in
+            if windowManager.activeWindow?.id != window.id {
+                focusHandler()
+            }
             onUserScrollDeltaY?(deltaY)
         }
         ctrl.bridge.onNativeHorizontalSwipe = { direction in
@@ -463,29 +469,55 @@ struct BibleWindowPane: View {
          - Parameter wm: Window manager that owns the source window and controller registry.
          - Returns: The existing or newly created links window, or `nil` when the manager cannot
            create another window.
-         - Side effects: may create a window, mark it as the pinned links target, attach it to the
-           source window, unminimize an existing target, and refresh visible windows.
+         - Side effects: may create or unminimize the workspace primary links window, may create a
+           chained target for a source links window, and refreshes visible windows.
          - Failure modes: returns `nil` when window creation is refused by the manager.
          */
         func prepareLinksWindow(using wm: WindowManager) -> Window? {
-            let linksWindow: Window
-            if let existingId = window.targetLinksWindowId,
-               let existing = wm.allWindows.first(where: { $0.id == existingId }) {
-                linksWindow = existing
-                if existing.layoutState == "minimized" {
-                    existing.layoutState = "split"
-                }
-            } else if let newWindow = wm.addWindow(from: window) {
-                newWindow.isLinksWindow = true
-                newWindow.isPinMode = true
-                newWindow.isSynchronized = false
-                window.targetLinksWindowId = newWindow.id
-                linksWindow = newWindow
-            } else {
-                return nil
+            wm.linksWindow(for: window)
+        }
+
+        /**
+         Runs a link-result load as soon as the destination pane controller exists.
+
+         SwiftUI creates the new pane and registers its controller on the next layout pass. Android
+         sets the links-window document in the same navigation flow, so this retries briefly instead
+         of imposing a visible fixed delay where the cloned Bible pane is shown first.
+
+         - Parameters:
+           - linksWindow: Destination window returned by `prepareLinksWindow(using:)`.
+           - wm: Window manager whose controller registry owns the destination controller.
+           - attempt: Current retry count.
+           - fallback: Source-pane work to run if the links controller never registers.
+           - action: Work to run against the destination controller.
+         - Side effects: Schedules short main-queue retries until the controller is available.
+         - Failure modes: Runs `fallback` after the retry budget is exhausted.
+         */
+        func withLinksController(
+            for linksWindow: Window,
+            using wm: WindowManager,
+            attempt: Int = 0,
+            fallback: @escaping () -> Void,
+            action: @escaping (BibleReaderController) -> Void
+        ) {
+            if let ctrl = wm.controllers[linksWindow.id] as? BibleReaderController {
+                action(ctrl)
+                return
             }
-            wm.refreshWindows()
-            return linksWindow
+
+            guard attempt < 20 else {
+                fallback()
+                return
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                withLinksController(
+                    for: linksWindow,
+                    using: wm,
+                    attempt: attempt + 1,
+                    fallback: fallback,
+                    action: action
+                )
+            }
         }
 
         // Links window support: single OSIS references open in a links window
@@ -500,11 +532,12 @@ struct BibleWindowPane: View {
             guard let wm = windowManager,
                   let linksWindow = prepareLinksWindow(using: wm) else { return }
 
-            // Navigate the links window's controller to the reference
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                if let ctrl = wm.controllers[linksWindow.id] as? BibleReaderController {
-                    ctrl.navigateTo(book: book, chapter: chapter)
-                }
+            withLinksController(
+                for: linksWindow,
+                using: wm,
+                fallback: { ctrl.navigateTo(book: book, chapter: chapter) }
+            ) { targetController in
+                targetController.navigateTo(book: book, chapter: chapter)
             }
         }
 
@@ -519,10 +552,47 @@ struct BibleWindowPane: View {
             guard let wm = windowManager,
                   let linksWindow = prepareLinksWindow(using: wm) else { return }
 
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                if let ctrl = wm.controllers[linksWindow.id] as? BibleReaderController {
-                    ctrl.loadMultiReferenceDocument(documentJSON)
+            withLinksController(
+                for: linksWindow,
+                using: wm,
+                fallback: { ctrl.loadMultiReferenceDocument(documentJSON) }
+            ) { targetController in
+                targetController.loadMultiReferenceDocument(documentJSON)
+            }
+        }
+
+        ctrl.onOpenDefinitionDocumentInLinksWindow = {
+            [weak ctrl, weak windowManager] documentJSON, renderedBook, renderedKey in
+            guard let ctrl else { return }
+            let useLinksWindow = store.getBool(.openLinksInSpecialWindowPref)
+            guard useLinksWindow else {
+                ctrl.loadDefinitionDocument(
+                    documentJSON,
+                    renderedBook: renderedBook,
+                    renderedKey: renderedKey
+                )
+                return
+            }
+
+            guard let wm = windowManager,
+                  let linksWindow = prepareLinksWindow(using: wm) else { return }
+
+            withLinksController(
+                for: linksWindow,
+                using: wm,
+                fallback: {
+                    ctrl.loadDefinitionDocument(
+                        documentJSON,
+                        renderedBook: renderedBook,
+                        renderedKey: renderedKey
+                    )
                 }
+            ) { targetController in
+                targetController.loadDefinitionDocument(
+                    documentJSON,
+                    renderedBook: renderedBook,
+                    renderedKey: renderedKey
+                )
             }
         }
     }

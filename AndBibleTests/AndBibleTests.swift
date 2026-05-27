@@ -60,6 +60,38 @@ final class AndBibleTests: XCTestCase {
     }
 
     @MainActor
+    func testWebViewCoordinatorInstallsPassiveTapRecognizerForNativeFocus() {
+        let bridge = BibleBridge()
+        let coordinator = WebViewCoordinator(bridge: bridge)
+        let webView = WKWebView()
+
+        coordinator.installSwipeRecognizersIfNeeded(on: webView)
+
+        let passiveTap = webView.gestureRecognizers?
+            .compactMap { $0 as? UITapGestureRecognizer }
+            .first { gesture in
+                !gesture.cancelsTouchesInView && gesture.delegate === coordinator
+            }
+        XCTAssertNotNil(passiveTap)
+    }
+
+    @MainActor
+    func testWebViewCoordinatorReportsNativeTapAndDragAsInteraction() {
+        let bridge = BibleBridge()
+        let coordinator = WebViewCoordinator(bridge: bridge)
+        let scrollView = UIScrollView()
+        var interactionCount = 0
+        bridge.onNativeUserInteraction = {
+            interactionCount += 1
+        }
+
+        coordinator.handleNativeTap(UITapGestureRecognizer())
+        coordinator.scrollViewWillBeginDragging(scrollView)
+
+        XCTAssertEqual(interactionCount, 2)
+    }
+
+    @MainActor
     func testBridgeEmitUsesFireAndForgetJavaScript() {
         let (bridge, recordedScripts) = makeRecordingBridge()
 
@@ -1898,6 +1930,100 @@ final class AndBibleTests: XCTestCase {
     }
 
     @MainActor
+    func testStrongsLinkEmitsVueDocumentInsteadOfNativeSheet() throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let modulePath = try makeTemporaryBundledSwordPath()
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+
+        controller.bridge(bridge, openExternalLink: "ab-w://?strong=H00430")
+
+        let addDocumentsScript = try XCTUnwrap(
+            recordedScripts().first(where: { $0.contains("emit('add_documents'") })
+        )
+        XCTAssertTrue(
+            addDocumentsScript.contains(#""type":"multi""#),
+            "Expected Strong's link to render through the Vue document pipeline. Script: \(addDocumentsScript)"
+        )
+        XCTAssertTrue(addDocumentsScript.contains(#""contentType":"strongs""#))
+        XCTAssertTrue(addDocumentsScript.contains(#""bookCategory":"DICTIONARY""#))
+        XCTAssertTrue(addDocumentsScript.contains(#""features":{"type":"hebrew","keyName":"00430"}"#))
+        XCTAssertEqual(
+            controller.renderedContentState,
+            "category=dictionary;module=StrongsHebrew;book=H00430;chapter=none;key=H00430"
+        )
+    }
+
+    @MainActor
+    func testStrongsLinkUsesLinksWindowRoutingCallbackWhenAvailable() throws {
+        let bridge = BibleBridge()
+        let modulePath = try makeTemporaryBundledSwordPath()
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        var routedPayload: (json: String, book: String, key: String)?
+        controller.onOpenDefinitionDocumentInLinksWindow = { documentJSON, renderedBook, renderedKey in
+            routedPayload = (json: documentJSON, book: renderedBook, key: renderedKey)
+        }
+
+        controller.bridge(bridge, openExternalLink: "ab-w://?strong=H00430")
+
+        let payload = try XCTUnwrap(routedPayload)
+        XCTAssertTrue(payload.json.contains(#""contentType":"strongs""#))
+        XCTAssertEqual(payload.book, "Strongs")
+        XCTAssertEqual(payload.key, "strongs")
+        XCTAssertEqual(controller.renderedContentState, BibleReaderController.emptyRenderedContentState)
+
+        let targetController = BibleReaderController(bridge: BibleBridge(), swordManagerOverride: manager)
+        targetController.loadDefinitionDocument(
+            payload.json,
+            renderedBook: payload.book,
+            renderedKey: payload.key
+        )
+        XCTAssertEqual(
+            targetController.renderedContentState,
+            "category=dictionary;module=StrongsHebrew;book=H00430;chapter=none;key=H00430"
+        )
+
+        targetController.bridge(BibleBridge(), saveState: #"{"selectedStrongsDict":"HebrewGreek"}"#)
+        XCTAssertEqual(
+            targetController.renderedContentState,
+            "category=dictionary;module=HebrewGreek;book=H00430;chapter=none;key=H00430"
+        )
+    }
+
+    @MainActor
+    func testDefinitionDocumentRequestedBeforeClientReadyReplaysAfterClientReady() throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let modulePath = try makeTemporaryBundledSwordPath()
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        let documentJSON = try XCTUnwrap(
+            controller.buildStrongsMultiDocJSON(strongs: ["H00430"], robinson: [])
+        )
+
+        controller.loadDefinitionDocument(
+            documentJSON,
+            renderedBook: "Strongs",
+            renderedKey: "strongs"
+        )
+        let scriptCountBeforeClientReady = recordedScripts().count
+
+        controller.bridgeDidSetClientReady(bridge)
+
+        let clientReadyScripts = Array(recordedScripts().dropFirst(scriptCountBeforeClientReady))
+        let addDocumentsScript = try XCTUnwrap(
+            clientReadyScripts.first(where: { $0.contains("emit('add_documents'") })
+        )
+        XCTAssertTrue(addDocumentsScript.contains(#""contentType":"strongs""#))
+        XCTAssertTrue(addDocumentsScript.contains(#""features":{"type":"hebrew","keyName":"00430"}"#))
+        XCTAssertFalse(addDocumentsScript.contains(#""osisRef":"Gen.1""#))
+        XCTAssertEqual(
+            controller.renderedContentState,
+            "category=dictionary;module=StrongsHebrew;book=H00430;chapter=none;key=H00430"
+        )
+    }
+
+    @MainActor
     func testLoadCurrentContentEmitsBookIntroAndChapterMarkerForSecondCorinthiansOne() throws {
         let (bridge, recordedScripts) = makeRecordingBridge()
         let modulePath = try makeTemporaryBundledSwordPath()
@@ -2873,6 +2999,119 @@ final class AndBibleTests: XCTestCase {
         XCTAssertTrue(createdWindow.historyItems?.isEmpty ?? true)
         XCTAssertEqual(createdWindow.pageManager?.currentCategoryName, "bible")
         XCTAssertNil(createdWindow.pageManager?.textDisplaySettings)
+    }
+
+    func testWindowManagerRoutesNormalWindowsThroughPrimaryLinksWindowAtEnd() throws {
+        let container = try makeWorkspaceModelContainer()
+        let context = ModelContext(container)
+        let workspaceStore = WorkspaceStore(modelContext: context)
+        let windowManager = WindowManager(workspaceStore: workspaceStore)
+        let workspace = workspaceStore.createWorkspace(name: "Links")
+        let firstWindow = try XCTUnwrap(workspaceStore.windows(workspaceId: workspace.id).first)
+        windowManager.setActiveWorkspace(workspace)
+        let secondWindow = try XCTUnwrap(windowManager.addWindow(from: firstWindow))
+        windowManager.activeWindow = firstWindow
+
+        let firstLinksWindow = try XCTUnwrap(windowManager.linksWindow(for: firstWindow))
+
+        XCTAssertTrue(firstLinksWindow.isLinksWindow)
+        XCTAssertTrue(firstLinksWindow.isPinMode)
+        XCTAssertFalse(firstLinksWindow.isSynchronized)
+        XCTAssertEqual(workspace.primaryTargetLinksWindowId, firstLinksWindow.id)
+        XCTAssertNil(firstWindow.targetLinksWindowId)
+        XCTAssertEqual(
+            windowManager.visibleWindows.map(\.id),
+            [firstWindow.id, secondWindow.id, firstLinksWindow.id]
+        )
+
+        windowManager.activeWindow = secondWindow
+        let secondLinksWindow = try XCTUnwrap(windowManager.linksWindow(for: secondWindow))
+
+        XCTAssertEqual(secondLinksWindow.id, firstLinksWindow.id)
+        XCTAssertNil(secondWindow.targetLinksWindowId)
+        XCTAssertEqual(
+            windowManager.visibleWindows.map(\.id),
+            [firstWindow.id, secondWindow.id, firstLinksWindow.id]
+        )
+    }
+
+    func testWindowManagerRepairsStalePrimaryLinksWindowToExistingLinksWindow() throws {
+        let container = try makeWorkspaceModelContainer()
+        let context = ModelContext(container)
+        let workspaceStore = WorkspaceStore(modelContext: context)
+        let windowManager = WindowManager(workspaceStore: workspaceStore)
+        let workspace = workspaceStore.createWorkspace(name: "Stale Links")
+        let firstWindow = try XCTUnwrap(workspaceStore.windows(workspaceId: workspace.id).first)
+        windowManager.setActiveWorkspace(workspace)
+        let originalLinksWindow = try XCTUnwrap(windowManager.linksWindow(for: firstWindow))
+        workspace.primaryTargetLinksWindowId = UUID()
+
+        let repairedLinksWindow = try XCTUnwrap(windowManager.linksWindow(for: firstWindow))
+
+        XCTAssertEqual(repairedLinksWindow.id, originalLinksWindow.id)
+        XCTAssertTrue(repairedLinksWindow.isLinksWindow)
+        XCTAssertEqual(workspace.primaryTargetLinksWindowId, repairedLinksWindow.id)
+    }
+
+    func testWindowManagerRestoresMinimizedPrimaryLinksWindowAndFocusesIt() throws {
+        let container = try makeWorkspaceModelContainer()
+        let context = ModelContext(container)
+        let workspaceStore = WorkspaceStore(modelContext: context)
+        let windowManager = WindowManager(workspaceStore: workspaceStore)
+        let workspace = workspaceStore.createWorkspace(name: "Restore Links")
+        let firstWindow = try XCTUnwrap(workspaceStore.windows(workspaceId: workspace.id).first)
+        windowManager.setActiveWorkspace(workspace)
+        let linksWindow = try XCTUnwrap(windowManager.linksWindow(for: firstWindow))
+        windowManager.minimizeWindow(linksWindow)
+        windowManager.activeWindow = firstWindow
+
+        let restoredLinksWindow = try XCTUnwrap(windowManager.linksWindow(for: firstWindow))
+
+        XCTAssertEqual(restoredLinksWindow.id, linksWindow.id)
+        XCTAssertEqual(restoredLinksWindow.layoutState, "split")
+        XCTAssertEqual(windowManager.activeWindow?.id, linksWindow.id)
+        XCTAssertTrue(windowManager.visibleWindows.contains(where: { $0.id == linksWindow.id }))
+    }
+
+    func testWindowManagerDisplaysPinnedWindowsBeforeUnpinnedWindows() throws {
+        let container = try makeWorkspaceModelContainer()
+        let context = ModelContext(container)
+        let workspaceStore = WorkspaceStore(modelContext: context)
+        let windowManager = WindowManager(workspaceStore: workspaceStore)
+        let workspace = workspaceStore.createWorkspace(name: "Pinned Order")
+        let firstWindow = try XCTUnwrap(workspaceStore.windows(workspaceId: workspace.id).first)
+        windowManager.setActiveWorkspace(workspace)
+        let secondWindow = try XCTUnwrap(windowManager.addWindow(from: firstWindow))
+        firstWindow.isPinMode = false
+        firstWindow.orderNumber = 0
+        secondWindow.isPinMode = true
+        secondWindow.orderNumber = 1
+
+        windowManager.refreshWindows()
+
+        XCTAssertEqual(windowManager.visibleWindows.map(\.id), [secondWindow.id, firstWindow.id])
+    }
+
+    func testWindowManagerGivesLinksWindowsTheirOwnChainedTarget() throws {
+        let container = try makeWorkspaceModelContainer()
+        let context = ModelContext(container)
+        let workspaceStore = WorkspaceStore(modelContext: context)
+        let windowManager = WindowManager(workspaceStore: workspaceStore)
+        let workspace = workspaceStore.createWorkspace(name: "Nested Links")
+        let firstWindow = try XCTUnwrap(workspaceStore.windows(workspaceId: workspace.id).first)
+        windowManager.setActiveWorkspace(workspace)
+        let primaryLinksWindow = try XCTUnwrap(windowManager.linksWindow(for: firstWindow))
+
+        let nestedLinksWindow = try XCTUnwrap(windowManager.linksWindow(for: primaryLinksWindow))
+
+        XCTAssertNotEqual(nestedLinksWindow.id, primaryLinksWindow.id)
+        XCTAssertTrue(nestedLinksWindow.isLinksWindow)
+        XCTAssertEqual(workspace.primaryTargetLinksWindowId, primaryLinksWindow.id)
+        XCTAssertEqual(primaryLinksWindow.targetLinksWindowId, nestedLinksWindow.id)
+        XCTAssertEqual(
+            windowManager.visibleWindows.map(\.id),
+            [firstWindow.id, primaryLinksWindow.id, nestedLinksWindow.id]
+        )
     }
 
     func testWorkspaceSelectionServicePersistsSelectedWorkspace() throws {
