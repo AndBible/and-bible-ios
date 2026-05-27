@@ -185,7 +185,7 @@ public protocol BibleBridgeDelegate: AnyObject {
     func bridge(_ bridge: BibleBridge, shareBookmarkVerse bookmarkId: String)
     /// Copies the selected verse range to the system pasteboard.
     func bridge(_ bridge: BibleBridge, copyVerse bookInitials: String, startOrdinal: Int, endOrdinal: Int)
-    /// Opens the compare view for the selected verse range.
+    /// Requests an Android-style compare document for the selected verse range.
     func bridge(_ bridge: BibleBridge, compareVerses bookInitials: String, startOrdinal: Int, endOrdinal: Int)
     /// Starts text-to-speech playback for the selected verse range and versification.
     func bridge(_ bridge: BibleBridge, speak bookInitials: String, v11n: String, startOrdinal: Int, endOrdinal: Int)
@@ -291,7 +291,7 @@ public protocol BibleBridgeDelegate: AnyObject {
     func bridge(_ bridge: BibleBridge, showToast text: String)
     /// Shares HTML rendered by the client rather than plain verse text.
     func bridge(_ bridge: BibleBridge, shareHtml html: String)
-    /// Toggles a compare document on or off in the native compare state.
+    /// Toggles a compare document on or off in the shared Vue reader state.
     func bridge(_ bridge: BibleBridge, toggleCompareDocument documentId: String)
 
     // MARK: - EPUB Navigation

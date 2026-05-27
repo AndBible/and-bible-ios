@@ -1,6 +1,6 @@
 # READER-702 Regression Report
 
-Date: 2026-05-25
+Date: 2026-05-26
 
 ## Scope
 
@@ -13,7 +13,7 @@ This is the current validation snapshot for the reader surface. It covers:
 - restored-position highlight behavior in the emitted reader payload
 - reader config/appSettings payload construction for embedded-client display and active-window state
 - double-tap fullscreen preference gating
-- bridge-driven compare presentation payload construction
+- bridge-driven compare document-pipeline payload construction
 - horizontal swipe-mode dispatch policy
 - Vue modal-state host-navigation gating
 - auto-fullscreen scroll-threshold policy
@@ -44,7 +44,7 @@ Related domain references:
   - focused reader/controller payload subset on `test/reader-config-payload-coverage`
   - focused reader gesture/fullscreen policy subset on `test/reader-fullscreen-swipe-coverage`
   - focused reader modal-state bridge/policy subset on `fix/125-vue-modal-state`
-  - focused reader compare bridge subset on `test/reader-compare-workflow-coverage`
+  - focused reader compare bridge subset on `fix/123-compare-vue-pipeline`
 
 ## Tests Executed
 
@@ -55,7 +55,7 @@ Related domain references:
 - `AndBibleTests/testReaderConfigPayloadIncludesDisplaySettingsAndActiveWindowState`
 - `AndBibleTests/testReaderConfigPayloadMarksInactiveWindowWithoutActiveIndicator`
 - `AndBibleTests/testDoubleTapFullscreenPreferenceGateControlsNativeToggleRequest`
-- `AndBibleTests/testReaderCompareBridgeRequestBuildsNativePresentationPayload`
+- `AndBibleTests/testReaderCompareBridgeRequestEmitsVueCompareDocument`
 - `AndBibleTests/testReaderHorizontalSwipePolicyMapsConfiguredModes`
 - `AndBibleTests/testReaderBridgeModalStateBlocksKeyNavigationAndRequestsClose`
 - `AndBibleTests/testAutoFullscreenPolicyAccumulatesThresholdByDirection`
@@ -119,26 +119,27 @@ Related domain references:
   changes, enter/exit fullscreen only after the threshold, reset when disabled,
   and do not auto-toggle when fullscreen was entered by double tap
 
-### Compare presentation payload
+### Compare document payload
 
-- embedded-client `compare` bridge messages are classified as handled and reach
-  the controller's native compare presentation callback
-- the callback receives the active reader book, chapter, current module name,
-  and normalized start/end verse numbers derived from the web ordinal range
-- this protects the current bridge payload path only; #123 tracks replacing the
-  native Compare sheet with the Android-aligned document-pipeline flow
+- embedded-client `compare` bridge messages are classified as handled and emit
+  a Vue `MultiDocument` payload with `compare: true`
+- the payload carries the active Bible module as a compare fragment, preserves
+  the selected OSIS range, and exposes the module name for Vue hide/restore
+  controls
+- reader overflow Compare also routes through `loadCompareDocument(...)` instead
+  of presenting a native Swift sheet
 
 ## Current Result
 
-Latest focused reader compare validation passed on 2026-05-09:
+Latest focused reader compare validation passed on 2026-05-26:
 
-- focused issue #41 subset: `1/1`
-- command: `xcodebuild test -project AndBible.xcodeproj -scheme AndBible -destination 'platform=iOS Simulator,id=73679934-67DF-45BE-AEAC-186E2396213C' CODE_SIGNING_ALLOWED=NO -only-testing:AndBibleTests/AndBibleTests/testReaderCompareBridgeRequestBuildsNativePresentationPayload`
+- focused issue #123 subset: `6/6`
+- command: `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -project AndBible.xcodeproj -scheme AndBible -destination 'platform=iOS Simulator,name=iPhone 17' -derivedDataPath /private/tmp/andbible-dd-123 test -only-testing:AndBibleTests/AndBibleTests/testReaderCompareBridgeRequestEmitsVueCompareDocument -only-testing:AndBibleTests/AndBibleTests/testToggleCompareDocumentPersistsWorkspaceHiddenStateAndReemitsConfig -only-testing:AndBibleTests/AndBibleTests/testReaderConfigPayloadIncludesDisplaySettingsAndActiveWindowState -only-testing:AndBibleTests/AndBibleTests/testMultiReferenceLinkEmitsVueMultiDocumentInsteadOfCrossReferenceSheet -only-testing:AndBibleTests/AndBibleTests/testMultiReferenceOsisLinkEmitsVueMultiDocumentInsteadOfCrossReferenceSheet -only-testing:AndBibleTests/AndBibleTests/testSingleOsisReferenceStillNavigatesWithoutMultiDocument`
 
-Latest full non-UI XCTest validation passed on 2026-05-09:
+Latest full non-UI XCTest validation passed on 2026-05-26:
 
-- `AndBibleTests`: `207/207`
-- command: `xcodebuild test -project AndBible.xcodeproj -scheme AndBible -destination 'platform=iOS Simulator,id=73679934-67DF-45BE-AEAC-186E2396213C' CODE_SIGNING_ALLOWED=NO -only-testing:AndBibleTests`
+- `AndBibleTests`: `253/253`
+- command: `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -project AndBible.xcodeproj -scheme AndBible -destination 'platform=iOS Simulator,name=iPhone 17' -derivedDataPath /private/tmp/andbible-dd-123 test -only-testing:AndBibleTests`
 
 Latest focused reader gesture/fullscreen validation passed on 2026-05-08:
 
@@ -172,7 +173,7 @@ Taken together, this gives the reader domain current regression evidence for:
 - payload-level restore/highlight behavior
 - payload-level config/appSettings propagation into the embedded document client
 - double-tap fullscreen preference gating
-- bridge-driven compare presentation payload construction
+- bridge-driven compare document-pipeline payload construction
 - horizontal swipe-mode dispatch policy
 - Vue modal-state host-navigation gating
 - auto-fullscreen threshold and lockout policy
@@ -190,7 +191,6 @@ The reader shell baseline is in much better shape now. The parts that still
 need implementation and/or tighter protection are:
 
 - #8 Strong's / dictionary document-pipeline routing and focused regression coverage
-- #123 Compare document-pipeline routing
 - #124 multi-reference / cross-reference document-pipeline routing
 
 Those areas show up as `Partial` in

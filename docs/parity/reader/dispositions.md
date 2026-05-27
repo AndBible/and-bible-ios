@@ -39,25 +39,25 @@ Why this is fine:
 - This disposition covers gesture plumbing only. Vue modal-open host gating is
   covered separately by the modal-state contract row in the verification matrix.
 
-## 3. Compare native sheet presentation is reclassified as drift
+## 3. Compare uses the shared document pipeline
 
-- Status: confirmed parity drift, tracked by #123
+- Status: resolved parity drift, tracked by #123
 
 What we do:
 
-- Bridge-driven compare requests are currently presented through UIKit/SwiftUI
-  sheet presentation.
+- Bridge-driven and reader-overflow Compare requests now build the same
+  `compare: true` `MultiDocument` payload shape Android uses.
+- The shared Vue `MultiDocument` path owns translation display, hide buttons,
+  and restore behavior.
 
-Why this is not a disposition anymore:
+Why this is not a native iOS disposition:
 
 - Android opens Compare through the fake compare document and Vue renders it
   with the shared `MultiDocument` path, including hide/restore translation
   behavior.
-- The iOS native sheet is useful current behavior, but it should not be treated
-  as the intended Android-parity endpoint.
-- The intended endpoint is to replace the native sheet with the shared
-  Vue/document compare flow unless a future ADR records a real iOS-only
-  exception.
+- The retired native iOS sheet is not the intended Android-parity endpoint.
+- A future native Compare path would need its own ADR with a real iOS-only
+  constraint or product requirement.
 
 ## 4. Reader fullscreen is coordinated by native shell state
 
