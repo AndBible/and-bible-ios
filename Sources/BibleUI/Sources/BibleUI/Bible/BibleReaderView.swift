@@ -12,66 +12,6 @@ import SwordKit
 import StoreKit
 #endif
 
-#if os(iOS)
-/**
- Presents `CompareView` from UIKit instead of SwiftUI sheet state.
-
- This entry point is used by bridge-driven actions that originate from the embedded WKWebView,
- where no SwiftUI view state mutation hook is available at the call site.
-
- - Parameters:
-   - book: User-visible book name for the comparison session.
-   - chapter: One-based chapter number to compare.
-   - currentModuleName: Active Bible module that should anchor the comparison.
-   - startVerse: Optional starting verse for range-limited comparisons.
-   - endVerse: Optional ending verse for range-limited comparisons.
-   - osisBookId: Optional OSIS book identifier when the caller already resolved it.
- - Important: This function walks UIKit presentation state and presents a page sheet from the
-   top-most view controller. It should only be called on iOS.
- - Failure modes: If no active `UIWindowScene` or root view controller is available, the function
-   returns without presenting anything.
- */
-func presentCompareView(book: String, chapter: Int, currentModuleName: String, startVerse: Int? = nil, endVerse: Int? = nil, osisBookId: String? = nil) {
-    guard let windowScene = UIApplication.shared.connectedScenes
-        .compactMap({ $0 as? UIWindowScene }).first,
-          let rootVC = windowScene.windows.first?.rootViewController else { return }
-
-    var topVC = rootVC
-    while let presented = topVC.presentedViewController {
-        topVC = presented
-    }
-
-    let content = CompareView(book: book, chapter: chapter, currentModuleName: currentModuleName, startVerse: startVerse, endVerse: endVerse, resolvedOsisBookId: osisBookId)
-    let hostingVC = UIHostingController(rootView: NavigationStack { content })
-    hostingVC.modalPresentationStyle = .pageSheet
-    if let sheet = hostingVC.sheetPresentationController {
-        sheet.detents = [.medium(), .large()]
-        sheet.prefersScrollingExpandsWhenScrolledToEdge = true
-    }
-    topVC.present(hostingVC, animated: true)
-}
-
-// Label assignment is now presented via SwiftUI .sheet() in BibleWindowPane
-// (no UIKit hosting needed — avoids gesture/toolbar conflicts)
-#else
-/**
- No-op macOS placeholder for UIKit-only compare-sheet presentation requests.
-
- - Parameters:
-   - book: Ignored on macOS.
-   - chapter: Ignored on macOS.
-   - currentModuleName: Ignored on macOS.
-   - startVerse: Ignored on macOS.
-   - endVerse: Ignored on macOS.
-   - osisBookId: Ignored on macOS.
- - Note: Compare presentation on macOS is currently handled through native SwiftUI paths only.
- */
-func presentCompareView(book: String, chapter: Int, currentModuleName: String, startVerse: Int? = nil, endVerse: Int? = nil, osisBookId: String? = nil) {
-    // macOS: no-op for now
-}
-// Label assignment presented via SwiftUI .sheet() in BibleWindowPane (cross-platform)
-#endif
-
 /// Captures the reader overflow trigger bounds so the popup can anchor to the real button.
 private struct ReaderOverflowButtonBoundsPreferenceKey: PreferenceKey {
     static var defaultValue: Anchor<CGRect>?
@@ -169,7 +109,6 @@ public struct BibleReaderView: View {
     private enum ReaderModal: String, Identifiable {
         case syncSettings
         case importExport
-        case compare
         case speakControls
         case modulePicker
         case dictionaryBrowser
@@ -198,7 +137,6 @@ public struct BibleReaderView: View {
     /// Internal reader-overflow destinations that should run only after the overflow sheet dismisses.
     private enum ReaderOverflowPresentation {
         case labelManager
-        case compare
         case bookmarks
         case history
         case readingPlans
@@ -868,15 +806,6 @@ public struct BibleReaderView: View {
                         }
                     }
             }
-        case .compare:
-            NavigationStack {
-                CompareView(
-                    book: panePresentationController?.currentBook ?? "Genesis",
-                    chapter: panePresentationController?.currentChapter ?? 1,
-                    currentModuleName: panePresentationController?.activeModuleName ?? "",
-                    resolvedOsisBookId: panePresentationController.flatMap { $0.osisBookId(for: $0.currentBook) }
-                )
-            }
         case .speakControls:
             SpeakControlView(speakService: speakService)
                 .presentationDetents([.height(400), .large])
@@ -1152,8 +1081,6 @@ public struct BibleReaderView: View {
             switch presentation {
             case .labelManager:
                 presentReaderModal(.labelManager)
-            case .compare:
-                presentReaderModal(.compare, from: windowManager.activeWindow?.id)
             case .bookmarks:
                 presentReaderSheet(.bookmarks, from: windowManager.activeWindow?.id)
             case .history:
@@ -1238,7 +1165,7 @@ public struct BibleReaderView: View {
             onShowDownloads: { presentReaderSheet(.downloads, from: window.id) },
             onShowHistory: { presentReaderSheet(.history, from: window.id) },
             onShowCompare: {
-                presentReaderModal(.compare, from: window.id)
+                (windowManager.controllers[window.id] as? BibleReaderController)?.loadCompareDocument()
             },
             onShowReadingPlans: { presentReaderSheet(.readingPlans, from: window.id) },
             onShowReadingProgress: { tab in

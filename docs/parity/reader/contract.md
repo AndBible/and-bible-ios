@@ -148,10 +148,10 @@ behaviors:
   Android uses for the fake compare document
 - synchronized window scrolling and active-window signaling
 
-The current native iOS Compare sheet is tracked as remaining parity drift in
-#123. Its existing payload coverage protects the bridge request, but should not
-be read as evidence that the native sheet is the intended final parity shape.
-The intended endpoint is the shared compare document flow.
+iOS now resolves Compare through the same embedded `MultiDocument` payload shape
+Android uses for the fake compare document. The reader keeps selection and
+overflow entry points, while hidden-translation and restore behavior remain
+owned by the shared Vue document config rather than a native sheet.
 
 ## Multi-Reference and Cross-Reference Routing
 

@@ -9,7 +9,6 @@ someone is changing:
 - `Sources/BibleUI/Sources/BibleUI/Bible/BibleReaderController.swift`
 - `Sources/BibleUI/Sources/BibleUI/Bible/BibleReaderInteractionPolicies.swift`
 - `Sources/BibleUI/Sources/BibleUI/Bible/BibleWindowPane.swift`
-- `Sources/BibleUI/Sources/BibleUI/Bible/CompareView.swift`
 - `Sources/BibleUI/Sources/BibleUI/Bible/CrossReferenceView.swift`
 - `Sources/BibleUI/Sources/BibleUI/Bible/StrongsSheetView.swift`
 - `Sources/BibleView/Sources/BibleView/WebViewCoordinator.swift`

@@ -405,12 +405,6 @@ struct BibleWindowPane: View {
         ctrl.onShowReadingProgress = { tab in onShowReadingProgress?(tab) }
         ctrl.onShowReadingProgressSettings = { onShowReadingProgressSettings?() }
         ctrl.onShowChapterReadHistory = { target in onShowChapterReadHistory?(target) }
-        ctrl.onCompareVerses = { [weak ctrl] book, chapter, moduleName, startVerse, endVerse in
-            #if os(iOS)
-            let osisId = ctrl?.osisBookId(for: book)
-            presentCompareView(book: book, chapter: chapter, currentModuleName: moduleName, startVerse: startVerse, endVerse: endVerse, osisBookId: osisId)
-            #endif
-        }
         ctrl.onAssignLabels = { bookmarkId in
             logger.info("onAssignLabels triggered: bookmarkId=\(bookmarkId)")
             pendingLabelBookmarkId = bookmarkId

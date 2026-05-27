@@ -1524,9 +1524,12 @@ final class AndBibleTests: XCTestCase {
         XCTAssertEqual(controller.readingProgressStore?.snapshot().settings, settings)
     }
 
-    func testReaderCompareBridgeRequestBuildsNativePresentationPayload() throws {
-        let bridge = BibleBridge()
-        let controller = BibleReaderController(bridge: bridge)
+    @MainActor
+    func testReaderCompareBridgeRequestEmitsVueCompareDocument() throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let modulePath = try makeTemporaryBundledSwordPath()
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
         let secondCorinthians = try XCTUnwrap(
             controller.bookList.first(where: { $0.osisId == "2Cor" })?.name
         )
@@ -1541,17 +1544,6 @@ final class AndBibleTests: XCTestCase {
 
         controller.navigateTo(book: secondCorinthians, chapter: chapter, verse: 1)
 
-        var receivedPayload: (
-            book: String,
-            chapter: Int,
-            moduleName: String,
-            startVerse: Int?,
-            endVerse: Int?
-        )?
-        controller.onCompareVerses = { book, chapter, moduleName, startVerse, endVerse in
-            receivedPayload = (book, chapter, moduleName, startVerse, endVerse)
-        }
-
         XCTAssertEqual(
             bridge.dispatchMessage(
                 method: "compare",
@@ -1559,13 +1551,29 @@ final class AndBibleTests: XCTestCase {
             ),
             .handled
         )
+        let deadline = Date(timeIntervalSinceNow: 2.0)
+        var emittedAddDocumentsScript: String?
+        while emittedAddDocumentsScript == nil && Date() < deadline {
+            emittedAddDocumentsScript = recordedScripts().first(where: { $0.contains("emit('add_documents'") })
+            if emittedAddDocumentsScript == nil {
+                RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.02))
+            }
+        }
 
-        let payload = try XCTUnwrap(receivedPayload)
-        XCTAssertEqual(payload.book, secondCorinthians)
-        XCTAssertEqual(payload.chapter, chapter)
-        XCTAssertEqual(payload.moduleName, activeModuleName)
-        XCTAssertEqual(payload.startVerse, startVerse)
-        XCTAssertEqual(payload.endVerse, endVerse)
+        let addDocumentsScript = try XCTUnwrap(
+            emittedAddDocumentsScript,
+            "Expected compare to emit an add_documents script after background payload creation"
+        )
+        XCTAssertTrue(
+            addDocumentsScript.contains(#""type":"multi""#),
+            "Expected compare to render through Vue MultiDocument. Script: \(addDocumentsScript)"
+        )
+        XCTAssertTrue(addDocumentsScript.contains(#""compare":true"#))
+        XCTAssertTrue(addDocumentsScript.contains(#""bookCategory":"BIBLE""#))
+        XCTAssertTrue(addDocumentsScript.contains(#""bookInitials":"\#(activeModuleName)""#))
+        XCTAssertTrue(addDocumentsScript.contains(#""bookAbbreviation":"\#(activeModuleName)""#))
+        XCTAssertTrue(addDocumentsScript.contains(#""osisRef":"2Cor.2.5-2Cor.2.7""#))
+        XCTAssertTrue(addDocumentsScript.contains(#""keyName":"\#(secondCorinthians) 2:5-7""#))
     }
 
     func testDoubleTapFullscreenPreferenceGateControlsNativeToggleRequest() throws {
@@ -2083,7 +2091,8 @@ final class AndBibleTests: XCTestCase {
         let autoAssignLabelId = try XCTUnwrap(UUID(uuidString: "22222222-2222-2222-2222-222222222222"))
         workspace.workspaceSettings = WorkspaceSettings(
             autoAssignLabels: [autoAssignLabelId],
-            studyPadCursors: [studyPadCursorId: 7]
+            studyPadCursors: [studyPadCursorId: 7],
+            hideCompareDocuments: ["KJV", "ESV"]
         )
         let firstWindow = try XCTUnwrap(workspaceStore.windows(workspaceId: workspace.id).first)
         windowManager.setActiveWorkspace(workspace)
@@ -2150,7 +2159,6 @@ final class AndBibleTests: XCTestCase {
         controller.nightMode = true
         controller.activeWindow = firstWindow
         controller.windowManagerRef = windowManager
-        controller.hiddenCompareDocuments = ["KJV", "ESV"]
 
         controller.bridgeDidSetClientReady(bridge)
 
@@ -2313,6 +2321,39 @@ final class AndBibleTests: XCTestCase {
             Set(try XCTUnwrap(appSettings["enabledExperimentalFeatures"] as? [String])),
             ["add_paragraph_break", "bookmark_edit_actions"]
         )
+    }
+
+    @MainActor
+    func testToggleCompareDocumentPersistsWorkspaceHiddenStateAndReemitsConfig() throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let container = try makeWorkspaceModelContainer()
+        let context = ModelContext(container)
+        let workspaceStore = WorkspaceStore(modelContext: context)
+        let workspace = workspaceStore.createWorkspace(name: "Compare State")
+        workspace.workspaceSettings = WorkspaceSettings(hideCompareDocuments: ["ESV"])
+        let window = try XCTUnwrap(workspaceStore.windows(workspaceId: workspace.id).first)
+        let controller = BibleReaderController(bridge: bridge)
+        controller.activeWindow = window
+
+        var persistCount = 0
+        controller.onPersistState = {
+            persistCount += 1
+            try? context.save()
+        }
+
+        controller.bridgeDidSetClientReady(bridge)
+        let initialPayload = try setConfigPayload(from: recordedScripts())
+        let initialAppSettings = try XCTUnwrap(initialPayload["appSettings"] as? [String: Any])
+        XCTAssertEqual(Set(try XCTUnwrap(initialAppSettings["hideCompareDocuments"] as? [String])), ["ESV"])
+
+        let initialScriptCount = recordedScripts().count
+        XCTAssertEqual(bridge.dispatchMessage(method: "toggleCompareDocument", args: ["KJV"]), .handled)
+
+        XCTAssertEqual(workspace.workspaceSettings?.hideCompareDocuments, ["ESV", "KJV"])
+        XCTAssertEqual(persistCount, 1)
+        let togglePayload = try setConfigPayload(from: Array(recordedScripts().dropFirst(initialScriptCount)))
+        let toggleAppSettings = try XCTUnwrap(togglePayload["appSettings"] as? [String: Any])
+        XCTAssertEqual(Set(try XCTUnwrap(toggleAppSettings["hideCompareDocuments"] as? [String])), ["ESV", "KJV"])
     }
 
     @MainActor
