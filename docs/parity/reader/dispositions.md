@@ -73,25 +73,25 @@ Why this is fine:
 - On iOS, hiding chrome, overlays, and bars is coordinated above the WebView,
   not inside the client bundle alone.
 
-## 5. Dedicated Strong's native sheet presentation is reclassified as drift
+## 5. Strong's / dictionary routing uses the shared document pipeline
 
-- Status: confirmed parity drift, tracked by #8
+- Status: resolved parity drift
 
 What we do:
 
-- iOS presents the Strong's / dictionary surface as a native bottom sheet.
-- Inside that sheet, iOS now routes Strong's content through the dedicated
-  `StrongsDocument` client path with tabbed per-dictionary rendering, rather
-  than relying on generic multi-document rendering.
+- iOS presents Strong's / dictionary results as transient reader documents.
+- The reader controller emits the dedicated `contentType: "strongs"`
+  `StrongsDocument` payload and the pane owner decides whether to render it in
+  the current pane or the configured links target window.
 
-Why this is not a disposition anymore:
+Why this is the parity endpoint:
 
-- Preserving `contentType: "strongs"` fixed an important embedded-client
-  rendering gap, but Android still owns Strong's through the normal
-  document/window pipeline.
-- The remaining iOS-native sheet ownership is tracked as drift by #8.
-- The intended endpoint is to replace the native sheet with the shared
-  Vue/document pipeline while preserving the Strong's-specific route.
+- Android routes Strong's through normal document/window handling rather than an
+  iOS-only native sheet.
+- The shared Vue route still owns the Strong's-specific tabbed rendering,
+  recursive Strong's navigation, morphology fragments, and "Find all
+  occurrences" links.
+- Reintroducing a native sheet would be a new parity decision, not a cleanup.
 
 ## 6. Some parity-sensitive reader inputs remain constrained by platform limits
 

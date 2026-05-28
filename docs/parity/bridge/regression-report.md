@@ -63,6 +63,8 @@ Related domain references:
 - `AndBibleTests/testParseRefSendsResponseWithOriginalCallId`
 - `AndBibleTests/testMyDocumentRawContentBridgeSendsAndroidCompatiblePayloadAndNullFallback`
 - `AndBibleTests/testMyDocumentEditBridgePersistsContentAndReloadsVisiblePage`
+- `AndBibleTests/testStrongsLinkEmitsVueDocumentInsteadOfNativeSheet`
+- `AndBibleTests/testStrongsLinkUsesLinksWindowRoutingCallbackWhenAvailable`
 
 ### UI
 
@@ -114,6 +116,8 @@ Related domain references:
 
 - representative `OsisFragment`, label/style, and selection-query payloads preserve the key names
   expected by `bibleview-js/src/types/client-objects.ts` and `bibleview-js/src/composables/android.ts`
+- Strong's payloads preserve the dedicated `contentType: "strongs"` route while using the
+  shared reader document/window pipeline instead of a native sheet
 
 ## Historical Result And Current Interpretation
 
@@ -159,8 +163,8 @@ The pieces that still need tighter protection are:
   behavior, AI bridge methods are deferred through #89, #90, #91,
   and #92, and no current iOS no-op method remains in "needs decision" status
 - raw `window.android.*` compatibility-shim behavior on a per-method basis
-- Strong's document-route bridge coverage, especially the dedicated
-  `contentType: "strongs"` route; native sheet routing remains tracked by #8
+- broader Strong's document-route bridge coverage beyond the focused
+  `contentType: "strongs"` and links-window routing checks
 - fullscreen, compare, help, and full reference-dialog UI workflows
 - positive delegate-callback assertions across the full JS-to-native message surface
 - generated or full-surface payload-shape parity checks between `BridgeTypes.swift` and

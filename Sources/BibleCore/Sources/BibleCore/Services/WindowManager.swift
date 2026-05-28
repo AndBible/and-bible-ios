@@ -85,7 +85,8 @@ public final class WindowManager {
 
     /**
      Refresh the visible windows list from the active workspace.
-     Respects maximized state and filters minimized windows.
+     Respects maximized state, filters minimized windows, and applies Android's display grouping
+     so links windows render after normal content panes without mutating persisted order numbers.
      */
     public func refreshWindows() {
         guard let workspace = activeWorkspace else {
@@ -93,7 +94,7 @@ public final class WindowManager {
             allWindows = []
             return
         }
-        allWindows = workspaceStore.windows(workspaceId: workspace.id)
+        allWindows = displayOrderedWindows(workspaceStore.windows(workspaceId: workspace.id))
 
         // If a window is maximized, only show that one
         if let maxId = workspace.maximizedWindowId,
@@ -109,6 +110,63 @@ public final class WindowManager {
     }
 
     // MARK: - Window Lifecycle
+
+    /**
+     Resolves the Android-style links target window for a source window.
+
+     Normal content windows route link results into the workspace primary links window, reusing an
+     existing links window before creating a new one. Links windows keep their own chained target
+     through `targetLinksWindowId`, matching Android's recursive links-window behavior.
+
+     - Parameter sourceWindow: Window that initiated the link navigation.
+     - Returns: Existing or newly created links window, or `nil` when no workspace is active or
+       creation fails.
+     - Side Effects: May create a window, mark it as a links target, update
+       `primaryTargetLinksWindowId` or `targetLinksWindowId`, unminimize an existing target, adjust
+       active-window focus when restoring a hidden target, and refresh the visible window lists.
+     - Failure Modes: Returns `nil` if there is no active workspace or `addWindow` cannot create a
+       target window.
+     - Note: Newly created visible links windows do not steal focus from the source window; Android
+       only switches focus when an existing hidden links window is restored.
+     */
+    @discardableResult
+    public func linksWindow(for sourceWindow: Window) -> Window? {
+        guard activeWorkspace != nil else { return nil }
+
+        let previousActiveWindow = activeWindow
+        var createdLinksWindow = false
+        let linksWindow: Window
+
+        if sourceWindow.isLinksWindow {
+            if let existing = explicitLinksWindowTarget(for: sourceWindow) {
+                linksWindow = existing
+            } else if let newWindow = createLinksWindow(from: sourceWindow) {
+                sourceWindow.targetLinksWindowId = newWindow.id
+                linksWindow = newWindow
+                createdLinksWindow = true
+            } else {
+                return nil
+            }
+        } else if let existing = primaryLinksWindow() {
+            linksWindow = existing
+        } else if let newWindow = createLinksWindow(from: sourceWindow) {
+            activeWorkspace?.primaryTargetLinksWindowId = newWindow.id
+            linksWindow = newWindow
+            createdLinksWindow = true
+        } else {
+            return nil
+        }
+
+        if linksWindow.layoutState == "minimized" {
+            linksWindow.layoutState = "split"
+            activeWindow = linksWindow
+        } else if createdLinksWindow, let previousActiveWindow {
+            activeWindow = previousActiveWindow
+        }
+
+        refreshWindows()
+        return linksWindow
+    }
 
     /// Minimize a window (hides it from the visible list).
     public func minimizeWindow(_ window: Window) {
@@ -217,5 +275,96 @@ public final class WindowManager {
         }
         syncWorkItem = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2, execute: work)
+    }
+
+    /**
+     Orders windows using Android's visible/tab grouping without mutating persisted order numbers.
+
+     Android sorts normal pinned panes first, normal unpinned panes second, and links windows last.
+     The stored `orderNumber` remains the within-group tiebreaker so user-managed ordering and
+     remote-sync payloads keep their persisted meaning.
+
+     - Parameter windows: Workspace windows in any persisted order.
+     - Returns: Windows ordered for display and tab iteration.
+     - Side Effects: None.
+     - Failure Modes: None.
+     */
+    private func displayOrderedWindows(_ windows: [Window]) -> [Window] {
+        windows.sorted { lhs, rhs in
+            let lhsGroup = displayOrderGroup(for: lhs)
+            let rhsGroup = displayOrderGroup(for: rhs)
+            if lhsGroup != rhsGroup {
+                return lhsGroup < rhsGroup
+            }
+            if lhs.orderNumber != rhs.orderNumber {
+                return lhs.orderNumber < rhs.orderNumber
+            }
+            return lhs.id.uuidString < rhs.id.uuidString
+        }
+    }
+
+    /**
+     Computes the Android display group for one window.
+
+     - Parameter window: Window whose display bucket should be calculated.
+     - Returns: `0` for normal pinned windows, `1` for normal unpinned windows, and `2` for links
+       windows.
+     - Side Effects: None.
+     - Failure Modes: None.
+     */
+    private func displayOrderGroup(for window: Window) -> Int {
+        if window.isLinksWindow { return 2 }
+        return window.isPinMode ? 0 : 1
+    }
+
+    /**
+     Finds the primary links window recorded on the active workspace.
+
+     - Returns: Existing primary links window, or the first available links window if the stored
+       identifier is missing or stale.
+     - Side Effects: Repairs `primaryTargetLinksWindowId` when an existing links window is reused.
+     - Failure Modes: Returns `nil` when no links window exists.
+     */
+    private func primaryLinksWindow() -> Window? {
+        if let existingId = activeWorkspace?.primaryTargetLinksWindowId,
+           let existing = allWindows.first(where: { $0.id == existingId }) {
+            return existing
+        }
+
+        guard let existing = allWindows.first(where: { $0.isLinksWindow }) else {
+            return nil
+        }
+        activeWorkspace?.primaryTargetLinksWindowId = existing.id
+        return existing
+    }
+
+    /**
+     Finds a links window chained from another links window.
+
+     - Parameter sourceWindow: Links window that initiated a nested link result.
+     - Returns: Explicit target window if its stored identifier still exists.
+     - Side Effects: None.
+     - Failure Modes: Returns `nil` for missing or stale target identifiers.
+     */
+    private func explicitLinksWindowTarget(for sourceWindow: Window) -> Window? {
+        guard let existingId = sourceWindow.targetLinksWindowId else { return nil }
+        return allWindows.first(where: { $0.id == existingId })
+    }
+
+    /**
+     Creates a window configured as an Android links target.
+
+     - Parameter sourceWindow: Window whose reading position and layout weight seed the new target.
+     - Returns: Newly created links window, or `nil` when `addWindow` fails.
+     - Side Effects: Inserts a window through `WorkspaceStore`, copies the source position via
+       `addWindow`, then marks the result as a non-synchronized pinned links window.
+     - Failure Modes: Returns `nil` if there is no active workspace.
+     */
+    private func createLinksWindow(from sourceWindow: Window) -> Window? {
+        guard let newWindow = addWindow(from: sourceWindow) else { return nil }
+        newWindow.isLinksWindow = true
+        newWindow.isPinMode = true
+        newWindow.isSynchronized = false
+        return newWindow
     }
 }

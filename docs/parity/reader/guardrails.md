@@ -10,7 +10,6 @@ someone is changing:
 - `Sources/BibleUI/Sources/BibleUI/Bible/BibleReaderInteractionPolicies.swift`
 - `Sources/BibleUI/Sources/BibleUI/Bible/BibleWindowPane.swift`
 - `Sources/BibleUI/Sources/BibleUI/Bible/CrossReferenceView.swift`
-- `Sources/BibleUI/Sources/BibleUI/Bible/StrongsSheetView.swift`
 - `Sources/BibleView/Sources/BibleView/WebViewCoordinator.swift`
 - `Sources/BibleUI/Sources/BibleUI/Shared/HistoryView.swift`
 - `Sources/BibleUI/Sources/BibleUI/Workspace/WorkspaceSelectorView.swift`
@@ -77,8 +76,7 @@ At minimum, reader-adjacent changes should keep the focused workflow subset in
 - history jump-back plus clear/delete persistence
 - workspace selector create/switch from the reader shell
 - restored-position highlight behavior
-- bridge-driven compare presentation payload construction, until #123 replaces
-  that current path with document-pipeline coverage
+- bridge-driven compare and Strong's document-pipeline payload construction
 
 If a change touches one of the still-partial areas, it is worth raising the bar
 and adding focused coverage instead of leaning only on the current reader
@@ -99,7 +97,5 @@ subset.
 
 ## Useful Next Improvements
 
-- implement and cover #8 Strong's document-pipeline routing
-- implement and cover #123 Compare document-pipeline routing
 - implement and cover #124 multi-reference / cross-reference document-pipeline routing
 - add a tighter guardrail around reader config emission into the embedded document client

@@ -14,7 +14,7 @@ private let logger = Logger(subsystem: "org.andbible", category: "WebViewCoordin
 
  `BibleWebView` uses this coordinator as the `WKNavigationDelegate` on both platforms and, on
  iOS, also as the `UIScrollViewDelegate`/`UIGestureRecognizerDelegate` to translate native scroll
- and swipe input into Android-parity bridge callbacks.
+ and touch input into Android-parity bridge callbacks.
  */
 public class WebViewCoordinator: NSObject, WKNavigationDelegate {
     private static let routedSchemes: Set<String> = [
@@ -68,8 +68,8 @@ public class WebViewCoordinator: NSObject, WKNavigationDelegate {
 
      Local `file://` navigation is allowed so the packaged Vue.js bundle can load assets.
      App-internal custom schemes and standard HTTP(S) links are routed back to native code so
-     `BibleReaderController` can decide whether to navigate internally, open a Strong's sheet,
-     present downloads, or hand off to the system browser.
+     `BibleReaderController` can decide whether to navigate internally, open transient
+     document content, present downloads, or hand off to the system browser.
      */
     public func webView(
         _ webView: WKWebView,
@@ -105,10 +105,26 @@ public class WebViewCoordinator: NSObject, WKNavigationDelegate {
 
 #if os(iOS)
 extension WebViewCoordinator: UIScrollViewDelegate, UIGestureRecognizerDelegate {
-    /// Installs left/right swipe recognizers used for Android-style swipe navigation modes.
+    /**
+     Installs native recognizers needed by the iOS web view host.
+
+     Left/right swipe recognizers drive Android-style swipe navigation, while the passive tap
+     recognizer reports plain web-view touches so panes become active even when the Vue client does
+     not emit a bridge message. All recognizers leave `cancelsTouchesInView` disabled so links,
+     selection, scrolling, and other web content interactions continue through WebKit.
+
+     - Parameter webView: Web view that should receive the recognizers.
+     - Side Effects: Adds gesture recognizers to `webView`; repeated calls after the first are
+       ignored.
+     - Failure Modes: None; UIKit rejects no-op duplicate installs through the coordinator flag.
+     */
     func installSwipeRecognizersIfNeeded(on webView: WKWebView) {
         guard !didInstallSwipeRecognizers else { return }
         didInstallSwipeRecognizers = true
+
+        let tap = UITapGestureRecognizer(target: self, action: #selector(handleNativeTap(_:)))
+        tap.cancelsTouchesInView = false
+        tap.delegate = self
 
         let left = UISwipeGestureRecognizer(target: self, action: #selector(handleHorizontalSwipe(_:)))
         left.direction = .left
@@ -120,12 +136,30 @@ extension WebViewCoordinator: UIScrollViewDelegate, UIGestureRecognizerDelegate 
         right.cancelsTouchesInView = false
         right.delegate = self
 
+        webView.addGestureRecognizer(tap)
         webView.addGestureRecognizer(left)
         webView.addGestureRecognizer(right)
     }
 
-    /// Converts UIKit swipe directions into bridge callbacks.
+    /**
+     Reports a plain native tap as user interaction without consuming the tap.
+
+     UIKit calls this after recognizing a tap gesture on the hosted web view. The recognizer is
+     passive, so WebKit still handles links, selection, and JavaScript click listeners normally.
+     */
+    @objc func handleNativeTap(_ recognizer: UITapGestureRecognizer) {
+        bridge.onNativeUserInteraction?()
+    }
+
+    /**
+     Converts UIKit swipe directions into bridge callbacks.
+
+     Swipes are also reported as native user interaction before navigation handling so the touched
+     pane becomes active even if the swipe gesture itself is rejected by higher-level navigation
+     settings. Unknown directions are ignored after the focus signal.
+     */
     @objc private func handleHorizontalSwipe(_ recognizer: UISwipeGestureRecognizer) {
+        bridge.onNativeUserInteraction?()
         switch recognizer.direction {
         case .left:
             bridge.onNativeHorizontalSwipe?(.left)
@@ -144,8 +178,15 @@ extension WebViewCoordinator: UIScrollViewDelegate, UIGestureRecognizerDelegate 
         true
     }
 
-    /// Resets the baseline used to compute native vertical scroll deltas.
+    /**
+     Starts user-scroll tracking and reports the drag as native interaction.
+
+     UIKit calls this before user-driven scrolling begins. The method focuses the pane through the
+     bridge callback and records the initial offset used later by `scrollViewDidScroll(_:)` to emit
+     vertical deltas.
+     */
     public func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+        bridge.onNativeUserInteraction?()
         lastUserScrollOffsetY = scrollView.contentOffset.y
     }
 

@@ -33,9 +33,8 @@ through the shared Vue/document pipeline on iOS.
 For the audited reader surfaces, the intended implementation is the shared
 Vue/document pipeline, not the current native iOS modal/sheet:
 
-- Strong's / dictionary content should stop being owned by a dedicated native
-  iOS sheet and should be presented through the normal reader document/window
-  pipeline.
+- Strong's / dictionary content is no longer owned by a dedicated native iOS
+  sheet; it is presented through the normal reader document/window pipeline.
 - Compare should stop being presented by the native Swift `CompareView` sheet
   and should use the same compare document flow Android uses.
 - Multi-reference and cross-reference content should stop being presented by
@@ -75,15 +74,17 @@ Every reader parity decision should use an honest evaluation:
 
 - Native iOS sheets for Strong's, Compare, and multi-reference content are not
   accepted final parity endpoints.
-- Until #8, #123, and #124 replace those native sheets, they remain known
-  parity gaps rather than intentional adaptations.
+- #8 and #123 have replaced the Strong's and Compare native sheets with shared
+  document-pipeline routing. Until #124 replaces the remaining multi-reference
+  native sheet path, that surface remains a known parity gap rather than an
+  intentional adaptation.
 - A native iOS sheet may still be the right answer for a future surface, but
   only after the evaluation above shows that it is the honest parity or platform
   answer.
 - Existing tests that prove native presentation payloads still have value
   protect the current bridge path rather than closing the parity gap.
-- Focused implementation work for remaining document-pipeline gaps is tracked
-  by #8, #123, and #124. #125 implemented the related modal-open host-gating
+- Focused implementation work for the remaining document-pipeline gap is
+  tracked by #124. #125 implemented the related modal-open host-gating
   behavior.
 - Future reader modal audits should first classify whether Android treats a
   surface as document-pipeline content, app-level native UI, shared Vue modal

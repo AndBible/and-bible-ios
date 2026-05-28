@@ -1,6 +1,6 @@
 # READER-702 Regression Report
 
-Date: 2026-05-26
+Date: 2026-05-27
 
 ## Scope
 
@@ -14,6 +14,7 @@ This is the current validation snapshot for the reader surface. It covers:
 - reader config/appSettings payload construction for embedded-client display and active-window state
 - double-tap fullscreen preference gating
 - bridge-driven compare document-pipeline payload construction
+- Strong's / dictionary document-pipeline routing
 - horizontal swipe-mode dispatch policy
 - Vue modal-state host-navigation gating
 - auto-fullscreen scroll-threshold policy
@@ -45,6 +46,7 @@ Related domain references:
   - focused reader gesture/fullscreen policy subset on `test/reader-fullscreen-swipe-coverage`
   - focused reader modal-state bridge/policy subset on `fix/125-vue-modal-state`
   - focused reader compare bridge subset on `fix/123-compare-vue-pipeline`
+  - focused reader Strong's document-routing subset on `fix/8-strongs-document-routing`
 
 ## Tests Executed
 
@@ -56,6 +58,8 @@ Related domain references:
 - `AndBibleTests/testReaderConfigPayloadMarksInactiveWindowWithoutActiveIndicator`
 - `AndBibleTests/testDoubleTapFullscreenPreferenceGateControlsNativeToggleRequest`
 - `AndBibleTests/testReaderCompareBridgeRequestEmitsVueCompareDocument`
+- `AndBibleTests/testStrongsLinkEmitsVueDocumentInsteadOfNativeSheet`
+- `AndBibleTests/testStrongsLinkUsesLinksWindowRoutingCallbackWhenAvailable`
 - `AndBibleTests/testReaderHorizontalSwipePolicyMapsConfiguredModes`
 - `AndBibleTests/testReaderBridgeModalStateBlocksKeyNavigationAndRequestsClose`
 - `AndBibleTests/testAutoFullscreenPolicyAccumulatesThresholdByDirection`
@@ -129,12 +133,29 @@ Related domain references:
 - reader overflow Compare also routes through `loadCompareDocument(...)` instead
   of presenting a native Swift sheet
 
+### Strong's document payload
+
+- Strong's links emit a Vue `MultiDocument` payload with `contentType: "strongs"`
+  instead of presenting a native iOS sheet
+- the payload preserves the Strong's feature metadata consumed by
+  `StrongsDocument.vue`
+- the reader's rendered-content state exposes the active dictionary module/key
+  so bottom window tabs label Strong's panes like Android dictionary documents
+- when the links-window preference is active, Strong's documents go through the
+  same pane-owned links-window routing callback used by other linked document
+  content
+
 ## Current Result
 
 Latest focused reader compare validation passed on 2026-05-26:
 
 - focused issue #123 subset: `6/6`
 - command: `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -project AndBible.xcodeproj -scheme AndBible -destination 'platform=iOS Simulator,name=iPhone 17' -derivedDataPath /private/tmp/andbible-dd-123 test -only-testing:AndBibleTests/AndBibleTests/testReaderCompareBridgeRequestEmitsVueCompareDocument -only-testing:AndBibleTests/AndBibleTests/testToggleCompareDocumentPersistsWorkspaceHiddenStateAndReemitsConfig -only-testing:AndBibleTests/AndBibleTests/testReaderConfigPayloadIncludesDisplaySettingsAndActiveWindowState -only-testing:AndBibleTests/AndBibleTests/testMultiReferenceLinkEmitsVueMultiDocumentInsteadOfCrossReferenceSheet -only-testing:AndBibleTests/AndBibleTests/testMultiReferenceOsisLinkEmitsVueMultiDocumentInsteadOfCrossReferenceSheet -only-testing:AndBibleTests/AndBibleTests/testSingleOsisReferenceStillNavigatesWithoutMultiDocument`
+
+Latest focused reader Strong's validation passed on 2026-05-27:
+
+- focused issue #8 subset: `6/6`
+- command: `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -project AndBible.xcodeproj -scheme AndBible -destination 'platform=iOS Simulator,name=iPhone 17' -derivedDataPath /private/tmp/andbible-dd-8 test -only-testing:AndBibleTests/AndBibleTests/testBuildStrongsMultiDocJSONReturnsInstallFallbackWhenNoStrongsDictionaryIsInstalled -only-testing:AndBibleTests/AndBibleTests/testStrongsLinkEmitsVueDocumentInsteadOfNativeSheet -only-testing:AndBibleTests/AndBibleTests/testStrongsLinkUsesLinksWindowRoutingCallbackWhenAvailable -only-testing:AndBibleTests/AndBibleTests/testMultiReferenceLinkEmitsVueMultiDocumentInsteadOfCrossReferenceSheet -only-testing:AndBibleTests/AndBibleTests/testMultiReferenceOsisLinkEmitsVueMultiDocumentInsteadOfCrossReferenceSheet -only-testing:AndBibleTests/AndBibleTests/testReaderCompareBridgeRequestEmitsVueCompareDocument`
 
 Latest full non-UI XCTest validation passed on 2026-05-26:
 
@@ -174,6 +195,7 @@ Taken together, this gives the reader domain current regression evidence for:
 - payload-level config/appSettings propagation into the embedded document client
 - double-tap fullscreen preference gating
 - bridge-driven compare document-pipeline payload construction
+- Strong's / dictionary document-pipeline routing
 - horizontal swipe-mode dispatch policy
 - Vue modal-state host-navigation gating
 - auto-fullscreen threshold and lockout policy
@@ -190,7 +212,6 @@ paths or isolated with focused checks.
 The reader shell baseline is in much better shape now. The parts that still
 need implementation and/or tighter protection are:
 
-- #8 Strong's / dictionary document-pipeline routing and focused regression coverage
 - #124 multi-reference / cross-reference document-pipeline routing
 
 Those areas show up as `Partial` in

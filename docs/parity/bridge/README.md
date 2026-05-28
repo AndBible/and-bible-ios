@@ -44,4 +44,3 @@ Primary references:
 - `Sources/BibleView/Sources/BibleView/BibleBridge.swift`
 - `Sources/BibleView/Sources/BibleView/BridgeTypes.swift`
 - `Sources/BibleUI/Sources/BibleUI/Bible/BibleReaderController.swift`
-- `Sources/BibleUI/Sources/BibleUI/Bible/StrongsSheetView.swift`
