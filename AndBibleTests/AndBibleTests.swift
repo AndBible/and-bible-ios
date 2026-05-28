@@ -609,6 +609,149 @@ final class AndBibleTests: XCTestCase {
         XCTAssertTrue(String(describing: type(of: view)).contains("BibleReaderKeyboardShortcuts"))
     }
 
+    func testModuleBrowserFiltersAndSortsAndroidDownloadRows() {
+        let modules = [
+            RemoteModuleInfo(
+                name: "KJV",
+                description: "King James Version",
+                category: .bible,
+                language: "en",
+                sourceName: "CrossWire",
+                version: "1.0",
+                installSizeBytes: 1_260_000
+            ),
+            RemoteModuleInfo(
+                name: "WEB",
+                description: "World English Bible",
+                category: .bible,
+                language: "en",
+                sourceName: "CrossWire",
+                version: "2.0"
+            ),
+            RemoteModuleInfo(
+                name: "REC",
+                description: "Recommended Bible",
+                category: .bible,
+                language: "en",
+                sourceName: "CrossWire",
+                version: "1.0"
+            ),
+            RemoteModuleInfo(
+                name: "WARN",
+                description: "Known warning module",
+                category: .bible,
+                language: "en",
+                sourceName: "CrossWire",
+                version: "1.0"
+            ),
+            RemoteModuleInfo(
+                name: "HIDE",
+                description: "Hidden module",
+                category: .bible,
+                language: "en",
+                sourceName: "CrossWire",
+                version: "1.0"
+            ),
+            RemoteModuleInfo(
+                name: "MHC",
+                description: "Matthew Henry",
+                category: .commentary,
+                language: "en",
+                sourceName: "CrossWire",
+                version: "1.0"
+            ),
+            RemoteModuleInfo(
+                name: "PSEUDO",
+                description: "Unavailable translation",
+                category: .bible,
+                language: "en",
+                sourceName: "Not Available",
+                availability: .unavailable,
+                unavailableReason: "Unavailable",
+                version: "0.0"
+            )
+        ]
+        let installed = [
+            ModuleInfo(name: "KJV", description: "King James Version", category: .bible, language: "en", version: "1.0"),
+            ModuleInfo(name: "WEB", description: "World English Bible", category: .bible, language: "en", version: "1.0")
+        ]
+        let recommended = ModuleDownloadConfiguration(
+            bibles: ["en": ["REC::CrossWire"]]
+        )
+        let bad = ModuleDownloadConfiguration(
+            bibles: ["en": ["WARN::CrossWire::1.0::W", "HIDE::CrossWire::1.0::H"]]
+        )
+
+        let filtered = ModuleBrowserView.filteredDownloadModules(
+            modules,
+            selectedCategory: nil,
+            selectedLanguage: "en",
+            searchText: "",
+            installedModules: installed,
+            installingModules: ["WARN"],
+            recommendedDocuments: recommended,
+            badDocuments: bad
+        )
+
+        XCTAssertEqual(filtered.map(\.name), ["WARN", "WEB", "KJV", "REC", "PSEUDO", "MHC"])
+        XCTAssertEqual(
+            ModuleBrowserView.displayStatus(
+                for: modules[1],
+                installedModules: installed,
+                installingModules: []
+            ),
+            .updateAvailable
+        )
+        XCTAssertEqual(ModuleBrowserView.installSizeText(for: modules[0].installSizeBytes), "1.3 MB")
+    }
+
+    func testDownloadConfigurationDecodesAndroidMetadataEntries() throws {
+        let data = """
+        {
+          "bibles": {"en": ["KJV::CrossWire", "ASV"]},
+          "commentaries": {},
+          "dictionaries": {},
+          "books": {},
+          "maps": {}
+        }
+        """.data(using: .utf8)!
+        let recommended = try JSONDecoder().decode(ModuleDownloadConfiguration.self, from: data)
+        let bad = ModuleDownloadConfiguration(
+            bibles: ["en": ["KJV::CrossWire::2.3::W", "WEB::CrossWire::1.0::H"]]
+        )
+        let kjv = RemoteModuleInfo(
+            name: "KJV",
+            description: "King James Version",
+            category: .bible,
+            language: "en",
+            sourceName: "CrossWire",
+            version: "2.3"
+        )
+        let asv = RemoteModuleInfo(
+            name: "ASV",
+            description: "American Standard Version",
+            category: .bible,
+            language: "en",
+            sourceName: "Different",
+            version: "1.0"
+        )
+        let web = RemoteModuleInfo(
+            name: "WEB",
+            description: "World English Bible",
+            category: .bible,
+            language: "en",
+            sourceName: "CrossWire",
+            version: "1.0"
+        )
+
+        XCTAssertTrue(recommended.contains(kjv))
+        XCTAssertTrue(recommended.contains(asv))
+        XCTAssertEqual(recommended.addons, [:])
+        XCTAssertEqual(bad.badDocumentAction(for: kjv), .warn)
+        XCTAssertEqual(bad.badDocumentAction(for: web), .hide)
+        XCTAssertEqual(bad.badDocumentAction(for: asv), .none)
+    }
+
     func testBibleReaderModulePickerBuildsForBibleCategory() {
         let view = BibleReaderModulePicker(
             controller: nil,

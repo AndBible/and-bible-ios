@@ -40,6 +40,8 @@ final class SwordManagerTests: XCTestCase {
         XCTAssertTrue(info.isInstallable)
         XCTAssertEqual(info.availability, .installable)
         XCTAssertNil(info.unavailableReason)
+        XCTAssertEqual(info.version, "")
+        XCTAssertNil(info.installSizeBytes)
     }
 
     func testPseudoBookMetadataCreatesUnavailableModules() throws {

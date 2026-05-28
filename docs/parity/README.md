@@ -31,12 +31,15 @@ docs or issue without creating a new ADR.
 
 Current maturity:
 
-- all current domains now carry:
+- established domains carry:
   - contract
   - dispositions
   - verification matrix
   - regression report
   - guardrails
+- `downloads/` currently carries a source-backed list matrix from the #120
+  parity pass; expand it into the full domain-doc set when follow-up work needs
+  durable contracts or guardrails
 - `settings/` remains the most operationally mature domain because it has
   machine-readable baselines plus a dedicated localization guardrail script
 - `bridge/` now has a dedicated inventory checker for the bundled iOS bridge
@@ -55,4 +58,5 @@ Current domains:
 - [search/](search/README.md)
 - [reading-plans/](reading-plans/README.md)
 - [settings/](settings/README.md)
+- [downloads/](downloads/README.md)
 - [sync/](sync/README.md)

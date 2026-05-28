@@ -45,6 +45,12 @@ public struct RemoteModuleInfo: Sendable, Identifiable {
     /// User-visible explanation when the module cannot be installed.
     public let unavailableReason: String?
 
+    /// Remote catalog version used to detect Android-style update availability.
+    public let version: String
+
+    /// Remote catalog install size in bytes, when the source reports it.
+    public let installSizeBytes: Int64?
+
     /// Unique identifier.
     public var id: String { "\(sourceName):\(name)" }
 
@@ -58,7 +64,9 @@ public struct RemoteModuleInfo: Sendable, Identifiable {
         language: String,
         sourceName: String,
         availability: RemoteModuleAvailability = .installable,
-        unavailableReason: String? = nil
+        unavailableReason: String? = nil,
+        version: String = "",
+        installSizeBytes: Int64? = nil
     ) {
         self.name = name
         self.description = description
@@ -67,6 +75,8 @@ public struct RemoteModuleInfo: Sendable, Identifiable {
         self.sourceName = sourceName
         self.availability = availability
         self.unavailableReason = unavailableReason
+        self.version = version
+        self.installSizeBytes = installSizeBytes
     }
 }
 
