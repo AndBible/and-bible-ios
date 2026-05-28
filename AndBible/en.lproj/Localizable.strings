@@ -169,6 +169,7 @@
    Downloads / Module Browser
    ======================================== */
 "module_browser" = "Module Browser";
+"doc_type_all" = "All types";
 "bibles" = "Bibles";
 "commentaries" = "Commentaries";
 "dictionaries" = "Dictionaries";

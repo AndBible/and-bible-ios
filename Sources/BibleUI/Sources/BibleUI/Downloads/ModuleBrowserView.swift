@@ -27,8 +27,8 @@ import SwordKit
    `SwordManager`, and refreshes the installed-module list shown in the UI
  */
 public struct ModuleBrowserView: View {
-    /// Selected remote/local module category segment.
-    @State private var selectedCategory: ModuleCategory = .bible
+    /// Selected remote/local module category segment, or `nil` for Android's "All types" filter.
+    @State private var selectedCategory: ModuleCategory? = .bible
 
     /// Selected language filter, or an empty string when all languages should be shown.
     @State private var selectedLanguage: String = ""
@@ -64,11 +64,26 @@ public struct ModuleBrowserView: View {
     @State private var refreshProgress: String?
 
     /**
-     Creates the module browser with empty local state.
+     Creates the module browser with optional Android-compatible search state.
 
-     - Note: The view resolves installed modules and repository data lazily in `onAppear`.
+     - Parameter initialSearchText: Optional module initials that should pre-populate search.
+       Empty or whitespace-only values are normalized to an empty query. A non-empty value starts
+       on Android's "All types" category so Bibles, commentaries, dictionaries, and books can all
+       satisfy a module-initials link.
+
+     Side effects:
+     - initializes local SwiftUI state only; repository and installed-module data are still loaded
+       lazily in `onAppear`
+
+     Failure modes:
+     - invalid or unknown initials simply behave as a free-text all-types search with no matching
+       rows until catalog data contains that module
      */
-    public init() {}
+    public init(initialSearchText: String = "") {
+        let normalizedSearchText = initialSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        _selectedCategory = State(initialValue: normalizedSearchText.isEmpty ? .bible : nil)
+        _searchText = State(initialValue: normalizedSearchText)
+    }
 
     // MARK: - Computed Properties
 
@@ -79,10 +94,10 @@ public struct ModuleBrowserView: View {
      */
     private var availableLanguages: [String] {
         var langs = Set<String>()
-        for m in availableModules where m.category == selectedCategory {
+        for m in availableModules where matchesSelectedCategory(m.category) {
             langs.insert(m.language)
         }
-        for m in installedModules where m.category == selectedCategory {
+        for m in installedModules where matchesSelectedCategory(m.category) {
             langs.insert(m.language)
         }
         return langs.sorted { a, b in
@@ -109,7 +124,7 @@ public struct ModuleBrowserView: View {
 
     /// Installed modules filtered by category, language, and search text.
     private var filteredInstalledModules: [ModuleInfo] {
-        var modules = installedModules.filter { $0.category == selectedCategory }
+        var modules = installedModules.filter { matchesSelectedCategory($0.category) }
         if !selectedLanguage.isEmpty {
             modules = modules.filter { $0.language == selectedLanguage }
         }
@@ -125,7 +140,7 @@ public struct ModuleBrowserView: View {
 
     /// Available (remote) modules filtered by category, language, and search text.
     private var filteredAvailableModules: [RemoteModuleInfo] {
-        var modules = availableModules.filter { $0.category == selectedCategory }
+        var modules = availableModules.filter { matchesSelectedCategory($0.category) }
         if !selectedLanguage.isEmpty {
             modules = modules.filter { $0.language == selectedLanguage }
         }
@@ -151,10 +166,12 @@ public struct ModuleBrowserView: View {
             // Category picker
             Section {
                 Picker("Category", selection: $selectedCategory) {
-                    Text(String(localized: "bibles")).tag(ModuleCategory.bible)
-                    Text(String(localized: "commentaries")).tag(ModuleCategory.commentary)
-                    Text(String(localized: "dictionaries")).tag(ModuleCategory.dictionary)
-                    Text(String(localized: "category_books")).tag(ModuleCategory.generalBook)
+                    Text(String(localized: "doc_type_all", defaultValue: "All types"))
+                        .tag(Optional<ModuleCategory>.none)
+                    Text(String(localized: "bibles")).tag(Optional(ModuleCategory.bible))
+                    Text(String(localized: "commentaries")).tag(Optional(ModuleCategory.commentary))
+                    Text(String(localized: "dictionaries")).tag(Optional(ModuleCategory.dictionary))
+                    Text(String(localized: "category_books")).tag(Optional(ModuleCategory.generalBook))
                 }
                 .pickerStyle(.segmented)
                 .onChange(of: selectedCategory) {
@@ -262,6 +279,22 @@ public struct ModuleBrowserView: View {
     }
 
     // MARK: - Row Views
+
+    /**
+     Tests whether a module category is visible under the current Android-parity type filter.
+
+     - Parameter category: Module category from installed or remote catalog metadata.
+     - Returns: `true` when the selected filter is "All types" or matches the supplied category.
+
+     The helper is deterministic and performs no side effects. It exists so installed, available,
+     and language filters all interpret the optional category state identically.
+
+     Failure modes:
+     - none; unknown future categories only match an identical selected enum value
+     */
+    private func matchesSelectedCategory(_ category: ModuleCategory) -> Bool {
+        selectedCategory.map { $0 == category } ?? true
+    }
 
     /**
      Builds one row for a locally installed module with removal controls.

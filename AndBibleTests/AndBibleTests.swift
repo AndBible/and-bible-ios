@@ -586,6 +586,7 @@ final class AndBibleTests: XCTestCase {
             nightModeMode: Binding.constant("system"),
             readingProgressInitialTab: .reading,
             chapterReadHistoryTarget: nil,
+            downloadsInitialSearchText: "",
             onDismiss: {},
             onSettingsChanged: {}
         )
@@ -1911,6 +1912,38 @@ final class AndBibleTests: XCTestCase {
     }
 
     #if os(iOS)
+    func testDownloadLinkInitialsAreParsedForDownloadsSearch() {
+        XCTAssertEqual(
+            BibleReaderController.downloadSearchText(from: "download://?initials=KJV"),
+            "KJV"
+        )
+        XCTAssertEqual(
+            BibleReaderController.downloadSearchText(from: "download://?initials=StrongsHebrew%20"),
+            "StrongsHebrew"
+        )
+        XCTAssertNil(BibleReaderController.downloadSearchText(from: "download://"))
+        XCTAssertNil(BibleReaderController.downloadSearchText(from: "download://?initials="))
+    }
+
+    @MainActor
+    func testDownloadLinkRoutesInitialsToDownloadsPresentation() throws {
+        let bridge = BibleBridge()
+        let modulePath = try makeTemporaryBundledSwordPath()
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        var requestedSearchText: String?
+        controller.onRequestOpenDownloads = { requestedSearchText = $0 }
+
+        controller.bridge(bridge, openExternalLink: "download://?initials=KJV")
+
+        XCTAssertEqual(requestedSearchText, "KJV")
+
+        requestedSearchText = "stale"
+        controller.bridge(bridge, openExternalLink: "download://")
+
+        XCTAssertNil(requestedSearchText)
+    }
+
     func testBuildStrongsMultiDocJSONReturnsInstallFallbackWhenNoStrongsDictionaryIsInstalled() throws {
         let bridge = BibleBridge()
         let modulePath = try makeTemporaryBundledSwordPath()
