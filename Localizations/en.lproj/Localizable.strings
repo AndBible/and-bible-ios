@@ -61,7 +61,7 @@
 "back_to_bible" = "Back to Bible";
 
 /* Module Pickers */
-"chooce_document" = "Choose Document";
+"choose_document" = "Choose Document";
 "document_type" = "Document type";
 "picker_select_translation" = "Select Translation";
 "picker_select_commentary" = "Select Commentary";
@@ -164,7 +164,7 @@
 "commentaries" = "Commentaries";
 "dictionaries" = "Dictionaries";
 "category_books" = "Books";
-"document_filter_results %lld" = "%lld documents";
+"document_filter_results %lld" = "Documents (%lld)";
 "install" = "Install";
 "uninstall" = "Uninstall";
 "refresh_catalog" = "Refresh Catalog";

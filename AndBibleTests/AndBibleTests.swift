@@ -682,6 +682,27 @@ final class AndBibleTests: XCTestCase {
             BibleReaderModulePicker.availableLanguages(from: modules),
             ["en", "fr", "he"]
         )
+        let bibleOnlyModules = [
+            ModuleInfo(name: "KJV", description: "King James Version", category: .bible, language: "en")
+        ]
+        XCTAssertTrue(
+            BibleReaderModulePicker.shouldShowCategoryEmptyState(
+                bibleOnlyModules,
+                selectedCategory: .dictionary
+            )
+        )
+        XCTAssertFalse(
+            BibleReaderModulePicker.shouldShowCategoryEmptyState(
+                bibleOnlyModules,
+                selectedCategory: .bible
+            )
+        )
+        XCTAssertFalse(
+            BibleReaderModulePicker.shouldShowCategoryEmptyState(
+                modules,
+                selectedCategory: nil
+            )
+        )
     }
 
     func testBibleReaderModulePickerMapsAndroidDocumentTypeCategories() {

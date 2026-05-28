@@ -14,8 +14,8 @@ known gap or an explicit adaptation, not a new parity target definition.
 
 Android references:
 
-- `../and-bible/app/src/main/java/net/bible/android/view/activity/navigation/ChooseDocument.kt`
-- `../and-bible/app/src/main/java/net/bible/android/view/activity/base/DocumentSelectionBase.kt`
+- [ChooseDocument.kt](https://github.com/AndBible/and-bible/blob/current-stable/app/src/main/java/net/bible/android/view/activity/navigation/ChooseDocument.kt)
+- [DocumentSelectionBase.kt](https://github.com/AndBible/and-bible/blob/current-stable/app/src/main/java/net/bible/android/view/activity/base/DocumentSelectionBase.kt)
 
 iOS references:
 

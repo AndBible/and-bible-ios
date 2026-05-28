@@ -102,6 +102,14 @@ struct BibleReaderModulePicker: View {
         Self.availableLanguages(from: allSelectableModules)
     }
 
+    /// Whether the active document type has no installed modules before language/search filtering.
+    private var shouldShowCategoryEmptyState: Bool {
+        Self.shouldShowCategoryEmptyState(
+            allSelectableModules,
+            selectedCategory: selectedCategory
+        )
+    }
+
     /**
      Builds the Android-style document chooser surface with type/language filters, search, rows,
      and a persistent Downloads handoff.
@@ -111,7 +119,7 @@ struct BibleReaderModulePicker: View {
             List {
                 filterControls
 
-                if allSelectableModules.isEmpty {
+                if allSelectableModules.isEmpty || shouldShowCategoryEmptyState {
                     emptyState
                 } else if filteredModules.isEmpty {
                     noMatchesState
@@ -253,7 +261,7 @@ struct BibleReaderModulePicker: View {
 
     /// Message shown when the requested category has no installed modules.
     private var emptyMessage: String {
-        switch category {
+        switch selectedCategory ?? category {
         case .commentary:
             return String(localized: "picker_no_commentary_modules")
         case .dictionary:
@@ -269,7 +277,7 @@ struct BibleReaderModulePicker: View {
 
     /// Android chooser title.
     private var navigationTitle: String {
-        String(localized: "chooce_document", defaultValue: "Choose Document")
+        String(localized: "choose_document", defaultValue: "Choose Document")
     }
 
     /**
@@ -397,6 +405,23 @@ struct BibleReaderModulePicker: View {
         Array(Set(modules.map(\.language))).sorted {
             displayName(for: $0).localizedCaseInsensitiveCompare(displayName(for: $1)) == .orderedAscending
         }
+    }
+
+    /**
+     Tests whether the selected Android document type has no installed modules at all.
+
+     - Parameters:
+       - modules: Complete installed-module set.
+       - selectedCategory: Optional document-type filter, with `nil` meaning all types.
+     - Returns: `true` only when a concrete type is selected and that type has no modules before
+       language or free-text filters run.
+     */
+    static func shouldShowCategoryEmptyState(
+        _ modules: [ModuleInfo],
+        selectedCategory: DocumentCategory?
+    ) -> Bool {
+        guard let selectedCategory else { return false }
+        return !modules.contains { documentCategory(for: $0.category) == selectedCategory }
     }
 
     /**
