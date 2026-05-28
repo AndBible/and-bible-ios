@@ -875,9 +875,8 @@ public struct ModuleBrowserView: View {
             do {
                 _ = try await repository.refreshDefaultDocuments()
             } catch {
-                if repository.loadCachedDefaultDocuments() == nil {
-                    errors.append("AndBible defaults: \(error.localizedDescription)")
-                }
+                // Defaults are cached opportunistically until #133 consumes them.
+                _ = repository.loadCachedDefaultDocuments()
             }
 
             let uniqueModules = deduplicatedModules(from: allModules)

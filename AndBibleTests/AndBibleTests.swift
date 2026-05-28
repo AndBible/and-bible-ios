@@ -2,7 +2,7 @@ import XCTest
 import AVFoundation
 @testable import BibleCore
 import CLibSword
-import SwordKit
+@testable import SwordKit
 import SwiftData
 import SQLite3
 @testable import BibleUI
@@ -703,6 +703,11 @@ final class AndBibleTests: XCTestCase {
             .updateAvailable
         )
         XCTAssertEqual(ModuleBrowserView.installSizeText(for: modules[0].installSizeBytes), "1.3 MB")
+        XCTAssertTrue(ModuleBrowserView.isRemoteVersionNewer(remoteVersion: "1.10", installedVersion: "1.9"))
+        XCTAssertFalse(ModuleBrowserView.isRemoteVersionNewer(remoteVersion: "1.0", installedVersion: "1.0"))
+        XCTAssertFalse(ModuleBrowserView.isRemoteVersionNewer(remoteVersion: "", installedVersion: "1.0"))
+        XCTAssertNil(ModuleBrowserView.installSizeText(for: 0))
+        XCTAssertNil(ModuleBrowserView.installSizeText(for: -1))
     }
 
     func testDownloadConfigurationDecodesAndroidMetadataEntries() throws {
@@ -750,6 +755,24 @@ final class AndBibleTests: XCTestCase {
         XCTAssertEqual(bad.badDocumentAction(for: kjv), .warn)
         XCTAssertEqual(bad.badDocumentAction(for: web), .hide)
         XCTAssertEqual(bad.badDocumentAction(for: asv), .none)
+    }
+
+    func testCatalogModuleConvertsSwordInstallSizeKilobytes() {
+        let module = CatalogModule(
+            name: "KJV",
+            description: "King James Version",
+            category: .bible,
+            language: "en",
+            modDrv: "zText",
+            dataPath: "modules/texts/ztext/kjv/",
+            confContent: "",
+            sourceName: "CrossWire",
+            version: "1.0",
+            size: "1260"
+        )
+
+        XCTAssertEqual(module.remoteModuleInfo.installSizeBytes, 1_290_240)
+        XCTAssertEqual(ModuleBrowserView.installSizeText(for: module.remoteModuleInfo.installSizeBytes), "1.3 MB")
     }
 
     func testBibleReaderModulePickerBuildsForBibleCategory() {

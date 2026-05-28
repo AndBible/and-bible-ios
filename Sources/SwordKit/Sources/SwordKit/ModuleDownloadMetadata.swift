@@ -40,8 +40,12 @@ public struct ModuleDownloadConfiguration: Sendable, Codable, Equatable {
     /// Map module entries keyed by language code.
     public var maps: [String: [String]]
 
-    /// Android add-on entries keyed by language code. iOS currently records but does not render
-    /// add-ons in the module browser.
+    /**
+     Android add-on entries keyed by language code.
+
+     iOS currently records these values so metadata decoding stays compatible with Android feeds,
+     but the module browser does not render add-ons until #136 defines an iOS model for them.
+     */
     public var addons: [String: [String]]
 
     private enum CodingKeys: String, CodingKey {

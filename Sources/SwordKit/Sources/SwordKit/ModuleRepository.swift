@@ -57,16 +57,20 @@ public struct CatalogModule: Sendable, Identifiable {
      Parses the SWORD `InstallSize` property into bytes for download-list display.
 
      - Parameter value: Raw catalog value from a module `.conf` file.
-     - Returns: Byte count when the value is an integer; otherwise `nil`.
+     - Returns: Byte count when the value is an integer number of kibibytes; otherwise `nil`.
 
      Side effects:
      - none
 
      Failure modes:
-     - non-numeric values return `nil`
+     - non-numeric values or values that overflow bytes return `nil`
      */
     private static func installSizeBytes(from value: String) -> Int64? {
-        Int64(value.trimmingCharacters(in: .whitespacesAndNewlines))
+        guard let kibibytes = Int64(value.trimmingCharacters(in: .whitespacesAndNewlines)) else {
+            return nil
+        }
+        let bytes = kibibytes.multipliedReportingOverflow(by: 1024)
+        return bytes.overflow ? nil : bytes.partialValue
     }
 }
 
