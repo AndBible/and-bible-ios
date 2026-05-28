@@ -52,7 +52,7 @@ struct BibleReaderNavigationDrawer: View {
 
                 drawerSection {
                     drawerRow(
-                        title: localizedDrawerString("chooce_document", default: "Choose Document"),
+                        title: localizedDrawerString("choose_document", default: "Choose Document"),
                         icon: .asset("DrawerChooseDocument"),
                         identifier: "readerChooseDocumentAction",
                         action: .chooseDocument

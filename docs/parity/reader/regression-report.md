@@ -1,6 +1,6 @@
 # READER-702 Regression Report
 
-Date: 2026-05-27
+Date: 2026-05-28
 
 ## Scope
 
@@ -19,6 +19,9 @@ This is the current validation snapshot for the reader surface. It covers:
 - Vue modal-state host-navigation gating
 - auto-fullscreen scroll-threshold policy
 - documentation-only classification of the #122 reader-modal audit
+- document chooser all-types entry, installed-module category/language/search
+  filtering, and explicit classification of remaining Android `ChooseDocument`
+  gaps
 
 Contract reference:
 
@@ -47,6 +50,7 @@ Related domain references:
   - focused reader modal-state bridge/policy subset on `fix/125-vue-modal-state`
   - focused reader compare bridge subset on `fix/123-compare-vue-pipeline`
   - focused reader Strong's document-routing subset on `fix/8-strongs-document-routing`
+  - focused reader document chooser subset on `fix/119-document-chooser-parity`
 
 ## Tests Executed
 
@@ -64,6 +68,9 @@ Related domain references:
 - `AndBibleTests/testReaderBridgeModalStateBlocksKeyNavigationAndRequestsClose`
 - `AndBibleTests/testAutoFullscreenPolicyAccumulatesThresholdByDirection`
 - `AndBibleTests/testAutoFullscreenPolicyHonorsDisabledAndDoubleTapLock`
+- `AndBibleTests/testBibleReaderModulePickerBuildsForBibleCategory`
+- `AndBibleTests/testBibleReaderModulePickerFiltersAndroidChooserCategoriesAndSearch`
+- `AndBibleTests/testBibleReaderModulePickerMapsAndroidDocumentTypeCategories`
 
 ### UI
 
@@ -145,7 +152,25 @@ Related domain references:
   same pane-owned links-window routing callback used by other linked document
   content
 
+### Document chooser
+
+- drawer-level Choose Document opens the shared module picker directly on
+  Android's all-types filter instead of showing the removed category-first native
+  sheet
+- category-specific picker entry still starts on the requested document type
+  when the caller is choosing a Bible/commentary/dictionary/book/map module
+- installed module filtering covers Android's representable document-type,
+  all-language, specific-language, free-text search, and category-order behavior
+- unsupported Android rows and actions remain explicit gaps: pseudo-documents,
+  add-ons, encrypted-module unlock prompts, and row context actions for
+  about/delete/delete-index/unlock
+
 ## Current Result
+
+Latest focused reader document chooser validation passed on 2026-05-28:
+
+- focused issue #119 subset: `3/3`
+- command: `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild test -project AndBible.xcodeproj -scheme AndBible -configuration Debug -destination 'platform=iOS Simulator,id=98C37D62-54A5-4C52-846B-B0801AEAD2CB' -derivedDataPath /private/tmp/andbible-dd-119 -only-testing:AndBibleTests/AndBibleTests/testBibleReaderModulePickerBuildsForBibleCategory -only-testing:AndBibleTests/AndBibleTests/testBibleReaderModulePickerFiltersAndroidChooserCategoriesAndSearch -only-testing:AndBibleTests/AndBibleTests/testBibleReaderModulePickerMapsAndroidDocumentTypeCategories`
 
 Latest focused reader compare validation passed on 2026-05-26:
 
@@ -196,6 +221,9 @@ Taken together, this gives the reader domain current regression evidence for:
 - double-tap fullscreen preference gating
 - bridge-driven compare document-pipeline payload construction
 - Strong's / dictionary document-pipeline routing
+- document chooser all-types entry and installed-module filtering, with
+  remaining Android chooser gaps recorded in
+  [document-chooser-matrix.md](document-chooser-matrix.md)
 - horizontal swipe-mode dispatch policy
 - Vue modal-state host-navigation gating
 - auto-fullscreen threshold and lockout policy
@@ -213,6 +241,8 @@ The reader shell baseline is in much better shape now. The parts that still
 need implementation and/or tighter protection are:
 
 - #124 multi-reference / cross-reference document-pipeline routing
+- #119 follow-ups for chooser pseudo-documents/add-ons, encrypted-module unlock
+  prompts, and row context actions
 
 Those areas show up as `Partial` in
 [verification-matrix.md](verification-matrix.md). Existing tests still protect

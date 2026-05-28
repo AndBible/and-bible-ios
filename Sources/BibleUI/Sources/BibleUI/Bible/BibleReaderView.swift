@@ -969,7 +969,16 @@ public struct BibleReaderView: View {
                 }
             }
         case .chooseDocument:
-            readerChooseDocumentSheet
+            BibleReaderModulePicker(
+                controller: panePresentationController,
+                category: panePresentationController?.currentCategory ?? .bible,
+                startsWithAllTypes: true,
+                onDismiss: dismissReaderModal,
+                onOpenDownloads: { presentDownloadsPreservingPane() },
+                onOpenDictionaryBrowser: { presentReaderModalPreservingPane(.dictionaryBrowser) },
+                onOpenGeneralBookBrowser: { presentReaderModalPreservingPane(.generalBookBrowser) },
+                onOpenMapBrowser: { presentReaderModalPreservingPane(.mapBrowser) }
+            )
         case .help:
             NavigationStack {
                 HelpView()
@@ -1533,16 +1542,6 @@ public struct BibleReaderView: View {
         }
     }
 
-    /// Choose-document sheet that reuses the existing module/category infrastructure.
-    private var readerChooseDocumentSheet: some View {
-        BibleReaderChooseDocumentSheet(
-            activeChoice: activeReaderDocumentChoice,
-            subtitle: readerDocumentChoiceSubtitle,
-            onSelect: handleReaderDocumentChoice,
-            onDismiss: dismissReaderModal
-        )
-    }
-
     /// Dismisses the drawer immediately using the shared animation.
     private func dismissReaderNavigationDrawer() {
         withAnimation(.easeInOut(duration: 0.2)) {
@@ -1676,107 +1675,6 @@ public struct BibleReaderView: View {
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
         let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"
         return "Version \(version) (\(build))"
-    }
-
-    /// Optional subtitle shown beneath each choose-document category.
-    private func readerDocumentChoiceSubtitle(_ choice: BibleReaderDocumentChoice) -> String? {
-        guard let controller = panePresentationController else { return nil }
-        switch choice {
-        case .bible:
-            return controller.activeModule?.info.description ?? controller.activeModuleName
-        case .commentary:
-            return controller.activeCommentaryModule?.info.description ?? controller.activeCommentaryModuleName
-        case .dictionary:
-            return controller.activeDictionaryModule?.info.description ?? controller.activeDictionaryModuleName
-        case .generalBook:
-            return controller.activeGeneralBookModule?.info.description ?? controller.activeGeneralBookModuleName
-        case .map:
-            return controller.activeMapModule?.info.description ?? controller.activeMapModuleName
-        case .epub:
-            return controller.currentEpubTitle
-        }
-    }
-
-    /// Whether one choose-document row matches the currently focused category.
-    private var activeReaderDocumentChoice: BibleReaderDocumentChoice {
-        let activeCategory = panePresentationController?.currentCategory ?? .bible
-        switch activeCategory {
-        case .commentary:
-            return .commentary
-        case .dictionary:
-            return .dictionary
-        case .generalBook:
-            return .generalBook
-        case .map:
-            return .map
-        case .epub:
-            return .epub
-        default:
-            return .bible
-        }
-    }
-
-    /// Routes the choose-document selection into the existing reader module/category infrastructure.
-    private func handleReaderDocumentChoice(_ choice: BibleReaderDocumentChoice) {
-        dismissReaderModal()
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
-            guard let controller = panePresentationController else { return }
-            switch choice {
-            case .bible:
-                pickerCategory = .bible
-                presentReaderModalPreservingPane(.modulePicker)
-            case .commentary:
-                pickerCategory = .commentary
-                presentReaderModalPreservingPane(.modulePicker)
-            case .dictionary:
-                let modules = controller.installedDictionaryModules
-                if modules.isEmpty {
-                    presentDownloadsPreservingPane()
-                } else if modules.count == 1 {
-                    controller.switchDictionaryModule(to: modules[0].name)
-                    controller.switchCategory(to: .dictionary)
-                    presentReaderModalPreservingPane(.dictionaryBrowser)
-                } else {
-                    pickerCategory = .dictionary
-                    presentReaderModalPreservingPane(.modulePicker)
-                }
-            case .generalBook:
-                let modules = controller.installedGeneralBookModules
-                if modules.isEmpty {
-                    presentDownloadsPreservingPane()
-                } else if modules.count == 1 {
-                    controller.switchGeneralBookModule(to: modules[0].name)
-                    controller.switchCategory(to: .generalBook)
-                    presentReaderModalPreservingPane(.generalBookBrowser)
-                } else {
-                    pickerCategory = .generalBook
-                    presentReaderModalPreservingPane(.modulePicker)
-                }
-            case .map:
-                let modules = controller.installedMapModules
-                if modules.isEmpty {
-                    presentDownloadsPreservingPane()
-                } else if modules.count == 1 {
-                    controller.switchMapModule(to: modules[0].name)
-                    controller.switchCategory(to: .map)
-                    presentReaderModalPreservingPane(.mapBrowser)
-                } else {
-                    pickerCategory = .map
-                    presentReaderModalPreservingPane(.modulePicker)
-                }
-            case .epub:
-                if !EpubReader.installedEpubs().isEmpty {
-                    if controller.activeEpubReader != nil {
-                        controller.switchCategory(to: .epub)
-                        presentReaderModalPreservingPane(.epubBrowser)
-                    } else {
-                        presentReaderModalPreservingPane(.epubLibrary)
-                    }
-                } else {
-                    presentDownloadsPreservingPane()
-                }
-            }
-        }
     }
 
     /// Category-specific browse icon used when reading non-Bible content.

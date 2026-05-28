@@ -49,6 +49,7 @@
 "dictionary" = "Dictionary";
 "general_book" = "General Book";
 "map" = "Map";
+"locked" = "Locked";
 
 /* Bible Navigation */
 "choose_book" = "Choose Book";
@@ -60,6 +61,8 @@
 "back_to_bible" = "Back to Bible";
 
 /* Module Pickers */
+"choose_document" = "Choose Document";
+"document_type" = "Document type";
 "picker_select_translation" = "Select Translation";
 "picker_select_commentary" = "Select Commentary";
 "picker_select_dictionary" = "Select Dictionary";
@@ -161,6 +164,7 @@
 "commentaries" = "Commentaries";
 "dictionaries" = "Dictionaries";
 "category_books" = "Books";
+"document_filter_results %lld" = "Documents (%lld)";
 "install" = "Install";
 "uninstall" = "Uninstall";
 "refresh_catalog" = "Refresh Catalog";
