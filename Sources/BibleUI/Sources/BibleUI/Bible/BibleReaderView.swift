@@ -174,6 +174,9 @@ public struct BibleReaderView: View {
     /// Presents the current top-level reader sheet driven by the overflow menu and shortcuts.
     @State private var activeReaderSheet: ReaderSheet?
 
+    /// Initial search applied when Downloads is opened from an Android-compatible download link.
+    @State private var downloadsInitialSearchText = ""
+
     /// Initial tab requested by the Android-compatible reading-progress bridge.
     @State private var readingProgressInitialTab: ReadingProgressTab = .reading
 
@@ -621,6 +624,7 @@ public struct BibleReaderView: View {
                 nightModeMode: $nightModeMode,
                 readingProgressInitialTab: readingProgressInitialTab,
                 chapterReadHistoryTarget: chapterReadHistoryTarget,
+                downloadsInitialSearchText: downloadsInitialSearchText,
                 onDismiss: dismissReaderSheet,
                 onSettingsChanged: applyGlobalDisplaySettingsChange
             )
@@ -655,6 +659,7 @@ public struct BibleReaderView: View {
                 reloadBehaviorPreferences()
             }
             if oldValue == .downloads, newValue == nil {
+                downloadsInitialSearchText = ""
                 for (_, ctrl) in windowManager.controllers {
                     (ctrl as? BibleReaderController)?.refreshInstalledModules()
                 }
@@ -722,7 +727,7 @@ public struct BibleReaderView: View {
                 onNavigatePrevious: { navigatePreviousIfReaderCanHostNavigate(focusedController) },
                 onNavigateNext: { navigateNextIfReaderCanHostNavigate(focusedController) },
                 onCloseClientModal: { _ = closeFocusedWebModalIfNeeded() },
-                onOpenDownloads: { presentReaderSheet(.downloads, from: windowManager.activeWindow?.id) },
+                onOpenDownloads: { presentDownloads(from: windowManager.activeWindow?.id) },
                 onOpenSettings: { presentReaderSheet(.settings, from: windowManager.activeWindow?.id) }
             )
         }
@@ -736,8 +741,33 @@ public struct BibleReaderView: View {
         activeReaderSheet = sheet
     }
 
+    /**
+     Presents Downloads and seeds its free-text search from an Android `download://` target.
+
+     - Parameters:
+       - windowId: Pane whose controller should own the sheet context. When `nil`, the focused pane
+         is used.
+       - initialSearchText: Optional module initials from the link query. Empty and whitespace-only
+         values are normalized away so normal Downloads entry points remain unfiltered.
+
+     Side effects:
+     - captures the pane presentation target
+     - updates `downloadsInitialSearchText`
+     - presents the `.downloads` reader sheet
+
+     Failure modes:
+     - invalid search text is normalized to an empty string and opens the standard Downloads view
+     */
+    private func presentDownloads(from windowId: UUID? = nil, initialSearchText: String? = nil) {
+        downloadsInitialSearchText = normalizedDownloadsSearchText(initialSearchText)
+        presentReaderSheet(.downloads, from: windowId)
+    }
+
     /// Closes the currently active top-level reader sheet.
     private func dismissReaderSheet() {
+        if activeReaderSheet == .downloads {
+            downloadsInitialSearchText = ""
+        }
         activeReaderSheet = nil
         chapterReadHistoryTarget = nil
     }
@@ -745,6 +775,36 @@ public struct BibleReaderView: View {
     /// Presents a follow-up top-level sheet after another flow already captured the pane target.
     private func presentReaderSheetPreservingPane(_ sheet: ReaderSheet) {
         activeReaderSheet = sheet
+    }
+
+    /**
+     Presents Downloads after a pane-scoped flow has already captured the owning pane.
+
+     - Parameter initialSearchText: Optional module initials from an Android-compatible link.
+     Side effects mirror `presentDownloads(from:initialSearchText:)` without changing the captured
+     pane target.
+
+     Failure modes:
+     - invalid search text is normalized to an empty string and opens the standard Downloads view
+     */
+    private func presentDownloadsPreservingPane(initialSearchText: String? = nil) {
+        downloadsInitialSearchText = normalizedDownloadsSearchText(initialSearchText)
+        presentReaderSheetPreservingPane(.downloads)
+    }
+
+    /**
+     Normalizes an optional Downloads search seed for storage in SwiftUI state.
+
+     - Parameter searchText: Optional module initials from Android-compatible routing.
+     - Returns: A trimmed search string, or an empty string when no target should be applied.
+
+     The helper is deterministic and performs no side effects.
+
+     Failure modes:
+     - `nil` or whitespace-only input returns an empty string
+     */
+    private func normalizedDownloadsSearchText(_ searchText: String?) -> String {
+        searchText?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     }
 
     /// Presents the book chooser for the pane that initiated the navigation.
@@ -814,7 +874,7 @@ public struct BibleReaderView: View {
                 controller: panePresentationController,
                 category: pickerCategory,
                 onDismiss: dismissReaderModal,
-                onOpenDownloads: { presentReaderSheetPreservingPane(.downloads) },
+                onOpenDownloads: { presentDownloadsPreservingPane() },
                 onOpenDictionaryBrowser: { presentReaderModalPreservingPane(.dictionaryBrowser) },
                 onOpenGeneralBookBrowser: { presentReaderModalPreservingPane(.generalBookBrowser) },
                 onOpenMapBrowser: { presentReaderModalPreservingPane(.mapBrowser) }
@@ -1092,7 +1152,7 @@ public struct BibleReaderView: View {
             case .workspaces:
                 presentReaderSheet(.workspaces, from: windowManager.activeWindow?.id)
             case .downloads:
-                presentReaderSheet(.downloads, from: windowManager.activeWindow?.id)
+                presentDownloads(from: windowManager.activeWindow?.id)
             case .epubLibrary:
                 presentReaderModal(.epubLibrary, from: windowManager.activeWindow?.id)
             case .epubBrowser:
@@ -1134,7 +1194,7 @@ public struct BibleReaderView: View {
 
     /** Opens Downloads from the reader shell. */
     private func openDownloadsFromReaderAction() {
-        presentReaderSheet(.downloads, from: windowManager.activeWindow?.id)
+        presentDownloads(from: windowManager.activeWindow?.id)
     }
 
     /** Opens About from the reader shell. */
@@ -1162,7 +1222,9 @@ public struct BibleReaderView: View {
             onShowSearch: { presentSearch(from: window.id) },
             onShowBookmarks: { presentReaderSheet(.bookmarks, from: window.id) },
             onShowSettings: { presentReaderSheet(.settings, from: window.id) },
-            onShowDownloads: { presentReaderSheet(.downloads, from: window.id) },
+            onShowDownloads: { initialSearchText in
+                presentDownloads(from: window.id, initialSearchText: initialSearchText)
+            },
             onShowHistory: { presentReaderSheet(.history, from: window.id) },
             onShowCompare: {
                 (windowManager.controllers[window.id] as? BibleReaderController)?.loadCompareDocument()
@@ -1542,7 +1604,7 @@ public struct BibleReaderView: View {
             }
         case .downloads:
             dismissReaderNavigationDrawerAndPerform {
-                presentReaderSheet(.downloads, from: windowManager.activeWindow?.id)
+                presentDownloads(from: windowManager.activeWindow?.id)
             }
         case .importExport:
             dismissReaderNavigationDrawerAndPerform { presentReaderModal(.importExport) }
@@ -1669,7 +1731,7 @@ public struct BibleReaderView: View {
             case .dictionary:
                 let modules = controller.installedDictionaryModules
                 if modules.isEmpty {
-                    presentReaderSheetPreservingPane(.downloads)
+                    presentDownloadsPreservingPane()
                 } else if modules.count == 1 {
                     controller.switchDictionaryModule(to: modules[0].name)
                     controller.switchCategory(to: .dictionary)
@@ -1681,7 +1743,7 @@ public struct BibleReaderView: View {
             case .generalBook:
                 let modules = controller.installedGeneralBookModules
                 if modules.isEmpty {
-                    presentReaderSheetPreservingPane(.downloads)
+                    presentDownloadsPreservingPane()
                 } else if modules.count == 1 {
                     controller.switchGeneralBookModule(to: modules[0].name)
                     controller.switchCategory(to: .generalBook)
@@ -1693,7 +1755,7 @@ public struct BibleReaderView: View {
             case .map:
                 let modules = controller.installedMapModules
                 if modules.isEmpty {
-                    presentReaderSheetPreservingPane(.downloads)
+                    presentDownloadsPreservingPane()
                 } else if modules.count == 1 {
                     controller.switchMapModule(to: modules[0].name)
                     controller.switchCategory(to: .map)
@@ -1711,7 +1773,7 @@ public struct BibleReaderView: View {
                         presentReaderModalPreservingPane(.epubLibrary)
                     }
                 } else {
-                    presentReaderSheetPreservingPane(.downloads)
+                    presentDownloadsPreservingPane()
                 }
             }
         }

@@ -98,8 +98,8 @@ struct BibleWindowPane: View {
     /// Requests the parent reader to present settings UI.
     var onShowSettings: (() -> Void)?
 
-    /// Requests the parent reader to present download/module-management UI.
-    var onShowDownloads: (() -> Void)?
+    /// Requests the parent reader to present download/module-management UI with optional search.
+    var onShowDownloads: ((String?) -> Void)?
 
     /// Requests the parent reader to present navigation history UI.
     var onShowHistory: (() -> Void)?
@@ -401,7 +401,7 @@ struct BibleWindowPane: View {
         ctrl.myDocumentStore = MyDocumentStore(modelContext: modelContext)
 
         ctrl.onShareVerseText = { text in onShareText?(text) }
-        ctrl.onRequestOpenDownloads = { onShowDownloads?() }
+        ctrl.onRequestOpenDownloads = { initialSearchText in onShowDownloads?(initialSearchText) }
         ctrl.onShowStrongsSearch = { strongsNum in onSearchForStrongs?(strongsNum) }
         ctrl.onShowCrossReferences = { refs in onShowCrossReferences?(refs) }
         ctrl.onShowReadingProgress = { tab in onShowReadingProgress?(tab) }

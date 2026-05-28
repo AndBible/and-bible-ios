@@ -3256,7 +3256,14 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
     /// Callback for presenting action sheets (set by BibleReaderView)
     var onShareVerseText: ((String) -> Void)?
-    var onRequestOpenDownloads: (() -> Void)?
+
+    /**
+     Callback for presenting Downloads with an optional Android-compatible search seed.
+
+     The optional string mirrors Android `DownloadActivity`'s `"search"` extra: `nil` opens
+     Downloads normally, while a non-empty module initials value pre-populates the browser search.
+     */
+    var onRequestOpenDownloads: ((String?) -> Void)?
     var onOpenExternalURL: ((URL) -> Void)?
 
     /// Whether there's an active text selection in the WebView.
@@ -3974,7 +3981,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         }
         // Handle Downloads links surfaced in web-rendered help/error content.
         if link.hasPrefix("download://") {
-            onRequestOpenDownloads?()
+            onRequestOpenDownloads?(Self.downloadSearchText(from: link))
             return
         }
         // Handle My Notes links surfaced in bookmark metadata.
@@ -4026,6 +4033,26 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         }
         guard let url = URL(string: link) else { return }
         openPlatformURL(url)
+    }
+
+    /**
+     Extracts the module-initials search seed from an Android-compatible Downloads pseudo-link.
+
+     - Parameter link: A `download://` link emitted by rendered document content, optionally with
+       an `initials` query item such as `download://?initials=KJV`.
+     - Returns: The decoded, trimmed `initials` value when present and non-empty; otherwise `nil`.
+
+     The method is deterministic and performs no I/O. Malformed or non-download links return
+     `nil`, which keeps the caller on the standard unfiltered Downloads presentation path.
+     */
+    static func downloadSearchText(from link: String) -> String? {
+        guard link.hasPrefix("download://"),
+              let components = URLComponents(string: link),
+              let value = components.queryItems?.first(where: { $0.name == "initials" })?.value else {
+            return nil
+        }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     private func handleErrorReportLink() {
@@ -5840,7 +5867,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      Requests that the owning SwiftUI view present the downloads/install UI.
      */
     public func bridgeDidRequestOpenDownloads(_ bridge: BibleBridge) {
-        onRequestOpenDownloads?()
+        onRequestOpenDownloads?(nil)
     }
 
     // MARK: - BibleBridgeDelegate — Dialogs

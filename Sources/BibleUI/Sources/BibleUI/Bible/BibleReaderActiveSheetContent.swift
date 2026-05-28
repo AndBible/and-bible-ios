@@ -15,6 +15,10 @@ struct BibleReaderActiveSheetContent: View {
     @Binding var nightModeMode: String
     let readingProgressInitialTab: ReadingProgressTab
     let chapterReadHistoryTarget: ChapterReadHistoryTarget?
+
+    /// Initial Downloads search text supplied by Android-compatible `download://` links.
+    let downloadsInitialSearchText: String
+
     let onDismiss: () -> Void
     let onSettingsChanged: () -> Void
 
@@ -48,7 +52,7 @@ struct BibleReaderActiveSheetContent: View {
             }
         case .downloads:
             NavigationStack {
-                ModuleBrowserView()
+                ModuleBrowserView(initialSearchText: downloadsInitialSearchText)
                     .toolbar {
                         ToolbarItem(placement: .cancellationAction) {
                             Button(String(localized: "done"), action: onDismiss)
