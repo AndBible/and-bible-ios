@@ -623,6 +623,86 @@ final class AndBibleTests: XCTestCase {
         XCTAssertTrue(String(describing: type(of: view)).contains("BibleReaderModulePicker"))
     }
 
+    func testBibleReaderModulePickerFiltersAndroidChooserCategoriesAndSearch() {
+        let modules = [
+            ModuleInfo(name: "KJV", description: "King James Version", category: .bible, language: "en"),
+            ModuleInfo(name: "MHC", description: "Matthew Henry", category: .commentary, language: "en"),
+            ModuleInfo(name: "StrongsHebrew", description: "Strong's Hebrew", category: .dictionary, language: "he"),
+            ModuleInfo(name: "BookA", description: "General reference book", category: .generalBook, language: "fr"),
+            ModuleInfo(name: "MapA", description: "Bible maps", category: .map, language: "en"),
+            ModuleInfo(name: "Devotion", description: "Daily devotional", category: .dailyDevotion, language: "en")
+        ]
+
+        XCTAssertEqual(
+            BibleReaderModulePicker.filteredModules(
+                modules,
+                selectedCategory: nil,
+                selectedLanguage: "",
+                searchText: ""
+            ).map(\.name),
+            ["KJV", "MHC", "StrongsHebrew", "BookA", "MapA"]
+        )
+        XCTAssertEqual(
+            BibleReaderModulePicker.filteredModules(
+                modules,
+                selectedCategory: .dictionary,
+                selectedLanguage: "",
+                searchText: ""
+            ).map(\.name),
+            ["StrongsHebrew"]
+        )
+        XCTAssertEqual(
+            BibleReaderModulePicker.filteredModules(
+                modules,
+                selectedCategory: nil,
+                selectedLanguage: "en",
+                searchText: ""
+            ).map(\.name),
+            ["KJV", "MHC", "MapA"]
+        )
+        XCTAssertEqual(
+            BibleReaderModulePicker.filteredModules(
+                modules,
+                selectedCategory: .bible,
+                selectedLanguage: "he",
+                searchText: ""
+            ).map(\.name),
+            []
+        )
+        XCTAssertEqual(
+            BibleReaderModulePicker.filteredModules(
+                modules,
+                selectedCategory: nil,
+                selectedLanguage: "",
+                searchText: "strong"
+            ).map(\.name),
+            ["StrongsHebrew"]
+        )
+        XCTAssertEqual(
+            BibleReaderModulePicker.availableLanguages(from: modules),
+            ["en", "fr", "he"]
+        )
+    }
+
+    func testBibleReaderModulePickerMapsAndroidDocumentTypeCategories() {
+        XCTAssertEqual(BibleReaderModulePicker.initialCategoryFilter(for: .bible), .bible)
+        XCTAssertEqual(BibleReaderModulePicker.initialCategoryFilter(for: .commentary), .commentary)
+        XCTAssertEqual(BibleReaderModulePicker.initialCategoryFilter(for: .dictionary), .dictionary)
+        XCTAssertEqual(BibleReaderModulePicker.initialCategoryFilter(for: .generalBook), .generalBook)
+        XCTAssertEqual(BibleReaderModulePicker.initialCategoryFilter(for: .map), .map)
+        XCTAssertNil(BibleReaderModulePicker.initialCategoryFilter(for: .epub))
+        XCTAssertNil(BibleReaderModulePicker.initialCategoryFilter(for: .dailyDevotion))
+
+        XCTAssertEqual(BibleReaderModulePicker.documentCategory(for: .bible), .bible)
+        XCTAssertEqual(BibleReaderModulePicker.documentCategory(for: .commentary), .commentary)
+        XCTAssertEqual(BibleReaderModulePicker.documentCategory(for: .dictionary), .dictionary)
+        XCTAssertEqual(BibleReaderModulePicker.documentCategory(for: .generalBook), .generalBook)
+        XCTAssertEqual(BibleReaderModulePicker.documentCategory(for: .map), .map)
+        XCTAssertNil(BibleReaderModulePicker.documentCategory(for: .dailyDevotion))
+        XCTAssertNil(BibleReaderModulePicker.documentCategory(for: .glossary))
+        XCTAssertNil(BibleReaderModulePicker.documentCategory(for: .unknown))
+    }
+
     func testBibleReaderSpeakMiniPlayerBuildsWithSpeakService() {
         let view = BibleReaderSpeakMiniPlayer(
             speakService: SpeakService(),
@@ -642,17 +722,6 @@ final class AndBibleTests: XCTestCase {
         )
 
         XCTAssertTrue(String(describing: type(of: view)).contains("BibleReaderNavigationDrawer"))
-    }
-
-    func testBibleReaderChooseDocumentSheetBuildsWithActiveBibleChoice() {
-        let view = BibleReaderChooseDocumentSheet(
-            activeChoice: .bible,
-            subtitle: { _ in nil },
-            onSelect: { _ in },
-            onDismiss: {}
-        )
-
-        XCTAssertTrue(String(describing: type(of: view)).contains("BibleReaderChooseDocumentSheet"))
     }
 
     #if os(iOS)

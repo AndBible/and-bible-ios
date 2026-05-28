@@ -1,6 +1,6 @@
 # READER-701 Verification Matrix (Android Reader -> iOS)
 
-Date: 2026-05-27
+Date: 2026-05-28
 
 ## Scope and Method
 
@@ -34,13 +34,14 @@ trust than proof.
 
 - `Pass`: 10
 - `Adapted Pass`: 1
-- `Partial`: 1
+- `Partial`: 2
 
 ## Matrix
 
 | Reader Contract Area | iOS Evidence | Status | Notes |
 |---|---|---|---|
 | Reader shell routes primary destinations through the left drawer and reader-local options through the right overflow popup | `BibleReaderView.swift`; UI tests `testSettingsScreenShowsPrimaryNavigationRows`, `testDownloadsScreenOpensFromReaderMenu`, `testBookmarksScreenOpensFromReaderMenu`, `testAboutScreenOpensFromReaderMenu` | Adapted Pass | This part now feels close to Android in day-to-day use, even though iOS gets there with native SwiftUI shells and an anchored popup instead of Android view classes. |
+| Reader document chooser opens the Android-style all-types module list from the drawer | `BibleReaderView.swift`, `BibleReaderModulePicker.swift`, `document-chooser-matrix.md`; unit tests `testBibleReaderModulePickerBuildsForBibleCategory`, `testBibleReaderModulePickerFiltersAndroidChooserCategoriesAndSearch`, `testBibleReaderModulePickerMapsAndroidDocumentTypeCategories` | Partial | The removed category-first sheet was drift. The remaining gaps are Android pseudo-doc rows, encrypted-module unlock prompts, and row context actions for about/delete/delete-index/unlock. |
 | Search result selection returns control to the reader and moves the active reference | `BibleReaderView.swift`, `BibleReaderController.swift`; UI test `testSearchResultSelectionNavigatesReaderToBundledReference` | Pass | The reader side of search handoff is in a good place. Search query semantics still live under `docs/parity/search/`. |
 | History jump-back plus destructive clear/delete flows persist through reopen | `HistoryView.swift`, `BibleReaderView.swift`, `BibleReaderController.swift`; UI tests `testHistorySelectionNavigatesReaderToSeededReference`, `testHistoryClearRemovesSeededRowAcrossReopen`, `testHistoryRowDeletePreservesOtherRowsAcrossReopen` | Pass | This now protects both the jump back into the reader and the more failure-prone destructive persistence paths. |
 | Workspace selection and switching remain coordinated by the reader shell | `BibleReaderView.swift`, `WorkspaceSelectorView.swift`, `WindowManager`; UI test `testWorkspaceSelectorCreateAndSwitchFlow` | Pass | The current check is doing useful work here: it covers creation, activation, and a clean return to the reader shell, not just low-level persistence. |

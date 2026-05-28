@@ -19,8 +19,10 @@ is useful, but the surrounding notes are where the intent and the remaining roug
 1. [contract.md](contract.md): reader behaviors that intentionally mirror Android
 2. [dispositions.md](dispositions.md): explicit iOS adaptations for those behaviors
 3. [verification-matrix.md](verification-matrix.md): current status by contract area
-4. [regression-report.md](regression-report.md): focused validation evidence
-5. [guardrails.md](guardrails.md): maintenance rules for high-risk reader changes
+4. [document-chooser-matrix.md](document-chooser-matrix.md): Android `ChooseDocument`
+   alignment and known chooser gaps
+5. [regression-report.md](regression-report.md): focused validation evidence
+6. [guardrails.md](guardrails.md): maintenance rules for high-risk reader changes
 
 Helpful companion docs:
 
