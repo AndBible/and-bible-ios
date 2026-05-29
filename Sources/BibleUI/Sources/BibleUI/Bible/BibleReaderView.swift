@@ -177,6 +177,15 @@ public struct BibleReaderView: View {
     /// Initial search applied when Downloads is opened from an Android-compatible download link.
     @State private var downloadsInitialSearchText = ""
 
+    /// Default-document mode applied to the next Downloads sheet presentation.
+    @State private var downloadsDefaultDownloadMode: ModuleBrowserDefaultDownloadMode = .disabled
+
+    /// Whether the no-Bible startup prompt should be visible.
+    @State private var showStartupDownloadPrompt = false
+
+    /// Guards startup prompt evaluation so it does not reappear repeatedly in one session.
+    @State private var didEvaluateStartupDownloadPrompt = false
+
     /// Initial tab requested by the Android-compatible reading-progress bridge.
     @State private var readingProgressInitialTab: ReadingProgressTab = .reading
 
@@ -438,6 +447,11 @@ public struct BibleReaderView: View {
         !isFullScreen || !fullScreenHideButtonsPref
     }
 
+    /// Whether Android's English-only Easy Start default download action should be offered.
+    private var isStartupEasyStartAvailable: Bool {
+        Locale.current.language.languageCode?.identifier == "en"
+    }
+
     /// Whether the floating fullscreen Bible reference capsule should be displayed.
     private var shouldShowBibleReferenceOverlay: Bool {
         isFullScreen &&
@@ -470,74 +484,13 @@ public struct BibleReaderView: View {
      `WindowManager` state.
      */
     public var body: some View {
-        VStack(spacing: 0) {
-            // Document header bar — hidden in fullscreen mode
-            if !isFullScreen {
-                documentHeader
-            }
-
-            // Split content — one BibleWindowPane per visible window
-            splitContent
-
-            // Persistent mini-player when speaking (visible even in fullscreen)
-            if speakService.isSpeaking {
-                BibleReaderSpeakMiniPlayer(
-                    speakService: speakService,
-                    currentReference: currentReference,
-                    onShowControls: { presentReaderModal(.speakControls) }
-                )
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-            }
-
-            // Bottom window tab bar — hidden in fullscreen mode
-            if shouldShowWindowTabBar {
-                WindowTabBar(
-                    onShowToast: { text in
-                        toastWorkItem?.cancel()
-                        withAnimation { toastMessage = text }
-                        let work = DispatchWorkItem {
-                            withAnimation { toastMessage = nil }
-                        }
-                        toastWorkItem = work
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5, execute: work)
-                    },
-                    onShowBookChooser: { presentBookChooser(from: windowManager.activeWindow?.id) },
-                    onGoToTypedRef: { window, text in
-                        guard let ctrl = windowManager.controllers[window.id] as? BibleReaderController else { return false }
-                        return ctrl.navigateToRef(text)
-                    }
-                )
-            }
-        }
+        readerScreenContent
         .animation(.easeInOut(duration: 0.2), value: isFullScreen)
         .overlay(alignment: .bottom) {
-            if shouldShowBibleReferenceOverlay {
-                Text(currentReference)
-                    .font(.subheadline.weight(.semibold))
-                    .lineLimit(1)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 8)
-                    .background(.ultraThinMaterial, in: Capsule())
-                    .overlay(
-                        Capsule().strokeBorder(Color.secondary.opacity(0.25), lineWidth: 1)
-                    )
-                    .padding(.bottom, bibleReferenceOverlayBottomPadding)
-                    .transition(.opacity)
-                    .allowsHitTesting(false)
-            }
+            bibleReferenceOverlay
         }
         .overlay(alignment: .bottom) {
-            if let message = toastMessage {
-                Text(message)
-                    .font(.subheadline)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 10)
-                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10))
-                    .shadow(radius: 4)
-                    .padding(.bottom, 80)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-                    .allowsHitTesting(false)
-            }
+            toastOverlay
         }
         .overlay(alignment: .topLeading) {
             readerRenderedContentStateExport
@@ -556,12 +509,7 @@ public struct BibleReaderView: View {
         .animation(.easeInOut(duration: 0.2), value: showReaderNavigationDrawer)
         .animation(.easeInOut(duration: 0.16), value: showReaderOverflowMenu)
         .background {
-            GeometryReader { proxy in
-                Color.clear.preference(
-                    key: ReaderSceneMetricsPreferenceKey.self,
-                    value: ReaderSceneMetrics(size: proxy.size, safeAreaInsets: proxy.safeAreaInsets)
-                )
-            }
+            readerSceneMetricsBackground
         }
         .onPreferenceChange(ReaderSceneMetricsPreferenceKey.self) { metrics in
             readerSceneMetrics = metrics
@@ -588,46 +536,22 @@ public struct BibleReaderView: View {
         #endif
         .preferredColorScheme(preferredColorSchemeOverride)
         .sheet(isPresented: $showBookChooser) {
-            NavigationStack {
-                BookChooserView(
-                    books: panePresentationController?.bookList ?? BibleReaderController.defaultBooks,
-                    navigateToVerse: navigateToVersePref
-                ) { book, chapter, verse in
-                    dismissBookChooser()
-                    panePresentationController?.navigateTo(book: book, chapter: chapter, verse: verse)
-                }
-            }
+            bookChooserSheetContent
         }
         .sheet(isPresented: $showSearch, onDismiss: { searchInitialQuery = "" }) {
-            NavigationStack {
-                SearchView(
-                    swordModule: panePresentationController?.activeModule,
-                    swordManager: panePresentationController?.swordManager,
-                    searchIndexService: searchIndexService,
-                    installedBibleModules: panePresentationController?.installedBibleModules ?? [],
-                    currentBook: panePresentationController?.currentBook ?? "Genesis",
-                    currentOsisBookId: panePresentationController?.osisBookId(for: panePresentationController?.currentBook ?? "Genesis") ?? BibleReaderController.osisBookId(for: panePresentationController?.currentBook ?? "Genesis"),
-                    initialQuery: searchInitialQuery,
-                    onNavigate: { book, chapter in
-                        showSearch = false
-                        panePresentationController?.navigateTo(book: book, chapter: chapter)
-                    }
-                )
-            }
+            searchSheetContent
         }
         .sheet(item: $activeReaderSheet) { presentedSheet in
-            BibleReaderActiveSheetContent(
-                sheet: presentedSheet,
-                controller: panePresentationController,
-                displaySettings: $globalDisplaySettings,
-                nightMode: $nightMode,
-                nightModeMode: $nightModeMode,
-                readingProgressInitialTab: readingProgressInitialTab,
-                chapterReadHistoryTarget: chapterReadHistoryTarget,
-                downloadsInitialSearchText: downloadsInitialSearchText,
-                onDismiss: dismissReaderSheet,
-                onSettingsChanged: applyGlobalDisplaySettingsChange
-            )
+            activeReaderSheetContent(presentedSheet)
+        }
+        .confirmationDialog(
+            String(localized: "picker_no_bible_modules"),
+            isPresented: $showStartupDownloadPrompt,
+            titleVisibility: .visible
+        ) {
+            startupDownloadPromptActions
+        } message: {
+            startupDownloadPromptMessage
         }
         .sheet(item: $activeReaderModal) { modal in
             readerModalContent(modal)
@@ -641,29 +565,10 @@ public struct BibleReaderView: View {
             isPresented: $showReaderStrongsModeDialog,
             titleVisibility: .visible
         ) {
-            ForEach(StrongsMode.allCases) { mode in
-                Button {
-                    applyStrongsMode(mode.rawValue)
-                } label: {
-                    if displaySettings.strongsMode ?? 0 == mode.rawValue {
-                        Label(mode.label, systemImage: "checkmark")
-                    } else {
-                        Text(mode.label)
-                    }
-                }
-            }
-            Button(String(localized: "cancel"), role: .cancel) {}
+            strongsModeDialogActions
         }
         .onChange(of: activeReaderSheet) { oldValue, newValue in
-            if oldValue == .settings, newValue == nil {
-                reloadBehaviorPreferences()
-            }
-            if oldValue == .downloads, newValue == nil {
-                downloadsInitialSearchText = ""
-                for (_, ctrl) in windowManager.controllers {
-                    (ctrl as? BibleReaderController)?.refreshInstalledModules()
-                }
-            }
+            handleActiveReaderSheetChange(from: oldValue, to: newValue)
         }
         .onChange(of: showReaderOverflowMenu) { oldValue, newValue in
             guard oldValue, !newValue else {
@@ -691,46 +596,297 @@ public struct BibleReaderView: View {
             get: { shareText != nil },
             set: { if !$0 { shareText = nil } }
         )) {
-            if let text = shareText {
-                ShareSheet(items: [text])
-            }
+            shareSheetContent
         }
         .sheet(isPresented: Binding(
             get: { crossReferences != nil },
             set: { if !$0 { crossReferences = nil } }
         )) {
-            if let refs = crossReferences {
-                CrossReferenceView(references: refs) { book, chapter in
-                    crossReferences = nil
-                    panePresentationController?.navigateTo(book: book, chapter: chapter)
-                }
-                .presentationDetents([.medium, .large])
-            }
+            crossReferenceSheetContent
         }
         .sheet(isPresented: $showRefChooser) {
-            NavigationStack {
-                BookChooserView(books: panePresentationController?.bookList ?? BibleReaderController.defaultBooks) { book, chapter, _ in
-                    showRefChooser = false
-                    let osisId = panePresentationController?.osisBookId(for: book) ?? BibleReaderController.osisBookId(for: book)
-                    refChooserCompletion?("\(osisId).\(chapter)")
-                    refChooserCompletion = nil
-                }
-            }
-            .presentationDetents([.large])
+            refChooserSheetContent
         }
         // MARK: - Keyboard Shortcuts (iPad/Mac)
         .background {
-            BibleReaderKeyboardShortcuts(
-                onSearch: { presentSearch(from: windowManager.activeWindow?.id) },
-                onShowBookChooser: { presentBookChooser(from: windowManager.activeWindow?.id) },
-                onOpenBookmarks: { presentReaderSheet(.bookmarks, from: windowManager.activeWindow?.id) },
-                onNavigatePrevious: { navigatePreviousIfReaderCanHostNavigate(focusedController) },
-                onNavigateNext: { navigateNextIfReaderCanHostNavigate(focusedController) },
-                onCloseClientModal: { _ = closeFocusedWebModalIfNeeded() },
-                onOpenDownloads: { presentDownloads(from: windowManager.activeWindow?.id) },
-                onOpenSettings: { presentReaderSheet(.settings, from: windowManager.activeWindow?.id) }
+            keyboardShortcutSurface
+        }
+    }
+
+    /// Main reader layout before transient overlays and presentation modifiers are attached.
+    @ViewBuilder
+    private var readerScreenContent: some View {
+        VStack(spacing: 0) {
+            // Document header bar — hidden in fullscreen mode
+            if !isFullScreen {
+                documentHeader
+            }
+
+            // Split content — one BibleWindowPane per visible window
+            splitContent
+
+            // Persistent mini-player when speaking (visible even in fullscreen)
+            if speakService.isSpeaking {
+                BibleReaderSpeakMiniPlayer(
+                    speakService: speakService,
+                    currentReference: currentReference,
+                    onShowControls: { presentReaderModal(.speakControls) }
+                )
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+
+            // Bottom window tab bar — hidden in fullscreen mode
+            if shouldShowWindowTabBar {
+                WindowTabBar(
+                    onShowToast: showWindowTabToast,
+                    onShowBookChooser: { presentBookChooser(from: windowManager.activeWindow?.id) },
+                    onGoToTypedRef: navigateWindowTabReference
+                )
+            }
+        }
+    }
+
+    /// Floating current-reference capsule shown during fullscreen reading.
+    @ViewBuilder
+    private var bibleReferenceOverlay: some View {
+        if shouldShowBibleReferenceOverlay {
+            Text(currentReference)
+                .font(.subheadline.weight(.semibold))
+                .lineLimit(1)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+                .background(.ultraThinMaterial, in: Capsule())
+                .overlay(
+                    Capsule().strokeBorder(Color.secondary.opacity(0.25), lineWidth: 1)
+                )
+                .padding(.bottom, bibleReferenceOverlayBottomPadding)
+                .transition(.opacity)
+                .allowsHitTesting(false)
+        }
+    }
+
+    /// Transient toast shown above the window tab bar.
+    @ViewBuilder
+    private var toastOverlay: some View {
+        if let message = toastMessage {
+            Text(message)
+                .font(.subheadline)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10))
+                .shadow(radius: 4)
+                .padding(.bottom, 80)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+                .allowsHitTesting(false)
+        }
+    }
+
+    /// Invisible scene-measurement surface used by pane and overlay placement.
+    private var readerSceneMetricsBackground: some View {
+        GeometryReader { proxy in
+            Color.clear.preference(
+                key: ReaderSceneMetricsPreferenceKey.self,
+                value: ReaderSceneMetrics(size: proxy.size, safeAreaInsets: proxy.safeAreaInsets)
             )
         }
+    }
+
+    /// Book chooser sheet used by toolbar and tab-bar navigation commands.
+    private var bookChooserSheetContent: some View {
+        NavigationStack {
+            BookChooserView(
+                books: panePresentationController?.bookList ?? BibleReaderController.defaultBooks,
+                navigateToVerse: navigateToVersePref
+            ) { book, chapter, verse in
+                dismissBookChooser()
+                panePresentationController?.navigateTo(book: book, chapter: chapter, verse: verse)
+            }
+        }
+    }
+
+    /// Search sheet seeded from toolbar, keyboard, or Android-compatible link routing.
+    private var searchSheetContent: some View {
+        NavigationStack {
+            SearchView(
+                swordModule: panePresentationController?.activeModule,
+                swordManager: panePresentationController?.swordManager,
+                searchIndexService: searchIndexService,
+                installedBibleModules: panePresentationController?.installedBibleModules ?? [],
+                currentBook: panePresentationController?.currentBook ?? "Genesis",
+                currentOsisBookId: searchSheetCurrentOsisBookId,
+                initialQuery: searchInitialQuery,
+                onNavigate: navigateFromSearch
+            )
+        }
+    }
+
+    /// OSIS book id shown as the Search sheet's current context.
+    private var searchSheetCurrentOsisBookId: String {
+        let currentBook = panePresentationController?.currentBook ?? "Genesis"
+        return panePresentationController?.osisBookId(for: currentBook)
+            ?? BibleReaderController.osisBookId(for: currentBook)
+    }
+
+    /// Builds content for the active top-level reader sheet.
+    private func activeReaderSheetContent(_ presentedSheet: ReaderSheet) -> some View {
+        BibleReaderActiveSheetContent(
+            sheet: presentedSheet,
+            controller: panePresentationController,
+            displaySettings: $globalDisplaySettings,
+            nightMode: $nightMode,
+            nightModeMode: $nightModeMode,
+            readingProgressInitialTab: readingProgressInitialTab,
+            chapterReadHistoryTarget: chapterReadHistoryTarget,
+            downloadsInitialSearchText: downloadsInitialSearchText,
+            downloadsDefaultDownloadMode: downloadsDefaultDownloadMode,
+            onDismiss: dismissReaderSheet,
+            onSettingsChanged: applyGlobalDisplaySettingsChange
+        )
+    }
+
+    /// Buttons shown when startup detects there are no installed Bible modules.
+    @ViewBuilder
+    private var startupDownloadPromptActions: some View {
+        if isStartupEasyStartAvailable {
+            Button(String(localized: "easy_start", defaultValue: "Easy Start")) {
+                presentStartupDefaultDownloads()
+            }
+        }
+        Button(String(localized: "download_modules")) {
+            presentDownloads(from: windowManager.activeWindow?.id)
+        }
+        Button(String(localized: "cancel"), role: .cancel) {}
+    }
+
+    /// Message shown in the no-Bible startup prompt.
+    private var startupDownloadPromptMessage: some View {
+        Text(
+            String(
+                localized: "startup_download_prompt",
+                defaultValue: "Download Bible modules to start reading."
+            )
+        )
+    }
+
+    /// Strong's mode picker options used by the reader toolbar dialog.
+    @ViewBuilder
+    private var strongsModeDialogActions: some View {
+        ForEach(StrongsMode.allCases) { mode in
+            Button {
+                applyStrongsMode(mode.rawValue)
+            } label: {
+                if displaySettings.strongsMode ?? 0 == mode.rawValue {
+                    Label(mode.label, systemImage: "checkmark")
+                } else {
+                    Text(mode.label)
+                }
+            }
+        }
+        Button(String(localized: "cancel"), role: .cancel) {}
+    }
+
+    /// System share sheet for selected or generated reader text.
+    @ViewBuilder
+    private var shareSheetContent: some View {
+        if let text = shareText {
+            ShareSheet(items: [text])
+        }
+    }
+
+    /// Cross-reference sheet for verse links resolved by the active pane.
+    @ViewBuilder
+    private var crossReferenceSheetContent: some View {
+        if let refs = crossReferences {
+            CrossReferenceView(references: refs) { book, chapter in
+                crossReferences = nil
+                panePresentationController?.navigateTo(book: book, chapter: chapter)
+            }
+            .presentationDetents([.medium, .large])
+        }
+    }
+
+    /// Reference chooser sheet used by web-modal callbacks.
+    private var refChooserSheetContent: some View {
+        NavigationStack {
+            BookChooserView(books: panePresentationController?.bookList ?? BibleReaderController.defaultBooks) { book, chapter, _ in
+                showRefChooser = false
+                let osisId = panePresentationController?.osisBookId(for: book) ?? BibleReaderController.osisBookId(for: book)
+                refChooserCompletion?("\(osisId).\(chapter)")
+                refChooserCompletion = nil
+            }
+        }
+        .presentationDetents([.large])
+    }
+
+    /// Invisible keyboard shortcut host for iPad and Mac command routing.
+    private var keyboardShortcutSurface: some View {
+        BibleReaderKeyboardShortcuts(
+            onSearch: { presentSearch(from: windowManager.activeWindow?.id) },
+            onShowBookChooser: { presentBookChooser(from: windowManager.activeWindow?.id) },
+            onOpenBookmarks: { presentReaderSheet(.bookmarks, from: windowManager.activeWindow?.id) },
+            onNavigatePrevious: { navigatePreviousIfReaderCanHostNavigate(focusedController) },
+            onNavigateNext: { navigateNextIfReaderCanHostNavigate(focusedController) },
+            onCloseClientModal: { _ = closeFocusedWebModalIfNeeded() },
+            onOpenDownloads: { presentDownloads(from: windowManager.activeWindow?.id) },
+            onOpenSettings: { presentReaderSheet(.settings, from: windowManager.activeWindow?.id) }
+        )
+    }
+
+    /**
+     Shows transient feedback requested by the bottom window tab bar.
+
+     - Parameter text: Message to display.
+     Side effects:
+     - cancels any pending toast dismissal
+     - updates `toastMessage`
+     - schedules automatic dismissal
+     Failure modes:
+     - none; newer toast requests replace earlier requests
+     */
+    private func showWindowTabToast(_ text: String) {
+        toastWorkItem?.cancel()
+        withAnimation { toastMessage = text }
+        let work = DispatchWorkItem {
+            withAnimation { toastMessage = nil }
+        }
+        toastWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5, execute: work)
+    }
+
+    /**
+     Attempts typed-reference navigation from the bottom tab bar.
+
+     - Parameters:
+       - window: Window whose controller should receive the reference.
+       - text: User-entered reference text.
+     - Returns: `true` when the reference was accepted by the window controller.
+     Side effects:
+     - may navigate the targeted pane
+     Failure modes:
+     - returns `false` when the controller is missing or cannot parse the reference
+     */
+    private func navigateWindowTabReference(_ window: Window, _ text: String) -> Bool {
+        guard let ctrl = windowManager.controllers[window.id] as? BibleReaderController else {
+            return false
+        }
+        return ctrl.navigateToRef(text)
+    }
+
+    /**
+     Navigates from Search results into the active reader pane.
+
+     - Parameters:
+       - book: Book name selected by Search.
+       - chapter: Chapter selected by Search.
+     Side effects:
+     - dismisses the Search sheet
+     - updates the active pane's reader location
+     Failure modes:
+     - does nothing when no pane presentation controller is available
+     */
+    private func navigateFromSearch(book: String, chapter: Int) {
+        showSearch = false
+        panePresentationController?.navigateTo(book: book, chapter: chapter)
     }
 
     // MARK: - Sheet Routing
@@ -749,27 +905,92 @@ public struct BibleReaderView: View {
          is used.
        - initialSearchText: Optional module initials from the link query. Empty and whitespace-only
          values are normalized away so normal Downloads entry points remain unfiltered.
+       - defaultDownloadMode: Optional startup/default-document mode for Android Easy Start.
 
      Side effects:
      - captures the pane presentation target
      - updates `downloadsInitialSearchText`
+     - updates `downloadsDefaultDownloadMode`
      - presents the `.downloads` reader sheet
 
      Failure modes:
      - invalid search text is normalized to an empty string and opens the standard Downloads view
      */
-    private func presentDownloads(from windowId: UUID? = nil, initialSearchText: String? = nil) {
+    private func presentDownloads(
+        from windowId: UUID? = nil,
+        initialSearchText: String? = nil,
+        defaultDownloadMode: ModuleBrowserDefaultDownloadMode = .disabled
+    ) {
         downloadsInitialSearchText = normalizedDownloadsSearchText(initialSearchText)
+        downloadsDefaultDownloadMode = defaultDownloadMode
         presentReaderSheet(.downloads, from: windowId)
+    }
+
+    /**
+     Opens Downloads in Android startup Easy Start mode.
+
+     Side effects:
+     - hides the startup prompt
+     - presents Downloads with `.englishStartup`, which consumes `default_documents_v2.json`
+
+     Failure modes:
+     - installation failures are handled inside `ModuleBrowserView`
+     */
+    private func presentStartupDefaultDownloads() {
+        showStartupDownloadPrompt = false
+        presentDownloads(
+            from: windowManager.activeWindow?.id,
+            defaultDownloadMode: .englishStartup
+        )
     }
 
     /// Closes the currently active top-level reader sheet.
     private func dismissReaderSheet() {
         if activeReaderSheet == .downloads {
             downloadsInitialSearchText = ""
+            downloadsDefaultDownloadMode = .disabled
         }
         activeReaderSheet = nil
         chapterReadHistoryTarget = nil
+    }
+
+    /**
+     Handles side effects that belong to a top-level reader sheet closing.
+
+     - Parameters:
+       - previousSheet: Sheet that was visible before SwiftUI reported the change.
+       - currentSheet: Sheet now visible after SwiftUI reported the change.
+
+     Side effects:
+     - reloads behavior preferences after Settings closes
+     - clears Downloads launch state after Downloads closes
+     - refreshes installed-module caches for each reader controller
+     - reopens the startup prompt when Downloads closes without an installed Bible
+
+     Failure modes:
+     - non-closing sheet transitions are ignored
+     */
+    private func handleActiveReaderSheetChange(
+        from previousSheet: ReaderSheet?,
+        to currentSheet: ReaderSheet?
+    ) {
+        guard currentSheet == nil, let previousSheet else {
+            return
+        }
+
+        switch previousSheet {
+        case .settings:
+            reloadBehaviorPreferences()
+        case .downloads:
+            downloadsInitialSearchText = ""
+            downloadsDefaultDownloadMode = .disabled
+            for (_, ctrl) in windowManager.controllers {
+                (ctrl as? BibleReaderController)?.refreshInstalledModules()
+            }
+            reevaluateStartupDownloadPromptAfterDownloads()
+        default:
+            break
+        }
     }
 
     /// Presents a follow-up top-level sheet after another flow already captured the pane target.
@@ -780,15 +1001,21 @@ public struct BibleReaderView: View {
     /**
      Presents Downloads after a pane-scoped flow has already captured the owning pane.
 
-     - Parameter initialSearchText: Optional module initials from an Android-compatible link.
+     - Parameters:
+       - initialSearchText: Optional module initials from an Android-compatible link.
+       - defaultDownloadMode: Optional startup/default-document mode for Android Easy Start.
      Side effects mirror `presentDownloads(from:initialSearchText:)` without changing the captured
      pane target.
 
      Failure modes:
      - invalid search text is normalized to an empty string and opens the standard Downloads view
      */
-    private func presentDownloadsPreservingPane(initialSearchText: String? = nil) {
+    private func presentDownloadsPreservingPane(
+        initialSearchText: String? = nil,
+        defaultDownloadMode: ModuleBrowserDefaultDownloadMode = .disabled
+    ) {
         downloadsInitialSearchText = normalizedDownloadsSearchText(initialSearchText)
+        downloadsDefaultDownloadMode = defaultDownloadMode
         presentReaderSheetPreservingPane(.downloads)
     }
 
@@ -1006,6 +1233,73 @@ public struct BibleReaderView: View {
         syncActiveDisplaySettings()
         installSynchronizedScrollingCallback()
         presentUITestLaunchSearchIfNeeded()
+        evaluateStartupDownloadPromptIfNeeded()
+    }
+
+    /**
+     Shows the no-Bible startup prompt once when the local module store has no Bible modules.
+
+     Android `StartupActivity` stops on its first-download layout whenever `SwordDocumentFacade`
+     has no Bibles. iOS is reader-first, so this coordinator presents the equivalent decision as a
+     startup prompt over the reader shell: normal Downloads for every locale, and English Easy
+     Start when Android would expose it.
+
+     Side effects:
+     - reads installed modules through the focused controller or a temporary `SwordManager`
+     - mutates `didEvaluateStartupDownloadPrompt` and `showStartupDownloadPrompt`
+
+     Failure modes:
+     - if `SwordManager` cannot be created, no prompt is shown and normal reader fallback remains
+     */
+    private func evaluateStartupDownloadPromptIfNeeded() {
+        guard !didEvaluateStartupDownloadPrompt,
+              activeReaderSheet == nil,
+              activeReaderModal == nil else {
+            return
+        }
+        didEvaluateStartupDownloadPrompt = true
+        showStartupDownloadPrompt = startupHasNoBibleModules()
+    }
+
+    /**
+     Re-runs the no-Bible startup prompt after Downloads closes.
+
+     Android's `afterDownload()` returns to the first-download layout when the user leaves
+     Downloads without installing a Bible. This mirrors that behavior without prompting again when a
+     Bible is now present.
+
+     Side effects:
+     - may reset the startup-prompt guard
+     - may show the startup prompt again
+
+     Failure modes:
+     - if module discovery fails, the prompt is not shown
+     */
+    private func reevaluateStartupDownloadPromptAfterDownloads() {
+        guard startupHasNoBibleModules() else {
+            showStartupDownloadPrompt = false
+            return
+        }
+        didEvaluateStartupDownloadPrompt = false
+        evaluateStartupDownloadPromptIfNeeded()
+    }
+
+    /**
+     Tests whether the current local module store lacks installed Bible modules.
+
+     - Returns: `true` when no installed Bible module is known.
+     - Side effects: may create a temporary `SwordManager` if the focused controller has not
+       registered yet.
+     - Failure modes: returns `false` if `SwordManager` creation fails.
+     */
+    private func startupHasNoBibleModules() -> Bool {
+        if let focusedController {
+            return focusedController.installedBibleModules.isEmpty
+        }
+        guard let manager = SwordManager() else {
+            return false
+        }
+        return !manager.installedModules().contains { $0.category == .bible }
     }
 
     /// Loads persisted display, behavior, and fullscreen preferences used by the reader shell.

@@ -835,8 +835,9 @@ final class AndBibleTests: XCTestCase {
     }
 
     func testBibleReaderModulePickerBuildsForBibleCategory() {
+        let controller = BibleReaderController(bridge: BibleBridge())
         let view = BibleReaderModulePicker(
-            controller: nil,
+            controller: controller,
             category: .bible,
             onDismiss: {},
             onOpenDownloads: {},
