@@ -1463,7 +1463,12 @@ final class AndBibleUITests: XCTestCase {
         let createdRow = requireLabelRow(named: originalName, in: app, timeout: 10)
         tapElementReliably(createdRow, timeout: 10)
         _ = requireElement("labelEditScreen", in: app, timeout: 10)
-        replaceText(in: requireElement("labelEditNameField", in: app, timeout: 10), with: renamedName)
+        replaceKnownText(
+            in: requireElement("labelEditNameField", in: app, timeout: 10),
+            existingCharacterCount: originalName.count,
+            with: renamedName,
+            app: app
+        )
         tapElementReliably(requireElement("labelEditDoneButton", in: app, timeout: 10), timeout: 10)
 
         waitForLabelManagerState(notContaining: labelManagerRowStateToken(originalName), in: app, timeout: 10)
@@ -6233,7 +6238,6 @@ final class AndBibleUITests: XCTestCase {
     /// Returns compact reader state export queries without probing broad element sets.
     private func readerRenderedContentStateElements(in app: XCUIApplication) -> [XCUIElement] {
         [
-            app.staticTexts["readerRenderedContentState"].firstMatch,
             app.textFields["readerRenderedContentState"].firstMatch,
         ]
     }
@@ -9890,6 +9894,39 @@ final class AndBibleUITests: XCTestCase {
             return
         }
 
+        if !text.isEmpty {
+            app.typeText(text)
+        }
+    }
+
+    /**
+     Replaces a text field when the current value is already known by the test.
+
+     This avoids sampling `element.value`, which can force XCTest to rebuild large SwiftUI
+     snapshots for modal text fields in CI. Callers verify the result through the owning screen's
+     semantic state instead of the transient field value.
+
+     * - Parameters:
+     *   - element: Focusable text-entry element whose current contents should be replaced.
+     *   - existingCharacterCount: Number of characters to delete after focusing the trailing edge.
+     *   - text: Replacement text typed through the XCTest keyboard bridge.
+     *   - app: Running app used for keyboard input.
+     * - Side effects:
+     *   - focuses the field, sends delete keystrokes for the known current contents, and types the
+     *     replacement text
+     * - Failure modes:
+     *   - focus failures are reported by `focusTextEntryElement`
+     */
+    private func replaceKnownText(
+        in element: XCUIElement,
+        existingCharacterCount: Int,
+        with text: String,
+        app: XCUIApplication
+    ) {
+        focusTextEntryElement(element, preferTrailingEdge: true, timeout: 10)
+        if existingCharacterCount > 0 {
+            app.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: existingCharacterCount))
+        }
         if !text.isEmpty {
             app.typeText(text)
         }
