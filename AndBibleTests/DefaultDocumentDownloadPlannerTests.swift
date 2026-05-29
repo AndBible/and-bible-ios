@@ -75,6 +75,24 @@ final class DefaultDocumentDownloadPlannerTests: XCTestCase {
         XCTAssertEqual(selected.map(\.sourceName), ["CrossWire"])
     }
 
+    func testSourceScopedTokenUsesFullCatalogWhenVisibleRowsAreDeduplicated() {
+        let configuration = ModuleDownloadConfiguration(
+            bibles: ["en": ["KJV::CrossWire"]]
+        )
+        let fullCatalog = [
+            remoteModule("KJV", category: .bible, sourceName: "AndBible"),
+            remoteModule("KJV", category: .bible, sourceName: "CrossWire"),
+        ]
+
+        let selected = DefaultDocumentDownloadPlanner.selectedModules(
+            from: configuration,
+            availableModules: fullCatalog,
+            installedModules: []
+        )
+
+        XCTAssertEqual(selected.map(\.sourceName), ["CrossWire"])
+    }
+
     private func remoteModule(
         _ name: String,
         category: ModuleCategory,

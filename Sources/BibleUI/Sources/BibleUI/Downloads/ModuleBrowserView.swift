@@ -948,7 +948,8 @@ public struct ModuleBrowserView: View {
      - when all repository refreshes fail, preserves cached catalogs so startup defaults can still
        resolve modules from the most recent successful refresh
      - merges and de-duplicates the refreshed module set before storing it in `availableModules`
-     - in startup default mode, requests selected Android default modules after catalog refresh
+     - in startup default mode, requests selected Android default modules from the full catalog so
+       source-scoped tokens can resolve alternate repository rows hidden by visible-row de-duplication
      - records aggregate or partial-source failures in `errorMessage`
 
      Failure modes:
@@ -1070,7 +1071,7 @@ public struct ModuleBrowserView: View {
                 isRefreshing = false
                 refreshProgress = nil
                 installDefaultDocumentsIfNeeded(
-                    using: uniqueModules,
+                    using: allModules,
                     defaultDocuments: resolvedDefaultDocuments
                 )
 
