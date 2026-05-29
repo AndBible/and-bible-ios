@@ -204,6 +204,18 @@ public struct RepositoryManagerView: View {
         editorState?.repositoryURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false || isSavingSource
     }
 
+    /// Stable sheet identifier that preserves the existing add-source UI test contract.
+    private var editorScreenAccessibilityIdentifier: String {
+        editorState?.originalName == nil ? "repositoryManagerAddSourceScreen" : "repositoryManagerSourceEditorScreen"
+    }
+
+    /// Stable cancel-button identifier that preserves the existing add-source UI test contract.
+    private var editorCancelAccessibilityIdentifier: String {
+        editorState?.originalName == nil
+            ? "repositoryManagerAddSourceCancelButton"
+            : "repositoryManagerSourceEditorCancelButton"
+    }
+
     // MARK: - Sections
 
     /**
@@ -383,14 +395,14 @@ public struct RepositoryManagerView: View {
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
-        .accessibilityIdentifier("repositoryManagerSourceEditorScreen")
+        .accessibilityIdentifier(editorScreenAccessibilityIdentifier)
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
                 Button(String(localized: "cancel", defaultValue: "Cancel")) {
                     closeEditor()
                 }
                 .disabled(isSavingSource)
-                .accessibilityIdentifier("repositoryManagerSourceEditorCancelButton")
+                .accessibilityIdentifier(editorCancelAccessibilityIdentifier)
             }
             ToolbarItem(placement: .confirmationAction) {
                 Button(editorState?.saveTitle ?? String(localized: "save", defaultValue: "Save")) {
