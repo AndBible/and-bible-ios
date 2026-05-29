@@ -6211,15 +6211,15 @@ final class AndBibleUITests: XCTestCase {
 
     /// Reads the compact reader state export without walking drawer or overflow menu contents.
     private func readerRenderedContentStateValue(in app: XCUIApplication) -> String? {
+        if let headerValue = readerDocumentHeaderStateValue(in: app) {
+            return headerValue
+        }
         for stateElement in readerRenderedContentStateElements(in: app) {
             guard stateElement.exists,
                   let value = stateElement.value as? String else {
                 continue
             }
             return value
-        }
-        if let headerValue = readerDocumentHeaderStateValue(in: app) {
-            return headerValue
         }
         return nil
     }
@@ -6238,6 +6238,7 @@ final class AndBibleUITests: XCTestCase {
     /// Returns compact reader state export queries without probing broad element sets.
     private func readerRenderedContentStateElements(in app: XCUIApplication) -> [XCUIElement] {
         [
+            app.staticTexts["readerRenderedContentState"].firstMatch,
             app.textFields["readerRenderedContentState"].firstMatch,
         ]
     }

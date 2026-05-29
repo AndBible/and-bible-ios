@@ -524,11 +524,20 @@ public final class RepositorySourceManager: @unchecked Sendable {
         return trimmed.hasPrefix("/") ? trimmed : "/\(trimmed)"
     }
 
+    /// Validates one persisted `InstallMgr.conf` source row before it can be written.
+    ///
+    /// Source names are also used as catalog-cache filenames, so the name must not contain
+    /// path separators that could escape the intended cache directory during a later refresh.
+    ///
+    /// - Parameter source: Normalized source row candidate.
+    /// - Throws: `RepositorySourceManagementError.invalidManifest` when a field is missing or
+    ///   contains config/file-path syntax that cannot be safely persisted.
     private static func validateConfigFields(_ source: SourceConfig) throws {
         guard source.type == "HTTP",
               !source.name.isEmpty,
               !source.host.isEmpty,
               !containsConfigSeparator(source.name),
+              !containsPathSeparator(source.name),
               !containsConfigSeparator(source.host),
               !containsConfigSeparator(source.catalogPath) else {
             throw RepositorySourceManagementError.invalidManifest(source.name)
@@ -537,6 +546,14 @@ public final class RepositorySourceManager: @unchecked Sendable {
 
     private static func containsConfigSeparator(_ value: String) -> Bool {
         value.contains("|") || value.contains("\n") || value.contains("\r")
+    }
+
+    /// Returns whether a source name contains directory separators unsafe for cache filenames.
+    ///
+    /// - Parameter value: Source name candidate from a manifest or direct-catalog fallback.
+    /// - Returns: `true` when the value could address a nested or parent directory as a filename.
+    private static func containsPathSeparator(_ value: String) -> Bool {
+        value.contains("/") || value.contains("\\")
     }
 
     private static func httpsURL(host: String, path: String) throws -> URL {

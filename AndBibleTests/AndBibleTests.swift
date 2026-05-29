@@ -3767,6 +3767,55 @@ final class AndBibleTests: XCTestCase {
         }
     }
 
+    func testRepositorySourceManagerRejectsManifestSourceNamesWithPathSeparators() async throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let manifestData = """
+        {
+          "name": "../custom",
+          "description": "Unsafe name",
+          "type": "sword-https",
+          "host": "unsafe.example",
+          "catalogDirectory": "/sword"
+        }
+        """.data(using: .utf8)!
+
+        MockURLProtocol.requestHandler = { request in
+            let response = HTTPURLResponse(
+                url: try XCTUnwrap(request.url),
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: nil
+            )!
+            return (response, manifestData)
+        }
+
+        let manager = RepositorySourceManager(
+            basePath: tempDir.path,
+            session: makeMockedURLSession()
+        )
+
+        do {
+            _ = try await manager.addCustomSource(from: "https://unsafe.example/manifest.json")
+            XCTFail("Expected manifest source names with path separators to be rejected.")
+        } catch RepositorySourceManagementError.invalidManifest(let name) {
+            XCTAssertEqual(name, "../custom")
+        } catch {
+            XCTFail("Unexpected path-separator validation error: \(error)")
+        }
+
+        let sourcesAfterFailure = manager.loadSources()
+        let config = try String(
+            contentsOf: tempDir.appendingPathComponent("InstallMgr.conf"),
+            encoding: .utf8
+        )
+        XCTAssertFalse(config.contains("../custom"))
+        XCTAssertFalse(sourcesAfterFailure.contains { $0.name == "../custom" })
+    }
+
     func testRepositorySourceManagerProtectsDefaultsAndDeletesCustomSources() throws {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
