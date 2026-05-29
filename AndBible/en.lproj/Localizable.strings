@@ -177,9 +177,15 @@
 "commentaries" = "Commentaries";
 "dictionaries" = "Dictionaries";
 "category_books" = "Books";
+"maps" = "Maps";
 "document_filter_results %lld" = "Documents (%lld)";
 "install" = "Install";
+"install_module" = "Install";
+"update" = "Update";
 "uninstall" = "Uninstall";
+"unavailable" = "Unavailable";
+"recommended_document" = "Recommended!";
+"bad_document_warning" = "Warning";
 "refresh_catalog" = "Refresh Catalog";
 "repositories" = "Repositories";
 "all_languages_count %lld" = "All Languages (%lld)";

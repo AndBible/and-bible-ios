@@ -47,8 +47,30 @@ public struct CatalogModule: Sendable, Identifiable {
             description: description,
             category: category,
             language: language,
-            sourceName: sourceName
+            sourceName: sourceName,
+            version: version,
+            installSizeBytes: Self.installSizeBytes(from: size)
         )
+    }
+
+    /**
+     Parses the SWORD `InstallSize` property into bytes for download-list display.
+
+     - Parameter value: Raw catalog value from a module `.conf` file.
+     - Returns: Byte count when the value is an integer number of kibibytes; otherwise `nil`.
+
+     Side effects:
+     - none
+
+     Failure modes:
+     - non-numeric values or values that overflow bytes return `nil`
+     */
+    private static func installSizeBytes(from value: String) -> Int64? {
+        guard let kibibytes = Int64(value.trimmingCharacters(in: .whitespacesAndNewlines)) else {
+            return nil
+        }
+        let bytes = kibibytes.multipliedReportingOverflow(by: 1024)
+        return bytes.overflow ? nil : bytes.partialValue
     }
 }
 
@@ -70,6 +92,12 @@ public struct CatalogModule: Sendable, Identifiable {
  ```
  */
 public final class ModuleRepository: @unchecked Sendable {
+    private static let recommendedDocumentsURL = URL(
+        string: "https://andbible.github.io/data/recommended_documents_v2.json")!
+    private static let badDocumentsURL = URL(
+        string: "https://andbible.github.io/data/bad_documents.json")!
+    private static let defaultDocumentsURL = URL(
+        string: "https://andbible.github.io/data/default_documents_v2.json")!
     private static let pseudoBooksURL = URL(string: "https://andbible.github.io/data/pseudo_books.json")!
     private static let unavailablePseudoSourceName = "Not Available"
 
@@ -96,6 +124,18 @@ public final class ModuleRepository: @unchecked Sendable {
 
     private var pseudoBooksCachePath: String {
         (metadataCacheDir as NSString).appendingPathComponent("pseudo_books.json")
+    }
+
+    private var recommendedDocumentsCachePath: String {
+        (metadataCacheDir as NSString).appendingPathComponent("recommended_documents_v2.json")
+    }
+
+    private var badDocumentsCachePath: String {
+        (metadataCacheDir as NSString).appendingPathComponent("bad_documents.json")
+    }
+
+    private var defaultDocumentsCachePath: String {
+        (metadataCacheDir as NSString).appendingPathComponent("default_documents_v2.json")
     }
 
     public init(basePath: String? = nil, swordPath: String? = nil, session: URLSession? = nil) {
@@ -203,6 +243,174 @@ public final class ModuleRepository: @unchecked Sendable {
         return modules
     }
 
+    /**
+     Loads cached Android recommended-document metadata.
+
+     - Returns: Parsed metadata when the cache exists and decodes successfully, otherwise `nil`.
+
+     Side effects:
+     - reads the repository metadata cache from disk
+
+     Failure modes:
+     - missing or malformed cache files are logged and treated as absent metadata
+     */
+    public func loadCachedRecommendedDocuments() -> ModuleDownloadConfiguration? {
+        loadCachedDownloadConfiguration(path: recommendedDocumentsCachePath, label: "recommended documents")
+    }
+
+    /**
+     Loads cached Android bad-document metadata.
+
+     - Returns: Parsed metadata when the cache exists and decodes successfully, otherwise `nil`.
+
+     Side effects:
+     - reads the repository metadata cache from disk
+
+     Failure modes:
+     - missing or malformed cache files are logged and treated as absent metadata
+     */
+    public func loadCachedBadDocuments() -> ModuleDownloadConfiguration? {
+        loadCachedDownloadConfiguration(path: badDocumentsCachePath, label: "bad documents")
+    }
+
+    /**
+     Loads cached Android default-document metadata for future startup/default-download flows.
+
+     - Returns: Parsed metadata when the cache exists and decodes successfully, otherwise `nil`.
+
+     Side effects:
+     - reads the repository metadata cache from disk
+
+     Failure modes:
+     - missing or malformed cache files are logged and treated as absent metadata
+     */
+    public func loadCachedDefaultDocuments() -> ModuleDownloadConfiguration? {
+        loadCachedDownloadConfiguration(path: defaultDocumentsCachePath, label: "default documents")
+    }
+
+    /**
+     Refreshes Android recommended-document metadata and caches it locally.
+
+     - Returns: Parsed metadata from AndBible's hosted JSON feed.
+     - Throws: `ModuleRepositoryError.downloadFailed` when the response is not HTTP 200, or a
+       decoding/file-system error from `URLSession`, `JSONDecoder`, or cache writes.
+
+     Side effects:
+     - downloads network metadata
+     - overwrites the local recommended-document metadata cache on success
+     */
+    public func refreshRecommendedDocuments() async throws -> ModuleDownloadConfiguration {
+        try await refreshDownloadConfiguration(
+            url: Self.recommendedDocumentsURL,
+            cachePath: recommendedDocumentsCachePath,
+            label: "recommended documents"
+        )
+    }
+
+    /**
+     Refreshes Android bad-document metadata and caches it locally.
+
+     - Returns: Parsed metadata from AndBible's hosted JSON feed.
+     - Throws: `ModuleRepositoryError.downloadFailed` when the response is not HTTP 200, or a
+       decoding/file-system error from `URLSession`, `JSONDecoder`, or cache writes.
+
+     Side effects:
+     - downloads network metadata
+     - overwrites the local bad-document metadata cache on success
+     */
+    public func refreshBadDocuments() async throws -> ModuleDownloadConfiguration {
+        try await refreshDownloadConfiguration(
+            url: Self.badDocumentsURL,
+            cachePath: badDocumentsCachePath,
+            label: "bad documents"
+        )
+    }
+
+    /**
+     Refreshes Android default-document metadata and caches it locally.
+
+     - Returns: Parsed metadata from AndBible's hosted JSON feed.
+     - Throws: `ModuleRepositoryError.downloadFailed` when the response is not HTTP 200, or a
+       decoding/file-system error from `URLSession`, `JSONDecoder`, or cache writes.
+
+     Side effects:
+     - downloads network metadata
+     - overwrites the local default-document metadata cache on success
+     */
+    public func refreshDefaultDocuments() async throws -> ModuleDownloadConfiguration {
+        try await refreshDownloadConfiguration(
+            url: Self.defaultDocumentsURL,
+            cachePath: defaultDocumentsCachePath,
+            label: "default documents"
+        )
+    }
+
+    /**
+     Decodes one cached Android metadata configuration.
+
+     - Parameters:
+       - path: Cache file path to read.
+       - label: Human-readable metadata name used in warning logs.
+     - Returns: Parsed metadata or `nil` when absent/malformed.
+
+     Side effects:
+     - reads a file from the metadata cache directory
+
+     Failure modes:
+     - decode failures are logged and treated as missing metadata
+     */
+    private func loadCachedDownloadConfiguration(path: String, label: String) -> ModuleDownloadConfiguration? {
+        guard let data = FileManager.default.contents(atPath: path) else {
+            return nil
+        }
+
+        do {
+            return try JSONDecoder().decode(ModuleDownloadConfiguration.self, from: data)
+        } catch {
+            logger.warning("Failed to decode cached \(label): \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    /**
+     Downloads, decodes, and caches one Android metadata configuration.
+
+     - Parameters:
+       - url: Hosted AndBible JSON endpoint.
+       - cachePath: Local metadata cache file path.
+       - label: Human-readable metadata name used in errors and logs.
+     - Returns: Parsed metadata configuration.
+     - Throws: Network, HTTP-status, decode, or cache-write errors.
+
+     Side effects:
+     - performs a network request
+     - writes the response body into the local metadata cache
+     */
+    private func refreshDownloadConfiguration(
+        url: URL,
+        cachePath: String,
+        label: String
+    ) async throws -> ModuleDownloadConfiguration {
+        let (data, response) = try await session.data(from: url)
+
+        guard let httpResponse = response as? HTTPURLResponse,
+              httpResponse.statusCode == 200 else {
+            let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+            throw ModuleRepositoryError.downloadFailed(
+                "\(label.capitalized) download failed (HTTP \(code))")
+        }
+
+        let configuration = try JSONDecoder().decode(ModuleDownloadConfiguration.self, from: data)
+
+        do {
+            try data.write(to: URL(fileURLWithPath: cachePath), options: .atomic)
+        } catch {
+            logger.warning("Failed to cache \(label): \(error.localizedDescription)")
+        }
+
+        return configuration
+    }
+
     static func pseudoModules(from data: Data) throws -> [RemoteModuleInfo] {
         try JSONDecoder().decode([PseudoBook].self, from: data)
             .compactMap { book in
@@ -217,7 +425,8 @@ public final class ModuleRepository: @unchecked Sendable {
                     language: "en",
                     sourceName: Self.unavailablePseudoSourceName,
                     availability: .unavailable,
-                    unavailableReason: description
+                    unavailableReason: description,
+                    version: "0.0"
                 )
             }
     }

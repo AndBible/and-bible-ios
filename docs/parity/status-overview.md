@@ -35,6 +35,7 @@ give you the fuller human context behind it.
 | [search](search/README.md) | Strong semantic coverage: `5 Pass`, `2 Adapted Pass`, `1 Partial` | Focused search UI workflows plus Strong's unit regressions | Multi-translation search still lacks focused regression coverage |
 | [reading-plans](reading-plans/README.md) | Strong sync and progression coverage: `5 Pass`, `1 Adapted Pass`, `3 Partial` | Focused daily-reading UI coverage plus restore/upload/patch unit coverage | Custom plan import, reading-plan list/start/import breadth, and additive iOS-only plan lifecycle coverage |
 | [reader](reader/README.md) | Reader shell/menu parity is stronger, and Strong's plus Compare now use the shared document pipeline: `10 Pass`, `1 Adapted Pass`, `1 Partial` | Focused reader-shell UI coverage, restored-position/config-payload/gesture-policy/modal-state/compare-payload/Strong's-routing unit regressions, and full local UI validation | Multi-reference document routing (#124) |
+| [downloads](downloads/README.md) | Downloads list parity is now source-backed and still partial: recommended/bad/pseudo/update state are covered; startup defaults, progress/cancel/error, and row action breadth remain gaps | Focused unit coverage for metadata matching, update/status sorting, and targeted search seed behavior | Default-document startup flow #133, progress/cancel/error state #134, row action breadth #135, and add-ons #136 |
 | [bridge](bridge/README.md) | StudyPad handoff, visible My Notes lifecycle, async `callId` flows, memorization bridge state, memorization speech loop, My Documents read/copy/share/edit/reload/AI-page actions, reading-progress local mutation/history/UI/settings behavior, Strong's document routing, and shared iOS bridge subset are present; full Android bridge breadth remains partial: `4 Pass`, `1 Adapted Pass`, `3 Partial` | Focused StudyPad handoff, visible My Notes lifecycle coverage, async `callId`, memorization state and speech-loop regressions, My Documents raw-content/action regressions, reading-progress bridge/settings regressions, Strong's-routing regressions, note-persistence regressions, bridge guardrails, machine-readable gap inventory, and local Android-backed drift checking | Android-only bridge method breadth now centers on scoped help, whole-page/chapter navigation, AI bridge slices #89, #90, #91, and #92, plus delegate branch coverage and payload-schema breadth |
 
 ## How To Read Each Domain
@@ -92,13 +93,17 @@ Current mechanisms:
 
 ### Tier 3: Documentation guardrails
 
-All current domains now have:
+All established domains now have:
 
 - explicit contract docs
 - explicit dispositions
 - explicit verification matrices
 - explicit regression reports
 - explicit maintenance guardrails
+
+`downloads/` is newer and currently has a source-backed list matrix. Expand it
+to the full domain-doc set once the remaining follow-up issues start changing
+durable behavior beyond the list audit.
 
 This is the baseline defense against silent parity drift when heavier
 automation is still missing.
