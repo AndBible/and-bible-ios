@@ -53,4 +53,5 @@ iOS references:
 - Add row action parity for about/delete index/unlock and Android confirmation
   messages (#135).
 - Add iOS add-on modeling before exposing Android's Add-ons filter (#136).
-- #121 owns repository/source editing parity.
+- Repository/source editing parity is documented in
+  [repository-source-management-matrix.md](repository-source-management-matrix.md).

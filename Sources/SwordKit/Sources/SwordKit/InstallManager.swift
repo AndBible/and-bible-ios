@@ -162,6 +162,19 @@ public final class InstallManager: @unchecked Sendable {
     }
 
     /**
+     Tests whether a repository name belongs to the packaged Android-parity default source set.
+
+     - Parameter name: Repository display name from an `HTTPSource` or `FTPSource` config row.
+     - Returns: `true` when the name is one of the built-in normal, beta, or legacy FTP sources.
+
+     Side effects:
+     - none
+     */
+    public static func isDefaultSourceName(_ name: String) -> Bool {
+        defaultSourceLines.compactMap(Self.sourceName).contains(name)
+    }
+
+    /**
      Write default InstallMgr.conf with sources matching Android AndBible.
      Sources are from and-bible/app/src/main/res/raw/repositories.txt
      */

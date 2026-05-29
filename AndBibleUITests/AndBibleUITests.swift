@@ -1463,7 +1463,12 @@ final class AndBibleUITests: XCTestCase {
         let createdRow = requireLabelRow(named: originalName, in: app, timeout: 10)
         tapElementReliably(createdRow, timeout: 10)
         _ = requireElement("labelEditScreen", in: app, timeout: 10)
-        replaceText(in: requireElement("labelEditNameField", in: app, timeout: 10), with: renamedName)
+        replaceKnownText(
+            in: requireElement("labelEditNameField", in: app, timeout: 10),
+            existingCharacterCount: originalName.count,
+            with: renamedName,
+            app: app
+        )
         tapElementReliably(requireElement("labelEditDoneButton", in: app, timeout: 10), timeout: 10)
 
         waitForLabelManagerState(notContaining: labelManagerRowStateToken(originalName), in: app, timeout: 10)
@@ -6206,15 +6211,15 @@ final class AndBibleUITests: XCTestCase {
 
     /// Reads the compact reader state export without walking drawer or overflow menu contents.
     private func readerRenderedContentStateValue(in app: XCUIApplication) -> String? {
+        if let headerValue = readerDocumentHeaderStateValue(in: app) {
+            return headerValue
+        }
         for stateElement in readerRenderedContentStateElements(in: app) {
             guard stateElement.exists,
                   let value = stateElement.value as? String else {
                 continue
             }
             return value
-        }
-        if let headerValue = readerDocumentHeaderStateValue(in: app) {
-            return headerValue
         }
         return nil
     }
@@ -9184,11 +9189,16 @@ final class AndBibleUITests: XCTestCase {
 
         func resolvedPromptTextField() -> XCUIElement {
             if let prompt = resolvedModalPrompt(in: app, timeout: 0.2) {
-                let promptCandidates = modalTextFieldCandidates(
-                    in: prompt,
-                    identifiers: accessibilityIdentifier.map { [$0] } ?? [],
-                    titles: placeholderHints
-                )
+                let promptCandidates: [XCUIElement]
+                if accessibilityIdentifier == "labelManagerNewLabelNameField" {
+                    promptCandidates = labelCreationPromptTextFieldCandidates(in: prompt)
+                } else {
+                    promptCandidates = modalTextFieldCandidates(
+                        in: prompt,
+                        identifiers: accessibilityIdentifier.map { [$0] } ?? [],
+                        titles: placeholderHints
+                    )
+                }
                 if let promptField = firstExistingElement(promptCandidates, timeout: 0.2) {
                     return promptField
                 }
@@ -9362,15 +9372,37 @@ final class AndBibleUITests: XCTestCase {
         resolvedModalPrompt(in: app, timeout: 0.2)
     }
 
+    /**
+     Returns create-label text field candidates with the alert-owned ordinal field before slower
+     identifier and title matching.
+     */
+    private func labelCreationPromptTextFieldCandidates(in prompt: XCUIElement) -> [XCUIElement] {
+        [
+            prompt.textFields.element(boundBy: 0),
+            prompt.secureTextFields.element(boundBy: 0),
+            prompt.textFields["labelManagerNewLabelNameField"].firstMatch,
+            prompt.secureTextFields["labelManagerNewLabelNameField"].firstMatch,
+            prompt.textFields["Label name"].firstMatch,
+            prompt.secureTextFields["Label name"].firstMatch,
+        ]
+    }
+
+    /**
+     Returns create-label button candidates with the accessibility identifier before title
+     matching.
+     */
+    private func labelCreationPromptCreateButtonCandidates(in prompt: XCUIElement) -> [XCUIElement] {
+        [
+            prompt.buttons["labelManagerCreateButton"].firstMatch,
+            prompt.buttons["Create"].firstMatch,
+        ]
+    }
+
     /// Resolves the create-label prompt text field by scoping queries to the visible prompt.
     private func resolveLabelCreationPromptTextField(in app: XCUIApplication) -> XCUIElement? {
         if let prompt = resolvedLabelCreationPrompt(in: app) {
             return firstExistingElement(
-                modalTextFieldCandidates(
-                    in: prompt,
-                    identifiers: ["labelManagerNewLabelNameField"],
-                    titles: ["Label name"]
-                ),
+                labelCreationPromptTextFieldCandidates(in: prompt),
                 timeout: 0.2
             )
         }
@@ -9381,11 +9413,7 @@ final class AndBibleUITests: XCTestCase {
     private func resolveLabelCreationPromptCreateButton(in app: XCUIApplication) -> XCUIElement? {
         if let prompt = resolvedLabelCreationPrompt(in: app) {
             return firstExistingElement(
-                modalButtonCandidates(
-                    in: prompt,
-                    identifiers: ["labelManagerCreateButton"],
-                    titles: ["Create"]
-                ),
+                labelCreationPromptCreateButtonCandidates(in: prompt),
                 timeout: 0.2
             )
         }
@@ -9890,6 +9918,39 @@ final class AndBibleUITests: XCTestCase {
             return
         }
 
+        if !text.isEmpty {
+            app.typeText(text)
+        }
+    }
+
+    /**
+     Replaces a text field when the current value is already known by the test.
+
+     This avoids sampling `element.value`, which can force XCTest to rebuild large SwiftUI
+     snapshots for modal text fields in CI. Callers verify the result through the owning screen's
+     semantic state instead of the transient field value.
+
+     * - Parameters:
+     *   - element: Focusable text-entry element whose current contents should be replaced.
+     *   - existingCharacterCount: Number of characters to delete after focusing the trailing edge.
+     *   - text: Replacement text typed through the XCTest keyboard bridge.
+     *   - app: Running app used for keyboard input.
+     * - Side effects:
+     *   - focuses the field, sends delete keystrokes for the known current contents, and types the
+     *     replacement text
+     * - Failure modes:
+     *   - focus failures are reported by `focusTextEntryElement`
+     */
+    private func replaceKnownText(
+        in element: XCUIElement,
+        existingCharacterCount: Int,
+        with text: String,
+        app: XCUIApplication
+    ) {
+        focusTextEntryElement(element, preferTrailingEdge: true, timeout: 10)
+        if existingCharacterCount > 0 {
+            app.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: existingCharacterCount))
+        }
         if !text.isEmpty {
             app.typeText(text)
         }

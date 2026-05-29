@@ -15,11 +15,16 @@ a documented platform constraint exists.
 1. [module-browser-list-matrix.md](module-browser-list-matrix.md): iOS
    `ModuleBrowserView` versus Android `DownloadActivity` and
    `DocumentDownloadItemAdapter`
+2. [repository-source-management-matrix.md](repository-source-management-matrix.md):
+   iOS `RepositoryManagerView` versus Android `RepoFactory`,
+   `CustomRepositories`, and `CustomRepositoryEditor`
 
 Related issues:
 
 - #120: Downloads list behavior and metadata parity
 - #121: repository/source-management parity
+- #138: MyBible custom repository support
+- #139: Android custom repository metadata persistence
 
 Primary code references:
 

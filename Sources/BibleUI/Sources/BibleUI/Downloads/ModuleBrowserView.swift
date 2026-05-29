@@ -281,6 +281,11 @@ public struct ModuleBrowserView: View {
         .onAppear {
             setupManagers()
         }
+        .onReceive(NotificationCenter.default.publisher(for: RepositorySourceManager.sourcesDidChangeNotification)) { _ in
+            Task { @MainActor in
+                reloadRepositorySources()
+            }
+        }
     }
 
     // MARK: - Row Views
@@ -763,6 +768,20 @@ public struct ModuleBrowserView: View {
                 availableModules = deduplicatedModules(from: cached)
             }
         }
+    }
+
+    /**
+     Reloads repository sources after the repository manager changes `InstallMgr.conf`.
+
+     Side effects:
+     - replaces the local source list used by subsequent catalog refreshes
+
+     Failure modes:
+     - source-manager read failures surface as an empty source list, matching initial setup behavior
+     */
+    @MainActor
+    private func reloadRepositorySources() {
+        sources = repository.loadSources()
     }
 
     /**

@@ -3624,6 +3624,365 @@ final class AndBibleTests: XCTestCase {
         XCTAssertEqual(window.pageManager?.textDisplaySettings?.lineSpacing, 10)
     }
 
+    func testRepositorySourceManagerAddsSwordHTTPSManifestSource() async throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let manifestData = """
+        {
+          "name": "Example Repo",
+          "description": "Example catalog",
+          "type": "sword-https",
+          "host": "example.org",
+          "catalogDirectory": "/sword",
+          "packageDirectory": "/sword/packages",
+          "manifestUrl": "https://example.org/sword/manifest.json"
+        }
+        """.data(using: .utf8)!
+
+        MockURLProtocol.requestHandler = { request in
+            XCTAssertEqual(request.url?.absoluteString, "https://example.org/sword/manifest.json")
+            let response = HTTPURLResponse(
+                url: try XCTUnwrap(request.url),
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: nil
+            )!
+            return (response, manifestData)
+        }
+
+        let manager = RepositorySourceManager(
+            basePath: tempDir.path,
+            session: makeMockedURLSession()
+        )
+
+        let registration = try await manager.addCustomSource(from: "https://example.org/sword/manifest.json")
+
+        XCTAssertEqual(registration.source.name, "Example Repo")
+        XCTAssertEqual(registration.source.type, "HTTP")
+        XCTAssertEqual(registration.source.host, "example.org")
+        XCTAssertEqual(registration.source.catalogPath, "/sword")
+        XCTAssertEqual(registration.packageDirectory, "/sword/packages")
+
+        let config = try String(
+            contentsOf: tempDir.appendingPathComponent("InstallMgr.conf"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(config.contains("HTTPSource=Example Repo|example.org|/sword"))
+        XCTAssertTrue(manager.loadSources().contains { $0.name == "Example Repo" })
+    }
+
+    func testRepositorySourceManagerAddsDirectSwordCatalogFallbackSource() async throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        MockURLProtocol.requestHandler = { request in
+            let path = request.url?.path ?? ""
+            let statusCode: Int
+            let data: Data
+            switch path {
+            case "/sword", "/sword/packages", "/sword/mods.d.tar.gz":
+                statusCode = 200
+                data = Data("readable".utf8)
+            case "/sword/manifest.json":
+                statusCode = 404
+                data = Data()
+            default:
+                XCTFail("Unexpected repository validation URL: \(request.url?.absoluteString ?? "")")
+                statusCode = 404
+                data = Data()
+            }
+
+            let response = HTTPURLResponse(
+                url: try XCTUnwrap(request.url),
+                statusCode: statusCode,
+                httpVersion: nil,
+                headerFields: nil
+            )!
+            return (response, data)
+        }
+
+        let manager = RepositorySourceManager(
+            basePath: tempDir.path,
+            session: makeMockedURLSession()
+        )
+
+        let registration = try await manager.addCustomSource(from: "https://custom.example:8443/sword")
+
+        XCTAssertTrue(registration.source.name.hasPrefix("custom.example-"))
+        XCTAssertEqual(registration.source.host, "custom.example:8443")
+        XCTAssertEqual(registration.source.catalogPath, "/sword")
+        XCTAssertEqual(registration.packageDirectory, "/sword/packages")
+        XCTAssertEqual(registration.sourceURL.absoluteString, "https://custom.example:8443/sword")
+
+        let config = try String(
+            contentsOf: tempDir.appendingPathComponent("InstallMgr.conf"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(config.contains("HTTPSource=\(registration.source.name)|custom.example:8443|/sword"))
+    }
+
+    func testRepositorySourceManagerRejectsDuplicateDefaultRepositoryName() async throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let manifestData = """
+        {
+          "name": "AndBible",
+          "description": "Duplicate default",
+          "type": "sword-https",
+          "host": "duplicate.example",
+          "catalogDirectory": "/sword"
+        }
+        """.data(using: .utf8)!
+
+        MockURLProtocol.requestHandler = { request in
+            let response = HTTPURLResponse(
+                url: try XCTUnwrap(request.url),
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: nil
+            )!
+            return (response, manifestData)
+        }
+
+        let manager = RepositorySourceManager(
+            basePath: tempDir.path,
+            session: makeMockedURLSession()
+        )
+
+        do {
+            _ = try await manager.addCustomSource(from: "https://duplicate.example/manifest.json")
+            XCTFail("Expected duplicate default repository name to be rejected.")
+        } catch RepositorySourceManagementError.duplicateSourceName(let name) {
+            XCTAssertEqual(name, "AndBible")
+        } catch {
+            XCTFail("Unexpected duplicate-source error: \(error)")
+        }
+    }
+
+    func testRepositorySourceManagerRejectsManifestSourceNamesWithPathSeparators() async throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let manifestData = """
+        {
+          "name": "../custom",
+          "description": "Unsafe name",
+          "type": "sword-https",
+          "host": "unsafe.example",
+          "catalogDirectory": "/sword"
+        }
+        """.data(using: .utf8)!
+
+        MockURLProtocol.requestHandler = { request in
+            let response = HTTPURLResponse(
+                url: try XCTUnwrap(request.url),
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: nil
+            )!
+            return (response, manifestData)
+        }
+
+        let manager = RepositorySourceManager(
+            basePath: tempDir.path,
+            session: makeMockedURLSession()
+        )
+
+        do {
+            _ = try await manager.addCustomSource(from: "https://unsafe.example/manifest.json")
+            XCTFail("Expected manifest source names with path separators to be rejected.")
+        } catch RepositorySourceManagementError.invalidManifest(let name) {
+            XCTAssertEqual(name, "../custom")
+        } catch {
+            XCTFail("Unexpected path-separator validation error: \(error)")
+        }
+
+        let sourcesAfterFailure = manager.loadSources()
+        let config = try String(
+            contentsOf: tempDir.appendingPathComponent("InstallMgr.conf"),
+            encoding: .utf8
+        )
+        XCTAssertFalse(config.contains("../custom"))
+        XCTAssertFalse(sourcesAfterFailure.contains { $0.name == "../custom" })
+    }
+
+    func testRepositorySourceManagerProtectsDefaultsAndDeletesCustomSources() throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        InstallManager.ensureDefaultConfigPublic(at: tempDir.path)
+        let configURL = tempDir.appendingPathComponent("InstallMgr.conf")
+        var config = try String(contentsOf: configURL, encoding: .utf8)
+        config += "\nHTTPSource=Example Repo|example.org|/sword\n"
+        try config.write(to: configURL, atomically: true, encoding: .utf8)
+
+        let manager = RepositorySourceManager(basePath: tempDir.path)
+
+        XCTAssertThrowsError(try manager.deleteCustomSource(named: "AndBible")) { error in
+            XCTAssertEqual(error as? RepositorySourceManagementError, .protectedDefaultSource("AndBible"))
+        }
+
+        try manager.deleteCustomSource(named: "Example Repo")
+
+        let remaining = manager.loadSources()
+        XCTAssertTrue(remaining.contains { $0.name == "AndBible" })
+        XCTAssertFalse(remaining.contains { $0.name == "Example Repo" })
+    }
+
+    func testRepositorySourceManagerResetToDefaultsRemovesCustomSourcesAndRestoresDefaults() throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        InstallManager.ensureDefaultConfigPublic(at: tempDir.path)
+        let configURL = tempDir.appendingPathComponent("InstallMgr.conf")
+        var config = try String(contentsOf: configURL, encoding: .utf8)
+        config += "\nHTTPSource=Example Repo|example.org|/sword\n"
+        try config.write(to: configURL, atomically: true, encoding: .utf8)
+
+        let manager = RepositorySourceManager(basePath: tempDir.path)
+        XCTAssertTrue(manager.loadSources().contains { $0.name == "Example Repo" })
+
+        let notificationExpectation = expectation(description: "Repository source reset posts change notification")
+        let observer = NotificationCenter.default.addObserver(
+            forName: RepositorySourceManager.sourcesDidChangeNotification,
+            object: nil,
+            queue: nil
+        ) { _ in
+            notificationExpectation.fulfill()
+        }
+        defer { NotificationCenter.default.removeObserver(observer) }
+
+        try manager.resetToDefaults()
+
+        wait(for: [notificationExpectation], timeout: 1)
+        let restoredSources = manager.loadSources()
+        XCTAssertFalse(restoredSources.isEmpty)
+        XCTAssertTrue(restoredSources.contains { $0.name == "AndBible" })
+        XCTAssertFalse(restoredSources.contains { $0.name == "Example Repo" })
+        XCTAssertTrue(restoredSources.allSatisfy(manager.isDefaultSource))
+    }
+
+    func testRepositorySourceManagerResetToDefaultsReportsRecreationFailure() throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let missingBasePath = tempDir.appendingPathComponent("missing", isDirectory: true)
+        let manager = RepositorySourceManager(basePath: missingBasePath.path)
+
+        XCTAssertThrowsError(try manager.resetToDefaults()) { error in
+            XCTAssertEqual(
+                error as? RepositorySourceManagementError,
+                .configWriteFailed("default configuration was not recreated")
+            )
+        }
+    }
+
+    func testRepositorySourceManagerReplacesCustomSourceInPlace() async throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        InstallManager.ensureDefaultConfigPublic(at: tempDir.path)
+        let configURL = tempDir.appendingPathComponent("InstallMgr.conf")
+        var config = try String(contentsOf: configURL, encoding: .utf8)
+        config += "\nHTTPSource=Old Repo|old.example|/sword\n"
+        try config.write(to: configURL, atomically: true, encoding: .utf8)
+
+        let manifestData = """
+        {
+          "name": "New Repo",
+          "description": "Replacement",
+          "type": "sword-https",
+          "host": "new.example",
+          "catalogDirectory": "/catalog"
+        }
+        """.data(using: .utf8)!
+
+        MockURLProtocol.requestHandler = { request in
+            let response = HTTPURLResponse(
+                url: try XCTUnwrap(request.url),
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: nil
+            )!
+            return (response, manifestData)
+        }
+
+        let manager = RepositorySourceManager(
+            basePath: tempDir.path,
+            session: makeMockedURLSession()
+        )
+
+        let registration = try await manager.replaceCustomSource(
+            named: "Old Repo",
+            with: "https://new.example/manifest.json"
+        )
+
+        XCTAssertEqual(registration.source.name, "New Repo")
+
+        let sourceNames = manager.loadSources().map(\.name)
+        XCTAssertTrue(sourceNames.contains("New Repo"))
+        XCTAssertFalse(sourceNames.contains("Old Repo"))
+    }
+
+    func testRepositorySourceManagerRejectsReplacingMissingCustomSource() async throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        InstallManager.ensureDefaultConfigPublic(at: tempDir.path)
+        let configURL = tempDir.appendingPathComponent("InstallMgr.conf")
+        let initialConfig = try String(contentsOf: configURL, encoding: .utf8)
+
+        MockURLProtocol.requestHandler = { request in
+            XCTFail("Replacing a missing source should fail before validating the replacement URL.")
+            let response = HTTPURLResponse(
+                url: try XCTUnwrap(request.url),
+                statusCode: 500,
+                httpVersion: nil,
+                headerFields: nil
+            )!
+            return (response, Data())
+        }
+
+        let manager = RepositorySourceManager(
+            basePath: tempDir.path,
+            session: makeMockedURLSession()
+        )
+
+        do {
+            _ = try await manager.replaceCustomSource(
+                named: "Missing Repo",
+                with: "https://new.example/manifest.json"
+            )
+            XCTFail("Expected replacing a missing source to fail.")
+        } catch RepositorySourceManagementError.sourceNotFound(let name) {
+            XCTAssertEqual(name, "Missing Repo")
+        }
+
+        let config = try String(contentsOf: configURL, encoding: .utf8)
+        XCTAssertEqual(config, initialConfig)
+        XCTAssertFalse(manager.loadSources().contains { $0.name == "New Repo" })
+    }
+
     func testWebDAVPropfindBuildsAuthenticatedRequestAndParsesMultiStatus() async throws {
         let expectedAuth = "Basic \(Data("alice:secret".utf8).base64EncodedString())"
         MockURLProtocol.requestHandler = { request in

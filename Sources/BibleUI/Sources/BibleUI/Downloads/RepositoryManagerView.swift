@@ -1,254 +1,415 @@
 // RepositoryManagerView.swift — Repository source management
 
 import SwiftUI
-import SwiftData
-import BibleCore
 import SwordKit
 
 /**
- Manages remote SWORD repository sources used by the downloads browser.
+ Manages Downloads repository sources with Android custom-repository parity.
 
- The view reads repository definitions from `InstallMgr.conf`, lets the user enable or disable
- individual sources for catalog refresh, supports adding custom HTTP sources, and can reset the
- source list back to the default packaged configuration.
+ The screen separates built-in Android repositories from user-added custom repositories. Built-in
+ normal, beta, and legacy FTP rows are read-only, while custom rows can be added, replaced, or
+ deleted through the same HTTPS manifest/direct-catalog validation flow Android uses.
 
  Data dependencies:
- - `ModuleRepository` is used indirectly to read the current source configuration from disk
- - `UserDefaults` stores the set of user-disabled repository names
- - `InstallManager` resolves and mutates the underlying `InstallMgr.conf` file used by SWORD
+ - `RepositorySourceManager` reads and mutates `InstallMgr.conf`
+ - `InstallManager` classifies packaged Android default repositories through the manager
+ - `openURL` opens the shared Android custom repositories help wiki
 
  Side effects:
- - `onAppear` loads both repository configuration and disabled-source preferences
- - add, delete, toggle, and reset actions mutate on-disk repository configuration or
-   `UserDefaults`, then reload local state from those persisted sources
- - resetting sources deletes the current config file and recreates the default source set
+ - `onAppear` loads the persisted source list
+ - add, replace, delete, and reset actions rewrite `InstallMgr.conf` through `RepositorySourceManager`
+ - help opens an external browser when the user chooses the wiki action
  */
 public struct RepositoryManagerView: View {
-    /// SwiftData context inherited from the parent environment.
-    @Environment(\.modelContext) private var modelContext
+    /// Opens the Android custom repository help URL when the help alert action is selected.
+    @Environment(\.openURL) private var openURL
+
+    /// Source-management service used for validation and config persistence.
+    private let sourceManager: RepositorySourceManager
 
     /// All configured repository sources loaded from `InstallMgr.conf`.
     @State private var sources: [SourceConfig] = []
 
-    /// Repository names the user has disabled in local preferences.
-    @State private var disabledSources: Set<String> = []
+    /// Currently presented custom-source editor state, or `nil` when no editor sheet is open.
+    @State private var editorState: RepositorySourceEditorState?
 
-    /// Whether the add-source sheet is currently presented.
-    @State private var showAddSource = false
+    /// Validation or persistence error shown inside the editor sheet.
+    @State private var editorErrorMessage: String?
+
+    /// Whether an add or replace request is currently validating remote HTTPS resources.
+    @State private var isSavingSource = false
 
     /// Whether the destructive reset confirmation alert is currently presented.
     @State private var showResetConfirm = false
 
-    /// Pending custom source display name entered in the add-source form.
-    @State private var newSourceName = ""
+    /// Custom repository selected for destructive deletion confirmation.
+    @State private var deletionCandidate: RepositorySourceDeletionCandidate?
 
-    /// Pending custom source host entered in the add-source form.
-    @State private var newSourceHost = ""
+    /// Whether the Android custom repositories help alert is currently presented.
+    @State private var showHelp = false
 
-    /// Pending custom source catalog path entered in the add-source form.
-    @State private var newSourcePath = ""
+    /// Last source-management error raised outside the editor sheet.
+    @State private var sourceErrorMessage: String?
 
     /**
-     Creates the repository manager with empty local state.
+     Creates the repository manager with an injectable source-management service.
 
-     - Note: Repository configuration is loaded lazily in `onAppear`.
+     - Parameter sourceManager: Service that owns source validation and `InstallMgr.conf` writes.
+
+     Side effects:
+     - none; repository configuration is loaded lazily in `onAppear`
      */
-    public init() {}
+    public init(sourceManager: RepositorySourceManager = RepositorySourceManager()) {
+        self.sourceManager = sourceManager
+    }
 
     /**
-     Builds the repository list, add-source sheet, and reset-to-defaults controls.
+     Builds the repository list, custom-source editor sheet, help, and reset controls.
      */
     public var body: some View {
         List {
             if sources.isEmpty {
-                Section {
-                    VStack(spacing: 12) {
-                        Text(String(localized: "no_sources_configured"))
-                            .foregroundStyle(.secondary)
-                        Button(String(localized: "reset_to_defaults")) {
-                            resetToDefaults()
-                        }
-                        .buttonStyle(.bordered)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical)
-                }
+                emptySourceSection
             } else {
-                Section {
-                    ForEach(sources) { source in
-                        sourceRow(source)
-                    }
-                } header: {
-                    Text(String(localized: "remote_sources"))
-                } footer: {
-                    Text(String(localized: "sources_count_\(sources.count)_\(enabledCount)"))
-                }
-
-                Section {
-                    Button(String(localized: "reset_to_defaults"), role: .destructive) {
-                        showResetConfirm = true
-                    }
-                }
+                defaultRepositoriesSection
+                customRepositoriesSection
+                resetSection
             }
         }
-        .navigationTitle(String(localized: "repositories"))
+        .navigationTitle(String(localized: "repositories", defaultValue: "Repositories"))
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
         .accessibilityIdentifier("repositoryManagerScreen")
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                Button(String(localized: "add"), systemImage: "plus") {
-                    showAddSource = true
+                Button {
+                    beginAddingSource()
+                } label: {
+                    SwiftUI.Label(String(localized: "add", defaultValue: "Add"), systemImage: "plus")
                 }
                 .accessibilityIdentifier("repositoryManagerAddButton")
             }
+            ToolbarItem(placement: .secondaryAction) {
+                Button {
+                    showHelp = true
+                } label: {
+                    SwiftUI.Label(String(localized: "help", defaultValue: "Help"), systemImage: "questionmark.circle")
+                }
+                .accessibilityIdentifier("repositoryManagerHelpButton")
+            }
         }
-        .sheet(isPresented: $showAddSource) {
+        .sheet(item: $editorState) { _ in
             NavigationStack {
-                addSourceView
+                sourceEditorView
             }
             .presentationDetents([.medium])
         }
-        .alert(String(localized: "reset_sources_title"), isPresented: $showResetConfirm) {
-            Button(String(localized: "reset"), role: .destructive) {
+        .alert(String(localized: "reset_sources_title", defaultValue: "Reset repositories"), isPresented: $showResetConfirm) {
+            Button(String(localized: "reset", defaultValue: "Reset"), role: .destructive) {
                 resetToDefaults()
             }
-            Button(String(localized: "cancel"), role: .cancel) {}
+            Button(String(localized: "cancel", defaultValue: "Cancel"), role: .cancel) {}
         } message: {
-            Text(String(localized: "reset_sources_message"))
+            Text(String(
+                localized: "reset_sources_message",
+                defaultValue: "Remove custom repositories and restore the built-in Android source list?"
+            ))
+        }
+        .alert(item: $deletionCandidate) { candidate in
+            Alert(
+                title: Text(String(
+                    localized: "delete_custom_repository_title",
+                    defaultValue: "Delete repository"
+                )),
+                message: Text(String(
+                    format: String(
+                        localized: "delete_custom_repository_message_format",
+                        defaultValue: "Delete %@?"
+                    ),
+                    candidate.source.name
+                )),
+                primaryButton: .destructive(Text(String(localized: "delete", defaultValue: "Delete"))) {
+                    deleteSource(candidate.source)
+                },
+                secondaryButton: .cancel(Text(String(localized: "cancel", defaultValue: "Cancel")))
+            )
+        }
+        .alert(String(localized: "custom_repositories", defaultValue: "Custom repositories"), isPresented: $showHelp) {
+            Button(String(localized: "open_wiki", defaultValue: "Open Wiki")) {
+                openURL(Self.customRepositoriesWikiURL)
+            }
+            Button(String(localized: "okay", defaultValue: "OK"), role: .cancel) {}
+        } message: {
+            Text(String(
+                localized: "custom_repositories_help_summary",
+                defaultValue: "Custom repositories use Android-compatible HTTPS manifests or direct SWORD catalog URLs."
+            ))
+        }
+        .alert(
+            String(localized: "repository_source_error", defaultValue: "Repository source error"),
+            isPresented: sourceErrorPresented
+        ) {
+            Button(String(localized: "okay", defaultValue: "OK"), role: .cancel) {}
+        } message: {
+            Text(sourceErrorMessage ?? "")
         }
         .onAppear {
             loadSources()
-            loadDisabledSources()
         }
     }
 
-    /// Number of non-FTP sources currently enabled for refresh.
-    private var enabledCount: Int {
-        sources.filter { !disabledSources.contains($0.name) && $0.type != "FTP" }.count
+    private static let customRepositoriesWikiURL = URL(
+        string: "https://github.com/AndBible/and-bible/wiki/Custom-repositories"
+    )!
+
+    /// Sources that match Android's built-in normal, beta, or legacy FTP repositories.
+    private var defaultSources: [SourceConfig] {
+        sources.filter(sourceManager.isDefaultSource)
     }
 
-    /// Whether the pending custom host indicates an unsupported FTP source.
-    private var isFTPHost: Bool {
-        let host = newSourceHost.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
-        return host.hasPrefix("ftp://") || host.hasPrefix("ftp.")
+    /// Sources that were added by the user and can be managed from this screen.
+    private var customSources: [SourceConfig] {
+        sources.filter { !sourceManager.isDefaultSource($0) }
     }
 
-    // MARK: - Source Row
-
-    /**
-     Builds one repository row with enable/disable and destructive-delete affordances.
-
-     - Parameter source: Source definition to render.
-     - Returns: A row showing source metadata, support state, and local management actions.
-     */
-    private func sourceRow(_ source: SourceConfig) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Image(systemName: disabledSources.contains(source.name) ? "circle" : "checkmark.circle.fill")
-                    .foregroundStyle(disabledSources.contains(source.name) ? Color.secondary : Color.green)
-
-                VStack(alignment: .leading) {
-                    Text(source.name)
-                        .font(.body)
-                        .foregroundStyle(disabledSources.contains(source.name) ? .secondary : .primary)
-                    Text("\(source.host)\(source.catalogPath)")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
-                }
-
-                Spacer()
-
-                if source.type == "FTP" {
-                    Text(String(localized: "ftp_unsupported"))
-                        .font(.caption2)
-                        .foregroundStyle(.red)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(Color.red.opacity(0.1))
-                        .clipShape(Capsule())
-                } else {
-                    Text(source.type)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(Color.secondary.opacity(0.1))
-                        .clipShape(Capsule())
+    /// Binding used by the source-error alert because SwiftUI alerts require a Boolean presenter.
+    private var sourceErrorPresented: Binding<Bool> {
+        Binding(
+            get: { sourceErrorMessage != nil },
+            set: { presented in
+                if !presented {
+                    sourceErrorMessage = nil
                 }
             }
+        )
+    }
+
+    /// Binding for the URL text field inside the optional editor state.
+    private var editorURLBinding: Binding<String> {
+        Binding(
+            get: { editorState?.repositoryURL ?? "" },
+            set: { newValue in
+                if var current = editorState {
+                    current.repositoryURL = newValue
+                    editorState = current
+                    editorErrorMessage = nil
+                }
+            }
+        )
+    }
+
+    /// Whether the current editor URL is empty or a validation request is already in flight.
+    private var editorSaveDisabled: Bool {
+        editorState?.repositoryURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false || isSavingSource
+    }
+
+    /// Stable sheet identifier that preserves the existing add-source UI test contract.
+    private var editorScreenAccessibilityIdentifier: String {
+        editorState?.originalName == nil ? "repositoryManagerAddSourceScreen" : "repositoryManagerSourceEditorScreen"
+    }
+
+    /// Stable cancel-button identifier that preserves the existing add-source UI test contract.
+    private var editorCancelAccessibilityIdentifier: String {
+        editorState?.originalName == nil
+            ? "repositoryManagerAddSourceCancelButton"
+            : "repositoryManagerSourceEditorCancelButton"
+    }
+
+    // MARK: - Sections
+
+    /**
+     Builds the repair section shown when no source rows are available.
+     */
+    private var emptySourceSection: some View {
+        Section {
+            VStack(spacing: 12) {
+                Text(String(localized: "no_sources_configured", defaultValue: "No repositories configured"))
+                    .foregroundStyle(.secondary)
+                Button(String(localized: "reset_to_defaults", defaultValue: "Reset to defaults")) {
+                    resetToDefaults()
+                }
+                .buttonStyle(.bordered)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical)
+        }
+    }
+
+    /**
+     Builds the read-only built-in repository section.
+     */
+    private var defaultRepositoriesSection: some View {
+        Section {
+            ForEach(defaultSources, id: \.repositoryManagerListID) { source in
+                sourceRow(source, isCustom: false)
+            }
+        } header: {
+            Text(String(localized: "default_repositories", defaultValue: "Default repositories"))
+        }
+    }
+
+    /**
+     Builds the custom repository section with edit and delete affordances.
+     */
+    private var customRepositoriesSection: some View {
+        Section {
+            if customSources.isEmpty {
+                Button {
+                    beginAddingSource()
+                } label: {
+                    SwiftUI.Label(
+                        String(localized: "add_custom_repository", defaultValue: "Add custom repository"),
+                        systemImage: "plus.circle"
+                    )
+                }
+                .accessibilityIdentifier("repositoryManagerEmptyAddCustomButton")
+            } else {
+                ForEach(customSources, id: \.repositoryManagerListID) { source in
+                    sourceRow(source, isCustom: true)
+                }
+            }
+        } header: {
+            Text(String(localized: "custom_repositories", defaultValue: "Custom repositories"))
+        }
+    }
+
+    /**
+     Builds the iOS repair action for restoring packaged defaults.
+     */
+    private var resetSection: some View {
+        Section {
+            Button(String(localized: "reset_to_defaults", defaultValue: "Reset to defaults"), role: .destructive) {
+                showResetConfirm = true
+            }
+        }
+    }
+
+    // MARK: - Row Views
+
+    /**
+     Builds one repository row with Android-parity source metadata and custom-only actions.
+
+     - Parameters:
+       - source: Source definition to render.
+       - isCustom: Whether edit/delete actions are available for the row.
+     - Returns: A row showing repository name, URL, protocol support state, and management affordances.
+     */
+    private func sourceRow(_ source: SourceConfig, isCustom: Bool) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: isCustom ? "globe" : "checkmark.seal.fill")
+                .foregroundStyle(isCustom ? Color.accentColor : Color.green)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(source.name)
+                    .font(.body)
+                Text(source.displayAddress)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+
+            Spacer(minLength: 8)
+
+            sourceProtocolBadge(source)
         }
         .contentShape(Rectangle())
         .onTapGesture {
-            guard source.type != "FTP" else { return }
-            toggleSource(source)
+            if isCustom {
+                beginEditingSource(source)
+            }
         }
-        .swipeActions(edge: .trailing) {
-            Button(String(localized: "delete"), role: .destructive) {
-                deleteSource(source)
+        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+            if isCustom {
+                Button(String(localized: "delete", defaultValue: "Delete"), role: .destructive) {
+                    deletionCandidate = RepositorySourceDeletionCandidate(source: source)
+                }
             }
         }
     }
 
-    // MARK: - Add Source View
+    /**
+     Builds the protocol/support badge for a repository row.
+
+     - Parameter source: Source whose protocol should be shown.
+     - Returns: A compact badge indicating HTTPS support or unsupported FTP state.
+     */
+    private func sourceProtocolBadge(_ source: SourceConfig) -> some View {
+        Group {
+            if source.type == "FTP" {
+                Text(String(localized: "ftp_unsupported", defaultValue: "FTP unsupported"))
+                    .foregroundStyle(.red)
+                    .background(Color.red.opacity(0.1))
+            } else {
+                Text(String(localized: "https", defaultValue: "HTTPS"))
+                    .foregroundStyle(.secondary)
+                    .background(Color.secondary.opacity(0.1))
+            }
+        }
+        .font(.caption2)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 2)
+        .clipShape(Capsule())
+    }
+
+    // MARK: - Source Editor
 
     /**
-     Builds the modal form used to create one custom HTTP source.
+     Builds the add/replace sheet for custom repositories.
      */
-    private var addSourceView: some View {
+    private var sourceEditorView: some View {
         Form {
-            Section(String(localized: "source_details")) {
-                TextField(String(localized: "source_name_placeholder"), text: $newSourceName)
-                    .textContentType(.organizationName)
-                    #if os(iOS)
-                    .autocapitalization(.words)
-                    #endif
-                TextField(String(localized: "source_host_placeholder"), text: $newSourceHost)
-                    .textContentType(.URL)
-                    #if os(iOS)
-                    .autocapitalization(.none)
-                    .keyboardType(.URL)
-                    #endif
-                TextField(String(localized: "source_path_placeholder"), text: $newSourcePath)
-                    #if os(iOS)
-                    .autocapitalization(.none)
-                    #endif
+            Section(String(localized: "repository_url", defaultValue: "Repository URL")) {
+                TextField(
+                    String(localized: "repository_url_placeholder", defaultValue: "https://example.org/repository"),
+                    text: editorURLBinding
+                )
+                .textContentType(.URL)
+                #if os(iOS)
+                .autocapitalization(.none)
+                .keyboardType(.URL)
+                #endif
+                .disabled(isSavingSource)
+                .accessibilityIdentifier("repositoryManagerRepositoryURLField")
             }
 
-            if isFTPHost {
+            if isSavingSource {
                 Section {
-                    SwiftUI.Label(String(localized: "ftp_not_supported_hint"), systemImage: "exclamationmark.triangle")
+                    HStack(spacing: 12) {
+                        ProgressView()
+                        Text(String(localized: "validating_repository", defaultValue: "Validating repository"))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+
+            if let editorErrorMessage {
+                Section {
+                    SwiftUI.Label(editorErrorMessage, systemImage: "exclamationmark.triangle")
                         .font(.caption)
                         .foregroundStyle(.orange)
                 }
             }
-
-            Section {
-                Text(String(localized: "source_catalog_hint"))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
         }
-        .navigationTitle(String(localized: "add_source"))
+        .navigationTitle(editorState?.title ?? String(localized: "custom_repository", defaultValue: "Custom repository"))
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
-        .accessibilityIdentifier("repositoryManagerAddSourceScreen")
+        .accessibilityIdentifier(editorScreenAccessibilityIdentifier)
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
-                Button(String(localized: "cancel")) {
-                    clearAddForm()
-                    showAddSource = false
+                Button(String(localized: "cancel", defaultValue: "Cancel")) {
+                    closeEditor()
                 }
-                .accessibilityIdentifier("repositoryManagerAddSourceCancelButton")
+                .disabled(isSavingSource)
+                .accessibilityIdentifier(editorCancelAccessibilityIdentifier)
             }
             ToolbarItem(placement: .confirmationAction) {
-                Button(String(localized: "add")) {
-                    addSource()
-                    showAddSource = false
+                Button(editorState?.saveTitle ?? String(localized: "save", defaultValue: "Save")) {
+                    saveEditorSource()
                 }
-                .disabled(newSourceName.isEmpty || newSourceHost.isEmpty || newSourcePath.isEmpty || isFTPHost)
+                .disabled(editorSaveDisabled)
+                .accessibilityIdentifier("repositoryManagerSourceEditorSaveButton")
             }
         }
     }
@@ -256,168 +417,184 @@ public struct RepositoryManagerView: View {
     // MARK: - Actions
 
     /**
-     Reloads repository definitions from the install-manager configuration file.
+     Reloads repository definitions from the source manager.
 
      Side effects:
      - replaces the local `sources` array with the current on-disk configuration
      */
     private func loadSources() {
-        let repo = ModuleRepository()
-        sources = repo.loadSources()
+        sources = sourceManager.loadSources()
     }
 
     /**
-     Loads the locally disabled repository names from `UserDefaults`.
+     Opens the editor for adding a new custom source.
 
      Side effects:
-     - replaces the local `disabledSources` set when persisted values exist
+     - resets transient editor error state
+     - presents the editor sheet
      */
-    private func loadDisabledSources() {
-        let key = "disabledRepositorySources"
-        if let saved = UserDefaults.standard.array(forKey: key) as? [String] {
-            disabledSources = Set(saved)
+    private func beginAddingSource() {
+        editorErrorMessage = nil
+        editorState = RepositorySourceEditorState(originalName: nil, repositoryURL: "")
+    }
+
+    /**
+     Opens the editor for replacing an existing custom source.
+
+     - Parameter source: Custom source whose persisted row should be replaced after validation.
+
+     Side effects:
+     - resets transient editor error state
+     - presents the editor sheet with the source's current HTTPS catalog URL
+     */
+    private func beginEditingSource(_ source: SourceConfig) {
+        editorErrorMessage = nil
+        editorState = RepositorySourceEditorState(
+            originalName: source.name,
+            repositoryURL: source.editableURLString
+        )
+    }
+
+    /**
+     Dismisses the editor sheet and clears in-flight editor state.
+
+     Side effects:
+     - clears local editor state and validation errors
+     */
+    private func closeEditor() {
+        editorState = nil
+        editorErrorMessage = nil
+        isSavingSource = false
+    }
+
+    /**
+     Validates and persists the currently edited custom repository source.
+
+     Side effects:
+     - starts an asynchronous HTTPS validation request
+     - writes `InstallMgr.conf` through `RepositorySourceManager` on success
+     - reloads the local source list and dismisses the editor on success
+     - keeps the editor open with an error message on failure
+     */
+    private func saveEditorSource() {
+        guard let editorState else { return }
+        isSavingSource = true
+        editorErrorMessage = nil
+
+        Task {
+            do {
+                if let originalName = editorState.originalName {
+                    try await sourceManager.replaceCustomSource(
+                        named: originalName,
+                        with: editorState.repositoryURL
+                    )
+                } else {
+                    try await sourceManager.addCustomSource(from: editorState.repositoryURL)
+                }
+
+                await MainActor.run {
+                    loadSources()
+                    closeEditor()
+                }
+            } catch {
+                await MainActor.run {
+                    isSavingSource = false
+                    editorErrorMessage = error.localizedDescription
+                }
+            }
         }
     }
 
     /**
-     Persists the current disabled-source set to `UserDefaults`.
+     Deletes one custom source from persisted configuration.
+
+     - Parameter source: Custom source definition to remove.
 
      Side effects:
-     - writes the `disabledSources` set under the `disabledRepositorySources` preference key
-     */
-    private func saveDisabledSources() {
-        let key = "disabledRepositorySources"
-        UserDefaults.standard.set(Array(disabledSources), forKey: key)
-    }
-
-    /**
-     Toggles one source between enabled and disabled states.
-
-     - Parameter source: Source whose enabled state should be inverted.
-
-     Side effects:
-     - mutates the local `disabledSources` set
-     - persists the updated disabled-source set to `UserDefaults`
-     */
-    private func toggleSource(_ source: SourceConfig) {
-        if disabledSources.contains(source.name) {
-            disabledSources.remove(source.name)
-        } else {
-            disabledSources.insert(source.name)
-        }
-        saveDisabledSources()
-    }
-
-    /**
-     Deletes one custom or default source entry from `InstallMgr.conf`.
-
-     - Parameter source: Source definition to remove from the persisted configuration.
-
-     Side effects:
-     - rewrites `InstallMgr.conf` without the selected source entry
-     - removes the source from the disabled-source set and reloads local source state
-
-     Failure modes:
-     - returns without mutating persisted state if the config file cannot be read
-     - file-write failures are ignored and will leave the current on-disk configuration unchanged
+     - rewrites `InstallMgr.conf` through `RepositorySourceManager`
+     - reloads local source state after successful deletion
+     - stores a presentable error if deletion fails
      */
     private func deleteSource(_ source: SourceConfig) {
-        // Remove from config file
-        let basePath = InstallManager.defaultBasePath()
-        let configPath = (basePath as NSString).appendingPathComponent("InstallMgr.conf")
-
-        guard let content = try? String(contentsOfFile: configPath, encoding: .utf8) else { return }
-
-        let lines = content.components(separatedBy: .newlines)
-        let filteredLines = lines.filter { line in
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            // Keep all lines except the one matching this source
-            if trimmed.hasPrefix("HTTPSource=") || trimmed.hasPrefix("FTPSource=") {
-                let parts = String(trimmed.drop(while: { $0 != "=" }).dropFirst())
-                    .components(separatedBy: "|")
-                return parts.first != source.name
-            }
-            return true
+        do {
+            try sourceManager.deleteCustomSource(named: source.name)
+            loadSources()
+        } catch {
+            sourceErrorMessage = error.localizedDescription
         }
-
-        let newContent = filteredLines.joined(separator: "\n")
-        try? newContent.write(toFile: configPath, atomically: true, encoding: .utf8)
-
-        disabledSources.remove(source.name)
-        saveDisabledSources()
-        loadSources()
     }
 
     /**
-     Appends one custom HTTP source to `InstallMgr.conf`.
+     Restores the repository configuration file to the packaged Android source set.
 
      Side effects:
-     - creates a default config skeleton when the file does not yet exist
-     - appends the new source definition to the on-disk config, clears the add-source form, and
-       reloads the source list
-
-     Failure modes:
-     - file-write failures are ignored, in which case the source list will reload without the new
-       source being present
-     */
-    private func addSource() {
-        let basePath = InstallManager.defaultBasePath()
-        let configPath = (basePath as NSString).appendingPathComponent("InstallMgr.conf")
-
-        // Read existing content
-        var content = (try? String(contentsOfFile: configPath, encoding: .utf8)) ?? """
-        [General]
-        PassiveFTP=true
-
-        [Sources]
-        """
-
-        // Append new source
-        let path = newSourcePath.hasPrefix("/") ? newSourcePath : "/\(newSourcePath)"
-        content += "\nHTTPSource=\(newSourceName)|\(newSourceHost)|\(path)"
-
-        try? content.write(toFile: configPath, atomically: true, encoding: .utf8)
-
-        clearAddForm()
-        loadSources()
-    }
-
-    /**
-     Restores the repository configuration file to the default packaged source set.
-
-     Side effects:
-     - deletes the current `InstallMgr.conf` file
-     - clears disabled-source preferences and recreates the default source configuration
-     - reloads the in-memory source list from the recreated config
-
-     Failure modes:
-     - deleting the existing config uses `try?`; if removal fails, the subsequent recreation step
-       still runs and may overwrite or preserve the prior file depending on install-manager behavior
+     - rewrites `InstallMgr.conf` through `RepositorySourceManager`
+     - reloads local source state after successful reset
+     - stores a presentable error if reset fails
      */
     private func resetToDefaults() {
-        // Delete the config file so ensureDefaultConfig recreates it
-        let basePath = InstallManager.defaultBasePath()
-        let configPath = (basePath as NSString).appendingPathComponent("InstallMgr.conf")
-        try? FileManager.default.removeItem(atPath: configPath)
+        do {
+            try sourceManager.resetToDefaults()
+            loadSources()
+        } catch {
+            sourceErrorMessage = error.localizedDescription
+        }
+    }
+}
 
-        // Clear disabled sources
-        disabledSources = []
-        saveDisabledSources()
+private struct RepositorySourceEditorState: Identifiable {
+    /// Stable sheet identity for SwiftUI modal presentation.
+    let id = UUID()
 
-        // Recreate defaults
-        InstallManager.ensureDefaultConfigPublic(at: basePath)
-        loadSources()
+    /// Name of the custom source being replaced, or `nil` when adding a new source.
+    let originalName: String?
+
+    /// User-entered HTTPS manifest or direct SWORD catalog URL.
+    var repositoryURL: String
+
+    /// Navigation title matching the current add or replace mode.
+    var title: String {
+        if originalName == nil {
+            return String(localized: "add_custom_repository", defaultValue: "Add custom repository")
+        }
+        return String(localized: "edit_custom_repository", defaultValue: "Edit custom repository")
     }
 
-    /**
-     Clears the transient add-source form fields.
+    /// Confirmation button title matching the current add or replace mode.
+    var saveTitle: String {
+        if originalName == nil {
+            return String(localized: "add", defaultValue: "Add")
+        }
+        return String(localized: "save", defaultValue: "Save")
+    }
+}
 
-     Side effects:
-     - resets the local add-source text fields back to empty strings
-     */
-    private func clearAddForm() {
-        newSourceName = ""
-        newSourceHost = ""
-        newSourcePath = ""
+/// Identifiable wrapper for presenting destructive custom-source delete confirmation.
+private struct RepositorySourceDeletionCandidate: Identifiable {
+    /// Stable identity for the current delete prompt.
+    let id = UUID()
+
+    /// Custom source selected for deletion.
+    let source: SourceConfig
+}
+
+private extension SourceConfig {
+    /// Stable identity for lists where Android default HTTP and FTP rows can share a source name.
+    var repositoryManagerListID: String {
+        "\(type)|\(name)|\(host)|\(catalogPath)"
+    }
+
+    /// User-visible address for repository rows.
+    var displayAddress: String {
+        "\(scheme)://\(host)\(catalogPath)"
+    }
+
+    /// HTTPS URL prefilled when replacing custom sources.
+    var editableURLString: String {
+        "https://\(host)\(catalogPath)"
+    }
+
+    private var scheme: String {
+        type == "FTP" ? "ftp" : "https"
     }
 }
