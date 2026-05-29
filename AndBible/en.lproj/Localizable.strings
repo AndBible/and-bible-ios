@@ -180,6 +180,7 @@
 "maps" = "Maps";
 "document_filter_results %lld" = "Documents (%lld)";
 "install" = "Install";
+"install_module" = "Install";
 "update" = "Update";
 "uninstall" = "Uninstall";
 "unavailable" = "Unavailable";

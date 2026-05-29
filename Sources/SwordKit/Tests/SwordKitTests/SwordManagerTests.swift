@@ -108,6 +108,66 @@ final class SwordManagerTests: XCTestCase {
         }
     }
 
+    func testRecommendedDocumentRefreshPreservesCachedMetadataAfterFailures() async throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let swordDir = tempDir.appendingPathComponent("sword", isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let validData = """
+        {
+          "bibles": {"en": ["KJV::CrossWire"]},
+          "commentaries": {},
+          "dictionaries": {},
+          "books": {},
+          "maps": {}
+        }
+        """.data(using: .utf8)!
+        let malformedData = Data("<html>temporary failure</html>".utf8)
+        var responses = [
+            (statusCode: 200, data: validData),
+            (statusCode: 200, data: malformedData),
+            (statusCode: 500, data: Data("temporary failure".utf8))
+        ]
+
+        PseudoBooksMockURLProtocol.requestHandler = { request in
+            let responsePayload = responses.removeFirst()
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: responsePayload.statusCode,
+                httpVersion: nil,
+                headerFields: nil
+            )!
+            return (response, responsePayload.data)
+        }
+        defer { PseudoBooksMockURLProtocol.requestHandler = nil }
+
+        let repository = ModuleRepository(
+            basePath: tempDir.path,
+            swordPath: swordDir.path,
+            session: Self.makePseudoBooksMockSession()
+        )
+
+        let refreshedMetadata = try await repository.refreshRecommendedDocuments()
+        XCTAssertEqual(refreshedMetadata.bibles["en"], ["KJV::CrossWire"])
+        XCTAssertEqual(repository.loadCachedRecommendedDocuments()?.bibles["en"], ["KJV::CrossWire"])
+
+        do {
+            _ = try await repository.refreshRecommendedDocuments()
+            XCTFail("Expected malformed recommended-document metadata to fail decoding.")
+        } catch {
+            XCTAssertEqual(repository.loadCachedRecommendedDocuments()?.bibles["en"], ["KJV::CrossWire"])
+        }
+
+        do {
+            _ = try await repository.refreshRecommendedDocuments()
+            XCTFail("Expected non-200 recommended-document metadata to fail downloading.")
+        } catch {
+            XCTAssertEqual(repository.loadCachedRecommendedDocuments()?.bibles["en"], ["KJV::CrossWire"])
+        }
+    }
+
     func testDefaultInstallManagerConfigIncludesAndBibleSources() throws {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)

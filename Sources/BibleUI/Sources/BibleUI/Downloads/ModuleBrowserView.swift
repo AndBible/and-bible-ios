@@ -395,7 +395,7 @@ public struct ModuleBrowserView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             case .installable:
-                Button(String(localized: "install")) {
+                Button(String(localized: "install_module", defaultValue: "Install")) {
                     installModule(module)
                 }
                 .buttonStyle(.bordered)
