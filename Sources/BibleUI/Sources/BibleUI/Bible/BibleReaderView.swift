@@ -356,6 +356,20 @@ public struct BibleReaderView: View {
         return windowManager.isControllerRegistrationPending(for: activeId)
     }
 
+    /**
+     Builds the fallback surface for pane-scoped modals whose controller or active module is unavailable.
+
+     - Returns: A reader-preparation view that distinguishes pending registration from unavailable state.
+     - Side Effects: None.
+     - Failure Modes: None.
+     */
+    private var readerPanePreparationContent: some View {
+        ReaderPanePreparationView(
+            isPending: isPanePresentationControllerPending,
+            onDismiss: dismissReaderModal
+        )
+    }
+
     /// Captures the window that should own the next pane-scoped presentation.
     private func setPanePresentationTarget(_ windowId: UUID?) {
         panePresentationTargetWindowId = windowId ?? windowManager.activeWindow?.id
@@ -904,43 +918,43 @@ public struct BibleReaderView: View {
                     onOpenMapBrowser: { presentReaderModalPreservingPane(.mapBrowser) }
                 )
             } else {
-                ReaderPanePreparationView(
-                    isPending: isPanePresentationControllerPending,
-                    onDismiss: dismissReaderModal
-                )
+                readerPanePreparationContent
             }
         case .dictionaryBrowser:
-            if let module = panePresentationController?.activeDictionaryModule {
+            if let controller = panePresentationController,
+               let module = controller.activeDictionaryModule {
                 DictionaryBrowserView(module: module) { key in
                     dismissReaderModal()
-                    panePresentationController?.loadDictionaryEntry(key: key)
+                    controller.loadDictionaryEntry(key: key)
                 }
             } else {
-                EmptyView()
+                readerPanePreparationContent
             }
         case .generalBookBrowser:
-            if let module = panePresentationController?.activeGeneralBookModule {
+            if let controller = panePresentationController,
+               let module = controller.activeGeneralBookModule {
                 GeneralBookBrowserView(
                     module: module,
-                    title: panePresentationController?.activeGeneralBookModuleName ?? String(localized: "general_book")
+                    title: controller.activeGeneralBookModuleName ?? String(localized: "general_book")
                 ) { key in
                     dismissReaderModal()
-                    panePresentationController?.loadGeneralBookEntry(key: key)
+                    controller.loadGeneralBookEntry(key: key)
                 }
             } else {
-                EmptyView()
+                readerPanePreparationContent
             }
         case .mapBrowser:
-            if let module = panePresentationController?.activeMapModule {
+            if let controller = panePresentationController,
+               let module = controller.activeMapModule {
                 GeneralBookBrowserView(
                     module: module,
-                    title: panePresentationController?.activeMapModuleName ?? String(localized: "map")
+                    title: controller.activeMapModuleName ?? String(localized: "map")
                 ) { key in
                     dismissReaderModal()
-                    panePresentationController?.loadMapEntry(key: key)
+                    controller.loadMapEntry(key: key)
                 }
             } else {
-                EmptyView()
+                readerPanePreparationContent
             }
         case .epubLibrary:
             EpubLibraryView { identifier in
@@ -952,20 +966,24 @@ public struct BibleReaderView: View {
                 }
             }
         case .epubBrowser:
-            if let reader = panePresentationController?.activeEpubReader {
-                EpubBrowserView(reader: reader) { href in
-                    dismissReaderModal()
-                    panePresentationController?.loadEpubEntry(href: href)
-                }
-            } else {
-                EpubLibraryView { identifier in
-                    dismissReaderModal()
-                    panePresentationController?.switchEpub(identifier: identifier)
-                    panePresentationController?.switchCategory(to: .epub)
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                        presentReaderModalPreservingPane(.epubBrowser)
+            if let controller = panePresentationController {
+                if let reader = controller.activeEpubReader {
+                    EpubBrowserView(reader: reader) { href in
+                        dismissReaderModal()
+                        controller.loadEpubEntry(href: href)
+                    }
+                } else {
+                    EpubLibraryView { identifier in
+                        dismissReaderModal()
+                        controller.switchEpub(identifier: identifier)
+                        controller.switchCategory(to: .epub)
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                            presentReaderModalPreservingPane(.epubBrowser)
+                        }
                     }
                 }
+            } else {
+                readerPanePreparationContent
             }
         case .epubSearch:
             if let reader = panePresentationController?.activeEpubReader {

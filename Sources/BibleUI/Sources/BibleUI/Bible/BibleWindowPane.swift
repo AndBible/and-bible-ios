@@ -383,8 +383,7 @@ struct BibleWindowPane: View {
 
         if let sharedController,
            !ctrl.copyModuleState(from: sharedController) {
-            logger.error("Registered BibleReaderController has no SwordManager; initializing pane controller independently")
-            assertionFailure("Registered BibleReaderController has no SwordManager")
+            logger.warning("Unable to copy SWORD state from registered controller; initializing pane controller independently")
             ctrl.initializeSwordIfNeeded()
         }
 
