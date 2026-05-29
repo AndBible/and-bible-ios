@@ -408,17 +408,30 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      - Parameters:
        - bridge: Bridge used to emit events to the Vue.js reader and receive callbacks.
        - bookmarkService: Optional bookmark/studypad service used for annotation features.
+       - initializesSword: Whether to initialize SWORD immediately. Pane controllers that will
+         copy an existing controller's shared module state pass `false` to avoid creating a
+         transient extra `SwordManager`.
 
      Side effects:
      - assigns itself as the bridge delegate
-     - initializes SWORD state and installed-module caches
+     - initializes SWORD state and installed-module caches when `initializesSword` is `true`
+
+     Failure modes:
+     - if SWORD initialization is requested and `SwordManager` creation fails, the controller
+       remains usable for placeholder/fallback rendering with empty installed-module caches.
      */
-    public init(bridge: BibleBridge, bookmarkService: BookmarkService? = nil) {
+    public init(
+        bridge: BibleBridge,
+        bookmarkService: BookmarkService? = nil,
+        initializesSword: Bool = true
+    ) {
         self.bridge = bridge
         self.bookmarkService = bookmarkService
         super.init()
         bridge.delegate = self
-        initializeSword()
+        if initializesSword {
+            initializeSwordIfNeeded()
+        }
     }
 
     init(bridge: BibleBridge, bookmarkService: BookmarkService? = nil, swordManagerOverride: SwordManager) {
@@ -1689,6 +1702,26 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         configureSwordManager(newMgr)
     }
 
+    /**
+     Ensures this controller has a SWORD manager and installed-module cache.
+
+     Controllers normally initialize SWORD during construction. Pane controllers may defer that
+     initialization so they can copy an existing controller's module state without constructing a
+     transient extra `SwordManager`; this method is the explicit fallback when shared state cannot
+     be copied.
+
+     Side effects:
+     - creates and configures `SwordManager` when this controller does not already have one
+     - refreshes installed-module caches and active module handles through `configureSwordManager`
+
+     Failure modes:
+     - if `SwordManager` creation fails, leaves the existing controller state unchanged.
+     */
+    public func initializeSwordIfNeeded() {
+        guard swordManager == nil else { return }
+        initializeSword()
+    }
+
     /// Initialize SWORD and find the first available Bible module.
     private func initializeSword() {
         guard let mgr = SwordManager() else {
@@ -1765,12 +1798,20 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     }
 
     /**
-     Copy module state (SwordManager + module lists) from an existing controller.
-     Avoids creating multiple C++ SWMgr instances which conflict with each other.
-     Each controller still gets its own SwordModule handles for independent cursor state.
+     Copies module state from an existing controller while keeping pane cursor state independent.
+
+     - Parameter other: Controller whose shared `SwordManager` and installed-module caches should
+       seed this controller.
+     - Returns: `true` when shared state was copied; `false` when `other` has no manager yet.
+     - Side Effects: Reuses `other`'s `SwordManager`, copies installed-module caches, resolves this
+       controller's own active module handles from that manager, and reapplies SWORD options.
+     - Failure Modes: Returns `false` without mutation when the source controller has no
+       `SwordManager`.
+     - Important: This avoids constructing multiple C++ `SWMgr` instances during pane creation.
      */
-    public func copyModuleState(from other: BibleReaderController) {
-        guard let mgr = other.swordManager else { return }
+    @discardableResult
+    public func copyModuleState(from other: BibleReaderController) -> Bool {
+        guard let mgr = other.swordManager else { return false }
         self.swordManager = mgr
         self.installedBibleModules = other.installedBibleModules
         self.installedCommentaryModules = other.installedCommentaryModules
@@ -1809,6 +1850,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         mgr.setGlobalOption(.headings, enabled: true)
         mgr.setGlobalOption(.redLetterWords, enabled: true)
         applySwordOptions()
+        return true
     }
 
     /**

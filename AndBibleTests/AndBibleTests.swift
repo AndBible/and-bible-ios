@@ -835,8 +835,9 @@ final class AndBibleTests: XCTestCase {
     }
 
     func testBibleReaderModulePickerBuildsForBibleCategory() {
+        let controller = BibleReaderController(bridge: BibleBridge(), initializesSword: false)
         let view = BibleReaderModulePicker(
-            controller: nil,
+            controller: controller,
             category: .bible,
             onDismiss: {},
             onOpenDownloads: {},
@@ -3347,6 +3348,90 @@ final class AndBibleTests: XCTestCase {
         XCTAssertTrue(createdWindow.historyItems?.isEmpty ?? true)
         XCTAssertEqual(createdWindow.pageManager?.currentCategoryName, "bible")
         XCTAssertNil(createdWindow.pageManager?.textDisplaySettings)
+    }
+
+    func testWindowManagerMarksVisibleWindowPendingUntilControllerRegisters() throws {
+        let container = try makeWorkspaceModelContainer()
+        let context = ModelContext(container)
+        let workspaceStore = WorkspaceStore(modelContext: context)
+        let windowManager = WindowManager(workspaceStore: workspaceStore)
+        let workspace = workspaceStore.createWorkspace(name: "Controller Readiness")
+        let firstWindow = try XCTUnwrap(workspaceStore.windows(workspaceId: workspace.id).first)
+
+        windowManager.setActiveWorkspace(workspace)
+
+        XCTAssertEqual(windowManager.controllerPendingWindowIds, Set([firstWindow.id]))
+        XCTAssertTrue(windowManager.isControllerRegistrationPending(for: firstWindow.id))
+        XCTAssertTrue(windowManager.hasPendingVisibleControllerRegistration)
+
+        windowManager.registerController(NSObject(), for: firstWindow.id)
+
+        XCTAssertFalse(windowManager.isControllerRegistrationPending(for: firstWindow.id))
+        XCTAssertFalse(windowManager.hasPendingVisibleControllerRegistration)
+    }
+
+    func testWindowManagerMarksNewWindowPendingWithoutReopeningRegisteredPanes() throws {
+        let container = try makeWorkspaceModelContainer()
+        let context = ModelContext(container)
+        let workspaceStore = WorkspaceStore(modelContext: context)
+        let windowManager = WindowManager(workspaceStore: workspaceStore)
+        let workspace = workspaceStore.createWorkspace(name: "New Window Readiness")
+        let firstWindow = try XCTUnwrap(workspaceStore.windows(workspaceId: workspace.id).first)
+        windowManager.setActiveWorkspace(workspace)
+        windowManager.registerController(NSObject(), for: firstWindow.id)
+
+        let secondWindow = try XCTUnwrap(windowManager.addWindow(from: firstWindow))
+
+        XCTAssertFalse(windowManager.isControllerRegistrationPending(for: firstWindow.id))
+        XCTAssertTrue(windowManager.isControllerRegistrationPending(for: secondWindow.id))
+        XCTAssertEqual(windowManager.controllerPendingWindowIds, Set([secondWindow.id]))
+
+        windowManager.registerController(NSObject(), for: secondWindow.id)
+
+        XCTAssertFalse(windowManager.hasPendingVisibleControllerRegistration)
+    }
+
+    func testWindowManagerAddWindowExitsMaximizedStateSoNewPaneCanRegister() throws {
+        let container = try makeWorkspaceModelContainer()
+        let context = ModelContext(container)
+        let workspaceStore = WorkspaceStore(modelContext: context)
+        let windowManager = WindowManager(workspaceStore: workspaceStore)
+        let workspace = workspaceStore.createWorkspace(name: "Maximized Add")
+        let firstWindow = try XCTUnwrap(workspaceStore.windows(workspaceId: workspace.id).first)
+        windowManager.setActiveWorkspace(workspace)
+        windowManager.registerController(NSObject(), for: firstWindow.id)
+        windowManager.maximizeWindow(firstWindow)
+
+        let secondWindow = try XCTUnwrap(windowManager.addWindow(from: firstWindow))
+
+        XCTAssertNil(workspace.maximizedWindowId)
+        XCTAssertEqual(windowManager.activeWindow?.id, secondWindow.id)
+        XCTAssertTrue(windowManager.visibleWindows.contains(where: { $0.id == secondWindow.id }))
+        XCTAssertTrue(windowManager.isControllerRegistrationPending(for: secondWindow.id))
+        XCTAssertTrue(windowManager.hasPendingVisibleControllerRegistration)
+    }
+
+    func testWindowManagerReadinessIgnoresHiddenWindowsUntilRestored() throws {
+        let container = try makeWorkspaceModelContainer()
+        let context = ModelContext(container)
+        let workspaceStore = WorkspaceStore(modelContext: context)
+        let windowManager = WindowManager(workspaceStore: workspaceStore)
+        let workspace = workspaceStore.createWorkspace(name: "Hidden Readiness")
+        let firstWindow = try XCTUnwrap(workspaceStore.windows(workspaceId: workspace.id).first)
+        windowManager.setActiveWorkspace(workspace)
+        windowManager.registerController(NSObject(), for: firstWindow.id)
+        let secondWindow = try XCTUnwrap(windowManager.addWindow(from: firstWindow))
+        XCTAssertTrue(windowManager.isControllerRegistrationPending(for: secondWindow.id))
+
+        windowManager.minimizeWindow(secondWindow)
+
+        XCTAssertFalse(windowManager.isControllerRegistrationPending(for: secondWindow.id))
+        XCTAssertFalse(windowManager.hasPendingVisibleControllerRegistration)
+
+        windowManager.restoreWindow(secondWindow)
+
+        XCTAssertTrue(windowManager.isControllerRegistrationPending(for: secondWindow.id))
+        XCTAssertTrue(windowManager.hasPendingVisibleControllerRegistration)
     }
 
     func testWindowManagerRoutesNormalWindowsThroughPrimaryLinksWindowAtEnd() throws {

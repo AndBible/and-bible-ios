@@ -351,7 +351,7 @@ struct BibleWindowPane: View {
      The setup flow:
      1. build pane-scoped stores/services from `modelContext`
      2. create `BibleReaderController` and inject display, speak, and workspace dependencies
-     3. optionally copy shared module state from an existing controller to avoid duplicate SWORD setup
+     3. copy shared module state from an existing controller before any fallback SWORD setup
      4. restore the persisted position
      5. wire pane-to-parent callbacks and register the controller with `WindowManager`
      */
@@ -371,13 +371,21 @@ struct BibleWindowPane: View {
 
         let bookmarkStore = BookmarkStore(modelContext: modelContext)
         let bookmarkService = BookmarkService(store: bookmarkStore)
-        let ctrl = BibleReaderController(bridge: bridge, bookmarkService: bookmarkService)
+        let sharedController = windowManager.controllers.values
+            .compactMap { $0 as? BibleReaderController }
+            .first
+        let ctrl = BibleReaderController(
+            bridge: bridge,
+            bookmarkService: bookmarkService,
+            initializesSword: sharedController == nil
+        )
         configureController(ctrl, workspaceStore: workspaceStore, settingsStore: store)
 
-        // Share module discovery from an existing controller to avoid
-        // creating multiple conflicting SwordManager C++ instances.
-        if let existingCtrl = windowManager.controllers.values.first(where: { $0 !== ctrl }) as? BibleReaderController {
-            ctrl.copyModuleState(from: existingCtrl)
+        if let sharedController,
+           !ctrl.copyModuleState(from: sharedController) {
+            logger.error("Registered BibleReaderController has no SwordManager; initializing pane controller independently")
+            assertionFailure("Registered BibleReaderController has no SwordManager")
+            ctrl.initializeSwordIfNeeded()
         }
 
         ctrl.restoreSavedPosition()

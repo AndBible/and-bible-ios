@@ -35,6 +35,13 @@ struct WindowTabBar: View {
     /// Window targeted by the currently presented typed-reference alert.
     @State private var goToRefWindow: Window?
 
+    /// Whether a visible pane is still opening and should block more user-created windows.
+    private var isAddWindowDisabled: Bool {
+        // Controller registry updates bump this marker; the pending check is derived from registry state.
+        _ = windowManager.controllerVersion
+        return windowManager.hasPendingVisibleControllerRegistration
+    }
+
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 6) {
@@ -44,16 +51,30 @@ struct WindowTabBar: View {
 
                 // Add window button
                 Button {
+                    guard !isAddWindowDisabled else { return }
                     windowManager.addWindow(from: windowManager.activeWindow)
                 } label: {
-                    Image(systemName: "plus")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .frame(width: 28, height: 28)
-                        .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
+                    Group {
+                        if isAddWindowDisabled {
+                            ProgressView()
+                                .controlSize(.small)
+                        } else {
+                            Image(systemName: "plus")
+                                .font(.caption)
+                        }
+                    }
+                    .foregroundStyle(.secondary)
+                    .frame(width: 28, height: 28)
+                    .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
                 }
                 .buttonStyle(.plain)
+                .disabled(isAddWindowDisabled)
                 .accessibilityIdentifier("windowTabAddButton")
+                .accessibilityValue(
+                    isAddWindowDisabled
+                        ? String(localized: "reader_window_opening", defaultValue: "Window opening")
+                        : ""
+                )
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
