@@ -462,10 +462,11 @@ public final class RepositorySourceManager: @unchecked Sendable {
         for url: URL,
         originalURLString: String
     ) throws -> RepositorySourceRegistration {
-        let host = url.host ?? ""
+        let displayHost = url.host ?? ""
+        let host = Self.hostAndPort(for: url) ?? displayHost
         let catalogDirectory = Self.normalizedCatalogDirectory(url.path)
         let source = try Self.source(
-            name: "\(host)-\(Self.androidHashPrefix(for: originalURLString))",
+            name: "\(displayHost)-\(Self.androidHashPrefix(for: originalURLString))",
             host: host,
             catalogDirectory: catalogDirectory
         )
@@ -498,11 +499,23 @@ public final class RepositorySourceManager: @unchecked Sendable {
     private static func normalizedHost(_ rawHost: String) -> String {
         let trimmed = rawHost.trimmingCharacters(in: .whitespacesAndNewlines)
         if let url = URL(string: trimmed), url.scheme != nil {
-            return url.host ?? trimmed
+            return hostAndPort(for: url) ?? trimmed
         }
         return trimmed
             .replacingOccurrences(of: "https://", with: "")
             .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+    }
+
+    private static func hostAndPort(for url: URL) -> String? {
+        guard let host = url.host, !host.isEmpty else {
+            return nil
+        }
+
+        let normalizedHost = host.contains(":") && !host.hasPrefix("[") ? "[\(host)]" : host
+        if let port = url.port {
+            return "\(normalizedHost):\(port)"
+        }
+        return normalizedHost
     }
 
     private static func normalizedCatalogDirectory(_ rawPath: String) -> String {

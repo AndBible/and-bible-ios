@@ -282,7 +282,9 @@ public struct ModuleBrowserView: View {
             setupManagers()
         }
         .onReceive(NotificationCenter.default.publisher(for: RepositorySourceManager.sourcesDidChangeNotification)) { _ in
-            reloadRepositorySources()
+            Task { @MainActor in
+                reloadRepositorySources()
+            }
         }
     }
 
@@ -777,6 +779,7 @@ public struct ModuleBrowserView: View {
      Failure modes:
      - source-manager read failures surface as an empty source list, matching initial setup behavior
      */
+    @MainActor
     private func reloadRepositorySources() {
         sources = repository.loadSources()
     }

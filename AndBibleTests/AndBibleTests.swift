@@ -3711,18 +3711,19 @@ final class AndBibleTests: XCTestCase {
             session: makeMockedURLSession()
         )
 
-        let registration = try await manager.addCustomSource(from: "https://custom.example/sword")
+        let registration = try await manager.addCustomSource(from: "https://custom.example:8443/sword")
 
         XCTAssertTrue(registration.source.name.hasPrefix("custom.example-"))
-        XCTAssertEqual(registration.source.host, "custom.example")
+        XCTAssertEqual(registration.source.host, "custom.example:8443")
         XCTAssertEqual(registration.source.catalogPath, "/sword")
         XCTAssertEqual(registration.packageDirectory, "/sword/packages")
+        XCTAssertEqual(registration.sourceURL.absoluteString, "https://custom.example:8443/sword")
 
         let config = try String(
             contentsOf: tempDir.appendingPathComponent("InstallMgr.conf"),
             encoding: .utf8
         )
-        XCTAssertTrue(config.contains("HTTPSource=\(registration.source.name)|custom.example|/sword"))
+        XCTAssertTrue(config.contains("HTTPSource=\(registration.source.name)|custom.example:8443|/sword"))
     }
 
     func testRepositorySourceManagerRejectsDuplicateDefaultRepositoryName() async throws {
