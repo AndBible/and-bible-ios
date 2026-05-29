@@ -3792,6 +3792,58 @@ final class AndBibleTests: XCTestCase {
         XCTAssertFalse(remaining.contains { $0.name == "Example Repo" })
     }
 
+    func testRepositorySourceManagerResetToDefaultsRemovesCustomSourcesAndRestoresDefaults() throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        InstallManager.ensureDefaultConfigPublic(at: tempDir.path)
+        let configURL = tempDir.appendingPathComponent("InstallMgr.conf")
+        var config = try String(contentsOf: configURL, encoding: .utf8)
+        config += "\nHTTPSource=Example Repo|example.org|/sword\n"
+        try config.write(to: configURL, atomically: true, encoding: .utf8)
+
+        let manager = RepositorySourceManager(basePath: tempDir.path)
+        XCTAssertTrue(manager.loadSources().contains { $0.name == "Example Repo" })
+
+        let notificationExpectation = expectation(description: "Repository source reset posts change notification")
+        let observer = NotificationCenter.default.addObserver(
+            forName: RepositorySourceManager.sourcesDidChangeNotification,
+            object: nil,
+            queue: nil
+        ) { _ in
+            notificationExpectation.fulfill()
+        }
+        defer { NotificationCenter.default.removeObserver(observer) }
+
+        try manager.resetToDefaults()
+
+        wait(for: [notificationExpectation], timeout: 1)
+        let restoredSources = manager.loadSources()
+        XCTAssertFalse(restoredSources.isEmpty)
+        XCTAssertTrue(restoredSources.contains { $0.name == "AndBible" })
+        XCTAssertFalse(restoredSources.contains { $0.name == "Example Repo" })
+        XCTAssertTrue(restoredSources.allSatisfy(manager.isDefaultSource))
+    }
+
+    func testRepositorySourceManagerResetToDefaultsReportsRecreationFailure() throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let missingBasePath = tempDir.appendingPathComponent("missing", isDirectory: true)
+        let manager = RepositorySourceManager(basePath: missingBasePath.path)
+
+        XCTAssertThrowsError(try manager.resetToDefaults()) { error in
+            XCTAssertEqual(
+                error as? RepositorySourceManagementError,
+                .configWriteFailed("default configuration was not recreated")
+            )
+        }
+    }
+
     func testRepositorySourceManagerReplacesCustomSourceInPlace() async throws {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
