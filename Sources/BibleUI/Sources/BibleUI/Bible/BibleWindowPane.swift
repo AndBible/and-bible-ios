@@ -371,20 +371,21 @@ struct BibleWindowPane: View {
 
         let bookmarkStore = BookmarkStore(modelContext: modelContext)
         let bookmarkService = BookmarkService(store: bookmarkStore)
-        let sharedController = windowManager.controllers.values
+        let sharedControllers = windowManager.controllers.values
             .compactMap { $0 as? BibleReaderController }
-            .first
         let ctrl = BibleReaderController(
             bridge: bridge,
             bookmarkService: bookmarkService,
-            initializesSword: sharedController == nil
+            initializesSword: sharedControllers.isEmpty
         )
         configureController(ctrl, workspaceStore: workspaceStore, settingsStore: store)
 
-        if let sharedController,
-           !ctrl.copyModuleState(from: sharedController) {
-            logger.warning("Unable to copy SWORD state from registered controller; initializing pane controller independently")
-            ctrl.initializeSwordIfNeeded()
+        if !sharedControllers.isEmpty {
+            let didCopyModuleState = sharedControllers.contains { ctrl.copyModuleState(from: $0) }
+            if !didCopyModuleState {
+                logger.warning("Unable to copy SWORD state from registered controllers; initializing pane controller independently")
+                ctrl.initializeSwordIfNeeded()
+            }
         }
 
         ctrl.restoreSavedPosition()

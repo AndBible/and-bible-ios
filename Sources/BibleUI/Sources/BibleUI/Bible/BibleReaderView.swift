@@ -1029,10 +1029,7 @@ public struct BibleReaderView: View {
                     onOpenMapBrowser: { presentReaderModalPreservingPane(.mapBrowser) }
                 )
             } else {
-                ReaderPanePreparationView(
-                    isPending: isPanePresentationControllerPending,
-                    onDismiss: dismissReaderModal
-                )
+                readerPanePreparationContent
             }
         case .help:
             NavigationStack {
