@@ -3942,6 +3942,47 @@ final class AndBibleTests: XCTestCase {
         XCTAssertFalse(sourceNames.contains("Old Repo"))
     }
 
+    func testRepositorySourceManagerRejectsReplacingMissingCustomSource() async throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        InstallManager.ensureDefaultConfigPublic(at: tempDir.path)
+        let configURL = tempDir.appendingPathComponent("InstallMgr.conf")
+        let initialConfig = try String(contentsOf: configURL, encoding: .utf8)
+
+        MockURLProtocol.requestHandler = { request in
+            XCTFail("Replacing a missing source should fail before validating the replacement URL.")
+            let response = HTTPURLResponse(
+                url: try XCTUnwrap(request.url),
+                statusCode: 500,
+                httpVersion: nil,
+                headerFields: nil
+            )!
+            return (response, Data())
+        }
+
+        let manager = RepositorySourceManager(
+            basePath: tempDir.path,
+            session: makeMockedURLSession()
+        )
+
+        do {
+            _ = try await manager.replaceCustomSource(
+                named: "Missing Repo",
+                with: "https://new.example/manifest.json"
+            )
+            XCTFail("Expected replacing a missing source to fail.")
+        } catch RepositorySourceManagementError.sourceNotFound(let name) {
+            XCTAssertEqual(name, "Missing Repo")
+        }
+
+        let config = try String(contentsOf: configURL, encoding: .utf8)
+        XCTAssertEqual(config, initialConfig)
+        XCTAssertFalse(manager.loadSources().contains { $0.name == "New Repo" })
+    }
+
     func testWebDAVPropfindBuildsAuthenticatedRequestAndParsesMultiStatus() async throws {
         let expectedAuth = "Basic \(Data("alice:secret".utf8).base64EncodedString())"
         MockURLProtocol.requestHandler = { request in

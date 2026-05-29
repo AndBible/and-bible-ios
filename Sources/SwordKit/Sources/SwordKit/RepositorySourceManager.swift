@@ -36,7 +36,7 @@ public struct RepositorySourceRegistration: Sendable {
 
  Each case maps to a user-actionable state from Android's custom repository flow: invalid HTTPS
  input, an unreadable SWORD catalog, duplicate repository names, unsupported repository types,
- protected default-source deletion, or local config read/write failures.
+ protected default-source deletion, stale edit targets, or local config read/write failures.
  */
 public enum RepositorySourceManagementError: Error, Equatable, LocalizedError, Sendable {
     /// The input string could not be parsed as an absolute URL.
@@ -59,6 +59,9 @@ public enum RepositorySourceManagementError: Error, Equatable, LocalizedError, S
 
     /// Default Android repositories are built-in and cannot be deleted from the custom-source UI.
     case protectedDefaultSource(String)
+
+    /// The custom source being edited is no longer present in `InstallMgr.conf`.
+    case sourceNotFound(String)
 
     /// `InstallMgr.conf` could not be read after default configuration was created.
     case configReadFailed
@@ -83,6 +86,8 @@ public enum RepositorySourceManagementError: Error, Equatable, LocalizedError, S
             return "A repository named \(value) already exists."
         case .protectedDefaultSource(let value):
             return "\(value) is a built-in repository and cannot be deleted here."
+        case .sourceNotFound(let value):
+            return "Repository named \(value) no longer exists."
         case .configReadFailed:
             return "Could not read repository configuration."
         case .configWriteFailed(let value):
@@ -211,7 +216,7 @@ public final class RepositorySourceManager: @unchecked Sendable {
      - posts `sourcesDidChangeNotification` after a successful write
 
      - Throws: `RepositorySourceManagementError` for default-source replacement attempts,
-       validation, duplicate, or persistence failures.
+       missing edit targets, validation, duplicate, or persistence failures.
      */
     @discardableResult
     public func replaceCustomSource(
@@ -220,6 +225,11 @@ public final class RepositorySourceManager: @unchecked Sendable {
     ) async throws -> RepositorySourceRegistration {
         guard !InstallManager.isDefaultSourceName(originalName) else {
             throw RepositorySourceManagementError.protectedDefaultSource(originalName)
+        }
+
+        let currentContent = try currentConfigContent()
+        guard Self.sourceLines(in: currentContent).contains(where: { $0.source.name == originalName }) else {
+            throw RepositorySourceManagementError.sourceNotFound(originalName)
         }
 
         let registration = try await resolveCustomSource(from: rawURL)
@@ -351,10 +361,18 @@ public final class RepositorySourceManager: @unchecked Sendable {
     }
 
     private func writeCustomSource(_ source: SourceConfig, replacing originalName: String?) throws {
+        let content = try currentConfigContent()
+        let sourceLines = Self.sourceLines(in: content)
+
+        if let originalName,
+           !sourceLines.contains(where: { $0.source.name == originalName })
+        {
+            throw RepositorySourceManagementError.sourceNotFound(originalName)
+        }
+
         try Self.validateConfigFields(source)
 
-        let content = try currentConfigContent()
-        let existingNames = Self.sourceLines(in: content)
+        let existingNames = sourceLines
             .map(\.source.name)
             .filter { $0 != originalName }
 
