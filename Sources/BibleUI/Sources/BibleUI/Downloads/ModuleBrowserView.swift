@@ -97,6 +97,9 @@ public struct ModuleBrowserView: View {
     /// Startup/default-document behavior requested by the caller.
     private let defaultDownloadMode: ModuleBrowserDefaultDownloadMode
 
+    /// Reports whether startup default refresh/install work is still active.
+    private let onDefaultDownloadActivityChanged: (Bool) -> Void
+
     /// Selected remote/local module category segment, or `nil` for Android's "All types" filter.
     @State private var selectedCategory: ModuleCategory? = .bible
 
@@ -145,6 +148,9 @@ public struct ModuleBrowserView: View {
     /// Guards Android startup defaults so they are requested at most once per Downloads session.
     @State private var didRequestDefaultDocuments = false
 
+    /// Startup default module names whose asynchronous installs have not finished yet.
+    @State private var defaultDownloadInstallingModules: Set<String> = []
+
     /**
      Creates the module browser with optional Android-compatible search and default-download state.
 
@@ -155,6 +161,8 @@ public struct ModuleBrowserView: View {
          satisfy a module-initials link.
        - defaultDownloadMode: Optional startup/default-document mode. Normal Downloads callers use
          `.disabled`; the startup Easy Start flow uses `.englishStartup`.
+       - onDefaultDownloadActivityChanged: Optional callback that reports startup default refresh and
+         install activity so callers can avoid prompting while Easy Start is still running.
 
      Side effects:
      - initializes local SwiftUI state only; repository and installed-module data are still loaded
@@ -168,9 +176,11 @@ public struct ModuleBrowserView: View {
      */
     public init(
         initialSearchText: String = "",
-        defaultDownloadMode: ModuleBrowserDefaultDownloadMode = .disabled
+        defaultDownloadMode: ModuleBrowserDefaultDownloadMode = .disabled,
+        onDefaultDownloadActivityChanged: @escaping (Bool) -> Void = { _ in }
     ) {
         self.defaultDownloadMode = defaultDownloadMode
+        self.onDefaultDownloadActivityChanged = onDefaultDownloadActivityChanged
         let normalizedSearchText = initialSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
         _selectedCategory = State(
             initialValue: normalizedSearchText.isEmpty && !defaultDownloadMode.shouldInstallDefaultDocuments
@@ -939,6 +949,7 @@ public struct ModuleBrowserView: View {
               !isRefreshing else {
             return
         }
+        onDefaultDownloadActivityChanged(true)
         refreshCatalog()
     }
 
@@ -973,12 +984,14 @@ public struct ModuleBrowserView: View {
         }
         guard let defaultDocuments else {
             errorMessage = "Could not load default document list."
+            finishDefaultDownloadActivityIfNeeded()
             return
         }
         guard Self.startupDefaultCatalogHasInstallableRows(modules) else {
             if errorMessage == nil {
                 errorMessage = "Could not load module catalog."
             }
+            finishDefaultDownloadActivityIfNeeded()
             return
         }
 
@@ -991,6 +1004,14 @@ public struct ModuleBrowserView: View {
         )
         didRequestDefaultDocuments = true
 
+        let moduleNames = Set(modulesToInstall.map(\.name))
+        guard !moduleNames.isEmpty else {
+            finishDefaultDownloadActivityIfNeeded()
+            return
+        }
+
+        defaultDownloadInstallingModules.formUnion(moduleNames)
+        onDefaultDownloadActivityChanged(true)
         for module in modulesToInstall {
             installModule(module)
         }
@@ -1027,6 +1048,7 @@ public struct ModuleBrowserView: View {
                 await MainActor.run {
                     errorMessage = "No remote sources configured."
                     isRefreshing = false
+                    finishDefaultDownloadActivityIfNeeded()
                 }
                 return
             }
@@ -1166,11 +1188,13 @@ public struct ModuleBrowserView: View {
     private func installModule(_ module: RemoteModuleInfo) {
         guard module.isInstallable else {
             errorMessage = module.unavailableReason ?? "\(module.name) is not available for installation."
+            markDefaultDownloadModuleFinishedIfNeeded(module.name)
             return
         }
 
         guard let source = sources.first(where: { $0.name == module.sourceName }) ?? repository.source(for: module.name) else {
             errorMessage = "Source not found for \(module.name)"
+            markDefaultDownloadModuleFinishedIfNeeded(module.name)
             return
         }
 
@@ -1185,14 +1209,58 @@ public struct ModuleBrowserView: View {
                     installingModules.remove(module.name)
                     swordManager = SwordManager()
                     refreshInstalledList()
+                    markDefaultDownloadModuleFinishedIfNeeded(module.name)
                 }
             } catch {
                 await MainActor.run {
                     installingModules.remove(module.name)
                     errorMessage = "Install failed: \(error.localizedDescription)"
+                    markDefaultDownloadModuleFinishedIfNeeded(module.name)
                 }
             }
         }
+    }
+
+    /**
+     Marks one startup default module done and finishes the default flow when none remain.
+
+     - Parameter moduleName: Module initials for the completed or skipped default install.
+
+     Side effects:
+     - removes `moduleName` from `defaultDownloadInstallingModules`
+     - invokes `onDefaultDownloadActivityChanged(false)` once the startup default set is exhausted
+
+     Failure modes:
+     - ignored for normal Downloads sessions where default-download mode is disabled
+     */
+    private func markDefaultDownloadModuleFinishedIfNeeded(_ moduleName: String) {
+        guard defaultDownloadMode.shouldInstallDefaultDocuments else {
+            return
+        }
+
+        defaultDownloadInstallingModules.remove(moduleName)
+        if defaultDownloadInstallingModules.isEmpty {
+            finishDefaultDownloadActivityIfNeeded()
+        }
+    }
+
+    /**
+     Reports that startup default refresh/install activity is no longer active.
+
+     Side effects:
+     - clears `defaultDownloadInstallingModules`
+     - invokes `onDefaultDownloadActivityChanged(false)` for the reader coordinator
+
+     Failure modes:
+     - ignored for normal Downloads sessions where default-download mode is disabled
+     */
+    private func finishDefaultDownloadActivityIfNeeded() {
+        guard defaultDownloadMode.shouldInstallDefaultDocuments else {
+            return
+        }
+
+        defaultDownloadInstallingModules.removeAll()
+        onDefaultDownloadActivityChanged(false)
     }
 
     /**

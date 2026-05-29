@@ -22,6 +22,9 @@ struct BibleReaderActiveSheetContent: View {
     /// Startup/default-document mode supplied when the reader opens Downloads for Easy Start.
     let downloadsDefaultDownloadMode: ModuleBrowserDefaultDownloadMode
 
+    /// Callback reporting startup default refresh/install activity from Downloads.
+    let onDefaultDownloadActivityChanged: (Bool) -> Void
+
     let onDismiss: () -> Void
     let onSettingsChanged: () -> Void
 
@@ -38,6 +41,8 @@ struct BibleReaderActiveSheetContent: View {
        - chapterReadHistoryTarget: Optional chapter read-history target.
        - downloadsInitialSearchText: Initial Downloads filter from Android-compatible links.
        - downloadsDefaultDownloadMode: Optional startup/default-document mode for Easy Start.
+       - onDefaultDownloadActivityChanged: Callback invoked when Easy Start Downloads starts or
+         finishes refresh/install activity.
        - onDismiss: Callback used to close the active sheet.
        - onSettingsChanged: Callback used after Settings mutates display preferences.
 
@@ -57,6 +62,7 @@ struct BibleReaderActiveSheetContent: View {
         chapterReadHistoryTarget: ChapterReadHistoryTarget?,
         downloadsInitialSearchText: String,
         downloadsDefaultDownloadMode: ModuleBrowserDefaultDownloadMode = .disabled,
+        onDefaultDownloadActivityChanged: @escaping (Bool) -> Void = { _ in },
         onDismiss: @escaping () -> Void,
         onSettingsChanged: @escaping () -> Void
     ) {
@@ -69,6 +75,7 @@ struct BibleReaderActiveSheetContent: View {
         self.chapterReadHistoryTarget = chapterReadHistoryTarget
         self.downloadsInitialSearchText = downloadsInitialSearchText
         self.downloadsDefaultDownloadMode = downloadsDefaultDownloadMode
+        self.onDefaultDownloadActivityChanged = onDefaultDownloadActivityChanged
         self.onDismiss = onDismiss
         self.onSettingsChanged = onSettingsChanged
     }
@@ -105,7 +112,8 @@ struct BibleReaderActiveSheetContent: View {
             NavigationStack {
                 ModuleBrowserView(
                     initialSearchText: downloadsInitialSearchText,
-                    defaultDownloadMode: downloadsDefaultDownloadMode
+                    defaultDownloadMode: downloadsDefaultDownloadMode,
+                    onDefaultDownloadActivityChanged: onDefaultDownloadActivityChanged
                 )
                     .toolbar {
                         ToolbarItem(placement: .cancellationAction) {

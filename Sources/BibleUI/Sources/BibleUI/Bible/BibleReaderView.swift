@@ -180,6 +180,9 @@ public struct BibleReaderView: View {
     /// Default-document mode applied to the next Downloads sheet presentation.
     @State private var downloadsDefaultDownloadMode: ModuleBrowserDefaultDownloadMode = .disabled
 
+    /// Tracks whether Android Easy Start default downloads are still refreshing or installing.
+    @State private var startupDefaultDownloadsInFlight = false
+
     /// Whether the no-Bible startup prompt should be visible.
     @State private var showStartupDownloadPrompt = false
 
@@ -739,6 +742,9 @@ public struct BibleReaderView: View {
             chapterReadHistoryTarget: chapterReadHistoryTarget,
             downloadsInitialSearchText: downloadsInitialSearchText,
             downloadsDefaultDownloadMode: downloadsDefaultDownloadMode,
+            onDefaultDownloadActivityChanged: { isInFlight in
+                handleStartupDefaultDownloadActivityChanged(isInFlight: isInFlight)
+            },
             onDismiss: dismissReaderSheet,
             onSettingsChanged: applyGlobalDisplaySettingsChange
         )
@@ -938,6 +944,7 @@ public struct BibleReaderView: View {
      */
     private func presentStartupDefaultDownloads() {
         showStartupDownloadPrompt = false
+        startupDefaultDownloadsInFlight = true
         presentDownloads(
             from: windowManager.activeWindow?.id,
             defaultDownloadMode: .englishStartup
@@ -965,7 +972,8 @@ public struct BibleReaderView: View {
      - reloads behavior preferences after Settings closes
      - clears Downloads launch state after Downloads closes
      - refreshes installed-module caches for each reader controller
-     - reopens the startup prompt when Downloads closes without an installed Bible
+     - reopens the startup prompt when Downloads closes without an installed Bible unless Easy Start
+       downloads are still refreshing or installing
 
      Failure modes:
      - non-closing sheet transitions are ignored
@@ -984,8 +992,12 @@ public struct BibleReaderView: View {
         case .downloads:
             downloadsInitialSearchText = ""
             downloadsDefaultDownloadMode = .disabled
+            let shouldWaitForStartupDefaultDownloads = startupDefaultDownloadsInFlight
             for (_, ctrl) in windowManager.controllers {
                 (ctrl as? BibleReaderController)?.refreshInstalledModules()
+            }
+            guard !shouldWaitForStartupDefaultDownloads else {
+                return
             }
             reevaluateStartupDownloadPromptAfterDownloads()
         default:
@@ -1282,6 +1294,32 @@ public struct BibleReaderView: View {
         }
         didEvaluateStartupDownloadPrompt = false
         evaluateStartupDownloadPromptIfNeeded()
+    }
+
+    /**
+     Records whether the startup Easy Start download pipeline is still active.
+
+     - Parameter isInFlight: `true` while startup defaults are refreshing or installing, and `false`
+       after the pipeline finishes or fails.
+
+     Side effects:
+     - mutates `startupDefaultDownloadsInFlight`
+     - refreshes reader controller module caches when the pipeline completes
+     - re-runs the no-Bible startup prompt after Downloads has already closed and no Bible installed
+
+     Failure modes:
+     - module-discovery failures are handled by `reevaluateStartupDownloadPromptAfterDownloads()`
+     */
+    private func handleStartupDefaultDownloadActivityChanged(isInFlight: Bool) {
+        startupDefaultDownloadsInFlight = isInFlight
+        guard !isInFlight, activeReaderSheet == nil else {
+            return
+        }
+
+        for (_, ctrl) in windowManager.controllers {
+            (ctrl as? BibleReaderController)?.refreshInstalledModules()
+        }
+        reevaluateStartupDownloadPromptAfterDownloads()
     }
 
     /**
