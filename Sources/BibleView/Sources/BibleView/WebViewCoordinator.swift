@@ -113,12 +113,12 @@ extension WebViewCoordinator: UIScrollViewDelegate, UIGestureRecognizerDelegate 
      not emit a bridge message. All recognizers leave `cancelsTouchesInView` disabled so links,
      selection, scrolling, and other web content interactions continue through WebKit.
 
-     - Parameter webView: Web view that should receive the recognizers.
-     - Side Effects: Adds gesture recognizers to `webView`; repeated calls after the first are
+     - Parameter view: Web-hosting view that should receive the recognizers.
+     - Side Effects: Adds gesture recognizers to `view`; repeated calls after the first are
        ignored.
      - Failure Modes: None; UIKit rejects no-op duplicate installs through the coordinator flag.
      */
-    func installSwipeRecognizersIfNeeded(on webView: WKWebView) {
+    func installSwipeRecognizersIfNeeded(on view: UIView) {
         guard !didInstallSwipeRecognizers else { return }
         didInstallSwipeRecognizers = true
 
@@ -136,9 +136,9 @@ extension WebViewCoordinator: UIScrollViewDelegate, UIGestureRecognizerDelegate 
         right.cancelsTouchesInView = false
         right.delegate = self
 
-        webView.addGestureRecognizer(tap)
-        webView.addGestureRecognizer(left)
-        webView.addGestureRecognizer(right)
+        view.addGestureRecognizer(tap)
+        view.addGestureRecognizer(left)
+        view.addGestureRecognizer(right)
     }
 
     /**

@@ -63,7 +63,7 @@ final class AndBibleTests: XCTestCase {
     func testWebViewCoordinatorInstallsPassiveTapRecognizerForNativeFocus() {
         let bridge = BibleBridge()
         let coordinator = WebViewCoordinator(bridge: bridge)
-        let webView = WKWebView()
+        let webView = UIView()
 
         coordinator.installSwipeRecognizersIfNeeded(on: webView)
 
