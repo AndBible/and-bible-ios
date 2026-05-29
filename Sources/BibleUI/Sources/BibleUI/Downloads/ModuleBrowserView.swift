@@ -532,6 +532,56 @@ public struct ModuleBrowserView: View {
     }
 
     /**
+     Adds cached catalog rows for sources that failed during the current refresh.
+
+     - Parameters:
+       - refreshedModules: Rows successfully refreshed from currently reachable sources.
+       - cachedModules: Rows restored from the on-disk catalog cache.
+       - failedSourceNames: Source names whose current catalog refresh failed.
+     - Returns: Refreshed rows followed by cached rows for failed sources that are not already
+       represented by the same source/module id.
+
+     Side effects:
+     - none
+
+     Failure modes:
+     - empty cache or empty failure set returns the refreshed rows unchanged
+     */
+    static func modulesByAddingCachedCatalogsForFailedSources(
+        refreshedModules: [RemoteModuleInfo],
+        cachedModules: [RemoteModuleInfo],
+        failedSourceNames: Set<String>
+    ) -> [RemoteModuleInfo] {
+        guard !failedSourceNames.isEmpty else { return refreshedModules }
+
+        var seenModuleIds = Set(refreshedModules.map(\.id))
+        var mergedModules = refreshedModules
+        for module in cachedModules
+            where failedSourceNames.contains(module.sourceName) &&
+                seenModuleIds.insert(module.id).inserted {
+            mergedModules.append(module)
+        }
+        return mergedModules
+    }
+
+    /**
+     Tests whether startup default selection has any installable catalog data to consume.
+
+     - Parameter modules: Full remote catalog rows available to startup default selection.
+     - Returns: `true` when at least one row can be installed.
+
+     Side effects:
+     - none
+
+     Failure modes:
+     - empty or pseudo/unavailable-only catalogs return `false` so the startup flow remains
+       retryable after a later refresh
+     */
+    static func startupDefaultCatalogHasInstallableRows(_ modules: [RemoteModuleInfo]) -> Bool {
+        modules.contains(where: \.isInstallable)
+    }
+
+    /**
      Filters and sorts remote modules using Android `DocumentSelectionBase.filterDocuments`
      semantics adapted to iOS data models.
 
@@ -896,17 +946,19 @@ public struct ModuleBrowserView: View {
      Requests Android default modules after metadata and catalogs are available.
 
      - Parameters:
-       - modules: De-duplicated remote catalog rows from the current refresh/cache.
+       - modules: Full remote catalog rows from the current refresh/cache.
        - defaultDocuments: Android default metadata from the current refresh/cache.
 
      Side effects:
-     - marks the startup default flow as requested once metadata is available
+     - marks the startup default flow as requested once metadata and installable catalog rows are
+       available
      - mutates `installingModules`, `errorMessage`, `swordManager`, and `installedModules` through
        normal module installation
      - performs file/network I/O indirectly through `installModule(_:)`
 
      Failure modes:
      - missing default metadata leaves the flow retryable and reports a user-visible error
+     - empty or unavailable-only catalogs leave the flow retryable for a later refresh
      - missing, installed, unavailable, malformed, or duplicate default entries are skipped
      - individual install failures are surfaced by `installModule(_:)`
      */
@@ -921,6 +973,12 @@ public struct ModuleBrowserView: View {
         }
         guard let defaultDocuments else {
             errorMessage = "Could not load default document list."
+            return
+        }
+        guard Self.startupDefaultCatalogHasInstallableRows(modules) else {
+            if errorMessage == nil {
+                errorMessage = "Could not load module catalog."
+            }
             return
         }
 
@@ -945,8 +1003,8 @@ public struct ModuleBrowserView: View {
      - marks the view as refreshing, clears stale error text, and updates progress copy while each
        source is fetched
      - refreshes Android pseudo, recommended, bad, and default metadata, falling back to caches
-     - when all repository refreshes fail, preserves cached catalogs so startup defaults can still
-       resolve modules from the most recent successful refresh
+     - when repository refreshes fail, preserves cached catalogs for failed sources so startup
+       defaults can still resolve modules from the most recent successful refresh
      - merges and de-duplicates the refreshed module set before storing it in `availableModules`
      - in startup default mode, requests selected Android default modules from the full catalog so
        source-scoped tokens can resolve alternate repository rows hidden by visible-row de-duplication
@@ -975,6 +1033,7 @@ public struct ModuleBrowserView: View {
 
             var allModules: [RemoteModuleInfo] = []
             var errors: [String] = []
+            var failedSourceNames: Set<String> = []
             let total = sourcesToRefresh.count
 
             for (index, source) in sourcesToRefresh.enumerated() {
@@ -986,15 +1045,18 @@ public struct ModuleBrowserView: View {
                     let modules = try await repository.refreshCatalog(for: source)
                     allModules.append(contentsOf: modules)
                 } catch {
+                    failedSourceNames.insert(source.name)
                     errors.append("\(source.name): \(error.localizedDescription)")
                 }
             }
 
-            if allModules.isEmpty && !errors.isEmpty {
+            if !failedSourceNames.isEmpty {
                 let cachedCatalogs = repository.loadCachedCatalogs()
-                if !cachedCatalogs.isEmpty {
-                    allModules.append(contentsOf: cachedCatalogs)
-                }
+                allModules = Self.modulesByAddingCachedCatalogsForFailedSources(
+                    refreshedModules: allModules,
+                    cachedModules: cachedCatalogs,
+                    failedSourceNames: failedSourceNames
+                )
             }
 
             await MainActor.run {
