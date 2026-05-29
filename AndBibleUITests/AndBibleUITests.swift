@@ -9189,11 +9189,16 @@ final class AndBibleUITests: XCTestCase {
 
         func resolvedPromptTextField() -> XCUIElement {
             if let prompt = resolvedModalPrompt(in: app, timeout: 0.2) {
-                let promptCandidates = modalTextFieldCandidates(
-                    in: prompt,
-                    identifiers: accessibilityIdentifier.map { [$0] } ?? [],
-                    titles: placeholderHints
-                )
+                let promptCandidates: [XCUIElement]
+                if accessibilityIdentifier == "labelManagerNewLabelNameField" {
+                    promptCandidates = labelCreationPromptTextFieldCandidates(in: prompt)
+                } else {
+                    promptCandidates = modalTextFieldCandidates(
+                        in: prompt,
+                        identifiers: accessibilityIdentifier.map { [$0] } ?? [],
+                        titles: placeholderHints
+                    )
+                }
                 if let promptField = firstExistingElement(promptCandidates, timeout: 0.2) {
                     return promptField
                 }
@@ -9367,15 +9372,37 @@ final class AndBibleUITests: XCTestCase {
         resolvedModalPrompt(in: app, timeout: 0.2)
     }
 
+    /**
+     Returns create-label text field candidates with the alert-owned ordinal field before slower
+     identifier and title matching.
+     */
+    private func labelCreationPromptTextFieldCandidates(in prompt: XCUIElement) -> [XCUIElement] {
+        [
+            prompt.textFields.element(boundBy: 0),
+            prompt.secureTextFields.element(boundBy: 0),
+            prompt.textFields["labelManagerNewLabelNameField"].firstMatch,
+            prompt.secureTextFields["labelManagerNewLabelNameField"].firstMatch,
+            prompt.textFields["Label name"].firstMatch,
+            prompt.secureTextFields["Label name"].firstMatch,
+        ]
+    }
+
+    /**
+     Returns create-label button candidates with the accessibility identifier before title
+     matching.
+     */
+    private func labelCreationPromptCreateButtonCandidates(in prompt: XCUIElement) -> [XCUIElement] {
+        [
+            prompt.buttons["labelManagerCreateButton"].firstMatch,
+            prompt.buttons["Create"].firstMatch,
+        ]
+    }
+
     /// Resolves the create-label prompt text field by scoping queries to the visible prompt.
     private func resolveLabelCreationPromptTextField(in app: XCUIApplication) -> XCUIElement? {
         if let prompt = resolvedLabelCreationPrompt(in: app) {
             return firstExistingElement(
-                modalTextFieldCandidates(
-                    in: prompt,
-                    identifiers: ["labelManagerNewLabelNameField"],
-                    titles: ["Label name"]
-                ),
+                labelCreationPromptTextFieldCandidates(in: prompt),
                 timeout: 0.2
             )
         }
@@ -9386,11 +9413,7 @@ final class AndBibleUITests: XCTestCase {
     private func resolveLabelCreationPromptCreateButton(in app: XCUIApplication) -> XCUIElement? {
         if let prompt = resolvedLabelCreationPrompt(in: app) {
             return firstExistingElement(
-                modalButtonCandidates(
-                    in: prompt,
-                    identifiers: ["labelManagerCreateButton"],
-                    titles: ["Create"]
-                ),
+                labelCreationPromptCreateButtonCandidates(in: prompt),
                 timeout: 0.2
             )
         }
