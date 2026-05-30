@@ -630,7 +630,7 @@ extension AndBibleTests {
     }
 
     func testBibleReaderModulePickerBuildsForBibleCategory() {
-        let controller = BibleReaderController(bridge: BibleBridge())
+        let controller = BibleReaderController(bridge: BibleBridge(), initializesSword: false)
         let view = BibleReaderModulePicker(
             controller: controller,
             category: .bible,

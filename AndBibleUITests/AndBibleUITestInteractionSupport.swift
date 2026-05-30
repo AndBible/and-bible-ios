@@ -222,30 +222,52 @@ extension AndBibleUITests {
         static let segmentCount = 3
     }
 
+    /// Shared normalized screen coordinates used by no-query keyboard dismissal helpers.
+    enum KeyboardDismissalCoordinate {
+        static let focusDismissal = CGVector(dx: 0.5, dy: 0.08)
+        static let softwareReturnKey = CGVector(dx: 0.92, dy: 0.93)
+    }
+
     /**
-     Dismisses the software keyboard through coordinate taps when present.
+     Dismisses the software keyboard through a coordinate tap outside the focused field.
      *
      * - Parameter app: Running application under test.
      * - Side effects:
-     *   - taps outside the keyboard first, then taps the keyboard's lower trailing return area
-     *     when the keyboard remains visible
+     *   - taps a stable non-control area near the top of the app window
      * - Failure modes:
-     *   - silently leaves focus unchanged when no software keyboard is visible or the active
-     *     control refuses to resign focus
+     *   - silently leaves focus unchanged when the active control refuses to resign focus
      */
     func dismissKeyboardIfPresent(in app: XCUIApplication) {
-        let keyboard = app.keyboards.firstMatch
-        guard keyboard.exists || keyboard.waitForExistence(timeout: 0.2) else {
-            return
-        }
+        app.coordinate(withNormalizedOffset: KeyboardDismissalCoordinate.focusDismissal).tap()
+    }
 
-        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.08)).tap()
-        guard keyboard.exists || keyboard.waitForExistence(timeout: 0.2) else {
-            return
-        }
+    /**
+     Dismisses the software keyboard immediately after a known text-entry edit.
+     *
+     This path is intentionally scoped to the focused field instead of `app.keyboards`. CI snapshot
+     stalls have occurred when the broad keyboard hierarchy is queried after the keyboard has already
+     disappeared, while field-scoped keyboard-focus checks remain bounded to the resolved input.
+     *
+     - Parameters:
+     *   - element: Text-entry control that just received keyboard input.
+     *   - app: Running application under test.
+     * - Side effects:
+     *   - sends a Return keystroke when the input still owns focus
+     *   - taps the software keyboard return-key region if the input remains focused afterward
+     * - Failure modes:
+     *   - silently leaves focus unchanged when the active control refuses to resign focus
+     */
+    func dismissKeyboardAfterFocusedTextEntry(
+        _ element: XCUIElement,
+        in app: XCUIApplication
+    ) {
+        if waitForElementKeyboardFocus(element, timeout: 0.2) {
+            app.typeText(XCUIKeyboardKey.return.rawValue)
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
 
-        if !keyboard.frame.isEmpty {
-            keyboard.coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.88)).tap()
+            if waitForElementKeyboardFocus(element, timeout: 0.2) {
+                app.coordinate(withNormalizedOffset: KeyboardDismissalCoordinate.softwareReturnKey).tap()
+            }
         }
     }
 

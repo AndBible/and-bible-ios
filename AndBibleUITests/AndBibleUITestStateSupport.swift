@@ -1589,6 +1589,79 @@ extension AndBibleUITests {
     }
 
     /**
+     Scrolls the Sync Settings form toward controls below the currently visible viewport.
+     *
+     * - Parameter app: Running application under test.
+     * - Side effects:
+     *   - swipes the Sync Settings root when it is resolved, otherwise falls back to an app-level
+     *     upward swipe
+     * - Failure modes:
+     *   - leaves scroll position unchanged when no scrollable surface accepts the gesture
+     */
+    func revealSyncSettingsLowerContent(in app: XCUIApplication) {
+        if let syncScreen = resolvedElement("syncSettingsScreen", in: app),
+           syncScreen.exists
+        {
+            syncScreen.swipeUp()
+        } else {
+            app.swipeUp()
+        }
+    }
+
+    /**
+     Resolves a Sync Settings button that may live in a lazily materialized SwiftUI form section.
+     *
+     * - Parameters:
+     *   - identifier: Accessibility identifier of the production button.
+     *   - app: Running application under test.
+     *   - timeout: Maximum time to keep resolving and revealing the form.
+     *   - file: Source file used for XCTest failure attribution.
+     *   - line: Source line used for XCTest failure attribution.
+     * - Returns: The resolved button once XCTest reports a hittable activation point.
+     * - Side effects:
+     *   - scrolls Sync Settings lower content until the requested button materializes and becomes
+     *     hittable
+     * - Failure modes:
+     *   - records an XCTest failure if the button never appears or never becomes hittable
+     */
+    func requireReachableSyncSettingsButton(
+        _ identifier: String,
+        in app: XCUIApplication,
+        timeout: TimeInterval,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) -> XCUIElement {
+        let deadline = Date().addingTimeInterval(timeout)
+        var lastCandidate = unresolvedElement(identifier, in: app)
+
+        repeat {
+            if let button = resolvedElement(identifier, in: app) {
+                lastCandidate = button
+                if waitForElementToBecomeHittable(button, timeout: 0.5) {
+                    return button
+                }
+            }
+
+            revealSyncSettingsLowerContent(in: app)
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        } while Date() < deadline
+
+        XCTAssertTrue(
+            lastCandidate.exists,
+            "Expected Sync Settings button '\(identifier)' to exist within \(timeout) seconds.",
+            file: file,
+            line: line
+        )
+        XCTAssertTrue(
+            waitForElementToBecomeHittable(lastCandidate, timeout: 1),
+            "Expected Sync Settings button '\(identifier)' to become hittable within \(timeout) seconds.",
+            file: file,
+            line: line
+        )
+        return lastCandidate
+    }
+
+    /**
      Returns the opposite serialized switch value for one live XCUI switch.
      *
      * - Parameter element: Live switch element whose current value should be inverted.
@@ -1614,8 +1687,8 @@ extension AndBibleUITests {
      *   - file: Source file used for XCTest failure attribution.
      *   - line: Source line used for XCTest failure attribution.
      * - Side effects:
-     *   - dismisses the keyboard when needed, taps the real test-connection button, and polls the
-     *     compact Sync Settings export until the remote status changes
+     *   - scrolls the Sync Settings form until the real test-connection button is reachable
+     *   - taps the button and polls the compact Sync Settings export until the remote status changes
      * - Failure modes:
      *   - records an XCTest failure if the button never drives the exported remote status away
      *     from `idle`
@@ -1626,7 +1699,7 @@ extension AndBibleUITests {
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
-        let button = requireElement(
+        let button = requireReachableSyncSettingsButton(
             "syncNextCloudTestConnectionButton",
             in: app,
             timeout: timeout,
@@ -1636,19 +1709,18 @@ extension AndBibleUITests {
         let deadline = Date().addingTimeInterval(timeout)
 
         repeat {
-            if let syncState = resolvedElement("syncSettingsState", in: app)?.value as? String,
+            if let syncState = resolvedElementSemanticText("syncSettingsState", in: app),
                let statusValue = syncStateToken(named: "remoteStatus", in: syncState),
                statusValue != "idle"
             {
                 return
             }
 
-            dismissKeyboardIfPresent(in: app)
             tapElementReliably(button, timeout: 5, file: file, line: line)
 
             let settleDeadline = Date().addingTimeInterval(2)
             repeat {
-                if let syncState = resolvedElement("syncSettingsState", in: app)?.value as? String,
+                if let syncState = resolvedElementSemanticText("syncSettingsState", in: app),
                    let statusValue = syncStateToken(named: "remoteStatus", in: syncState),
                    statusValue != "idle"
                 {
@@ -1658,7 +1730,7 @@ extension AndBibleUITests {
             } while Date() < settleDeadline
         } while Date() < deadline
 
-        let finalState = (resolvedElement("syncSettingsState", in: app)?.value as? String) ?? "nil"
+        let finalState = resolvedElementSemanticText("syncSettingsState", in: app) ?? "nil"
         let finalStatus = syncStateToken(named: "remoteStatus", in: finalState) ?? "nil"
         XCTAssertNotEqual(
             finalStatus,

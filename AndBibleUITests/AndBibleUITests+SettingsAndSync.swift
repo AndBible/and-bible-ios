@@ -287,7 +287,7 @@ extension AndBibleUITests {
         let serverField = requireElement("syncNextCloudServerURLField", in: app, timeout: 10)
 
         replaceText(in: serverField, with: "not-a-url")
-        dismissKeyboardIfPresent(in: app)
+        dismissKeyboardAfterFocusedTextEntry(serverField, in: app)
         triggerSyncConnectionTest(in: app, timeout: 15)
         waitForElementValue("syncSettingsState", toContain: "remoteStatus=failureInvalidURL", in: app, timeout: 10)
     }

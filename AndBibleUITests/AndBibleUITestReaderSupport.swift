@@ -1070,13 +1070,66 @@ extension AndBibleUITests {
     }
 
     /**
+     Returns whether an identifier is one of the compact semantic state exports emitted for UI tests.
+     *
+     * - Parameter identifier: Accessibility identifier that may name a state export probe.
+     * - Returns: `true` when the identifier is backed by a tiny state-export element.
+     * - Side effects: none.
+     * - Failure modes: This helper cannot fail.
+     */
+    func isSemanticStateExportIdentifier(_ identifier: String) -> Bool {
+        switch identifier {
+        case
+            "searchStateExport",
+            "bookmarkListStateExport",
+            "readingPlanListStateExport",
+            "availablePlansStateExport",
+            "labelManagerStateExport",
+            "syncSettingsState":
+            return true
+        default:
+            return false
+        }
+    }
+
+    /**
+     Samples the value from compact state-export probes without first asking XCTest for existence.
+     *
+     * XCTest can spend tens of seconds rebuilding snapshots for volatile SwiftUI surfaces when a test
+     * repeatedly calls `exists` before reading a known state probe. These probes are emitted only for
+     * UI automation and carry their contract in `accessibilityValue`, so callers can sample the value
+     * directly and let a missing value mean "not observable yet".
+     *
+     * - Parameters:
+     *   - identifier: Accessibility identifier of a compact state-export probe.
+     *   - app: Running application under test.
+     * - Returns: First non-empty exported value from the ordered semantic state candidates.
+     * - Side effects: none.
+     * - Failure modes: returns `nil` when no state probe currently publishes a value.
+     */
+    func semanticStateExportValue(
+        _ identifier: String,
+        in app: XCUIApplication
+    ) -> String? {
+        for candidate in semanticStateCandidates(for: identifier, in: app) {
+            if let value = candidate.value as? String,
+               !value.isEmpty
+            {
+                return value
+            }
+        }
+        return nil
+    }
+
+    /**
      Returns the semantic accessibility text exported for one resolved element.
      *
      * - Parameters:
      *   - identifier: Accessibility identifier under test.
      *   - app: Running application whose live hierarchy should be sampled.
      * - Returns: The exported accessibility value when present, otherwise a conservative label
-     *   fallback for simple text-bearing controls.
+     *   fallback for simple text-bearing controls. Compact state exports are sampled directly from
+     *   `accessibilityValue` without a separate existence query.
      * - Side effects: none.
      * - Failure modes: returns `nil` when the element is absent or has no safe semantic text.
      */
@@ -1084,6 +1137,12 @@ extension AndBibleUITests {
         _ identifier: String,
         in app: XCUIApplication
     ) -> String? {
+        if isSemanticStateExportIdentifier(identifier),
+           let value = semanticStateExportValue(identifier, in: app)
+        {
+            return value
+        }
+
         guard let element = resolvedElement(identifier, in: app) else {
             return nil
         }
