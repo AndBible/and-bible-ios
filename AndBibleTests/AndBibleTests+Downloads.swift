@@ -501,6 +501,101 @@ extension AndBibleTests {
         )
     }
 
+    func testModuleRepositoryCancellationAfterFinalFileStopsBeforePublish() async throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let swordDir = tempDir.appendingPathComponent("sword", isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let source = SourceConfig(
+            name: "TestRepo",
+            type: "HTTP",
+            host: "example.test",
+            catalogPath: "/raw"
+        )
+        let catalogData = try makeModuleRepositoryCatalogArchive(moduleName: "TESTDICT")
+
+        ModuleRepositoryDownloadMockURLProtocol.requestHandler = { request in
+            let response: HTTPURLResponse
+            let data: Data
+            switch request.url?.path {
+            case "/raw/mods.d.tar.gz":
+                response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!
+                data = catalogData
+            case "/raw/modules/lexdict/rawld/testdict/testdict.dat":
+                response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!
+                data = Data("dictionary-data".utf8)
+            case "/raw/modules/lexdict/rawld/testdict/testdict.idx":
+                response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!
+                data = Data("index-data".utf8)
+            default:
+                XCTFail("Unexpected request: \(request.url?.absoluteString ?? "<nil>")")
+                response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 404,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!
+                data = Data()
+            }
+            return (response, data)
+        }
+        defer { ModuleRepositoryDownloadMockURLProtocol.requestHandler = nil }
+
+        let repository = ModuleRepository(
+            basePath: tempDir.path,
+            swordPath: swordDir.path,
+            session: makeModuleRepositoryDownloadMockSession()
+        )
+
+        _ = try await repository.refreshCatalog(for: source)
+
+        var installTask: Task<Void, Error>?
+        installTask = Task {
+            try await repository.installModule(named: "TESTDICT", from: source) { progress in
+                if progress >= 1 {
+                    installTask?.cancel()
+                }
+            }
+        }
+
+        do {
+            try await installTask?.value
+            XCTFail("Expected final-progress cancellation to stop before publishing the install.")
+        } catch is CancellationError {
+            // Expected cancellation path.
+        }
+
+        let confPath = swordDir
+            .appendingPathComponent("mods.d", isDirectory: true)
+            .appendingPathComponent("testdict.conf")
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: confPath.path),
+            "Cancelling after the final staged file should stop before the .conf marker is published."
+        )
+        let localDir = moduleRepositoryLocalDir(for: "TESTDICT", under: swordDir)
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: localDir.path),
+            "Cancelling after the final staged file should not publish staged module data."
+        )
+    }
+
     private func makeModuleRepositoryDownloadMockSession() -> URLSession {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [ModuleRepositoryDownloadMockURLProtocol.self]

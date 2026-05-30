@@ -1059,6 +1059,7 @@ public final class ModuleRepository: @unchecked Sendable {
         guard stagedFileCount > 0 else {
             throw ModuleRepositoryError.downloadFailed("No module data files were available for \(moduleName)")
         }
+        try Task.checkCancellation()
 
         // 4. Publish staged files and write .conf marker with rollback for updates.
         try commitStagedModuleInstall(
