@@ -182,6 +182,9 @@ public enum ModuleBrowserDefaultDownloadMode: Sendable, Equatable {
    `SwordManager`, and refreshes the installed state shown in the download rows
  */
 public struct ModuleBrowserView: View {
+    /// Android's repository list staleness window before Downloads refreshes catalogs on open.
+    static let downloadCatalogStaleInterval: TimeInterval = 24 * 60 * 60
+
     /// Startup/default-document behavior requested by the caller.
     private let defaultDownloadMode: ModuleBrowserDefaultDownloadMode
 
@@ -1037,6 +1040,42 @@ public struct ModuleBrowserView: View {
         let defaultDocuments: ModuleDownloadConfiguration?
         let installedModules: [ModuleInfo]
         let cachedModules: [RemoteModuleInfo]
+        let shouldRefreshCatalogs: Bool
+    }
+
+    /**
+     Decides whether normal Downloads should refresh repository catalogs after showing cached rows.
+
+     Android opens the Downloads activity from cached installer/book-list state and refreshes the
+     repository list only when that list is stale, missing, or the user explicitly requests a
+     refresh. This helper mirrors that behavior using iOS catalog cache timestamps.
+
+     - Parameters:
+       - sources: Configured repository sources that should have catalog cache entries.
+       - repository: Repository facade that can report catalog cache age per source.
+       - staleInterval: Maximum accepted catalog age. Defaults to Android's one-day refresh window.
+     - Returns: `true` when at least one configured source is missing cache data or has stale cache
+       data, otherwise `false`.
+
+     Side effects:
+     - reads catalog cache metadata from disk through `repository`
+
+     Failure modes:
+     - malformed, unreadable, or absent cache files are treated as stale so the next open can
+       recover by refreshing
+     */
+    static func shouldAutoRefreshCatalogs(
+        sources: [SourceConfig],
+        repository: ModuleRepository,
+        staleInterval: TimeInterval = Self.downloadCatalogStaleInterval
+    ) -> Bool {
+        guard !sources.isEmpty else { return false }
+        return sources.contains { source in
+            guard let cacheAge = repository.catalogCacheAge(for: source.name) else {
+                return true
+            }
+            return cacheAge > staleInterval
+        }
     }
 
     /**
@@ -1066,15 +1105,20 @@ public struct ModuleBrowserView: View {
         let repository = repository
         let initialState = await Task.detached(priority: .userInitiated) {
             let manager = SwordManager()
+            let sources = repository.loadSources()
             let cachedModules = repository.loadCachedCatalogs() + repository.loadCachedPseudoModules()
             return InitialModuleBrowserState(
                 swordManager: manager,
-                sources: repository.loadSources(),
+                sources: sources,
                 recommendedDocuments: repository.loadCachedRecommendedDocuments(),
                 badDocuments: repository.loadCachedBadDocuments(),
                 defaultDocuments: repository.loadCachedDefaultDocuments(),
                 installedModules: manager?.installedModules() ?? [],
-                cachedModules: cachedModules
+                cachedModules: cachedModules,
+                shouldRefreshCatalogs: Self.shouldAutoRefreshCatalogs(
+                    sources: sources,
+                    repository: repository
+                )
             )
         }.value
 
@@ -1090,7 +1134,11 @@ public struct ModuleBrowserView: View {
             availableModules = deduplicatedModules(from: initialState.cachedModules)
         }
         isLoadingInitialState = false
-        startDefaultDownloadFlowIfNeeded()
+        if defaultDownloadMode.shouldInstallDefaultDocuments {
+            startDefaultDownloadFlowIfNeeded()
+        } else if initialState.shouldRefreshCatalogs {
+            refreshCatalog()
+        }
     }
 
     /**

@@ -89,6 +89,51 @@ extension AndBibleTests {
         )
     }
 
+    func testModuleBrowserAutoRefreshesOnlyMissingOrStaleCatalogs() throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let swordDir = tempDir.appendingPathComponent("sword", isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let source = SourceConfig(
+            name: "TestRepo",
+            type: "HTTP",
+            host: "example.test",
+            catalogPath: "/raw"
+        )
+        let repository = ModuleRepository(
+            basePath: tempDir.path,
+            swordPath: swordDir.path,
+            session: makeModuleRepositoryDownloadMockSession()
+        )
+
+        XCTAssertFalse(
+            ModuleBrowserView.shouldAutoRefreshCatalogs(sources: [], repository: repository),
+            "Downloads should not start a refresh loop when no repository sources are configured."
+        )
+        XCTAssertTrue(
+            ModuleBrowserView.shouldAutoRefreshCatalogs(sources: [source], repository: repository),
+            "Missing source cache should refresh after the sheet opens, matching Android's first-load behavior."
+        )
+
+        try writeModuleRepositoryCatalogCache(sourceName: source.name, timestamp: Date(), under: tempDir)
+        XCTAssertFalse(
+            ModuleBrowserView.shouldAutoRefreshCatalogs(sources: [source], repository: repository),
+            "Recent source cache should open from cache without immediately refreshing."
+        )
+
+        try writeModuleRepositoryCatalogCache(
+            sourceName: source.name,
+            timestamp: Date(timeIntervalSinceNow: -(ModuleBrowserView.downloadCatalogStaleInterval + 1)),
+            under: tempDir
+        )
+        XCTAssertTrue(
+            ModuleBrowserView.shouldAutoRefreshCatalogs(sources: [source], repository: repository),
+            "Stale source cache should refresh after the cached list has been restored."
+        )
+    }
+
     func testModuleRepositoryDownloadFailsWithoutInstalledMarkerWhenRequiredFileFails() async throws {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -1031,6 +1076,18 @@ extension AndBibleTests {
         data.append(UInt8((value >> 8) & 0xff))
         data.append(UInt8((value >> 16) & 0xff))
         data.append(UInt8((value >> 24) & 0xff))
+    }
+
+    private func writeModuleRepositoryCatalogCache(sourceName: String, timestamp: Date, under baseDir: URL) throws {
+        let cacheDir = baseDir.appendingPathComponent("catalog-cache", isDirectory: true)
+        try FileManager.default.createDirectory(at: cacheDir, withIntermediateDirectories: true)
+        let json = """
+        {
+          "timestamp": \(timestamp.timeIntervalSinceReferenceDate),
+          "modules": []
+        }
+        """
+        try Data(json.utf8).write(to: cacheDir.appendingPathComponent("\(sourceName).json"))
     }
 }
 
