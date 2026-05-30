@@ -1769,7 +1769,7 @@ public struct ModuleBrowserView: View {
 
      Side effects:
      - cancels and awaits any active install task for the same module before deleting files
-     - invokes repository-backed uninstall file I/O
+     - invokes repository-backed uninstall file I/O off the main actor
      - rebuilds the local SWORD manager and installed-module cache after a successful uninstall
      - records uninstall failures in `errorMessage`
 
@@ -1779,18 +1779,24 @@ public struct ModuleBrowserView: View {
      */
     private func uninstallModuleAfterCancellingInstall(_ name: String) {
         let cancelledInstallTask = cancelInstall(name)
+        let repository = repository
 
         Task {
             if let cancelledInstallTask {
                 await cancelledInstallTask.value
             }
 
-            await MainActor.run {
-                do {
+            do {
+                try await Task.detached(priority: .userInitiated) {
                     try repository.uninstallModule(named: name)
+                }.value
+
+                await MainActor.run {
                     swordManager = SwordManager()
                     refreshInstalledList()
-                } catch {
+                }
+            } catch {
+                await MainActor.run {
                     errorMessage = "Uninstall failed: \(error.localizedDescription)"
                 }
             }
