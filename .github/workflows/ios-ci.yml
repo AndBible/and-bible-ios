@@ -286,7 +286,12 @@ jobs:
 
       - name: Resolve iOS simulator destination
         id: simulator
-        run: python3 -u scripts/resolve_ios_simulator_destination.py --project AndBible.xcodeproj --scheme AndBible
+        run: >-
+          python3 -u scripts/resolve_ios_simulator_destination.py
+          --project AndBible.xcodeproj
+          --scheme AndBible
+          --create-dedicated-device
+          --device-name-prefix "AndBible CI Unit"
 
       - name: Boot selected simulator
         run: >-
@@ -308,6 +313,7 @@ jobs:
             --action build-for-testing
 
       - name: Run selected simulator tests without rebuilding
+        timeout-minutes: 10
         run: |
           python3 -u scripts/run_xcodebuild_with_test_selection.py \
             --project AndBible.xcodeproj \
@@ -341,6 +347,10 @@ jobs:
           include-hidden-files: true
           retention-days: 14
           overwrite: true
+
+      - name: Delete dedicated simulator
+        if: always() && steps.simulator.outputs.simulator_created == 'true'
+        run: xcrun simctl delete "${{ steps.simulator.outputs.simulator_id }}"
 
   ios-simulator-ui-tests:
     name: ${{ matrix.job_name }}

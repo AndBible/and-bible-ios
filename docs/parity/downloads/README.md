@@ -23,6 +23,7 @@ Related issues:
 
 - #120: Downloads list behavior and metadata parity
 - #121: repository/source-management parity
+- #133: startup/default-document flow using `default_documents_v2.json`
 - #138: MyBible custom repository support
 - #139: Android custom repository metadata persistence
 

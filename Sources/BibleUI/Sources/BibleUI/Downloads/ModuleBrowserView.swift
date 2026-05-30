@@ -30,6 +30,46 @@ enum ModuleBrowserDownloadStatus: Equatable {
 }
 
 /**
+ Controls whether `ModuleBrowserView` should consume Android startup default metadata.
+
+ Normal Downloads entry points keep this disabled. The reader startup Easy Start prompt enables
+ the English mode so iOS follows Android's `download-recommended` path: refresh metadata/catalogs,
+ read `default_documents_v2.json`, and request the configured English defaults once.
+ */
+public enum ModuleBrowserDefaultDownloadMode: Sendable, Equatable {
+    /// Render normal Downloads without automatically requesting default documents.
+    case disabled
+
+    /// Consume Android's English startup defaults, matching `StartupActivity.easyStart()`.
+    case englishStartup
+
+    /**
+     Whether this mode should trigger startup default installation.
+     - Returns: `true` for modes that consume default metadata.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    var shouldInstallDefaultDocuments: Bool {
+        self == .englishStartup
+    }
+
+    /**
+     Android metadata language bucket consumed by this mode.
+     - Returns: The metadata language code, or `nil` when defaults are disabled.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    var languageCode: String? {
+        switch self {
+        case .disabled:
+            return nil
+        case .englishStartup:
+            return "en"
+        }
+    }
+}
+
+/**
  Browses installed and remote SWORD modules, then coordinates install and uninstall actions.
 
  The view combines locally installed module metadata from `SwordManager` with cached or refreshed
@@ -48,10 +88,18 @@ enum ModuleBrowserDownloadStatus: Equatable {
    catalogs when available
  - refreshing the catalog performs network-backed repository fetches, merges results, and surfaces
    partial failures through local error state
+ - when launched in startup default mode, refresh consumes `default_documents_v2.json` and requests
+   selected English defaults once
  - installing or uninstalling a module mutates the local module store on disk, rebuilds the
    `SwordManager`, and refreshes the installed state shown in the download rows
  */
 public struct ModuleBrowserView: View {
+    /// Startup/default-document behavior requested by the caller.
+    private let defaultDownloadMode: ModuleBrowserDefaultDownloadMode
+
+    /// Reports whether startup default refresh/install work is still active.
+    private let onDefaultDownloadActivityChanged: (Bool) -> Void
+
     /// Selected remote/local module category segment, or `nil` for Android's "All types" filter.
     @State private var selectedCategory: ModuleCategory? = .bible
 
@@ -76,6 +124,9 @@ public struct ModuleBrowserView: View {
     /// Android bad-document metadata used to hide or warn about known problematic modules.
     @State private var badDocuments: ModuleDownloadConfiguration?
 
+    /// Android default-document metadata used by the startup Easy Start flow.
+    @State private var defaultDocuments: ModuleDownloadConfiguration?
+
     /// Lazily created SWORD manager used to query locally installed modules.
     @State private var swordManager: SwordManager?
 
@@ -94,25 +145,48 @@ public struct ModuleBrowserView: View {
     /// Progress text describing which remote source is being refreshed.
     @State private var refreshProgress: String?
 
-    /**
-     Creates the module browser with optional Android-compatible search state.
+    /// Guards Android startup defaults so they are requested at most once per Downloads session.
+    @State private var didRequestDefaultDocuments = false
 
-     - Parameter initialSearchText: Optional module initials that should pre-populate search.
-       Empty or whitespace-only values are normalized to an empty query. A non-empty value starts
-       on Android's "All types" category so Bibles, commentaries, dictionaries, and books can all
-       satisfy a module-initials link.
+    /// Startup default module names whose asynchronous installs have not finished yet.
+    @State private var defaultDownloadInstallingModules: Set<String> = []
+
+    /**
+     Creates the module browser with optional Android-compatible search and default-download state.
+
+     - Parameters:
+       - initialSearchText: Optional module initials that should pre-populate search. Empty or
+         whitespace-only values are normalized to an empty query. A non-empty value starts on
+         Android's "All types" category so Bibles, commentaries, dictionaries, and books can all
+         satisfy a module-initials link.
+       - defaultDownloadMode: Optional startup/default-document mode. Normal Downloads callers use
+         `.disabled`; the startup Easy Start flow uses `.englishStartup`.
+       - onDefaultDownloadActivityChanged: Optional callback that reports startup default refresh and
+         install activity so callers can avoid prompting while Easy Start is still running.
 
      Side effects:
      - initializes local SwiftUI state only; repository and installed-module data are still loaded
        lazily in `onAppear`
+     - when a default-download mode is supplied, `onAppear` later refreshes metadata/catalogs and
+       requests Android defaults once
 
      Failure modes:
      - invalid or unknown initials simply behave as a free-text all-types search with no matching
        rows until catalog data contains that module
      */
-    public init(initialSearchText: String = "") {
+    public init(
+        initialSearchText: String = "",
+        defaultDownloadMode: ModuleBrowserDefaultDownloadMode = .disabled,
+        onDefaultDownloadActivityChanged: @escaping (Bool) -> Void = { _ in }
+    ) {
+        self.defaultDownloadMode = defaultDownloadMode
+        self.onDefaultDownloadActivityChanged = onDefaultDownloadActivityChanged
         let normalizedSearchText = initialSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        _selectedCategory = State(initialValue: normalizedSearchText.isEmpty ? .bible : nil)
+        _selectedCategory = State(
+            initialValue: normalizedSearchText.isEmpty && !defaultDownloadMode.shouldInstallDefaultDocuments
+                ? .bible
+                : nil
+        )
         _searchText = State(initialValue: normalizedSearchText)
     }
 
@@ -280,6 +354,7 @@ public struct ModuleBrowserView: View {
         }
         .onAppear {
             setupManagers()
+            startDefaultDownloadFlowIfNeeded()
         }
         .onReceive(NotificationCenter.default.publisher(for: RepositorySourceManager.sourcesDidChangeNotification)) { _ in
             Task { @MainActor in
@@ -464,6 +539,56 @@ public struct ModuleBrowserView: View {
             unique.append(module)
         }
         return unique
+    }
+
+    /**
+     Adds cached catalog rows for sources that failed during the current refresh.
+
+     - Parameters:
+       - refreshedModules: Rows successfully refreshed from currently reachable sources.
+       - cachedModules: Rows restored from the on-disk catalog cache.
+       - failedSourceNames: Source names whose current catalog refresh failed.
+     - Returns: Refreshed rows followed by cached rows for failed sources that are not already
+       represented by the same source/module id.
+
+     Side effects:
+     - none
+
+     Failure modes:
+     - empty cache or empty failure set returns the refreshed rows unchanged
+     */
+    static func modulesByAddingCachedCatalogsForFailedSources(
+        refreshedModules: [RemoteModuleInfo],
+        cachedModules: [RemoteModuleInfo],
+        failedSourceNames: Set<String>
+    ) -> [RemoteModuleInfo] {
+        guard !failedSourceNames.isEmpty else { return refreshedModules }
+
+        var seenModuleIds = Set(refreshedModules.map(\.id))
+        var mergedModules = refreshedModules
+        for module in cachedModules
+            where failedSourceNames.contains(module.sourceName) &&
+                seenModuleIds.insert(module.id).inserted {
+            mergedModules.append(module)
+        }
+        return mergedModules
+    }
+
+    /**
+     Tests whether startup default selection has any installable catalog data to consume.
+
+     - Parameter modules: Full remote catalog rows available to startup default selection.
+     - Returns: `true` when at least one row can be installed.
+
+     Side effects:
+     - none
+
+     Failure modes:
+     - empty or pseudo/unavailable-only catalogs return `false` so the startup flow remains
+       retryable after a later refresh
+     */
+    static func startupDefaultCatalogHasInstallableRows(_ modules: [RemoteModuleInfo]) -> Bool {
+        modules.contains(where: \.isInstallable)
     }
 
     /**
@@ -742,7 +867,8 @@ public struct ModuleBrowserView: View {
      Side effects:
      - creates a `SwordManager` instance the first time the view appears
      - loads configured remote sources from repository storage
-     - restores cached Android recommended/bad metadata for row badges and filtering
+     - restores cached Android recommended/bad/default metadata for row badges, filtering, and
+       startup default-document consumption
      - refreshes the installed-module list from the local module directory
      - restores cached remote catalogs when no in-memory catalog has been loaded yet
      */
@@ -758,6 +884,9 @@ public struct ModuleBrowserView: View {
         }
         if badDocuments == nil {
             badDocuments = repository.loadCachedBadDocuments()
+        }
+        if defaultDocuments == nil {
+            defaultDocuments = repository.loadCachedDefaultDocuments()
         }
         refreshInstalledList()
 
@@ -799,13 +928,107 @@ public struct ModuleBrowserView: View {
     }
 
     /**
+     Starts Android's startup default-document flow for Easy Start launches.
+
+     Normal Downloads entry points leave `defaultDownloadMode` disabled. When startup Easy Start
+     enables it, the view refreshes catalogs and Android metadata first so selection uses the
+     newest `default_documents_v2.json` when available, with cached metadata/catalog fallback inside
+     `refreshCatalog()`.
+
+     Side effects:
+     - starts a catalog refresh if a default-download mode is active and no refresh is running
+     - may eventually install modules through `installDefaultDocumentsIfNeeded`
+
+     Failure modes:
+     - if sources are missing or refresh fails without usable cache, `refreshCatalog()` surfaces
+       the user-visible error and leaves the flow retryable
+     */
+    private func startDefaultDownloadFlowIfNeeded() {
+        guard defaultDownloadMode.shouldInstallDefaultDocuments,
+              !didRequestDefaultDocuments,
+              !isRefreshing else {
+            return
+        }
+        onDefaultDownloadActivityChanged(true)
+        refreshCatalog()
+    }
+
+    /**
+     Requests Android default modules after metadata and catalogs are available.
+
+     - Parameters:
+       - modules: Full remote catalog rows from the current refresh/cache.
+       - defaultDocuments: Android default metadata from the current refresh/cache.
+
+     Side effects:
+     - marks the startup default flow as requested once metadata and installable catalog rows are
+       available
+     - mutates `installingModules`, `errorMessage`, `swordManager`, and `installedModules` through
+       normal module installation
+     - performs file/network I/O indirectly through `installModule(_:)`
+
+     Failure modes:
+     - missing default metadata leaves the flow retryable and reports a user-visible error
+     - empty or unavailable-only catalogs leave the flow retryable for a later refresh
+     - missing, installed, unavailable, malformed, or duplicate default entries are skipped
+     - individual install failures are surfaced by `installModule(_:)`
+     */
+    private func installDefaultDocumentsIfNeeded(
+        using modules: [RemoteModuleInfo],
+        defaultDocuments: ModuleDownloadConfiguration?
+    ) {
+        guard defaultDownloadMode.shouldInstallDefaultDocuments,
+              !didRequestDefaultDocuments,
+              let language = defaultDownloadMode.languageCode else {
+            return
+        }
+        guard let defaultDocuments else {
+            errorMessage = "Could not load default document list."
+            finishDefaultDownloadActivityIfNeeded()
+            return
+        }
+        guard Self.startupDefaultCatalogHasInstallableRows(modules) else {
+            if errorMessage == nil {
+                errorMessage = "Could not load module catalog."
+            }
+            finishDefaultDownloadActivityIfNeeded()
+            return
+        }
+
+        refreshInstalledList()
+        let modulesToInstall = DefaultDocumentDownloadPlanner.selectedModules(
+            from: defaultDocuments,
+            availableModules: modules,
+            installedModules: installedModules,
+            language: language
+        )
+        didRequestDefaultDocuments = true
+
+        let moduleNames = Set(modulesToInstall.map(\.name))
+        guard !moduleNames.isEmpty else {
+            finishDefaultDownloadActivityIfNeeded()
+            return
+        }
+
+        defaultDownloadInstallingModules.formUnion(moduleNames)
+        onDefaultDownloadActivityChanged(true)
+        for module in modulesToInstall {
+            installModule(module)
+        }
+    }
+
+    /**
      Refreshes all configured remote catalogs and updates the filtered module list.
 
      Side effects:
      - marks the view as refreshing, clears stale error text, and updates progress copy while each
        source is fetched
      - refreshes Android pseudo, recommended, bad, and default metadata, falling back to caches
+     - when repository refreshes fail, preserves cached catalogs for failed sources so startup
+       defaults can still resolve modules from the most recent successful refresh
      - merges and de-duplicates the refreshed module set before storing it in `availableModules`
+     - in startup default mode, requests selected Android default modules from the full catalog so
+       source-scoped tokens can resolve alternate repository rows hidden by visible-row de-duplication
      - records aggregate or partial-source failures in `errorMessage`
 
      Failure modes:
@@ -820,16 +1043,19 @@ public struct ModuleBrowserView: View {
 
         Task {
             let sourcesToRefresh = sources
+            let shouldRequireDefaultDocuments = defaultDownloadMode.shouldInstallDefaultDocuments
             if sourcesToRefresh.isEmpty {
                 await MainActor.run {
                     errorMessage = "No remote sources configured."
                     isRefreshing = false
+                    finishDefaultDownloadActivityIfNeeded()
                 }
                 return
             }
 
             var allModules: [RemoteModuleInfo] = []
             var errors: [String] = []
+            var failedSourceNames: Set<String> = []
             let total = sourcesToRefresh.count
 
             for (index, source) in sourcesToRefresh.enumerated() {
@@ -841,8 +1067,18 @@ public struct ModuleBrowserView: View {
                     let modules = try await repository.refreshCatalog(for: source)
                     allModules.append(contentsOf: modules)
                 } catch {
+                    failedSourceNames.insert(source.name)
                     errors.append("\(source.name): \(error.localizedDescription)")
                 }
+            }
+
+            if !failedSourceNames.isEmpty {
+                let cachedCatalogs = repository.loadCachedCatalogs()
+                allModules = Self.modulesByAddingCachedCatalogsForFailedSources(
+                    refreshedModules: allModules,
+                    cachedModules: cachedCatalogs,
+                    failedSourceNames: failedSourceNames
+                )
             }
 
             await MainActor.run {
@@ -891,11 +1127,25 @@ public struct ModuleBrowserView: View {
                 }
             }
 
+            let resolvedDefaultDocuments: ModuleDownloadConfiguration?
             do {
-                _ = try await repository.refreshDefaultDocuments()
+                let refreshedDefaultDocuments = try await repository.refreshDefaultDocuments()
+                resolvedDefaultDocuments = refreshedDefaultDocuments
+                await MainActor.run {
+                    defaultDocuments = refreshedDefaultDocuments
+                }
             } catch {
-                // Defaults are cached opportunistically until #133 consumes them.
-                _ = repository.loadCachedDefaultDocuments()
+                if let cachedDefaultDocuments = repository.loadCachedDefaultDocuments() {
+                    resolvedDefaultDocuments = cachedDefaultDocuments
+                    await MainActor.run {
+                        defaultDocuments = cachedDefaultDocuments
+                    }
+                } else {
+                    resolvedDefaultDocuments = nil
+                    if shouldRequireDefaultDocuments {
+                        errors.append("AndBible defaults: \(error.localizedDescription)")
+                    }
+                }
             }
 
             let uniqueModules = deduplicatedModules(from: allModules)
@@ -904,6 +1154,10 @@ public struct ModuleBrowserView: View {
                 availableModules = uniqueModules
                 isRefreshing = false
                 refreshProgress = nil
+                installDefaultDocumentsIfNeeded(
+                    using: allModules,
+                    defaultDocuments: resolvedDefaultDocuments
+                )
 
                 if uniqueModules.isEmpty && !errors.isEmpty {
                     errorMessage = "Failed to load catalogs:\n" + errors.joined(separator: "\n")
@@ -934,11 +1188,13 @@ public struct ModuleBrowserView: View {
     private func installModule(_ module: RemoteModuleInfo) {
         guard module.isInstallable else {
             errorMessage = module.unavailableReason ?? "\(module.name) is not available for installation."
+            markDefaultDownloadModuleFinishedIfNeeded(module.name)
             return
         }
 
-        guard let source = repository.source(for: module.name) ?? sources.first(where: { $0.name == module.sourceName }) else {
+        guard let source = sources.first(where: { $0.name == module.sourceName }) ?? repository.source(for: module.name) else {
             errorMessage = "Source not found for \(module.name)"
+            markDefaultDownloadModuleFinishedIfNeeded(module.name)
             return
         }
 
@@ -953,14 +1209,58 @@ public struct ModuleBrowserView: View {
                     installingModules.remove(module.name)
                     swordManager = SwordManager()
                     refreshInstalledList()
+                    markDefaultDownloadModuleFinishedIfNeeded(module.name)
                 }
             } catch {
                 await MainActor.run {
                     installingModules.remove(module.name)
                     errorMessage = "Install failed: \(error.localizedDescription)"
+                    markDefaultDownloadModuleFinishedIfNeeded(module.name)
                 }
             }
         }
+    }
+
+    /**
+     Marks one startup default module done and finishes the default flow when none remain.
+
+     - Parameter moduleName: Module initials for the completed or skipped default install.
+
+     Side effects:
+     - removes `moduleName` from `defaultDownloadInstallingModules`
+     - invokes `onDefaultDownloadActivityChanged(false)` once the startup default set is exhausted
+
+     Failure modes:
+     - ignored for normal Downloads sessions where default-download mode is disabled
+     */
+    private func markDefaultDownloadModuleFinishedIfNeeded(_ moduleName: String) {
+        guard defaultDownloadMode.shouldInstallDefaultDocuments else {
+            return
+        }
+
+        defaultDownloadInstallingModules.remove(moduleName)
+        if defaultDownloadInstallingModules.isEmpty {
+            finishDefaultDownloadActivityIfNeeded()
+        }
+    }
+
+    /**
+     Reports that startup default refresh/install activity is no longer active.
+
+     Side effects:
+     - clears `defaultDownloadInstallingModules`
+     - invokes `onDefaultDownloadActivityChanged(false)` for the reader coordinator
+
+     Failure modes:
+     - ignored for normal Downloads sessions where default-download mode is disabled
+     */
+    private func finishDefaultDownloadActivityIfNeeded() {
+        guard defaultDownloadMode.shouldInstallDefaultDocuments else {
+            return
+        }
+
+        defaultDownloadInstallingModules.removeAll()
+        onDefaultDownloadActivityChanged(false)
     }
 
     /**

@@ -19,8 +19,66 @@ struct BibleReaderActiveSheetContent: View {
     /// Initial Downloads search text supplied by Android-compatible `download://` links.
     let downloadsInitialSearchText: String
 
+    /// Startup/default-document mode supplied when the reader opens Downloads for Easy Start.
+    let downloadsDefaultDownloadMode: ModuleBrowserDefaultDownloadMode
+
+    /// Callback reporting startup default refresh/install activity from Downloads.
+    let onDefaultDownloadActivityChanged: (Bool) -> Void
+
     let onDismiss: () -> Void
     let onSettingsChanged: () -> Void
+
+    /**
+     Creates active reader sheet content for the currently presented sheet route.
+
+     - Parameters:
+       - sheet: Reader sheet route to render.
+       - controller: Focused reader controller backing sheet navigation actions.
+       - displaySettings: Shared text display settings binding for Settings.
+       - nightMode: Shared night-mode binding for Settings.
+       - nightModeMode: Shared night-mode mode binding for Settings.
+       - readingProgressInitialTab: Initial reading-progress tab for progress routes.
+       - chapterReadHistoryTarget: Optional chapter read-history target.
+       - downloadsInitialSearchText: Initial Downloads filter from Android-compatible links.
+       - downloadsDefaultDownloadMode: Optional startup/default-document mode for Easy Start.
+       - onDefaultDownloadActivityChanged: Callback invoked when Easy Start Downloads starts or
+         finishes refresh/install activity.
+       - onDismiss: Callback used to close the active sheet.
+       - onSettingsChanged: Callback used after Settings mutates display preferences.
+
+     Side effects:
+     - none during initialization
+
+     Failure modes:
+     - none; route-specific failures are handled by the rendered child view
+     */
+    init(
+        sheet: BibleReaderView.ReaderSheet,
+        controller: BibleReaderController?,
+        displaySettings: Binding<TextDisplaySettings>,
+        nightMode: Binding<Bool>,
+        nightModeMode: Binding<String>,
+        readingProgressInitialTab: ReadingProgressTab,
+        chapterReadHistoryTarget: ChapterReadHistoryTarget?,
+        downloadsInitialSearchText: String,
+        downloadsDefaultDownloadMode: ModuleBrowserDefaultDownloadMode = .disabled,
+        onDefaultDownloadActivityChanged: @escaping (Bool) -> Void = { _ in },
+        onDismiss: @escaping () -> Void,
+        onSettingsChanged: @escaping () -> Void
+    ) {
+        self.sheet = sheet
+        self.controller = controller
+        self._displaySettings = displaySettings
+        self._nightMode = nightMode
+        self._nightModeMode = nightModeMode
+        self.readingProgressInitialTab = readingProgressInitialTab
+        self.chapterReadHistoryTarget = chapterReadHistoryTarget
+        self.downloadsInitialSearchText = downloadsInitialSearchText
+        self.downloadsDefaultDownloadMode = downloadsDefaultDownloadMode
+        self.onDefaultDownloadActivityChanged = onDefaultDownloadActivityChanged
+        self.onDismiss = onDismiss
+        self.onSettingsChanged = onSettingsChanged
+    }
 
     var body: some View {
         switch sheet {
@@ -52,7 +110,11 @@ struct BibleReaderActiveSheetContent: View {
             }
         case .downloads:
             NavigationStack {
-                ModuleBrowserView(initialSearchText: downloadsInitialSearchText)
+                ModuleBrowserView(
+                    initialSearchText: downloadsInitialSearchText,
+                    defaultDownloadMode: downloadsDefaultDownloadMode,
+                    onDefaultDownloadActivityChanged: onDefaultDownloadActivityChanged
+                )
                     .toolbar {
                         ToolbarItem(placement: .cancellationAction) {
                             Button(String(localized: "done"), action: onDismiss)
