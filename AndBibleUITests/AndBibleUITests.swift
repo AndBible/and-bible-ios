@@ -3234,8 +3234,8 @@ final class AndBibleUITests: XCTestCase {
                 ($0.exists || $0.waitForExistence(timeout: 0.2))
                     && waitForElementToBecomeHittable($0, timeout: 0.5)
             }) {
-                picker.tap()
-                if searchTranslationPickerIsOpen(in: app, timeout: 2) {
+                tapElementReliably(picker, timeout: 2)
+                if searchTranslationPickerIsOpen(in: app, timeout: 3) {
                     return
                 }
             }
@@ -9260,6 +9260,19 @@ final class AndBibleUITests: XCTestCase {
             }
 
             if waitForElementKeyboardFocus(promptTextField, timeout: 0.5) {
+                let currentValue = observedPromptTextValue()
+                if currentValue == text {
+                    return true
+                }
+                if !currentValue.isEmpty {
+                    _ = clearTextEntryElement(
+                        resolvedPromptTextField(),
+                        app: app,
+                        placeholderHints: placeholderHints,
+                        includeElementMetadata: includeElementMetadata
+                    )
+                }
+
                 app.typeText(text)
                 if waitForObservedPromptTextValue(timeout: min(3, max(0.5, deadline.timeIntervalSinceNow))) {
                     return true

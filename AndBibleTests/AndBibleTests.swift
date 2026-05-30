@@ -710,6 +710,90 @@ final class AndBibleTests: XCTestCase {
         XCTAssertNil(ModuleBrowserView.installSizeText(for: -1))
     }
 
+    func testModuleBrowserMergesCachedCatalogRowsForFailedSources() {
+        let refreshedModules = [
+            RemoteModuleInfo(
+                name: "ASV",
+                description: "American Standard Version",
+                category: .bible,
+                language: "en",
+                sourceName: "AndBible"
+            ),
+            RemoteModuleInfo(
+                name: "KJV",
+                description: "King James Version",
+                category: .bible,
+                language: "en",
+                sourceName: "CrossWire"
+            )
+        ]
+        let cachedModules = [
+            RemoteModuleInfo(
+                name: "ASV",
+                description: "American Standard Version",
+                category: .bible,
+                language: "en",
+                sourceName: "AndBible"
+            ),
+            RemoteModuleInfo(
+                name: "KJV",
+                description: "King James Version",
+                category: .bible,
+                language: "en",
+                sourceName: "CrossWire"
+            ),
+            RemoteModuleInfo(
+                name: "MHC",
+                description: "Matthew Henry",
+                category: .commentary,
+                language: "en",
+                sourceName: "CrossWire"
+            ),
+            RemoteModuleInfo(
+                name: "WEB",
+                description: "World English Bible",
+                category: .bible,
+                language: "en",
+                sourceName: "CustomSource"
+            )
+        ]
+
+        let merged = ModuleBrowserView.modulesByAddingCachedCatalogsForFailedSources(
+            refreshedModules: refreshedModules,
+            cachedModules: cachedModules,
+            failedSourceNames: ["CrossWire"]
+        )
+
+        XCTAssertEqual(merged.map(\.id), ["AndBible:ASV", "CrossWire:KJV", "CrossWire:MHC"])
+    }
+
+    func testModuleBrowserStartupDefaultsRequireInstallableCatalogRows() {
+        let unavailableModules = [
+            RemoteModuleInfo(
+                name: "PSEUDO",
+                description: "Unavailable translation",
+                category: .bible,
+                language: "en",
+                sourceName: "Not Available",
+                availability: .unavailable,
+                unavailableReason: "Unavailable"
+            )
+        ]
+        let installableModules = [
+            RemoteModuleInfo(
+                name: "KJV",
+                description: "King James Version",
+                category: .bible,
+                language: "en",
+                sourceName: "CrossWire"
+            )
+        ]
+
+        XCTAssertFalse(ModuleBrowserView.startupDefaultCatalogHasInstallableRows([]))
+        XCTAssertFalse(ModuleBrowserView.startupDefaultCatalogHasInstallableRows(unavailableModules))
+        XCTAssertTrue(ModuleBrowserView.startupDefaultCatalogHasInstallableRows(installableModules))
+    }
+
     func testDownloadConfigurationDecodesAndroidMetadataEntries() throws {
         let data = """
         {
@@ -835,8 +919,9 @@ final class AndBibleTests: XCTestCase {
     }
 
     func testBibleReaderModulePickerBuildsForBibleCategory() {
+        let controller = BibleReaderController(bridge: BibleBridge())
         let view = BibleReaderModulePicker(
-            controller: nil,
+            controller: controller,
             category: .bible,
             onDismiss: {},
             onOpenDownloads: {},
