@@ -122,7 +122,6 @@ final class DefaultDocumentDownloadPlannerTests: XCTestCase {
 final class ModuleDownloadRowActionPlannerTests: XCTestCase {
     func testInstallableRemoteRowsExposeAboutOnly() {
         let actions = ModuleDownloadRowActionPlanner.availableActions(
-            for: remoteModule("KJV", category: .bible, sourceName: "CrossWire"),
             installedModule: nil,
             isBeingInstalled: false
         )
@@ -132,7 +131,6 @@ final class ModuleDownloadRowActionPlannerTests: XCTestCase {
 
     func testInstalledRowsExposeAndroidManagementActions() {
         let actions = ModuleDownloadRowActionPlanner.availableActions(
-            for: remoteModule("KJV", category: .bible, sourceName: "CrossWire"),
             installedModule: installedModule("KJV", category: .bible),
             isBeingInstalled: false
         )
@@ -142,7 +140,6 @@ final class ModuleDownloadRowActionPlannerTests: XCTestCase {
 
     func testEncryptedInstalledRowsIncludeUnlockWhenCipherCoordinatorIsSupported() {
         let actions = ModuleDownloadRowActionPlanner.availableActions(
-            for: remoteModule("KJV", category: .bible, sourceName: "CrossWire"),
             installedModule: installedModule("KJV", category: .bible, isEncrypted: true),
             isBeingInstalled: false,
             supportsUnlock: true
@@ -153,7 +150,6 @@ final class ModuleDownloadRowActionPlannerTests: XCTestCase {
 
     func testEncryptedInstalledRowsDocumentIOSUnlockGapByDefault() {
         let actions = ModuleDownloadRowActionPlanner.availableActions(
-            for: remoteModule("KJV", category: .bible, sourceName: "CrossWire"),
             installedModule: installedModule("KJV", category: .bible, isEncrypted: true),
             isBeingInstalled: false
         )
@@ -163,7 +159,6 @@ final class ModuleDownloadRowActionPlannerTests: XCTestCase {
 
     func testBeingInstalledRowsHideInlineAboutButKeepInstalledManagementParity() {
         let actions = ModuleDownloadRowActionPlanner.availableActions(
-            for: remoteModule("KJV", category: .bible, sourceName: "CrossWire"),
             installedModule: installedModule("KJV", category: .bible),
             isBeingInstalled: true
         )

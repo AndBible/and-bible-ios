@@ -38,7 +38,6 @@ public enum ModuleDownloadRowAction: Sendable, Equatable {
  parity rule.
 
  Inputs:
- - a remote catalog row from the Downloads list
  - the matching installed module snapshot, when present
  - whether this row is currently in Android's `BEING_INSTALLED` state
  - whether the current platform has a real cipher-key coordinator for unlock
@@ -58,7 +57,6 @@ public struct ModuleDownloadRowActionPlanner: Sendable {
      Returns the ordered row actions for one Downloads row.
 
      - Parameters:
-       - module: Remote catalog row being rendered.
        - installedModule: Installed module with the same initials, or `nil` when the module is not
          installed locally.
        - isBeingInstalled: Whether the row is in the active install/update state.
@@ -70,7 +68,6 @@ public struct ModuleDownloadRowActionPlanner: Sendable {
      - Failure modes: none.
      */
     public static func availableActions(
-        for _: RemoteModuleInfo,
         installedModule: ModuleInfo?,
         isBeingInstalled: Bool,
         supportsUnlock: Bool = false
