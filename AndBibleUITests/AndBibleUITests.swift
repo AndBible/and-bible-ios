@@ -5387,7 +5387,6 @@ final class AndBibleUITests: XCTestCase {
         return [
             app.textFields.matching(focusedPredicate).firstMatch,
             app.secureTextFields.matching(focusedPredicate).firstMatch,
-            app.descendants(matching: .any).matching(focusedPredicate).firstMatch,
         ]
     }
 
@@ -9155,7 +9154,10 @@ final class AndBibleUITests: XCTestCase {
     }
 
     /**
-     Types text into a prompt field and waits for XCTest to observe the committed value.
+     Types text into a prompt field.
+
+     Stable prompt-owned fields avoid live value polling because XCTest can hang while rebuilding
+     SwiftUI alert snapshots. Those callers verify the durable post-submit state instead.
 
      - Parameters:
        - text: Final text expected in the prompt-owned field.
@@ -9166,11 +9168,13 @@ final class AndBibleUITests: XCTestCase {
          unsafe or unnecessarily expensive.
        - file: Source file used for XCTest failure attribution.
        - line: Source line used for XCTest failure attribution.
-     - Returns: `true` when the prompt field reports the expected value before submission.
+     - Returns: `true` when text was sent to the prompt field, or when identifier-less callers
+       observe the expected field value before submission.
      - Side effects:
-       - focuses the prompt field, emits keyboard input, and clears/retries if CI drops the input
+       - focuses the prompt field and emits keyboard input; identifier-less callers also
+         clear/retry when value observation shows dropped input
      - Failure modes:
-       - records an XCTest failure when the field value never matches `text`
+       - records an XCTest failure when identifier-less callers cannot observe the expected value
      */
     @discardableResult
     private func typePromptText(
@@ -9239,6 +9243,19 @@ final class AndBibleUITests: XCTestCase {
                 RunLoop.current.run(until: Date().addingTimeInterval(0.2))
             } while Date() < valueDeadline
             return observedPromptTextValue() == text
+        }
+
+        if accessibilityIdentifier != nil {
+            let promptTextField = resolvedPromptTextField()
+            focusResolvedPromptTextEntryElement(
+                promptTextField,
+                in: app,
+                timeout: min(5, max(1, deadline.timeIntervalSinceNow)),
+                file: file,
+                line: line
+            )
+            app.typeText(text)
+            return true
         }
 
         repeat {
