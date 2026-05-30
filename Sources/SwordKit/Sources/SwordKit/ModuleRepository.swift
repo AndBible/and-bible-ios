@@ -10,6 +10,277 @@ import os.log
 
 private let logger = Logger(subsystem: "org.andbible.ios", category: "ModuleRepository")
 
+/**
+ Internal HTTP-status failure used while downloading individual module files.
+
+ `installModule` decides whether a 404 means "skip this optional testament group" or "fail the
+ install" based on the module driver and where the failed file appears in its group. Keeping this
+ separate from `ModuleRepositoryError.downloadFailed` preserves that context until the install loop
+ can make the Android-parity decision.
+ */
+private struct ModuleFileHTTPStatusError: Error, LocalizedError, Sendable {
+    /// Repository file name whose HTTP response was not successful.
+    let fileName: String
+
+    /// HTTP status code returned by the repository.
+    let statusCode: Int
+
+    /// User-visible failure text used when the missing file is required.
+    var errorDescription: String? {
+        "\(fileName) download failed (HTTP \(statusCode))"
+    }
+}
+
+/**
+ Downloads one file with native URLSession streaming and progress callbacks.
+
+ The delegate moves the completed temporary download into the caller's staging path only after a
+ 200 response. It is separate from `ModuleRepository` so each file gets an isolated continuation
+ and cancellation target.
+ */
+private final class ModuleFileDownloadDelegate: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
+    /// Destination inside the module staging directory.
+    private let destinationURL: URL
+
+    /// Repository file name used in failure messages.
+    private let fileName: String
+
+    /// Number of files completed before this task began.
+    private let completedFiles: Int
+
+    /// Total planned files after optional group pruning.
+    private let totalFiles: Double
+
+    /// Optional normalized progress callback supplied by the UI layer.
+    private let progress: ((Double) -> Void)?
+
+    /// Serializes continuation, task, and progress-throttle state across URLSession callbacks.
+    private let lock = NSLock()
+
+    /// Download task cancelled by the Swift task cancellation handler.
+    private var task: URLSessionDownloadTask?
+
+    /// Continuation resumed exactly once from `urlSession(_:task:didCompleteWithError:)`.
+    private var continuation: CheckedContinuation<Void, Error>?
+
+    /// Error produced while validating or moving the temporary downloaded file.
+    private var finishError: Error?
+
+    /// Tracks whether the temporary download was moved into staging.
+    private var movedDownloadToDestination = false
+
+    /// Last integer percent emitted so progress updates stay bounded.
+    private var lastReportedPercent: Int
+
+    /**
+     Creates a delegate for one staged file download.
+
+     - Parameters:
+       - destinationURL: Final staging path for the downloaded file.
+       - fileName: Repository file name used in diagnostics.
+       - completedFiles: Number of files already staged.
+       - totalFiles: Total planned files for progress scaling.
+       - progress: Optional normalized progress callback.
+     - Side effects: none until a URLSession task starts delivering callbacks.
+     - Failure modes: none.
+     */
+    init(
+        destinationURL: URL,
+        fileName: String,
+        completedFiles: Int,
+        totalFiles: Double,
+        progress: ((Double) -> Void)?
+    ) {
+        self.destinationURL = destinationURL
+        self.fileName = fileName
+        self.completedFiles = completedFiles
+        self.totalFiles = totalFiles
+        self.progress = progress
+        self.lastReportedPercent = Int((Double(completedFiles) / totalFiles * 100).rounded(.towardZero))
+    }
+
+    /**
+     Stores the task and continuation before the download is resumed.
+
+     - Parameters:
+       - task: URLSession download task for this file.
+       - continuation: Continuation to resume after URLSession completes.
+     - Side effects: mutates delegate state under lock.
+     - Failure modes: none.
+     */
+    func start(task: URLSessionDownloadTask, continuation: CheckedContinuation<Void, Error>) {
+        lock.lock()
+        self.task = task
+        self.continuation = continuation
+        lock.unlock()
+    }
+
+    /**
+     Cancels the active download task when the surrounding Swift task is cancelled.
+
+     Side effects:
+     - calls `cancel()` on the stored URLSession task
+
+     Failure modes:
+     - missing or already-completed tasks are ignored
+     */
+    func cancel() {
+        lock.lock()
+        let activeTask = task
+        lock.unlock()
+        activeTask?.cancel()
+    }
+
+    /**
+     Records an error from the download-finish phase.
+
+     - Parameter error: Failure to surface when URLSession reports completion.
+     - Side effects: mutates delegate state under lock.
+     - Failure modes: preserves the first recorded error when multiple callbacks race.
+     */
+    private func recordFinishError(_ error: Error) {
+        lock.lock()
+        if finishError == nil {
+            finishError = error
+        }
+        lock.unlock()
+    }
+
+    /**
+     Resumes the stored continuation once.
+
+     - Parameter result: Success or failure for the staged file download.
+     - Side effects: clears the stored continuation and task under lock.
+     - Failure modes: duplicate completions are ignored.
+     */
+    private func resumeOnce(_ result: Result<Void, Error>) {
+        lock.lock()
+        let continuation = continuation
+        self.continuation = nil
+        task = nil
+        lock.unlock()
+
+        guard let continuation else { return }
+        switch result {
+        case .success:
+            continuation.resume()
+        case .failure(let error):
+            continuation.resume(throwing: error)
+        }
+    }
+
+    /**
+     Reports native URLSession byte progress as normalized module-install progress.
+
+     Side effects:
+     - invokes the caller's progress callback when a new integer percent boundary is crossed
+
+     Failure modes:
+     - unknown content length disables in-file progress; file-completion progress still occurs in
+       `ModuleRepository.installModule`
+     */
+    func urlSession(
+        _ session: URLSession,
+        downloadTask: URLSessionDownloadTask,
+        didWriteData bytesWritten: Int64,
+        totalBytesWritten: Int64,
+        totalBytesExpectedToWrite: Int64
+    ) {
+        guard totalBytesExpectedToWrite > 0 else { return }
+        let currentFileFraction = min(Double(totalBytesWritten) / Double(totalBytesExpectedToWrite), 1)
+        let overallProgress = (Double(completedFiles) + currentFileFraction) / totalFiles
+        let percent = Int((overallProgress * 100).rounded(.towardZero))
+
+        lock.lock()
+        let shouldReport = percent > lastReportedPercent
+        if shouldReport {
+            lastReportedPercent = percent
+        }
+        lock.unlock()
+
+        if shouldReport {
+            progress?(overallProgress)
+        }
+    }
+
+    /**
+     Validates the HTTP response and moves the temporary download into staging.
+
+     Side effects:
+     - creates the staging parent directory
+     - removes any previous staged file at the same destination
+     - moves the temporary URLSession file into `destinationURL`
+
+     Failure modes:
+     - records `ModuleFileHTTPStatusError` for non-200 responses
+     - records file-system errors so completion can throw them to the install loop
+     */
+    func urlSession(
+        _ session: URLSession,
+        downloadTask: URLSessionDownloadTask,
+        didFinishDownloadingTo location: URL
+    ) {
+        guard let httpResponse = downloadTask.response as? HTTPURLResponse else {
+            recordFinishError(ModuleRepositoryError.downloadFailed("\(fileName) download failed"))
+            return
+        }
+        guard httpResponse.statusCode == 200 else {
+            recordFinishError(ModuleFileHTTPStatusError(fileName: fileName, statusCode: httpResponse.statusCode))
+            return
+        }
+
+        do {
+            let fm = FileManager.default
+            try fm.createDirectory(at: destinationURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+            if fm.fileExists(atPath: destinationURL.path) {
+                try fm.removeItem(at: destinationURL)
+            }
+            try fm.moveItem(at: location, to: destinationURL)
+
+            lock.lock()
+            movedDownloadToDestination = true
+            lock.unlock()
+        } catch {
+            recordFinishError(error)
+        }
+    }
+
+    /**
+     Converts URLSession completion into the async result for one file.
+
+     Side effects:
+     - resumes the stored continuation once
+
+     Failure modes:
+     - maps URLSession cancellation to `CancellationError`
+     - returns previously recorded response or file-system errors
+     */
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        if let error {
+            let nsError = error as NSError
+            if nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled {
+                resumeOnce(.failure(CancellationError()))
+            } else {
+                resumeOnce(.failure(error))
+            }
+            return
+        }
+
+        lock.lock()
+        let finishError = finishError
+        let movedDownloadToDestination = movedDownloadToDestination
+        lock.unlock()
+
+        if let finishError {
+            resumeOnce(.failure(finishError))
+        } else if movedDownloadToDestination {
+            resumeOnce(.success(()))
+        } else {
+            resumeOnce(.failure(ModuleRepositoryError.downloadFailed("\(fileName) download failed")))
+        }
+    }
+}
+
 /// Configuration for a remote SWORD module source.
 public struct SourceConfig: Sendable, Identifiable {
     public let name: String
@@ -105,8 +376,26 @@ public final class ModuleRepository: @unchecked Sendable {
     private let swordPath: String
     private let session: URLSession
 
-    /// Catalog entries cached per source name.
+    /**
+     Catalog entries cached per source name for install lookups after a refresh or disk restore.
+
+     This repository is shared across SwiftUI tasks and marked `@unchecked Sendable` because
+     `URLSession` and SWORD integration are thread-safe at the call boundary but the cache itself
+     is ordinary mutable Swift state. Access must go through the cache helper methods below so
+     concurrent catalog refreshes, restores, and installs cannot race on the dictionary storage.
+     */
     private var catalogCache: [String: [CatalogModule]] = [:]
+
+    /**
+     Serializes access to `catalogCache`.
+
+     Side effects:
+     - blocks competing cache readers/writers until the current critical section completes
+
+     Failure modes:
+     - none; callers must avoid re-entering cache helper methods while already holding this lock
+     */
+    private let catalogCacheLock = NSLock()
 
     /// Directory for persisting catalog caches.
     private var cacheDir: String {
@@ -136,6 +425,60 @@ public final class ModuleRepository: @unchecked Sendable {
 
     private var defaultDocumentsCachePath: String {
         (metadataCacheDir as NSString).appendingPathComponent("default_documents_v2.json")
+    }
+
+    /**
+     Reads cached catalog entries for one source.
+
+     - Parameter sourceName: Repository source key from `SourceConfig.name`.
+     - Returns: A value-copy of the cached entries when the source has been loaded; otherwise `nil`.
+
+     Side effects:
+     - briefly locks `catalogCacheLock`
+
+     Failure modes:
+     - none
+     */
+    private func cachedCatalogEntries(for sourceName: String) -> [CatalogModule]? {
+        catalogCacheLock.lock()
+        defer { catalogCacheLock.unlock() }
+        return catalogCache[sourceName]
+    }
+
+    /**
+     Replaces cached catalog entries for one source.
+
+     - Parameters:
+       - entries: Parsed catalog rows for the source.
+       - sourceName: Repository source key from `SourceConfig.name`.
+
+     Side effects:
+     - mutates the in-memory catalog cache under `catalogCacheLock`
+
+     Failure modes:
+     - none
+     */
+    private func setCachedCatalogEntries(_ entries: [CatalogModule], for sourceName: String) {
+        catalogCacheLock.lock()
+        catalogCache[sourceName] = entries
+        catalogCacheLock.unlock()
+    }
+
+    /**
+     Captures a stable snapshot of the current source-to-catalog mapping.
+
+     - Returns: A value-copy of the full cache suitable for iteration without holding the lock.
+
+     Side effects:
+     - briefly locks `catalogCacheLock`
+
+     Failure modes:
+     - none
+     */
+    private func catalogCacheSnapshot() -> [String: [CatalogModule]] {
+        catalogCacheLock.lock()
+        defer { catalogCacheLock.unlock() }
+        return catalogCache
     }
 
     public init(basePath: String? = nil, swordPath: String? = nil, session: URLSession? = nil) {
@@ -493,7 +836,7 @@ public final class ModuleRepository: @unchecked Sendable {
             }
 
             let sourceName = String(file.dropLast(5)) // remove .json
-            catalogCache[sourceName] = entries
+            setCachedCatalogEntries(entries, for: sourceName)
         }
 
         return allModules
@@ -584,7 +927,7 @@ public final class ModuleRepository: @unchecked Sendable {
         }
 
         // Cache in memory and persist to disk
-        catalogCache[source.name] = catalogEntries
+        setCachedCatalogEntries(catalogEntries, for: source.name)
         saveCatalogToDisk(sourceName: source.name, entries: catalogEntries)
 
         return catalogEntries.map(\.remoteModuleInfo)
@@ -593,15 +936,34 @@ public final class ModuleRepository: @unchecked Sendable {
     // MARK: - Module Installation
 
     /**
-     Install a module by downloading its data files.
+     Installs one remote SWORD module by streaming data files into a staging directory before
+     publishing it.
+
      - Parameters:
-       - moduleName: Module abbreviation (e.g., "KJV").
-       - source: The remote source to download from.
-       - progress: Optional progress callback (0.0 to 1.0).
+       - moduleName: Module abbreviation from the refreshed catalog, such as `KJV`.
+       - source: Remote source whose in-memory catalog entry supplies URLs and module metadata.
+       - progress: Optional callback receiving normalized completion in the range `0.0...1.0`.
+     - Side effects:
+       - creates a temporary staging directory next to the target module directory
+       - streams downloaded data files into staging so large modules are not fully buffered in memory
+       - skips absent optional OT/NT file groups so single-testament modules can install
+       - replaces the target module directory only after all required files have downloaded
+       - writes the module `.conf` file only after staged data is ready to publish
+       - invalidates SWORD's module cache after a successful install
+     - Throws:
+       - `ModuleRepositoryError.moduleNotFound` when the source catalog does not contain the module
+       - `ModuleRepositoryError.invalidURL` when the source cannot produce a base URL
+       - `ModuleRepositoryError.downloadFailed` when any required data file returns a non-200 HTTP
+         response, no optional data group is available, or transport fails
+       - `CancellationError` when the surrounding task is cancelled before the install completes
+       - file-system errors from directory creation, data writes, or config writes
+     - Important: The `.conf` file is the installed marker consumed by `SwordManager`, and updates
+       may already have an installed marker. Data files are therefore staged and swapped with a
+       rollback path so failed or cancelled installs do not corrupt an existing module.
      */
     public func installModule(named moduleName: String, from source: SourceConfig,
                               progress: ((Double) -> Void)? = nil) async throws {
-        guard let entries = catalogCache[source.name],
+        guard let entries = cachedCatalogEntries(for: source.name),
               let entry = entries.first(where: { $0.name == moduleName }) else {
             throw ModuleRepositoryError.moduleNotFound(moduleName)
         }
@@ -630,54 +992,229 @@ public final class ModuleRepository: @unchecked Sendable {
             localDir = (swordPath as NSString).appendingPathComponent(entry.dataPath)
             remoteBase = entry.dataPath
         }
-        try fm.createDirectory(atPath: localDir, withIntermediateDirectories: true)
-
-        // 2. Determine files to download based on ModDrv
-        let fileNames = moduleFiles(for: entry.modDrv, dataPath: entry.dataPath)
-
-        // 3. Download each file
-        let total = Double(max(fileNames.count, 1))
-        var downloaded = 0
-
-        for fileName in fileNames {
-            let remoteURL = baseURL
-                .appendingPathComponent(remoteBase)
-                .appendingPathComponent(fileName)
-
-            do {
-                logger.info("Downloading \(remoteURL.absoluteString)")
-                let (fileData, fileResponse) = try await session.data(from: remoteURL)
-                guard let httpResp = fileResponse as? HTTPURLResponse,
-                      httpResp.statusCode == 200 else {
-                    let code = (fileResponse as? HTTPURLResponse)?.statusCode ?? -1
-                    logger.warning("HTTP \(code) for \(fileName) — skipping")
-                    downloaded += 1
-                    progress?(Double(downloaded) / total)
-                    continue
-                }
-
-                let localFilePath = (localDir as NSString).appendingPathComponent(fileName)
-                try fileData.write(to: URL(fileURLWithPath: localFilePath))
-                logger.info("Saved \(fileName) (\(fileData.count) bytes) to \(localFilePath)")
-            } catch {
-                logger.warning("Download failed for \(fileName): \(error.localizedDescription)")
-            }
-
-            downloaded += 1
-            progress?(Double(downloaded) / total)
+        let localDirURL = URL(fileURLWithPath: localDir, isDirectory: true)
+        let localParentURL = localDirURL.deletingLastPathComponent()
+        try fm.createDirectory(at: localParentURL, withIntermediateDirectories: true)
+        let stagingDirURL = localParentURL.appendingPathComponent(
+            ".\(localDirURL.lastPathComponent)-\(UUID().uuidString).installing",
+            isDirectory: true
+        )
+        try fm.createDirectory(at: stagingDirURL, withIntermediateDirectories: true)
+        defer {
+            try? fm.removeItem(at: stagingDirURL)
         }
 
-        // 4. Write .conf file to mods.d/
-        let modsDir = (swordPath as NSString).appendingPathComponent("mods.d")
-        try fm.createDirectory(atPath: modsDir, withIntermediateDirectories: true)
-        let confPath = (modsDir as NSString)
-            .appendingPathComponent(moduleName.lowercased() + ".conf")
-        try entry.confContent.write(toFile: confPath, atomically: true, encoding: .utf8)
+        // 2. Determine files to download based on ModDrv
+        let fileGroups = moduleFileGroups(for: entry.modDrv, dataPath: entry.dataPath)
+
+        // 3. Download each file
+        var plannedFileCount = fileGroups.reduce(0) { $0 + $1.files.count }
+        var downloaded = 0
+        var stagedFileCount = 0
+
+        for group in fileGroups {
+            var downloadedInGroup = 0
+
+            for (index, fileName) in group.files.enumerated() {
+                try Task.checkCancellation()
+
+                let remoteURL = baseURL
+                    .appendingPathComponent(remoteBase)
+                    .appendingPathComponent(fileName)
+
+                do {
+                    logger.info("Downloading \(remoteURL.absoluteString)")
+                    let stagedFileURL = stagingDirURL.appendingPathComponent(fileName)
+                    try await downloadRequiredModuleFile(
+                        from: remoteURL,
+                        to: stagedFileURL,
+                        fileName: fileName,
+                        completedFiles: downloaded,
+                        totalFiles: Double(max(plannedFileCount, 1)),
+                        progress: progress
+                    )
+                    logger.info("Staged \(fileName) to \(stagedFileURL.path)")
+                    downloaded += 1
+                    downloadedInGroup += 1
+                    stagedFileCount += 1
+                    progress?(Double(downloaded) / Double(max(plannedFileCount, 1)))
+                } catch let statusError as ModuleFileHTTPStatusError
+                    where !group.required && downloadedInGroup == 0 && index == 0 && statusError.statusCode == 404 {
+                    plannedFileCount -= group.files.count
+                    if downloaded > 0 {
+                        progress?(Double(downloaded) / Double(max(plannedFileCount, 1)))
+                    }
+                    logger.info("Skipping missing optional module file group starting with \(fileName)")
+                    break
+                } catch let statusError as ModuleFileHTTPStatusError {
+                    logger.warning("Download failed for \(fileName): \(statusError.localizedDescription)")
+                    throw ModuleRepositoryError.downloadFailed(statusError.localizedDescription)
+                } catch {
+                    logger.warning("Download failed for \(fileName): \(error.localizedDescription)")
+                    throw error
+                }
+            }
+        }
+
+        guard stagedFileCount > 0 else {
+            throw ModuleRepositoryError.downloadFailed("No module data files were available for \(moduleName)")
+        }
+
+        // 4. Publish staged files and write .conf marker with rollback for updates.
+        try commitStagedModuleInstall(
+            stagingDirURL: stagingDirURL,
+            localDirURL: localDirURL,
+            moduleName: moduleName,
+            confContent: entry.confContent
+        )
 
         // 5. Invalidate SWORD's module cache so new SWMgr instances rescan
         invalidateModuleCache()
 
         progress?(1.0)
+    }
+
+    /**
+     Streams one module file into a staging destination using URLSession's native download task.
+
+     - Parameters:
+       - remoteURL: Fully resolved repository URL for the required module file.
+       - destinationURL: Staging-file destination that will be created or replaced.
+       - fileName: Repository file name used in user-visible failure messages.
+       - completedFiles: Number of required files already staged before this download.
+       - totalFiles: Total required files for the module install, used for progress scaling.
+       - progress: Optional progress callback receiving throttled normalized completion.
+
+     Side effects:
+     - creates the destination parent directory
+     - creates a short-lived URLSession with the same configuration as the repository session
+     - moves URLSession's temporary download file to `destinationURL` after a 200 response
+     - invokes `progress` as URLSession reports integer percent boundaries
+
+     Failure modes:
+     - throws `ModuleFileHTTPStatusError` for non-200 responses so the install loop can distinguish
+       optional 404 groups from required-file failures
+     - throws `CancellationError` when the surrounding task is cancelled
+     - propagates transport and file I/O errors
+     */
+    private func downloadRequiredModuleFile(
+        from remoteURL: URL,
+        to destinationURL: URL,
+        fileName: String,
+        completedFiles: Int,
+        totalFiles: Double,
+        progress: ((Double) -> Void)?
+    ) async throws {
+        try Task.checkCancellation()
+        let delegate = ModuleFileDownloadDelegate(
+            destinationURL: destinationURL,
+            fileName: fileName,
+            completedFiles: completedFiles,
+            totalFiles: totalFiles,
+            progress: progress
+        )
+        let downloadSession = URLSession(
+            configuration: session.configuration,
+            delegate: delegate,
+            delegateQueue: nil
+        )
+        defer {
+            downloadSession.invalidateAndCancel()
+        }
+
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                let task = downloadSession.downloadTask(with: remoteURL)
+                delegate.start(task: task, continuation: continuation)
+                task.resume()
+            }
+        } onCancel: {
+            delegate.cancel()
+        }
+
+        try Task.checkCancellation()
+    }
+
+    /**
+     Publishes a fully staged module install with rollback protection for updates.
+
+     - Parameters:
+       - stagingDirURL: Directory containing all freshly downloaded required files.
+       - localDirURL: Final SWORD module data directory.
+       - moduleName: Module abbreviation used to resolve the `.conf` marker path.
+       - confContent: Catalog `.conf` content to publish after staged data is in place.
+
+     Side effects:
+     - moves the previous module data directory and config marker to hidden backups when present
+     - moves the staged directory into the final location
+     - writes the `.conf` installed marker atomically
+     - removes backups after a successful publish
+
+     Failure modes:
+     - restores previous data/config backups when any publish step fails, then rethrows the error
+     - best-effort cleanup is used for rollback failures because the original error is the caller's
+       actionable failure
+     */
+    private func commitStagedModuleInstall(
+        stagingDirURL: URL,
+        localDirURL: URL,
+        moduleName: String,
+        confContent: String
+    ) throws {
+        let fm = FileManager.default
+        let nonce = UUID().uuidString
+        let localParentURL = localDirURL.deletingLastPathComponent()
+        let backupDirURL = localParentURL.appendingPathComponent(
+            ".\(localDirURL.lastPathComponent)-\(nonce).backup",
+            isDirectory: true
+        )
+        let modsDirURL = URL(fileURLWithPath: swordPath, isDirectory: true)
+            .appendingPathComponent("mods.d", isDirectory: true)
+        try fm.createDirectory(at: modsDirURL, withIntermediateDirectories: true)
+        let confURL = modsDirURL.appendingPathComponent(moduleName.lowercased() + ".conf")
+        let backupConfURL = modsDirURL.appendingPathComponent(
+            ".\(moduleName.lowercased()).conf-\(nonce).backup"
+        )
+
+        var movedExistingDir = false
+        var movedExistingConf = false
+        var movedStagingIntoPlace = false
+
+        do {
+            if fm.fileExists(atPath: localDirURL.path) {
+                try fm.moveItem(at: localDirURL, to: backupDirURL)
+                movedExistingDir = true
+            }
+            if fm.fileExists(atPath: confURL.path) {
+                try fm.moveItem(at: confURL, to: backupConfURL)
+                movedExistingConf = true
+            }
+
+            try fm.moveItem(at: stagingDirURL, to: localDirURL)
+            movedStagingIntoPlace = true
+            try confContent.write(to: confURL, atomically: true, encoding: .utf8)
+
+            if movedExistingDir {
+                try? fm.removeItem(at: backupDirURL)
+            }
+            if movedExistingConf {
+                try? fm.removeItem(at: backupConfURL)
+            }
+        } catch {
+            if movedStagingIntoPlace {
+                try? fm.removeItem(at: localDirURL)
+            }
+            if movedExistingDir {
+                try? fm.moveItem(at: backupDirURL, to: localDirURL)
+            }
+            if movedStagingIntoPlace || movedExistingConf {
+                try? fm.removeItem(at: confURL)
+            }
+            if movedExistingConf {
+                try? fm.moveItem(at: backupConfURL, to: confURL)
+            }
+            throw error
+        }
     }
 
     /// Uninstall a module by removing its data and conf files.
@@ -894,9 +1431,10 @@ public final class ModuleRepository: @unchecked Sendable {
 
     /// Find the source for a given module name from the catalog cache.
     public func source(for moduleName: String) -> SourceConfig? {
-        for (sourceName, entries) in catalogCache {
+        let sources = loadSources()
+        for (sourceName, entries) in catalogCacheSnapshot() {
             if entries.contains(where: { $0.name == moduleName }) {
-                return loadSources().first(where: { $0.name == sourceName })
+                return sources.first(where: { $0.name == sourceName })
             }
         }
         return nil
@@ -1079,31 +1617,71 @@ public final class ModuleRepository: @unchecked Sendable {
 
     // MARK: - Module File Patterns
 
-    /// Determine which files to download based on module driver type.
-    private func moduleFiles(for modDrv: String, dataPath: String) -> [String] {
+    /**
+     Describes one group of module data files that must be handled together.
+
+     Verse-keyed Bibles and commentaries can be single-testament modules, so their OT and NT groups
+     are optional until the first file in a group exists. Dictionary and genbook drivers need every
+     file in their group to produce a usable module.
+     */
+    private struct ModuleFileGroup {
+        /// Repository file names in the order they should be downloaded.
+        let files: [String]
+
+        /// Whether a missing first file fails the install instead of skipping the group.
+        let required: Bool
+    }
+
+    /**
+     Determines the module file groups to download based on the SWORD module driver.
+
+     - Parameters:
+       - modDrv: SWORD driver name from the module `.conf`.
+       - dataPath: Normalized `DataPath` from the module `.conf`.
+     - Returns: Ordered file groups. Optional groups model Android/libsword behavior for
+       single-testament verse-keyed modules; required groups remain all-or-nothing.
+     - Side effects: none.
+     - Failure modes: unknown drivers fall back to optional ztext-style testament groups.
+     */
+    private func moduleFileGroups(for modDrv: String, dataPath: String) -> [ModuleFileGroup] {
         let driver = modDrv.lowercased()
 
         switch driver {
         case "ztext", "ztext4":
-            return ["ot.bzs", "ot.bzz", "ot.bzv", "nt.bzs", "nt.bzz", "nt.bzv"]
+            return [
+                ModuleFileGroup(files: ["ot.bzs", "ot.bzz", "ot.bzv"], required: false),
+                ModuleFileGroup(files: ["nt.bzs", "nt.bzz", "nt.bzv"], required: false)
+            ]
         case "rawtext", "rawtext4":
-            return ["ot", "ot.vss", "nt", "nt.vss"]
+            return [
+                ModuleFileGroup(files: ["ot", "ot.vss"], required: false),
+                ModuleFileGroup(files: ["nt", "nt.vss"], required: false)
+            ]
         case "zcom", "zcom2", "zcom4":
-            return ["ot.bzs", "ot.bzz", "ot.bzv", "nt.bzs", "nt.bzz", "nt.bzv"]
+            return [
+                ModuleFileGroup(files: ["ot.bzs", "ot.bzz", "ot.bzv"], required: false),
+                ModuleFileGroup(files: ["nt.bzs", "nt.bzz", "nt.bzv"], required: false)
+            ]
         case "rawcom", "rawcom4":
-            return ["ot", "ot.vss", "nt", "nt.vss"]
+            return [
+                ModuleFileGroup(files: ["ot", "ot.vss"], required: false),
+                ModuleFileGroup(files: ["nt", "nt.vss"], required: false)
+            ]
         case "zld":
             let name = lastComponent(of: dataPath)
-            return ["\(name).dat", "\(name).idx", "\(name).zdx", "\(name).zdt"]
+            return [ModuleFileGroup(files: ["\(name).dat", "\(name).idx", "\(name).zdx", "\(name).zdt"], required: true)]
         case "rawld", "rawld4":
             let name = lastComponent(of: dataPath)
-            return ["\(name).dat", "\(name).idx"]
+            return [ModuleFileGroup(files: ["\(name).dat", "\(name).idx"], required: true)]
         case "rawgenbook":
             let name = lastComponent(of: dataPath)
-            return ["\(name).bdt", "\(name).bks", "\(name).bky"]
+            return [ModuleFileGroup(files: ["\(name).bdt", "\(name).bks", "\(name).bky"], required: true)]
         default:
             // Best effort for unknown types
-            return ["ot.bzs", "ot.bzz", "ot.bzv", "nt.bzs", "nt.bzz", "nt.bzv"]
+            return [
+                ModuleFileGroup(files: ["ot.bzs", "ot.bzz", "ot.bzv"], required: false),
+                ModuleFileGroup(files: ["nt.bzs", "nt.bzz", "nt.bzv"], required: false)
+            ]
         }
     }
 

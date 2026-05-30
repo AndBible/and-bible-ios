@@ -399,7 +399,7 @@ extension AndBibleTests {
             selectedLanguage: "en",
             searchText: "",
             installedModules: installed,
-            installingModules: ["WARN"],
+            downloadActivities: ["WARN": .inProgress(0.25)],
             recommendedDocuments: recommended,
             badDocuments: bad
         )
@@ -409,7 +409,7 @@ extension AndBibleTests {
             ModuleBrowserView.displayStatus(
                 for: modules[1],
                 installedModules: installed,
-                installingModules: []
+                downloadActivities: [:]
             ),
             .updateAvailable
         )
