@@ -34,6 +34,26 @@ public final class WindowManager {
      */
     public private(set) var controllerVersion: Int = 0
 
+    /**
+     Visible windows whose pane controller has not registered yet.
+
+     This state models the gap between creating a persisted `Window` and SwiftUI instantiating the
+     corresponding pane controller. UI that needs pane-scoped services should treat entries here as
+     "opening" rather than as empty module or document state.
+     */
+    public private(set) var controllerPendingWindowIds: Set<UUID> = []
+
+    /**
+     Whether any visible pane is waiting for controller registration.
+
+     - Returns: `true` while at least one visible window has no registered controller.
+     - Side Effects: None.
+     - Failure Modes: None.
+     */
+    public var hasPendingVisibleControllerRegistration: Bool {
+        !controllerPendingWindowIds.isEmpty
+    }
+
     /// ID of the currently maximized window, if any.
     public var maximizedWindowId: UUID? {
         get { activeWorkspace?.maximizedWindowId }
@@ -61,16 +81,48 @@ public final class WindowManager {
 
     // MARK: - Controller Registry
 
-    /// Register a controller for a window.
+    /**
+     Registers a pane controller and marks its window ready for pane-scoped actions.
+
+     - Parameters:
+       - controller: Controller created by the visible pane.
+       - windowId: Identifier of the window now backed by `controller`.
+     - Side Effects: Mutates the controller registry, clears pending readiness for `windowId`, and
+       increments `controllerVersion` so SwiftUI consumers re-read registry-backed state.
+     - Failure Modes: None; repeated registration for the same window replaces the stored
+       controller.
+     - Note: This is the normal transition from pending to ready.
+     */
     public func registerController(_ controller: AnyObject, for windowId: UUID) {
         controllers[windowId] = controller
+        controllerPendingWindowIds.remove(windowId)
         controllerVersion += 1
     }
 
-    /// Unregister a controller for a window.
+    /**
+     Unregisters a pane controller for a window that is leaving the workspace.
+
+     - Parameter windowId: Identifier whose controller should be dropped.
+     - Side Effects: Mutates controller and readiness registries, then increments
+       `controllerVersion`.
+     - Failure Modes: Missing controller entries are ignored.
+     */
     public func unregisterController(for windowId: UUID) {
         controllers.removeValue(forKey: windowId)
+        controllerPendingWindowIds.remove(windowId)
         controllerVersion += 1
+    }
+
+    /**
+     Reports whether a specific visible window is waiting for controller registration.
+
+     - Parameter windowId: Window identifier to inspect.
+     - Returns: `true` when the window is visible but no controller has registered for it yet.
+     - Side Effects: None.
+     - Failure Modes: Unknown or hidden windows return `false`.
+     */
+    public func isControllerRegistrationPending(for windowId: UUID) -> Bool {
+        controllerPendingWindowIds.contains(windowId)
     }
 
     // MARK: - Workspace Management
@@ -79,6 +131,7 @@ public final class WindowManager {
     public func setActiveWorkspace(_ workspace: Workspace) {
         // Clear controllers from the previous workspace to prevent stale entries
         controllers.removeAll()
+        controllerPendingWindowIds.removeAll()
         activeWorkspace = workspace
         refreshWindows()
     }
@@ -92,6 +145,7 @@ public final class WindowManager {
         guard let workspace = activeWorkspace else {
             visibleWindows = []
             allWindows = []
+            controllerPendingWindowIds = []
             return
         }
         allWindows = displayOrderedWindows(workspaceStore.windows(workspaceId: workspace.id))
@@ -107,6 +161,7 @@ public final class WindowManager {
         if activeWindow == nil || !visibleWindows.contains(where: { $0.id == activeWindow?.id }) {
             activeWindow = visibleWindows.first
         }
+        reconcileControllerReadiness()
     }
 
     // MARK: - Window Lifecycle
@@ -191,6 +246,9 @@ public final class WindowManager {
        - category: Category to use when no eligible source category is inherited.
        - sourceWindow: Existing window whose sync state, layout weight, and reading position should be cloned.
      - Returns: The newly created window, or `nil` when no workspace is active.
+     - Side Effects: Inserts a window, exits maximized layout so the new active pane can render,
+       refreshes display ordering, focuses the new window, and marks visible windows without
+       registered controllers as pending.
      - Note: Non-Bible categories such as dictionary or EPUB are intentionally not inherited; new windows fall back to Bible/commentary semantics.
      */
     @discardableResult
@@ -224,9 +282,32 @@ public final class WindowManager {
             }
         }
 
+        if workspace.maximizedWindowId != nil {
+            workspace.maximizedWindowId = nil
+        }
+
         refreshWindows()
         activeWindow = window
         return window
+    }
+
+    /**
+     Recomputes controller readiness from the current visible window set.
+
+     - Side Effects: Replaces `controllerPendingWindowIds` with visible windows lacking registered
+       controllers.
+     - Failure Modes: None.
+     - Important: The pending set intentionally excludes minimized or otherwise hidden windows,
+       because SwiftUI is not expected to instantiate panes for those windows until they become
+       visible again.
+     */
+    private func reconcileControllerReadiness() {
+        let nextPendingWindowIds = Set(visibleWindows.compactMap { window in
+            controllers[window.id] == nil ? window.id : nil
+        })
+        if controllerPendingWindowIds != nextPendingWindowIds {
+            controllerPendingWindowIds = nextPendingWindowIds
+        }
     }
 
     /// Remove a window from the workspace.

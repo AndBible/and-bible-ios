@@ -14,7 +14,7 @@ import SwordKit
  installed `ModuleInfo` values and has no module mutation or cipher-key coordinator.
  */
 struct BibleReaderModulePicker: View {
-    let controller: BibleReaderController?
+    let controller: BibleReaderController
     let category: DocumentCategory
     let onDismiss: () -> Void
     let onOpenDownloads: () -> Void
@@ -35,7 +35,7 @@ struct BibleReaderModulePicker: View {
      Creates a pane-scoped module picker with Android-compatible initial type selection.
 
      - Parameters:
-       - controller: Reader controller whose installed modules and switch actions back the picker.
+       - controller: Ready reader controller whose installed modules and switch actions back the picker.
        - category: Category requested by the caller. This becomes the initial document-type filter,
          matching Android's `type` intent extra for Bible/commentary launches.
        - startsWithAllTypes: Whether the picker should start on Android's "All types" filter. Use
@@ -51,10 +51,11 @@ struct BibleReaderModulePicker: View {
      - initializes SwiftUI state only; controller mutations happen later from row selection.
 
      Failure modes:
-     - `nil` controller produces an empty chooser while preserving the requested initial filter.
+     - The caller must wait for a ready pane controller before constructing the picker; a missing
+       controller is a pane-readiness state, not an empty installed-module state.
      */
     init(
-        controller: BibleReaderController?,
+        controller: BibleReaderController,
         category: DocumentCategory,
         startsWithAllTypes: Bool = false,
         onDismiss: @escaping () -> Void,
@@ -80,7 +81,6 @@ struct BibleReaderModulePicker: View {
        active reader controller, de-duplicated by module initials.
      */
     private var allSelectableModules: [ModuleInfo] {
-        guard let controller else { return [] }
         let categoryOrder = Self.categoryFilterOrder.compactMap { $0 }
         var seen = Set<String>()
         return categoryOrder.flatMap { controller.installedModules(for: $0) }
@@ -301,27 +301,27 @@ struct BibleReaderModulePicker: View {
 
         switch selectedDocumentCategory {
         case .commentary:
-            controller?.switchCommentaryModule(to: module.name)
-            if controller?.currentCategory != .commentary {
-                controller?.switchCategory(to: .commentary)
+            controller.switchCommentaryModule(to: module.name)
+            if controller.currentCategory != .commentary {
+                controller.switchCategory(to: .commentary)
             }
             onDismiss()
         case .dictionary:
-            controller?.switchDictionaryModule(to: module.name)
-            controller?.switchCategory(to: .dictionary)
+            controller.switchDictionaryModule(to: module.name)
+            controller.switchCategory(to: .dictionary)
             dismissAndPresentAuxiliaryBrowser(onOpenDictionaryBrowser)
         case .generalBook:
-            controller?.switchGeneralBookModule(to: module.name)
-            controller?.switchCategory(to: .generalBook)
+            controller.switchGeneralBookModule(to: module.name)
+            controller.switchCategory(to: .generalBook)
             dismissAndPresentAuxiliaryBrowser(onOpenGeneralBookBrowser)
         case .map:
-            controller?.switchMapModule(to: module.name)
-            controller?.switchCategory(to: .map)
+            controller.switchMapModule(to: module.name)
+            controller.switchCategory(to: .map)
             dismissAndPresentAuxiliaryBrowser(onOpenMapBrowser)
         default:
-            controller?.switchModule(to: module.name)
-            if controller?.currentCategory != .bible {
-                controller?.switchCategory(to: .bible)
+            controller.switchModule(to: module.name)
+            if controller.currentCategory != .bible {
+                controller.switchCategory(to: .bible)
             }
             onDismiss()
         }
@@ -349,7 +349,7 @@ struct BibleReaderModulePicker: View {
      */
     private func isActive(_ module: ModuleInfo) -> Bool {
         guard let documentCategory = Self.documentCategory(for: module.category) else { return false }
-        return module.name == controller?.activeModuleName(for: documentCategory)
+        return module.name == controller.activeModuleName(for: documentCategory)
     }
 
     /**

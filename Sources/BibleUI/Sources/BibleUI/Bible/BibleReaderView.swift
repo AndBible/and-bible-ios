@@ -336,13 +336,50 @@ public struct BibleReaderView: View {
         return windowManager.controllers[windowId] as? BibleReaderController
     }
 
-    /// Controller that owns the currently presented pane-scoped modal flow.
+    /**
+     Controller that owns the currently presented pane-scoped modal flow.
+
+     When a modal captured a specific window, this deliberately does not fall back to the currently
+     focused controller if that target is still pending. Pane-scoped actions must either use their
+     captured controller or wait for that pane to finish registration.
+    */
     private var panePresentationController: BibleReaderController? {
-        if let panePresentationTargetWindowId,
-           let targetController = controller(for: panePresentationTargetWindowId) {
-            return targetController
+        _ = windowManager.controllerVersion
+        if let panePresentationTargetWindowId {
+            return controller(for: panePresentationTargetWindowId)
         }
         return focusedController
+    }
+
+    /**
+     Whether the modal's target pane exists but is still waiting for controller registration.
+
+     - Returns: `true` for a visible target window that has not registered its controller yet.
+     - Side Effects: Reads `WindowManager` readiness state only.
+     - Failure Modes: Missing target or active window identifiers return `false`.
+    */
+    private var isPanePresentationControllerPending: Bool {
+        // Controller registry updates bump this marker; the pending check is derived from registry state.
+        _ = windowManager.controllerVersion
+        if let panePresentationTargetWindowId {
+            return windowManager.isControllerRegistrationPending(for: panePresentationTargetWindowId)
+        }
+        guard let activeId = windowManager.activeWindow?.id else { return false }
+        return windowManager.isControllerRegistrationPending(for: activeId)
+    }
+
+    /**
+     Builds the fallback surface for pane-scoped modals whose controller or active module is unavailable.
+
+     - Returns: A reader-preparation view that distinguishes pending registration from unavailable state.
+     - Side Effects: None.
+     - Failure Modes: None.
+     */
+    private var readerPanePreparationContent: some View {
+        ReaderPanePreparationView(
+            isPending: isPanePresentationControllerPending,
+            onDismiss: dismissReaderModal
+        )
     }
 
     /// Captures the window that should own the next pane-scoped presentation.
@@ -1109,47 +1146,54 @@ public struct BibleReaderView: View {
             SpeakControlView(speakService: speakService)
                 .presentationDetents([.height(400), .large])
         case .modulePicker:
-            BibleReaderModulePicker(
-                controller: panePresentationController,
-                category: pickerCategory,
-                onDismiss: dismissReaderModal,
-                onOpenDownloads: { presentDownloadsPreservingPane() },
-                onOpenDictionaryBrowser: { presentReaderModalPreservingPane(.dictionaryBrowser) },
-                onOpenGeneralBookBrowser: { presentReaderModalPreservingPane(.generalBookBrowser) },
-                onOpenMapBrowser: { presentReaderModalPreservingPane(.mapBrowser) }
-            )
+            if let controller = panePresentationController {
+                BibleReaderModulePicker(
+                    controller: controller,
+                    category: pickerCategory,
+                    onDismiss: dismissReaderModal,
+                    onOpenDownloads: { presentDownloadsPreservingPane() },
+                    onOpenDictionaryBrowser: { presentReaderModalPreservingPane(.dictionaryBrowser) },
+                    onOpenGeneralBookBrowser: { presentReaderModalPreservingPane(.generalBookBrowser) },
+                    onOpenMapBrowser: { presentReaderModalPreservingPane(.mapBrowser) }
+                )
+            } else {
+                readerPanePreparationContent
+            }
         case .dictionaryBrowser:
-            if let module = panePresentationController?.activeDictionaryModule {
+            if let controller = panePresentationController,
+               let module = controller.activeDictionaryModule {
                 DictionaryBrowserView(module: module) { key in
                     dismissReaderModal()
-                    panePresentationController?.loadDictionaryEntry(key: key)
+                    controller.loadDictionaryEntry(key: key)
                 }
             } else {
-                EmptyView()
+                readerPanePreparationContent
             }
         case .generalBookBrowser:
-            if let module = panePresentationController?.activeGeneralBookModule {
+            if let controller = panePresentationController,
+               let module = controller.activeGeneralBookModule {
                 GeneralBookBrowserView(
                     module: module,
-                    title: panePresentationController?.activeGeneralBookModuleName ?? String(localized: "general_book")
+                    title: controller.activeGeneralBookModuleName ?? String(localized: "general_book")
                 ) { key in
                     dismissReaderModal()
-                    panePresentationController?.loadGeneralBookEntry(key: key)
+                    controller.loadGeneralBookEntry(key: key)
                 }
             } else {
-                EmptyView()
+                readerPanePreparationContent
             }
         case .mapBrowser:
-            if let module = panePresentationController?.activeMapModule {
+            if let controller = panePresentationController,
+               let module = controller.activeMapModule {
                 GeneralBookBrowserView(
                     module: module,
-                    title: panePresentationController?.activeMapModuleName ?? String(localized: "map")
+                    title: controller.activeMapModuleName ?? String(localized: "map")
                 ) { key in
                     dismissReaderModal()
-                    panePresentationController?.loadMapEntry(key: key)
+                    controller.loadMapEntry(key: key)
                 }
             } else {
-                EmptyView()
+                readerPanePreparationContent
             }
         case .epubLibrary:
             EpubLibraryView { identifier in
@@ -1161,20 +1205,24 @@ public struct BibleReaderView: View {
                 }
             }
         case .epubBrowser:
-            if let reader = panePresentationController?.activeEpubReader {
-                EpubBrowserView(reader: reader) { href in
-                    dismissReaderModal()
-                    panePresentationController?.loadEpubEntry(href: href)
-                }
-            } else {
-                EpubLibraryView { identifier in
-                    dismissReaderModal()
-                    panePresentationController?.switchEpub(identifier: identifier)
-                    panePresentationController?.switchCategory(to: .epub)
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                        presentReaderModalPreservingPane(.epubBrowser)
+            if let controller = panePresentationController {
+                if let reader = controller.activeEpubReader {
+                    EpubBrowserView(reader: reader) { href in
+                        dismissReaderModal()
+                        controller.loadEpubEntry(href: href)
+                    }
+                } else {
+                    EpubLibraryView { identifier in
+                        dismissReaderModal()
+                        controller.switchEpub(identifier: identifier)
+                        controller.switchCategory(to: .epub)
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                            presentReaderModalPreservingPane(.epubBrowser)
+                        }
                     }
                 }
+            } else {
+                readerPanePreparationContent
             }
         case .epubSearch:
             if let reader = panePresentationController?.activeEpubReader {
@@ -1208,16 +1256,20 @@ public struct BibleReaderView: View {
                 }
             }
         case .chooseDocument:
-            BibleReaderModulePicker(
-                controller: panePresentationController,
-                category: panePresentationController?.currentCategory ?? .bible,
-                startsWithAllTypes: true,
-                onDismiss: dismissReaderModal,
-                onOpenDownloads: { presentDownloadsPreservingPane() },
-                onOpenDictionaryBrowser: { presentReaderModalPreservingPane(.dictionaryBrowser) },
-                onOpenGeneralBookBrowser: { presentReaderModalPreservingPane(.generalBookBrowser) },
-                onOpenMapBrowser: { presentReaderModalPreservingPane(.mapBrowser) }
-            )
+            if let controller = panePresentationController {
+                BibleReaderModulePicker(
+                    controller: controller,
+                    category: controller.currentCategory,
+                    startsWithAllTypes: true,
+                    onDismiss: dismissReaderModal,
+                    onOpenDownloads: { presentDownloadsPreservingPane() },
+                    onOpenDictionaryBrowser: { presentReaderModalPreservingPane(.dictionaryBrowser) },
+                    onOpenGeneralBookBrowser: { presentReaderModalPreservingPane(.generalBookBrowser) },
+                    onOpenMapBrowser: { presentReaderModalPreservingPane(.mapBrowser) }
+                )
+            } else {
+                readerPanePreparationContent
+            }
         case .help:
             NavigationStack {
                 HelpView()
@@ -2780,6 +2832,81 @@ public struct BibleReaderView: View {
         tiltScrollService.start()
     }
     #endif
+}
+
+/**
+ Presents an explicit pane-readiness state for reader modals that require a registered controller.
+
+ `BibleReaderView` shows this instead of constructing picker/browser content with a missing
+ controller. That keeps opening/unavailable pane lifecycle separate from genuine empty document
+ module states.
+ */
+private struct ReaderPanePreparationView: View {
+    /// Whether the target window is visible and expected to register a controller shortly.
+    let isPending: Bool
+
+    /// Dismisses the owning reader modal when the user leaves the readiness state.
+    let onDismiss: () -> Void
+
+    /**
+     Builds the modal surface for a pane that is pending or no longer available.
+
+     - Returns: Navigation-wrapped content with an optional spinner while registration is expected.
+     - Side Effects: The Done toolbar action calls `onDismiss`.
+     - Failure Modes: None; this view is intentionally static until parent state changes.
+     */
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 12) {
+                if isPending {
+                    ProgressView()
+                } else {
+                    Image(systemName: "exclamationmark.circle")
+                        .font(.title2)
+                        .foregroundStyle(.secondary)
+                }
+                Text(title)
+                    .font(.headline)
+                Text(message)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .navigationTitle(String(localized: "choose_document", defaultValue: "Choose Document"))
+            #if os(iOS)
+            .navigationBarTitleDisplayMode(.inline)
+            #endif
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(String(localized: "done"), action: onDismiss)
+                }
+            }
+        }
+    }
+
+    /// Primary readiness text shown to the user.
+    private var title: String {
+        if isPending {
+            return String(localized: "reader_pane_preparing_title", defaultValue: "Preparing reader")
+        }
+        return String(localized: "reader_pane_unavailable_title", defaultValue: "Reader unavailable")
+    }
+
+    /// Secondary readiness text shown to the user.
+    private var message: String {
+        if isPending {
+            return String(
+                localized: "reader_pane_preparing_message",
+                defaultValue: "The selected pane is still opening."
+            )
+        }
+        return String(
+            localized: "reader_pane_unavailable_message",
+            defaultValue: "The selected pane is no longer available."
+        )
+    }
 }
 
 /// Applies the compact reader state to early reader chrome only for UI automation.

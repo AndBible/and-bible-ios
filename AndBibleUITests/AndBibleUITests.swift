@@ -1515,7 +1515,7 @@ final class AndBibleUITests: XCTestCase {
         let serverField = requireElement("syncNextCloudServerURLField", in: app, timeout: 10)
 
         replaceText(in: serverField, with: "not-a-url")
-        dismissKeyboardIfPresent(in: app)
+        dismissKeyboardAfterFocusedTextEntry(serverField, in: app)
         triggerSyncConnectionTest(in: app, timeout: 15)
         waitForElementValue("syncSettingsState", toContain: "remoteStatus=failureInvalidURL", in: app, timeout: 10)
     }
@@ -3571,46 +3571,12 @@ final class AndBibleUITests: XCTestCase {
      *
      * - Parameter app: Running application under test.
      * - Side effects:
-     *   - uses one visible keyboard dismissal action when the software keyboard remains presented
-     *     after query submission
+     *   - none; Search autofocus is disabled while detailed UI-test exports are enabled
      * - Failure modes:
-     *   - silently leaves focus unchanged when no keyboard dismissal action is available
+     *   - silently leaves focus unchanged if a future Search control reintroduces automatic focus
      */
     private func dismissSearchFieldFocusIfNeeded(in app: XCUIApplication) {
-        let keyboard = app.keyboards.firstMatch
-        guard keyboard.exists || keyboard.waitForExistence(timeout: 0.2) else {
-            return
-        }
-
-        dismissKeyboardIfPresent(in: app)
-        guard keyboard.exists else {
-            return
-        }
-        let searchScreen = unresolvedElement("searchScreen", in: app)
-        let dismissalCandidates = [
-            searchScreen.buttons["searchWordModeButton::allWords"].firstMatch,
-            searchScreen.otherElements["searchWordModeButton::allWords"].firstMatch,
-            searchScreen.segmentedControls["searchWordModePicker"].buttons["All Words"].firstMatch,
-            searchScreen.segmentedControls.buttons["All Words"].firstMatch,
-            searchScreen.buttons["All Words"].firstMatch
-        ]
-        for candidate in dismissalCandidates where candidate.exists && !candidate.frame.isEmpty {
-            tapElementReliably(candidate, timeout: 5)
-            return
-        }
-
-        let pickerCandidates = [
-            searchScreen.segmentedControls["searchWordModePicker"].firstMatch,
-            searchScreen.otherElements["searchWordModePicker"].firstMatch,
-        ]
-        if let picker = pickerCandidates.first(where: { $0.exists || $0.waitForExistence(timeout: 0.2) }) {
-            tapSegmentedControlSegment(
-                picker,
-                index: 0,
-                segmentCount: SearchWordModeControl.segmentCount,
-                timeout: 5
-            )
-        }
+        _ = app
     }
 
     /**
@@ -5311,6 +5277,57 @@ final class AndBibleUITests: XCTestCase {
         return directCandidates + scopedCandidates
     }
 
+    /**
+     Returns whether an identifier is one of the compact semantic state exports emitted for UI tests.
+     *
+     * - Parameter identifier: Accessibility identifier that may name a state export probe.
+     * - Returns: `true` when the identifier is backed by a tiny state-export element.
+     * - Side effects: none.
+     * - Failure modes: This helper cannot fail.
+     */
+    private func isSemanticStateExportIdentifier(_ identifier: String) -> Bool {
+        switch identifier {
+        case
+            "searchStateExport",
+            "bookmarkListStateExport",
+            "readingPlanListStateExport",
+            "availablePlansStateExport",
+            "labelManagerStateExport",
+            "syncSettingsState":
+            return true
+        default:
+            return false
+        }
+    }
+
+    /**
+     Samples the value from compact state-export probes without first asking XCTest for existence.
+     *
+     * XCTest can spend tens of seconds rebuilding snapshots for volatile SwiftUI surfaces when a test
+     * repeatedly calls `exists` before reading a known state probe. These probes are emitted only for
+     * UI automation and carry their contract in `accessibilityValue`, so callers can sample the value
+     * directly and let a missing value mean "not observable yet".
+     *
+     * - Parameters:
+     *   - identifier: Accessibility identifier of a compact state-export probe.
+     *   - app: Running application under test.
+     * - Returns: First non-empty exported value from the ordered semantic state candidates.
+     * - Side effects: none.
+     * - Failure modes: returns `nil` when no state probe currently publishes a value.
+     */
+    private func semanticStateExportValue(
+        _ identifier: String,
+        in app: XCUIApplication
+    ) -> String? {
+        for candidate in semanticStateCandidates(for: identifier, in: app) {
+            if let value = candidate.value as? String,
+               !value.isEmpty {
+                return value
+            }
+        }
+        return nil
+    }
+
     /// Returns the first modal presentation surface currently visible to XCTest.
     private func resolvedModalPrompt(
         in app: XCUIApplication,
@@ -5387,7 +5404,6 @@ final class AndBibleUITests: XCTestCase {
         return [
             app.textFields.matching(focusedPredicate).firstMatch,
             app.secureTextFields.matching(focusedPredicate).firstMatch,
-            app.descendants(matching: .any).matching(focusedPredicate).firstMatch,
         ]
     }
 
@@ -7555,7 +7571,8 @@ final class AndBibleUITests: XCTestCase {
      *   - identifier: Accessibility identifier under test.
      *   - app: Running application whose live hierarchy should be sampled.
      * - Returns: The exported accessibility value when present, otherwise a conservative label
-     *   fallback for simple text-bearing controls.
+     *   fallback for simple text-bearing controls. Compact state exports are sampled directly from
+     *   `accessibilityValue` without a separate existence query.
      * - Side effects: none.
      * - Failure modes: returns `nil` when the element is absent or has no safe semantic text.
      */
@@ -7563,6 +7580,11 @@ final class AndBibleUITests: XCTestCase {
         _ identifier: String,
         in app: XCUIApplication
     ) -> String? {
+        if isSemanticStateExportIdentifier(identifier),
+           let value = semanticStateExportValue(identifier, in: app) {
+            return value
+        }
+
         guard let element = resolvedElement(identifier, in: app) else {
             return nil
         }
@@ -7950,30 +7972,51 @@ final class AndBibleUITests: XCTestCase {
         static let segmentCount = 3
     }
 
+    /// Shared normalized screen coordinates used by no-query keyboard dismissal helpers.
+    private enum KeyboardDismissalCoordinate {
+        static let focusDismissal = CGVector(dx: 0.5, dy: 0.08)
+        static let softwareReturnKey = CGVector(dx: 0.92, dy: 0.93)
+    }
+
     /**
-     Dismisses the software keyboard through coordinate taps when present.
+     Dismisses the software keyboard through a coordinate tap outside the focused field.
      *
      * - Parameter app: Running application under test.
      * - Side effects:
-     *   - taps outside the keyboard first, then taps the keyboard's lower trailing return area
-     *     when the keyboard remains visible
+     *   - taps a stable non-control area near the top of the app window
      * - Failure modes:
-     *   - silently leaves focus unchanged when no software keyboard is visible or the active
-     *     control refuses to resign focus
+     *   - silently leaves focus unchanged when the active control refuses to resign focus
      */
     private func dismissKeyboardIfPresent(in app: XCUIApplication) {
-        let keyboard = app.keyboards.firstMatch
-        guard keyboard.exists || keyboard.waitForExistence(timeout: 0.2) else {
-            return
-        }
+        app.coordinate(withNormalizedOffset: KeyboardDismissalCoordinate.focusDismissal).tap()
+    }
 
-        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.08)).tap()
-        guard keyboard.exists || keyboard.waitForExistence(timeout: 0.2) else {
-            return
-        }
-
-        if !keyboard.frame.isEmpty {
-            keyboard.coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.88)).tap()
+    /**
+     Dismisses the software keyboard immediately after a known text-entry edit.
+     *
+     * This path is intentionally scoped to the focused field instead of `app.keyboards`. CI snapshot
+     * stalls have occurred when the broad keyboard hierarchy is queried after the keyboard has already
+     * disappeared, while field-scoped keyboard-focus checks remain bounded to the resolved input.
+     *
+     * - Parameters:
+     *   - element: Text-entry control that just received keyboard input.
+     *   - app: Running application under test.
+     * - Side effects:
+     *   - sends a Return keystroke when the input still owns focus
+     *   - taps the software keyboard return-key region if the input remains focused afterward
+     * - Failure modes:
+     *   - silently leaves focus unchanged when the active control refuses to resign focus
+     */
+    private func dismissKeyboardAfterFocusedTextEntry(
+        _ element: XCUIElement,
+        in app: XCUIApplication
+    ) {
+        if waitForElementKeyboardFocus(element, timeout: 0.2) {
+            app.typeText(XCUIKeyboardKey.return.rawValue)
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+            if waitForElementKeyboardFocus(element, timeout: 0.2) {
+                app.coordinate(withNormalizedOffset: KeyboardDismissalCoordinate.softwareReturnKey).tap()
+            }
         }
     }
 
@@ -9155,7 +9198,10 @@ final class AndBibleUITests: XCTestCase {
     }
 
     /**
-     Types text into a prompt field and waits for XCTest to observe the committed value.
+     Types text into a prompt field.
+
+     Stable prompt-owned fields avoid live value polling because XCTest can hang while rebuilding
+     SwiftUI alert snapshots. Those callers verify the durable post-submit state instead.
 
      - Parameters:
        - text: Final text expected in the prompt-owned field.
@@ -9166,11 +9212,13 @@ final class AndBibleUITests: XCTestCase {
          unsafe or unnecessarily expensive.
        - file: Source file used for XCTest failure attribution.
        - line: Source line used for XCTest failure attribution.
-     - Returns: `true` when the prompt field reports the expected value before submission.
+     - Returns: `true` when text was sent to the prompt field, or when identifier-less callers
+       observe the expected field value before submission.
      - Side effects:
-       - focuses the prompt field, emits keyboard input, and clears/retries if CI drops the input
+       - focuses the prompt field and emits keyboard input; identifier-less callers also
+         clear/retry when value observation shows dropped input
      - Failure modes:
-       - records an XCTest failure when the field value never matches `text`
+       - records an XCTest failure when identifier-less callers cannot observe the expected value
      */
     @discardableResult
     private func typePromptText(
@@ -9239,6 +9287,19 @@ final class AndBibleUITests: XCTestCase {
                 RunLoop.current.run(until: Date().addingTimeInterval(0.2))
             } while Date() < valueDeadline
             return observedPromptTextValue() == text
+        }
+
+        if accessibilityIdentifier != nil {
+            let promptTextField = resolvedPromptTextField()
+            focusResolvedPromptTextEntryElement(
+                promptTextField,
+                in: app,
+                timeout: min(5, max(1, deadline.timeIntervalSinceNow)),
+                file: file,
+                line: line
+            )
+            app.typeText(text)
+            return true
         }
 
         repeat {
@@ -9448,22 +9509,11 @@ final class AndBibleUITests: XCTestCase {
      fallback here because XCTest can time out snapshotting that container while results rerender.
      */
     private func searchStateCandidateValues(in app: XCUIApplication) -> [String] {
-        let candidates = [
-            resolvedStateExportElement("searchStateExport", in: app),
-        ]
-
-        var values: [String] = []
-        for candidate in candidates {
-            guard let candidate,
-                  candidate.exists,
-                  let value = candidate.value as? String,
-                  value.contains("state="),
-                  !values.contains(value) else {
-                continue
-            }
-            values.append(value)
+        guard let value = semanticStateExportValue("searchStateExport", in: app),
+              value.contains("state=") else {
+            return []
         }
-        return values
+        return [value]
     }
 
     /// Reads the current exported Search state from the state-bearing root element.
@@ -9473,8 +9523,7 @@ final class AndBibleUITests: XCTestCase {
 
     /// Reads the current exported Bookmark List state without walking the full list hierarchy.
     private func resolvedBookmarkListStateValue(in app: XCUIApplication) -> String? {
-        if let stateElement = resolvedStateExportElement("bookmarkListStateExport", in: app),
-           let value = stateElement.value as? String {
+        if let value = semanticStateExportValue("bookmarkListStateExport", in: app) {
             return value
         }
         if let screen = resolvedElement("bookmarkListScreen", in: app),
@@ -9486,8 +9535,7 @@ final class AndBibleUITests: XCTestCase {
 
     /// Reads the current exported Reading Plans list state without walking the full list hierarchy.
     private func resolvedReadingPlanListStateValue(in app: XCUIApplication) -> String? {
-        if let stateElement = resolvedStateExportElement("readingPlanListStateExport", in: app),
-           let value = stateElement.value as? String {
+        if let value = semanticStateExportValue("readingPlanListStateExport", in: app) {
             return value
         }
         if let screen = resolvedElement("readingPlanListScreen", in: app),
@@ -9499,8 +9547,7 @@ final class AndBibleUITests: XCTestCase {
 
     /// Reads the current exported Available Plans state without walking the full picker hierarchy.
     private func resolvedAvailablePlansStateValue(in app: XCUIApplication) -> String? {
-        if let stateElement = resolvedStateExportElement("availablePlansStateExport", in: app),
-           let value = stateElement.value as? String {
+        if let value = semanticStateExportValue("availablePlansStateExport", in: app) {
             return value
         }
         if let screen = resolvedElement("availablePlansScreen", in: app),
@@ -9512,8 +9559,7 @@ final class AndBibleUITests: XCTestCase {
 
     /// Reads the current exported Label Manager state without broad prompt/list queries.
     private func resolvedLabelManagerStateValue(in app: XCUIApplication) -> String? {
-        if let stateElement = resolvedStateExportElement("labelManagerStateExport", in: app),
-           let value = stateElement.value as? String {
+        if let value = semanticStateExportValue("labelManagerStateExport", in: app) {
             return value
         }
         if let screen = resolvedElement("labelManagerScreen", in: app),
@@ -10650,6 +10696,78 @@ final class AndBibleUITests: XCTestCase {
     }
 
     /**
+     Scrolls the Sync Settings form toward controls below the currently visible viewport.
+     *
+     * - Parameter app: Running application under test.
+     * - Side effects:
+     *   - swipes the Sync Settings root when it is resolved, otherwise falls back to an app-level
+     *     upward swipe
+     * - Failure modes:
+     *   - leaves scroll position unchanged when no scrollable surface accepts the gesture
+     */
+    private func revealSyncSettingsLowerContent(in app: XCUIApplication) {
+        if let syncScreen = resolvedElement("syncSettingsScreen", in: app),
+           syncScreen.exists {
+            syncScreen.swipeUp()
+        } else {
+            app.swipeUp()
+        }
+    }
+
+    /**
+     Resolves a Sync Settings button that may live in a lazily materialized SwiftUI form section.
+     *
+     * - Parameters:
+     *   - identifier: Accessibility identifier of the production button.
+     *   - app: Running application under test.
+     *   - timeout: Maximum time to keep resolving and revealing the form.
+     *   - file: Source file used for XCTest failure attribution.
+     *   - line: Source line used for XCTest failure attribution.
+     * - Returns: The resolved button once XCTest reports a hittable activation point.
+     * - Side effects:
+     *   - scrolls Sync Settings lower content until the requested button materializes and becomes
+     *     hittable
+     * - Failure modes:
+     *   - records an XCTest failure if the button never appears or never becomes hittable
+     */
+    private func requireReachableSyncSettingsButton(
+        _ identifier: String,
+        in app: XCUIApplication,
+        timeout: TimeInterval,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) -> XCUIElement {
+        let deadline = Date().addingTimeInterval(timeout)
+        var lastCandidate = unresolvedElement(identifier, in: app)
+
+        repeat {
+            if let button = resolvedElement(identifier, in: app) {
+                lastCandidate = button
+                if waitForElementToBecomeHittable(button, timeout: 0.5) {
+                    return button
+                }
+            }
+
+            revealSyncSettingsLowerContent(in: app)
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        } while Date() < deadline
+
+        XCTAssertTrue(
+            lastCandidate.exists,
+            "Expected Sync Settings button '\(identifier)' to exist within \(timeout) seconds.",
+            file: file,
+            line: line
+        )
+        XCTAssertTrue(
+            waitForElementToBecomeHittable(lastCandidate, timeout: 1),
+            "Expected Sync Settings button '\(identifier)' to become hittable within \(timeout) seconds.",
+            file: file,
+            line: line
+        )
+        return lastCandidate
+    }
+
+    /**
      Returns the opposite serialized switch value for one live XCUI switch.
      *
      * - Parameter element: Live switch element whose current value should be inverted.
@@ -10675,8 +10793,8 @@ final class AndBibleUITests: XCTestCase {
      *   - file: Source file used for XCTest failure attribution.
      *   - line: Source line used for XCTest failure attribution.
      * - Side effects:
-     *   - dismisses the keyboard when needed, taps the real test-connection button, and polls the
-     *     compact Sync Settings export until the remote status changes
+     *   - scrolls the Sync Settings form until the real test-connection button is reachable
+     *   - taps the button and polls the compact Sync Settings export until the remote status changes
      * - Failure modes:
      *   - records an XCTest failure if the button never drives the exported remote status away
      *     from `idle`
@@ -10687,7 +10805,7 @@ final class AndBibleUITests: XCTestCase {
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
-        let button = requireElement(
+        let button = requireReachableSyncSettingsButton(
             "syncNextCloudTestConnectionButton",
             in: app,
             timeout: timeout,
@@ -10697,19 +10815,18 @@ final class AndBibleUITests: XCTestCase {
         let deadline = Date().addingTimeInterval(timeout)
 
         repeat {
-            if let syncState = resolvedElement("syncSettingsState", in: app)?.value as? String,
+            if let syncState = resolvedElementSemanticText("syncSettingsState", in: app),
                let statusValue = syncStateToken(named: "remoteStatus", in: syncState),
                statusValue != "idle"
             {
                 return
             }
 
-            dismissKeyboardIfPresent(in: app)
             tapElementReliably(button, timeout: 5, file: file, line: line)
 
             let settleDeadline = Date().addingTimeInterval(2)
             repeat {
-                if let syncState = resolvedElement("syncSettingsState", in: app)?.value as? String,
+                if let syncState = resolvedElementSemanticText("syncSettingsState", in: app),
                    let statusValue = syncStateToken(named: "remoteStatus", in: syncState),
                    statusValue != "idle"
                 {
@@ -10719,7 +10836,7 @@ final class AndBibleUITests: XCTestCase {
             } while Date() < settleDeadline
         } while Date() < deadline
 
-        let finalState = (resolvedElement("syncSettingsState", in: app)?.value as? String) ?? "nil"
+        let finalState = resolvedElementSemanticText("syncSettingsState", in: app) ?? "nil"
         let finalStatus = syncStateToken(named: "remoteStatus", in: finalState) ?? "nil"
         XCTAssertNotEqual(
             finalStatus,
