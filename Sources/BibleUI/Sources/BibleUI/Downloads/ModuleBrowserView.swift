@@ -1,20 +1,108 @@
 // ModuleBrowserView.swift — Module download browser
 
+import Foundation
 import SwiftUI
 import BibleCore
 import SwordKit
 
 /**
+ Tracks one active or failed Downloads row operation using Android's document-status shape.
+
+ Android exposes `BEING_INSTALLED` with a percent and `ERROR_DOWNLOADING` as row states rather
+ than a global spinner. iOS keeps the same contract locally: in-progress rows sort first and show
+ determinate progress plus cancel, while failed rows remain in the list with a retry action.
+
+ Side effects:
+ - none; values are immutable snapshots of row state
+
+ Failure modes:
+ - none; progress values are clamped to `0.0...1.0` so malformed callbacks cannot produce invalid
+   progress UI
+ */
+struct ModuleBrowserDownloadActivity: Equatable {
+    /**
+     Operation phase for a download row.
+
+     Cases mirror Android's install-status branch points: progress for `BEING_INSTALLED`, and
+     retained failure details for `ERROR_DOWNLOADING`.
+     */
+    enum Phase: Equatable {
+        /// Module files are still downloading or being installed.
+        case inProgress
+
+        /// The latest install attempt failed and can be retried from the row.
+        case failed
+    }
+
+    /// Current Android-equivalent row phase.
+    let phase: Phase
+
+    /// Clamped normalized completion ratio used by the row progress bar.
+    let progressFraction: Double
+
+    /// User-visible failure detail for failed rows.
+    let message: String?
+
+    /**
+     Creates an in-progress activity snapshot.
+
+     - Parameter progressFraction: Normalized completion ratio. Values outside `0.0...1.0` are
+       clamped before storage.
+     - Returns: An activity representing Android `BEING_INSTALLED`.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    static func inProgress(_ progressFraction: Double) -> ModuleBrowserDownloadActivity {
+        ModuleBrowserDownloadActivity(
+            phase: .inProgress,
+            progressFraction: min(max(progressFraction, 0), 1),
+            message: nil
+        )
+    }
+
+    /**
+     Creates a retained failed-download activity snapshot.
+
+     - Parameter message: Failure text from the repository install attempt.
+     - Returns: An activity representing Android `ERROR_DOWNLOADING`.
+     - Side effects: none.
+     - Failure modes: empty messages are normalized by the row to the generic download-failed text.
+     */
+    static func failed(_ message: String) -> ModuleBrowserDownloadActivity {
+        ModuleBrowserDownloadActivity(
+            phase: .failed,
+            progressFraction: 0,
+            message: message
+        )
+    }
+
+    /**
+     Integer percent displayed beside the row progress indicator.
+
+     - Returns: A clamped `0...100` percent derived from `progressFraction`.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    var progressPercent: Int {
+        Int((min(max(progressFraction, 0), 1) * 100).rounded(.towardZero))
+    }
+}
+
+/**
  Android download-row status used by `ModuleBrowserView`.
 
  The enum mirrors Android `DocumentStatus.DocumentInstallStatus` closely enough for sorting and
- row controls: in-progress rows sort first, updates sort before already-installed rows, installed
- rows show completed state, unavailable pseudo rows stay visible but disabled, and installable rows
- expose the normal install action.
+ row controls: in-progress rows sort first with determinate progress, failed rows keep a retry
+ affordance, updates sort before already-installed rows, installed rows show completed state,
+ unavailable pseudo rows stay visible but disabled, and installable rows expose the normal install
+ action.
  */
 enum ModuleBrowserDownloadStatus: Equatable {
-    /// The module is currently being installed.
-    case beingInstalled
+    /// The module is currently being installed with Android-style percent progress.
+    case beingInstalled(progressPercent: Int)
+
+    /// The previous module install attempt failed and can be retried.
+    case errorDownloading(message: String)
 
     /// A repository module has a newer version than the installed module.
     case updateAvailable
@@ -94,6 +182,9 @@ public enum ModuleBrowserDefaultDownloadMode: Sendable, Equatable {
    `SwordManager`, and refreshes the installed state shown in the download rows
  */
 public struct ModuleBrowserView: View {
+    /// Android's repository list staleness window before Downloads refreshes catalogs on open.
+    static let downloadCatalogStaleInterval: TimeInterval = 24 * 60 * 60
+
     /// Startup/default-document behavior requested by the caller.
     private let defaultDownloadMode: ModuleBrowserDefaultDownloadMode
 
@@ -111,6 +202,12 @@ public struct ModuleBrowserView: View {
 
     /// Whether a remote catalog refresh is currently in progress.
     @State private var isRefreshing = false
+
+    /// Whether initial local SWORD/cache restoration is running after the sheet appears.
+    @State private var isLoadingInitialState = false
+
+    /// Guards the initial load task so SwiftUI body updates do not restart local setup work.
+    @State private var didStartInitialStateLoad = false
 
     /// De-duplicated remote modules loaded from configured sources or the local cache.
     @State private var availableModules: [RemoteModuleInfo] = []
@@ -136,8 +233,14 @@ public struct ModuleBrowserView: View {
     /// Configured remote source definitions loaded from repository configuration.
     @State private var sources: [SourceConfig] = []
 
-    /// Module names currently being installed so duplicate install actions can be suppressed.
-    @State private var installingModules: Set<String> = []
+    /// Per-module row activity for Android-style progress, cancel, and retry state.
+    @State private var downloadActivities: [String: ModuleBrowserDownloadActivity] = [:]
+
+    /// Running install tasks keyed by module initials so row cancel buttons can stop work.
+    @State private var installTasks: [String: Task<Void, Never>] = [:]
+
+    /// Monotonic task identifiers that prevent stale cancelled tasks from clearing newer retries.
+    @State private var installTaskIDs: [String: UUID] = [:]
 
     /// User-visible error text for refresh, install, or uninstall failures.
     @State private var errorMessage: String?
@@ -235,7 +338,7 @@ public struct ModuleBrowserView: View {
             selectedLanguage: selectedLanguage,
             searchText: searchText,
             installedModules: installedModules,
-            installingModules: installingModules,
+            downloadActivities: downloadActivities,
             recommendedDocuments: recommendedDocuments,
             badDocuments: badDocuments
         )
@@ -288,12 +391,16 @@ public struct ModuleBrowserView: View {
                 }
             }
 
-            if isRefreshing {
+            if isLoadingInitialState || isRefreshing {
                 Section {
                     VStack(spacing: 8) {
                         ProgressView()
                         if let refreshProgress {
                             Text(refreshProgress)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        } else if isLoadingInitialState {
+                            Text(String(localized: "loading", defaultValue: "Loading..."))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         } else {
@@ -316,7 +423,7 @@ public struct ModuleBrowserView: View {
                         remoteModuleRow(module)
                     }
                 }
-            } else if availableModules.isEmpty && !isRefreshing {
+            } else if availableModules.isEmpty && !isRefreshing && !isLoadingInitialState {
                 Section {
                     VStack(spacing: 8) {
                         Text(String(localized: "tap_refresh_to_load"))
@@ -348,13 +455,12 @@ public struct ModuleBrowserView: View {
                     Button("Refresh", systemImage: "arrow.clockwise") {
                         refreshCatalog()
                     }
-                    .disabled(isRefreshing)
+                    .disabled(isRefreshing || isLoadingInitialState)
                 }
             }
         }
-        .onAppear {
-            setupManagers()
-            startDefaultDownloadFlowIfNeeded()
+        .task {
+            await loadInitialStateIfNeeded()
         }
         .onReceive(NotificationCenter.default.publisher(for: RepositorySourceManager.sourcesDidChangeNotification)) { _ in
             Task { @MainActor in
@@ -416,7 +522,7 @@ public struct ModuleBrowserView: View {
         let status = Self.displayStatus(
             for: module,
             installedModules: installedModules,
-            installingModules: installingModules
+            downloadActivities: downloadActivities
         )
         let isRecommended = recommendedDocuments?.contains(module) == true
         let badAction = badDocuments?.badDocumentAction(for: module) ?? .none
@@ -454,6 +560,12 @@ public struct ModuleBrowserView: View {
                             .foregroundStyle(.red)
                     }
                 }
+                if case let .errorDownloading(message) = status {
+                    Text(message.isEmpty ? String(localized: "error_download_failed") : message)
+                        .font(.caption2)
+                        .foregroundStyle(.red)
+                        .lineLimit(2)
+                }
             }
 
             Spacer()
@@ -462,8 +574,33 @@ public struct ModuleBrowserView: View {
             case .installed:
                 Image(systemName: "checkmark.circle.fill")
                     .foregroundStyle(.green)
-            case .beingInstalled:
-                ProgressView()
+            case .beingInstalled(let progressPercent):
+                VStack(alignment: .trailing, spacing: 6) {
+                    Text("\(progressPercent)%")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    ProgressView(value: Double(progressPercent), total: 100)
+                        .frame(width: 76)
+                    Button {
+                        cancelInstall(module.name)
+                    } label: {
+                        Label(String(localized: "cancel"), systemImage: "arrow.uturn.backward.circle")
+                    }
+                    .labelStyle(.iconOnly)
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .accessibilityLabel(String(localized: "cancel"))
+                }
+            case .errorDownloading:
+                VStack(alignment: .trailing, spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.red)
+                    Button(String(localized: "retry", defaultValue: "Retry")) {
+                        installModule(module)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
             case .updateAvailable:
                 Button(String(localized: "update")) {
                     installModule(module)
@@ -601,7 +738,7 @@ public struct ModuleBrowserView: View {
        - selectedLanguage: Selected language code, or empty for all languages.
        - searchText: Free-text query applied to initials, description, language, and source.
        - installedModules: Current installed modules used for status and update sorting.
-       - installingModules: Module initials currently being installed.
+       - downloadActivities: Module initials with active progress or retained failure state.
        - recommendedDocuments: Android recommended metadata used for language-specific ordering.
        - badDocuments: Android bad-document metadata used to hide or warn rows.
      - Returns: Visible modules ordered by Android status, installed/recommended/category, and
@@ -619,7 +756,7 @@ public struct ModuleBrowserView: View {
         selectedLanguage: String,
         searchText: String,
         installedModules: [ModuleInfo],
-        installingModules: Set<String>,
+        downloadActivities: [String: ModuleBrowserDownloadActivity],
         recommendedDocuments: ModuleDownloadConfiguration?,
         badDocuments: ModuleDownloadConfiguration?
     ) -> [RemoteModuleInfo] {
@@ -643,7 +780,7 @@ public struct ModuleBrowserView: View {
         return sortedDownloadModules(
             filtered,
             installedModules: installedModules,
-            installingModules: installingModules,
+            downloadActivities: downloadActivities,
             selectedLanguage: selectedLanguage,
             recommendedDocuments: recommendedDocuments
         )
@@ -655,7 +792,7 @@ public struct ModuleBrowserView: View {
      - Parameters:
        - modules: Already-filtered remote rows.
        - installedModules: Installed modules used to detect installed/update state.
-       - installingModules: Module initials currently being installed.
+       - downloadActivities: Module initials with active progress or retained failure state.
        - selectedLanguage: Current language filter; Android only prioritizes recommended rows when
          a concrete language is active.
        - recommendedDocuments: Android recommended metadata.
@@ -671,13 +808,21 @@ public struct ModuleBrowserView: View {
     static func sortedDownloadModules(
         _ modules: [RemoteModuleInfo],
         installedModules: [ModuleInfo],
-        installingModules: Set<String>,
+        downloadActivities: [String: ModuleBrowserDownloadActivity],
         selectedLanguage: String,
         recommendedDocuments: ModuleDownloadConfiguration?
     ) -> [RemoteModuleInfo] {
         modules.sorted { lhs, rhs in
-            let lhsStatus = displayStatus(for: lhs, installedModules: installedModules, installingModules: installingModules)
-            let rhsStatus = displayStatus(for: rhs, installedModules: installedModules, installingModules: installingModules)
+            let lhsStatus = displayStatus(
+                for: lhs,
+                installedModules: installedModules,
+                downloadActivities: downloadActivities
+            )
+            let rhsStatus = displayStatus(
+                for: rhs,
+                installedModules: installedModules,
+                downloadActivities: downloadActivities
+            )
             let lhsStatusRank = statusSortRank(lhsStatus)
             let rhsStatusRank = statusSortRank(rhsStatus)
             if lhsStatusRank != rhsStatusRank {
@@ -714,7 +859,7 @@ public struct ModuleBrowserView: View {
      - Parameters:
        - module: Remote module row.
        - installedModules: Installed module snapshot.
-       - installingModules: Module initials currently being installed.
+       - downloadActivities: Module initials with active progress or retained failure state.
      - Returns: Status used for row affordances and sort order.
 
      Side effects:
@@ -726,10 +871,15 @@ public struct ModuleBrowserView: View {
     static func displayStatus(
         for module: RemoteModuleInfo,
         installedModules: [ModuleInfo],
-        installingModules: Set<String>
+        downloadActivities: [String: ModuleBrowserDownloadActivity]
     ) -> ModuleBrowserDownloadStatus {
-        if installingModules.contains(module.name) {
-            return .beingInstalled
+        if let activity = downloadActivities[module.name] {
+            switch activity.phase {
+            case .inProgress:
+                return .beingInstalled(progressPercent: activity.progressPercent)
+            case .failed:
+                return .errorDownloading(message: activity.message ?? "")
+            }
         }
         guard module.isInstallable else {
             return .unavailable
@@ -831,7 +981,7 @@ public struct ModuleBrowserView: View {
             return 1
         case .installed:
             return 2
-        case .installable, .unavailable:
+        case .errorDownloading, .installable, .unavailable:
             return 3
         }
     }
@@ -862,40 +1012,132 @@ public struct ModuleBrowserView: View {
     // MARK: - Data Management
 
     /**
-     Initializes the local SWORD manager, repository sources, and cached catalog state.
+     Initial state restored before the Downloads list can show cached or installed rows.
+
+     This snapshot is produced away from the main actor so SWORD manager creation, installed-module
+     scanning, and JSON catalog decoding do not block modal presentation. It contains only
+     value-semantic module/source metadata plus the freshly created `SwordManager` needed by later
+     install/uninstall operations.
+
+     Inputs:
+     - captured `ModuleRepository` whose cache is restored by the background load
+
+     Outputs:
+     - one immutable state bundle consumed by `loadInitialStateIfNeeded`
 
      Side effects:
-     - creates a `SwordManager` instance the first time the view appears
-     - loads configured remote sources from repository storage
-     - restores cached Android recommended/bad/default metadata for row badges, filtering, and
-       startup default-document consumption
-     - refreshes the installed-module list from the local module directory
-     - restores cached remote catalogs when no in-memory catalog has been loaded yet
-     */
-    private func setupManagers() {
-        if swordManager == nil {
-            swordManager = SwordManager()
-        }
-        if sources.isEmpty {
-            sources = repository.loadSources()
-        }
-        if recommendedDocuments == nil {
-            recommendedDocuments = repository.loadCachedRecommendedDocuments()
-        }
-        if badDocuments == nil {
-            badDocuments = repository.loadCachedBadDocuments()
-        }
-        if defaultDocuments == nil {
-            defaultDocuments = repository.loadCachedDefaultDocuments()
-        }
-        refreshInstalledList()
+     - none itself; the loader that creates it performs local file I/O and SWORD initialization
 
-        // Load cached catalog from disk if available modules are empty
-        if availableModules.isEmpty {
-            let cached = repository.loadCachedCatalogs() + repository.loadCachedPseudoModules()
-            if !cached.isEmpty {
-                availableModules = deduplicatedModules(from: cached)
+     Failure modes:
+     - unavailable managers or missing cache files are represented as `nil`/empty values so the UI
+       can still open and offer refresh
+     */
+    private struct InitialModuleBrowserState {
+        let swordManager: SwordManager?
+        let sources: [SourceConfig]
+        let recommendedDocuments: ModuleDownloadConfiguration?
+        let badDocuments: ModuleDownloadConfiguration?
+        let defaultDocuments: ModuleDownloadConfiguration?
+        let installedModules: [ModuleInfo]
+        let cachedModules: [RemoteModuleInfo]
+        let shouldRefreshCatalogs: Bool
+    }
+
+    /**
+     Decides whether normal Downloads should refresh repository catalogs after showing cached rows.
+
+     Android opens the Downloads activity from cached installer/book-list state and refreshes the
+     repository list only when that list is stale, missing, or the user explicitly requests a
+     refresh. This helper mirrors that behavior using iOS catalog cache timestamps.
+
+     - Parameters:
+       - sources: Configured repository sources that should have catalog cache entries.
+       - repository: Repository facade that can report catalog cache age per source.
+       - staleInterval: Maximum accepted catalog age. Defaults to Android's one-day refresh window.
+     - Returns: `true` when at least one configured source is missing cache data or has stale cache
+       data, otherwise `false`.
+
+     Side effects:
+     - reads catalog cache metadata from disk through `repository`
+
+     Failure modes:
+     - malformed, unreadable, or absent cache files are treated as stale so the next open can
+       recover by refreshing
+     */
+    static func shouldAutoRefreshCatalogs(
+        sources: [SourceConfig],
+        repository: ModuleRepository,
+        staleInterval: TimeInterval = Self.downloadCatalogStaleInterval
+    ) -> Bool {
+        guard !sources.isEmpty else { return false }
+        return sources.contains { source in
+            guard let cacheAge = repository.catalogCacheAge(for: source.name) else {
+                return true
             }
+            return cacheAge > staleInterval
+        }
+    }
+
+    /**
+     Starts initial local state restoration after the Downloads sheet has been presented.
+
+     Side effects:
+     - sets `isLoadingInitialState` while local setup is in flight
+     - creates a `SwordManager` and scans installed modules on a background task
+     - loads configured repository sources and cached Android metadata/catalog rows from disk
+     - updates SwiftUI state on the main actor after the snapshot is ready
+     - starts Android default-document refresh/install flow after local state is available
+
+     Failure modes:
+     - missing caches produce empty module lists and keep the sheet interactive
+     - cancellation leaves current state unchanged so dismissed sheets do not apply stale updates
+
+     - Important: This method intentionally avoids synchronous SWORD or catalog work on the main
+       actor. Downloads should present immediately, then populate rows, matching Android's
+       behavior of opening the screen before repository work completes.
+     */
+    @MainActor
+    private func loadInitialStateIfNeeded() async {
+        guard !didStartInitialStateLoad else { return }
+        didStartInitialStateLoad = true
+        isLoadingInitialState = true
+
+        let repository = repository
+        let initialState = await Task.detached(priority: .userInitiated) {
+            let manager = SwordManager()
+            let sources = repository.loadSources()
+            let cachedModules = repository.loadCachedCatalogs() + repository.loadCachedPseudoModules()
+            return InitialModuleBrowserState(
+                swordManager: manager,
+                sources: sources,
+                recommendedDocuments: repository.loadCachedRecommendedDocuments(),
+                badDocuments: repository.loadCachedBadDocuments(),
+                defaultDocuments: repository.loadCachedDefaultDocuments(),
+                installedModules: manager?.installedModules() ?? [],
+                cachedModules: cachedModules,
+                shouldRefreshCatalogs: Self.shouldAutoRefreshCatalogs(
+                    sources: sources,
+                    repository: repository
+                )
+            )
+        }.value
+
+        guard !Task.isCancelled else { return }
+
+        swordManager = initialState.swordManager
+        sources = initialState.sources
+        recommendedDocuments = initialState.recommendedDocuments
+        badDocuments = initialState.badDocuments
+        defaultDocuments = initialState.defaultDocuments
+        installedModules = initialState.installedModules
+        if availableModules.isEmpty && !initialState.cachedModules.isEmpty {
+            availableModules = deduplicatedModules(from: initialState.cachedModules)
+        }
+        isLoadingInitialState = false
+        if defaultDownloadMode.shouldInstallDefaultDocuments {
+            startDefaultDownloadFlowIfNeeded()
+        } else if initialState.shouldRefreshCatalogs {
+            refreshCatalog()
         }
     }
 
@@ -963,8 +1205,8 @@ public struct ModuleBrowserView: View {
      Side effects:
      - marks the startup default flow as requested once metadata and installable catalog rows are
        available
-     - mutates `installingModules`, `errorMessage`, `swordManager`, and `installedModules` through
-       normal module installation
+     - mutates `downloadActivities`, `errorMessage`, `swordManager`, and `installedModules`
+       through normal module installation
      - performs file/network I/O indirectly through `installModule(_:)`
 
      Failure modes:
@@ -1176,13 +1418,16 @@ public struct ModuleBrowserView: View {
      - Parameter module: Remote module to install locally.
 
      Side effects:
-     - records the module name in `installingModules` so the UI can show progress
+     - records the module name in `downloadActivities` so the UI can show progress and cancel
      - performs repository installation work and, on success, rebuilds local SWORD state before
        refreshing the installed-module list
-     - surfaces installation failures in `errorMessage`
+     - stores installation failures in the row activity and surfaces the latest failure in
+       `errorMessage`
 
      Failure modes:
      - if the matching source cannot be resolved, sets a user-visible error and returns
+     - task cancellation clears active row state without reporting a failure, matching Android
+       `INSTALL_CANCELLED`
      - repository installation errors are caught and reported without crashing the view
      */
     private func installModule(_ module: RemoteModuleInfo) {
@@ -1192,33 +1437,79 @@ public struct ModuleBrowserView: View {
             return
         }
 
+        guard installTasks[module.name] == nil else {
+            return
+        }
+
         guard let source = sources.first(where: { $0.name == module.sourceName }) ?? repository.source(for: module.name) else {
             errorMessage = "Source not found for \(module.name)"
             markDefaultDownloadModuleFinishedIfNeeded(module.name)
             return
         }
 
-        installingModules.insert(module.name)
+        let installID = UUID()
+        downloadActivities[module.name] = .inProgress(0)
+        installTaskIDs[module.name] = installID
         errorMessage = nil
 
-        Task {
+        let task = Task {
+            await Task.yield()
             do {
-                try await repository.installModule(named: module.name, from: source)
+                try await repository.installModule(named: module.name, from: source) { progress in
+                    Task { @MainActor in
+                        guard installTaskIDs[module.name] == installID else { return }
+                        downloadActivities[module.name] = .inProgress(progress)
+                    }
+                }
 
                 await MainActor.run {
-                    installingModules.remove(module.name)
+                    guard installTaskIDs[module.name] == installID else { return }
+                    installTasks[module.name] = nil
+                    installTaskIDs[module.name] = nil
+                    downloadActivities[module.name] = nil
                     swordManager = SwordManager()
                     refreshInstalledList()
                     markDefaultDownloadModuleFinishedIfNeeded(module.name)
                 }
             } catch {
                 await MainActor.run {
-                    installingModules.remove(module.name)
-                    errorMessage = "Install failed: \(error.localizedDescription)"
+                    guard installTaskIDs[module.name] == installID else { return }
+                    installTasks[module.name] = nil
+                    installTaskIDs[module.name] = nil
+                    if error is CancellationError || Task.isCancelled {
+                        downloadActivities[module.name] = nil
+                    } else {
+                        let message = error.localizedDescription
+                        downloadActivities[module.name] = .failed(message)
+                        errorMessage = "Install failed: \(message)"
+                    }
                     markDefaultDownloadModuleFinishedIfNeeded(module.name)
                 }
             }
         }
+        installTasks[module.name] = task
+    }
+
+    /**
+     Cancels an active module install from its Downloads row.
+
+     - Parameter moduleName: Module initials for the active install task.
+
+     Side effects:
+     - cancels the stored install task when present
+     - clears the row activity immediately so the row returns to its normal installed/not-installed
+       state, matching Android `INSTALL_CANCELLED`
+     - marks startup default activity complete when the cancelled module belonged to that flow
+
+     Failure modes:
+     - missing or already-finished tasks are ignored
+     */
+    private func cancelInstall(_ moduleName: String) {
+        installTasks[moduleName]?.cancel()
+        installTasks[moduleName] = nil
+        installTaskIDs[moduleName] = nil
+        downloadActivities[moduleName] = nil
+        markDefaultDownloadModuleFinishedIfNeeded(moduleName)
     }
 
     /**
