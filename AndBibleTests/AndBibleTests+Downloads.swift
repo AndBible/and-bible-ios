@@ -1,9 +1,47 @@
 import XCTest
 import CLibSword
+@testable import BibleCore
+import SQLite3
 @testable import SwordKit
 @testable import BibleUI
 
+private let searchIndexFixtureSQLiteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+
 extension AndBibleTests {
+    func testModuleBrowserRowActionConfirmationUsesFriendlyModuleDescription() {
+        let module = RemoteModuleInfo(
+            name: "KJV",
+            description: "King James Version",
+            category: .bible,
+            language: "en",
+            sourceName: "CrossWire"
+        )
+
+        let uninstall = ModuleBrowserRowActionConfirmation(kind: .uninstall, module: module)
+        let deleteIndex = ModuleBrowserRowActionConfirmation(kind: .deleteIndex, module: module)
+
+        XCTAssertEqual(uninstall.message, "Remove King James Version from this device?")
+        XCTAssertEqual(deleteIndex.message, "Delete the search index for King James Version?")
+    }
+
+    func testSearchIndexDeleteIndexAwaitsQueuedMutation() async throws {
+        let databaseURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("search-index-\(UUID().uuidString).sqlite")
+        defer { try? FileManager.default.removeItem(at: databaseURL) }
+
+        let service = SearchIndexService(databasePath: databaseURL.path)
+        try seedSearchIndexFixture(moduleName: "KJV", databaseURL: databaseURL)
+        let seededCounts = try searchIndexFixtureCounts(moduleName: "KJV", databaseURL: databaseURL)
+        XCTAssertEqual(seededCounts.rows, 1)
+        XCTAssertEqual(seededCounts.metadata, 1)
+
+        await service.deleteIndex(for: "KJV")
+
+        let deletedCounts = try searchIndexFixtureCounts(moduleName: "KJV", databaseURL: databaseURL)
+        XCTAssertEqual(deletedCounts.rows, 0)
+        XCTAssertEqual(deletedCounts.metadata, 0)
+    }
+
     func testModuleBrowserDownloadActivityDrivesAndroidProgressAndErrorStatus() {
         let modules = [
             RemoteModuleInfo(
@@ -1089,10 +1127,70 @@ extension AndBibleTests {
         """
         try Data(json.utf8).write(to: cacheDir.appendingPathComponent("\(sourceName).json"))
     }
+
+    private func seedSearchIndexFixture(moduleName: String, databaseURL: URL) throws {
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(databaseURL.path, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK else {
+            throw SearchIndexFixtureError.openFailed
+        }
+        defer { sqlite3_close(db) }
+
+        let escapedModuleName = moduleName.replacingOccurrences(of: "'", with: "''")
+        let sql = """
+        INSERT INTO verse_fts (verse_key, plain_text, module_name)
+        VALUES ('Genesis 1:1', 'created', '\(escapedModuleName)');
+        INSERT INTO indexed_modules (module_name, verse_count, indexed_at, schema_version)
+        VALUES ('\(escapedModuleName)', 1, datetime('now'), 1);
+        """
+        guard sqlite3_exec(db, sql, nil, nil, nil) == SQLITE_OK else {
+            throw SearchIndexFixtureError.writeFailed
+        }
+    }
+
+    private func searchIndexFixtureCounts(moduleName: String, databaseURL: URL) throws -> (rows: Int, metadata: Int) {
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(databaseURL.path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
+            throw SearchIndexFixtureError.openFailed
+        }
+        defer { sqlite3_close(db) }
+
+        return (
+            rows: try searchIndexFixtureCount(
+                db: db,
+                sql: "SELECT COUNT(*) FROM verse_fts WHERE module_name = ?",
+                moduleName: moduleName
+            ),
+            metadata: try searchIndexFixtureCount(
+                db: db,
+                sql: "SELECT COUNT(*) FROM indexed_modules WHERE module_name = ?",
+                moduleName: moduleName
+            )
+        )
+    }
+
+    private func searchIndexFixtureCount(db: OpaquePointer?, sql: String, moduleName: String) throws -> Int {
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw SearchIndexFixtureError.readFailed
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        sqlite3_bind_text(stmt, 1, moduleName, -1, searchIndexFixtureSQLiteTransient)
+        guard sqlite3_step(stmt) == SQLITE_ROW else {
+            throw SearchIndexFixtureError.readFailed
+        }
+        return Int(sqlite3_column_int(stmt, 0))
+    }
 }
 
 private enum ModuleRepositoryDownloadTestError: Error {
     case compressionFailed
+}
+
+private enum SearchIndexFixtureError: Error {
+    case openFailed
+    case readFailed
+    case writeFailed
 }
 
 private final class ModuleRepositoryDownloadMockURLProtocol: URLProtocol {

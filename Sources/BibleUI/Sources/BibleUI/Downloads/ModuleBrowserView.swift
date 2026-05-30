@@ -115,6 +115,20 @@ enum ModuleBrowserDownloadStatus: Equatable {
 
     /// The row can be installed.
     case installable
+
+    /**
+     Whether this row is in Android's active `BEING_INSTALLED` branch.
+
+     - Returns: `true` only for rows actively downloading or installing.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    var isBeingInstalled: Bool {
+        if case .beingInstalled = self {
+            return true
+        }
+        return false
+    }
 }
 
 /**
@@ -185,6 +199,9 @@ public struct ModuleBrowserView: View {
     /// Android's repository list staleness window before Downloads refreshes catalogs on open.
     static let downloadCatalogStaleInterval: TimeInterval = 24 * 60 * 60
 
+    /// Shared full-text search index service used for Android's Delete Index row action.
+    @Environment(SearchIndexService.self) private var searchIndexService
+
     /// Startup/default-document behavior requested by the caller.
     private let defaultDownloadMode: ModuleBrowserDefaultDownloadMode
 
@@ -244,6 +261,12 @@ public struct ModuleBrowserView: View {
 
     /// User-visible error text for refresh, install, or uninstall failures.
     @State private var errorMessage: String?
+
+    /// Module details currently presented from Android's row About action.
+    @State private var selectedModuleDetails: ModuleBrowserModuleDetails?
+
+    /// Destructive row action waiting for Android-style confirmation.
+    @State private var pendingRowActionConfirmation: ModuleBrowserRowActionConfirmation?
 
     /// Progress text describing which remote source is being refreshed.
     @State private var refreshProgress: String?
@@ -323,11 +346,6 @@ public struct ModuleBrowserView: View {
             if !resolvedA && resolvedB { return false }
             return nameA.localizedCaseInsensitiveCompare(nameB) == .orderedAscending
         }
-    }
-
-    /// Installed module names for quick lookup.
-    private var installedModuleNames: Set<String> {
-        Set(installedModules.map(\.name))
     }
 
     /// Available (remote) modules filtered by category, language, and search text.
@@ -459,6 +477,41 @@ public struct ModuleBrowserView: View {
                 }
             }
         }
+        .sheet(item: $selectedModuleDetails) { details in
+            NavigationStack {
+                ModuleBrowserModuleDetailsView(details: details)
+            }
+        }
+        .alert(
+            pendingRowActionConfirmation?.title ?? "",
+            isPresented: Binding(
+                get: { pendingRowActionConfirmation != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        pendingRowActionConfirmation = nil
+                    }
+                }
+            ),
+            presenting: pendingRowActionConfirmation
+        ) { confirmation in
+            switch confirmation.kind {
+            case .uninstall:
+                Button(String(localized: "uninstall"), role: .destructive) {
+                    uninstallModule(confirmation.moduleName)
+                    pendingRowActionConfirmation = nil
+                }
+            case .deleteIndex:
+                Button(String(localized: "delete_module_index", defaultValue: "Delete Index"), role: .destructive) {
+                    deleteModuleIndex(confirmation.moduleName)
+                    pendingRowActionConfirmation = nil
+                }
+            }
+            Button(String(localized: "cancel"), role: .cancel) {
+                pendingRowActionConfirmation = nil
+            }
+        } message: { confirmation in
+            Text(confirmation.message)
+        }
         .task {
             await loadInitialStateIfNeeded()
         }
@@ -524,6 +577,12 @@ public struct ModuleBrowserView: View {
             installedModules: installedModules,
             downloadActivities: downloadActivities
         )
+        let installedModule = installedModules.first { $0.name == module.name }
+        let rowActions = ModuleDownloadRowActionPlanner.availableActions(
+            for: module,
+            installedModule: installedModule,
+            isBeingInstalled: status.isBeingInstalled
+        )
         let isRecommended = recommendedDocuments?.contains(module) == true
         let badAction = badDocuments?.badDocumentAction(for: module) ?? .none
 
@@ -570,72 +629,164 @@ public struct ModuleBrowserView: View {
 
             Spacer()
 
-            switch status {
-            case .installed:
-                Image(systemName: "checkmark.circle.fill")
-                    .foregroundStyle(.green)
-            case .beingInstalled(let progressPercent):
-                VStack(alignment: .trailing, spacing: 6) {
-                    Text("\(progressPercent)%")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    ProgressView(value: Double(progressPercent), total: 100)
-                        .frame(width: 76)
-                    Button {
-                        cancelInstall(module.name)
-                    } label: {
-                        Label(String(localized: "cancel"), systemImage: "arrow.uturn.backward.circle")
-                    }
-                    .labelStyle(.iconOnly)
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .accessibilityLabel(String(localized: "cancel"))
-                }
-            case .errorDownloading:
-                VStack(alignment: .trailing, spacing: 6) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.red)
-                    Button(String(localized: "retry", defaultValue: "Retry")) {
-                        installModule(module)
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                }
-            case .updateAvailable:
-                Button(String(localized: "update")) {
-                    installModule(module)
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-            case .unavailable:
-                Label(String(localized: "unavailable"), systemImage: "lock.slash")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            case .installable:
-                Button(String(localized: "install_module", defaultValue: "Install")) {
-                    installModule(module)
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-            }
+            rowTrailingControls(
+                for: module,
+                installedModule: installedModule,
+                status: status,
+                rowActions: rowActions
+            )
         }
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-            if installedModuleNames.contains(module.name) {
+            if rowActions.contains(.uninstall) {
                 Button(role: .destructive) {
-                    uninstallModule(module.name)
+                    pendingRowActionConfirmation = ModuleBrowserRowActionConfirmation(
+                        kind: .uninstall,
+                        module: module
+                    )
                 } label: {
                     Label(String(localized: "uninstall"), systemImage: "trash")
                 }
             }
         }
         .contextMenu {
-            if installedModuleNames.contains(module.name) {
+            if rowActions.contains(.about) {
+                Button {
+                    selectedModuleDetails = ModuleBrowserModuleDetails(
+                        module: module,
+                        installedModule: installedModule
+                    )
+                } label: {
+                    Label(String(localized: "about"), systemImage: "info.circle")
+                }
+            }
+            if rowActions.contains(.uninstall) {
                 Button(role: .destructive) {
-                    uninstallModule(module.name)
+                    pendingRowActionConfirmation = ModuleBrowserRowActionConfirmation(
+                        kind: .uninstall,
+                        module: module
+                    )
                 } label: {
                     Label(String(localized: "uninstall"), systemImage: "trash")
                 }
             }
+            if rowActions.contains(.deleteIndex) {
+                Button(role: .destructive) {
+                    pendingRowActionConfirmation = ModuleBrowserRowActionConfirmation(
+                        kind: .deleteIndex,
+                        module: module
+                    )
+                } label: {
+                    Label(
+                        String(localized: "delete_module_index", defaultValue: "Delete Index"),
+                        systemImage: "magnifyingglass"
+                    )
+                }
+            }
+        }
+    }
+
+    /**
+     Builds the trailing controls for a Downloads row from Android-compatible row actions.
+
+     - Parameters:
+       - module: Remote catalog row being rendered.
+       - installedModule: Matching installed row, when present.
+       - status: Current Android-equivalent install status.
+       - rowActions: Precomputed secondary actions from `ModuleDownloadRowActionPlanner`.
+     - Returns: SwiftUI controls for About plus the primary install/update/progress affordance.
+     - Side effects: Produced controls may mutate view state when tapped.
+     - Failure modes: Action failures are handled by `installModule(_:)`, `cancelInstall(_:)`, or
+       the confirmation alert handlers.
+     */
+    @ViewBuilder
+    private func rowTrailingControls(
+        for module: RemoteModuleInfo,
+        installedModule: ModuleInfo?,
+        status: ModuleBrowserDownloadStatus,
+        rowActions: [ModuleDownloadRowAction]
+    ) -> some View {
+        HStack(spacing: 8) {
+            if rowActions.contains(.about) {
+                Button {
+                    selectedModuleDetails = ModuleBrowserModuleDetails(
+                        module: module,
+                        installedModule: installedModule
+                    )
+                } label: {
+                    Label(String(localized: "about"), systemImage: "info.circle")
+                }
+                .labelStyle(.iconOnly)
+                .buttonStyle(.borderless)
+                .accessibilityLabel(String(localized: "about"))
+            }
+
+            rowPrimaryControl(for: module, status: status)
+        }
+    }
+
+    /**
+     Builds the primary install/status control for one Downloads row.
+
+     - Parameters:
+       - module: Remote catalog row being rendered.
+       - status: Current Android-equivalent install status.
+     - Returns: SwiftUI control matching Android's status branch for the row.
+     - Side effects: Buttons may start, retry, update, or cancel module installs.
+     - Failure modes: Install failures are caught and retained as row error state by
+       `installModule(_:)`.
+     */
+    @ViewBuilder
+    private func rowPrimaryControl(
+        for module: RemoteModuleInfo,
+        status: ModuleBrowserDownloadStatus
+    ) -> some View {
+        switch status {
+        case .installed:
+            Image(systemName: "checkmark.circle.fill")
+                .foregroundStyle(.green)
+        case .beingInstalled(let progressPercent):
+            VStack(alignment: .trailing, spacing: 6) {
+                Text("\(progressPercent)%")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                ProgressView(value: Double(progressPercent), total: 100)
+                    .frame(width: 76)
+                Button {
+                    cancelInstall(module.name)
+                } label: {
+                    Label(String(localized: "cancel"), systemImage: "arrow.uturn.backward.circle")
+                }
+                .labelStyle(.iconOnly)
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .accessibilityLabel(String(localized: "cancel"))
+            }
+        case .errorDownloading:
+            VStack(alignment: .trailing, spacing: 6) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.red)
+                Button(String(localized: "retry", defaultValue: "Retry")) {
+                    installModule(module)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
+        case .updateAvailable:
+            Button(String(localized: "update")) {
+                installModule(module)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+        case .unavailable:
+            Label(String(localized: "unavailable"), systemImage: "lock.slash")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        case .installable:
+            Button(String(localized: "install_module", defaultValue: "Install")) {
+                installModule(module)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
         }
     }
 
@@ -1574,6 +1725,25 @@ public struct ModuleBrowserView: View {
             refreshInstalledList()
         } catch {
             errorMessage = "Uninstall failed: \(error.localizedDescription)"
+        }
+    }
+
+    /**
+     Deletes the local full-text search index for one installed module.
+
+     Android exposes this as the `delete_index` contextual document action and confirms before
+     dispatching to `SwordDocumentFacade.deleteDocumentIndex`. iOS uses its FTS5-backed
+     `SearchIndexService`; deleting a missing index is intentionally harmless so the action can
+     stay visible for every installed row like Android.
+
+     - Parameter name: Module initials whose local search index should be removed.
+     - Side effects: Mutates the shared search-index SQLite database through `SearchIndexService`.
+     - Failure modes: `SearchIndexService.deleteIndex(for:)` treats missing indexes and SQLite
+       failures as no-ops, matching Android's best-effort contextual action.
+     */
+    private func deleteModuleIndex(_ name: String) {
+        Task {
+            await searchIndexService.deleteIndex(for: name)
         }
     }
 }

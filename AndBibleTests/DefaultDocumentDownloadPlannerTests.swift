@@ -118,3 +118,87 @@ final class DefaultDocumentDownloadPlannerTests: XCTestCase {
         )
     }
 }
+
+final class ModuleDownloadRowActionPlannerTests: XCTestCase {
+    func testInstallableRemoteRowsExposeAboutOnly() {
+        let actions = ModuleDownloadRowActionPlanner.availableActions(
+            for: remoteModule("KJV", category: .bible, sourceName: "CrossWire"),
+            installedModule: nil,
+            isBeingInstalled: false
+        )
+
+        XCTAssertEqual(actions, [.about])
+    }
+
+    func testInstalledRowsExposeAndroidManagementActions() {
+        let actions = ModuleDownloadRowActionPlanner.availableActions(
+            for: remoteModule("KJV", category: .bible, sourceName: "CrossWire"),
+            installedModule: installedModule("KJV", category: .bible),
+            isBeingInstalled: false
+        )
+
+        XCTAssertEqual(actions, [.about, .uninstall, .deleteIndex])
+    }
+
+    func testEncryptedInstalledRowsIncludeUnlockWhenCipherCoordinatorIsSupported() {
+        let actions = ModuleDownloadRowActionPlanner.availableActions(
+            for: remoteModule("KJV", category: .bible, sourceName: "CrossWire"),
+            installedModule: installedModule("KJV", category: .bible, isEncrypted: true),
+            isBeingInstalled: false,
+            supportsUnlock: true
+        )
+
+        XCTAssertEqual(actions, [.about, .uninstall, .deleteIndex, .unlock])
+    }
+
+    func testEncryptedInstalledRowsDocumentIOSUnlockGapByDefault() {
+        let actions = ModuleDownloadRowActionPlanner.availableActions(
+            for: remoteModule("KJV", category: .bible, sourceName: "CrossWire"),
+            installedModule: installedModule("KJV", category: .bible, isEncrypted: true),
+            isBeingInstalled: false
+        )
+
+        XCTAssertEqual(actions, [.about, .uninstall, .deleteIndex])
+    }
+
+    func testBeingInstalledRowsHideInlineAboutButKeepInstalledManagementParity() {
+        let actions = ModuleDownloadRowActionPlanner.availableActions(
+            for: remoteModule("KJV", category: .bible, sourceName: "CrossWire"),
+            installedModule: installedModule("KJV", category: .bible),
+            isBeingInstalled: true
+        )
+
+        XCTAssertEqual(actions, [.uninstall, .deleteIndex])
+    }
+
+    private func remoteModule(
+        _ name: String,
+        category: ModuleCategory,
+        sourceName: String,
+        availability: RemoteModuleAvailability = .installable
+    ) -> RemoteModuleInfo {
+        RemoteModuleInfo(
+            name: name,
+            description: name,
+            category: category,
+            language: "en",
+            sourceName: sourceName,
+            availability: availability
+        )
+    }
+
+    private func installedModule(
+        _ name: String,
+        category: ModuleCategory,
+        isEncrypted: Bool = false
+    ) -> ModuleInfo {
+        ModuleInfo(
+            name: name,
+            description: name,
+            category: category,
+            language: "en",
+            isEncrypted: isEncrypted,
+            isUnlocked: !isEncrypted
+        )
+    }
+}

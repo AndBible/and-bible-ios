@@ -26,6 +26,18 @@ public final class SearchIndexService: @unchecked Sendable {
     private var db: OpaquePointer?
     @ObservationIgnored
     private let dbPath: String
+    /**
+     Serial queue for SQLite mutations that rewrite module index contents.
+
+     `SQLITE_OPEN_FULLMUTEX` protects individual SQLite calls, not logical create/delete
+     operations. Keeping index creation and deletion on one queue prevents Delete Index from
+     interleaving with a background build and leaving partial FTS rows with completed metadata.
+     */
+    @ObservationIgnored
+    private let indexMutationQueue = DispatchQueue(
+        label: "org.andbible.ios.search-index.mutations",
+        qos: .userInitiated
+    )
 
     /// Whether an index is currently being built.
     public var isIndexing = false
@@ -48,6 +60,24 @@ public final class SearchIndexService: @unchecked Sendable {
      */
     public init() {
         dbPath = Self.defaultDatabasePath()
+        openDatabase()
+    }
+
+    /**
+     Creates the search index service against a caller-supplied SQLite path.
+
+     Tests use this initializer to isolate index state from the app's shared Documents database.
+     Runtime callers should use `init()` so the service resolves the standard app database path.
+
+     - Parameter databasePath: Absolute path for the FTS5 SQLite database.
+     - Side effects:
+       - opens or creates the SQLite database at `databasePath`
+       - creates required FTS and metadata tables when absent
+     - Failure modes:
+       - SQLite open or schema failures leave the service with no active database handle
+     */
+    init(databasePath: String) {
+        dbPath = databasePath
         openDatabase()
     }
 
@@ -150,7 +180,7 @@ public final class SearchIndexService: @unchecked Sendable {
         }
 
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            indexMutationQueue.async { [weak self] in
                 guard let self, let db = self.db else {
                     DispatchQueue.main.async {
                         self?.isIndexing = false
@@ -233,10 +263,25 @@ public final class SearchIndexService: @unchecked Sendable {
         }
     }
 
-    /// Delete the search index for a module.
-    public func deleteIndex(for moduleName: String) {
-        guard let db else { return }
-        deleteIndexData(db: db, moduleName: moduleName)
+    /**
+     Deletes the search index for a module after any active index mutation completes.
+
+     - Parameter moduleName: Module initials whose FTS rows and metadata should be removed.
+     - Side effects:
+       - mutates the FTS index database on the service's serial mutation queue
+     - Failure modes:
+       - missing indexes, closed database handles, and SQLite statement failures are treated as
+         no-ops so callers can use this as Android-style best-effort cleanup
+     */
+    public func deleteIndex(for moduleName: String) async {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            indexMutationQueue.async { [weak self] in
+                if let self, let db = self.db {
+                    self.deleteIndexData(db: db, moduleName: moduleName)
+                }
+                continuation.resume()
+            }
+        }
     }
 
     private func deleteIndexData(db: OpaquePointer, moduleName: String) {

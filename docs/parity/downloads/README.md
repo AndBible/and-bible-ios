@@ -15,7 +15,9 @@ a documented platform constraint exists.
 1. [module-browser-list-matrix.md](module-browser-list-matrix.md): iOS
    `ModuleBrowserView` versus Android `DownloadActivity` and
    `DocumentDownloadItemAdapter`
-2. [repository-source-management-matrix.md](repository-source-management-matrix.md):
+2. [row-actions-matrix.md](row-actions-matrix.md): Android Downloads row About,
+   delete, delete-index, and unlock actions versus iOS `ModuleBrowserView`
+3. [repository-source-management-matrix.md](repository-source-management-matrix.md):
    iOS `RepositoryManagerView` versus Android `RepoFactory`,
    `CustomRepositories`, and `CustomRepositoryEditor`
 
