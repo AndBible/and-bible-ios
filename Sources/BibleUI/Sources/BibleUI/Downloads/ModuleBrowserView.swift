@@ -200,6 +200,12 @@ public struct ModuleBrowserView: View {
     /// Whether a remote catalog refresh is currently in progress.
     @State private var isRefreshing = false
 
+    /// Whether initial local SWORD/cache restoration is running after the sheet appears.
+    @State private var isLoadingInitialState = false
+
+    /// Guards the initial load task so SwiftUI body updates do not restart local setup work.
+    @State private var didStartInitialStateLoad = false
+
     /// De-duplicated remote modules loaded from configured sources or the local cache.
     @State private var availableModules: [RemoteModuleInfo] = []
 
@@ -382,12 +388,16 @@ public struct ModuleBrowserView: View {
                 }
             }
 
-            if isRefreshing {
+            if isLoadingInitialState || isRefreshing {
                 Section {
                     VStack(spacing: 8) {
                         ProgressView()
                         if let refreshProgress {
                             Text(refreshProgress)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        } else if isLoadingInitialState {
+                            Text(String(localized: "loading", defaultValue: "Loading..."))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         } else {
@@ -410,7 +420,7 @@ public struct ModuleBrowserView: View {
                         remoteModuleRow(module)
                     }
                 }
-            } else if availableModules.isEmpty && !isRefreshing {
+            } else if availableModules.isEmpty && !isRefreshing && !isLoadingInitialState {
                 Section {
                     VStack(spacing: 8) {
                         Text(String(localized: "tap_refresh_to_load"))
@@ -442,13 +452,12 @@ public struct ModuleBrowserView: View {
                     Button("Refresh", systemImage: "arrow.clockwise") {
                         refreshCatalog()
                     }
-                    .disabled(isRefreshing)
+                    .disabled(isRefreshing || isLoadingInitialState)
                 }
             }
         }
-        .onAppear {
-            setupManagers()
-            startDefaultDownloadFlowIfNeeded()
+        .task {
+            await loadInitialStateIfNeeded()
         }
         .onReceive(NotificationCenter.default.publisher(for: RepositorySourceManager.sourcesDidChangeNotification)) { _ in
             Task { @MainActor in
@@ -1000,41 +1009,88 @@ public struct ModuleBrowserView: View {
     // MARK: - Data Management
 
     /**
-     Initializes the local SWORD manager, repository sources, and cached catalog state.
+     Initial state restored before the Downloads list can show cached or installed rows.
+
+     This snapshot is produced away from the main actor so SWORD manager creation, installed-module
+     scanning, and JSON catalog decoding do not block modal presentation. It contains only
+     value-semantic module/source metadata plus the freshly created `SwordManager` needed by later
+     install/uninstall operations.
+
+     Inputs:
+     - captured `ModuleRepository` whose cache is restored by the background load
+
+     Outputs:
+     - one immutable state bundle consumed by `loadInitialStateIfNeeded`
 
      Side effects:
-     - creates a `SwordManager` instance the first time the view appears
-     - loads configured remote sources from repository storage
-     - restores cached Android recommended/bad/default metadata for row badges, filtering, and
-       startup default-document consumption
-     - refreshes the installed-module list from the local module directory
-     - restores cached remote catalogs when no in-memory catalog has been loaded yet
-     */
-    private func setupManagers() {
-        if swordManager == nil {
-            swordManager = SwordManager()
-        }
-        if sources.isEmpty {
-            sources = repository.loadSources()
-        }
-        if recommendedDocuments == nil {
-            recommendedDocuments = repository.loadCachedRecommendedDocuments()
-        }
-        if badDocuments == nil {
-            badDocuments = repository.loadCachedBadDocuments()
-        }
-        if defaultDocuments == nil {
-            defaultDocuments = repository.loadCachedDefaultDocuments()
-        }
-        refreshInstalledList()
+     - none itself; the loader that creates it performs local file I/O and SWORD initialization
 
-        // Load cached catalog from disk if available modules are empty
-        if availableModules.isEmpty {
-            let cached = repository.loadCachedCatalogs() + repository.loadCachedPseudoModules()
-            if !cached.isEmpty {
-                availableModules = deduplicatedModules(from: cached)
-            }
+     Failure modes:
+     - unavailable managers or missing cache files are represented as `nil`/empty values so the UI
+       can still open and offer refresh
+     */
+    private struct InitialModuleBrowserState {
+        let swordManager: SwordManager?
+        let sources: [SourceConfig]
+        let recommendedDocuments: ModuleDownloadConfiguration?
+        let badDocuments: ModuleDownloadConfiguration?
+        let defaultDocuments: ModuleDownloadConfiguration?
+        let installedModules: [ModuleInfo]
+        let cachedModules: [RemoteModuleInfo]
+    }
+
+    /**
+     Starts initial local state restoration after the Downloads sheet has been presented.
+
+     Side effects:
+     - sets `isLoadingInitialState` while local setup is in flight
+     - creates a `SwordManager` and scans installed modules on a background task
+     - loads configured repository sources and cached Android metadata/catalog rows from disk
+     - updates SwiftUI state on the main actor after the snapshot is ready
+     - starts Android default-document refresh/install flow after local state is available
+
+     Failure modes:
+     - missing caches produce empty module lists and keep the sheet interactive
+     - cancellation leaves current state unchanged so dismissed sheets do not apply stale updates
+
+     - Important: This method intentionally avoids synchronous SWORD or catalog work on the main
+       actor. Downloads should present immediately, then populate rows, matching Android's
+       behavior of opening the screen before repository work completes.
+     */
+    @MainActor
+    private func loadInitialStateIfNeeded() async {
+        guard !didStartInitialStateLoad else { return }
+        didStartInitialStateLoad = true
+        isLoadingInitialState = true
+
+        let repository = repository
+        let initialState = await Task.detached(priority: .userInitiated) {
+            let manager = SwordManager()
+            let cachedModules = repository.loadCachedCatalogs() + repository.loadCachedPseudoModules()
+            return InitialModuleBrowserState(
+                swordManager: manager,
+                sources: repository.loadSources(),
+                recommendedDocuments: repository.loadCachedRecommendedDocuments(),
+                badDocuments: repository.loadCachedBadDocuments(),
+                defaultDocuments: repository.loadCachedDefaultDocuments(),
+                installedModules: manager?.installedModules() ?? [],
+                cachedModules: cachedModules
+            )
+        }.value
+
+        guard !Task.isCancelled else { return }
+
+        swordManager = initialState.swordManager
+        sources = initialState.sources
+        recommendedDocuments = initialState.recommendedDocuments
+        badDocuments = initialState.badDocuments
+        defaultDocuments = initialState.defaultDocuments
+        installedModules = initialState.installedModules
+        if availableModules.isEmpty && !initialState.cachedModules.isEmpty {
+            availableModules = deduplicatedModules(from: initialState.cachedModules)
         }
+        isLoadingInitialState = false
+        startDefaultDownloadFlowIfNeeded()
     }
 
     /**

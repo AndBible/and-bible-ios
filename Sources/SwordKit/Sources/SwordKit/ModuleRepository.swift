@@ -996,17 +996,9 @@ public final class ModuleRepository: @unchecked Sendable {
         //    filename prefix (e.g. "modules/lexdict/rawld/strongshebrew/strongshebrew")
         //    — the parent is the directory, and files like "strongshebrew.dat" go there.
         let driver = entry.modDrv.lowercased()
-        let usesFilePrefix = ["rawld", "rawld4", "zld", "rawgenbook"].contains(driver)
-        let localDir: String
-        let remoteBase: String
-        if usesFilePrefix {
-            // DataPath's parent is the actual directory
-            localDir = ((swordPath as NSString).appendingPathComponent(entry.dataPath) as NSString).deletingLastPathComponent
-            remoteBase = (entry.dataPath as NSString).deletingLastPathComponent
-        } else {
-            localDir = (swordPath as NSString).appendingPathComponent(entry.dataPath)
-            remoteBase = entry.dataPath
-        }
+        let moduleDataPath = moduleDataDirectoryPath(for: entry.dataPath, driver: driver)
+        let localDir = (swordPath as NSString).appendingPathComponent(moduleDataPath)
+        let remoteBase = moduleDataPath
         let localDirURL = URL(fileURLWithPath: localDir, isDirectory: true)
         let localParentURL = localDirURL.deletingLastPathComponent()
         try fm.createDirectory(at: localParentURL, withIntermediateDirectories: true)
@@ -1020,7 +1012,11 @@ public final class ModuleRepository: @unchecked Sendable {
         }
 
         // 2. Determine files to download based on ModDrv
-        let fileGroups = moduleFileGroups(for: entry.modDrv, dataPath: entry.dataPath)
+        let fileGroups = moduleFileGroups(
+            for: entry.modDrv,
+            dataPath: entry.dataPath,
+            confContent: entry.confContent
+        )
 
         // 3. Download each file
         var plannedFileCount = fileGroups.reduce(0) { $0 + $1.files.count }
@@ -1063,6 +1059,18 @@ public final class ModuleRepository: @unchecked Sendable {
                     break
                 } catch let statusError as ModuleFileHTTPStatusError {
                     logger.warning("Download failed for \(fileName): \(statusError.localizedDescription)")
+                    if statusError.statusCode == 404 {
+                        let installedFromPackage = try await installModulePackageFallback(
+                            named: moduleName,
+                            entry: entry,
+                            source: source,
+                            localDirURL: localDirURL,
+                            progress: progress
+                        )
+                        if installedFromPackage {
+                            return
+                        }
+                    }
                     throw ModuleRepositoryError.downloadFailed(statusError.localizedDescription)
                 } catch {
                     logger.warning("Download failed for \(fileName): \(error.localizedDescription)")
@@ -1072,6 +1080,16 @@ public final class ModuleRepository: @unchecked Sendable {
         }
 
         guard stagedFileCount > 0 else {
+            let installedFromPackage = try await installModulePackageFallback(
+                named: moduleName,
+                entry: entry,
+                source: source,
+                localDirURL: localDirURL,
+                progress: progress
+            )
+            if installedFromPackage {
+                return
+            }
             throw ModuleRepositoryError.downloadFailed("No module data files were available for \(moduleName)")
         }
         try Task.checkCancellation()
@@ -1150,6 +1168,288 @@ public final class ModuleRepository: @unchecked Sendable {
         }
 
         try Task.checkCancellation()
+    }
+
+    /**
+     Installs a module from a repository ZIP package when raw data-file probing cannot find usable
+     files.
+
+     Android's installer can use package directories such as `zip/` or `packages/rawzip/` for
+     repositories that do not expose raw module data files. The Swift installer first tries raw file
+     paths so it can preserve streaming progress, then calls this fallback only when no module data
+     has been staged.
+
+     - Parameters:
+       - moduleName: Catalog module abbreviation whose package should be downloaded.
+       - entry: Parsed catalog entry providing `DataPath`, `ModDrv`, and `.conf` content.
+       - source: Repository source used to derive package ZIP candidate URLs.
+       - localDirURL: Final module data directory that will receive the extracted package data.
+       - progress: Optional normalized progress callback shared with the caller.
+     - Returns: `true` when a candidate package was downloaded, extracted, and committed; `false`
+       when no package candidate was available.
+     - Side effects:
+       - downloads a candidate ZIP into a temporary file
+       - extracts only `modules/` entries into a temporary staging tree
+       - commits the staged module data and catalog `.conf` through the rollback-safe publish path
+       - invalidates SWORD's module cache after a successful package install
+     - Throws:
+       - `CancellationError` when the surrounding task is cancelled
+       - `ModuleRepositoryError.invalidZip` when a downloaded candidate is malformed or lacks the
+         catalog data directory
+       - file-system errors from temporary extraction or final publish
+     */
+    private func installModulePackageFallback(
+        named moduleName: String,
+        entry: CatalogModule,
+        source: SourceConfig,
+        localDirURL: URL,
+        progress: ((Double) -> Void)?
+    ) async throws -> Bool {
+        let candidates = packageZipCandidateURLs(for: moduleName, source: source)
+        guard !candidates.isEmpty else { return false }
+
+        let fm = FileManager.default
+        let packageDownloadURL = fm.temporaryDirectory
+            .appendingPathComponent("\(moduleName)-\(UUID().uuidString).zip")
+        defer {
+            try? fm.removeItem(at: packageDownloadURL)
+        }
+
+        var downloadedPackageURL: URL?
+        for candidate in candidates {
+            try Task.checkCancellation()
+            do {
+                logger.info("Trying package fallback \(candidate.absoluteString)")
+                try await downloadRequiredModuleFile(
+                    from: candidate,
+                    to: packageDownloadURL,
+                    fileName: candidate.lastPathComponent,
+                    completedFiles: 0,
+                    totalFiles: 1,
+                    progress: progress
+                )
+                downloadedPackageURL = candidate
+                break
+            } catch let statusError as ModuleFileHTTPStatusError where statusError.statusCode == 404 {
+                logger.info("Skipping missing package fallback \(candidate.absoluteString)")
+                try? fm.removeItem(at: packageDownloadURL)
+            }
+        }
+
+        guard let downloadedPackageURL else { return false }
+
+        let zipData = try Data(contentsOf: packageDownloadURL)
+        let entries = try parseZip(zipData)
+        guard !entries.isEmpty else {
+            throw ModuleRepositoryError.invalidZip("\(downloadedPackageURL.lastPathComponent) is empty")
+        }
+
+        let moduleDataPath = moduleDataDirectoryPath(for: entry.dataPath, driver: entry.modDrv)
+        let extractionRootURL = fm.temporaryDirectory
+            .appendingPathComponent("\(moduleName)-\(UUID().uuidString).package", isDirectory: true)
+        try fm.createDirectory(at: extractionRootURL, withIntermediateDirectories: true)
+        defer {
+            try? fm.removeItem(at: extractionRootURL)
+        }
+
+        let dataPathPrefix = moduleDataPath.hasSuffix("/") ? moduleDataPath : "\(moduleDataPath)/"
+        var extractedDataFileCount = 0
+
+        for entry in entries {
+            try Task.checkCancellation()
+            guard let relativePath = normalizedSwordPackageEntryPath(entry.name),
+                  relativePath.hasPrefix(dataPathPrefix) else {
+                continue
+            }
+
+            let destinationURL = extractionRootURL.appendingPathComponent(relativePath)
+            try fm.createDirectory(
+                at: destinationURL.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try entry.data.write(to: destinationURL)
+            extractedDataFileCount += 1
+        }
+
+        let stagedDataDirURL = extractionRootURL.appendingPathComponent(moduleDataPath, isDirectory: true)
+        guard extractedDataFileCount > 0,
+              fm.fileExists(atPath: stagedDataDirURL.path) else {
+            throw ModuleRepositoryError.invalidZip(
+                "\(downloadedPackageURL.lastPathComponent) did not contain \(moduleDataPath)"
+            )
+        }
+
+        try Task.checkCancellation()
+        try commitStagedModuleInstall(
+            stagingDirURL: stagedDataDirURL,
+            localDirURL: localDirURL,
+            moduleName: moduleName,
+            confContent: entry.confContent
+        )
+        invalidateModuleCache()
+        progress?(1.0)
+        return true
+    }
+
+    /**
+     Builds repository package ZIP candidates that match Android/SWORD repository layouts.
+
+     - Parameters:
+       - moduleName: Catalog module abbreviation used as the package filename.
+       - source: Repository source whose host and catalog path anchor package locations.
+     - Returns: De-duplicated HTTPS URLs, ordered from source-local packages to CrossWire-style
+       parent `packages/rawzip` locations.
+     - Side effects: none.
+     - Failure modes: malformed host/path combinations are skipped rather than thrown because raw
+       file installation remains the primary path.
+     */
+    private func packageZipCandidateURLs(for moduleName: String, source: SourceConfig) -> [URL] {
+        let packageFileName = "\(moduleName).zip"
+        var paths: [String] = []
+        if let androidPackageDirectory = androidPackageDirectory(for: source) {
+            paths.append(appendingPathComponent(packageFileName, toPath: androidPackageDirectory))
+        }
+        paths += [
+            appendingPathComponent("zip/\(packageFileName)", toPath: source.catalogPath),
+            appendingPathComponent("packages/\(packageFileName)", toPath: source.catalogPath),
+            appendingPathComponent("packages/rawzip/\(packageFileName)", toPath: source.catalogPath)
+        ]
+
+        if let rawParentPath = parentPathForRawPackageDirectory(source.catalogPath) {
+            paths.append(appendingPathComponent("packages/rawzip/\(packageFileName)", toPath: rawParentPath))
+        }
+
+        var seen = Set<String>()
+        return paths.compactMap { path in
+            guard let url = URL(string: "https://\(source.host)\(path)") else { return nil }
+            guard seen.insert(url.absoluteString).inserted else { return nil }
+            return url
+        }
+    }
+
+    /**
+     Returns the Android-parity package directory for known default SWORD repositories.
+
+     Android keeps package and catalog directories as distinct repository fields. iOS persists only
+     the catalog-style `HTTPSource` row today, so default sources need an explicit package-directory
+     map to avoid guessing wrong locations for repositories such as STEP, IBT, Wycliffe, and
+     Lockman.
+
+     - Parameter source: Repository source loaded from `InstallMgr.conf`.
+     - Returns: Package directory path from Android's `repositories.txt` when the source matches a
+       built-in repository, otherwise the direct-catalog custom fallback `catalogPath/packages`.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    private func androidPackageDirectory(for source: SourceConfig) -> String? {
+        switch (source.name, source.host, source.catalogPath) {
+        case ("CrossWire", "crosswire.org", "/ftpmirror/pub/sword/raw"):
+            return "/ftpmirror/pub/sword/packages/rawzip"
+        case ("Crosswire Beta", "crosswire.org", "/ftpmirror/pub/sword/betaraw"):
+            return "/ftpmirror/pub/sword/betapackages/rawzip"
+        case ("AndBible Extra", "andbible.github.io", "/andbible-extra"):
+            return "/andbible-extra/zip"
+        case ("AndBible", "andbible.github.io", "/data/andbible"):
+            return "/data/andbible/zip"
+        case ("AndBible Beta", "andbible.github.io", "/data/andbible/beta"):
+            return "/data/andbible/beta/zip"
+        case ("IBT", "ibtrussia.org", "/ftpmirror/pub/modsword/raw"):
+            return "/ftpmirror/pub/modsword/rawzip"
+        case ("Wycliffe (CrossWire)", "crosswire.org", "/ftpmirror/pub/sword/wyclifferaw"):
+            return "/ftpmirror/pub/sword/wycliffepackages/rawzip"
+        case ("eBible", "ebible.org", "/sword"):
+            return "/sword/zip"
+        case ("Lockman (CrossWire)", "crosswire.org", "/ftpmirror/pub/sword/lockmanraw"):
+            return "/ftpmirror/pub/sword/lockmanpackages"
+        case ("STEP Bible (Tyndale)", "public.modules.stepbible.org", "/catalog"):
+            return "/packages"
+        default:
+            return appendingPathComponent("packages", toPath: source.catalogPath)
+        }
+    }
+
+    /**
+     Resolves the parent repository path whose `packages/rawzip/` directory pairs with a raw data
+     catalog.
+
+     - Parameter catalogPath: Source catalog path from `InstallMgr.conf`.
+     - Returns: The parent path when the final path component is a raw catalog directory, otherwise
+       `nil`.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    private func parentPathForRawPackageDirectory(_ catalogPath: String) -> String? {
+        let trimmedPath = catalogPath.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let components = trimmedPath.split(separator: "/").map(String.init)
+        guard let lastComponent = components.last,
+              lastComponent.lowercased().contains("raw") else {
+            return nil
+        }
+
+        let parentComponents = components.dropLast()
+        return "/" + parentComponents.joined(separator: "/")
+    }
+
+    /**
+     Appends a relative component to a repository path without requiring URL filesystem semantics.
+
+     - Parameters:
+       - component: Relative path component or subpath to append.
+       - path: Absolute repository path beginning with `/`.
+     - Returns: A normalized absolute path with exactly one separator between `path` and
+       `component`.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    private func appendingPathComponent(_ component: String, toPath path: String) -> String {
+        let basePath = path.hasSuffix("/") ? String(path.dropLast()) : path
+        let relativeComponent = component.hasPrefix("/") ? String(component.dropFirst()) : component
+        if basePath.isEmpty {
+            return "/\(relativeComponent)"
+        }
+        return "\(basePath)/\(relativeComponent)"
+    }
+
+    /**
+     Normalizes a SWORD package ZIP entry to a safe path rooted at the local SWORD home.
+
+     - Parameter path: Raw ZIP entry name.
+     - Returns: A relative path beginning with `mods.d/` or `modules/`, with any single enclosing
+       package folder removed; returns `nil` for absolute paths, traversal paths, directories, or
+       unsupported archive entries.
+     - Side effects: none.
+     - Failure modes: unsafe paths are filtered out instead of throwing so unrelated archive entries
+       do not fail an otherwise valid package.
+     */
+    private func normalizedSwordPackageEntryPath(_ path: String) -> String? {
+        var relativePath = path.replacingOccurrences(of: "\\", with: "/")
+        while relativePath.hasPrefix("./") {
+            relativePath = String(relativePath.dropFirst(2))
+        }
+        guard !relativePath.isEmpty,
+              !relativePath.hasPrefix("/"),
+              !relativePath.hasSuffix("/") else {
+            return nil
+        }
+
+        let components = relativePath.split(separator: "/", omittingEmptySubsequences: false)
+        guard !components.contains(where: { $0 == ".." || $0.isEmpty }) else {
+            return nil
+        }
+
+        let lowercasedPath = relativePath.lowercased()
+        if lowercasedPath.hasPrefix("mods.d/") || lowercasedPath.hasPrefix("modules/") {
+            return relativePath
+        }
+
+        guard let slashIndex = relativePath.firstIndex(of: "/") else { return nil }
+        let nestedPath = String(relativePath[relativePath.index(after: slashIndex)...])
+        let lowercasedNestedPath = nestedPath.lowercased()
+        guard lowercasedNestedPath.hasPrefix("mods.d/")
+            || lowercasedNestedPath.hasPrefix("modules/") else {
+            return nil
+        }
+        return nestedPath
     }
 
     /**
@@ -1412,16 +1712,35 @@ public final class ModuleRepository: @unchecked Sendable {
         return entries
     }
 
+    /**
+     Reads a little-endian 16-bit integer from ZIP bytes without assuming pointer alignment.
+
+     - Parameters:
+       - data: ZIP data buffer.
+       - offset: Byte offset of the integer.
+     - Returns: Parsed unsigned integer.
+     - Side effects: none.
+     - Failure modes: callers guarantee bounds before reading local ZIP headers.
+     */
     private func readUInt16(_ data: Data, at offset: Int) -> UInt16 {
-        return data.withUnsafeBytes { ptr in
-            ptr.load(fromByteOffset: offset, as: UInt16.self).littleEndian
-        }
+        UInt16(data[offset]) | (UInt16(data[offset + 1]) << 8)
     }
 
+    /**
+     Reads a little-endian 32-bit integer from ZIP bytes without assuming pointer alignment.
+
+     - Parameters:
+       - data: ZIP data buffer.
+       - offset: Byte offset of the integer.
+     - Returns: Parsed unsigned integer.
+     - Side effects: none.
+     - Failure modes: callers guarantee bounds before reading local ZIP headers.
+     */
     private func readUInt32(_ data: Data, at offset: Int) -> UInt32 {
-        return data.withUnsafeBytes { ptr in
-            ptr.load(fromByteOffset: offset, as: UInt32.self).littleEndian
-        }
+        UInt32(data[offset])
+            | (UInt32(data[offset + 1]) << 8)
+            | (UInt32(data[offset + 2]) << 16)
+            | (UInt32(data[offset + 3]) << 24)
     }
 
     /// Inflate deflated data using the C adapter's inflate_raw_data().
@@ -1655,12 +1974,17 @@ public final class ModuleRepository: @unchecked Sendable {
      - Parameters:
        - modDrv: SWORD driver name from the module `.conf`.
        - dataPath: Normalized `DataPath` from the module `.conf`.
+       - confContent: Full `.conf` content used for zCom `BlockType` file extension parity.
      - Returns: Ordered file groups. Optional groups model Android/libsword behavior for
        single-testament verse-keyed modules; required groups remain all-or-nothing.
      - Side effects: none.
      - Failure modes: unknown drivers fall back to optional ztext-style testament groups.
      */
-    private func moduleFileGroups(for modDrv: String, dataPath: String) -> [ModuleFileGroup] {
+    private func moduleFileGroups(
+        for modDrv: String,
+        dataPath: String,
+        confContent: String
+    ) -> [ModuleFileGroup] {
         let driver = modDrv.lowercased()
 
         switch driver {
@@ -1675,9 +1999,16 @@ public final class ModuleRepository: @unchecked Sendable {
                 ModuleFileGroup(files: ["nt", "nt.vss"], required: false)
             ]
         case "zcom", "zcom2", "zcom4":
+            let compressedStem = compressedCommentaryFileStem(from: confContent)
             return [
-                ModuleFileGroup(files: ["ot.bzs", "ot.bzz", "ot.bzv"], required: false),
-                ModuleFileGroup(files: ["nt.bzs", "nt.bzz", "nt.bzv"], required: false)
+                ModuleFileGroup(
+                    files: ["ot.\(compressedStem)zs", "ot.\(compressedStem)zz", "ot.\(compressedStem)zv"],
+                    required: false
+                ),
+                ModuleFileGroup(
+                    files: ["nt.\(compressedStem)zs", "nt.\(compressedStem)zz", "nt.\(compressedStem)zv"],
+                    required: false
+                )
             ]
         case "rawcom", "rawcom4":
             return [
@@ -1700,6 +2031,90 @@ public final class ModuleRepository: @unchecked Sendable {
                 ModuleFileGroup(files: ["nt.bzs", "nt.bzz", "nt.bzv"], required: false)
             ]
         }
+    }
+
+    /**
+     Maps zCom `BlockType` metadata to the compressed commentary filename stem.
+
+     - Parameter confContent: Full module `.conf` content from the repository catalog.
+     - Returns: `b` for book-block modules or missing metadata, `c` for chapter-block modules,
+       and `v` for verse-block modules.
+     - Side effects: none.
+     - Failure modes: unknown `BlockType` values fall back to book-block filenames because that is
+       the historical SWORD default and preserves current behavior for modules without metadata.
+     */
+    private func compressedCommentaryFileStem(from confContent: String) -> String {
+        guard let blockType = confValue(named: "BlockType", in: confContent)?.lowercased() else {
+            return "b"
+        }
+
+        switch blockType {
+        case "chapter":
+            return "c"
+        case "verse":
+            return "v"
+        default:
+            return "b"
+        }
+    }
+
+    /**
+     Reads one key from a SWORD `.conf` document without requiring the module to be reparsed.
+
+     - Parameters:
+       - key: Case-insensitive key name to read.
+       - confContent: Full module `.conf` content.
+     - Returns: The trimmed key value when present, otherwise `nil`.
+     - Side effects: none.
+     - Failure modes: malformed lines, comments, and section headers are ignored.
+     */
+    private func confValue(named key: String, in confContent: String) -> String? {
+        for line in confContent.components(separatedBy: .newlines) {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard !trimmed.isEmpty,
+                  !trimmed.hasPrefix("#"),
+                  !trimmed.hasPrefix("["),
+                  let separator = trimmed.firstIndex(of: "=") else {
+                continue
+            }
+
+            let candidateKey = String(trimmed[..<separator])
+                .trimmingCharacters(in: .whitespaces)
+            guard candidateKey.caseInsensitiveCompare(key) == .orderedSame else {
+                continue
+            }
+
+            return String(trimmed[trimmed.index(after: separator)...])
+                .trimmingCharacters(in: .whitespaces)
+        }
+
+        return nil
+    }
+
+    /**
+     Resolves the directory that contains data files for a module `DataPath`.
+
+     - Parameters:
+       - dataPath: Normalized SWORD `DataPath` from the catalog.
+       - driver: SWORD module driver name.
+     - Returns: A relative path under the SWORD home where data files should be read or written.
+     - Side effects: none.
+     - Failure modes: none; unknown drivers treat `DataPath` as a directory.
+     */
+    private func moduleDataDirectoryPath(for dataPath: String, driver: String) -> String {
+        var normalizedPath = dataPath
+        if normalizedPath.hasPrefix("./") {
+            normalizedPath = String(normalizedPath.dropFirst(2))
+        }
+        while normalizedPath.hasSuffix("/") {
+            normalizedPath = String(normalizedPath.dropLast())
+        }
+
+        let normalizedDriver = driver.lowercased()
+        if ["rawld", "rawld4", "zld", "rawgenbook"].contains(normalizedDriver) {
+            return (normalizedPath as NSString).deletingLastPathComponent
+        }
+        return normalizedPath
     }
 
     /// Get the last path component, stripping trailing slashes.

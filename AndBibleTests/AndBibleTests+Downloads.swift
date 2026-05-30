@@ -397,6 +397,317 @@ extension AndBibleTests {
         )
     }
 
+    func testModuleRepositoryInstallsChapterBlockCompressedCommentary() async throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let swordDir = tempDir.appendingPathComponent("sword", isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let source = SourceConfig(
+            name: "CrossWire",
+            type: "HTTP",
+            host: "example.test",
+            catalogPath: "/raw"
+        )
+        let catalogData = try makeModuleRepositoryCatalogArchive(
+            moduleName: "BARNES",
+            category: "Commentaries",
+            modDrv: "zCom",
+            dataPath: "./modules/comments/zcom/barnes/",
+            extraConf: "BlockType=CHAPTER"
+        )
+        var requestedPaths: [String] = []
+
+        ModuleRepositoryDownloadMockURLProtocol.requestHandler = { request in
+            requestedPaths.append(request.url?.path ?? "")
+            let response: HTTPURLResponse
+            let data: Data
+            switch request.url?.path {
+            case "/raw/mods.d.tar.gz":
+                response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!
+                data = catalogData
+            case "/raw/modules/comments/zcom/barnes/ot.czs":
+                response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 404,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!
+                data = Data()
+            case "/raw/modules/comments/zcom/barnes/nt.czs",
+                "/raw/modules/comments/zcom/barnes/nt.czz",
+                "/raw/modules/comments/zcom/barnes/nt.czv":
+                response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!
+                data = Data("commentary-data-\(request.url!.lastPathComponent)".utf8)
+            default:
+                XCTFail("Unexpected request: \(request.url?.absoluteString ?? "<nil>")")
+                response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 404,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!
+                data = Data()
+            }
+            return (response, data)
+        }
+        defer { ModuleRepositoryDownloadMockURLProtocol.requestHandler = nil }
+
+        let repository = ModuleRepository(
+            basePath: tempDir.path,
+            swordPath: swordDir.path,
+            session: makeModuleRepositoryDownloadMockSession()
+        )
+
+        _ = try await repository.refreshCatalog(for: source)
+        try await repository.installModule(named: "BARNES", from: source)
+
+        XCTAssertFalse(
+            requestedPaths.contains { $0.hasSuffix(".bzs") || $0.hasSuffix(".bzz") || $0.hasSuffix(".bzv") },
+            "Chapter-block compressed commentaries should request c-extension data files, not b-extension files."
+        )
+        XCTAssertTrue(requestedPaths.contains("/raw/modules/comments/zcom/barnes/nt.czs"))
+        XCTAssertTrue(requestedPaths.contains("/raw/modules/comments/zcom/barnes/nt.czz"))
+        XCTAssertTrue(requestedPaths.contains("/raw/modules/comments/zcom/barnes/nt.czv"))
+
+        let localDir = swordDir
+            .appendingPathComponent("modules", isDirectory: true)
+            .appendingPathComponent("comments", isDirectory: true)
+            .appendingPathComponent("zcom", isDirectory: true)
+            .appendingPathComponent("barnes", isDirectory: true)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: localDir.appendingPathComponent("nt.czs").path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: localDir.appendingPathComponent("nt.czz").path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: localDir.appendingPathComponent("nt.czv").path))
+
+        let confPath = swordDir
+            .appendingPathComponent("mods.d", isDirectory: true)
+            .appendingPathComponent("barnes.conf")
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: confPath.path),
+            "A chapter-block compressed commentary should publish its .conf marker after data files are staged."
+        )
+    }
+
+    func testModuleRepositoryFallsBackToPackageZipWhenRawDataFilesAreUnavailable() async throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let swordDir = tempDir.appendingPathComponent("sword", isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let source = SourceConfig(
+            name: "AndBible Extra",
+            type: "HTTP",
+            host: "andbible.github.io",
+            catalogPath: "/andbible-extra"
+        )
+        let catalogData = try makeModuleRepositoryCatalogArchive(
+            moduleName: "Augustin",
+            category: "Commentaries",
+            modDrv: "RawCom4",
+            dataPath: "./modules/comments/rawcom/augustin/"
+        )
+        let zipData = makeModuleRepositoryZip([
+            (
+                "mods.d/augustin.conf",
+                Data(
+                    """
+                    [Augustin]
+                    Description=Augustin
+                    Category=Commentaries
+                    Lang=en
+                    ModDrv=RawCom4
+                    DataPath=./modules/comments/rawcom/augustin/
+                    Version=1.0
+                    InstallSize=1
+                    """.utf8
+                )
+            ),
+            ("modules/comments/rawcom/augustin/nt", Data("raw-commentary-data".utf8))
+        ])
+        var requestedPaths: [String] = []
+
+        ModuleRepositoryDownloadMockURLProtocol.requestHandler = { request in
+            requestedPaths.append(request.url?.path ?? "")
+            let response: HTTPURLResponse
+            let data: Data
+            switch request.url?.path {
+            case "/andbible-extra/mods.d.tar.gz":
+                response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!
+                data = catalogData
+            case "/andbible-extra/modules/comments/rawcom/augustin/ot",
+                "/andbible-extra/modules/comments/rawcom/augustin/nt":
+                response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 404,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!
+                data = Data()
+            case "/andbible-extra/zip/Augustin.zip":
+                response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!
+                data = zipData
+            default:
+                XCTFail("Unexpected request: \(request.url?.absoluteString ?? "<nil>")")
+                response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 404,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!
+                data = Data()
+            }
+            return (response, data)
+        }
+        defer { ModuleRepositoryDownloadMockURLProtocol.requestHandler = nil }
+
+        let repository = ModuleRepository(
+            basePath: tempDir.path,
+            swordPath: swordDir.path,
+            session: makeModuleRepositoryDownloadMockSession()
+        )
+
+        _ = try await repository.refreshCatalog(for: source)
+        try await repository.installModule(named: "Augustin", from: source)
+
+        XCTAssertTrue(
+            requestedPaths.contains("/andbible-extra/zip/Augustin.zip"),
+            "Package-backed repositories should fall back to the module ZIP when raw data files are unavailable."
+        )
+
+        let localDir = swordDir
+            .appendingPathComponent("modules", isDirectory: true)
+            .appendingPathComponent("comments", isDirectory: true)
+            .appendingPathComponent("rawcom", isDirectory: true)
+            .appendingPathComponent("augustin", isDirectory: true)
+        XCTAssertEqual(
+            try Data(contentsOf: localDir.appendingPathComponent("nt")),
+            Data("raw-commentary-data".utf8)
+        )
+
+        let confPath = swordDir
+            .appendingPathComponent("mods.d", isDirectory: true)
+            .appendingPathComponent("augustin.conf")
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: confPath.path),
+            "A package ZIP fallback should still publish the catalog .conf marker through the staged installer."
+        )
+    }
+
+    func testModuleRepositoryUsesAndroidDefaultPackageDirectoryForPackageFallback() async throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let swordDir = tempDir.appendingPathComponent("sword", isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let source = SourceConfig(
+            name: "STEP Bible (Tyndale)",
+            type: "HTTP",
+            host: "public.modules.stepbible.org",
+            catalogPath: "/catalog"
+        )
+        let catalogData = try makeModuleRepositoryCatalogArchive(moduleName: "STEPMOD")
+        let zipData = makeModuleRepositoryZip([
+            ("mods.d/stepmod.conf", Data("placeholder".utf8)),
+            ("modules/lexdict/rawld/stepmod/stepmod.dat", Data("dictionary-data".utf8)),
+            ("modules/lexdict/rawld/stepmod/stepmod.idx", Data("index-data".utf8))
+        ])
+        var requestedPaths: [String] = []
+
+        ModuleRepositoryDownloadMockURLProtocol.requestHandler = { request in
+            requestedPaths.append(request.url?.path ?? "")
+            let response: HTTPURLResponse
+            let data: Data
+            switch request.url?.path {
+            case "/catalog/mods.d.tar.gz":
+                response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!
+                data = catalogData
+            case "/catalog/modules/lexdict/rawld/stepmod/stepmod.dat":
+                response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 404,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!
+                data = Data()
+            case "/packages/STEPMOD.zip":
+                response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!
+                data = zipData
+            default:
+                XCTFail("Unexpected request: \(request.url?.absoluteString ?? "<nil>")")
+                response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 404,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!
+                data = Data()
+            }
+            return (response, data)
+        }
+        defer { ModuleRepositoryDownloadMockURLProtocol.requestHandler = nil }
+
+        let repository = ModuleRepository(
+            basePath: tempDir.path,
+            swordPath: swordDir.path,
+            session: makeModuleRepositoryDownloadMockSession()
+        )
+
+        _ = try await repository.refreshCatalog(for: source)
+        try await repository.installModule(named: "STEPMOD", from: source)
+
+        XCTAssertTrue(
+            requestedPaths.contains("/packages/STEPMOD.zip"),
+            "Default repositories should use Android's explicit package directory, not derive it from the catalog path."
+        )
+        XCTAssertFalse(
+            requestedPaths.contains("/catalog/packages/STEPMOD.zip"),
+            "STEP's Android package directory is /packages, not /catalog/packages."
+        )
+
+        let localDir = moduleRepositoryLocalDir(for: "STEPMOD", under: swordDir)
+        XCTAssertEqual(
+            try Data(contentsOf: localDir.appendingPathComponent("stepmod.dat")),
+            Data("dictionary-data".utf8)
+        )
+        XCTAssertEqual(
+            try Data(contentsOf: localDir.appendingPathComponent("stepmod.idx")),
+            Data("index-data".utf8)
+        )
+    }
+
     func testModuleRepositoryCancellationStopsBeforeInstalledMarker() async throws {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -606,7 +917,8 @@ extension AndBibleTests {
         moduleName: String,
         category: String = "Lexicons / Dictionaries",
         modDrv: String = "RawLD",
-        dataPath: String? = nil
+        dataPath: String? = nil,
+        extraConf: String = ""
     ) throws -> Data {
         let moduleKey = moduleName.lowercased()
         let resolvedDataPath = dataPath ?? "./modules/lexdict/rawld/\(moduleKey)/\(moduleKey)"
@@ -617,6 +929,7 @@ extension AndBibleTests {
         Lang=en
         ModDrv=\(modDrv)
         DataPath=\(resolvedDataPath)
+        \(extraConf)
         Version=1.0
         InstallSize=1
         """
@@ -683,6 +996,41 @@ extension AndBibleTests {
             defer { gunzip_free(output) }
             return Data(bytes: output, count: Int(outputLength))
         }
+    }
+
+    private func makeModuleRepositoryZip(_ entries: [(String, Data)]) -> Data {
+        var data = Data()
+
+        for (name, body) in entries {
+            let nameData = Data(name.utf8)
+            data.append(contentsOf: [0x50, 0x4b, 0x03, 0x04])
+            appendModuleRepositoryZipUInt16(20, to: &data)
+            appendModuleRepositoryZipUInt16(0, to: &data)
+            appendModuleRepositoryZipUInt16(0, to: &data)
+            appendModuleRepositoryZipUInt16(0, to: &data)
+            appendModuleRepositoryZipUInt16(0, to: &data)
+            appendModuleRepositoryZipUInt32(0, to: &data)
+            appendModuleRepositoryZipUInt32(UInt32(body.count), to: &data)
+            appendModuleRepositoryZipUInt32(UInt32(body.count), to: &data)
+            appendModuleRepositoryZipUInt16(UInt16(nameData.count), to: &data)
+            appendModuleRepositoryZipUInt16(0, to: &data)
+            data.append(nameData)
+            data.append(body)
+        }
+
+        return data
+    }
+
+    private func appendModuleRepositoryZipUInt16(_ value: UInt16, to data: inout Data) {
+        data.append(UInt8(value & 0xff))
+        data.append(UInt8((value >> 8) & 0xff))
+    }
+
+    private func appendModuleRepositoryZipUInt32(_ value: UInt32, to data: inout Data) {
+        data.append(UInt8(value & 0xff))
+        data.append(UInt8((value >> 8) & 0xff))
+        data.append(UInt8((value >> 16) & 0xff))
+        data.append(UInt8((value >> 24) & 0xff))
     }
 }
 
