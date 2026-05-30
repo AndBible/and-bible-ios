@@ -60,6 +60,9 @@ private final class ModuleFileDownloadDelegate: NSObject, URLSessionDownloadDele
     /// Download task cancelled by the Swift task cancellation handler.
     private var task: URLSessionDownloadTask?
 
+    /// Records cancellation that arrives before a URLSession task has been stored.
+    private var cancellationRequested = false
+
     /// Continuation resumed exactly once from `urlSession(_:task:didCompleteWithError:)`.
     private var continuation: CheckedContinuation<Void, Error>?
 
@@ -105,20 +108,31 @@ private final class ModuleFileDownloadDelegate: NSObject, URLSessionDownloadDele
      - Parameters:
        - task: URLSession download task for this file.
        - continuation: Continuation to resume after URLSession completes.
+     - Returns: `true` when the caller should resume the task, or `false` when cancellation was
+       already requested before the task could be stored.
      - Side effects: mutates delegate state under lock.
-     - Failure modes: none.
+     - Failure modes: resumes `continuation` with `CancellationError` when cancellation already won
+       the start race.
      */
-    func start(task: URLSessionDownloadTask, continuation: CheckedContinuation<Void, Error>) {
+    func start(task: URLSessionDownloadTask, continuation: CheckedContinuation<Void, Error>) -> Bool {
         lock.lock()
+        if cancellationRequested {
+            lock.unlock()
+            task.cancel()
+            continuation.resume(throwing: CancellationError())
+            return false
+        }
         self.task = task
         self.continuation = continuation
         lock.unlock()
+        return true
     }
 
     /**
      Cancels the active download task when the surrounding Swift task is cancelled.
 
      Side effects:
+     - records cancellation so a task created after this point is not resumed
      - calls `cancel()` on the stored URLSession task
 
      Failure modes:
@@ -126,6 +140,7 @@ private final class ModuleFileDownloadDelegate: NSObject, URLSessionDownloadDele
      */
     func cancel() {
         lock.lock()
+        cancellationRequested = true
         let activeTask = task
         lock.unlock()
         activeTask?.cancel()
@@ -1126,8 +1141,9 @@ public final class ModuleRepository: @unchecked Sendable {
         try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
                 let task = downloadSession.downloadTask(with: remoteURL)
-                delegate.start(task: task, continuation: continuation)
-                task.resume()
+                if delegate.start(task: task, continuation: continuation) {
+                    task.resume()
+                }
             }
         } onCancel: {
             delegate.cancel()
