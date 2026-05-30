@@ -28,6 +28,31 @@
 		CA1C01A1D3E74B1F00A1B003 /* CalculatorIcon@3x.png in Resources */ = {isa = PBXBuildFile; fileRef = CA1C01A1D3E74B1F00A1C003 /* CalculatorIcon@3x.png */; };
 		E798724B03764F55FC3187E5 /* SwordKit in Frameworks */ = {isa = PBXBuildFile; productRef = 020BEFE49A96B4F15548630F /* SwordKit */; };
 		5126013EC1173F5B6609881C /* Localizable.strings in Resources */ = {isa = PBXBuildFile; fileRef = 451FFBBE453EACF1547FF4B6 /* Localizable.strings */; };
+		B69113624461C63AB21F4144 /* AndBibleTestSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = A279E3BCEE4A2AEC1F495246 /* AndBibleTestSupport.swift */; };
+		34F21932E6E652AD0A369D9C /* AndBibleTests+AppAndReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7DBD78B5D4D44BEE0FC2737 /* AndBibleTests+AppAndReader.swift */; };
+		FBE587F989B0D3A1B1A283EF /* AndBibleTests+StrongsAndDictionary.swift in Sources */ = {isa = PBXBuildFile; fileRef = 753C59196517046968D24B93 /* AndBibleTests+StrongsAndDictionary.swift */; };
+		AFD079CE86282D6B4341904C /* AndBibleTests+BridgeAndProgress.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5DF9348CDC2BD0D53181B56 /* AndBibleTests+BridgeAndProgress.swift */; };
+		7DEA38853208672406B7FCDA /* AndBibleTests+ReaderNavigation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 069F1737655720623BBF1459 /* AndBibleTests+ReaderNavigation.swift */; };
+		E9FA86A2D5CC0A4A4E80DA43 /* AndBibleTests+WorkspaceAndRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = CBD8E8244D3217EB4FF6EFDA /* AndBibleTests+WorkspaceAndRepository.swift */; };
+		254AD0BDEA441BB40927B5B6 /* AndBibleTests+RemoteSyncAdapters.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8FE3CBDBCA674EED4D5041C /* AndBibleTests+RemoteSyncAdapters.swift */; };
+		22128DB191044688F60685A6 /* AndBibleTests+RemoteSyncReadingPlans.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6AB6A612FD48BD5F9D7DD8B4 /* AndBibleTests+RemoteSyncReadingPlans.swift */; };
+		176997CD8D98198C43FD46DC /* AndBibleTests+RemoteSyncBookmarks.swift in Sources */ = {isa = PBXBuildFile; fileRef = BFA9FBBC24A24039D9B51DC6 /* AndBibleTests+RemoteSyncBookmarks.swift */; };
+		9798F22C53C7F7BB29B22E9C /* AndBibleTests+RemoteSyncTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0CC9A0A993B73FAF0226150 /* AndBibleTests+RemoteSyncTransport.swift */; };
+		906F7E8A3810F315334D7BB0 /* AndBibleTests+RemoteSyncState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 70BC95812B90ED267EC66D6B /* AndBibleTests+RemoteSyncState.swift */; };
+		DF4297E4F6F61467148CB772 /* AndBibleTests+RemoteSyncLifecycle.swift in Sources */ = {isa = PBXBuildFile; fileRef = B47ED2258F0F324029C56991 /* AndBibleTests+RemoteSyncLifecycle.swift */; };
+		4202BEFA9B7CF9C5DC42E0B9 /* AndBibleTests+Bookmarks.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE544E071979CFE6FAA43CFE /* AndBibleTests+Bookmarks.swift */; };
+		7878413CFC8EEC15FAD39267 /* AndBibleUITestSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90D5002E961A06DB9393E326 /* AndBibleUITestSupport.swift */; };
+		A2EEBFCC9A28E42778471552 /* AndBibleUITests+Search.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C5CED694021FF0C2B594EB6 /* AndBibleUITests+Search.swift */; };
+		8736B1F0D4ED3F4C47BD692A /* AndBibleUITests+PlansDownloadsWorkspace.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B1FF7DFF60A342B10407D17 /* AndBibleUITests+PlansDownloadsWorkspace.swift */; };
+		0798BAF8561D6E99D2319FC6 /* AndBibleUITests+BookmarksHistory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F6441E4B51A35E089AD9764 /* AndBibleUITests+BookmarksHistory.swift */; };
+		248321438B5F20234C13F4AB /* AndBibleUITests+SettingsAndSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5CA7604EEDDA950FF6A00BE1 /* AndBibleUITests+SettingsAndSync.swift */; };
+		CD88E3BED94FA317E94D6A3E /* AndBibleUITestSearchSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A90A042DDD33607A1761CCE /* AndBibleUITestSearchSupport.swift */; };
+		8E4AC4CC1047A4ECD3CBACF1 /* AndBibleUITestListSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9153C9F6F1FDD489F80C26C3 /* AndBibleUITestListSupport.swift */; };
+		AC17BB4B4296BB077B6891D5 /* AndBibleUITestElementSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54331A62E18CCE5AB9A629CD /* AndBibleUITestElementSupport.swift */; };
+		D0771529B952829C77DBE023 /* AndBibleUITestReaderSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 319E22F2B51D98677DD41DA6 /* AndBibleUITestReaderSupport.swift */; };
+		D53BEDB9C39D5C410E0643B4 /* AndBibleUITestInteractionSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4A04A880CDBD0810AACD52F /* AndBibleUITestInteractionSupport.swift */; };
+		CA70F982E1D8C8A49D27292A /* AndBibleUITestStateSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = C892FA089280ABEE52D95C2F /* AndBibleUITestStateSupport.swift */; };
+		F89C2FD58B1DFD132EEC5839 /* AndBibleTests+BridgeIOS.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5172B5175C1984FA05E10E75 /* AndBibleTests+BridgeIOS.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -108,6 +133,31 @@
 		6BED42142889C17F36CB4471 /* yue */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = yue; path = yue.lproj/Localizable.strings; sourceTree = "<group>"; };
 		AEF24B385D42BE93B4B2BCC0 /* zh-Hans */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = zh-Hans; path = zh-Hans.lproj/Localizable.strings; sourceTree = "<group>"; };
 		F25455B6A3C4498DA7EC3907 /* zh-Hant */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = zh-Hant; path = zh-Hant.lproj/Localizable.strings; sourceTree = "<group>"; };
+		A279E3BCEE4A2AEC1F495246 /* AndBibleTestSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AndBibleTestSupport.swift; sourceTree = "<group>"; };
+		F7DBD78B5D4D44BEE0FC2737 /* AndBibleTests+AppAndReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AndBibleTests+AppAndReader.swift"; sourceTree = "<group>"; };
+		753C59196517046968D24B93 /* AndBibleTests+StrongsAndDictionary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AndBibleTests+StrongsAndDictionary.swift"; sourceTree = "<group>"; };
+		E5DF9348CDC2BD0D53181B56 /* AndBibleTests+BridgeAndProgress.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AndBibleTests+BridgeAndProgress.swift"; sourceTree = "<group>"; };
+		069F1737655720623BBF1459 /* AndBibleTests+ReaderNavigation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AndBibleTests+ReaderNavigation.swift"; sourceTree = "<group>"; };
+		CBD8E8244D3217EB4FF6EFDA /* AndBibleTests+WorkspaceAndRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AndBibleTests+WorkspaceAndRepository.swift"; sourceTree = "<group>"; };
+		F8FE3CBDBCA674EED4D5041C /* AndBibleTests+RemoteSyncAdapters.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AndBibleTests+RemoteSyncAdapters.swift"; sourceTree = "<group>"; };
+		6AB6A612FD48BD5F9D7DD8B4 /* AndBibleTests+RemoteSyncReadingPlans.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AndBibleTests+RemoteSyncReadingPlans.swift"; sourceTree = "<group>"; };
+		BFA9FBBC24A24039D9B51DC6 /* AndBibleTests+RemoteSyncBookmarks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AndBibleTests+RemoteSyncBookmarks.swift"; sourceTree = "<group>"; };
+		D0CC9A0A993B73FAF0226150 /* AndBibleTests+RemoteSyncTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AndBibleTests+RemoteSyncTransport.swift"; sourceTree = "<group>"; };
+		70BC95812B90ED267EC66D6B /* AndBibleTests+RemoteSyncState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AndBibleTests+RemoteSyncState.swift"; sourceTree = "<group>"; };
+		B47ED2258F0F324029C56991 /* AndBibleTests+RemoteSyncLifecycle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AndBibleTests+RemoteSyncLifecycle.swift"; sourceTree = "<group>"; };
+		EE544E071979CFE6FAA43CFE /* AndBibleTests+Bookmarks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AndBibleTests+Bookmarks.swift"; sourceTree = "<group>"; };
+		90D5002E961A06DB9393E326 /* AndBibleUITestSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AndBibleUITestSupport.swift; sourceTree = "<group>"; };
+		4C5CED694021FF0C2B594EB6 /* AndBibleUITests+Search.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AndBibleUITests+Search.swift"; sourceTree = "<group>"; };
+		6B1FF7DFF60A342B10407D17 /* AndBibleUITests+PlansDownloadsWorkspace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AndBibleUITests+PlansDownloadsWorkspace.swift"; sourceTree = "<group>"; };
+		0F6441E4B51A35E089AD9764 /* AndBibleUITests+BookmarksHistory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AndBibleUITests+BookmarksHistory.swift"; sourceTree = "<group>"; };
+		5CA7604EEDDA950FF6A00BE1 /* AndBibleUITests+SettingsAndSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AndBibleUITests+SettingsAndSync.swift"; sourceTree = "<group>"; };
+		3A90A042DDD33607A1761CCE /* AndBibleUITestSearchSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AndBibleUITestSearchSupport.swift; sourceTree = "<group>"; };
+		9153C9F6F1FDD489F80C26C3 /* AndBibleUITestListSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AndBibleUITestListSupport.swift; sourceTree = "<group>"; };
+		54331A62E18CCE5AB9A629CD /* AndBibleUITestElementSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AndBibleUITestElementSupport.swift; sourceTree = "<group>"; };
+		319E22F2B51D98677DD41DA6 /* AndBibleUITestReaderSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AndBibleUITestReaderSupport.swift; sourceTree = "<group>"; };
+		A4A04A880CDBD0810AACD52F /* AndBibleUITestInteractionSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AndBibleUITestInteractionSupport.swift; sourceTree = "<group>"; };
+		C892FA089280ABEE52D95C2F /* AndBibleUITestStateSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AndBibleUITestStateSupport.swift; sourceTree = "<group>"; };
+		5172B5175C1984FA05E10E75 /* AndBibleTests+BridgeIOS.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AndBibleTests+BridgeIOS.swift"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -184,6 +234,17 @@
 			isa = PBXGroup;
 			children = (
 				A1B2C3D4E5F60718293A4B5E /* AndBibleUITests.swift */,
+				90D5002E961A06DB9393E326 /* AndBibleUITestSupport.swift */,
+				4C5CED694021FF0C2B594EB6 /* AndBibleUITests+Search.swift */,
+				6B1FF7DFF60A342B10407D17 /* AndBibleUITests+PlansDownloadsWorkspace.swift */,
+				0F6441E4B51A35E089AD9764 /* AndBibleUITests+BookmarksHistory.swift */,
+				5CA7604EEDDA950FF6A00BE1 /* AndBibleUITests+SettingsAndSync.swift */,
+				C892FA089280ABEE52D95C2F /* AndBibleUITestStateSupport.swift */,
+				A4A04A880CDBD0810AACD52F /* AndBibleUITestInteractionSupport.swift */,
+				319E22F2B51D98677DD41DA6 /* AndBibleUITestReaderSupport.swift */,
+				54331A62E18CCE5AB9A629CD /* AndBibleUITestElementSupport.swift */,
+				9153C9F6F1FDD489F80C26C3 /* AndBibleUITestListSupport.swift */,
+				3A90A042DDD33607A1761CCE /* AndBibleUITestSearchSupport.swift */,
 			);
 			path = AndBibleUITests;
 			sourceTree = "<group>";
@@ -195,6 +256,20 @@
 				9B8F65108C5F5E1DAF2B3C4D /* WorkspaceSyncRestoreTests.swift */,
 				D10500000000000000000001 /* RemoteSyncMyDocumentRestoreTests.swift */,
 				D13300000000000000000001 /* DefaultDocumentDownloadPlannerTests.swift */,
+				A279E3BCEE4A2AEC1F495246 /* AndBibleTestSupport.swift */,
+				F7DBD78B5D4D44BEE0FC2737 /* AndBibleTests+AppAndReader.swift */,
+				753C59196517046968D24B93 /* AndBibleTests+StrongsAndDictionary.swift */,
+				E5DF9348CDC2BD0D53181B56 /* AndBibleTests+BridgeAndProgress.swift */,
+				069F1737655720623BBF1459 /* AndBibleTests+ReaderNavigation.swift */,
+				CBD8E8244D3217EB4FF6EFDA /* AndBibleTests+WorkspaceAndRepository.swift */,
+				F8FE3CBDBCA674EED4D5041C /* AndBibleTests+RemoteSyncAdapters.swift */,
+				6AB6A612FD48BD5F9D7DD8B4 /* AndBibleTests+RemoteSyncReadingPlans.swift */,
+				BFA9FBBC24A24039D9B51DC6 /* AndBibleTests+RemoteSyncBookmarks.swift */,
+				D0CC9A0A993B73FAF0226150 /* AndBibleTests+RemoteSyncTransport.swift */,
+				70BC95812B90ED267EC66D6B /* AndBibleTests+RemoteSyncState.swift */,
+				B47ED2258F0F324029C56991 /* AndBibleTests+RemoteSyncLifecycle.swift */,
+				EE544E071979CFE6FAA43CFE /* AndBibleTests+Bookmarks.swift */,
+				5172B5175C1984FA05E10E75 /* AndBibleTests+BridgeIOS.swift */,
 			);
 			path = AndBibleTests;
 			sourceTree = "<group>";
@@ -401,6 +476,20 @@
 				8A7E540F7B4E4D0C9E1A2B3C /* WorkspaceSyncRestoreTests.swift in Sources */,
 				D10500000000000000000002 /* RemoteSyncMyDocumentRestoreTests.swift in Sources */,
 				D13300000000000000000002 /* DefaultDocumentDownloadPlannerTests.swift in Sources */,
+				B69113624461C63AB21F4144 /* AndBibleTestSupport.swift in Sources */,
+				34F21932E6E652AD0A369D9C /* AndBibleTests+AppAndReader.swift in Sources */,
+				FBE587F989B0D3A1B1A283EF /* AndBibleTests+StrongsAndDictionary.swift in Sources */,
+				AFD079CE86282D6B4341904C /* AndBibleTests+BridgeAndProgress.swift in Sources */,
+				7DEA38853208672406B7FCDA /* AndBibleTests+ReaderNavigation.swift in Sources */,
+				E9FA86A2D5CC0A4A4E80DA43 /* AndBibleTests+WorkspaceAndRepository.swift in Sources */,
+				254AD0BDEA441BB40927B5B6 /* AndBibleTests+RemoteSyncAdapters.swift in Sources */,
+				22128DB191044688F60685A6 /* AndBibleTests+RemoteSyncReadingPlans.swift in Sources */,
+				176997CD8D98198C43FD46DC /* AndBibleTests+RemoteSyncBookmarks.swift in Sources */,
+				9798F22C53C7F7BB29B22E9C /* AndBibleTests+RemoteSyncTransport.swift in Sources */,
+				906F7E8A3810F315334D7BB0 /* AndBibleTests+RemoteSyncState.swift in Sources */,
+				DF4297E4F6F61467148CB772 /* AndBibleTests+RemoteSyncLifecycle.swift in Sources */,
+				4202BEFA9B7CF9C5DC42E0B9 /* AndBibleTests+Bookmarks.swift in Sources */,
+				F89C2FD58B1DFD132EEC5839 /* AndBibleTests+BridgeIOS.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -409,6 +498,17 @@
 			buildActionMask = 2147483647;
 			files = (
 				A1B2C3D4E5F60718293A4B5C /* AndBibleUITests.swift in Sources */,
+				7878413CFC8EEC15FAD39267 /* AndBibleUITestSupport.swift in Sources */,
+				A2EEBFCC9A28E42778471552 /* AndBibleUITests+Search.swift in Sources */,
+				8736B1F0D4ED3F4C47BD692A /* AndBibleUITests+PlansDownloadsWorkspace.swift in Sources */,
+				0798BAF8561D6E99D2319FC6 /* AndBibleUITests+BookmarksHistory.swift in Sources */,
+				248321438B5F20234C13F4AB /* AndBibleUITests+SettingsAndSync.swift in Sources */,
+				CA70F982E1D8C8A49D27292A /* AndBibleUITestStateSupport.swift in Sources */,
+				D53BEDB9C39D5C410E0643B4 /* AndBibleUITestInteractionSupport.swift in Sources */,
+				D0771529B952829C77DBE023 /* AndBibleUITestReaderSupport.swift in Sources */,
+				AC17BB4B4296BB077B6891D5 /* AndBibleUITestElementSupport.swift in Sources */,
+				8E4AC4CC1047A4ECD3CBACF1 /* AndBibleUITestListSupport.swift in Sources */,
+				CD88E3BED94FA317E94D6A3E /* AndBibleUITestSearchSupport.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
