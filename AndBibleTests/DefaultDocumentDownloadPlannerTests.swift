@@ -166,22 +166,6 @@ final class ModuleDownloadRowActionPlannerTests: XCTestCase {
         XCTAssertEqual(actions, [.uninstall, .deleteIndex])
     }
 
-    private func remoteModule(
-        _ name: String,
-        category: ModuleCategory,
-        sourceName: String,
-        availability: RemoteModuleAvailability = .installable
-    ) -> RemoteModuleInfo {
-        RemoteModuleInfo(
-            name: name,
-            description: name,
-            category: category,
-            language: "en",
-            sourceName: sourceName,
-            availability: availability
-        )
-    }
-
     private func installedModule(
         _ name: String,
         category: ModuleCategory,
