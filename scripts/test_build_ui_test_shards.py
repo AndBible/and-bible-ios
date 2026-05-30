@@ -11,6 +11,7 @@ from build_ui_test_shards import (
     build_ui_test_cases,
     choose_shard_count,
     discover_ui_test_identifiers,
+    discover_ui_test_identifiers_from_files,
     load_timing_manifest,
 )
 
@@ -38,6 +39,40 @@ class BuildUITestShardsTests(unittest.TestCase):
                 "AndBibleUITests/AndBibleUITests/testAlpha",
                 "AndBibleUITests/AndBibleUITests/testBeta",
                 "AndBibleUITests/AndBibleUITests/testGamma_example",
+            ],
+        )
+
+    def test_discover_ui_test_identifiers_from_files_reads_split_extensions(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            first_file = root / "AndBibleUITests.swift"
+            second_file = root / "AndBibleUITests+Search.swift"
+            first_file.write_text(
+                """
+                final class AndBibleUITests: XCTestCase {
+                    func testAlpha() {}
+                }
+                """
+            )
+            second_file.write_text(
+                """
+                extension AndBibleUITests {
+                    func testBeta() {}
+                }
+                """
+            )
+
+            identifiers = discover_ui_test_identifiers_from_files(
+                [first_file, second_file],
+                test_target="AndBibleUITests",
+                test_case_class="AndBibleUITests",
+            )
+
+        self.assertEqual(
+            identifiers,
+            [
+                "AndBibleUITests/AndBibleUITests/testAlpha",
+                "AndBibleUITests/AndBibleUITests/testBeta",
             ],
         )
 
