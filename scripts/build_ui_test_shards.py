@@ -41,6 +41,25 @@ def discover_ui_test_identifiers(
     return identifiers
 
 
+def discover_ui_test_identifiers_from_files(
+    swift_files: Sequence[Path],
+    *,
+    test_target: str,
+    test_case_class: str,
+) -> list[str]:
+    """Extract XCTest UI method identifiers from one or more Swift source files."""
+    identifiers: list[str] = []
+    for swift_file in swift_files:
+        identifiers.extend(
+            discover_ui_test_identifiers(
+                swift_file.read_text(),
+                test_target=test_target,
+                test_case_class=test_case_class,
+            )
+        )
+    return identifiers
+
+
 def normalize_test_identifier(
     raw_identifier: str,
     *,
@@ -210,7 +229,7 @@ def write_github_outputs(
 def create_argument_parser() -> argparse.ArgumentParser:
     """Create the CLI parser."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--test-file", required=True, type=Path)
+    parser.add_argument("--test-file", required=True, nargs="+", type=Path)
     parser.add_argument("--timings-file", type=Path)
     parser.add_argument("--shard-count", type=int, default=2)
     parser.add_argument("--target-shard-duration-seconds", type=float)
@@ -228,9 +247,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = create_argument_parser()
     args = parser.parse_args(argv)
 
-    swift_source = args.test_file.read_text()
-    identifiers = discover_ui_test_identifiers(
-        swift_source,
+    identifiers = discover_ui_test_identifiers_from_files(
+        args.test_file,
         test_target=args.test_target,
         test_case_class=args.test_case_class,
     )

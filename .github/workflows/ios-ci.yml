@@ -130,7 +130,7 @@ jobs:
         id: plan
         run: >-
           python3 -u scripts/build_ui_test_shards.py
-          --test-file AndBibleUITests/AndBibleUITests.swift
+          --test-file AndBibleUITests/AndBibleUITests*.swift
           --timings-file "${UI_TEST_TIMINGS_FILE}"
           --shard-count "${UI_TEST_MIN_SHARD_COUNT}"
           --target-shard-duration-seconds "${UI_TEST_TARGET_SHARD_DURATION_SECONDS}"
