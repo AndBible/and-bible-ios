@@ -11,6 +11,8 @@ public enum ModuleCategory: String, Sendable, Codable {
     case map = "Maps"
     case dailyDevotion = "Daily Devotional"
     case glossary = "Glossaries"
+    /// Android/JSword add-on modules that provide fonts, features, styles, prompts, or similar app data.
+    case addon = "And Bible"
     case unknown = "Unknown"
 
     public init(typeString: String) {

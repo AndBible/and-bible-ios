@@ -7,9 +7,9 @@ import Foundation
 
  Android's startup Easy Start path opens `DownloadActivity` with `download-recommended=true`,
  refreshes `default_documents_v2.json`, then requests English defaults in category order:
- Bibles, commentaries, add-ons, books, dictionaries, and maps. iOS does not yet model add-ons as
- installable SWORD rows, so this planner preserves the supported category order and intentionally
- ignores add-on tokens until an iOS add-on category exists.
+ Bibles, commentaries, add-ons, books, dictionaries, and maps. iOS represents Android add-ons with
+ the dedicated `And Bible` category, so default metadata can select matching add-on catalog rows
+ without treating them as Bibles, books, or other unrelated SWORD categories.
 
  Inputs:
  - Android-shaped default metadata decoded as `ModuleDownloadConfiguration`
@@ -28,7 +28,7 @@ import Foundation
  */
 public struct DefaultDocumentDownloadPlanner: Sendable {
     /**
-     Parsed default-document token scoped to one supported SWORD module category.
+     Parsed default-document token scoped to one supported SWORD/Android module category.
 
      The optional source name corresponds to Android's `initials::repository` token syntax. A
      `nil` source means "use the first matching module in repository/catalog order", matching
@@ -41,7 +41,7 @@ public struct DefaultDocumentDownloadPlanner: Sendable {
         /// Optional Android repository/source name requested by `initials::repository`.
         public let sourceName: String?
 
-        /// Supported SWORD category bucket that supplied the request.
+        /// Supported SWORD/Android category bucket that supplied the request.
         public let category: ModuleCategory
 
         /**
@@ -49,7 +49,7 @@ public struct DefaultDocumentDownloadPlanner: Sendable {
          - Parameters:
            - initials: Module initials to install.
            - sourceName: Optional repository/source name.
-           - category: SWORD category bucket that supplied the token.
+           - category: SWORD/Android category bucket that supplied the token.
          */
         public init(initials: String, sourceName: String?, category: ModuleCategory) {
             self.initials = initials
@@ -75,6 +75,7 @@ public struct DefaultDocumentDownloadPlanner: Sendable {
         [
             (ModuleCategory.bible, configuration.bibles[language, default: []]),
             (ModuleCategory.commentary, configuration.commentaries[language, default: []]),
+            (ModuleCategory.addon, configuration.addons[language, default: []]),
             (ModuleCategory.generalBook, configuration.books[language, default: []]),
             (ModuleCategory.dictionary, configuration.dictionaries[language, default: []]),
             (ModuleCategory.map, configuration.maps[language, default: []]),

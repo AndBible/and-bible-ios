@@ -325,10 +325,10 @@ public struct ModuleBrowserView: View {
      */
     private var availableLanguages: [String] {
         var langs = Set<String>()
-        for m in availableModules where matchesSelectedCategory(m.category) {
+        for m in availableModules where Self.matchesDownloadCategory(m.category, selectedCategory: selectedCategory) {
             langs.insert(m.language)
         }
-        for m in installedModules where matchesSelectedCategory(m.category) {
+        for m in installedModules where Self.matchesDownloadCategory(m.category, selectedCategory: selectedCategory) {
             langs.insert(m.language)
         }
         return langs.sorted { a, b in
@@ -346,6 +346,18 @@ public struct ModuleBrowserView: View {
             if !resolvedA && resolvedB { return false }
             return nameA.localizedCaseInsensitiveCompare(nameB) == .orderedAscending
         }
+    }
+
+    /**
+     Whether the Android Add-ons filter should be visible in the Downloads type picker.
+
+     Android exposes add-ons as a separate document type backed by rows in the repository/document
+     list. iOS mirrors that by showing Add-ons only after the loaded catalog contains `And Bible`
+     rows, while keeping it visible if it is already selected so users can move back to another
+     filter after a catalog refresh.
+     */
+    private var shouldShowAddonsFilter: Bool {
+        selectedCategory == .addon || availableModules.contains { $0.category == .addon }
     }
 
     /// Available (remote) modules filtered by category, language, and search text.
@@ -382,6 +394,10 @@ public struct ModuleBrowserView: View {
                     Text(String(localized: "dictionaries")).tag(Optional(ModuleCategory.dictionary))
                     Text(String(localized: "category_books")).tag(Optional(ModuleCategory.generalBook))
                     Text(String(localized: "maps", defaultValue: "Maps")).tag(Optional(ModuleCategory.map))
+                    if shouldShowAddonsFilter {
+                        Text(String(localized: "doc_type_addons", defaultValue: "Add-ons"))
+                            .tag(Optional(ModuleCategory.addon))
+                    }
                 }
                 .pickerStyle(.segmented)
                 .onChange(of: selectedCategory) {
@@ -529,22 +545,6 @@ public struct ModuleBrowserView: View {
     }
 
     // MARK: - Row Views
-
-    /**
-     Tests whether a module category is visible under the current Android-parity type filter.
-
-     - Parameter category: Module category from installed or remote catalog metadata.
-     - Returns: `true` when the selected filter is "All types" or matches the supplied category.
-
-     The helper is deterministic and performs no side effects. It exists so installed, available,
-     and language filters all interpret the optional category state identically.
-
-     Failure modes:
-     - none; unknown future categories only match an identical selected enum value
-     */
-    private func matchesSelectedCategory(_ category: ModuleCategory) -> Bool {
-        selectedCategory.map { $0 == category } ?? true
-    }
 
     /**
      Clears type and language filters once search becomes active, matching Android Downloads.
@@ -923,10 +923,10 @@ public struct ModuleBrowserView: View {
     ) -> [RemoteModuleInfo] {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         let filtered = modules.filter { module in
-            if let selectedCategory, module.category != selectedCategory {
+            if !matchesDownloadCategory(module.category, selectedCategory: selectedCategory) {
                 return false
             }
-            if !selectedLanguage.isEmpty, module.language != selectedLanguage {
+            if !matchesDownloadLanguage(module, selectedLanguage: selectedLanguage) {
                 return false
             }
             if badDocuments?.badDocumentAction(for: module) == .hide {
@@ -945,6 +945,52 @@ public struct ModuleBrowserView: View {
             selectedLanguage: selectedLanguage,
             recommendedDocuments: recommendedDocuments
         )
+    }
+
+    /**
+     Tests Android Downloads document-type visibility for a remote or installed module category.
+
+     Android's "All types" filter intentionally excludes `BookCategory.AND_BIBLE`, exposing
+     add-ons only through the Add-ons filter. iOS follows the same rule using the explicit
+     `.addon` category instead of folding add-on rows into Bibles, books, or unknown rows.
+
+     - Parameters:
+       - category: Module category from SWORD/Android metadata.
+       - selectedCategory: Selected Downloads type, or `nil` for Android's All filter.
+     - Returns: `true` when the row belongs in the selected type filter.
+     - Side effects: none.
+     - Failure modes: none; unsupported future categories appear only in All.
+     */
+    private static func matchesDownloadCategory(
+        _ category: ModuleCategory,
+        selectedCategory: ModuleCategory?
+    ) -> Bool {
+        guard let selectedCategory else {
+            return category != .addon
+        }
+        return category == selectedCategory
+    }
+
+    /**
+     Tests Android Downloads language visibility for one remote module row.
+
+     Android does not exclude `BookCategory.AND_BIBLE` rows when a concrete language is selected,
+     because add-ons provide app assets rather than user-readable document text. iOS preserves that
+     behavior so add-on rows stay visible under the Add-ons filter even if their catalog language is
+     only a metadata placeholder.
+
+     - Parameters:
+       - module: Remote module row being filtered.
+       - selectedLanguage: Selected language code, or empty for all languages.
+     - Returns: `true` when the row belongs in the selected language filter.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    private static func matchesDownloadLanguage(
+        _ module: RemoteModuleInfo,
+        selectedLanguage: String
+    ) -> Bool {
+        selectedLanguage.isEmpty || module.language == selectedLanguage || module.category == .addon
     }
 
     /**
@@ -1207,6 +1253,8 @@ public struct ModuleBrowserView: View {
             return 4
         case .map:
             return 5
+        case .addon:
+            return 6
         default:
             return 7
         }

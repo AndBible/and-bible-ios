@@ -43,8 +43,9 @@ public struct ModuleDownloadConfiguration: Sendable, Codable, Equatable {
     /**
      Android add-on entries keyed by language code.
 
-     iOS currently records these values so metadata decoding stays compatible with Android feeds,
-     but the module browser does not render add-ons until #136 defines an iOS model for them.
+     These entries map to SWORD rows whose category is JSword's `AND_BIBLE` / `And Bible` bucket.
+     They participate in Downloads filtering and metadata decisions only when the catalog exposes
+     matching add-on rows.
      */
     public var addons: [String: [String]]
 
@@ -115,7 +116,7 @@ public struct ModuleDownloadConfiguration: Sendable, Codable, Equatable {
     /**
      Returns the language-indexed metadata map for a module category.
 
-     - Parameter category: SWORD module category to map onto Android's metadata buckets.
+     - Parameter category: SWORD/Android module category to map onto Android's metadata buckets.
      - Returns: A language-keyed token map; unsupported categories return an empty map.
 
      Side effects:
@@ -136,6 +137,8 @@ public struct ModuleDownloadConfiguration: Sendable, Codable, Equatable {
             return books
         case .map:
             return maps
+        case .addon:
+            return addons
         default:
             return [:]
         }
