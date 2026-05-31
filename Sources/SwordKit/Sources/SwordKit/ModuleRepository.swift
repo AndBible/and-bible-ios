@@ -752,7 +752,8 @@ public final class ModuleRepository: @unchecked Sendable {
      - Returns: Built-in and custom sources in display/refresh order.
      - Side effects: may create or migrate default source configuration through
        `RepositorySourceManager`.
-     - Failure modes: returns an empty list if persisted source configuration cannot be read.
+     - Failure modes: unreadable `InstallMgr.conf` data omits config-backed SWORD rows, while
+       valid sidecar-only MyBible sources can still be returned.
      */
     public func loadSources() -> [SourceConfig] {
         RepositorySourceManager(basePath: basePath).loadSources()
@@ -1528,7 +1529,7 @@ public final class ModuleRepository: @unchecked Sendable {
        - progress: Optional normalized progress callback shared with the Downloads row.
      - Side effects:
        - downloads the MyBible ZIP package to a temporary file
-       - extracts readable MyBible SQLite payloads into a staged directory
+       - streams readable MyBible SQLite payloads into a staged directory
        - writes installed-module metadata beside the extracted payload
        - atomically replaces any previous install for the same MyBible module initials
      - Throws:
@@ -1562,12 +1563,6 @@ public final class ModuleRepository: @unchecked Sendable {
         )
 
         try Task.checkCancellation()
-        let zipData = try Data(contentsOf: packageDownloadURL)
-        let entries = try parseZip(zipData)
-        guard !entries.isEmpty else {
-            throw ModuleRepositoryError.invalidZip("\(downloadURL.lastPathComponent) is empty")
-        }
-
         let stagingDirURL = myBibleInstallDir
             .appendingPathComponent(".\(entry.name)-\(UUID().uuidString).installing", isDirectory: true)
         try fm.createDirectory(at: stagingDirURL, withIntermediateDirectories: true)
@@ -1575,25 +1570,16 @@ public final class ModuleRepository: @unchecked Sendable {
             try? fm.removeItem(at: stagingDirURL)
         }
 
-        var extractedPayloadCount = 0
-        for zipEntry in entries {
-            try Task.checkCancellation()
-            guard let fileName = Self.normalizedMyBiblePackageEntryName(
-                zipEntry.name,
-                packageFileName: entry.packageFileName
-            ) else {
-                continue
-            }
-
-            let destinationURL = stagingDirURL.appendingPathComponent(fileName)
-            if fm.fileExists(atPath: destinationURL.path) {
-                try fm.removeItem(at: destinationURL)
-            }
-            try zipEntry.data.write(to: destinationURL)
-            extractedPayloadCount += 1
+        let extractionResult = try extractMyBiblePackagePayloads(
+            from: packageDownloadURL,
+            to: stagingDirURL,
+            packageFileName: entry.packageFileName
+        )
+        guard extractionResult.entryCount > 0 else {
+            throw ModuleRepositoryError.invalidZip("\(downloadURL.lastPathComponent) is empty")
         }
 
-        guard extractedPayloadCount > 0 else {
+        guard extractionResult.payloadCount > 0 else {
             throw ModuleRepositoryError.invalidZip(
                 "\(downloadURL.lastPathComponent) did not contain a MyBible SQLite payload"
             )
@@ -1619,6 +1605,208 @@ public final class ModuleRepository: @unchecked Sendable {
         try Task.checkCancellation()
         try commitStagedMyBibleInstall(stagingDirURL: stagingDirURL, moduleName: entry.name)
         progress?(1.0)
+    }
+
+    /**
+     Counts ZIP entries inspected and MyBible payloads published during file-backed extraction.
+
+     The installer needs both values so empty archives keep their specific error while archives
+     that only contain unsupported or unsafe entries report the more useful "no MyBible payload"
+     failure.
+     */
+    private struct MyBiblePackageExtractionResult {
+        /// Number of ZIP file entries discovered in the package.
+        let entryCount: Int
+
+        /// Number of normalized MyBible payload files written into staging.
+        let payloadCount: Int
+    }
+
+    /**
+     Describes one ZIP entry whose compressed payload remains in the package file.
+
+     - Note: Sizes and offsets come from the central directory when available, or from a local
+       header fallback for stream-style archives. The actual entry bytes are read only when the
+       MyBible payload name passes normalization.
+     */
+    private struct FileBackedZipEntry {
+        /// Entry path as recorded in the ZIP metadata.
+        let name: String
+
+        /// Compression method from ZIP metadata: 0 for stored, 8 for raw deflate.
+        let compressionMethod: UInt16
+
+        /// General-purpose flags; encrypted and data-descriptor-only local entries need special handling.
+        let generalPurposeFlags: UInt16
+
+        /// Compressed byte count for the entry payload.
+        let compressedSize: UInt64
+
+        /// Uncompressed byte count advertised by ZIP metadata.
+        let uncompressedSize: UInt64
+
+        /// Offset of the entry's local file header in the package file.
+        let localHeaderOffset: UInt64
+    }
+
+    /**
+     Extracts safe MyBible SQLite payload entries from a downloaded package without loading it all.
+
+     - Parameters:
+       - zipURL: Temporary package file produced by `downloadRequiredModuleFile`.
+       - stagingDirURL: Empty installation staging directory for the module.
+       - packageFileName: Manifest package name used to accept legacy payloads without an extension.
+     - Returns: Counts for total entries inspected and MyBible payload files written.
+     - Side effects: reads ZIP metadata from `zipURL` and writes matching payload files into
+       `stagingDirURL`.
+     - Throws: `ModuleRepositoryError.invalidZip` for malformed ZIP structure, unsupported
+       encrypted payloads, or unsupported ZIP64 entries; `ModuleRepositoryError.decompressionFailed`
+       when zlib cannot inflate a deflated payload; file-system errors from staging writes; and
+       `CancellationError` when the install task is cancelled between entries.
+     */
+    private func extractMyBiblePackagePayloads(
+        from zipURL: URL,
+        to stagingDirURL: URL,
+        packageFileName: String?
+    ) throws -> MyBiblePackageExtractionResult {
+        let entries = try readFileBackedZipEntries(from: zipURL)
+        let fm = FileManager.default
+        var payloadCount = 0
+
+        for entry in entries {
+            try Task.checkCancellation()
+            guard let fileName = Self.normalizedMyBiblePackageEntryName(
+                entry.name,
+                packageFileName: packageFileName
+            ) else {
+                continue
+            }
+
+            guard entry.generalPurposeFlags & 0x0001 == 0 else {
+                throw ModuleRepositoryError.invalidZip("Encrypted ZIP entries are not supported")
+            }
+
+            let destinationURL = stagingDirURL.appendingPathComponent(fileName)
+            if fm.fileExists(atPath: destinationURL.path) {
+                try fm.removeItem(at: destinationURL)
+            }
+
+            do {
+                switch entry.compressionMethod {
+                case 0:
+                    try copyStoredZipEntry(entry, from: zipURL, to: destinationURL)
+                case 8:
+                    try inflateDeflatedZipEntry(entry, from: zipURL, to: destinationURL)
+                default:
+                    continue
+                }
+                payloadCount += 1
+            } catch {
+                try? fm.removeItem(at: destinationURL)
+                throw error
+            }
+        }
+
+        return MyBiblePackageExtractionResult(entryCount: entries.count, payloadCount: payloadCount)
+    }
+
+    /**
+     Copies one stored ZIP payload from the package file to staging in bounded chunks.
+
+     - Parameters:
+       - entry: ZIP entry metadata whose compression method is stored.
+       - zipURL: Package file containing the payload.
+       - destinationURL: Staged payload path to create.
+     - Side effects: creates and writes `destinationURL`; reads the source package through
+       `FileHandle`.
+     - Throws: `ModuleRepositoryError.invalidZip` when the local header or payload range is
+       truncated, plus file-system errors from opening, reading, writing, or closing files.
+     */
+    private func copyStoredZipEntry(
+        _ entry: FileBackedZipEntry,
+        from zipURL: URL,
+        to destinationURL: URL
+    ) throws {
+        let handle = try FileHandle(forReadingFrom: zipURL)
+        defer {
+            try? handle.close()
+        }
+        let fileSize = try handle.seekToEnd()
+        let dataOffset = try zipEntryDataOffset(entry, in: handle, fileSize: fileSize)
+
+        _ = FileManager.default.createFile(atPath: destinationURL.path, contents: nil)
+        let output = try FileHandle(forWritingTo: destinationURL)
+        do {
+            try handle.seek(toOffset: dataOffset)
+            var remaining = entry.compressedSize
+            while remaining > 0 {
+                try Task.checkCancellation()
+                let chunkSize = Int(min(remaining, UInt64(64 * 1024)))
+                guard let chunk = try handle.read(upToCount: chunkSize),
+                      !chunk.isEmpty else {
+                    throw ModuleRepositoryError.invalidZip("Truncated stored ZIP entry")
+                }
+                try output.write(contentsOf: chunk)
+                remaining -= UInt64(chunk.count)
+            }
+            try output.close()
+        } catch {
+            try? output.close()
+            throw error
+        }
+    }
+
+    /**
+     Inflates one raw-deflate ZIP payload directly from the package file into staging.
+
+     - Parameters:
+       - entry: ZIP entry metadata whose compression method is deflated.
+       - zipURL: Package file containing the compressed payload.
+       - destinationURL: Staged payload path to create.
+     - Side effects: invokes the C zlib bridge to read `zipURL` and write `destinationURL`.
+     - Throws: `ModuleRepositoryError.invalidZip` when the payload range is outside the package,
+       `ModuleRepositoryError.decompressionFailed` when zlib rejects the deflate stream or writes
+       the wrong byte count, plus file-system errors from checking the staged file.
+     */
+    private func inflateDeflatedZipEntry(
+        _ entry: FileBackedZipEntry,
+        from zipURL: URL,
+        to destinationURL: URL
+    ) throws {
+        let handle = try FileHandle(forReadingFrom: zipURL)
+        defer {
+            try? handle.close()
+        }
+        let fileSize = try handle.seekToEnd()
+        let dataOffset = try zipEntryDataOffset(entry, in: handle, fileSize: fileSize)
+
+        guard dataOffset <= UInt64(UInt.max),
+              entry.compressedSize <= UInt64(UInt.max) else {
+            throw ModuleRepositoryError.invalidZip("ZIP entry is too large")
+        }
+
+        let result = zipURL.withUnsafeFileSystemRepresentation { inputPath in
+            destinationURL.withUnsafeFileSystemRepresentation { outputPath in
+                guard let inputPath, let outputPath else {
+                    return Int32(-1)
+                }
+                return inflate_raw_file_range_to_file(
+                    inputPath,
+                    UInt(dataOffset),
+                    UInt(entry.compressedSize),
+                    outputPath
+                )
+            }
+        }
+        guard result == 0 else {
+            throw ModuleRepositoryError.decompressionFailed
+        }
+
+        let attributes = try FileManager.default.attributesOfItem(atPath: destinationURL.path)
+        guard let writtenSize = (attributes[.size] as? NSNumber)?.uint64Value,
+              writtenSize == entry.uncompressedSize else {
+            throw ModuleRepositoryError.decompressionFailed
+        }
     }
 
     /**
@@ -2271,6 +2459,326 @@ public final class ModuleRepository: @unchecked Sendable {
     }
 
     // MARK: - ZIP Parsing
+
+    /**
+     Reads ZIP metadata from disk while leaving compressed payload bytes in the package file.
+
+     - Parameter zipURL: Package file to inspect.
+     - Returns: File-backed ZIP entries in archive order, or an empty list for an empty archive.
+     - Side effects: opens, seeks, and reads `zipURL`; no payload file data is decompressed here.
+     - Throws: `ModuleRepositoryError.invalidZip` when central-directory or local-header metadata
+       is malformed, truncated, spans multiple disks, uses unsupported ZIP64 fields, or requires a
+       data descriptor without a central directory.
+     */
+    private func readFileBackedZipEntries(from zipURL: URL) throws -> [FileBackedZipEntry] {
+        let handle = try FileHandle(forReadingFrom: zipURL)
+        defer {
+            try? handle.close()
+        }
+
+        let fileSize = try handle.seekToEnd()
+        if let centralDirectoryEntries = try readZipCentralDirectoryEntries(
+            from: handle,
+            fileSize: fileSize
+        ) {
+            return centralDirectoryEntries
+        }
+        return try readLocalZipEntries(from: handle, fileSize: fileSize)
+    }
+
+    /**
+     Parses the ZIP central directory when the archive has a standard end record.
+
+     - Parameters:
+       - handle: Open package file handle, owned by the caller.
+       - fileSize: Total package byte count.
+     - Returns: Central-directory entries, or `nil` when no end-of-central-directory record exists
+       so callers can use the local-header streaming fallback.
+     - Side effects: seeks and reads `handle`.
+     - Throws: `ModuleRepositoryError.invalidZip` when central-directory metadata is truncated,
+       inconsistent, multi-disk, or ZIP64-only.
+     */
+    private func readZipCentralDirectoryEntries(
+        from handle: FileHandle,
+        fileSize: UInt64
+    ) throws -> [FileBackedZipEntry]? {
+        let minimumEndRecordSize = 22
+        guard fileSize >= UInt64(minimumEndRecordSize) else {
+            return nil
+        }
+
+        let searchLength = min(fileSize, UInt64(minimumEndRecordSize + 0xffff))
+        let tail = try readZipBytes(
+            from: handle,
+            offset: fileSize - searchLength,
+            count: Int(searchLength)
+        )
+
+        var endRecordOffset: Int?
+        var candidateOffset = tail.count - minimumEndRecordSize
+        while candidateOffset >= 0 {
+            if tail[candidateOffset] == 0x50,
+               tail[candidateOffset + 1] == 0x4b,
+               tail[candidateOffset + 2] == 0x05,
+               tail[candidateOffset + 3] == 0x06 {
+                let commentLength = Int(readUInt16(tail, at: candidateOffset + 20))
+                if candidateOffset + minimumEndRecordSize + commentLength == tail.count {
+                    endRecordOffset = candidateOffset
+                    break
+                }
+            }
+
+            if candidateOffset == 0 {
+                break
+            }
+            candidateOffset -= 1
+        }
+
+        guard let endRecordOffset else {
+            return nil
+        }
+
+        let diskNumber = readUInt16(tail, at: endRecordOffset + 4)
+        let centralDirectoryDisk = readUInt16(tail, at: endRecordOffset + 6)
+        let entriesOnDisk = readUInt16(tail, at: endRecordOffset + 8)
+        let totalEntries = readUInt16(tail, at: endRecordOffset + 10)
+        let centralDirectorySize32 = readUInt32(tail, at: endRecordOffset + 12)
+        let centralDirectoryOffset32 = readUInt32(tail, at: endRecordOffset + 16)
+
+        guard diskNumber == 0,
+              centralDirectoryDisk == 0,
+              entriesOnDisk == totalEntries else {
+            throw ModuleRepositoryError.invalidZip("Multi-disk ZIP packages are not supported")
+        }
+        guard totalEntries != UInt16.max,
+              centralDirectorySize32 != UInt32.max,
+              centralDirectoryOffset32 != UInt32.max else {
+            throw ModuleRepositoryError.invalidZip("ZIP64 MyBible packages are not supported")
+        }
+
+        let centralDirectorySize = UInt64(centralDirectorySize32)
+        let centralDirectoryOffset = UInt64(centralDirectoryOffset32)
+        guard centralDirectoryOffset <= fileSize,
+              centralDirectorySize <= fileSize - centralDirectoryOffset else {
+            throw ModuleRepositoryError.invalidZip("Truncated ZIP central directory")
+        }
+        guard centralDirectorySize <= UInt64(Int.max) else {
+            throw ModuleRepositoryError.invalidZip("ZIP central directory is too large")
+        }
+        guard centralDirectorySize > 0 else {
+            guard totalEntries == 0 else {
+                throw ModuleRepositoryError.invalidZip("ZIP central directory entry count mismatch")
+            }
+            return []
+        }
+
+        let centralDirectory = try readZipBytes(
+            from: handle,
+            offset: centralDirectoryOffset,
+            count: Int(centralDirectorySize)
+        )
+        var entries: [FileBackedZipEntry] = []
+        var offset = 0
+
+        while offset < centralDirectory.count {
+            guard offset + 46 <= centralDirectory.count else {
+                throw ModuleRepositoryError.invalidZip("Truncated ZIP central directory entry")
+            }
+            guard centralDirectory[offset] == 0x50,
+                  centralDirectory[offset + 1] == 0x4b,
+                  centralDirectory[offset + 2] == 0x01,
+                  centralDirectory[offset + 3] == 0x02 else {
+                throw ModuleRepositoryError.invalidZip("Malformed ZIP central directory")
+            }
+
+            let generalPurposeFlags = readUInt16(centralDirectory, at: offset + 8)
+            let compressionMethod = readUInt16(centralDirectory, at: offset + 10)
+            let compressedSize32 = readUInt32(centralDirectory, at: offset + 20)
+            let uncompressedSize32 = readUInt32(centralDirectory, at: offset + 24)
+            let nameLength = Int(readUInt16(centralDirectory, at: offset + 28))
+            let extraLength = Int(readUInt16(centralDirectory, at: offset + 30))
+            let commentLength = Int(readUInt16(centralDirectory, at: offset + 32))
+            let entryDisk = readUInt16(centralDirectory, at: offset + 34)
+            let localHeaderOffset32 = readUInt32(centralDirectory, at: offset + 42)
+            let nameStart = offset + 46
+            let nextOffset = nameStart + nameLength + extraLength + commentLength
+
+            guard nextOffset <= centralDirectory.count else {
+                throw ModuleRepositoryError.invalidZip("Truncated ZIP central directory entry")
+            }
+            guard entryDisk == 0 else {
+                throw ModuleRepositoryError.invalidZip("Multi-disk ZIP entries are not supported")
+            }
+            guard compressedSize32 != UInt32.max,
+                  uncompressedSize32 != UInt32.max,
+                  localHeaderOffset32 != UInt32.max else {
+                throw ModuleRepositoryError.invalidZip("ZIP64 MyBible entries are not supported")
+            }
+
+            let nameData = Data(centralDirectory[nameStart..<(nameStart + nameLength)])
+            let name = String(data: nameData, encoding: .utf8) ?? ""
+            entries.append(FileBackedZipEntry(
+                name: name,
+                compressionMethod: compressionMethod,
+                generalPurposeFlags: generalPurposeFlags,
+                compressedSize: UInt64(compressedSize32),
+                uncompressedSize: UInt64(uncompressedSize32),
+                localHeaderOffset: UInt64(localHeaderOffset32)
+            ))
+            offset = nextOffset
+        }
+
+        guard entries.count == Int(totalEntries) else {
+            throw ModuleRepositoryError.invalidZip("ZIP central directory entry count mismatch")
+        }
+        return entries
+    }
+
+    /**
+     Parses local ZIP headers for stream-style archives without a central directory.
+
+     - Parameters:
+       - handle: Open package file handle, owned by the caller.
+       - fileSize: Total package byte count.
+     - Returns: File-backed entries whose sizes are available in their local headers.
+     - Side effects: seeks and reads `handle`.
+     - Throws: `ModuleRepositoryError.invalidZip` when a local header is truncated, ZIP64-sized,
+       or depends on a trailing data descriptor that cannot be skipped without central metadata.
+     */
+    private func readLocalZipEntries(
+        from handle: FileHandle,
+        fileSize: UInt64
+    ) throws -> [FileBackedZipEntry] {
+        var entries: [FileBackedZipEntry] = []
+        var offset: UInt64 = 0
+
+        while offset + 30 <= fileSize {
+            let header = try readZipBytes(from: handle, offset: offset, count: 30)
+            guard header[0] == 0x50,
+                  header[1] == 0x4b,
+                  header[2] == 0x03,
+                  header[3] == 0x04 else {
+                break
+            }
+
+            let generalPurposeFlags = readUInt16(header, at: 6)
+            guard generalPurposeFlags & 0x0008 == 0 else {
+                throw ModuleRepositoryError.invalidZip(
+                    "ZIP entries with data descriptors require a central directory"
+                )
+            }
+
+            let compressionMethod = readUInt16(header, at: 8)
+            let compressedSize32 = readUInt32(header, at: 18)
+            let uncompressedSize32 = readUInt32(header, at: 22)
+            let nameLength = Int(readUInt16(header, at: 26))
+            let extraLength = Int(readUInt16(header, at: 28))
+            guard compressedSize32 != UInt32.max,
+                  uncompressedSize32 != UInt32.max else {
+                throw ModuleRepositoryError.invalidZip("ZIP64 MyBible entries are not supported")
+            }
+
+            let metadataLength = UInt64(30 + nameLength + extraLength)
+            guard metadataLength <= fileSize - offset else {
+                throw ModuleRepositoryError.invalidZip("Truncated ZIP local header")
+            }
+            let nameData = try readZipBytes(
+                from: handle,
+                offset: offset + 30,
+                count: nameLength
+            )
+            let dataOffset = offset + metadataLength
+            let compressedSize = UInt64(compressedSize32)
+            guard compressedSize <= fileSize - dataOffset else {
+                throw ModuleRepositoryError.invalidZip("Truncated ZIP payload")
+            }
+
+            let name = String(data: nameData, encoding: .utf8) ?? ""
+            entries.append(FileBackedZipEntry(
+                name: name,
+                compressionMethod: compressionMethod,
+                generalPurposeFlags: generalPurposeFlags,
+                compressedSize: compressedSize,
+                uncompressedSize: UInt64(uncompressedSize32),
+                localHeaderOffset: offset
+            ))
+            offset = dataOffset + compressedSize
+        }
+
+        return entries
+    }
+
+    /**
+     Computes the payload offset for an entry by validating its local file header.
+
+     - Parameters:
+       - entry: Central-directory or local-header entry metadata.
+       - handle: Open package file handle, owned by the caller.
+       - fileSize: Total package byte count.
+     - Returns: Byte offset where the compressed payload starts.
+     - Side effects: seeks and reads `handle`.
+     - Throws: `ModuleRepositoryError.invalidZip` when the local header signature, metadata, or
+       payload range is inconsistent with the package file.
+     */
+    private func zipEntryDataOffset(
+        _ entry: FileBackedZipEntry,
+        in handle: FileHandle,
+        fileSize: UInt64
+    ) throws -> UInt64 {
+        guard entry.localHeaderOffset <= fileSize,
+              30 <= fileSize - entry.localHeaderOffset else {
+            throw ModuleRepositoryError.invalidZip("Truncated ZIP local header")
+        }
+
+        let header = try readZipBytes(from: handle, offset: entry.localHeaderOffset, count: 30)
+        guard header[0] == 0x50,
+              header[1] == 0x4b,
+              header[2] == 0x03,
+              header[3] == 0x04 else {
+            throw ModuleRepositoryError.invalidZip("Malformed ZIP local header")
+        }
+
+        let nameLength = Int(readUInt16(header, at: 26))
+        let extraLength = Int(readUInt16(header, at: 28))
+        let metadataLength = UInt64(30 + nameLength + extraLength)
+        guard metadataLength <= fileSize - entry.localHeaderOffset else {
+            throw ModuleRepositoryError.invalidZip("Truncated ZIP local header")
+        }
+
+        let dataOffset = entry.localHeaderOffset + metadataLength
+        guard entry.compressedSize <= fileSize - dataOffset else {
+            throw ModuleRepositoryError.invalidZip("Truncated ZIP payload")
+        }
+        return dataOffset
+    }
+
+    /**
+     Reads an exact byte range from a ZIP file handle.
+
+     - Parameters:
+       - handle: Open package file handle, owned by the caller.
+       - offset: Absolute byte offset to read from.
+       - count: Exact number of bytes required.
+     - Returns: Data containing exactly `count` bytes.
+     - Side effects: seeks and reads `handle`.
+     - Throws: `ModuleRepositoryError.invalidZip` when the requested range cannot be read fully,
+       plus file-system errors from `FileHandle` seeking or reading.
+     */
+    private func readZipBytes(
+        from handle: FileHandle,
+        offset: UInt64,
+        count: Int
+    ) throws -> Data {
+        try handle.seek(toOffset: offset)
+        guard count > 0 else {
+            return Data()
+        }
+        guard let data = try handle.read(upToCount: count),
+              data.count == count else {
+            throw ModuleRepositoryError.invalidZip("Truncated ZIP structure")
+        }
+        return data
+    }
 
     private struct ZipEntry {
         let name: String

@@ -5,8 +5,10 @@
 // Otherwise, provides stub implementations for development without libsword.
 
 #include "include/flatapi.h"
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/types.h>
 
 #ifdef USE_REAL_SWORD
 
@@ -669,6 +671,87 @@ unsigned char *inflate_raw_data(const unsigned char *input, unsigned long input_
     *output_len = stream.total_out;
     inflateEnd(&stream);
     return output;
+}
+
+int inflate_raw_file_range_to_file(const char *input_path,
+                                   unsigned long input_offset,
+                                   unsigned long input_len,
+                                   const char *output_path) {
+    if (!input_path || !output_path) return -1;
+
+    FILE *input = fopen(input_path, "rb");
+    if (!input) return -2;
+
+    FILE *output = fopen(output_path, "wb");
+    if (!output) {
+        fclose(input);
+        return -3;
+    }
+
+    if (fseeko(input, (off_t)input_offset, SEEK_SET) != 0) {
+        fclose(output);
+        fclose(input);
+        return -4;
+    }
+
+    z_stream stream;
+    memset(&stream, 0, sizeof(stream));
+    if (inflateInit2(&stream, -15) != Z_OK) {
+        fclose(output);
+        fclose(input);
+        return -5;
+    }
+
+    unsigned char input_buffer[65536];
+    unsigned char output_buffer[65536];
+    unsigned long remaining = input_len;
+    int ret = Z_OK;
+    int result = 0;
+
+    while (remaining > 0 && ret != Z_STREAM_END) {
+        size_t next_read = remaining < sizeof(input_buffer)
+            ? (size_t)remaining
+            : sizeof(input_buffer);
+        size_t bytes_read = fread(input_buffer, 1, next_read, input);
+        if (bytes_read != next_read) {
+            result = -6;
+            break;
+        }
+        remaining -= (unsigned long)bytes_read;
+
+        stream.next_in = input_buffer;
+        stream.avail_in = (uInt)bytes_read;
+
+        do {
+            stream.next_out = output_buffer;
+            stream.avail_out = (uInt)sizeof(output_buffer);
+
+            ret = inflate(&stream, remaining == 0 ? Z_FINISH : Z_NO_FLUSH);
+            if (ret != Z_OK && ret != Z_STREAM_END) {
+                result = -7;
+                break;
+            }
+
+            size_t produced = sizeof(output_buffer) - stream.avail_out;
+            if (produced > 0 && fwrite(output_buffer, 1, produced, output) != produced) {
+                result = -8;
+                break;
+            }
+        } while ((stream.avail_in > 0 || stream.avail_out == 0) && ret != Z_STREAM_END);
+
+        if (result != 0) break;
+    }
+
+    if (result == 0 && (ret != Z_STREAM_END || remaining != 0 || stream.avail_in != 0)) {
+        result = -9;
+    }
+
+    inflateEnd(&stream);
+    if (fclose(output) != 0 && result == 0) {
+        result = -10;
+    }
+    fclose(input);
+    return result;
 }
 
 void gunzip_free(unsigned char *buffer) {

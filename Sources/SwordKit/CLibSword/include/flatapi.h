@@ -204,6 +204,13 @@ unsigned char *gunzip_data(const unsigned char *input, unsigned long input_len,
 unsigned char *inflate_raw_data(const unsigned char *input, unsigned long input_len,
                                 unsigned long expected_len, unsigned long *output_len);
 
+/// Decompress raw deflate bytes from a file range into an output file.
+/// Returns 0 on success and nonzero when input, output, seeking, or zlib streaming fails.
+int inflate_raw_file_range_to_file(const char *input_path,
+                                   unsigned long input_offset,
+                                   unsigned long input_len,
+                                   const char *output_path);
+
 /// Free buffer allocated by gunzip_data or inflate_raw_data.
 void gunzip_free(unsigned char *buffer);
 

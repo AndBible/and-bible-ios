@@ -377,6 +377,106 @@ extension AndBibleTests {
         XCTAssertTrue(repository.loadInstalledMyBibleModules().isEmpty)
     }
 
+    func testModuleRepositoryInstallsDeflatedMyBiblePackage() async throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let swordDir = tempDir.appendingPathComponent("sword", isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let source = SourceConfig(
+            name: "Example MyBible",
+            type: "HTTP",
+            host: "mybible.example",
+            catalogPath: "/manifest.json",
+            repositoryType: SourceConfig.myBibleHTTPSRepositoryType,
+            description: "Example MyBible catalog",
+            manifestURL: URL(string: "https://mybible.example/manifest.json"),
+            sourceURL: URL(string: "https://mybible.example/manifest.json")
+        )
+        let manifestData = """
+        {
+          "url": "https://mybible.example/manifest.json",
+          "file_name": "Example MyBible",
+          "description": "Example MyBible catalog",
+          "modules": [
+            {
+              "file_name": "finrk.SQLite3.zip",
+              "description": "Finnish RK",
+              "download_url": "https://mybible.example/finrk.SQLite3.zip",
+              "language_code": "fi",
+              "update_date": "2026-05-01",
+              "update_info": "initial"
+            }
+          ]
+        }
+        """.data(using: .utf8)!
+        let myBibleDatabaseURL = tempDir.appendingPathComponent("finrk.SQLite3")
+        try makeMyBibleFixtureDatabase(at: myBibleDatabaseURL)
+        let databaseData = try Data(contentsOf: myBibleDatabaseURL)
+        let packageData = try makeModuleRepositoryZipWithCentralDirectory([
+            (
+                name: "finrk.SQLite3",
+                body: databaseData,
+                compressionMethod: 8,
+                compressedBody: makeModuleRepositoryRawDeflateData(databaseData)
+            )
+        ])
+
+        ModuleRepositoryDownloadMockURLProtocol.requestHandler = { request in
+            switch request.url?.path {
+            case "/manifest.json":
+                return (
+                    HTTPURLResponse(
+                        url: request.url!,
+                        statusCode: 200,
+                        httpVersion: nil,
+                        headerFields: nil
+                    )!,
+                    manifestData
+                )
+            case "/finrk.SQLite3.zip":
+                return (
+                    HTTPURLResponse(
+                        url: request.url!,
+                        statusCode: 200,
+                        httpVersion: nil,
+                        headerFields: nil
+                    )!,
+                    packageData
+                )
+            default:
+                XCTFail("Unexpected MyBible request: \(request.url?.absoluteString ?? "<nil>")")
+                return (
+                    HTTPURLResponse(
+                        url: request.url!,
+                        statusCode: 404,
+                        httpVersion: nil,
+                        headerFields: nil
+                    )!,
+                    Data()
+                )
+            }
+        }
+        defer { ModuleRepositoryDownloadMockURLProtocol.requestHandler = nil }
+
+        let repository = ModuleRepository(
+            basePath: tempDir.path,
+            swordPath: swordDir.path,
+            session: makeModuleRepositoryDownloadMockSession()
+        )
+
+        _ = try await repository.refreshCatalog(for: source)
+        try await repository.installModule(named: "MyBible-finrk_SQLite3", from: source)
+
+        let moduleDir = swordDir
+            .appendingPathComponent("mybible", isDirectory: true)
+            .appendingPathComponent("MyBible-finrk_SQLite3", isDirectory: true)
+        let installedDatabaseURL = moduleDir.appendingPathComponent("finrk.SQLite3")
+        let reader = try XCTUnwrap(MyBibleReader(filePath: installedDatabaseURL.path))
+        XCTAssertEqual(reader.getVerse(book: 10, chapter: 1, verse: 1), "Alussa loi Jumala")
+    }
+
     func testModuleRepositoryDownloadFailsWithoutInstalledMarkerWhenRequiredFileFails() async throws {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -1307,6 +1407,89 @@ extension AndBibleTests {
         }
 
         return data
+    }
+
+    private func makeModuleRepositoryZipWithCentralDirectory(
+        _ entries: [(name: String, body: Data, compressionMethod: UInt16, compressedBody: Data)]
+    ) -> Data {
+        var data = Data()
+        var centralDirectory = Data()
+
+        for entry in entries {
+            let nameData = Data(entry.name.utf8)
+            let localHeaderOffset = UInt32(data.count)
+            let checksum = moduleRepositoryZipCRC32(entry.body)
+
+            data.append(contentsOf: [0x50, 0x4b, 0x03, 0x04])
+            appendModuleRepositoryZipUInt16(20, to: &data)
+            appendModuleRepositoryZipUInt16(0, to: &data)
+            appendModuleRepositoryZipUInt16(entry.compressionMethod, to: &data)
+            appendModuleRepositoryZipUInt16(0, to: &data)
+            appendModuleRepositoryZipUInt16(0, to: &data)
+            appendModuleRepositoryZipUInt32(checksum, to: &data)
+            appendModuleRepositoryZipUInt32(UInt32(entry.compressedBody.count), to: &data)
+            appendModuleRepositoryZipUInt32(UInt32(entry.body.count), to: &data)
+            appendModuleRepositoryZipUInt16(UInt16(nameData.count), to: &data)
+            appendModuleRepositoryZipUInt16(0, to: &data)
+            data.append(nameData)
+            data.append(entry.compressedBody)
+
+            centralDirectory.append(contentsOf: [0x50, 0x4b, 0x01, 0x02])
+            appendModuleRepositoryZipUInt16(20, to: &centralDirectory)
+            appendModuleRepositoryZipUInt16(20, to: &centralDirectory)
+            appendModuleRepositoryZipUInt16(0, to: &centralDirectory)
+            appendModuleRepositoryZipUInt16(entry.compressionMethod, to: &centralDirectory)
+            appendModuleRepositoryZipUInt16(0, to: &centralDirectory)
+            appendModuleRepositoryZipUInt16(0, to: &centralDirectory)
+            appendModuleRepositoryZipUInt32(checksum, to: &centralDirectory)
+            appendModuleRepositoryZipUInt32(UInt32(entry.compressedBody.count), to: &centralDirectory)
+            appendModuleRepositoryZipUInt32(UInt32(entry.body.count), to: &centralDirectory)
+            appendModuleRepositoryZipUInt16(UInt16(nameData.count), to: &centralDirectory)
+            appendModuleRepositoryZipUInt16(0, to: &centralDirectory)
+            appendModuleRepositoryZipUInt16(0, to: &centralDirectory)
+            appendModuleRepositoryZipUInt16(0, to: &centralDirectory)
+            appendModuleRepositoryZipUInt16(0, to: &centralDirectory)
+            appendModuleRepositoryZipUInt32(0, to: &centralDirectory)
+            appendModuleRepositoryZipUInt32(localHeaderOffset, to: &centralDirectory)
+            centralDirectory.append(nameData)
+        }
+
+        let centralDirectoryOffset = UInt32(data.count)
+        data.append(centralDirectory)
+        data.append(contentsOf: [0x50, 0x4b, 0x05, 0x06])
+        appendModuleRepositoryZipUInt16(0, to: &data)
+        appendModuleRepositoryZipUInt16(0, to: &data)
+        appendModuleRepositoryZipUInt16(UInt16(entries.count), to: &data)
+        appendModuleRepositoryZipUInt16(UInt16(entries.count), to: &data)
+        appendModuleRepositoryZipUInt32(UInt32(centralDirectory.count), to: &data)
+        appendModuleRepositoryZipUInt32(centralDirectoryOffset, to: &data)
+        appendModuleRepositoryZipUInt16(0, to: &data)
+
+        return data
+    }
+
+    private func makeModuleRepositoryRawDeflateData(_ data: Data) throws -> Data {
+        let gzipData = try gzipModuleRepositoryTestData(data)
+        guard gzipData.count > 18 else {
+            throw ModuleRepositoryDownloadTestError.compressionFailed
+        }
+        return Data(gzipData.dropFirst(10).dropLast(8))
+    }
+
+    private func moduleRepositoryZipCRC32(_ data: Data) -> UInt32 {
+        var crc: UInt32 = 0xffff_ffff
+        for byte in data {
+            var lookup = (crc ^ UInt32(byte)) & 0xff
+            for _ in 0..<8 {
+                if lookup & 1 == 1 {
+                    lookup = (lookup >> 1) ^ 0xedb8_8320
+                } else {
+                    lookup >>= 1
+                }
+            }
+            crc = (crc >> 8) ^ lookup
+        }
+        return crc ^ 0xffff_ffff
     }
 
     private func appendModuleRepositoryZipUInt16(_ value: UInt16, to data: inout Data) {
