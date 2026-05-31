@@ -170,15 +170,19 @@ public final class RepositorySourceManager: @unchecked Sendable {
      Side effects:
      - creates or migrates default repository configuration through `InstallManager`.
      - best-effort writes `CustomRepositories.json` when legacy source-only custom rows can be
-       backfilled; load still returns enriched in-memory rows if that write fails.
+       backfilled and the sidecar is absent or decodable; load still returns enriched in-memory
+       rows if the sidecar is unreadable or the write fails.
 
      Failure modes:
      - omits config-backed SWORD rows if the SWORD config file cannot be read
      - ignores malformed custom metadata records instead of failing all Downloads sources
+     - skips backfill persistence when `CustomRepositories.json` exists but cannot be decoded,
+       preserving the unreadable file for possible recovery
      */
     public func loadSources() -> [SourceConfig] {
         InstallManager.ensureDefaultConfigPublic(at: basePath)
-        var customRecords = loadCustomRepositoryRecords()
+        let customRecordLoad = loadCustomRepositoryRecordStore()
+        var customRecords = customRecordLoad.records
 
         guard let content = try? String(contentsOf: configURL, encoding: .utf8) else {
             return customRecords
@@ -193,7 +197,9 @@ public final class RepositorySourceManager: @unchecked Sendable {
         )
         if !backfilledRecords.isEmpty {
             customRecords.append(contentsOf: backfilledRecords)
-            try? writeCustomRepositoryRecords(customRecords)
+            if customRecordLoad.canPersistBackfilledRecords {
+                try? writeCustomRepositoryRecords(customRecords)
+            }
         }
         let recordsByName = Dictionary(customRecords.map { ($0.name, $0) }, uniquingKeysWith: { first, _ in first })
 
@@ -544,6 +550,15 @@ public final class RepositorySourceManager: @unchecked Sendable {
         }
     }
 
+    /// Result of loading `CustomRepositories.json` with enough state to make safe repair decisions.
+    private struct CustomRepositoryRecordLoad {
+        /// Valid records decoded from the sidecar, or an empty array when records are absent/unusable.
+        let records: [CustomRepositoryRecord]
+
+        /// Whether source-only SWORD backfills may be written without risking overwrite of unknown data.
+        let canPersistBackfilledRecords: Bool
+    }
+
     private func currentConfigContent() throws -> String {
         InstallManager.ensureDefaultConfigPublic(at: basePath)
         do {
@@ -563,13 +578,39 @@ public final class RepositorySourceManager: @unchecked Sendable {
        so Downloads can still load built-in SWORD sources and valid sidecar-only repositories.
      */
     private func loadCustomRepositoryRecords() -> [CustomRepositoryRecord] {
+        loadCustomRepositoryRecordStore().records
+    }
+
+    /**
+     Loads sidecar records and records whether the sidecar is safe to rewrite with inferred data.
+
+     Backfill persistence is safe when the sidecar is absent or successfully decodes, because the
+     manager either owns a new file or can preserve every decoded valid record in deterministic
+     order. When the file exists but cannot be read or decoded, the unreadable bytes may still
+     contain recoverable custom/MyBible metadata, so load-only callers receive no records and
+     source-only backfills stay in memory without replacing the sidecar.
+
+     - Returns: Decoded valid records plus a flag controlling whether inferred legacy records can
+       be persisted.
+     - Side effects: reads `CustomRepositories.json` and checks whether the sidecar path exists.
+     - Failure modes: unreadable or undecodable sidecars return no records and disallow backfill
+       persistence; malformed decoded records are dropped while still allowing a clean rewrite.
+     */
+    private func loadCustomRepositoryRecordStore() -> CustomRepositoryRecordLoad {
+        let sidecarExists = fileManager.fileExists(atPath: customRepositoriesURL.path)
         guard let data = fileManager.contents(atPath: customRepositoriesURL.path) else {
-            return []
+            return CustomRepositoryRecordLoad(
+                records: [],
+                canPersistBackfilledRecords: !sidecarExists
+            )
         }
         guard let records = try? JSONDecoder().decode(CustomRepositoryStore.self, from: data).repositories else {
-            return []
+            return CustomRepositoryRecordLoad(records: [], canPersistBackfilledRecords: false)
         }
-        return records.filter(Self.isValidCustomRepositoryRecord)
+        return CustomRepositoryRecordLoad(
+            records: records.filter(Self.isValidCustomRepositoryRecord),
+            canPersistBackfilledRecords: true
+        )
     }
 
     /**
