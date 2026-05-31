@@ -2,15 +2,9 @@ name: iOS CI
 
 on:
   pull_request:
-    paths-ignore:
-      - "**/*.md"
-      - "docs/**"
   push:
     branches:
       - main
-    paths-ignore:
-      - "**/*.md"
-      - "docs/**"
 
 concurrency:
   group: ios-ci-${{ github.event.pull_request.number || github.ref }}
@@ -24,6 +18,62 @@ env:
   UI_TEST_TIMINGS_FILE: scripts/ui_test_timings.json
 
 jobs:
+  classify-changes:
+    name: Classify Changes
+    runs-on: ubuntu-latest
+    outputs:
+      docs_only: ${{ steps.classify.outputs.docs_only }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Classify change set
+        id: classify
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+          CURRENT_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          if [[ "${EVENT_NAME}" == "pull_request" ]]; then
+            base="${PR_BASE_SHA}"
+            head="${PR_HEAD_SHA}"
+          else
+            base="${PUSH_BEFORE_SHA}"
+            head="${CURRENT_SHA}"
+          fi
+
+          if [[ -z "${base}" || "${base}" =~ ^0+$ ]]; then
+            mapfile -t changed_files < <(git diff-tree --no-commit-id --name-only -r "${head}")
+          else
+            mapfile -t changed_files < <(git diff --name-only "${base}" "${head}")
+          fi
+
+          docs_only=true
+          if [[ "${#changed_files[@]}" -eq 0 ]]; then
+            docs_only=false
+          fi
+
+          for path in "${changed_files[@]}"; do
+            echo "changed: ${path}"
+            case "${path}" in
+              docs/*|*.md)
+                ;;
+              *)
+                docs_only=false
+                ;;
+            esac
+          done
+
+          echo "docs_only=${docs_only}"
+          echo "docs_only=${docs_only}" >> "${GITHUB_OUTPUT}"
+
   repo-standards:
     name: Repo Standards
     runs-on: ubuntu-latest
@@ -85,11 +135,19 @@ jobs:
   bibleview-js:
     name: BibleView JS
     runs-on: ubuntu-latest
+    needs:
+      - classify-changes
     steps:
+      - name: Docs-only pass
+        if: needs.classify-changes.outputs.docs_only == 'true'
+        run: echo "Docs-only change set; BibleView JS checks are not required."
+
       - name: Checkout
+        if: needs.classify-changes.outputs.docs_only != 'true'
         uses: actions/checkout@v6
 
       - name: Setup Node.js
+        if: needs.classify-changes.outputs.docs_only != 'true'
         uses: actions/setup-node@v4
         with:
           node-version: "20"
@@ -97,14 +155,17 @@ jobs:
           cache-dependency-path: bibleview-js/package-lock.json
 
       - name: Install frontend dependencies
+        if: needs.classify-changes.outputs.docs_only != 'true'
         working-directory: bibleview-js
         run: npm ci
 
       - name: Run frontend tests
+        if: needs.classify-changes.outputs.docs_only != 'true'
         working-directory: bibleview-js
         run: npm run test:ci
 
       - name: Build frontend debug bundle
+        if: needs.classify-changes.outputs.docs_only != 'true'
         working-directory: bibleview-js
         run: npm run build-debug
 
@@ -112,6 +173,7 @@ jobs:
     name: Plan UI Test Shards
     runs-on: ubuntu-latest
     needs:
+      - classify-changes
       - repo-standards
       - localization-guardrails
     outputs:
@@ -139,21 +201,29 @@ jobs:
 
   ios-ui-foundation:
     name: Prepare UI Test Foundation
-    runs-on: macos-15
+    runs-on: ${{ needs.classify-changes.outputs.docs_only == 'true' && 'ubuntu-latest' || 'macos-15' }}
     needs:
+      - classify-changes
       - repo-standards
       - localization-guardrails
     timeout-minutes: 60
     steps:
+      - name: Docs-only pass
+        if: needs.classify-changes.outputs.docs_only == 'true'
+        run: echo "Docs-only change set; UI test foundation preparation is not required."
+
       - name: Checkout
+        if: needs.classify-changes.outputs.docs_only != 'true'
         uses: actions/checkout@v6
 
       - name: Select Xcode version
+        if: needs.classify-changes.outputs.docs_only != 'true'
         uses: maxim-lobanov/setup-xcode@v1.6.0
         with:
           xcode-version: ${{ env.XCODE_VERSION }}
 
       - name: Restore libsword build cache
+        if: needs.classify-changes.outputs.docs_only != 'true'
         uses: actions/cache@v5
         with:
           path: |
@@ -165,9 +235,11 @@ jobs:
             ${{ runner.os }}-xcode-${{ env.XCODE_VERSION }}-libsword-hosttool-
 
       - name: Show Xcode version
+        if: needs.classify-changes.outputs.docs_only != 'true'
         run: xcodebuild -version
 
       - name: Ensure libsword build prerequisites
+        if: needs.classify-changes.outputs.docs_only != 'true'
         run: |
           if ! command -v cmake >/dev/null 2>&1; then
             brew install cmake
@@ -177,6 +249,7 @@ jobs:
           fi
 
       - name: Build libsword XCFramework
+        if: needs.classify-changes.outputs.docs_only != 'true'
         working-directory: libsword
         env:
           INCLUDE_MACOS_SLICE: "1"
@@ -189,6 +262,7 @@ jobs:
 
       - name: Upload prepared libsword XCFramework
         id: upload_libsword_xcframework
+        if: needs.classify-changes.outputs.docs_only != 'true'
         continue-on-error: true
         uses: actions/upload-artifact@v6
         with:
@@ -198,7 +272,7 @@ jobs:
           retention-days: 1
 
       - name: Retry upload prepared libsword XCFramework
-        if: steps.upload_libsword_xcframework.outcome == 'failure'
+        if: needs.classify-changes.outputs.docs_only != 'true' && steps.upload_libsword_xcframework.outcome == 'failure'
         uses: actions/upload-artifact@v6
         with:
           name: libsword-hosttool-xcframework
@@ -209,8 +283,9 @@ jobs:
 
   ios-simulator-unit-tests:
     name: Unit Tests (Simulator)
-    runs-on: macos-15
+    runs-on: ${{ needs.classify-changes.outputs.docs_only == 'true' && 'ubuntu-latest' || 'macos-15' }}
     needs:
+      - classify-changes
       - repo-standards
       - localization-guardrails
     timeout-minutes: 60
@@ -222,15 +297,22 @@ jobs:
         -skip-testing:AndBibleUITests
         -skip-testing:AndBibleTests/AndBibleTests/testBridgeBindsWeakWebViewReferenceFromLifecycleCallbacks
     steps:
+      - name: Docs-only pass
+        if: needs.classify-changes.outputs.docs_only == 'true'
+        run: echo "Docs-only change set; simulator unit tests are not required."
+
       - name: Checkout
+        if: needs.classify-changes.outputs.docs_only != 'true'
         uses: actions/checkout@v6
 
       - name: Select Xcode version
+        if: needs.classify-changes.outputs.docs_only != 'true'
         uses: maxim-lobanov/setup-xcode@v1.6.0
         with:
           xcode-version: ${{ env.XCODE_VERSION }}
 
       - name: Restore SwiftPM and build caches
+        if: needs.classify-changes.outputs.docs_only != 'true'
         uses: actions/cache@v5
         with:
           path: |
@@ -242,6 +324,7 @@ jobs:
             ${{ runner.os }}-xcode-${{ env.XCODE_VERSION }}-spm-
 
       - name: Restore libsword build cache
+        if: needs.classify-changes.outputs.docs_only != 'true'
         uses: actions/cache@v5
         with:
           path: |
@@ -253,9 +336,11 @@ jobs:
             ${{ runner.os }}-xcode-${{ env.XCODE_VERSION }}-libsword-iosonly-
 
       - name: Show Xcode version
+        if: needs.classify-changes.outputs.docs_only != 'true'
         run: xcodebuild -version
 
       - name: Ensure iOS simulator runtime is available
+        if: needs.classify-changes.outputs.docs_only != 'true'
         run: |
           if xcrun simctl list runtimes available | grep -Fq 'iOS '; then
             echo "An iOS simulator runtime is already installed."
@@ -265,6 +350,7 @@ jobs:
           fi
 
       - name: Ensure libsword build prerequisites
+        if: needs.classify-changes.outputs.docs_only != 'true'
         run: |
           if ! command -v cmake >/dev/null 2>&1; then
             brew install cmake
@@ -274,6 +360,7 @@ jobs:
           fi
 
       - name: Build libsword XCFramework
+        if: needs.classify-changes.outputs.docs_only != 'true'
         working-directory: libsword
         env:
           INCLUDE_MACOS_SLICE: "0"
@@ -286,6 +373,7 @@ jobs:
 
       - name: Resolve iOS simulator destination
         id: simulator
+        if: needs.classify-changes.outputs.docs_only != 'true'
         run: >-
           python3 -u scripts/resolve_ios_simulator_destination.py
           --project AndBible.xcodeproj
@@ -294,12 +382,14 @@ jobs:
           --device-name-prefix "AndBible CI Unit"
 
       - name: Boot selected simulator
+        if: needs.classify-changes.outputs.docs_only != 'true'
         run: >-
           python3 -u scripts/wait_for_simulator_boot.py
           --simulator-id "${{ steps.simulator.outputs.simulator_id }}"
           --timeout-seconds 300
 
       - name: Build for testing
+        if: needs.classify-changes.outputs.docs_only != 'true'
         run: |
           mkdir -p .artifacts
           python3 -u scripts/run_xcodebuild_with_test_selection.py \
@@ -313,6 +403,7 @@ jobs:
             --action build-for-testing
 
       - name: Run selected simulator tests without rebuilding
+        if: needs.classify-changes.outputs.docs_only != 'true'
         timeout-minutes: 10
         run: |
           python3 -u scripts/run_xcodebuild_with_test_selection.py \
@@ -327,7 +418,7 @@ jobs:
 
       - name: Upload xcodebuild test result bundle
         id: upload_unit_xcresult
-        if: always()
+        if: always() && needs.classify-changes.outputs.docs_only != 'true'
         continue-on-error: true
         uses: actions/upload-artifact@v6
         with:
@@ -338,7 +429,7 @@ jobs:
           retention-days: 14
 
       - name: Retry upload xcodebuild test result bundle
-        if: always() && steps.upload_unit_xcresult.outcome == 'failure'
+        if: always() && needs.classify-changes.outputs.docs_only != 'true' && steps.upload_unit_xcresult.outcome == 'failure'
         uses: actions/upload-artifact@v6
         with:
           name: andbible-xcresult-${{ github.run_id }}-unit
@@ -349,13 +440,14 @@ jobs:
           overwrite: true
 
       - name: Delete dedicated simulator
-        if: always() && steps.simulator.outputs.simulator_created == 'true'
+        if: always() && needs.classify-changes.outputs.docs_only != 'true' && steps.simulator.outputs.simulator_created == 'true'
         run: xcrun simctl delete "${{ steps.simulator.outputs.simulator_id }}"
 
   ios-simulator-ui-tests:
     name: ${{ matrix.job_name }}
-    runs-on: macos-15
+    runs-on: ${{ needs.classify-changes.outputs.docs_only == 'true' && 'ubuntu-latest' || 'macos-15' }}
     needs:
+      - classify-changes
       - ui-shard-plan
       - ios-ui-foundation
     strategy:
@@ -368,15 +460,22 @@ jobs:
       TEST_XCRESULT_BUNDLE_PATH: ${{ matrix.test_xcresult_bundle_path }}
       TEST_SELECTION_ARGS: ${{ matrix.test_selection_args }}
     steps:
+      - name: Docs-only pass
+        if: needs.classify-changes.outputs.docs_only == 'true'
+        run: echo "Docs-only change set; simulator UI shard is not required."
+
       - name: Checkout
+        if: needs.classify-changes.outputs.docs_only != 'true'
         uses: actions/checkout@v6
 
       - name: Select Xcode version
+        if: needs.classify-changes.outputs.docs_only != 'true'
         uses: maxim-lobanov/setup-xcode@v1.6.0
         with:
           xcode-version: ${{ env.XCODE_VERSION }}
 
       - name: Restore SwiftPM and build caches
+        if: needs.classify-changes.outputs.docs_only != 'true'
         uses: actions/cache@v5
         with:
           path: |
@@ -388,6 +487,7 @@ jobs:
             ${{ runner.os }}-xcode-${{ env.XCODE_VERSION }}-spm-
 
       - name: Restore libsword build cache
+        if: needs.classify-changes.outputs.docs_only != 'true'
         uses: actions/cache@v5
         with:
           path: |
@@ -399,15 +499,18 @@ jobs:
             ${{ runner.os }}-xcode-${{ env.XCODE_VERSION }}-libsword-hosttool-
 
       - name: Download prepared libsword XCFramework
+        if: needs.classify-changes.outputs.docs_only != 'true'
         uses: actions/download-artifact@v5
         with:
           name: libsword-hosttool-xcframework
           path: libsword
 
       - name: Show Xcode version
+        if: needs.classify-changes.outputs.docs_only != 'true'
         run: xcodebuild -version
 
       - name: Ensure iOS simulator runtime is available
+        if: needs.classify-changes.outputs.docs_only != 'true'
         run: |
           if xcrun simctl list runtimes available | grep -Fq 'iOS '; then
             echo "An iOS simulator runtime is already installed."
@@ -417,6 +520,7 @@ jobs:
           fi
 
       - name: Ensure libsword build prerequisites
+        if: needs.classify-changes.outputs.docs_only != 'true'
         run: |
           if ! command -v cmake >/dev/null 2>&1; then
             brew install cmake
@@ -426,6 +530,7 @@ jobs:
           fi
 
       - name: Build libsword XCFramework
+        if: needs.classify-changes.outputs.docs_only != 'true'
         working-directory: libsword
         env:
           INCLUDE_MACOS_SLICE: "1"
@@ -438,6 +543,7 @@ jobs:
 
       - name: Resolve iOS simulator destination
         id: simulator
+        if: needs.classify-changes.outputs.docs_only != 'true'
         run: >-
           python3 scripts/resolve_ios_simulator_destination.py
           --project AndBible.xcodeproj
@@ -446,12 +552,14 @@ jobs:
           --device-name-prefix "AndBible CI UI"
 
       - name: Boot selected simulator
+        if: needs.classify-changes.outputs.docs_only != 'true'
         run: >-
           python3 scripts/wait_for_simulator_boot.py
           --simulator-id "${{ steps.simulator.outputs.simulator_id }}"
           --timeout-seconds 300
 
       - name: Build for testing
+        if: needs.classify-changes.outputs.docs_only != 'true'
         run: |
           mkdir -p .artifacts
           python3 -u scripts/run_xcodebuild_with_test_selection.py \
@@ -465,9 +573,11 @@ jobs:
             --action build-for-testing
 
       - name: Build host-side UI fixture tool
+        if: needs.classify-changes.outputs.docs_only != 'true'
         run: swift build --package-path . --product UITestFixtureTool
 
       - name: Run selected simulator tests without rebuilding
+        if: needs.classify-changes.outputs.docs_only != 'true'
         env:
           UITEST_FIXTURE_TOOL_PATH: ${{ github.workspace }}/.build/debug/UITestFixtureTool
           UITEST_BUNDLE_ID: org.andbible.ios
@@ -485,7 +595,7 @@ jobs:
 
       - name: Upload xcodebuild test result bundle
         id: upload_ui_xcresult
-        if: always()
+        if: always() && needs.classify-changes.outputs.docs_only != 'true'
         continue-on-error: true
         uses: actions/upload-artifact@v6
         with:
@@ -496,7 +606,7 @@ jobs:
           retention-days: 14
 
       - name: Retry upload xcodebuild test result bundle
-        if: always() && steps.upload_ui_xcresult.outcome == 'failure'
+        if: always() && needs.classify-changes.outputs.docs_only != 'true' && steps.upload_ui_xcresult.outcome == 'failure'
         uses: actions/upload-artifact@v6
         with:
           name: andbible-xcresult-${{ github.run_id }}-${{ matrix.artifact_suffix }}
@@ -507,5 +617,5 @@ jobs:
           overwrite: true
 
       - name: Delete dedicated simulator
-        if: always() && steps.simulator.outputs.simulator_created == 'true'
+        if: always() && needs.classify-changes.outputs.docs_only != 'true' && steps.simulator.outputs.simulator_created == 'true'
         run: xcrun simctl delete "${{ steps.simulator.outputs.simulator_id }}"
