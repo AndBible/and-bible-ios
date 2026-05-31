@@ -3,6 +3,9 @@
 import Foundation
 import SQLite3
 
+/// SQLite destructor marker that copies Swift string buffers before `sqlite3_step` reads them.
+private let myBibleReaderSQLiteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+
 /**
  Reads MyBible SQLite modules used by the MyBible and related Android ecosystems.
 
@@ -151,7 +154,7 @@ public final class MyBibleReader: @unchecked Sendable {
         guard sqlite3_prepare_v2(db, query, -1, &stmt, nil) == SQLITE_OK else { return nil }
         defer { sqlite3_finalize(stmt) }
 
-        sqlite3_bind_text(stmt, 1, key, -1, nil)
+        sqlite3_bind_text(stmt, 1, key, -1, myBibleReaderSQLiteTransient)
         guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
         guard let textPtr = sqlite3_column_text(stmt, 0) else { return nil }
         return String(cString: textPtr)

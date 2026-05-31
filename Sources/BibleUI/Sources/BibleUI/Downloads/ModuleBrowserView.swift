@@ -1364,7 +1364,7 @@ public struct ModuleBrowserView: View {
                 recommendedDocuments: repository.loadCachedRecommendedDocuments(),
                 badDocuments: repository.loadCachedBadDocuments(),
                 defaultDocuments: repository.loadCachedDefaultDocuments(),
-                installedModules: manager?.installedModules() ?? [],
+                installedModules: (manager?.installedModules() ?? []) + repository.loadInstalledMyBibleModules(),
                 cachedModules: cachedModules,
                 shouldRefreshCatalogs: Self.shouldAutoRefreshCatalogs(
                     sources: sources,
@@ -1417,7 +1417,7 @@ public struct ModuleBrowserView: View {
      */
     private func refreshInstalledList() {
         guard let mgr = swordManager else { return }
-        installedModules = mgr.installedModules()
+        installedModules = mgr.installedModules() + repository.loadInstalledMyBibleModules()
     }
 
     /**

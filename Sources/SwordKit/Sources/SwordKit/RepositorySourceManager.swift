@@ -4,15 +4,16 @@ import CryptoKit
 import Foundation
 
 /**
- Resolved custom repository data that can be persisted into the iOS SWORD source config.
+ Resolved custom repository data that can be persisted by the iOS Downloads source manager.
 
  The registration mirrors Android's `CustomRepository` validation result closely enough for
- iOS's current SWORD catalog pipeline: the visible repository identity, catalog host/path, and
- source URL are preserved, while package-directory metadata is retained for diagnostics even
- though `InstallMgr.conf` cannot store it.
+ iOS's current catalog pipeline: the visible repository identity, repository family, manifest
+ URL, package directory, and source URL are preserved. SWORD-compatible rows are projected into
+ `InstallMgr.conf`; non-SWORD rows stay in the custom metadata store so edit/delete flows keep
+ their original manifest context.
  */
 public struct RepositorySourceRegistration: Sendable {
-    /// Source row that will be written to `InstallMgr.conf`.
+    /// Source identity and refresh metadata used by Downloads after persistence.
     public let source: SourceConfig
 
     /// Human-readable description returned by a manifest or synthesized from the source URL.
@@ -35,7 +36,7 @@ public struct RepositorySourceRegistration: Sendable {
  Errors raised while validating or mutating repository source configuration.
 
  Each case maps to a user-actionable state from Android's custom repository flow: invalid HTTPS
- input, an unreadable SWORD catalog, duplicate repository names, unsupported repository types,
+ input, an unreadable repository endpoint, duplicate repository names, unsupported repository types,
  protected default-source deletion, stale edit targets, or local config read/write failures.
  */
 public enum RepositorySourceManagementError: Error, Equatable, LocalizedError, Sendable {
@@ -45,13 +46,13 @@ public enum RepositorySourceManagementError: Error, Equatable, LocalizedError, S
     /// Android accepts only `https://` custom repository URLs; iOS follows the same rule.
     case httpsRequired
 
-    /// The URL and Android direct-catalog fallback probes did not return readable HTTPS resources.
+    /// The URL and Android fallback probes did not return a readable supported HTTPS repository.
     case repositoryUnreachable(String)
 
-    /// A manifest was present but did not contain enough SWORD repository data for iOS to persist.
+    /// A manifest was present but did not contain enough repository data for iOS to persist or refresh.
     case invalidManifest(String)
 
-    /// The manifest describes a repository family iOS cannot consume through the SWORD catalog pipeline yet.
+    /// The manifest describes a repository family iOS cannot consume through Downloads.
     case unsupportedRepositoryType(String)
 
     /// The resolved repository name already exists in default, beta, or custom source configuration.
@@ -60,7 +61,7 @@ public enum RepositorySourceManagementError: Error, Equatable, LocalizedError, S
     /// Default Android repositories are built-in and cannot be deleted from the custom-source UI.
     case protectedDefaultSource(String)
 
-    /// The custom source being edited is no longer present in `InstallMgr.conf`.
+    /// The custom source being edited is no longer present in source config or metadata.
     case sourceNotFound(String)
 
     /// `InstallMgr.conf` could not be read after default configuration was created.
@@ -77,9 +78,9 @@ public enum RepositorySourceManagementError: Error, Equatable, LocalizedError, S
         case .httpsRequired:
             return "Custom repositories must use an https:// URL."
         case .repositoryUnreachable(let value):
-            return "Could not read a SWORD repository at \(value)."
+            return "Could not read a supported repository at \(value)."
         case .invalidManifest(let value):
-            return "The repository manifest is not valid for iOS SWORD downloads: \(value)"
+            return "The repository manifest is not valid for iOS Downloads: \(value)"
         case .unsupportedRepositoryType(let value):
             return "Repository type \(value) is not supported on iOS yet."
         case .duplicateSourceName(let value):
@@ -97,12 +98,14 @@ public enum RepositorySourceManagementError: Error, Equatable, LocalizedError, S
 }
 
 /**
- Owns custom repository validation and `InstallMgr.conf` mutation for the Downloads source UI.
+ Owns custom repository validation and source persistence for the Downloads source UI.
 
  The manager intentionally follows Android's `CustomRepositoryEditor` sequence: require HTTPS,
  try the supplied URL as a manifest, try `manifest.json`, then fall back to probing a direct
- SWORD catalog containing the base URL, `packages`, and `mods.d.tar.gz`. Mutations are persisted
- to `InstallMgr.conf`, the current iOS source-of-truth for SWORD catalogs.
+ SWORD catalog containing the base URL, `packages`, and `mods.d.tar.gz`. SWORD custom sources
+ are written to `InstallMgr.conf` because SWORD consumes that file directly. Android-compatible
+ MyBible sources are persisted in `CustomRepositories.json` because they are not SWORD sources
+ but still need stable edit/delete metadata and Downloads catalog refresh support.
 
  - Important: This type is `@unchecked Sendable` because it stores `URLSession` and
    `FileManager`; callers should treat it as a small service object and serialize UI-driven
@@ -121,6 +124,11 @@ public final class RepositorySourceManager: @unchecked Sendable {
     private var configURL: URL {
         URL(fileURLWithPath: basePath, isDirectory: true)
             .appendingPathComponent("InstallMgr.conf")
+    }
+
+    private var customRepositoriesURL: URL {
+        URL(fileURLWithPath: basePath, isDirectory: true)
+            .appendingPathComponent("CustomRepositories.json")
     }
 
     /**
@@ -148,24 +156,60 @@ public final class RepositorySourceManager: @unchecked Sendable {
     }
 
     /**
-     Loads configured repository sources from `InstallMgr.conf`.
+     Loads configured repository sources from SWORD config and custom repository metadata.
 
-     - Returns: Parsed HTTP and FTP source rows in persisted order.
+     SWORD rows are read from `InstallMgr.conf` and enriched from the custom metadata sidecar
+     when available. MyBible rows live only in the sidecar and are appended after config-backed
+     sources, matching Android's built-in-then-custom source ordering.
+
+     - Returns: Source rows in persisted SWORD order followed by non-SWORD custom rows. If the
+       SWORD config cannot be read, sidecar-only MyBible rows are still returned in sidecar order.
 
      Side effects:
      - creates or migrates default repository configuration through `InstallManager`.
 
      Failure modes:
-     - returns an empty array if the config file cannot be read.
+     - omits config-backed SWORD rows if the SWORD config file cannot be read
+     - ignores malformed custom metadata records instead of failing all Downloads sources
      */
     public func loadSources() -> [SourceConfig] {
         InstallManager.ensureDefaultConfigPublic(at: basePath)
+        let customRecords = loadCustomRepositoryRecords()
 
         guard let content = try? String(contentsOf: configURL, encoding: .utf8) else {
-            return []
+            return customRecords
+                .filter { $0.type == SourceConfig.myBibleHTTPSRepositoryType }
+                .map(\.source)
         }
 
-        return Self.sourceLines(in: content).compactMap(\.source)
+        let persistedSources = Self.sourceLines(in: content).map(\.source)
+        let recordsByName = Dictionary(customRecords.map { ($0.name, $0) }, uniquingKeysWith: { first, _ in first })
+
+        var namesInConfig: Set<String> = []
+        let configSources = persistedSources.map { source in
+            namesInConfig.insert(source.name)
+            guard let record = recordsByName[source.name],
+                  record.type == SourceConfig.swordHTTPSRepositoryType else {
+                return source
+            }
+            return SourceConfig(
+                name: source.name,
+                type: source.type,
+                host: source.host,
+                catalogPath: source.catalogPath,
+                repositoryType: record.type,
+                description: record.description,
+                packageDirectory: record.packageDirectory.isEmpty ? nil : record.packageDirectory,
+                manifestURL: URL(string: record.manifestURL),
+                sourceURL: URL(string: record.sourceURL)
+            )
+        }
+
+        let myBibleSources = customRecords
+            .filter { $0.type == SourceConfig.myBibleHTTPSRepositoryType && !namesInConfig.contains($0.name) }
+            .map(\.source)
+
+        return configSources + myBibleSources
     }
 
     /**
@@ -189,7 +233,7 @@ public final class RepositorySourceManager: @unchecked Sendable {
 
      Side effects:
      - performs HTTPS requests for manifest/direct-catalog validation
-     - appends an `HTTPSource` row to `InstallMgr.conf`
+     - appends an `HTTPSource` row for SWORD repositories, or writes a MyBible metadata record
      - posts `sourcesDidChangeNotification` after a successful write
 
      - Throws: `RepositorySourceManagementError` for validation, duplicate, or persistence failures.
@@ -197,7 +241,7 @@ public final class RepositorySourceManager: @unchecked Sendable {
     @discardableResult
     public func addCustomSource(from rawURL: String) async throws -> RepositorySourceRegistration {
         let registration = try await resolveCustomSource(from: rawURL)
-        try writeCustomSource(registration.source, replacing: nil)
+        try writeCustomRegistration(registration, replacing: nil)
         NotificationCenter.default.post(name: Self.sourcesDidChangeNotification, object: nil)
         return registration
     }
@@ -212,7 +256,7 @@ public final class RepositorySourceManager: @unchecked Sendable {
 
      Side effects:
      - performs HTTPS requests for validation
-     - rewrites `InstallMgr.conf`, preserving the original custom row position when possible
+     - rewrites `InstallMgr.conf` and/or the custom metadata sidecar
      - posts `sourcesDidChangeNotification` after a successful write
 
      - Throws: `RepositorySourceManagementError` for default-source replacement attempts,
@@ -227,42 +271,44 @@ public final class RepositorySourceManager: @unchecked Sendable {
             throw RepositorySourceManagementError.protectedDefaultSource(originalName)
         }
 
-        let currentContent = try currentConfigContent()
-        guard Self.sourceLines(in: currentContent).contains(where: { $0.source.name == originalName }) else {
+        guard loadSources().contains(where: { $0.name == originalName && !isDefaultSource($0) }) else {
             throw RepositorySourceManagementError.sourceNotFound(originalName)
         }
 
         let registration = try await resolveCustomSource(from: rawURL)
-        try writeCustomSource(registration.source, replacing: originalName)
+        try writeCustomRegistration(registration, replacing: originalName)
         NotificationCenter.default.post(name: Self.sourcesDidChangeNotification, object: nil)
         return registration
     }
 
     /**
-     Deletes a custom source from `InstallMgr.conf`.
+     Deletes a custom source from SWORD config and custom repository metadata.
 
      - Parameter name: Repository source name to delete.
 
      Side effects:
-     - rewrites `InstallMgr.conf` without matching HTTP/FTP source rows
+     - rewrites `InstallMgr.conf` without matching HTTP/FTP source rows when it can be read
+     - removes matching custom metadata records, including sidecar-only MyBible rows when the
+       SWORD config is unreadable
      - posts `sourcesDidChangeNotification` after a successful write
 
      - Throws: `RepositorySourceManagementError.protectedDefaultSource` for built-in sources or a
-       config persistence error when the file cannot be read or written.
+       config persistence error when a config-backed source cannot be read or written.
      */
     public func deleteCustomSource(named name: String) throws {
         guard !InstallManager.isDefaultSourceName(name) else {
             throw RepositorySourceManagementError.protectedDefaultSource(name)
         }
 
-        let content = try currentConfigContent()
-        let lines = content.components(separatedBy: .newlines)
-        let updatedLines = lines.filter { line in
-            guard let parsed = Self.parseSourceLine(line) else { return true }
-            return parsed.source.name != name
+        let customRecords = loadCustomRepositoryRecords()
+        let matchingRecord = customRecords.first { $0.name == name }
+        do {
+            let content = try currentConfigContent()
+            try writeConfig(Self.configContent(content, removing: name))
+        } catch RepositorySourceManagementError.configReadFailed
+            where matchingRecord?.type == SourceConfig.myBibleHTTPSRepositoryType {
         }
-
-        try writeConfig(updatedLines.joined(separator: "\n"))
+        try removeCustomRepositoryRecord(named: name)
         NotificationCenter.default.post(name: Self.sourcesDidChangeNotification, object: nil)
     }
 
@@ -271,6 +317,7 @@ public final class RepositorySourceManager: @unchecked Sendable {
 
      Side effects:
      - removes the existing `InstallMgr.conf`
+     - removes custom repository metadata
      - recreates the default/beta source set through `InstallManager`
      - posts `sourcesDidChangeNotification` after recreation
 
@@ -285,6 +332,13 @@ public final class RepositorySourceManager: @unchecked Sendable {
                 throw RepositorySourceManagementError.configWriteFailed(error.localizedDescription)
             }
         }
+        if fileManager.fileExists(atPath: customRepositoriesURL.path) {
+            do {
+                try fileManager.removeItem(at: customRepositoriesURL)
+            } catch {
+                throw RepositorySourceManagementError.configWriteFailed(error.localizedDescription)
+            }
+        }
 
         InstallManager.ensureDefaultConfigPublic(at: basePath)
         guard fileManager.fileExists(atPath: configURL.path) else {
@@ -295,10 +349,10 @@ public final class RepositorySourceManager: @unchecked Sendable {
     }
 
     /**
-     Resolves a user-entered URL into a SWORD source registration without persisting it.
+     Resolves a user-entered URL into a custom repository registration without persisting it.
 
      - Parameter rawURL: HTTPS manifest URL or direct SWORD catalog URL.
-     - Returns: Registration data suitable for `InstallMgr.conf`.
+     - Returns: Registration data suitable for source persistence and catalog refresh.
 
      Side effects:
      - performs HTTPS requests against the supplied URL and Android fallback URLs
@@ -351,6 +405,71 @@ public final class RepositorySourceManager: @unchecked Sendable {
         let manifestUrl: String?
     }
 
+    /// Versioned sidecar file that preserves Android custom repository metadata beyond SWORD rows.
+    private struct CustomRepositoryStore: Codable {
+        /// Sidecar schema version for future migrations.
+        var version: Int
+
+        /// Persisted custom repositories in display/edit order.
+        var repositories: [CustomRepositoryRecord]
+
+        static let empty = CustomRepositoryStore(version: 1, repositories: [])
+    }
+
+    /// One persisted custom repository record used to round-trip edit/delete context.
+    private struct CustomRepositoryRecord: Codable, Sendable {
+        /// Repository display name and unique source key.
+        var name: String
+
+        /// User-visible manifest description.
+        var description: String
+
+        /// Android repository family, such as `sword-https` or `mybible-https`.
+        var type: String
+
+        /// Host and optional port used by the common `SourceConfig` model.
+        var host: String
+
+        /// SWORD catalog directory or MyBible manifest path.
+        var catalogDirectory: String
+
+        /// Optional Android package directory for SWORD package fallback.
+        var packageDirectory: String
+
+        /// Manifest URL used to repopulate the edit field.
+        var manifestURL: String
+
+        /// Resolved source URL used by display and diagnostics.
+        var sourceURL: String
+
+        /// Rehydrates a stored record into the common Downloads source model.
+        var source: SourceConfig {
+            SourceConfig(
+                name: name,
+                type: "HTTP",
+                host: host,
+                catalogPath: catalogDirectory,
+                repositoryType: type,
+                description: description,
+                packageDirectory: packageDirectory.isEmpty ? nil : packageDirectory,
+                manifestURL: URL(string: manifestURL),
+                sourceURL: URL(string: sourceURL)
+            )
+        }
+
+        /// Captures a resolved registration in the stable sidecar schema.
+        init(registration: RepositorySourceRegistration) {
+            self.name = registration.source.name
+            self.description = registration.description
+            self.type = registration.type
+            self.host = registration.source.host
+            self.catalogDirectory = registration.source.catalogPath
+            self.packageDirectory = registration.packageDirectory
+            self.manifestURL = registration.manifestURL.absoluteString
+            self.sourceURL = registration.sourceURL.absoluteString
+        }
+    }
+
     private func currentConfigContent() throws -> String {
         InstallManager.ensureDefaultConfigPublic(at: basePath)
         do {
@@ -360,29 +479,192 @@ public final class RepositorySourceManager: @unchecked Sendable {
         }
     }
 
-    private func writeCustomSource(_ source: SourceConfig, replacing originalName: String?) throws {
-        let content = try currentConfigContent()
-        let sourceLines = Self.sourceLines(in: content)
+    /**
+     Loads sidecar custom repository records.
+
+     - Returns: Persisted records that pass source validation, or an empty array when the sidecar
+       is absent or unreadable.
+     - Side effects: reads `CustomRepositories.json`.
+     - Failure modes: malformed sidecars are treated as empty, and malformed records are dropped,
+       so Downloads can still load built-in SWORD sources and valid sidecar-only repositories.
+     */
+    private func loadCustomRepositoryRecords() -> [CustomRepositoryRecord] {
+        guard let data = fileManager.contents(atPath: customRepositoriesURL.path) else {
+            return []
+        }
+        guard let records = try? JSONDecoder().decode(CustomRepositoryStore.self, from: data).repositories else {
+            return []
+        }
+        return records.filter(Self.isValidCustomRepositoryRecord)
+    }
+
+    /**
+     Validates one decoded sidecar record before it can participate in source loading or mutation.
+
+     - Parameter record: Record decoded from `CustomRepositories.json`.
+     - Returns: `true` when the repository family is supported and the reconstructed source passes
+       the same persistence safety checks used for newly resolved custom repositories.
+     - Side effects: none.
+     - Failure modes: validation failures are converted to `false` so a bad record cannot poison
+       the entire sidecar.
+     */
+    private static func isValidCustomRepositoryRecord(_ record: CustomRepositoryRecord) -> Bool {
+        guard record.type == SourceConfig.swordHTTPSRepositoryType
+                || record.type == SourceConfig.myBibleHTTPSRepositoryType else {
+            return false
+        }
+        do {
+            try validateSourceFields(record.source)
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    /**
+     Writes the complete custom repository sidecar.
+
+     - Parameter records: Records to persist in deterministic array order.
+     - Side effects: creates the source-config directory and atomically writes
+       `CustomRepositories.json`.
+     - Throws: `RepositorySourceManagementError.configWriteFailed` for encoding or file-system
+       failures.
+     */
+    private func writeCustomRepositoryRecords(_ records: [CustomRepositoryRecord]) throws {
+        let store = CustomRepositoryStore(version: 1, repositories: records)
+        do {
+            try fileManager.createDirectory(
+                at: customRepositoriesURL.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            let data = try JSONEncoder().encode(store)
+            try data.write(to: customRepositoriesURL, options: .atomic)
+        } catch {
+            throw RepositorySourceManagementError.configWriteFailed(error.localizedDescription)
+        }
+    }
+
+    /**
+     Removes one custom repository sidecar record.
+
+     - Parameter name: Repository name to remove.
+     - Side effects: rewrites or deletes `CustomRepositories.json`.
+     - Throws: `RepositorySourceManagementError.configWriteFailed` when the sidecar cannot be
+       updated.
+     */
+    private func removeCustomRepositoryRecord(named name: String) throws {
+        let records = loadCustomRepositoryRecords()
+        let updatedRecords = records.filter { $0.name != name }
+        if updatedRecords.isEmpty {
+            if fileManager.fileExists(atPath: customRepositoriesURL.path) {
+                do {
+                    try fileManager.removeItem(at: customRepositoriesURL)
+                } catch {
+                    throw RepositorySourceManagementError.configWriteFailed(error.localizedDescription)
+                }
+            }
+        } else if updatedRecords.count != records.count {
+            try writeCustomRepositoryRecords(updatedRecords)
+        }
+    }
+
+    /**
+     Persists a resolved custom repository registration across SWORD config and sidecar storage.
+
+     - Parameters:
+       - registration: Validated custom repository metadata to persist.
+       - originalName: Existing repository name to replace, or `nil` when adding a new source.
+     - Side effects: rewrites `InstallMgr.conf` and `CustomRepositories.json` as needed.
+     - Throws: `RepositorySourceManagementError` when the visible edit target is missing, a
+       visible source name conflicts, source fields are invalid, or either backing store cannot be
+       written.
+     - Note: Replacements keep the original sidecar index so display/edit ordering remains stable.
+       Orphaned SWORD sidecar metadata is ignored for duplicate checks because `loadSources()`
+       cannot surface it without the matching `InstallMgr.conf` row.
+       Sidecar-only MyBible registrations can still be written when `InstallMgr.conf` is unreadable
+       because SWORD does not consume those rows.
+     */
+    private func writeCustomRegistration(
+        _ registration: RepositorySourceRegistration,
+        replacing originalName: String?
+    ) throws {
+        let source = registration.source
+        let customRecords = loadCustomRepositoryRecords()
+        let content: String?
+        do {
+            content = try currentConfigContent()
+        } catch RepositorySourceManagementError.configReadFailed where source.isMyBibleRepository {
+            content = nil
+        }
+        let sourceLines = content.map { Self.sourceLines(in: $0) } ?? []
+        let sourceNamesInConfig = Set(sourceLines.map(\.source.name))
+        let visibleCustomRecords = customRecords.filter {
+            $0.type == SourceConfig.myBibleHTTPSRepositoryType || sourceNamesInConfig.contains($0.name)
+        }
 
         if let originalName,
            !sourceLines.contains(where: { $0.source.name == originalName })
+            && !visibleCustomRecords.contains(where: { $0.name == originalName })
         {
             throw RepositorySourceManagementError.sourceNotFound(originalName)
         }
 
-        try Self.validateConfigFields(source)
+        try Self.validateSourceFields(source)
 
-        let existingNames = sourceLines
-            .map(\.source.name)
-            .filter { $0 != originalName }
+        if InstallManager.isDefaultSourceName(source.name), source.name != originalName {
+            throw RepositorySourceManagementError.duplicateSourceName(source.name)
+        }
+
+        let existingNames = Set(
+            (sourceLines.map(\.source.name) + visibleCustomRecords.map(\.name))
+                .filter { $0 != originalName }
+        )
 
         guard !existingNames.contains(source.name) else {
             throw RepositorySourceManagementError.duplicateSourceName(source.name)
         }
 
-        let sourceLine = Self.sourceLine(for: source)
-        let updated = Self.configContent(content, inserting: sourceLine, replacing: originalName)
-        try writeConfig(updated)
+        if let content {
+            let updated: String
+            if source.isMyBibleRepository {
+                updated = Self.configContent(content, removing: originalName)
+            } else if let originalName,
+                      sourceLines.contains(where: { $0.source.name == originalName }) {
+                let sourceLine = Self.sourceLine(for: source)
+                updated = Self.configContent(content, inserting: sourceLine, replacing: originalName)
+            } else {
+                let sourceLine = Self.sourceLine(for: source)
+                updated = Self.configContent(
+                    Self.configContent(content, removing: originalName),
+                    inserting: sourceLine,
+                    replacing: nil
+                )
+            }
+            try writeConfig(updated)
+        }
+
+        let replacementRecord = CustomRepositoryRecord(registration: registration)
+        var updatedRecords: [CustomRepositoryRecord] = []
+        var didReplaceRecord = false
+        for record in customRecords {
+            if let originalName, record.name == originalName {
+                if !didReplaceRecord {
+                    updatedRecords.append(replacementRecord)
+                    didReplaceRecord = true
+                }
+            } else if record.name == source.name {
+                if originalName == nil && !didReplaceRecord {
+                    updatedRecords.append(replacementRecord)
+                    didReplaceRecord = true
+                }
+            } else {
+                updatedRecords.append(record)
+            }
+        }
+        if !didReplaceRecord {
+            updatedRecords.append(replacementRecord)
+        }
+        try writeCustomRepositoryRecords(updatedRecords)
     }
 
     private func writeConfig(_ content: String) throws {
@@ -408,11 +690,14 @@ public final class RepositorySourceManager: @unchecked Sendable {
         }
 
         if let type = jsonObject["type"] as? String {
-            guard type == "sword-https" else {
-                throw RepositorySourceManagementError.unsupportedRepositoryType(type)
-            }
-
             do {
+                if type == SourceConfig.myBibleHTTPSRepositoryType {
+                    let manifest = try JSONDecoder().decode(MyBibleRepositoryManifest.self, from: data)
+                    return try registration(from: manifest, manifestURL: url)
+                }
+                guard type == SourceConfig.swordHTTPSRepositoryType else {
+                    throw RepositorySourceManagementError.unsupportedRepositoryType(type)
+                }
                 let manifest = try JSONDecoder().decode(SwordHTTPSManifest.self, from: data)
                 return try registration(from: manifest, manifestURL: url)
             } catch let error as RepositorySourceManagementError {
@@ -423,7 +708,14 @@ public final class RepositorySourceManager: @unchecked Sendable {
         }
 
         if jsonObject["file_name"] != nil && jsonObject["url"] != nil {
-            throw RepositorySourceManagementError.unsupportedRepositoryType("mybible-https")
+            do {
+                let manifest = try JSONDecoder().decode(MyBibleRepositoryManifest.self, from: data)
+                return try registration(from: manifest, manifestURL: url)
+            } catch let error as RepositorySourceManagementError {
+                throw error
+            } catch {
+                throw RepositorySourceManagementError.invalidManifest(error.localizedDescription)
+            }
         }
 
         return nil
@@ -464,7 +756,10 @@ public final class RepositorySourceManager: @unchecked Sendable {
             toPath: source.catalogPath
         )
         let sourceURL = try Self.httpsURL(host: source.host, path: source.catalogPath)
-        let reportedManifestURL = manifest.manifestUrl.flatMap(URL.init(string:)) ?? manifestURL
+        let reportedManifestURL = Self.preferredHTTPSManifestURL(
+            from: manifest.manifestUrl,
+            fallback: manifestURL
+        )
 
         return RepositorySourceRegistration(
             source: source,
@@ -473,6 +768,35 @@ public final class RepositorySourceManager: @unchecked Sendable {
             manifestURL: reportedManifestURL,
             sourceURL: sourceURL,
             type: manifest.type
+        )
+    }
+
+    private func registration(
+        from manifest: MyBibleRepositoryManifest,
+        manifestURL: URL
+    ) throws -> RepositorySourceRegistration {
+        let reportedManifestURL = try Self.httpsURL(from: manifest.url, fallback: manifestURL)
+        let host = Self.hostAndPort(for: reportedManifestURL) ?? reportedManifestURL.host ?? ""
+        let source = SourceConfig(
+            name: manifest.fileName.trimmingCharacters(in: .whitespacesAndNewlines),
+            type: "HTTP",
+            host: host,
+            catalogPath: Self.normalizedCatalogDirectory(reportedManifestURL.path),
+            repositoryType: SourceConfig.myBibleHTTPSRepositoryType,
+            description: manifest.description,
+            packageDirectory: nil,
+            manifestURL: reportedManifestURL,
+            sourceURL: reportedManifestURL
+        )
+        try Self.validateSourceFields(source)
+
+        return RepositorySourceRegistration(
+            source: source,
+            description: manifest.description,
+            packageDirectory: "",
+            manifestURL: reportedManifestURL,
+            sourceURL: reportedManifestURL,
+            type: SourceConfig.myBibleHTTPSRepositoryType
         )
     }
 
@@ -543,15 +867,37 @@ public final class RepositorySourceManager: @unchecked Sendable {
     }
 
     /**
-     Validates one persisted `InstallMgr.conf` source row before it can be written.
+     Validates one source model before it can be persisted or used as a catalog cache key.
 
-     Source names are also used as catalog-cache filenames, so the name must not contain
-     path separators that could escape the intended cache directory during a later refresh.
+     Source names are used as catalog-cache filenames, so the name must not contain path
+     separators that could escape the intended cache directory during a later refresh. Persisted
+     manifest URLs must be HTTPS because edit flows reuse them as user-entered repository URLs;
+     MyBible sources additionally require a manifest URL because their catalog is the manifest.
+     Free-form metadata such as descriptions is stored in JSON and is not constrained by
+     `InstallMgr.conf` separators.
 
      - Parameter source: Normalized source row candidate.
      - Throws: `RepositorySourceManagementError.invalidManifest` when a field is missing or
-       contains config/file-path syntax that cannot be safely persisted.
+       source identity contains config/file-path syntax that cannot be safely persisted;
+       `httpsRequired` when persisted manifest metadata is not HTTPS or a MyBible source lacks a
+       manifest URL.
      */
+    private static func validateSourceFields(_ source: SourceConfig) throws {
+        try validateConfigFields(source)
+        guard !source.repositoryType.isEmpty,
+              !containsConfigSeparator(source.repositoryType) else {
+            throw RepositorySourceManagementError.invalidManifest(source.name)
+        }
+        if let manifestURL = source.manifestURL {
+            guard manifestURL.scheme?.lowercased() == "https",
+                  manifestURL.host?.isEmpty == false else {
+                throw RepositorySourceManagementError.httpsRequired
+            }
+        } else if source.isMyBibleRepository {
+            throw RepositorySourceManagementError.httpsRequired
+        }
+    }
+
     private static func validateConfigFields(_ source: SourceConfig) throws {
         guard source.type == "HTTP",
               !source.name.isEmpty,
@@ -583,6 +929,43 @@ public final class RepositorySourceManager: @unchecked Sendable {
             throw RepositorySourceManagementError.invalidURL("https://\(host)\(path)")
         }
         return url
+    }
+
+    /**
+     Returns safe edit metadata from an optional SWORD manifest self-reference.
+
+     SWORD manifests can include `manifestUrl` as descriptive metadata. The app only accepts HTTPS
+     custom repository URLs, so non-HTTPS or malformed self-references are ignored and the HTTPS URL
+     that was actually fetched is retained instead.
+
+     - Parameters:
+       - rawValue: Optional `manifestUrl` field from the decoded SWORD manifest.
+       - fallback: HTTPS manifest URL used to fetch the manifest.
+     - Returns: The HTTPS self-reference when valid, otherwise `fallback`.
+     - Side effects: none.
+     - Failure modes: malformed or non-HTTPS metadata is treated as absent.
+     */
+    private static func preferredHTTPSManifestURL(from rawValue: String?, fallback: URL) -> URL {
+        guard let rawValue else {
+            return fallback
+        }
+        let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let candidate = URL(string: trimmed),
+              candidate.scheme?.lowercased() == "https",
+              candidate.host?.isEmpty == false else {
+            return fallback
+        }
+        return candidate
+    }
+
+    private static func httpsURL(from rawValue: String, fallback: URL) throws -> URL {
+        let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        let candidate = URL(string: trimmed) ?? fallback
+        guard candidate.scheme?.lowercased() == "https",
+              candidate.host?.isEmpty == false else {
+            throw RepositorySourceManagementError.httpsRequired
+        }
+        return candidate
     }
 
     private static func sourceLines(in content: String) -> [ParsedSourceLine] {
@@ -667,6 +1050,16 @@ public final class RepositorySourceManager: @unchecked Sendable {
 
         lines.insert(sourceLine, at: insertionIndex)
         return lines.joined(separator: "\n")
+    }
+
+    private static func configContent(_ content: String, removing sourceName: String?) -> String {
+        guard let sourceName else { return content }
+        let lines = content.components(separatedBy: .newlines)
+        let updatedLines = lines.filter { line in
+            guard let parsed = parseSourceLine(line) else { return true }
+            return parsed.source.name != sourceName
+        }
+        return updatedLines.joined(separator: "\n")
     }
 
     private static func appendingPathComponent(_ component: String, toPath path: String) -> String {
