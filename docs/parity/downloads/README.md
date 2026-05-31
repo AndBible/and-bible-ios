@@ -28,7 +28,6 @@ Related issues:
 - #133: startup/default-document flow using `default_documents_v2.json`
 - #134: active download progress, cancel, and error/retry row state
 - #135: row actions for about/delete index/unlock
-- #136: Android add-ons filter/modeling
 - #138: MyBible custom repository support
 - #139: Android custom repository metadata persistence
 

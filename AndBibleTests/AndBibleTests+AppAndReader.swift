@@ -568,7 +568,7 @@ extension AndBibleTests {
             name: "AddonFonts",
             description: "Add-on font pack",
             category: .addon,
-            language: "en",
+            language: "zxx",
             sourceName: "AndBible",
             version: "1.0"
         )
