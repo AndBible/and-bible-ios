@@ -1,69 +1,101 @@
 # SETPAR-701 Verification Matrix (Android Application Preferences -> iOS)
 
-Date: 2026-03-11
+Date: 2026-05-31
 
 ## Scope and Method
 
-- Contract baseline: `docs/parity/settings/contract.md`.
-- Key inventory: `Sources/BibleCore/Sources/BibleCore/Database/AppPreferenceRegistry.swift` (`AppPreferenceKey.allCases` = 35).
-- Verification method: direct code inspection of iOS UI persistence points and runtime consumers, backed by simulator regression evidence in `docs/parity/settings/regression-report.md`.
+- Android source baseline: `docs/parity/settings/contract.md`, re-audited from
+  `and-bible/app/src/main/res/xml/settings.xml:23-293`.
+- Android actionable preference rows: 41.
+- iOS registry baseline: `Sources/BibleCore/Sources/BibleCore/Database/AppPreferenceRegistry.swift`
+  (`AppPreferenceKey.allCases` = 35).
+- Verification method: direct inspection of Android XML/runtime sources, iOS registry,
+  iOS Settings UI, iOS reader payload, and the Android/iOS Vue `appSettings` contracts.
+
+The previous matrix treated the 35 iOS registry keys as the complete Android contract.
+That was incorrect. The matrix now distinguishes registry-backed iOS parity from
+Android rows that are action shortcuts, deferred feature gaps, or platform-specific
+divergences.
 
 ## Status Legend
 
-- `Pass`: key has iOS UI/action + persisted value + runtime consumer.
+- `Pass`: key has iOS UI/action + persisted value + runtime consumer where applicable.
 - `Adapted Pass`: parity delivered with explicit iOS platform adaptation.
-- `Partial`: key exists, but parity is incomplete (for example runtime-only without iOS UI, or behavior drift).
+- `Partial`: iOS has some behavior, but the source-backed Android contract is not complete.
+- `Tracked Gap`: not implemented on iOS and tracked by a follow-up issue.
 - `Documented Divergence`: intentionally not implemented on iOS; disposition documented.
+- `Outside Registry`: Android action row is handled outside `AppPreferenceRegistry`.
 
 ## Summary
 
-- `Pass`: 24/35
-- `Adapted Pass`: 9/35
-- `Partial`: 0/35
-- `Documented Divergence`: 2/35
+- Android actionable rows inventoried: 41/41.
+- iOS registry-backed rows: 35.
+- Registry-backed `Pass`: 21.
+- Registry-backed `Adapted Pass`: 11.
+- Registry-backed `Partial`: 1 (`locale_pref`, tracked by #164).
+- Registry-backed `Documented Divergence`: 2 (`volume_keys_scroll`, `request_sdcard_permission_pref`).
+- Non-registry tracked gap: 1 (`notes_content_type`, tracked by #163).
+- Non-registry documented divergence: 1 (`eink_mode`).
+- Android action shortcuts outside registry: 4 (`global_text_display_settings`,
+  `sync_settings_shortcut`, `ai_settings_shortcut`, `reading_progress_settings_shortcut`).
 
 ## Key-by-Key Matrix
 
-| Key | iOS Evidence (UI/persistence) | iOS Evidence (runtime consumer) | Status | Notes |
-|---|---|---|---|---|
-| `strongs_greek_dictionary` | `SettingsView.swift:161-187,745,802,1152` | `BibleReaderController.swift:2658-2670` | Pass | Selected-set semantics match Android (empty = runtime default/all). |
-| `strongs_hebrew_dictionary` | `SettingsView.swift:190-215,746,806,1161` | `BibleReaderController.swift:2658-2670` | Pass | Same pattern as Greek selection. |
-| `robinson_greek_morphology` | `SettingsView.swift:218-243,747,810,1170` | `BibleReaderController.swift:2701-2720` | Pass | Multi-select + stale-value fallback behavior present. |
-| `disabled_word_lookup_dictionaries` | `SettingsView.swift:246-271,748,814,1178` | `BibleReaderController.swift:2746-2764,2773-2795` | Pass | Inverse selection is consumed by lookup path. |
-| `navigate_to_verse_pref` | `SettingsView.swift:276-295,761` | `BibleReaderView.swift:75,241,334-340`; `BookChooserView.swift:46-60` | Pass | Verse-step chooser flow is wired. |
-| `open_links_in_special_window_pref` | `SettingsView.swift:460-477,750` | `BibleWindowPane.swift:341-347` | Pass | Switches between current-window navigation and links-window behavior. |
-| `screen_keep_on_pref` | `SettingsView.swift:297-313,761,1121-1124` | `BibleReaderView.swift:250` | Pass | Uses `UIApplication.isIdleTimerDisabled`. |
-| `double_tap_to_fullscreen` | `SettingsView.swift:315-333,763` | `BibleReaderController.swift:3231-3234` | Pass | Double-tap bridge event is preference-gated. |
-| `auto_fullscreen_pref` | `SettingsView.swift:335-350,764` | `BibleReaderView.swift:1627-1654` | Pass | Direction-aware threshold logic implemented. |
-| `toolbar_button_actions` | `SettingsView.swift:352-377,767,1211-1217` | `BibleReaderView.swift:1459-1497,1499-1563` | Adapted Pass | Android chooser/activity concept adapted to iOS sheet/module picker. |
-| `disable_two_step_bookmarking` | `SettingsView.swift:379-397,765` | `BibleWindowPane.swift:395-447` | Pass | One-step and two-step bookmark flows implemented. |
-| `bible_view_swipe_mode` | `SettingsView.swift:399-424,769,1202-1208` | `BibleReaderView.swift:1656-1676`; `WebViewCoordinator.swift:82-109,122-137` | Adapted Pass | Native iOS swipe recognizers/scroll delegate bridge into chapter/page/none actions. |
-| `volume_keys_scroll` | `SettingsView.swift:426-451,770` | No runtime consumer; disposition in `dispositions.md:5-20` | Documented Divergence | Kept for parity/sync continuity; iOS cannot intercept hardware volume keys for app actions. |
-| `night_mode_pref3` | `SettingsView.swift:832-857,773,1192-1200` | `BibleReaderView.swift:65,234-240,1612-1618`; `ContentView.swift:20,46-63`; `NightModeSettings.swift:19-60` | Adapted Pass | `automatic` mode excluded by platform constraint (`autoModeAvailable = false`). |
-| `locale_pref` | `SettingsView.swift:1024-1050,782-797,1241-1281` | Applied via `AppleLanguages` override in `SettingsView.swift:1043-1049` | Pass | Android locale-value mapping and legacy code normalization are implemented. |
-| `monochrome_mode` | `SettingsView.swift:860-877,751,867` | `BibleReaderController.swift:4069,4102` | Pass | Emitted into Vue appSettings payload. |
-| `disable_animations` | `SettingsView.swift:878-895,752,885` | `BibleReaderController.swift:4070,4102` | Pass | Emitted into Vue appSettings payload. |
-| `disable_click_to_edit` | `SettingsView.swift:896-914,753,906` | `BibleReaderController.swift:4071,4102` | Pass | Emitted into Vue appSettings payload. |
-| `font_size_multiplier` | `SettingsView.swift:917-939,757,923` | `BibleReaderController.swift:4072-4073,4102` | Pass | 10-500 clamp and runtime min-guard present. |
-| `full_screen_hide_buttons_pref` | `SettingsView.swift:940-960,758,950` | `BibleReaderView.swift:139-141,246,1609` | Pass | Fullscreen tab-bar visibility follows preference. |
-| `hide_window_buttons` | `SettingsView.swift:961-980,759,971` | `BibleReaderView.swift:699`; `BibleWindowPane.swift:79-83` | Pass | Window hamburger control visibility follows preference. |
-| `hide_bible_reference_overlay` | `SettingsView.swift:982-1002,760,992` | `BibleReaderView.swift:143-147,199-210,1611` | Pass | Fullscreen Bible reference capsule overlay is preference-gated. |
-| `show_active_window_indicator` | `SettingsView.swift:1003-1023,754,1013` | `BibleReaderController.swift:4030-4033,4064-4065,4102` | Pass | Indicator propagated via both `set_active` event and config payload. |
-| `disable_bible_bookmark_modal_buttons` | `SettingsView.swift:1071-1093,780,852,1292-1304` | `BibleReaderController.swift:4074,4102` | Pass | Inverse multi-select editor now matches Android action IDs and persists disabled button set. |
-| `disable_gen_bookmark_modal_buttons` | `SettingsView.swift:1096-1118,781,857,1299-1304` | `BibleReaderController.swift:4075,4102` | Pass | Inverse multi-select editor now matches Android action IDs and persists disabled button set. |
-| `discrete_help` | `SettingsView.swift:483-499,688-709` | Action-only key shape validated by `AndBibleTests.swift:25-45` | Adapted Pass | Implemented as help action + sheet content. |
-| `discrete_mode` | `SettingsView.swift:500-503` | `AndBibleApp.swift:29,163-165,176-190` | Adapted Pass | iOS icon switching implemented via alternate icon API. |
-| `show_calculator` | `SettingsView.swift:505-508` | `AndBibleApp.swift:31,143-149` | Pass | Startup calculator gate follows persisted preference. |
-| `calculator_pin` | `SettingsView.swift:510-525` | `CalculatorView.swift:31-32,133-146` | Pass | Numeric PIN entry and unlock behavior are wired. |
-| `experimental_features` | `SettingsView.swift:551-571,771,818,1182-1189` | `BibleReaderController.swift:4076,4102` | Pass | Multi-select IDs are sanitized and emitted in appSettings. |
-| `enable_bluetooth_pref` | `SettingsView.swift:529-549,756,540` | `SpeakService.swift:85,107-113` | Adapted Pass | Android media-button behavior adapted to iOS `MPRemoteCommandCenter`. |
-| `request_sdcard_permission_pref` | Not surfaced in iOS settings UI | Disposition documented in `dispositions.md:49-58` | Documented Divergence | No iOS SD-card permission model equivalent. |
-| `show_errorbox` | `SettingsView.swift:603-624,789` | `BibleReaderController.swift:4068,4102` | Adapted Pass | Visibility is now debug-only (`#if DEBUG`) to match Android beta-only visibility contract. |
-| `open_links` | `SettingsView.swift:595-617,1127-1131` | iOS adaptation in `dispositions.md:60-72` | Adapted Pass | Opens iOS app settings as closest supported equivalent. |
-| `crash_app` | `SettingsView.swift:620-649,1134-1140` | iOS adaptation in `dispositions.md:73-84` | Adapted Pass | Debug-only destructive action with 10-second delay and single-shot guard. |
+| Key | iOS Evidence | Status | Notes |
+|---|---|---|---|
+| `strongs_greek_dictionary` | `AppPreferenceRegistry`; `SettingsView` dictionary section; `BibleReaderController` dictionary selection | Pass | Empty selected set retains Android all-enabled semantics. |
+| `strongs_hebrew_dictionary` | `AppPreferenceRegistry`; `SettingsView` dictionary section; `BibleReaderController` dictionary selection | Pass | Same pattern as Greek dictionary selection. |
+| `robinson_greek_morphology` | `AppPreferenceRegistry`; `SettingsView` dictionary section; `BibleReaderController` morphology lookup | Pass | Stale selections are sanitized against installed modules. |
+| `disabled_word_lookup_dictionaries` | `AppPreferenceRegistry`; `SettingsView` inverse dictionary selector; `BibleReaderController` lookup path | Pass | Stored set is disabled modules, matching Android inverse preference. |
+| `navigate_to_verse_pref` | `AppPreferenceRegistry`; `SettingsView`; reader/book chooser navigation | Pass | Verse-step chooser flow is wired. |
+| `open_links_in_special_window_pref` | `AppPreferenceRegistry`; `SettingsView`; `BibleWindowPane` link handling | Pass | Switches current-window versus links-window behavior. |
+| `screen_keep_on_pref` | `AppPreferenceRegistry`; `SettingsView.applyScreenKeepOn`; `BibleReaderView` idle timer state | Pass | Uses `UIApplication.isIdleTimerDisabled`. |
+| `double_tap_to_fullscreen` | `AppPreferenceRegistry`; `SettingsView`; `BibleReaderController` double-tap gate | Pass | Preference gates fullscreen gesture handling. |
+| `auto_fullscreen_pref` | `AppPreferenceRegistry`; `SettingsView`; `BibleReaderView` auto-fullscreen logic | Pass | Native scroll threshold implementation. |
+| `toolbar_button_actions` | `AppPreferenceRegistry`; `SettingsView` picker; `BibleReaderView` toolbar behavior | Adapted Pass | Android menu/activity concept adapted to iOS sheet/module picker. |
+| `disable_two_step_bookmarking` | `AppPreferenceRegistry`; `SettingsView`; `BibleWindowPane` bookmark flow | Pass | One-step and two-step bookmark flows implemented. |
+| `bible_view_swipe_mode` | `AppPreferenceRegistry`; `SettingsView` picker; `BibleReaderView`/`WebViewCoordinator` gestures | Adapted Pass | Implemented with native iOS swipe recognizers. |
+| `volume_keys_scroll` | `AppPreferenceRegistry`; `SettingsView` persistence plus iOS note; `dispositions.md` | Documented Divergence | iOS cannot intercept hardware volume buttons for arbitrary app scrolling. |
+| `night_mode_pref3` | `AppPreferenceRegistry`; `SettingsView`; `NightModeSettingsResolver`; app color-scheme state | Adapted Pass | Android automatic sensor mode is excluded by platform constraint. |
+| `global_text_display_settings` | `SettingsStore.globalTextDisplaySettingsKey`; `SettingsView.lookAndFeelSection`; `TextDisplaySettingsView`/`ColorSettingsView` | Outside Registry | Android action row is adapted as iOS Look & feel navigation, not a registry preference. |
+| `locale_pref` | `AppPreferenceRegistry`; `SettingsView.localeOptions`; `AppleLanguages` override | Partial | Persistence works, but Android locale arrays are not fully represented; tracked by #164. |
+| `disable_click_to_edit` | `AppPreferenceRegistry`; `SettingsView`; iOS Vue `appSettings.disableClickToEdit` | Pass | Emitted into iOS reader payload. |
+| `notes_content_type` | No iOS registry key; no iOS Vue `appSettings.notesContentType`; Android source emits and consumes it | Tracked Gap | Real note-editor parity gap tracked by #163. |
+| `font_size_multiplier` | `AppPreferenceRegistry`; `SettingsView` stepper; iOS Vue `fontSizeMultiplier` payload | Pass | 10-500 clamp and percent-to-float conversion implemented. |
+| `full_screen_hide_buttons_pref` | `AppPreferenceRegistry`; `SettingsView`; `BibleReaderView` fullscreen controls | Pass | Fullscreen button-bar visibility follows preference. |
+| `hide_window_buttons` | `AppPreferenceRegistry`; `SettingsView`; `BibleWindowPane` window control visibility | Pass | In-window button visibility follows preference. |
+| `hide_bible_reference_overlay` | `AppPreferenceRegistry`; `SettingsView`; `BibleReaderView` overlay gate | Pass | Fullscreen reference overlay follows preference. |
+| `show_active_window_indicator` | `AppPreferenceRegistry`; `SettingsView`; `BibleReaderController.emitActiveState` and config payload | Pass | Propagated through config and `set_active`. |
+| `disable_bible_bookmark_modal_buttons` | `AppPreferenceRegistry`; `SettingsView` inverse selector; iOS Vue modal button payload | Pass | Android action IDs are persisted as disabled set. |
+| `disable_gen_bookmark_modal_buttons` | `AppPreferenceRegistry`; `SettingsView` inverse selector; iOS Vue modal button payload | Pass | Android action IDs are persisted as disabled set. |
+| `monochrome_mode` | `AppPreferenceRegistry`; `SettingsView`; iOS Vue `monochromeMode` payload | Adapted Pass | iOS default is `false`; Android Onyx-device default does not apply. |
+| `eink_mode` | No iOS registry/UI/payload; Android Vue uses it for e-ink helper lines/page buttons | Documented Divergence | iOS has no e-ink-specific reader controls; see `dispositions.md`. |
+| `disable_animations` | `AppPreferenceRegistry`; `SettingsView`; iOS Vue `disableAnimations` payload | Adapted Pass | iOS default is `false`; Android Onyx-device default does not apply. |
+| `discrete_help` | `AppPreferenceRegistry` action; `SettingsView` help sheet | Adapted Pass | Android dialog is adapted to native iOS sheet. |
+| `discrete_mode` | `AppPreferenceRegistry`; `SettingsView`; `AndBibleApp` alternate icon behavior | Adapted Pass | Android launcher identity behavior adapted to iOS alternate icon API. |
+| `show_calculator` | `AppPreferenceRegistry`; `SettingsView`; `AndBibleApp` startup calculator gate | Pass | Startup calculator gate follows persisted preference. |
+| `calculator_pin` | `AppPreferenceRegistry`; `SettingsView` numeric field; `CalculatorView` unlock | Pass | Numeric PIN entry and unlock behavior are wired. |
+| `sync_settings_shortcut` | `SettingsView` Data section links to `SyncSettingsView` | Outside Registry | Shortcut adapted outside registry; presentation alignment tracked by #155. |
+| `ai_settings_shortcut` | No direct iOS Application preferences shortcut | Outside Registry | Deferred to AI parity issues (#5, #74, #89-#92) and settings presentation issue #155. |
+| `reading_progress_settings_shortcut` | Reader bridge presents native `ReadingProgressSettingsView`; no top-level Settings shortcut | Outside Registry | Runtime feature exists; top-level shortcut alignment tracked by #155. |
+| `experimental_features` | `AppPreferenceRegistry`; `SettingsView` multi-select; iOS Vue `enabledExperimentalFeatures` payload | Pass | Android feature IDs are sanitized and emitted. |
+| `enable_bluetooth_pref` | `AppPreferenceRegistry`; `SettingsView`; `SpeakService` remote command handling | Adapted Pass | Android media-button behavior adapted to iOS remote command center. |
+| `request_sdcard_permission_pref` | `AppPreferenceRegistry`; not surfaced; `dispositions.md` | Documented Divergence | iOS has no SD-card permission model equivalent. |
+| `show_errorbox` | `AppPreferenceRegistry`; debug-only `SettingsView`; iOS Vue `errorBox` payload | Adapted Pass | Android beta-only visibility adapted to iOS debug builds. |
+| `open_links` | `AppPreferenceRegistry` action; `SettingsView.openBibleLinkSystemSettings` | Adapted Pass | iOS opens app settings as closest supported equivalent. |
+| `crash_app` | `AppPreferenceRegistry` action; debug-only `SettingsView.triggerDebugCrash` | Adapted Pass | Debug-only destructive action with delayed crash and single-shot guard. |
 
-## Open Gaps Identified by This Matrix
+## Open Gaps Identified By This Matrix
 
-No functional gaps remain for the 35-key Android application-preferences contract. Remaining entries are documented platform divergences (`volume_keys_scroll`, `request_sdcard_permission_pref`).
+- #163: implement `notes_content_type` only after the iOS note editor supports the
+  same HTML/Markdown default behavior Android exposes.
+- #164: reconcile `locale_pref` option arrays with Android source and actual iOS
+  localization resources.
+- #155: decide how far iOS Application preferences should align Android's shortcut
+  presentation for Sync, AI settings, Reading Progress settings, search, reset, and
+  broader admin-flow placement.
+- `eink_mode` is not an implementation gap today. It is an Android-only e-ink
+  behavior and is intentionally documented as a divergence.
 
-Regression hardening note: Strong's "Find all occurrences" now has a module-backed simulator test to prevent recurrence of the `H02022` no-results failure.
+Regression hardening note: Strong's "Find all occurrences" retains module-backed
+simulator coverage to prevent recurrence of the `H02022` no-results failure.

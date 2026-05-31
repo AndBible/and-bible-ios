@@ -57,6 +57,26 @@ This file records explicit iOS disposition decisions for Android parity tickets 
   - This preference is intentionally not surfaced in iOS settings UI.
   - No iOS runtime consumer is added.
 
+## SETPAR-154 — `eink_mode`
+
+- Android contract:
+  - Key: `eink_mode`
+  - Source: `and-bible/app/src/main/res/xml/settings.xml:201-206`
+  - Runtime preference reader: `and-bible/app/src/main/java/net/bible/service/common/CommonUtils.kt:453`
+  - Reader payload: `and-bible/app/src/main/java/net/bible/android/view/activity/page/BibleView.kt:1531`
+  - Vue consumers: `and-bible/app/bibleview-js/src/components/BibleView.vue:74-83`
+- Android behavior:
+  - Enables Android e-ink-specific reader affordances, specifically scroll helper lines and page scroll buttons when the corresponding text-display settings are enabled.
+  - This is distinct from `monochrome_mode` and `disable_animations`, which are already represented on iOS.
+- iOS disposition (Android-only divergence):
+  - Do not add `eink_mode` to `AppPreferenceRegistry`, Settings UI, or the iOS reader payload unless iOS gains equivalent e-ink-specific behavior.
+  - Adding a no-op switch would create dead UI and would not improve behavioral parity.
+  - `monochrome_mode` and `disable_animations` remain the supported cross-platform rendering preferences on iOS.
+- Tracking:
+  - #154 records the source-backed audit.
+  - #156 should not be implemented as written because it bundles this Android-only e-ink setting with the separate `notes_content_type` gap.
+  - #163 tracks the real `notes_content_type` follow-up independently.
+
 ## SETPAR-505 — `open_links`
 
 - Android contract:

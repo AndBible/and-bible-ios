@@ -1,91 +1,136 @@
 # Android Settings Contract (Source Of Truth)
 
-This file captures the explicit Android contract to match on iOS.
+Last audited: 2026-05-31 for #154.
 
-Primary sources:
-- Settings schema: `and-bible/app/src/main/res/xml/settings.xml:25-253`
-- Labels/summaries: `and-bible/app/src/main/res/values/strings.xml`
-- Option arrays: `and-bible/app/src/main/res/values/arrays.xml`
-- Runtime rules/visibility: `and-bible/app/src/main/java/net/bible/android/view/activity/settings/SettingsActivity.kt:219-357`
-- Runtime behavior consumers: callsites listed below per key.
+This file records the Android Application preferences contract and the current iOS
+disposition for each Android preference row. It intentionally separates two layers:
+
+- Android source inventory: every actionable preference row in
+  `and-bible/app/src/main/res/xml/settings.xml`.
+- iOS implementation registry: `AppPreferenceRegistry`, which only contains durable
+  iOS parity settings and action rows that iOS currently implements.
+
+The two counts are not expected to be equal. Android currently exposes 41 actionable
+preference rows. iOS currently registers 35 of them in `AppPreferenceRegistry`; every
+Android row outside that registry must have an explicit disposition below.
+
+Primary Android sources:
+- Settings schema: `and-bible/app/src/main/res/xml/settings.xml:23-293`
+- Runtime setup/reset/visibility: `and-bible/app/src/main/java/net/bible/android/view/activity/settings/SettingsActivity.kt:134-385`
+- Reader config values: `and-bible/app/src/main/java/net/bible/service/common/CommonUtils.kt:452-459`
+- Reader config payload: `and-bible/app/src/main/java/net/bible/android/view/activity/page/BibleView.kt:1508-1538`
+- Shared Vue reader config: `and-bible/app/bibleview-js/src/composables/config.ts`
+
+Primary iOS sources:
+- Registry: `Sources/BibleCore/Sources/BibleCore/Database/AppPreferenceRegistry.swift`
+- Settings UI: `Sources/BibleUI/Sources/BibleUI/Settings/SettingsView.swift`
+- Reader config payload: `Sources/BibleUI/Sources/BibleUI/Bible/BibleReaderController.swift`
+- Shared Vue reader config: `bibleview-js/src/composables/config.ts`
+
+## Inventory Rules
+
+- `bible_display_pref` is the Android `PreferenceScreen` container key and is not an
+  actionable application preference.
+- `dictionaries_category` is a category container key. It is documented as category
+  metadata, not as a user preference.
+- `global_text_display_settings`, `sync_settings_shortcut`,
+  `ai_settings_shortcut`, and `reading_progress_settings_shortcut` are action rows,
+  not durable preference values. They should not be added to `AppPreferenceRegistry`
+  unless iOS intentionally models them as registry-backed actions.
+- `eink_mode` is an Android e-ink feature switch and is intentionally not registered
+  on iOS unless iOS gains equivalent e-ink behavior.
+- `notes_content_type` is a real Android preference and is tracked separately by #163
+  because it depends on note-editor Markdown parity, not e-ink behavior.
+- `locale_pref` is registry-backed, but the option list is not currently complete
+  against Android `arrays.xml`; that drift is tracked by #164.
 
 ## Category Titles
 
 | Category | String key | English text | Reference |
 |---|---|---|---|
-| Dictionaries | `prefs_dictionaries_cat` | Dictionaries | `strings.xml:234` |
-| Application behavior | `prefs_behavior_customization_cat` | Application behavior | `strings.xml:195` |
-| Look & feel | `prefs_display_customization_cat` | Look & feel | `strings.xml:194` |
-| Settings for the persecuted | `prefs_persecution_cat` | Settings for the persecuted | `strings.xml:1147` |
-| Advanced settings | `prefs_advanced_settings_cat` | Advanced settings | `strings.xml:193` |
+| Dictionaries | `prefs_dictionaries_cat` | Dictionaries | `strings.xml:277` |
+| Application behavior | `prefs_behavior_customization_cat` | Application behavior | `strings.xml:227` |
+| Look & feel | `prefs_display_customization_cat` | Look & feel | `strings.xml:226` |
+| E-ink settings | `prefs_eink_settings_cat` | E-ink settings | `strings.xml:120` |
+| Settings for the persecuted | `prefs_persecution_cat` | Settings for the persecuted | `strings.xml:1166` |
+| Features | `prefs_features_cat` | Features | `strings.xml:225` |
+| Advanced settings | `prefs_advanced_settings_cat` | Advanced settings | `strings.xml:224` |
 
-## Per-Key Contract
+## Android Preference Inventory And iOS Disposition
 
-| Key | Type | Default (from XML/runtime) | Label / Summary (en) | Runtime behavior reference |
-|---|---|---|---|---|
-| `strongs_greek_dictionary` | `MultiSelectListPreference` | Runtime default = all available entries (`SettingsActivity.kt:183-196`) | `choose_strongs_greek_dictionary_title` / `choose_strongs_greek_dictionary_summary` (`strings.xml:235-236`) | `SwordDocumentFacade.kt:94` |
-| `strongs_hebrew_dictionary` | `MultiSelectListPreference` | Runtime default = all available entries (`SettingsActivity.kt:183-196`) | `choose_strongs_hebrew_dictionary_title` / `choose_strongs_hebrew_dictionary_summary` (`strings.xml:237-238`) | `SwordDocumentFacade.kt:96` |
-| `robinson_greek_morphology` | `MultiSelectListPreference` | Runtime default = all available entries (`SettingsActivity.kt:183-196`) | `choose_strongs_greek_morphology_title` / `choose_strongs_greek_morphology_summary` (`strings.xml:239-240`) | `SwordDocumentFacade.kt:92` |
-| `disabled_word_lookup_dictionaries` | `InverseMultiSelectListPreference` | No XML default; inverse logic means empty disabled set | `choose_word_lookup_dictionary_title` / `choose_word_lookup_dictionary_summary` (`strings.xml:241-242`) | `SwordDocumentFacade.kt:100` |
-| `navigate_to_verse_pref` | `SwitchPreferenceCompat` | `false` (`settings.xml:55`) | `prefs_navigate_to_verse_title` / `prefs_navigate_to_verse_summary` (`strings.xml:164-165`) | `GridChoosePassageBook.kt:134`, `GridChoosePassageChapter.kt:81` |
-| `open_links_in_special_window_pref` | `SwitchPreferenceCompat` | `true` (`settings.xml:62`) | `prefs_open_links_in_special_window_title` / `prefs_open_links_in_special_window_summary` (`strings.xml:166-167`) | `LinkControl.kt:401-402`, `BibleView.kt:1261` |
-| `screen_keep_on_pref` | `SwitchPreferenceCompat` | `false` (`settings.xml:67`) | `prefs_screen_keep_on_title` / `prefs_screen_keep_on_summary` (`strings.xml:169-170`) | `ActivityBase.kt:453` |
-| `double_tap_to_fullscreen` | `SwitchPreferenceCompat` | `true` (`settings.xml:73`) | `prefs_double_tap_to_fullscreen_title` / `prefs_double_tap_to_fullscreen_summary` (`strings.xml:1062-1063`) | `BibleGestureListener.kt:156` |
-| `auto_fullscreen_pref` | `SwitchPreferenceCompat` | `false` (`settings.xml:79`) | `auto_fullscreen` / `auto_fullscreen_summary` (`strings.xml:183`, `190`) | `BibleGestureListener.kt:43` |
-| `toolbar_button_actions` | `ListPreference` | Runtime fallback to `default` when blank (`SettingsActivity.kt:262-265`) | `prefs_toolbar_button_action_title` / `prefs_toolbar_button_action_summary` (`strings.xml:151-152`) | `MainBibleActivity.kt:1055` |
-| `disable_two_step_bookmarking` | `SwitchPreferenceCompat` | `false` (`settings.xml:91`) | `prefs_disable_two_step_bookmarking_title` / `prefs_disable_two_step_bookmarking_summary` (`strings.xml:1060-1061`) | `BibleView.kt:566` |
-| `bible_view_swipe_mode` | `ListPreference` | `CHAPTER` (`settings.xml:100`) | `prefs_bible_view_swipe_mode_title` / `prefs_bible_view_swipe_mode_summary` (`strings.xml:1311-1312`) | `CommonUtils.kt:440` |
-| `volume_keys_scroll` | `SwitchPreferenceCompat` | `true` (`settings.xml:104`) | `prefs_volume_keys_scroll_title` / `prefs_volume_keys_scroll_summary` (`strings.xml:1316-1317`) | `MainBibleActivity.kt:1856` |
-| `night_mode_pref3` | `ListPreference` | XML default `manual` (`settings.xml:113`), runtime entry-set/default adjusted (`SettingsActivity.kt:225-234`) | `prefs_night_mode_title` / `prefs_night_mode_summary` (`strings.xml:157-158`) | `ScreenSettings.kt:62-64` |
-| `locale_pref` | `ListPreference` | `""` (`settings.xml:124`) | `prefs_interface_locale_title` / `prefs_interface_locale_summary` (`strings.xml:171-172`) | `CommonUtils.kt:457`, `LocaleHelper.kt:31` |
-| `monochrome_mode` | `SwitchPreferenceCompat` | `false` (`settings.xml:128`) | `prefs_e_ink_mode_title` / `prefs_eink_mode_summary` (`strings.xml:106-107`) | `CommonUtils.kt:435` |
-| `disable_animations` | `SwitchPreferenceCompat` | `false` (`settings.xml:134`) | `prefs_disable_animations_title` / `prefs_disable_animations_summary` (`strings.xml:109-110`) | `CommonUtils.kt:436` |
-| `disable_click_to_edit` | `SwitchPreferenceCompat` | `false` (`settings.xml:141`) | `prefs_disable_click_to_edit_title` / `prefs_disable_click_to_edit_summary` (`strings.xml:112-113`) | consumed via JS appSettings payload (Android bridge path) |
-| `font_size_multiplier` | `SeekBarPreference` | `100` (`settings.xml:147`), min `10`, max `500` (`settings.xml:148-149`) | `pref_font_size_multiplier_title` (`strings.xml:1307`) | `CommonUtils.kt:438-439` |
-| `full_screen_hide_buttons_pref` | `SwitchPreferenceCompat` | `true` (`settings.xml:156`) | `full_screen_hide_buttons_pref_title` / `full_screen_hide_buttons_pref_summary` (`strings.xml:231-232`) | `SplitBibleArea.kt:319` |
-| `hide_window_buttons` | `SwitchPreferenceCompat` | `false` (`settings.xml:162`) | `hide_window_buttons_title` / `hide_window_buttons_summary` (`strings.xml:226-227`) | `SplitBibleArea.kt:316` |
-| `hide_bible_reference_overlay` | `SwitchPreferenceCompat` | `false` (`settings.xml:168`) | `hide_bible_reference_overlay_title` / `hide_bible_reference_overlay_summary` (`strings.xml:228-229`) | `SplitBibleArea.kt:624` |
-| `show_active_window_indicator` | `SwitchPreferenceCompat` | `true` (`settings.xml:174`) | `active_window_indicator_title` / `active_window_indicator_summary` (`strings.xml:952-953`) | `BibleView.kt:1379` |
-| `disable_bible_bookmark_modal_buttons` | `InverseMultiSelectListPreference` | No XML default | `prefs_in_window_bible_bookmark_modal_buttons_title` / `prefs_in_window_bookmark_modal_buttons_description` (`strings.xml:1284`, `1286`) | `BibleView.kt:1397` |
-| `disable_gen_bookmark_modal_buttons` | `InverseMultiSelectListPreference` | No XML default | `prefs_in_window_gen_bookmark_modal_buttons_title` / `prefs_in_window_bookmark_modal_buttons_description` (`strings.xml:1285`, `1286`) | `BibleView.kt:1400` |
-| `discrete_help` | `Preference` | N/A | `prefs_persecuted_help` / `prefs_persecuted_summary` (`strings.xml:1157`, `1159`) | click behavior dialog `SettingsActivity.kt:291-319` |
-| `discrete_mode` | `SwitchPreferenceCompat` | `false` (`settings.xml:202`) | `prefs_discrete_mode` / `prefs_discrete_mode_desc` (`strings.xml:1148-1149`) | icon/name switch `CommonUtils.kt:1529-1563`, `MainBibleActivity.kt:1937` |
-| `show_calculator` | `SwitchPreferenceCompat` | `false` (`settings.xml:207`) | `prefs_show_calculator` (title), summary set dynamically from `calculator_par*` (`SettingsActivity.kt:285-289`) | startup calculator gate `CommonUtils.kt:1583`, `StartupActivity.kt:386-401` |
-| `calculator_pin` | `EditTextPreference` | `1234` (`settings.xml:213`) | `prefs_calculator_pin` / `prefs_calculator_pin_desc` (`strings.xml:1151-1152`) | calculator unlock `CalculatorActivity.kt:263-270` |
-| `experimental_features` | `MultiSelectListPreference` | `@null` (`settings.xml:223`) | `prefs_experimental_features_title` / `prefs_experimental_features_summary` (`strings.xml:946-947`) | `CommonUtils.kt:443` |
-| `enable_bluetooth_pref` | `SwitchPreferenceCompat` | `true` (`settings.xml:230`) | `prefs_enable_bluetooth_title` / `prefs_enable_bluetooth_summary` (`strings.xml:256-257`) | `MediaButtonHandler.kt:56`, `89`, `132` |
-| `request_sdcard_permission_pref` | `SwitchPreferenceCompat` | `false` (`settings.xml:234`) | `prefs_request_sdcard_permission_title` / `prefs_request_sdcard_permission_summary` (`strings.xml:175-176`) | `MainBibleActivity.kt:2077`, `DocumentControl.kt:167` |
-| `show_errorbox` | `SwitchPreferenceCompat` | `false` (`settings.xml:238`) | `prefs_show_error_box_title` / `prefs_show_error_box_summary` (`strings.xml:950-951`) | `BibleView.kt:1387` |
-| `open_links` | `Preference` | `false` (`settings.xml:244`) | `open_bible_links_title` / `open_bible_links_summary` (`strings.xml:1209-1210`) | click opens OS App-links settings `SettingsActivity.kt:334-349` |
-| `crash_app` | `Preference` | N/A | `crash_app` / `crash_app_summary` (`strings.xml`, same file) | click behavior only in beta `SettingsActivity.kt:321-333` |
-
-## Android Runtime Visibility / Dynamic Rules
-
-| Rule | Reference |
-|---|---|
-| `night_mode_pref3` entries and defaults are adjusted by `autoModeAvailable` | `SettingsActivity.kt:225-234` |
-| `show_errorbox` visible only in beta builds | `SettingsActivity.kt:235-236` |
-| dictionaries category hidden if no dictionary modules available | `SettingsActivity.kt:237-247` |
-| `font_size_multiplier` summary shows current multiplier string | `SettingsActivity.kt:249-260` |
-| `request_sdcard_permission_pref` hidden on Android Q+ | `SettingsActivity.kt:267-270` |
-| `calculator_pin` editor forced numeric input | `SettingsActivity.kt:272-274` |
-| `discrete_mode` and `show_calculator` hidden in discrete flavor | `SettingsActivity.kt:276-284` |
-| `show_calculator` summary built from calculator paragraphs | `SettingsActivity.kt:285-289` |
-| `discrete_help` dialog content differs by build flavor | `SettingsActivity.kt:291-307` |
-| `crash_app` visible only in beta | `SettingsActivity.kt:321-333` |
-| `open_links` visible only on API >= S; otherwise hidden | `SettingsActivity.kt:334-349` |
+| Key | Android source / behavior | iOS disposition |
+|---|---|---|
+| `strongs_greek_dictionary` | XML `settings.xml:28-32`; dictionary rows/defaults are populated at `SettingsActivity.kt:245-254`. | Registry-backed pass. |
+| `strongs_hebrew_dictionary` | XML `settings.xml:33-37`; dictionary rows/defaults are populated at `SettingsActivity.kt:245-254`. | Registry-backed pass. |
+| `robinson_greek_morphology` | XML `settings.xml:38-42`; dictionary rows/defaults are populated at `SettingsActivity.kt:245-254`. | Registry-backed pass. |
+| `disabled_word_lookup_dictionaries` | XML `settings.xml:43-47`; inverse dictionary row is populated at `SettingsActivity.kt:251-254`. | Registry-backed pass. |
+| `navigate_to_verse_pref` | XML `settings.xml:52-57`; default `false`. | Registry-backed pass. |
+| `open_links_in_special_window_pref` | XML `settings.xml:58-62`; default `true`. | Registry-backed pass. |
+| `screen_keep_on_pref` | XML `settings.xml:63-68`; default `false`. | Registry-backed pass. |
+| `double_tap_to_fullscreen` | XML `settings.xml:69-74`; default `true`. | Registry-backed pass. |
+| `auto_fullscreen_pref` | XML `settings.xml:75-80`; default `false`. | Registry-backed pass. |
+| `toolbar_button_actions` | XML `settings.xml:81-86`; blank values are normalized to `default` at `SettingsActivity.kt:270-273`. | Registry-backed adapted pass. |
+| `disable_two_step_bookmarking` | XML `settings.xml:88-93`; default `false`. | Registry-backed pass. |
+| `bible_view_swipe_mode` | XML `settings.xml:94-100`; default `CHAPTER`. | Registry-backed adapted pass. |
+| `volume_keys_scroll` | XML `settings.xml:101-106`; Android handles hardware volume-key scrolling. | Registry-backed documented divergence: iOS keeps persistence/UI for sync continuity but cannot intercept volume buttons for app actions. |
+| `night_mode_pref3` | XML `settings.xml:107-113`; runtime entries/default are replaced at `SettingsActivity.kt:233-242`. | Registry-backed adapted pass. |
+| `global_text_display_settings` | XML `settings.xml:118-122`; action starts global `TextDisplaySettingsActivity` at `SettingsActivity.kt:299-308`. | Outside registry, adapted on iOS. Global display settings use `SettingsStore.globalTextDisplaySettingsKey`; Settings links live in `SettingsView.lookAndFeelSection`. |
+| `locale_pref` | XML `settings.xml:124-130`; option arrays are `arrays.xml:121-230`. | Registry-backed partial. iOS persists/applies locale overrides, but its option list is stale against Android arrays; tracked by #164. |
+| `disable_click_to_edit` | XML `settings.xml:131-137`; Android emits `disableClickToEdit` into `appSettings`. | Registry-backed pass. |
+| `notes_content_type` | XML `settings.xml:138-145`; default `HTML`; values `HTML`/`MARKDOWN` at `arrays.xml:264-271`; Android emits `notesContentType` at `BibleView.kt:1537`. | Missing on iOS; tracked by #163. Not e-ink related. |
+| `font_size_multiplier` | XML `settings.xml:146-153`; default `100`, min `10`, max `500`; summary updates at `SettingsActivity.kt:255-268`. | Registry-backed pass. |
+| `full_screen_hide_buttons_pref` | XML `settings.xml:154-159`; effective default `true`. | Registry-backed pass. |
+| `hide_window_buttons` | XML `settings.xml:160-165`; default `false`. | Registry-backed pass. |
+| `hide_bible_reference_overlay` | XML `settings.xml:166-171`; default `false`. | Registry-backed pass. |
+| `show_active_window_indicator` | XML `settings.xml:172-177`; default `true`. | Registry-backed pass. |
+| `disable_bible_bookmark_modal_buttons` | XML `settings.xml:178-184`; Android inverse multi-select action IDs from `arrays.xml:231-250`. | Registry-backed pass. |
+| `disable_gen_bookmark_modal_buttons` | XML `settings.xml:185-191`; Android inverse multi-select action IDs from `arrays.xml:251-262`. | Registry-backed pass. |
+| `monochrome_mode` | XML `settings.xml:195-200`; Android runtime default is `isOnyxDevice` at `CommonUtils.kt:452`. | Registry-backed adapted pass. iOS default remains `false` because iOS has no Onyx-device default path. |
+| `eink_mode` | XML `settings.xml:201-206`; Android emits `einkMode` at `BibleView.kt:1531`; Vue uses it for scroll helper lines/page buttons at `BibleView.vue:74-83`. | Documented divergence. Do not implement as dead iOS UI; see `dispositions.md`. |
+| `disable_animations` | XML `settings.xml:207-212`; Android runtime default is `isOnyxDevice` at `CommonUtils.kt:454`. | Registry-backed adapted pass. iOS default remains `false` because iOS has no Onyx-device default path. |
+| `discrete_help` | XML `settings.xml:216-221`; click behavior is `SettingsActivity.kt:325-353`. | Registry-backed adapted action. |
+| `discrete_mode` | XML `settings.xml:222-227`; hidden in discrete flavor at `SettingsActivity.kt:310-314`. | Registry-backed adapted pass. |
+| `show_calculator` | XML `settings.xml:228-232`; hidden/summary adjusted at `SettingsActivity.kt:315-324`. | Registry-backed pass. |
+| `calculator_pin` | XML `settings.xml:233-238`; numeric editor enforced at `SettingsActivity.kt:280-282`. | Registry-backed pass. |
+| `sync_settings_shortcut` | XML `settings.xml:241-245`; starts `SyncSettingsActivity` at `SettingsActivity.kt:284-287`. | Outside registry, adapted by iOS Settings data link to `SyncSettingsView`; broader shortcut presentation is tracked by #155. |
+| `ai_settings_shortcut` | XML `settings.xml:246-250`; starts `AiSettingsActivity` at `SettingsActivity.kt:289-292`. | Outside registry, deferred to the iOS AI parity track (#5, #74, #89-#92) and settings presentation track (#155). |
+| `reading_progress_settings_shortcut` | XML `settings.xml:251-255`; starts `ReadingProgressSettingsActivity` at `SettingsActivity.kt:294-297`. | Outside registry, partially adapted through the reader bridge/native reading-progress settings; top-level settings shortcut alignment is tracked by #155. |
+| `experimental_features` | XML `settings.xml:258-265`; option arrays are `arrays.xml:273-280`. | Registry-backed pass. |
+| `enable_bluetooth_pref` | XML `settings.xml:266-270`; default `true`. | Registry-backed adapted pass through iOS remote command handling. |
+| `request_sdcard_permission_pref` | XML `settings.xml:271-274`; hidden on Android Q+ at `SettingsActivity.kt:275-278`. | Registry-backed documented divergence. iOS has no SD-card permission model. |
+| `show_errorbox` | XML `settings.xml:275-280`; visible only for beta at `SettingsActivity.kt:243-244`. | Registry-backed adapted pass; iOS exposes only in debug builds. |
+| `open_links` | XML `settings.xml:281-286`; visible on Android S+ and opens app-link settings at `SettingsActivity.kt:368-383`. | Registry-backed adapted action; iOS opens app settings. |
+| `crash_app` | XML `settings.xml:287-291`; visible only for beta/debug at `SettingsActivity.kt:355-367`. | Registry-backed adapted action; iOS debug-only delayed crash. |
 
 ## List / Multi-Select Option Contracts
 
-| Key | Options contract | Reference |
+| Key | Options contract | Reference | iOS disposition |
+|---|---|---|---|
+| `toolbar_button_actions` | `default`, `swap-menu`, `swap-activity` | `arrays.xml:65-74` | Implemented. |
+| `bible_view_swipe_mode` | `CHAPTER`, `PAGE`, `NONE` | `arrays.xml:77-87` | Implemented with native iOS gestures. |
+| `night_mode_pref3` | runtime-dependent `system`/`automatic`/`manual` or `system`/`manual` | `arrays.xml:90-116`, `SettingsActivity.kt:233-242` | Adapted: iOS supports system/manual and documents excluded automatic behavior. |
+| `locale_pref` | Android language label/value arrays | `arrays.xml:121-230` | Partial: option drift tracked by #164. |
+| `notes_content_type` | `HTML`, `MARKDOWN` | `arrays.xml:264-271` | Missing: tracked by #163. |
+| `disable_bible_bookmark_modal_buttons` | Bible one-tap action IDs | `arrays.xml:231-250` | Implemented. |
+| `disable_gen_bookmark_modal_buttons` | Generic one-tap action IDs | `arrays.xml:251-262` | Implemented. |
+| `experimental_features` | `bookmark_edit_actions`, `add_paragraph_break` | `arrays.xml:273-280` | Implemented. |
+
+## Android Runtime Visibility / Dynamic Rules
+
+| Rule | Reference | iOS disposition |
 |---|---|---|
-| `toolbar_button_actions` | `default`, `swap-menu`, `swap-activity` with mapped descriptions | `arrays.xml:44-53` |
-| `bible_view_swipe_mode` | `CHAPTER`, `PAGE`, `NONE` | `arrays.xml:56-66` |
-| `night_mode_pref3` | runtime-dependent set from `system/automatic/manual` or `system/manual` | `arrays.xml:69-95`, `SettingsActivity.kt:225-234` |
-| `locale_pref` | description/value arrays in strict positional order | `arrays.xml:100-189` |
-| `disable_bible_bookmark_modal_buttons` | action names/ids arrays | `arrays.xml:190-209` |
-| `disable_gen_bookmark_modal_buttons` | action names/ids arrays | `arrays.xml:210-221` |
-| `experimental_features` | names/ids arrays | `arrays.xml:224-231` |
+| `night_mode_pref3` entries/default are adjusted by `autoModeAvailable`. | `SettingsActivity.kt:233-242` | Adapted. |
+| `show_errorbox` visible only in beta builds. | `SettingsActivity.kt:243-244` | Adapted to debug builds. |
+| Dictionary category hidden if no dictionary modules are available. | `SettingsActivity.kt:245-254` | Implemented. |
+| `font_size_multiplier` summary shows the current multiplier. | `SettingsActivity.kt:255-268` | Implemented with a SwiftUI stepper value. |
+| `request_sdcard_permission_pref` hidden on Android Q+. | `SettingsActivity.kt:275-278` | iOS divergence. |
+| `calculator_pin` editor forced to numeric input. | `SettingsActivity.kt:280-282` | Implemented. |
+| Sync, AI, and Reading Progress shortcuts open adjacent settings screens. | `SettingsActivity.kt:284-297` | Sync adapted; AI and top-level Reading Progress shortcut alignment tracked by #155 and AI parity issues. |
+| `global_text_display_settings` opens global text-display settings. | `SettingsActivity.kt:299-308` | Adapted through Look & feel settings links and `SettingsStore.globalTextDisplaySettingsKey`. |
+| `discrete_mode` and `show_calculator` hidden in discrete flavor. | `SettingsActivity.kt:310-324` | Adapted through iOS app-icon/calculator behavior. |
+| `discrete_help` shows flavor-dependent help dialog. | `SettingsActivity.kt:325-353` | Adapted as iOS help sheet. |
+| `crash_app` visible only in beta/debug. | `SettingsActivity.kt:355-367` | Adapted to debug builds. |
+| `open_links` visible only on Android S+; otherwise hidden. | `SettingsActivity.kt:368-383` | Adapted to iOS app settings. |
 
 ## Ownership And Review Checklist
 
@@ -95,8 +140,11 @@ Primary sources:
 
 Checklist for parity updates:
 
-- Confirm `settings.xml` key set still matches this contract.
+- Confirm `settings.xml` actionable row set still matches this inventory.
+- Confirm new Android rows are either added to `AppPreferenceRegistry`, tracked by a
+  follow-up issue, or documented as an intentional divergence.
 - Confirm defaults in XML/runtime code still match this contract.
 - Confirm labels/summaries and option arrays still match this contract.
 - Confirm runtime visibility/dynamic rules still match this contract.
-- Update iOS backlog tickets when Android contract changes.
+- Confirm the verification matrix does not summarize parity as a 35-key Android
+  contract unless Android source still proves that count.
