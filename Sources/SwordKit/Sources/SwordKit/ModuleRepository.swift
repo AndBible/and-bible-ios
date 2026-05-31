@@ -1215,6 +1215,7 @@ public final class ModuleRepository: @unchecked Sendable {
 
     /**
      Downloads and converts an Android-compatible MyBible repository manifest into Downloads rows.
+     Module language codes are trimmed before storage, with empty values defaulting to English.
 
      - Parameter source: Custom source whose `manifestURL` points at a MyBible manifest.
      - Returns: Installable remote rows for manifest modules with HTTPS package URLs.
@@ -1244,14 +1245,15 @@ public final class ModuleRepository: @unchecked Sendable {
         let entries = manifest.modules.compactMap { module -> CatalogModule? in
             let normalizedDownloadURL = Self.normalizedMyBibleDownloadURL(module.downloadURL)
             guard let downloadURL = normalizedDownloadURL else { return nil }
+            let languageCode = module.languageCode.trimmingCharacters(in: .whitespacesAndNewlines)
 
             return CatalogModule(
                 name: Self.myBibleModuleInitials(fileName: module.fileName),
                 description: module.description,
                 category: Self.myBibleCategory(fileName: module.fileName),
-                language: module.languageCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                language: languageCode.isEmpty
                     ? "en"
-                    : module.languageCode,
+                    : languageCode,
                 modDrv: "",
                 dataPath: "",
                 confContent: "",

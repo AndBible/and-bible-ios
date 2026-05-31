@@ -583,6 +583,17 @@ public final class RepositorySourceManager: @unchecked Sendable {
         }
     }
 
+    /**
+     Persists a resolved custom repository registration across SWORD config and sidecar storage.
+
+     - Parameters:
+       - registration: Validated custom repository metadata to persist.
+       - originalName: Existing repository name to replace, or `nil` when adding a new source.
+     - Side effects: rewrites `InstallMgr.conf` and `CustomRepositories.json` as needed.
+     - Throws: `RepositorySourceManagementError` when the edit target is missing, a source name
+       conflicts, source fields are invalid, or either backing store cannot be written.
+     - Note: Replacements keep the original sidecar index so display/edit ordering remains stable.
+     */
     private func writeCustomRegistration(
         _ registration: RepositorySourceRegistration,
         replacing originalName: String?
@@ -627,8 +638,27 @@ public final class RepositorySourceManager: @unchecked Sendable {
         }
         try writeConfig(updated)
 
-        var updatedRecords = customRecords.filter { $0.name != originalName && $0.name != source.name }
-        updatedRecords.append(CustomRepositoryRecord(registration: registration))
+        let replacementRecord = CustomRepositoryRecord(registration: registration)
+        var updatedRecords: [CustomRepositoryRecord] = []
+        var didReplaceRecord = false
+        for record in customRecords {
+            if let originalName, record.name == originalName {
+                if !didReplaceRecord {
+                    updatedRecords.append(replacementRecord)
+                    didReplaceRecord = true
+                }
+            } else if record.name == source.name {
+                if originalName == nil && !didReplaceRecord {
+                    updatedRecords.append(replacementRecord)
+                    didReplaceRecord = true
+                }
+            } else {
+                updatedRecords.append(record)
+            }
+        }
+        if !didReplaceRecord {
+            updatedRecords.append(replacementRecord)
+        }
         try writeCustomRepositoryRecords(updatedRecords)
     }
 

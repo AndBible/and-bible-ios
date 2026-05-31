@@ -214,7 +214,7 @@ extension AndBibleTests {
               "file_name": "finrk.SQLite3.zip",
               "description": "Finnish RK",
               "download_url": "https://mybible.example/finrk.SQLite3.zip",
-              "language_code": "fi",
+              "language_code": "  fi  ",
               "update_date": "2026-05-01",
               "update_info": "initial"
             },
