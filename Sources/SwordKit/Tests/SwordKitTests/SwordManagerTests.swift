@@ -220,6 +220,7 @@ final class SwordManagerTests: XCTestCase {
     func testModuleCategoryInit() {
         XCTAssertEqual(ModuleCategory(typeString: "Biblical Texts"), .bible)
         XCTAssertEqual(ModuleCategory(typeString: "Commentaries"), .commentary)
+        XCTAssertEqual(ModuleCategory(typeString: "And Bible"), .addon)
         XCTAssertEqual(ModuleCategory(typeString: "Unknown Type"), .unknown)
     }
 

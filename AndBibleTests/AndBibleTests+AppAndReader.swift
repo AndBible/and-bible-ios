@@ -372,6 +372,14 @@ extension AndBibleTests {
                 version: "1.0"
             ),
             RemoteModuleInfo(
+                name: "ADDON",
+                description: "Add-on font pack",
+                category: .addon,
+                language: "zxx",
+                sourceName: "AndBible",
+                version: "1.0"
+            ),
+            RemoteModuleInfo(
                 name: "PSEUDO",
                 description: "Unavailable translation",
                 category: .bible,
@@ -405,6 +413,17 @@ extension AndBibleTests {
         )
 
         XCTAssertEqual(filtered.map(\.name), ["WARN", "WEB", "KJV", "REC", "PSEUDO", "MHC"])
+        let addonFiltered = ModuleBrowserView.filteredDownloadModules(
+            modules,
+            selectedCategory: .addon,
+            selectedLanguage: "en",
+            searchText: "",
+            installedModules: installed,
+            downloadActivities: [:],
+            recommendedDocuments: recommended,
+            badDocuments: bad
+        )
+        XCTAssertEqual(addonFiltered.map(\.name), ["ADDON"])
         XCTAssertEqual(
             ModuleBrowserView.displayStatus(
                 for: modules[1],
@@ -512,12 +531,14 @@ extension AndBibleTests {
           "commentaries": {},
           "dictionaries": {},
           "books": {},
-          "maps": {}
+          "maps": {},
+          "addons": {"en": ["AddonFonts::AndBible"]}
         }
         """.data(using: .utf8)!
         let recommended = try JSONDecoder().decode(ModuleDownloadConfiguration.self, from: data)
         let bad = ModuleDownloadConfiguration(
-            bibles: ["en": ["KJV::CrossWire::2.3::W", "WEB::CrossWire::1.0::H"]]
+            bibles: ["en": ["KJV::CrossWire::2.3::W", "WEB::CrossWire::1.0::H"]],
+            addons: ["en": ["AddonFonts::AndBible::1.0::W"]]
         )
         let kjv = RemoteModuleInfo(
             name: "KJV",
@@ -543,11 +564,21 @@ extension AndBibleTests {
             sourceName: "CrossWire",
             version: "1.0"
         )
+        let addon = RemoteModuleInfo(
+            name: "AddonFonts",
+            description: "Add-on font pack",
+            category: .addon,
+            language: "zxx",
+            sourceName: "AndBible",
+            version: "1.0"
+        )
 
         XCTAssertTrue(recommended.contains(kjv))
         XCTAssertTrue(recommended.contains(asv))
-        XCTAssertEqual(recommended.addons, [:])
+        XCTAssertTrue(recommended.contains(addon))
+        XCTAssertEqual(recommended.addons, ["en": ["AddonFonts::AndBible"]])
         XCTAssertEqual(bad.badDocumentAction(for: kjv), .warn)
+        XCTAssertEqual(bad.badDocumentAction(for: addon), .warn)
         XCTAssertEqual(bad.badDocumentAction(for: web), .hide)
         XCTAssertEqual(bad.badDocumentAction(for: asv), .none)
     }

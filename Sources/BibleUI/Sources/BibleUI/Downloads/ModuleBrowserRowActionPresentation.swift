@@ -259,6 +259,8 @@ struct ModuleBrowserModuleDetailsView: View {
             return String(localized: "category_books")
         case .map:
             return String(localized: "maps", defaultValue: "Maps")
+        case .addon:
+            return String(localized: "doc_type_addons", defaultValue: "Add-ons")
         default:
             return category.rawValue
         }

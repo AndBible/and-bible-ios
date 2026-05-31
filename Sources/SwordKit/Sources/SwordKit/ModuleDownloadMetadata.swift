@@ -43,8 +43,9 @@ public struct ModuleDownloadConfiguration: Sendable, Codable, Equatable {
     /**
      Android add-on entries keyed by language code.
 
-     iOS currently records these values so metadata decoding stays compatible with Android feeds,
-     but the module browser does not render add-ons until #136 defines an iOS model for them.
+     These entries map to SWORD rows whose category is JSword's `AND_BIBLE` / `And Bible` bucket.
+     They participate in Downloads filtering and metadata decisions only when the catalog exposes
+     matching add-on rows.
      */
     public var addons: [String: [String]]
 
@@ -115,7 +116,7 @@ public struct ModuleDownloadConfiguration: Sendable, Codable, Equatable {
     /**
      Returns the language-indexed metadata map for a module category.
 
-     - Parameter category: SWORD module category to map onto Android's metadata buckets.
+     - Parameter category: SWORD/Android module category to map onto Android's metadata buckets.
      - Returns: A language-keyed token map; unsupported categories return an empty map.
 
      Side effects:
@@ -136,6 +137,8 @@ public struct ModuleDownloadConfiguration: Sendable, Codable, Equatable {
             return books
         case .map:
             return maps
+        case .addon:
+            return addons
         default:
             return [:]
         }
@@ -155,7 +158,7 @@ public struct ModuleDownloadConfiguration: Sendable, Codable, Equatable {
      - malformed repository-scoped tokens are ignored
      */
     public func contains(_ module: RemoteModuleInfo) -> Bool {
-        entries(for: module.category)[module.language, default: []].contains { token in
+        metadataTokens(for: module).contains { token in
             let parts = token.components(separatedBy: "::")
             if parts.count >= 2 {
                 return parts[0] == module.name && parts[1] == module.sourceName
@@ -168,8 +171,8 @@ public struct ModuleDownloadConfiguration: Sendable, Codable, Equatable {
      Returns Android's bad-document action for a remote module.
 
      - Parameter module: Remote module row being considered for display.
-     - Returns: The configured action, or `.none` when the row is not listed or the entry is
-       malformed.
+     - Returns: The configured action, or `.none` when the row is not listed or matching entries are
+       malformed. Hide takes precedence over warning when duplicate metadata rows conflict.
 
      Side effects:
      - none
@@ -178,7 +181,8 @@ public struct ModuleDownloadConfiguration: Sendable, Codable, Equatable {
      - malformed entries and non-matching versions/repositories return `.none`
      */
     public func badDocumentAction(for module: RemoteModuleInfo) -> ModuleBadDocumentAction {
-        for token in entries(for: module.category)[module.language, default: []] {
+        var foundWarning = false
+        for token in metadataTokens(for: module) {
             let parts = token.components(separatedBy: "::")
             guard parts.count >= 4 else { continue }
             guard parts[0] == module.name,
@@ -186,9 +190,48 @@ public struct ModuleDownloadConfiguration: Sendable, Codable, Equatable {
                   parts[2] == module.version else {
                 continue
             }
-            return ModuleBadDocumentAction(actionLetter: parts[3])
+            switch ModuleBadDocumentAction(actionLetter: parts[3]) {
+            case .hide:
+                return .hide
+            case .warn:
+                foundWarning = true
+            case .none:
+                continue
+            }
         }
-        return .none
+        return foundWarning ? .warn : .none
+    }
+
+    /**
+     Returns metadata tokens that can apply to one remote module row.
+
+     Normal document categories are language-scoped by the catalog row language. Android add-ons
+     are not filtered out by concrete language selection, so their metadata is treated as
+     language-neutral and matched across all add-on buckets.
+
+     - Parameter module: Remote module row being matched against metadata.
+     - Returns: Candidate metadata tokens for the row.
+     - Side effects: none.
+     - Failure modes: none; unsupported categories return no tokens.
+     */
+    private func metadataTokens(for module: RemoteModuleInfo) -> [String] {
+        let categoryEntries = entries(for: module.category)
+        guard module.category == .addon else {
+            return categoryEntries[module.language, default: []]
+        }
+        return Self.languageNeutralTokens(from: categoryEntries)
+    }
+
+    /**
+     Flattens language-keyed metadata in deterministic key order.
+
+     - Parameter entries: Language-keyed Android metadata bucket.
+     - Returns: All tokens ordered by language key and original token order within each key.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    private static func languageNeutralTokens(from entries: [String: [String]]) -> [String] {
+        entries.keys.sorted().flatMap { entries[$0, default: []] }
     }
 }
 

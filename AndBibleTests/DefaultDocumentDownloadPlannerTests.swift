@@ -11,7 +11,7 @@ final class DefaultDocumentDownloadPlannerTests: XCTestCase {
             dictionaries: ["en": ["StrongsHebrew::CrossWire"]],
             books: ["en": ["Pilgrim"]],
             maps: ["en": ["BibleMap"]],
-            addons: ["en": ["UnsupportedAddon"]]
+            addons: ["en": ["AddonFonts"]]
         )
         let availableModules = [
             remoteModule("StrongsHebrew", category: .dictionary, sourceName: "CrossWire"),
@@ -20,7 +20,7 @@ final class DefaultDocumentDownloadPlannerTests: XCTestCase {
             remoteModule("BibleMap", category: .map, sourceName: "CrossWire"),
             remoteModule("Pilgrim", category: .generalBook, sourceName: "CrossWire"),
             remoteModule("MHC", category: .commentary, sourceName: "CrossWire"),
-            remoteModule("UnsupportedAddon", category: .unknown, sourceName: "AndBible"),
+            remoteModule("AddonFonts", category: .addon, sourceName: "AndBible"),
         ]
 
         let selected = DefaultDocumentDownloadPlanner.selectedModules(
@@ -29,8 +29,11 @@ final class DefaultDocumentDownloadPlannerTests: XCTestCase {
             installedModules: []
         )
 
-        XCTAssertEqual(selected.map(\.name), ["KJV", "MHC", "Pilgrim", "StrongsHebrew", "BibleMap"])
-        XCTAssertEqual(selected.map(\.sourceName), ["CrossWire", "CrossWire", "CrossWire", "CrossWire", "CrossWire"])
+        XCTAssertEqual(selected.map(\.name), ["KJV", "MHC", "AddonFonts", "Pilgrim", "StrongsHebrew", "BibleMap"])
+        XCTAssertEqual(
+            selected.map(\.sourceName),
+            ["CrossWire", "CrossWire", "AndBible", "CrossWire", "CrossWire", "CrossWire"]
+        )
     }
 
     func testSkipsInstalledUnavailableMissingAndDuplicateDefaults() {

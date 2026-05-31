@@ -166,6 +166,7 @@
 "dictionaries" = "Dictionaries";
 "category_books" = "Books";
 "maps" = "Maps";
+"doc_type_addons" = "Add-ons";
 "document_filter_results %lld" = "Documents (%lld)";
 "install" = "Install";
 "install_module" = "Install";
