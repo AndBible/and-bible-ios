@@ -756,7 +756,10 @@ public final class RepositorySourceManager: @unchecked Sendable {
             toPath: source.catalogPath
         )
         let sourceURL = try Self.httpsURL(host: source.host, path: source.catalogPath)
-        let reportedManifestURL = manifest.manifestUrl.flatMap(URL.init(string:)) ?? manifestURL
+        let reportedManifestURL = Self.preferredHTTPSManifestURL(
+            from: manifest.manifestUrl,
+            fallback: manifestURL
+        )
 
         return RepositorySourceRegistration(
             source: source,
@@ -867,15 +870,17 @@ public final class RepositorySourceManager: @unchecked Sendable {
      Validates one source model before it can be persisted or used as a catalog cache key.
 
      Source names are used as catalog-cache filenames, so the name must not contain path
-     separators that could escape the intended cache directory during a later refresh. MyBible
-     sources additionally require an HTTPS manifest URL because their catalog is the manifest.
+     separators that could escape the intended cache directory during a later refresh. Persisted
+     manifest URLs must be HTTPS because edit flows reuse them as user-entered repository URLs;
+     MyBible sources additionally require a manifest URL because their catalog is the manifest.
      Free-form metadata such as descriptions is stored in JSON and is not constrained by
      `InstallMgr.conf` separators.
 
      - Parameter source: Normalized source row candidate.
      - Throws: `RepositorySourceManagementError.invalidManifest` when a field is missing or
        source identity contains config/file-path syntax that cannot be safely persisted;
-       `httpsRequired` when a MyBible source lacks an HTTPS manifest.
+       `httpsRequired` when persisted manifest metadata is not HTTPS or a MyBible source lacks a
+       manifest URL.
      */
     private static func validateSourceFields(_ source: SourceConfig) throws {
         try validateConfigFields(source)
@@ -883,10 +888,13 @@ public final class RepositorySourceManager: @unchecked Sendable {
               !containsConfigSeparator(source.repositoryType) else {
             throw RepositorySourceManagementError.invalidManifest(source.name)
         }
-        if source.isMyBibleRepository {
-            guard source.manifestURL?.scheme?.lowercased() == "https" else {
+        if let manifestURL = source.manifestURL {
+            guard manifestURL.scheme?.lowercased() == "https",
+                  manifestURL.host?.isEmpty == false else {
                 throw RepositorySourceManagementError.httpsRequired
             }
+        } else if source.isMyBibleRepository {
+            throw RepositorySourceManagementError.httpsRequired
         }
     }
 
@@ -921,6 +929,33 @@ public final class RepositorySourceManager: @unchecked Sendable {
             throw RepositorySourceManagementError.invalidURL("https://\(host)\(path)")
         }
         return url
+    }
+
+    /**
+     Returns safe edit metadata from an optional SWORD manifest self-reference.
+
+     SWORD manifests can include `manifestUrl` as descriptive metadata. The app only accepts HTTPS
+     custom repository URLs, so non-HTTPS or malformed self-references are ignored and the HTTPS URL
+     that was actually fetched is retained instead.
+
+     - Parameters:
+       - rawValue: Optional `manifestUrl` field from the decoded SWORD manifest.
+       - fallback: HTTPS manifest URL used to fetch the manifest.
+     - Returns: The HTTPS self-reference when valid, otherwise `fallback`.
+     - Side effects: none.
+     - Failure modes: malformed or non-HTTPS metadata is treated as absent.
+     */
+    private static func preferredHTTPSManifestURL(from rawValue: String?, fallback: URL) -> URL {
+        guard let rawValue else {
+            return fallback
+        }
+        let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let candidate = URL(string: trimmed),
+              candidate.scheme?.lowercased() == "https",
+              candidate.host?.isEmpty == false else {
+            return fallback
+        }
+        return candidate
     }
 
     private static func httpsURL(from rawValue: String, fallback: URL) throws -> URL {

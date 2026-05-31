@@ -585,6 +585,57 @@ extension AndBibleTests {
         XCTAssertTrue(manager.loadSources().contains { $0.name == "Example Repo" })
     }
 
+    func testRepositorySourceManagerIgnoresNonHTTPSSwordManifestURLMetadata() async throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let manifestData = """
+        {
+          "name": "Example Repo",
+          "description": "Example catalog",
+          "type": "sword-https",
+          "host": "example.org",
+          "catalogDirectory": "/sword",
+          "packageDirectory": "/sword/packages",
+          "manifestUrl": "http://example.org/sword/manifest.json"
+        }
+        """.data(using: .utf8)!
+
+        MockURLProtocol.requestHandler = { request in
+            XCTAssertEqual(request.url?.absoluteString, "https://example.org/sword/manifest.json")
+            let response = HTTPURLResponse(
+                url: try XCTUnwrap(request.url),
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: nil
+            )!
+            return (response, manifestData)
+        }
+
+        let manager = RepositorySourceManager(
+            basePath: tempDir.path,
+            session: makeMockedURLSession()
+        )
+
+        let registration = try await manager.addCustomSource(from: "https://example.org/sword/manifest.json")
+
+        XCTAssertEqual(registration.manifestURL.absoluteString, "https://example.org/sword/manifest.json")
+        let source = try XCTUnwrap(manager.loadSources().first { $0.name == "Example Repo" })
+        XCTAssertEqual(source.manifestURL?.absoluteString, "https://example.org/sword/manifest.json")
+
+        let sidecarData = try Data(contentsOf: tempDir.appendingPathComponent("CustomRepositories.json"))
+        let sidecarJSON = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: sidecarData) as? [String: Any]
+        )
+        let repositories = try XCTUnwrap(sidecarJSON["repositories"] as? [[String: Any]])
+        XCTAssertEqual(
+            repositories.compactMap { $0["manifestURL"] as? String },
+            ["https://example.org/sword/manifest.json"]
+        )
+    }
+
     func testRepositorySourceManagerAddsMyBibleManifestSource() async throws {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -752,6 +803,51 @@ extension AndBibleTests {
 
         XCTAssertEqual(sources.map(\.name), ["Example MyBible"])
         XCTAssertEqual(sources.first?.manifestURL?.absoluteString, "https://mybible.example/manifest.json")
+    }
+
+    func testRepositorySourceManagerDropsSwordSidecarWithNonHTTPSManifestURL() throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let config = """
+        [General]
+
+        [Sources]
+        HTTPSource=Example SWORD|sword.example|/sword
+        """
+        try config.write(
+            to: tempDir.appendingPathComponent("InstallMgr.conf"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let sidecarData = """
+        {
+          "version": 1,
+          "repositories": [
+            {
+              "name": "Example SWORD",
+              "description": "Unsafe manifest metadata",
+              "type": "sword-https",
+              "host": "sword.example",
+              "catalogDirectory": "/sword",
+              "packageDirectory": "/sword/packages",
+              "manifestURL": "http://sword.example/manifest.json",
+              "sourceURL": "https://sword.example/sword"
+            }
+          ]
+        }
+        """.data(using: .utf8)!
+        try sidecarData.write(to: tempDir.appendingPathComponent("CustomRepositories.json"))
+
+        let manager = RepositorySourceManager(basePath: tempDir.path)
+        let source = try XCTUnwrap(manager.loadSources().first { $0.name == "Example SWORD" })
+
+        XCTAssertNil(source.manifestURL)
+        XCTAssertEqual(source.host, "sword.example")
+        XCTAssertEqual(source.catalogPath, "/sword")
     }
 
     func testRepositorySourceManagerAddsAndReplacesMyBibleWhenSwordConfigUnreadable() async throws {

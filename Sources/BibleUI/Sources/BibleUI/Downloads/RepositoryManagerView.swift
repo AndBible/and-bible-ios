@@ -596,9 +596,10 @@ private extension SourceConfig {
         return "\(scheme)://\(host)\(catalogPath)"
     }
 
-    /// HTTPS URL prefilled when replacing custom sources.
+    /// HTTPS URL prefilled when replacing custom sources. Persisted non-HTTPS manifest metadata is
+    /// ignored so stale sidecars fall back to the synthesized HTTPS catalog URL accepted by save.
     var editableURLString: String {
-        if let manifestURL {
+        if let manifestURL, manifestURL.scheme?.lowercased() == "https" {
             return manifestURL.absoluteString
         }
         return "https://\(host)\(catalogPath)"
