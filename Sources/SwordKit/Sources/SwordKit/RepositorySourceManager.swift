@@ -162,24 +162,27 @@ public final class RepositorySourceManager: @unchecked Sendable {
      when available. MyBible rows live only in the sidecar and are appended after config-backed
      sources, matching Android's built-in-then-custom source ordering.
 
-     - Returns: Source rows in persisted SWORD order followed by non-SWORD custom rows.
+     - Returns: Source rows in persisted SWORD order followed by non-SWORD custom rows. If the
+       SWORD config cannot be read, sidecar-only MyBible rows are still returned in sidecar order.
 
      Side effects:
      - creates or migrates default repository configuration through `InstallManager`.
 
      Failure modes:
-     - returns an empty array if the SWORD config file cannot be read
+     - omits config-backed SWORD rows if the SWORD config file cannot be read
      - ignores malformed custom metadata records instead of failing all Downloads sources
      */
     public func loadSources() -> [SourceConfig] {
         InstallManager.ensureDefaultConfigPublic(at: basePath)
+        let customRecords = loadCustomRepositoryRecords()
 
         guard let content = try? String(contentsOf: configURL, encoding: .utf8) else {
-            return []
+            return customRecords
+                .filter { $0.type == SourceConfig.myBibleHTTPSRepositoryType }
+                .map(\.source)
         }
 
         let persistedSources = Self.sourceLines(in: content).map(\.source)
-        let customRecords = loadCustomRepositoryRecords()
         let recordsByName = Dictionary(customRecords.map { ($0.name, $0) }, uniquingKeysWith: { first, _ in first })
 
         var namesInConfig: Set<String> = []

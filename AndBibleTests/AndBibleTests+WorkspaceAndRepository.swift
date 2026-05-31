@@ -650,6 +650,54 @@ extension AndBibleTests {
         XCTAssertFalse(manager.loadSources().contains { $0.name == "Example MyBible" })
     }
 
+    func testRepositorySourceManagerLoadsMyBibleSidecarWhenSwordConfigUnreadable() throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        try FileManager.default.createDirectory(
+            at: tempDir.appendingPathComponent("InstallMgr.conf", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        let sidecarData = """
+        {
+          "version": 1,
+          "repositories": [
+            {
+              "name": "Example MyBible",
+              "description": "Example MyBible catalog",
+              "type": "mybible-https",
+              "host": "mybible.example",
+              "catalogDirectory": "/manifest.json",
+              "packageDirectory": "",
+              "manifestURL": "https://mybible.example/manifest.json",
+              "sourceURL": "https://mybible.example/manifest.json"
+            },
+            {
+              "name": "Example SWORD",
+              "description": "Example SWORD catalog",
+              "type": "sword-https",
+              "host": "sword.example",
+              "catalogDirectory": "/sword",
+              "packageDirectory": "/sword/packages",
+              "manifestURL": "https://sword.example/manifest.json",
+              "sourceURL": "https://sword.example/sword"
+            }
+          ]
+        }
+        """.data(using: .utf8)!
+        try sidecarData.write(to: tempDir.appendingPathComponent("CustomRepositories.json"))
+
+        let manager = RepositorySourceManager(basePath: tempDir.path)
+        let sources = manager.loadSources()
+
+        XCTAssertEqual(sources.map(\.name), ["Example MyBible"])
+        let source = try XCTUnwrap(sources.first)
+        XCTAssertTrue(source.isMyBibleRepository)
+        XCTAssertEqual(source.manifestURL?.absoluteString, "https://mybible.example/manifest.json")
+    }
+
     func testRepositorySourceManagerPreservesMyBibleOrderWhenReplacingSource() async throws {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
