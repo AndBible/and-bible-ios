@@ -287,20 +287,27 @@ public final class RepositorySourceManager: @unchecked Sendable {
      - Parameter name: Repository source name to delete.
 
      Side effects:
-     - rewrites `InstallMgr.conf` without matching HTTP/FTP source rows
-     - removes matching custom metadata records
+     - rewrites `InstallMgr.conf` without matching HTTP/FTP source rows when it can be read
+     - removes matching custom metadata records, including sidecar-only MyBible rows when the
+       SWORD config is unreadable
      - posts `sourcesDidChangeNotification` after a successful write
 
      - Throws: `RepositorySourceManagementError.protectedDefaultSource` for built-in sources or a
-       config persistence error when the file cannot be read or written.
+       config persistence error when a config-backed source cannot be read or written.
      */
     public func deleteCustomSource(named name: String) throws {
         guard !InstallManager.isDefaultSourceName(name) else {
             throw RepositorySourceManagementError.protectedDefaultSource(name)
         }
 
-        let content = try currentConfigContent()
-        try writeConfig(Self.configContent(content, removing: name))
+        let customRecords = loadCustomRepositoryRecords()
+        let matchingRecord = customRecords.first { $0.name == name }
+        do {
+            let content = try currentConfigContent()
+            try writeConfig(Self.configContent(content, removing: name))
+        } catch RepositorySourceManagementError.configReadFailed
+            where matchingRecord?.type == SourceConfig.myBibleHTTPSRepositoryType {
+        }
         try removeCustomRepositoryRecord(named: name)
         NotificationCenter.default.post(name: Self.sourcesDidChangeNotification, object: nil)
     }
@@ -541,9 +548,12 @@ public final class RepositorySourceManager: @unchecked Sendable {
        - registration: Validated custom repository metadata to persist.
        - originalName: Existing repository name to replace, or `nil` when adding a new source.
      - Side effects: rewrites `InstallMgr.conf` and `CustomRepositories.json` as needed.
-     - Throws: `RepositorySourceManagementError` when the edit target is missing, a source name
-       conflicts, source fields are invalid, or either backing store cannot be written.
+     - Throws: `RepositorySourceManagementError` when the visible edit target is missing, a
+       visible source name conflicts, source fields are invalid, or either backing store cannot be
+       written.
      - Note: Replacements keep the original sidecar index so display/edit ordering remains stable.
+       Orphaned SWORD sidecar metadata is ignored for duplicate checks because `loadSources()`
+       cannot surface it without the matching `InstallMgr.conf` row.
      */
     private func writeCustomRegistration(
         _ registration: RepositorySourceRegistration,
@@ -553,10 +563,14 @@ public final class RepositorySourceManager: @unchecked Sendable {
         let content = try currentConfigContent()
         let sourceLines = Self.sourceLines(in: content)
         let customRecords = loadCustomRepositoryRecords()
+        let sourceNamesInConfig = Set(sourceLines.map(\.source.name))
+        let visibleCustomRecords = customRecords.filter {
+            $0.type == SourceConfig.myBibleHTTPSRepositoryType || sourceNamesInConfig.contains($0.name)
+        }
 
         if let originalName,
            !sourceLines.contains(where: { $0.source.name == originalName })
-            && !customRecords.contains(where: { $0.name == originalName })
+            && !visibleCustomRecords.contains(where: { $0.name == originalName })
         {
             throw RepositorySourceManagementError.sourceNotFound(originalName)
         }
@@ -564,7 +578,7 @@ public final class RepositorySourceManager: @unchecked Sendable {
         try Self.validateSourceFields(source)
 
         let existingNames = Set(
-            (sourceLines.map(\.source.name) + customRecords.map(\.name))
+            (sourceLines.map(\.source.name) + visibleCustomRecords.map(\.name))
                 .filter { $0 != originalName }
         )
 
