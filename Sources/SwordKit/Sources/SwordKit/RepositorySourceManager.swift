@@ -482,16 +482,43 @@ public final class RepositorySourceManager: @unchecked Sendable {
     /**
      Loads sidecar custom repository records.
 
-     - Returns: Persisted records, or an empty array when the sidecar is absent or unreadable.
+     - Returns: Persisted records that pass source validation, or an empty array when the sidecar
+       is absent or unreadable.
      - Side effects: reads `CustomRepositories.json`.
-     - Failure modes: malformed sidecars are treated as empty so Downloads can still load built-in
-       SWORD sources.
+     - Failure modes: malformed sidecars are treated as empty, and malformed records are dropped,
+       so Downloads can still load built-in SWORD sources and valid sidecar-only repositories.
      */
     private func loadCustomRepositoryRecords() -> [CustomRepositoryRecord] {
         guard let data = fileManager.contents(atPath: customRepositoriesURL.path) else {
             return []
         }
-        return (try? JSONDecoder().decode(CustomRepositoryStore.self, from: data).repositories) ?? []
+        guard let records = try? JSONDecoder().decode(CustomRepositoryStore.self, from: data).repositories else {
+            return []
+        }
+        return records.filter(Self.isValidCustomRepositoryRecord)
+    }
+
+    /**
+     Validates one decoded sidecar record before it can participate in source loading or mutation.
+
+     - Parameter record: Record decoded from `CustomRepositories.json`.
+     - Returns: `true` when the repository family is supported and the reconstructed source passes
+       the same persistence safety checks used for newly resolved custom repositories.
+     - Side effects: none.
+     - Failure modes: validation failures are converted to `false` so a bad record cannot poison
+       the entire sidecar.
+     */
+    private static func isValidCustomRepositoryRecord(_ record: CustomRepositoryRecord) -> Bool {
+        guard record.type == SourceConfig.swordHTTPSRepositoryType
+                || record.type == SourceConfig.myBibleHTTPSRepositoryType else {
+            return false
+        }
+        do {
+            try validateSourceFields(record.source)
+            return true
+        } catch {
+            return false
+        }
     }
 
     /**
@@ -554,15 +581,22 @@ public final class RepositorySourceManager: @unchecked Sendable {
      - Note: Replacements keep the original sidecar index so display/edit ordering remains stable.
        Orphaned SWORD sidecar metadata is ignored for duplicate checks because `loadSources()`
        cannot surface it without the matching `InstallMgr.conf` row.
+       Sidecar-only MyBible registrations can still be written when `InstallMgr.conf` is unreadable
+       because SWORD does not consume those rows.
      */
     private func writeCustomRegistration(
         _ registration: RepositorySourceRegistration,
         replacing originalName: String?
     ) throws {
         let source = registration.source
-        let content = try currentConfigContent()
-        let sourceLines = Self.sourceLines(in: content)
         let customRecords = loadCustomRepositoryRecords()
+        let content: String?
+        do {
+            content = try currentConfigContent()
+        } catch RepositorySourceManagementError.configReadFailed where source.isMyBibleRepository {
+            content = nil
+        }
+        let sourceLines = content.map { Self.sourceLines(in: $0) } ?? []
         let sourceNamesInConfig = Set(sourceLines.map(\.source.name))
         let visibleCustomRecords = customRecords.filter {
             $0.type == SourceConfig.myBibleHTTPSRepositoryType || sourceNamesInConfig.contains($0.name)
@@ -577,6 +611,10 @@ public final class RepositorySourceManager: @unchecked Sendable {
 
         try Self.validateSourceFields(source)
 
+        if InstallManager.isDefaultSourceName(source.name), source.name != originalName {
+            throw RepositorySourceManagementError.duplicateSourceName(source.name)
+        }
+
         let existingNames = Set(
             (sourceLines.map(\.source.name) + visibleCustomRecords.map(\.name))
                 .filter { $0 != originalName }
@@ -586,22 +624,24 @@ public final class RepositorySourceManager: @unchecked Sendable {
             throw RepositorySourceManagementError.duplicateSourceName(source.name)
         }
 
-        let updated: String
-        if source.isMyBibleRepository {
-            updated = Self.configContent(content, removing: originalName)
-        } else if let originalName,
-                  sourceLines.contains(where: { $0.source.name == originalName }) {
-            let sourceLine = Self.sourceLine(for: source)
-            updated = Self.configContent(content, inserting: sourceLine, replacing: originalName)
-        } else {
-            let sourceLine = Self.sourceLine(for: source)
-            updated = Self.configContent(
-                Self.configContent(content, removing: originalName),
-                inserting: sourceLine,
-                replacing: nil
-            )
+        if let content {
+            let updated: String
+            if source.isMyBibleRepository {
+                updated = Self.configContent(content, removing: originalName)
+            } else if let originalName,
+                      sourceLines.contains(where: { $0.source.name == originalName }) {
+                let sourceLine = Self.sourceLine(for: source)
+                updated = Self.configContent(content, inserting: sourceLine, replacing: originalName)
+            } else {
+                let sourceLine = Self.sourceLine(for: source)
+                updated = Self.configContent(
+                    Self.configContent(content, removing: originalName),
+                    inserting: sourceLine,
+                    replacing: nil
+                )
+            }
+            try writeConfig(updated)
         }
-        try writeConfig(updated)
 
         let replacementRecord = CustomRepositoryRecord(registration: registration)
         var updatedRecords: [CustomRepositoryRecord] = []
