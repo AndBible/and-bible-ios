@@ -160,21 +160,29 @@ public final class RepositorySourceManager: @unchecked Sendable {
 
      SWORD rows are read from `InstallMgr.conf` and enriched from the custom metadata sidecar
      when available. MyBible rows live only in the sidecar and are appended after config-backed
-     sources, matching Android's built-in-then-custom source ordering.
+     sources, matching Android's built-in-then-custom source ordering. Legacy custom SWORD rows
+     that predate the sidecar are migrated by inferring Android-compatible direct-catalog metadata
+     from their host and catalog path.
 
      - Returns: Source rows in persisted SWORD order followed by non-SWORD custom rows. If the
        SWORD config cannot be read, sidecar-only MyBible rows are still returned in sidecar order.
 
      Side effects:
      - creates or migrates default repository configuration through `InstallManager`.
+     - best-effort writes `CustomRepositories.json` when legacy source-only custom rows can be
+       backfilled and the sidecar is absent or decodable; load still returns enriched in-memory
+       rows if the sidecar is unreadable or the write fails.
 
      Failure modes:
      - omits config-backed SWORD rows if the SWORD config file cannot be read
      - ignores malformed custom metadata records instead of failing all Downloads sources
+     - skips backfill persistence when `CustomRepositories.json` exists but cannot be decoded,
+       preserving the unreadable file for possible recovery
      */
     public func loadSources() -> [SourceConfig] {
         InstallManager.ensureDefaultConfigPublic(at: basePath)
-        let customRecords = loadCustomRepositoryRecords()
+        let customRecordLoad = loadCustomRepositoryRecordStore()
+        var customRecords = customRecordLoad.records
 
         guard let content = try? String(contentsOf: configURL, encoding: .utf8) else {
             return customRecords
@@ -183,6 +191,16 @@ public final class RepositorySourceManager: @unchecked Sendable {
         }
 
         let persistedSources = Self.sourceLines(in: content).map(\.source)
+        let backfilledRecords = Self.backfilledCustomRepositoryRecords(
+            from: persistedSources,
+            excludingNames: Set(customRecords.map(\.name))
+        )
+        if !backfilledRecords.isEmpty {
+            customRecords.append(contentsOf: backfilledRecords)
+            if customRecordLoad.canPersistBackfilledRecords {
+                try? writeCustomRepositoryRecords(customRecords)
+            }
+        }
         let recordsByName = Dictionary(customRecords.map { ($0.name, $0) }, uniquingKeysWith: { first, _ in first })
 
         var namesInConfig: Set<String> = []
@@ -210,6 +228,68 @@ public final class RepositorySourceManager: @unchecked Sendable {
             .map(\.source)
 
         return configSources + myBibleSources
+    }
+
+    /**
+     Infers Android custom-repository metadata for legacy SWORD config rows with no sidecar record.
+
+     Older iOS builds persisted custom SWORD repositories only as `HTTPSource` rows, losing
+     Android's description, manifest URL, and package directory fields. When a row is not a
+     packaged default and has no existing metadata record, the only durable source of truth is the
+     SWORD host/catalog tuple, so the migration treats that tuple as a direct catalog URL and uses
+     Android's direct-repository package-directory rule of `catalogDirectory/packages`.
+
+     - Parameters:
+       - sources: Parsed `InstallMgr.conf` source rows in persisted order.
+       - excludingNames: Source names that already have custom metadata and must not be overwritten.
+     - Returns: Valid sidecar records inferred from source-only custom rows, in config order.
+     - Side effects: none; the caller owns persistence so source loading can decide how to handle
+       write failures.
+     - Failure modes: rows with default names, non-HTTP transports, malformed HTTPS URLs, duplicate
+       metadata names, or invalid source fields are skipped because they cannot be backfilled safely.
+     */
+    private static func backfilledCustomRepositoryRecords(
+        from sources: [SourceConfig],
+        excludingNames: Set<String>
+    ) -> [CustomRepositoryRecord] {
+        var seenNames = excludingNames
+        return sources.compactMap { source -> CustomRepositoryRecord? in
+            guard source.type == "HTTP",
+                  !InstallManager.isDefaultSourceName(source.name),
+                  !seenNames.contains(source.name),
+                  let sourceURL = try? httpsURL(host: source.host, path: source.catalogPath) else {
+                return nil
+            }
+            seenNames.insert(source.name)
+
+            let packageDirectory = appendingPathComponent("packages", toPath: source.catalogPath)
+            let enrichedSource = SourceConfig(
+                name: source.name,
+                type: source.type,
+                host: source.host,
+                catalogPath: source.catalogPath,
+                repositoryType: SourceConfig.swordHTTPSRepositoryType,
+                description: sourceURL.absoluteString,
+                packageDirectory: packageDirectory,
+                manifestURL: sourceURL,
+                sourceURL: sourceURL
+            )
+
+            guard (try? validateSourceFields(enrichedSource)) != nil else {
+                return nil
+            }
+
+            return CustomRepositoryRecord(
+                registration: RepositorySourceRegistration(
+                    source: enrichedSource,
+                    description: sourceURL.absoluteString,
+                    packageDirectory: packageDirectory,
+                    manifestURL: sourceURL,
+                    sourceURL: sourceURL,
+                    type: SourceConfig.swordHTTPSRepositoryType
+                )
+            )
+        }
     }
 
     /**
@@ -470,6 +550,15 @@ public final class RepositorySourceManager: @unchecked Sendable {
         }
     }
 
+    /// Result of loading `CustomRepositories.json` with enough state to make safe repair decisions.
+    private struct CustomRepositoryRecordLoad {
+        /// Valid records decoded from the sidecar, or an empty array when records are absent/unusable.
+        let records: [CustomRepositoryRecord]
+
+        /// Whether source-only SWORD backfills may be written without risking overwrite of unknown data.
+        let canPersistBackfilledRecords: Bool
+    }
+
     private func currentConfigContent() throws -> String {
         InstallManager.ensureDefaultConfigPublic(at: basePath)
         do {
@@ -489,13 +578,39 @@ public final class RepositorySourceManager: @unchecked Sendable {
        so Downloads can still load built-in SWORD sources and valid sidecar-only repositories.
      */
     private func loadCustomRepositoryRecords() -> [CustomRepositoryRecord] {
+        loadCustomRepositoryRecordStore().records
+    }
+
+    /**
+     Loads sidecar records and records whether the sidecar is safe to rewrite with inferred data.
+
+     Backfill persistence is safe when the sidecar is absent or successfully decodes, because the
+     manager either owns a new file or can preserve every decoded valid record in deterministic
+     order. When the file exists but cannot be read or decoded, the unreadable bytes may still
+     contain recoverable custom/MyBible metadata, so load-only callers receive no records and
+     source-only backfills stay in memory without replacing the sidecar.
+
+     - Returns: Decoded valid records plus a flag controlling whether inferred legacy records can
+       be persisted.
+     - Side effects: reads `CustomRepositories.json` and checks whether the sidecar path exists.
+     - Failure modes: unreadable or undecodable sidecars return no records and disallow backfill
+       persistence; malformed decoded records are dropped while still allowing a clean rewrite.
+     */
+    private func loadCustomRepositoryRecordStore() -> CustomRepositoryRecordLoad {
+        let sidecarExists = fileManager.fileExists(atPath: customRepositoriesURL.path)
         guard let data = fileManager.contents(atPath: customRepositoriesURL.path) else {
-            return []
+            return CustomRepositoryRecordLoad(
+                records: [],
+                canPersistBackfilledRecords: !sidecarExists
+            )
         }
         guard let records = try? JSONDecoder().decode(CustomRepositoryStore.self, from: data).repositories else {
-            return []
+            return CustomRepositoryRecordLoad(records: [], canPersistBackfilledRecords: false)
         }
-        return records.filter(Self.isValidCustomRepositoryRecord)
+        return CustomRepositoryRecordLoad(
+            records: records.filter(Self.isValidCustomRepositoryRecord),
+            canPersistBackfilledRecords: true
+        )
     }
 
     /**

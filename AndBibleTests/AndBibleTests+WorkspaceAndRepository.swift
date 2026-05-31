@@ -636,6 +636,69 @@ extension AndBibleTests {
         )
     }
 
+    func testRepositorySourceManagerBackfillsSourceOnlyCustomSwordMetadata() throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        InstallManager.ensureDefaultConfigPublic(at: tempDir.path)
+        let configURL = tempDir.appendingPathComponent("InstallMgr.conf")
+        var config = try String(contentsOf: configURL, encoding: .utf8)
+        config += "\nHTTPSource=Legacy Repo|legacy.example|/catalog\n"
+        try config.write(to: configURL, atomically: true, encoding: .utf8)
+
+        let manager = RepositorySourceManager(basePath: tempDir.path)
+        let source = try XCTUnwrap(manager.loadSources().first { $0.name == "Legacy Repo" })
+
+        XCTAssertEqual(source.repositoryType, SourceConfig.swordHTTPSRepositoryType)
+        XCTAssertEqual(source.description, "https://legacy.example/catalog")
+        XCTAssertEqual(source.packageDirectory, "/catalog/packages")
+        XCTAssertEqual(source.manifestURL?.absoluteString, "https://legacy.example/catalog")
+        XCTAssertEqual(source.sourceURL?.absoluteString, "https://legacy.example/catalog")
+
+        let sidecarData = try Data(contentsOf: tempDir.appendingPathComponent("CustomRepositories.json"))
+        let sidecarJSON = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: sidecarData) as? [String: Any]
+        )
+        let repositories = try XCTUnwrap(sidecarJSON["repositories"] as? [[String: Any]])
+        XCTAssertEqual(repositories.count, 1)
+
+        let record = try XCTUnwrap(repositories.first)
+        XCTAssertEqual(record["name"] as? String, "Legacy Repo")
+        XCTAssertEqual(record["description"] as? String, "https://legacy.example/catalog")
+        XCTAssertEqual(record["type"] as? String, SourceConfig.swordHTTPSRepositoryType)
+        XCTAssertEqual(record["host"] as? String, "legacy.example")
+        XCTAssertEqual(record["catalogDirectory"] as? String, "/catalog")
+        XCTAssertEqual(record["packageDirectory"] as? String, "/catalog/packages")
+        XCTAssertEqual(record["manifestURL"] as? String, "https://legacy.example/catalog")
+        XCTAssertEqual(record["sourceURL"] as? String, "https://legacy.example/catalog")
+    }
+
+    func testRepositorySourceManagerDoesNotOverwriteUnreadableSidecarDuringBackfill() throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        InstallManager.ensureDefaultConfigPublic(at: tempDir.path)
+        let configURL = tempDir.appendingPathComponent("InstallMgr.conf")
+        var config = try String(contentsOf: configURL, encoding: .utf8)
+        config += "\nHTTPSource=Legacy Repo|legacy.example|/catalog\n"
+        try config.write(to: configURL, atomically: true, encoding: .utf8)
+
+        let sidecarURL = tempDir.appendingPathComponent("CustomRepositories.json")
+        let unreadableSidecar = Data("{\"version\":1,\"repositories\":[".utf8)
+        try unreadableSidecar.write(to: sidecarURL)
+
+        let manager = RepositorySourceManager(basePath: tempDir.path)
+        let source = try XCTUnwrap(manager.loadSources().first { $0.name == "Legacy Repo" })
+
+        XCTAssertEqual(source.manifestURL?.absoluteString, "https://legacy.example/catalog")
+        XCTAssertEqual(source.packageDirectory, "/catalog/packages")
+        XCTAssertEqual(try Data(contentsOf: sidecarURL), unreadableSidecar)
+    }
+
     func testRepositorySourceManagerAddsMyBibleManifestSource() async throws {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -805,7 +868,7 @@ extension AndBibleTests {
         XCTAssertEqual(sources.first?.manifestURL?.absoluteString, "https://mybible.example/manifest.json")
     }
 
-    func testRepositorySourceManagerDropsSwordSidecarWithNonHTTPSManifestURL() throws {
+    func testRepositorySourceManagerRepairsSwordSidecarWithNonHTTPSManifestURL() throws {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
@@ -845,9 +908,19 @@ extension AndBibleTests {
         let manager = RepositorySourceManager(basePath: tempDir.path)
         let source = try XCTUnwrap(manager.loadSources().first { $0.name == "Example SWORD" })
 
-        XCTAssertNil(source.manifestURL)
         XCTAssertEqual(source.host, "sword.example")
         XCTAssertEqual(source.catalogPath, "/sword")
+        XCTAssertEqual(source.manifestURL?.absoluteString, "https://sword.example/sword")
+        XCTAssertEqual(source.sourceURL?.absoluteString, "https://sword.example/sword")
+        XCTAssertEqual(source.description, "https://sword.example/sword")
+        XCTAssertEqual(source.packageDirectory, "/sword/packages")
+
+        let repairedSidecarData = try Data(contentsOf: tempDir.appendingPathComponent("CustomRepositories.json"))
+        let repairedSidecarJSON = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: repairedSidecarData) as? [String: Any]
+        )
+        let repositories = try XCTUnwrap(repairedSidecarJSON["repositories"] as? [[String: Any]])
+        XCTAssertEqual(repositories.compactMap { $0["manifestURL"] as? String }, ["https://sword.example/sword"])
     }
 
     func testRepositorySourceManagerAddsAndReplacesMyBibleWhenSwordConfigUnreadable() async throws {

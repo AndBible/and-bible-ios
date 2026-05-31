@@ -1096,6 +1096,104 @@ extension AndBibleTests {
         )
     }
 
+    func testModuleRepositoryUsesPersistedCustomPackageDirectoryBeforeHeuristics() async throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let swordDir = tempDir.appendingPathComponent("sword", isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let source = SourceConfig(
+            name: "Custom Repo",
+            type: "HTTP",
+            host: "custom.example",
+            catalogPath: "/catalog",
+            packageDirectory: "/android/packages"
+        )
+        let catalogData = try makeModuleRepositoryCatalogArchive(moduleName: "CUSTOM")
+        let zipData = makeModuleRepositoryZip([
+            ("mods.d/custom.conf", Data("placeholder".utf8)),
+            ("modules/lexdict/rawld/custom/custom.dat", Data("dictionary-data".utf8)),
+            ("modules/lexdict/rawld/custom/custom.idx", Data("index-data".utf8))
+        ])
+        var requestedPaths: [String] = []
+
+        ModuleRepositoryDownloadMockURLProtocol.requestHandler = { request in
+            requestedPaths.append(request.url?.path ?? "")
+            let response: HTTPURLResponse
+            let data: Data
+            switch request.url?.path {
+            case "/catalog/mods.d.tar.gz":
+                response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!
+                data = catalogData
+            case "/catalog/modules/lexdict/rawld/custom/custom.dat":
+                response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 404,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!
+                data = Data()
+            case "/android/packages/CUSTOM.zip":
+                response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!
+                data = zipData
+            default:
+                XCTFail("Unexpected request: \(request.url?.absoluteString ?? "<nil>")")
+                response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 404,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!
+                data = Data()
+            }
+            return (response, data)
+        }
+        defer { ModuleRepositoryDownloadMockURLProtocol.requestHandler = nil }
+
+        let repository = ModuleRepository(
+            basePath: tempDir.path,
+            swordPath: swordDir.path,
+            session: makeModuleRepositoryDownloadMockSession()
+        )
+
+        _ = try await repository.refreshCatalog(for: source)
+        try await repository.installModule(named: "CUSTOM", from: source)
+
+        XCTAssertTrue(
+            requestedPaths.contains("/android/packages/CUSTOM.zip"),
+            "Custom repositories should use their persisted Android package directory first."
+        )
+        XCTAssertFalse(
+            requestedPaths.contains("/catalog/packages/CUSTOM.zip"),
+            "Persisted custom package directories must not be replaced with catalog-relative heuristics."
+        )
+        XCTAssertFalse(
+            requestedPaths.contains("/catalog/zip/CUSTOM.zip"),
+            "Persisted custom package directories must take precedence over legacy zip heuristics."
+        )
+
+        let localDir = moduleRepositoryLocalDir(for: "CUSTOM", under: swordDir)
+        XCTAssertEqual(
+            try Data(contentsOf: localDir.appendingPathComponent("custom.dat")),
+            Data("dictionary-data".utf8)
+        )
+        XCTAssertEqual(
+            try Data(contentsOf: localDir.appendingPathComponent("custom.idx")),
+            Data("index-data".utf8)
+        )
+    }
+
     func testModuleRepositoryCancellationStopsBeforeInstalledMarker() async throws {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
