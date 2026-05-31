@@ -284,6 +284,31 @@ public final class SearchIndexService: @unchecked Sendable {
         }
     }
 
+    /**
+     Deletes the search index for a module for callers that still use the former synchronous API.
+
+     This overload preserves source compatibility while callers migrate to the async deletion path.
+     It blocks the calling thread until earlier queued index mutations finish, then removes the
+     module's FTS rows and metadata on the same serial mutation queue used by async create/delete.
+
+     - Parameter moduleName: Module initials whose FTS rows and metadata should be removed.
+     - Side effects:
+       - blocks the caller until the serial mutation queue reaches this deletion request
+       - mutates the FTS index database on the service's serial mutation queue
+     - Failure modes:
+       - missing indexes, closed database handles, and SQLite statement failures are treated as
+         no-ops so legacy callers keep the same best-effort behavior as the async API
+     - Important: New code should call `await deleteIndex(for:)` so UI tasks can suspend instead
+       of blocking a thread while queued index mutations complete.
+     */
+    @available(*, deprecated, message: "Use await deleteIndex(for:) so deletion can suspend instead of blocking.")
+    public func deleteIndex(for moduleName: String) {
+        indexMutationQueue.sync {
+            guard let db else { return }
+            deleteIndexData(db: db, moduleName: moduleName)
+        }
+    }
+
     private func deleteIndexData(db: OpaquePointer, moduleName: String) {
         var stmt: OpaquePointer?
 

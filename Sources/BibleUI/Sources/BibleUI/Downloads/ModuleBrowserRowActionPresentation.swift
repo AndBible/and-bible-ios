@@ -113,7 +113,7 @@ struct ModuleBrowserRowActionConfirmation: Identifiable {
     /**
      Alert message matching Android's document/delete-index confirmation intent.
 
-     - Returns: Localized message text with the selected module initials.
+     - Returns: Localized message text with the selected module display name.
      - Side effects: none.
      - Failure modes: none.
      */
