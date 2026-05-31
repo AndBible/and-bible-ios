@@ -36,7 +36,7 @@ public struct RepositorySourceRegistration: Sendable {
  Errors raised while validating or mutating repository source configuration.
 
  Each case maps to a user-actionable state from Android's custom repository flow: invalid HTTPS
- input, an unreadable SWORD catalog, duplicate repository names, unsupported repository types,
+ input, an unreadable repository endpoint, duplicate repository names, unsupported repository types,
  protected default-source deletion, stale edit targets, or local config read/write failures.
  */
 public enum RepositorySourceManagementError: Error, Equatable, LocalizedError, Sendable {
@@ -46,7 +46,7 @@ public enum RepositorySourceManagementError: Error, Equatable, LocalizedError, S
     /// Android accepts only `https://` custom repository URLs; iOS follows the same rule.
     case httpsRequired
 
-    /// The URL and Android direct-catalog fallback probes did not return readable HTTPS SWORD resources.
+    /// The URL and Android fallback probes did not return a readable supported HTTPS repository.
     case repositoryUnreachable(String)
 
     /// A manifest was present but did not contain enough repository data for iOS to persist or refresh.
@@ -78,7 +78,7 @@ public enum RepositorySourceManagementError: Error, Equatable, LocalizedError, S
         case .httpsRequired:
             return "Custom repositories must use an https:// URL."
         case .repositoryUnreachable(let value):
-            return "Could not read a SWORD repository at \(value)."
+            return "Could not read a supported repository at \(value)."
         case .invalidManifest(let value):
             return "The repository manifest is not valid for iOS Downloads: \(value)"
         case .unsupportedRepositoryType(let value):
@@ -393,58 +393,6 @@ public final class RepositorySourceManager: @unchecked Sendable {
         let catalogDirectory: String
         let packageDirectory: String?
         let manifestUrl: String?
-    }
-
-    /// Android MyBible repository manifest shape accepted by `CustomRepositoryEditor`.
-    private struct MyBibleRepositoryManifest: Decodable {
-        /// Canonical manifest URL reported by the Android-compatible spec.
-        let url: String
-
-        /// Repository display name from the Android `file_name` field.
-        let fileName: String
-
-        /// User-visible repository description.
-        let description: String
-
-        /// Module rows required for this to be treated as a MyBible repository spec.
-        let modules: [MyBibleModuleManifest]
-
-        private enum CodingKeys: String, CodingKey {
-            case url
-            case fileName = "file_name"
-            case description
-            case modules
-        }
-    }
-
-    /// Minimal MyBible module row used only to validate repository-manifest shape.
-    private struct MyBibleModuleManifest: Decodable {
-        /// Package filename reported by the manifest row.
-        let fileName: String
-
-        /// User-visible module description.
-        let description: String
-
-        /// Package download URL reported by the manifest row.
-        let downloadURL: String
-
-        /// Module language code reported by the manifest row.
-        let languageCode: String
-
-        /// Module update date reported by the manifest row.
-        let updateDate: String
-
-        /// Module update text reported by the manifest row.
-        let updateInfo: String
-
-        private enum CodingKeys: String, CodingKey {
-            case fileName = "file_name"
-            case description
-            case downloadURL = "download_url"
-            case languageCode = "language_code"
-            case updateDate = "update_date"
-            case updateInfo = "update_info"
-        }
     }
 
     /// Versioned sidecar file that preserves Android custom repository metadata beyond SWORD rows.

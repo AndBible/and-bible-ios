@@ -1103,58 +1103,6 @@ public final class ModuleRepository: @unchecked Sendable {
 
     // MARK: - Catalog Refresh
 
-    /// Android MyBible repository manifest decoded during catalog refresh.
-    private struct MyBibleRepositoryManifest: Decodable {
-        /// Canonical manifest URL reported inside the Android-compatible spec.
-        var url: String
-
-        /// User-visible repository name from `file_name`.
-        var fileName: String
-
-        /// Repository description shown by Android and preserved by iOS metadata.
-        var description: String
-
-        /// Downloadable module rows exposed by the manifest.
-        var modules: [MyBibleModuleManifest]
-
-        private enum CodingKeys: String, CodingKey {
-            case url
-            case fileName = "file_name"
-            case description
-            case modules
-        }
-    }
-
-    /// Android MyBible module row converted into a Downloads catalog entry.
-    private struct MyBibleModuleManifest: Decodable {
-        /// Package filename used for initials/category inference.
-        var fileName: String
-
-        /// User-visible module description.
-        var description: String
-
-        /// Package URL from `download_url`; iOS normalizes HTTP to HTTPS before use.
-        var downloadURL: String
-
-        /// Manifest language code for the row.
-        var languageCode: String
-
-        /// Manifest update date stored as the remote version marker.
-        var updateDate: String
-
-        /// Manifest update text retained for future metadata display.
-        var updateInfo: String
-
-        private enum CodingKeys: String, CodingKey {
-            case fileName = "file_name"
-            case description
-            case downloadURL = "download_url"
-            case languageCode = "language_code"
-            case updateDate = "update_date"
-            case updateInfo = "update_info"
-        }
-    }
-
     /**
      Download and parse the module catalog for a source.
      - Returns: List of available modules from this source.
