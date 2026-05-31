@@ -338,6 +338,42 @@ public final class SearchIndexService: @unchecked Sendable {
         }
     }
 
+    #if DEBUG
+    /**
+     Runs a test-supplied SQLite mutation on the production index mutation queue.
+
+     This hook lets regression tests install deterministic barriers and fixture writes without
+     building a full SWORD module index. The closure receives the open SQLite handle and executes
+     in the same serialized position as `createIndex(module:)` and `deleteIndex(for:)`.
+
+     - Parameter mutation: Fixture operation to run against the open search-index database handle.
+     - Side effects:
+       - enqueues work on `indexMutationQueue`
+       - may mutate the search-index SQLite database when the closure performs writes
+     - Failure modes:
+       - resumes without invoking `mutation` when the database handle is unavailable
+       - propagates any error thrown by `mutation` to the awaiting test
+     - Important: DEBUG-only test support. Runtime code should use the public index APIs instead.
+     */
+    func performIndexMutationForTesting(_ mutation: @escaping (OpaquePointer) throws -> Void) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            indexMutationQueue.async { [weak self] in
+                guard let self, let db = self.db else {
+                    continuation.resume()
+                    return
+                }
+
+                do {
+                    try mutation(db)
+                    continuation.resume()
+                } catch {
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
+    }
+    #endif
+
     private func deleteIndexData(db: OpaquePointer, moduleName: String) {
         var stmt: OpaquePointer?
 

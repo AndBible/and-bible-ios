@@ -30,12 +30,27 @@ extension AndBibleTests {
         defer { try? FileManager.default.removeItem(at: databaseURL) }
 
         let service = SearchIndexService(databasePath: databaseURL.path)
-        try seedSearchIndexFixture(moduleName: "KJV", databaseURL: databaseURL)
-        let seededCounts = try searchIndexFixtureCounts(moduleName: "KJV", databaseURL: databaseURL)
-        XCTAssertEqual(seededCounts.rows, 1)
-        XCTAssertEqual(seededCounts.metadata, 1)
+        let queuedMutationStarted = expectation(description: "queued fixture mutation started")
+        let releaseQueuedMutation = DispatchSemaphore(value: 0)
 
-        await service.deleteIndex(for: "KJV")
+        let fixtureTask = Task {
+            try await service.performIndexMutationForTesting { db in
+                queuedMutationStarted.fulfill()
+                releaseQueuedMutation.wait()
+                try self.seedSearchIndexFixture(moduleName: "KJV", db: db)
+            }
+        }
+
+        await fulfillment(of: [queuedMutationStarted], timeout: 1.0)
+        let deleteTask = Task {
+            await service.deleteIndex(for: "KJV")
+        }
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            releaseQueuedMutation.signal()
+        }
+        try await fixtureTask.value
+        await deleteTask.value
 
         let deletedCounts = try searchIndexFixtureCounts(moduleName: "KJV", databaseURL: databaseURL)
         XCTAssertEqual(deletedCounts.rows, 0)
@@ -1135,6 +1150,10 @@ extension AndBibleTests {
         }
         defer { sqlite3_close(db) }
 
+        try seedSearchIndexFixture(moduleName: moduleName, db: db)
+    }
+
+    private func seedSearchIndexFixture(moduleName: String, db: OpaquePointer?) throws {
         let escapedModuleName = moduleName.replacingOccurrences(of: "'", with: "''")
         let sql = """
         INSERT INTO verse_fts (verse_key, plain_text, module_name)
