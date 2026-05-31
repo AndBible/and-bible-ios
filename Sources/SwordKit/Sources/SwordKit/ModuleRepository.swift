@@ -296,35 +296,204 @@ private final class ModuleFileDownloadDelegate: NSObject, URLSessionDownloadDele
     }
 }
 
-/// Configuration for a remote SWORD module source.
+/**
+ Configuration for a remote module source consumed by Downloads.
+
+ The struct keeps the legacy SWORD tuple (`type`, `host`, `catalogPath`) while also carrying
+ Android custom-repository metadata. SWORD rows use `sword-https` by default and can be projected
+ into `InstallMgr.conf`; MyBible rows use `mybible-https` and are refreshed from their manifest
+ URL without pretending to be SWORD sources.
+
+ - Note: This type is immutable and has no side effects. Validation is owned by
+   `RepositorySourceManager` before records are persisted.
+ */
 public struct SourceConfig: Sendable, Identifiable {
+    /// Android custom repository type for HTTPS SWORD repositories accepted by Downloads.
+    public static let swordHTTPSRepositoryType = "sword-https"
+
+    /// Android custom repository type for MyBible manifest repositories accepted by Downloads.
+    public static let myBibleHTTPSRepositoryType = "mybible-https"
+
+    /// Stable repository name shown to users and used for cache identity.
     public let name: String
+
+    /// SWORD transport value from `InstallMgr.conf`; MyBible custom rows use `HTTP` for UI parity.
     public let type: String  // "HTTP" or "FTP"
+
+    /// Network host and optional port for SWORD rows, or the manifest host for MyBible rows.
     public let host: String
+
+    /// SWORD catalog path, or manifest path for MyBible custom rows.
     public let catalogPath: String
+
+    /// Android repository family that determines refresh and install behavior.
+    public let repositoryType: String
+
+    /// Optional manifest description retained for edit/display context.
+    public let description: String?
+
+    /// Optional Android package directory used by SWORD package fallback installs.
+    public let packageDirectory: String?
+
+    /// Optional custom repository manifest URL used for edit context and MyBible refresh.
+    public let manifestURL: URL?
+
+    /// Optional resolved source URL used for display and diagnostics.
+    public let sourceURL: URL?
 
     public var id: String { name }
 
-    /// Base URL for this source (HTTPS preferred).
+    /// HTTPS base URL for SWORD catalog refresh, when the host/path tuple is usable.
     public var baseURL: URL? {
         URL(string: "https://\(host)\(catalogPath)")
     }
+
+    /// Whether this source is backed by an Android MyBible repository manifest.
+    public var isMyBibleRepository: Bool {
+        repositoryType == Self.myBibleHTTPSRepositoryType
+    }
+
+    /**
+     Creates a remote repository source row with optional Android custom-repository metadata.
+
+     - Parameters:
+       - name: Stable repository name shown in Downloads and used for cache keys.
+       - type: Transport row from `InstallMgr.conf`, normally `HTTP` or `FTP`.
+       - host: Network host and optional port for SWORD-style sources.
+       - catalogPath: SWORD catalog path, or the manifest path for MyBible sources.
+       - repositoryType: Android repository type. Defaults to `sword-https` for HTTP rows and
+         `ftp` for FTP rows so existing callers keep their previous behavior.
+       - description: Optional human-readable manifest description.
+       - packageDirectory: Optional Android package directory for SWORD package fallback.
+       - manifestURL: Optional custom repository manifest URL.
+       - sourceURL: Optional resolved source URL used for display/edit context.
+     - Side effects: none.
+     - Failure modes: none; validation is owned by `RepositorySourceManager`.
+     */
+    public init(
+        name: String,
+        type: String,
+        host: String,
+        catalogPath: String,
+        repositoryType: String? = nil,
+        description: String? = nil,
+        packageDirectory: String? = nil,
+        manifestURL: URL? = nil,
+        sourceURL: URL? = nil
+    ) {
+        self.name = name
+        self.type = type
+        self.host = host
+        self.catalogPath = catalogPath
+        self.repositoryType = repositoryType ?? (type == "FTP" ? "ftp" : Self.swordHTTPSRepositoryType)
+        self.description = description
+        self.packageDirectory = packageDirectory
+        self.manifestURL = manifestURL
+        self.sourceURL = sourceURL
+    }
 }
 
-/// Parsed module entry from a SWORD catalog .conf file.
+/**
+ Parsed remote module entry from a repository catalog.
+
+ SWORD entries carry the original `.conf` payload required for the SWORD installer. MyBible
+ entries carry a direct package URL and package filename instead. Keeping both shapes in one
+ model lets the Downloads list sort, filter, cache, and install rows without branching in UI code.
+
+ - Note: The struct is immutable and performs no file or network I/O.
+ */
 public struct CatalogModule: Sendable, Identifiable {
+    /// Module initials shown in Downloads and used as install identity.
     public let name: String
+
+    /// User-visible module description.
     public let description: String
+
+    /// Downloads category inferred from SWORD metadata or MyBible filename conventions.
     public let category: ModuleCategory
+
+    /// Module language code.
     public let language: String
+
+    /// SWORD module driver name; empty for non-SWORD repository rows.
     public let modDrv: String
+
+    /// SWORD data path; empty for non-SWORD repository rows.
     public let dataPath: String
+
+    /// Full SWORD `.conf` content required by SWORD installation.
     public let confContent: String
+
+    /// Repository source name that produced this catalog entry.
     public let sourceName: String
+
+    /// Remote catalog version or update marker.
     public let version: String
+
+    /// Remote install-size value as reported by SWORD catalogs.
     public let size: String
 
+    /// Android repository family that produced this row.
+    public let repositoryType: String
+
+    /// Direct package URL for non-SWORD installers.
+    public let downloadURL: URL?
+
+    /// Original package filename from the repository manifest.
+    public let packageFileName: String?
+
     public var id: String { "\(sourceName):\(name)" }
+
+    /**
+     Creates a catalog entry from either a SWORD `.conf` row or an Android-compatible custom
+     repository manifest.
+
+     - Parameters:
+       - name: Module initials shown in Downloads.
+       - description: User-visible module description.
+       - category: Download category.
+       - language: Module language code.
+       - modDrv: SWORD driver name; empty for non-SWORD repository rows.
+       - dataPath: SWORD data path; empty for non-SWORD repository rows.
+       - confContent: Full SWORD `.conf` content; empty for non-SWORD repository rows.
+       - sourceName: Repository source name.
+       - version: Remote version/update marker.
+       - size: SWORD install-size value in KiB when available.
+       - repositoryType: Android repository type that produced the row.
+       - downloadURL: Direct package URL for non-SWORD installers.
+       - packageFileName: Original package filename from the manifest.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    public init(
+        name: String,
+        description: String,
+        category: ModuleCategory,
+        language: String,
+        modDrv: String,
+        dataPath: String,
+        confContent: String,
+        sourceName: String,
+        version: String,
+        size: String,
+        repositoryType: String = SourceConfig.swordHTTPSRepositoryType,
+        downloadURL: URL? = nil,
+        packageFileName: String? = nil
+    ) {
+        self.name = name
+        self.description = description
+        self.category = category
+        self.language = language
+        self.modDrv = modDrv
+        self.dataPath = dataPath
+        self.confContent = confContent
+        self.sourceName = sourceName
+        self.version = version
+        self.size = size
+        self.repositoryType = repositoryType
+        self.downloadURL = downloadURL
+        self.packageFileName = packageFileName
+    }
 
     /// Convert to the public RemoteModuleInfo type.
     public var remoteModuleInfo: RemoteModuleInfo {
@@ -442,6 +611,61 @@ public final class ModuleRepository: @unchecked Sendable {
         (metadataCacheDir as NSString).appendingPathComponent("default_documents_v2.json")
     }
 
+    /// Directory where Android-compatible MyBible packages are installed outside the SWORD tree.
+    private var myBibleInstallDir: URL {
+        let dir = URL(fileURLWithPath: swordPath, isDirectory: true)
+            .appendingPathComponent("mybible", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    /**
+     Persisted metadata for one installed MyBible package.
+
+     The SQLite payload is not a SWORD module, so Downloads stores a small sidecar beside the
+     extracted package. This lets the list render installed state and uninstall safely without
+     inventing fake `mods.d` rows that SWORD would try to load.
+     */
+    private struct InstalledMyBibleModule: Codable {
+        /// Installed module initials used by Downloads and uninstall.
+        var name: String
+
+        /// User-visible module description from the repository manifest.
+        var description: String
+
+        /// Raw `ModuleCategory` value captured at install time.
+        var category: String
+
+        /// Module language code captured from the manifest row.
+        var language: String
+
+        /// Manifest update marker captured as the installed version.
+        var version: String
+
+        /// Repository source name that produced this installed module.
+        var sourceName: String
+
+        /// Original package filename from the MyBible manifest.
+        var packageFileName: String
+
+        /// HTTPS package URL used for the install.
+        var downloadURL: String
+
+        /// Local install timestamp for future diagnostics and migrations.
+        var installedAt: Date
+
+        /// Converts sidecar metadata into the common installed-module row model.
+        var moduleInfo: ModuleInfo {
+            ModuleInfo(
+                name: name,
+                description: description,
+                category: ModuleCategory(typeString: category),
+                language: language,
+                version: version
+            )
+        }
+    }
+
     /**
      Reads cached catalog entries for one source.
 
@@ -518,44 +742,20 @@ public final class ModuleRepository: @unchecked Sendable {
 
     // MARK: - Source Configuration
 
-    /// Parse sources from InstallMgr.conf.
+    /**
+     Loads repository sources visible to Downloads.
+
+     The canonical loader lives in `RepositorySourceManager` so SWORD `InstallMgr.conf` rows and
+     Android custom repository sidecar records are interpreted consistently by the manager UI and
+     module browser.
+
+     - Returns: Built-in and custom sources in display/refresh order.
+     - Side effects: may create or migrate default source configuration through
+       `RepositorySourceManager`.
+     - Failure modes: returns an empty list if persisted source configuration cannot be read.
+     */
     public func loadSources() -> [SourceConfig] {
-        // Ensure config exists
-        InstallManager.ensureDefaultConfigPublic(at: basePath)
-
-        let configPath = (basePath as NSString).appendingPathComponent("InstallMgr.conf")
-        guard let content = try? String(contentsOfFile: configPath, encoding: .utf8) else {
-            return []
-        }
-
-        var sources: [SourceConfig] = []
-        for line in content.components(separatedBy: .newlines) {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            if trimmed.hasPrefix("HTTPSource=") {
-                let value = String(trimmed.dropFirst("HTTPSource=".count))
-                let parts = value.components(separatedBy: "|")
-                if parts.count >= 3 {
-                    sources.append(SourceConfig(
-                        name: parts[0],
-                        type: "HTTP",
-                        host: parts[1],
-                        catalogPath: parts[2]
-                    ))
-                }
-            } else if trimmed.hasPrefix("FTPSource=") {
-                let value = String(trimmed.dropFirst("FTPSource=".count))
-                let parts = value.components(separatedBy: "|")
-                if parts.count >= 3 {
-                    sources.append(SourceConfig(
-                        name: parts[0],
-                        type: "FTP",
-                        host: parts[1],
-                        catalogPath: parts[2]
-                    ))
-                }
-            }
-        }
-        return sources
+        RepositorySourceManager(basePath: basePath).loadSources()
     }
 
     // MARK: - AndBible Metadata
@@ -815,6 +1015,9 @@ public final class ModuleRepository: @unchecked Sendable {
         var confContent: String
         var version: String
         var size: String
+        var repositoryType: String?
+        var downloadURL: String?
+        var packageFileName: String?
     }
 
     /// Load all cached catalogs from disk. Returns combined RemoteModuleInfo list.
@@ -844,7 +1047,10 @@ public final class ModuleRepository: @unchecked Sendable {
                     confContent: m.confContent,
                     sourceName: m.sourceName,
                     version: m.version,
-                    size: m.size
+                    size: m.size,
+                    repositoryType: m.repositoryType ?? SourceConfig.swordHTTPSRepositoryType,
+                    downloadURL: m.downloadURL.flatMap(URL.init(string:)),
+                    packageFileName: m.packageFileName
                 )
                 entries.append(entry)
                 allModules.append(entry.remoteModuleInfo)
@@ -872,7 +1078,10 @@ public final class ModuleRepository: @unchecked Sendable {
                     dataPath: e.dataPath,
                     confContent: e.confContent,
                     version: e.version,
-                    size: e.size
+                    size: e.size,
+                    repositoryType: e.repositoryType,
+                    downloadURL: e.downloadURL?.absoluteString,
+                    packageFileName: e.packageFileName
                 )
             }
         )
@@ -894,11 +1103,67 @@ public final class ModuleRepository: @unchecked Sendable {
 
     // MARK: - Catalog Refresh
 
+    /// Android MyBible repository manifest decoded during catalog refresh.
+    private struct MyBibleRepositoryManifest: Decodable {
+        /// Canonical manifest URL reported inside the Android-compatible spec.
+        var url: String
+
+        /// User-visible repository name from `file_name`.
+        var fileName: String
+
+        /// Repository description shown by Android and preserved by iOS metadata.
+        var description: String
+
+        /// Downloadable module rows exposed by the manifest.
+        var modules: [MyBibleModuleManifest]
+
+        private enum CodingKeys: String, CodingKey {
+            case url
+            case fileName = "file_name"
+            case description
+            case modules
+        }
+    }
+
+    /// Android MyBible module row converted into a Downloads catalog entry.
+    private struct MyBibleModuleManifest: Decodable {
+        /// Package filename used for initials/category inference.
+        var fileName: String
+
+        /// User-visible module description.
+        var description: String
+
+        /// Package URL from `download_url`; iOS normalizes HTTP to HTTPS before use.
+        var downloadURL: String
+
+        /// Manifest language code for the row.
+        var languageCode: String
+
+        /// Manifest update date stored as the remote version marker.
+        var updateDate: String
+
+        /// Manifest update text retained for future metadata display.
+        var updateInfo: String
+
+        private enum CodingKeys: String, CodingKey {
+            case fileName = "file_name"
+            case description
+            case downloadURL = "download_url"
+            case languageCode = "language_code"
+            case updateDate = "update_date"
+            case updateInfo = "update_info"
+        }
+    }
+
     /**
      Download and parse the module catalog for a source.
      - Returns: List of available modules from this source.
      */
     public func refreshCatalog(for source: SourceConfig) async throws -> [RemoteModuleInfo] {
+        if source.isMyBibleRepository {
+            return try await refreshMyBibleCatalog(for: source)
+        }
+
         guard source.type == "HTTP" else {
             logger.info("Skipping FTP source '\(source.name)' — FTP is not supported on iOS")
             return []
@@ -948,6 +1213,136 @@ public final class ModuleRepository: @unchecked Sendable {
         return catalogEntries.map(\.remoteModuleInfo)
     }
 
+    /**
+     Downloads and converts an Android-compatible MyBible repository manifest into Downloads rows.
+
+     - Parameter source: Custom source whose `manifestURL` points at a MyBible manifest.
+     - Returns: Installable remote rows for manifest modules with HTTPS package URLs.
+     - Side effects:
+       - performs a network request
+       - updates the in-memory and disk catalog cache for the source
+     - Failure modes:
+       - throws `ModuleRepositoryError.invalidURL` when the source has no usable manifest URL
+       - throws `ModuleRepositoryError.downloadFailed` for non-200 manifest responses
+       - propagates JSON decoding failures for malformed manifests
+     */
+    private func refreshMyBibleCatalog(for source: SourceConfig) async throws -> [RemoteModuleInfo] {
+        guard let manifestURL = source.manifestURL else {
+            throw ModuleRepositoryError.invalidURL(source.name)
+        }
+
+        let (data, response) = try await session.data(from: manifestURL)
+        guard let httpResponse = response as? HTTPURLResponse,
+              httpResponse.statusCode == 200 else {
+            let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+            throw ModuleRepositoryError.downloadFailed(
+                "MyBible manifest from \(source.name) failed (HTTP \(code))"
+            )
+        }
+
+        let manifest = try JSONDecoder().decode(MyBibleRepositoryManifest.self, from: data)
+        let entries = manifest.modules.compactMap { module -> CatalogModule? in
+            let normalizedDownloadURL = Self.normalizedMyBibleDownloadURL(module.downloadURL)
+            guard let downloadURL = normalizedDownloadURL else { return nil }
+
+            return CatalogModule(
+                name: Self.myBibleModuleInitials(fileName: module.fileName),
+                description: module.description,
+                category: Self.myBibleCategory(fileName: module.fileName),
+                language: module.languageCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    ? "en"
+                    : module.languageCode,
+                modDrv: "",
+                dataPath: "",
+                confContent: "",
+                sourceName: source.name,
+                version: module.updateDate,
+                size: "",
+                repositoryType: SourceConfig.myBibleHTTPSRepositoryType,
+                downloadURL: downloadURL,
+                packageFileName: module.fileName
+            )
+        }
+
+        setCachedCatalogEntries(entries, for: source.name)
+        saveCatalogToDisk(sourceName: source.name, entries: entries)
+
+        return entries.map(\.remoteModuleInfo)
+    }
+
+    /**
+     Normalizes Android MyBible module download URLs while preserving HTTPS-only behavior.
+
+     Android rewrites cached `http://` MyBible module URLs to HTTPS before exposing module rows.
+     iOS mirrors that compatibility path, then drops rows that still cannot produce an HTTPS URL.
+
+     - Parameter rawURL: Manifest `download_url` value.
+     - Returns: HTTPS URL suitable for package download, or `nil` when the row is unsupported.
+     - Side effects: none.
+     - Failure modes: malformed URLs are skipped.
+     */
+    private static func normalizedMyBibleDownloadURL(_ rawURL: String) -> URL? {
+        let trimmed = rawURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        let httpsString = trimmed.hasPrefix("http://")
+            ? "https://" + String(trimmed.dropFirst("http://".count))
+            : trimmed
+        guard let url = URL(string: String(httpsString)),
+              url.scheme?.lowercased() == "https",
+              url.host?.isEmpty == false else {
+            return nil
+        }
+        return url
+    }
+
+    /**
+     Builds Android-compatible MyBible module initials from a package filename.
+
+     - Parameter fileName: Manifest `file_name`, usually a `.SQLite3.zip` package.
+     - Returns: Initials prefixed with `MyBible-` and sanitized for local identifiers.
+     - Side effects: none.
+     - Failure modes: empty filenames collapse to `MyBible-module`.
+     */
+    private static func myBibleModuleInitials(fileName: String) -> String {
+        let base = ((fileName as NSString).deletingPathExtension as NSString).lastPathComponent
+        let fallback = base.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "module" : base
+        return "MyBible-" + sanitizeMyBibleModuleName(fallback)
+    }
+
+    /**
+     Maps Android MyBible filename conventions to common module categories.
+
+     - Parameter fileName: Manifest package filename.
+     - Returns: Commentaries for `.commentaries`, dictionaries for `.dictionaries`, otherwise Bible.
+     - Side effects: none.
+     - Failure modes: unknown filename families intentionally fall back to Bible, matching Android's
+       default category behavior.
+     */
+    private static func myBibleCategory(fileName: String) -> ModuleCategory {
+        let lowercased = fileName.lowercased()
+        if lowercased.contains(".commentaries") {
+            return .commentary
+        }
+        if lowercased.contains(".dictionaries") {
+            return .dictionary
+        }
+        return .bible
+    }
+
+    /**
+     Sanitizes MyBible package basenames using Android's identifier policy.
+
+     - Parameter name: Package basename without its outer archive extension.
+     - Returns: ASCII alphanumerics preserved and every other scalar replaced with `_`.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    private static func sanitizeMyBibleModuleName(_ name: String) -> String {
+        let allowed = CharacterSet.alphanumerics
+        return String(name.unicodeScalars.map { scalar in
+            allowed.contains(scalar) ? Character(scalar) : "_"
+        })
+    }
+
     // MARK: - Module Installation
 
     /**
@@ -981,6 +1376,11 @@ public final class ModuleRepository: @unchecked Sendable {
         guard let entries = cachedCatalogEntries(for: source.name),
               let entry = entries.first(where: { $0.name == moduleName }) else {
             throw ModuleRepositoryError.moduleNotFound(moduleName)
+        }
+
+        if source.isMyBibleRepository || entry.repositoryType == SourceConfig.myBibleHTTPSRepositoryType {
+            try await installMyBibleModule(entry, progress: progress)
+            return
         }
 
         guard let baseURL = source.baseURL else {
@@ -1171,6 +1571,194 @@ public final class ModuleRepository: @unchecked Sendable {
     }
 
     /**
+     Installs one Android-compatible MyBible ZIP package into the local MyBible module store.
+
+     - Parameters:
+       - entry: Catalog row produced from a MyBible manifest.
+       - progress: Optional normalized progress callback shared with the Downloads row.
+     - Side effects:
+       - downloads the MyBible ZIP package to a temporary file
+       - extracts readable MyBible SQLite payloads into a staged directory
+       - writes installed-module metadata beside the extracted payload
+       - atomically replaces any previous install for the same MyBible module initials
+     - Throws:
+       - `ModuleRepositoryError.invalidURL` when the manifest row has no HTTPS package URL
+       - `ModuleRepositoryError.invalidZip` when the package is empty or lacks a MyBible payload
+       - `CancellationError` when the surrounding task is cancelled
+       - file-system errors from staging or publishing the package
+     */
+    private func installMyBibleModule(
+        _ entry: CatalogModule,
+        progress: ((Double) -> Void)?
+    ) async throws {
+        guard let downloadURL = entry.downloadURL else {
+            throw ModuleRepositoryError.invalidURL(entry.name)
+        }
+
+        let fm = FileManager.default
+        let packageDownloadURL = fm.temporaryDirectory
+            .appendingPathComponent("\(entry.name)-\(UUID().uuidString).zip")
+        defer {
+            try? fm.removeItem(at: packageDownloadURL)
+        }
+
+        try await downloadRequiredModuleFile(
+            from: downloadURL,
+            to: packageDownloadURL,
+            fileName: downloadURL.lastPathComponent,
+            completedFiles: 0,
+            totalFiles: 1,
+            progress: progress
+        )
+
+        try Task.checkCancellation()
+        let zipData = try Data(contentsOf: packageDownloadURL)
+        let entries = try parseZip(zipData)
+        guard !entries.isEmpty else {
+            throw ModuleRepositoryError.invalidZip("\(downloadURL.lastPathComponent) is empty")
+        }
+
+        let stagingDirURL = myBibleInstallDir
+            .appendingPathComponent(".\(entry.name)-\(UUID().uuidString).installing", isDirectory: true)
+        try fm.createDirectory(at: stagingDirURL, withIntermediateDirectories: true)
+        defer {
+            try? fm.removeItem(at: stagingDirURL)
+        }
+
+        var extractedPayloadCount = 0
+        for zipEntry in entries {
+            try Task.checkCancellation()
+            guard let fileName = Self.normalizedMyBiblePackageEntryName(
+                zipEntry.name,
+                packageFileName: entry.packageFileName
+            ) else {
+                continue
+            }
+
+            let destinationURL = stagingDirURL.appendingPathComponent(fileName)
+            if fm.fileExists(atPath: destinationURL.path) {
+                try fm.removeItem(at: destinationURL)
+            }
+            try zipEntry.data.write(to: destinationURL)
+            extractedPayloadCount += 1
+        }
+
+        guard extractedPayloadCount > 0 else {
+            throw ModuleRepositoryError.invalidZip(
+                "\(downloadURL.lastPathComponent) did not contain a MyBible SQLite payload"
+            )
+        }
+
+        let metadata = InstalledMyBibleModule(
+            name: entry.name,
+            description: entry.description,
+            category: entry.category.rawValue,
+            language: entry.language,
+            version: entry.version,
+            sourceName: entry.sourceName,
+            packageFileName: entry.packageFileName ?? downloadURL.lastPathComponent,
+            downloadURL: downloadURL.absoluteString,
+            installedAt: Date()
+        )
+        let metadataData = try JSONEncoder().encode(metadata)
+        try metadataData.write(
+            to: stagingDirURL.appendingPathComponent("module.json"),
+            options: .atomic
+        )
+
+        try Task.checkCancellation()
+        try commitStagedMyBibleInstall(stagingDirURL: stagingDirURL, moduleName: entry.name)
+        progress?(1.0)
+    }
+
+    /**
+     Normalizes one ZIP entry from a MyBible package to a safe local payload filename.
+
+     - Parameters:
+       - path: ZIP entry path.
+       - packageFileName: Manifest package filename used to identify expected payload names.
+     - Returns: A flat filename to write into the module directory, or `nil` for unsupported or
+       unsafe entries.
+     - Side effects: none.
+     - Failure modes: unsafe paths are skipped rather than failing unrelated package contents.
+     */
+    private static func normalizedMyBiblePackageEntryName(
+        _ path: String,
+        packageFileName: String?
+    ) -> String? {
+        var relativePath = path.replacingOccurrences(of: "\\", with: "/")
+        while relativePath.hasPrefix("./") {
+            relativePath = String(relativePath.dropFirst(2))
+        }
+        guard !relativePath.isEmpty,
+              !relativePath.hasPrefix("/"),
+              !relativePath.hasSuffix("/") else {
+            return nil
+        }
+
+        let components = relativePath.split(separator: "/", omittingEmptySubsequences: false)
+        guard !components.contains(where: { $0 == ".." || $0.isEmpty }),
+              let fileName = components.last.map(String.init) else {
+            return nil
+        }
+
+        let lowercasedFileName = fileName.lowercased()
+        if lowercasedFileName.hasSuffix(".sqlite3") || lowercasedFileName.hasSuffix(".mybible") {
+            return fileName
+        }
+
+        let expectedPayloadName = packageFileName.flatMap { packageFileName -> String? in
+            let payloadName = (packageFileName as NSString).deletingPathExtension
+            return payloadName.isEmpty ? nil : payloadName
+        }
+        if let expectedPayloadName, fileName == expectedPayloadName {
+            return fileName
+        }
+
+        return nil
+    }
+
+    /**
+     Atomically publishes a staged MyBible module directory with rollback protection.
+
+     - Parameters:
+       - stagingDirURL: Directory containing extracted MyBible payload and sidecar metadata.
+       - moduleName: MyBible module initials used as the final directory name.
+     - Side effects:
+       - moves any existing install to a backup directory
+       - moves the staging directory into the final MyBible install location
+       - removes the backup after a successful publish
+     - Failure modes:
+       - restores the previous directory on publish failure, then rethrows the original error.
+     */
+    private func commitStagedMyBibleInstall(stagingDirURL: URL, moduleName: String) throws {
+        let fm = FileManager.default
+        let finalDirURL = myBibleInstallDir.appendingPathComponent(moduleName, isDirectory: true)
+        let backupDirURL = myBibleInstallDir
+            .appendingPathComponent(".\(moduleName)-\(UUID().uuidString).backup", isDirectory: true)
+        var movedExisting = false
+
+        do {
+            if fm.fileExists(atPath: finalDirURL.path) {
+                try fm.moveItem(at: finalDirURL, to: backupDirURL)
+                movedExisting = true
+            }
+
+            try fm.moveItem(at: stagingDirURL, to: finalDirURL)
+
+            if movedExisting {
+                try? fm.removeItem(at: backupDirURL)
+            }
+        } catch {
+            if movedExisting {
+                try? fm.removeItem(at: finalDirURL)
+                try? fm.moveItem(at: backupDirURL, to: finalDirURL)
+            }
+            throw error
+        }
+    }
+
+    /**
      Installs a module from a repository ZIP package when raw data-file probing cannot find usable
      files.
 
@@ -1342,6 +1930,11 @@ public final class ModuleRepository: @unchecked Sendable {
      - Failure modes: none.
      */
     private func androidPackageDirectory(for source: SourceConfig) -> String? {
+        if let packageDirectory = source.packageDirectory,
+           !packageDirectory.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return packageDirectory
+        }
+
         switch (source.name, source.host, source.catalogPath) {
         case ("CrossWire", "crosswire.org", "/ftpmirror/pub/sword/raw"):
             return "/ftpmirror/pub/sword/packages/rawzip"
@@ -1534,8 +2127,60 @@ public final class ModuleRepository: @unchecked Sendable {
         }
     }
 
-    /// Uninstall a module by removing its data and conf files.
+    /**
+     Loads installed MyBible module metadata from the local non-SWORD module store.
+
+     - Returns: Installed MyBible modules as common `ModuleInfo` rows for Downloads state.
+     - Side effects:
+       - creates the MyBible install directory if needed
+       - reads `module.json` sidecars from installed MyBible module directories
+     - Failure modes:
+       - unreadable or malformed sidecars are logged and skipped so one bad install cannot hide the
+       rest of the Downloads list.
+     */
+    public func loadInstalledMyBibleModules() -> [ModuleInfo] {
+        let fm = FileManager.default
+        guard let entries = try? fm.contentsOfDirectory(
+            at: myBibleInstallDir,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return []
+        }
+
+        return entries.compactMap { url in
+            guard (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true else {
+                return nil
+            }
+            let metadataURL = url.appendingPathComponent("module.json")
+            do {
+                let data = try Data(contentsOf: metadataURL)
+                return try JSONDecoder().decode(InstalledMyBibleModule.self, from: data).moduleInfo
+            } catch {
+                logger.warning("Failed to load MyBible install metadata \(metadataURL.path): \(error.localizedDescription)")
+                return nil
+            }
+        }
+        .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    /**
+     Uninstalls either a MyBible sidecar module or a SWORD module by name.
+
+     MyBible modules are removed from the non-SWORD install store only when their `module.json`
+     sidecar is present. Other names follow the existing SWORD uninstall path, which deletes data
+     and config files and invalidates SWORD's module cache.
+
+     - Parameter moduleName: Installed module initials to remove.
+     - Side effects: deletes module files and may invalidate SWORD's module cache.
+     - Throws: file-system errors when deletion fails; SWORD lookup failures surface as
+       `ModuleRepositoryError.moduleNotFound`.
+     */
     public func uninstallModule(named moduleName: String) throws {
+        if try uninstallMyBibleModuleIfPresent(named: moduleName) {
+            return
+        }
+
         let fm = FileManager.default
 
         // Find and read .conf file
@@ -1569,6 +2214,24 @@ public final class ModuleRepository: @unchecked Sendable {
 
         // Invalidate SWORD's module cache
         invalidateModuleCache()
+    }
+
+    /**
+     Removes one installed MyBible module directory when it has a valid sidecar marker.
+
+     - Parameter moduleName: MyBible module initials to remove.
+     - Returns: `true` when a MyBible install was found and removed, otherwise `false`.
+     - Side effects: deletes the installed MyBible module directory.
+     - Failure modes: propagates file-system deletion errors.
+     */
+    private func uninstallMyBibleModuleIfPresent(named moduleName: String) throws -> Bool {
+        let moduleDirURL = myBibleInstallDir.appendingPathComponent(moduleName, isDirectory: true)
+        let metadataURL = moduleDirURL.appendingPathComponent("module.json")
+        guard FileManager.default.fileExists(atPath: metadataURL.path) else {
+            return false
+        }
+        try FileManager.default.removeItem(at: moduleDirURL)
+        return true
     }
 
     /// Delete SWORD's modules-conf.cache so the next SWMgr instance rescans mods.d/.

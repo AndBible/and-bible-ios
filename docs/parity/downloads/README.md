@@ -36,4 +36,5 @@ Primary code references:
 - `Sources/BibleUI/Sources/BibleUI/Downloads/ModuleBrowserView.swift`
 - `Sources/BibleUI/Sources/BibleUI/Downloads/RepositoryManagerView.swift`
 - `Sources/SwordKit/Sources/SwordKit/ModuleRepository.swift`
+- `Sources/SwordKit/Sources/SwordKit/RepositorySourceManager.swift`
 - `Sources/SwordKit/Sources/SwordKit/ModuleDownloadMetadata.swift`

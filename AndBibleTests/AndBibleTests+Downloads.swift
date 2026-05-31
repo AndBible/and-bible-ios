@@ -187,6 +187,196 @@ extension AndBibleTests {
         )
     }
 
+    func testModuleRepositoryRefreshesMyBibleCatalogFromManifest() async throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let swordDir = tempDir.appendingPathComponent("sword", isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let source = SourceConfig(
+            name: "Example MyBible",
+            type: "HTTP",
+            host: "mybible.example",
+            catalogPath: "/manifest.json",
+            repositoryType: SourceConfig.myBibleHTTPSRepositoryType,
+            description: "Example MyBible catalog",
+            manifestURL: URL(string: "https://mybible.example/manifest.json"),
+            sourceURL: URL(string: "https://mybible.example/manifest.json")
+        )
+        let manifestData = """
+        {
+          "url": "https://mybible.example/manifest.json",
+          "file_name": "Example MyBible",
+          "description": "Example MyBible catalog",
+          "modules": [
+            {
+              "file_name": "finrk.SQLite3.zip",
+              "description": "Finnish RK",
+              "download_url": "https://mybible.example/finrk.SQLite3.zip",
+              "language_code": "fi",
+              "update_date": "2026-05-01",
+              "update_info": "initial"
+            },
+            {
+              "file_name": "legacy.SQLite3.zip",
+              "description": "Legacy URL",
+              "download_url": "http://mybible.example/legacy.SQLite3.zip",
+              "language_code": "en",
+              "update_date": "2026-05-02",
+              "update_info": "http upgraded"
+            },
+            {
+              "file_name": "ignored.SQLite3.zip",
+              "description": "Unsupported URL",
+              "download_url": "ftp://mybible.example/ignored.SQLite3.zip",
+              "language_code": "en",
+              "update_date": "2026-05-03",
+              "update_info": "ignored"
+            }
+          ]
+        }
+        """.data(using: .utf8)!
+
+        ModuleRepositoryDownloadMockURLProtocol.requestHandler = { request in
+            XCTAssertEqual(request.url?.absoluteString, "https://mybible.example/manifest.json")
+            return (
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!,
+                manifestData
+            )
+        }
+        defer { ModuleRepositoryDownloadMockURLProtocol.requestHandler = nil }
+
+        let repository = ModuleRepository(
+            basePath: tempDir.path,
+            swordPath: swordDir.path,
+            session: makeModuleRepositoryDownloadMockSession()
+        )
+
+        let modules = try await repository.refreshCatalog(for: source)
+
+        XCTAssertEqual(modules.map(\.name), ["MyBible-finrk_SQLite3", "MyBible-legacy_SQLite3"])
+        XCTAssertEqual(modules.first?.description, "Finnish RK")
+        XCTAssertEqual(modules.first?.category, .bible)
+        XCTAssertEqual(modules.first?.language, "fi")
+        XCTAssertEqual(modules.first?.sourceName, "Example MyBible")
+    }
+
+    func testModuleRepositoryInstallsAndUninstallsMyBiblePackage() async throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let swordDir = tempDir.appendingPathComponent("sword", isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let source = SourceConfig(
+            name: "Example MyBible",
+            type: "HTTP",
+            host: "mybible.example",
+            catalogPath: "/manifest.json",
+            repositoryType: SourceConfig.myBibleHTTPSRepositoryType,
+            description: "Example MyBible catalog",
+            manifestURL: URL(string: "https://mybible.example/manifest.json"),
+            sourceURL: URL(string: "https://mybible.example/manifest.json")
+        )
+        let manifestData = """
+        {
+          "url": "https://mybible.example/manifest.json",
+          "file_name": "Example MyBible",
+          "description": "Example MyBible catalog",
+          "modules": [
+            {
+              "file_name": "finrk.SQLite3.zip",
+              "description": "Finnish RK",
+              "download_url": "https://mybible.example/finrk.SQLite3.zip",
+              "language_code": "fi",
+              "update_date": "2026-05-01",
+              "update_info": "initial"
+            }
+          ]
+        }
+        """.data(using: .utf8)!
+        let myBibleDatabaseURL = tempDir.appendingPathComponent("finrk.SQLite3")
+        try makeMyBibleFixtureDatabase(at: myBibleDatabaseURL)
+        let packageData = makeModuleRepositoryZip([
+            ("finrk.SQLite3", try Data(contentsOf: myBibleDatabaseURL))
+        ])
+
+        ModuleRepositoryDownloadMockURLProtocol.requestHandler = { request in
+            switch request.url?.path {
+            case "/manifest.json":
+                return (
+                    HTTPURLResponse(
+                        url: request.url!,
+                        statusCode: 200,
+                        httpVersion: nil,
+                        headerFields: nil
+                    )!,
+                    manifestData
+                )
+            case "/finrk.SQLite3.zip":
+                return (
+                    HTTPURLResponse(
+                        url: request.url!,
+                        statusCode: 200,
+                        httpVersion: nil,
+                        headerFields: nil
+                    )!,
+                    packageData
+                )
+            default:
+                XCTFail("Unexpected MyBible request: \(request.url?.absoluteString ?? "<nil>")")
+                return (
+                    HTTPURLResponse(
+                        url: request.url!,
+                        statusCode: 404,
+                        httpVersion: nil,
+                        headerFields: nil
+                    )!,
+                    Data()
+                )
+            }
+        }
+        defer { ModuleRepositoryDownloadMockURLProtocol.requestHandler = nil }
+
+        let repository = ModuleRepository(
+            basePath: tempDir.path,
+            swordPath: swordDir.path,
+            session: makeModuleRepositoryDownloadMockSession()
+        )
+
+        _ = try await repository.refreshCatalog(for: source)
+        try await repository.installModule(named: "MyBible-finrk_SQLite3", from: source)
+
+        let installed = repository.loadInstalledMyBibleModules()
+        XCTAssertEqual(installed.map(\.name), ["MyBible-finrk_SQLite3"])
+        XCTAssertEqual(installed.first?.description, "Finnish RK")
+        XCTAssertEqual(installed.first?.language, "fi")
+
+        let moduleDir = swordDir
+            .appendingPathComponent("mybible", isDirectory: true)
+            .appendingPathComponent("MyBible-finrk_SQLite3", isDirectory: true)
+        let installedDatabaseURL = moduleDir.appendingPathComponent("finrk.SQLite3")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: installedDatabaseURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: moduleDir.appendingPathComponent("module.json").path))
+        do {
+            let reader = try XCTUnwrap(MyBibleReader(filePath: installedDatabaseURL.path))
+            XCTAssertTrue(reader.isBible)
+            XCTAssertEqual(reader.moduleDescription, "Finnish RK")
+            XCTAssertEqual(reader.language, "fi")
+            XCTAssertEqual(reader.getVerse(book: 10, chapter: 1, verse: 1), "Alussa loi Jumala")
+        }
+
+        try repository.uninstallModule(named: "MyBible-finrk_SQLite3")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: moduleDir.path))
+        XCTAssertTrue(repository.loadInstalledMyBibleModules().isEmpty)
+    }
+
     func testModuleRepositoryDownloadFailsWithoutInstalledMarkerWhenRequiredFileFails() async throws {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -1200,6 +1390,32 @@ extension AndBibleTests {
         }
         return Int(sqlite3_column_int(stmt, 0))
     }
+
+    private func makeMyBibleFixtureDatabase(at databaseURL: URL) throws {
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(
+            databaseURL.path,
+            &db,
+            SQLITE_OPEN_CREATE | SQLITE_OPEN_READWRITE,
+            nil
+        ) == SQLITE_OK else {
+            throw MyBibleFixtureError.openFailed
+        }
+        defer { sqlite3_close(db) }
+
+        let sql = """
+        CREATE TABLE info (name TEXT PRIMARY KEY, value TEXT);
+        CREATE TABLE books (book_number INTEGER PRIMARY KEY, long_name TEXT, short_name TEXT);
+        CREATE TABLE verses (book_number INTEGER, chapter INTEGER, verse INTEGER, text TEXT);
+        INSERT INTO info (name, value) VALUES ('description', 'Finnish RK');
+        INSERT INTO info (name, value) VALUES ('language', 'fi');
+        INSERT INTO books (book_number, long_name, short_name) VALUES (10, 'Genesis', 'Gen');
+        INSERT INTO verses (book_number, chapter, verse, text) VALUES (10, 1, 1, 'Alussa loi Jumala');
+        """
+        guard sqlite3_exec(db, sql, nil, nil, nil) == SQLITE_OK else {
+            throw MyBibleFixtureError.writeFailed
+        }
+    }
 }
 
 private enum ModuleRepositoryDownloadTestError: Error {
@@ -1209,6 +1425,11 @@ private enum ModuleRepositoryDownloadTestError: Error {
 private enum SearchIndexFixtureError: Error {
     case openFailed
     case readFailed
+    case writeFailed
+}
+
+private enum MyBibleFixtureError: Error {
+    case openFailed
     case writeFailed
 }
 

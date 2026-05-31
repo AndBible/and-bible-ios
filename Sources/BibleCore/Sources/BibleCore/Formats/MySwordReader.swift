@@ -3,6 +3,9 @@
 import Foundation
 import SQLite3
 
+/// SQLite destructor marker that copies Swift string buffers before `sqlite3_step` reads them.
+private let mySwordReaderSQLiteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+
 /**
  Reads MySword SQLite modules used by the Android ecosystem.
 
@@ -152,7 +155,7 @@ public final class MySwordReader: @unchecked Sendable {
         guard sqlite3_prepare_v2(db, query, -1, &stmt, nil) == SQLITE_OK else { return nil }
         defer { sqlite3_finalize(stmt) }
 
-        sqlite3_bind_text(stmt, 1, key, -1, nil)
+        sqlite3_bind_text(stmt, 1, key, -1, mySwordReaderSQLiteTransient)
 
         guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
         return String(cString: sqlite3_column_text(stmt, 0))
@@ -198,7 +201,7 @@ public final class MySwordReader: @unchecked Sendable {
         guard sqlite3_prepare_v2(db, query, -1, &stmt, nil) == SQLITE_OK else { return nil }
         defer { sqlite3_finalize(stmt) }
 
-        sqlite3_bind_text(stmt, 1, key, -1, nil)
+        sqlite3_bind_text(stmt, 1, key, -1, mySwordReaderSQLiteTransient)
         guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
         return String(cString: sqlite3_column_text(stmt, 0))
     }

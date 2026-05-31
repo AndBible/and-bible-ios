@@ -336,7 +336,11 @@ public struct RepositoryManagerView: View {
      */
     private func sourceProtocolBadge(_ source: SourceConfig) -> some View {
         Group {
-            if source.type == "FTP" {
+            if source.isMyBibleRepository {
+                Text(String(localized: "mybible", defaultValue: "MyBible"))
+                    .foregroundStyle(.secondary)
+                    .background(Color.secondary.opacity(0.1))
+            } else if source.type == "FTP" {
                 Text(String(localized: "ftp_unsupported", defaultValue: "FTP unsupported"))
                     .foregroundStyle(.red)
                     .background(Color.red.opacity(0.1))
@@ -581,17 +585,23 @@ private struct RepositorySourceDeletionCandidate: Identifiable {
 private extension SourceConfig {
     /// Stable identity for lists where Android default HTTP and FTP rows can share a source name.
     var repositoryManagerListID: String {
-        "\(type)|\(name)|\(host)|\(catalogPath)"
+        "\(repositoryType)|\(type)|\(name)|\(host)|\(catalogPath)"
     }
 
     /// User-visible address for repository rows.
     var displayAddress: String {
-        "\(scheme)://\(host)\(catalogPath)"
+        if isMyBibleRepository, let manifestURL {
+            return manifestURL.absoluteString
+        }
+        return "\(scheme)://\(host)\(catalogPath)"
     }
 
     /// HTTPS URL prefilled when replacing custom sources.
     var editableURLString: String {
-        "https://\(host)\(catalogPath)"
+        if let manifestURL {
+            return manifestURL.absoluteString
+        }
+        return "https://\(host)\(catalogPath)"
     }
 
     private var scheme: String {

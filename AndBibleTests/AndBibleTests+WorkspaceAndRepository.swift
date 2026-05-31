@@ -585,6 +585,188 @@ extension AndBibleTests {
         XCTAssertTrue(manager.loadSources().contains { $0.name == "Example Repo" })
     }
 
+    func testRepositorySourceManagerAddsMyBibleManifestSource() async throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let manifestData = """
+        {
+          "url": "https://mybible.example/manifest.json",
+          "file_name": "Example MyBible",
+          "description": "Example MyBible catalog | Android",
+          "modules": [
+            {
+              "file_name": "finrk.SQLite3.zip",
+              "description": "Finnish RK",
+              "download_url": "https://mybible.example/finrk.SQLite3.zip",
+              "language_code": "fi",
+              "update_date": "2026-05-01",
+              "update_info": "initial"
+            }
+          ]
+        }
+        """.data(using: .utf8)!
+
+        MockURLProtocol.requestHandler = { request in
+            XCTAssertEqual(request.url?.absoluteString, "https://mybible.example/manifest.json")
+            let response = HTTPURLResponse(
+                url: try XCTUnwrap(request.url),
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: nil
+            )!
+            return (response, manifestData)
+        }
+
+        let manager = RepositorySourceManager(
+            basePath: tempDir.path,
+            session: makeMockedURLSession()
+        )
+
+        let registration = try await manager.addCustomSource(from: "https://mybible.example/manifest.json")
+
+        XCTAssertEqual(registration.source.name, "Example MyBible")
+        XCTAssertTrue(registration.source.isMyBibleRepository)
+        XCTAssertEqual(registration.source.manifestURL?.absoluteString, "https://mybible.example/manifest.json")
+        XCTAssertEqual(registration.type, SourceConfig.myBibleHTTPSRepositoryType)
+
+        let config = try String(
+            contentsOf: tempDir.appendingPathComponent("InstallMgr.conf"),
+            encoding: .utf8
+        )
+        XCTAssertFalse(
+            config.contains("HTTPSource=Example MyBible"),
+            "MyBible repositories should not be projected into SWORD InstallMgr.conf."
+        )
+
+        let loadedSource = try XCTUnwrap(manager.loadSources().first { $0.name == "Example MyBible" })
+        XCTAssertTrue(loadedSource.isMyBibleRepository)
+        XCTAssertEqual(loadedSource.description, "Example MyBible catalog | Android")
+        XCTAssertEqual(loadedSource.manifestURL?.absoluteString, "https://mybible.example/manifest.json")
+
+        try manager.deleteCustomSource(named: "Example MyBible")
+        XCTAssertFalse(manager.loadSources().contains { $0.name == "Example MyBible" })
+    }
+
+    func testRepositorySourceManagerRejectsDuplicateMyBibleRepositoryName() async throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let manifestData = """
+        {
+          "url": "https://duplicate.example/manifest.json",
+          "file_name": "AndBible",
+          "description": "Duplicate MyBible catalog",
+          "modules": []
+        }
+        """.data(using: .utf8)!
+
+        MockURLProtocol.requestHandler = { request in
+            let response = HTTPURLResponse(
+                url: try XCTUnwrap(request.url),
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: nil
+            )!
+            return (response, manifestData)
+        }
+
+        let manager = RepositorySourceManager(
+            basePath: tempDir.path,
+            session: makeMockedURLSession()
+        )
+
+        do {
+            _ = try await manager.addCustomSource(from: "https://duplicate.example/manifest.json")
+            XCTFail("Expected duplicate MyBible repository name to be rejected.")
+        } catch RepositorySourceManagementError.duplicateSourceName(let name) {
+            XCTAssertEqual(name, "AndBible")
+        } catch {
+            XCTFail("Unexpected duplicate MyBible repository error: \(error)")
+        }
+    }
+
+    func testRepositorySourceManagerRejectsInvalidMyBibleManifest() async throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let manifestData = """
+        {
+          "url": "https://invalid.example/manifest.json",
+          "file_name": "Invalid MyBible",
+          "description": "Missing modules"
+        }
+        """.data(using: .utf8)!
+
+        MockURLProtocol.requestHandler = { request in
+            let response = HTTPURLResponse(
+                url: try XCTUnwrap(request.url),
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: nil
+            )!
+            return (response, manifestData)
+        }
+
+        let manager = RepositorySourceManager(
+            basePath: tempDir.path,
+            session: makeMockedURLSession()
+        )
+
+        do {
+            _ = try await manager.addCustomSource(from: "https://invalid.example/manifest.json")
+            XCTFail("Expected invalid MyBible manifest to be rejected.")
+        } catch RepositorySourceManagementError.invalidManifest {
+            XCTAssertFalse(manager.loadSources().contains { $0.name == "Invalid MyBible" })
+        } catch {
+            XCTFail("Unexpected invalid MyBible manifest error: \(error)")
+        }
+    }
+
+    func testRepositorySourceManagerRejectsUnsupportedManifestType() async throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let manifestData = """
+        {
+          "type": "unsupported-https",
+          "name": "Unsupported Repo"
+        }
+        """.data(using: .utf8)!
+
+        MockURLProtocol.requestHandler = { request in
+            let response = HTTPURLResponse(
+                url: try XCTUnwrap(request.url),
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: nil
+            )!
+            return (response, manifestData)
+        }
+
+        let manager = RepositorySourceManager(
+            basePath: tempDir.path,
+            session: makeMockedURLSession()
+        )
+
+        do {
+            _ = try await manager.addCustomSource(from: "https://unsupported.example/manifest.json")
+            XCTFail("Expected unsupported custom repository type to be rejected.")
+        } catch RepositorySourceManagementError.unsupportedRepositoryType(let type) {
+            XCTAssertEqual(type, "unsupported-https")
+        } catch {
+            XCTFail("Unexpected unsupported manifest error: \(error)")
+        }
+    }
+
     func testRepositorySourceManagerAddsDirectSwordCatalogFallbackSource() async throws {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
