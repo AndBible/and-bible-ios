@@ -38,6 +38,15 @@ public final class SearchIndexService: @unchecked Sendable {
         label: "org.andbible.ios.search-index.mutations",
         qos: .userInitiated
     )
+    /**
+     Queue-specific marker used to detect re-entrant synchronous legacy delete calls.
+
+     `DispatchQueue.sync` deadlocks when called from the same serial queue. The deprecated
+     synchronous delete overload checks this marker so internal queued work can delete directly
+     while outside callers still block until the serial mutation queue reaches their request.
+     */
+    @ObservationIgnored
+    private let indexMutationQueueSpecificKey = DispatchSpecificKey<Bool>()
 
     /// Whether an index is currently being built.
     public var isIndexing = false
@@ -60,6 +69,7 @@ public final class SearchIndexService: @unchecked Sendable {
      */
     public init() {
         dbPath = Self.defaultDatabasePath()
+        configureIndexMutationQueue()
         openDatabase()
     }
 
@@ -78,11 +88,23 @@ public final class SearchIndexService: @unchecked Sendable {
      */
     init(databasePath: String) {
         dbPath = databasePath
+        configureIndexMutationQueue()
         openDatabase()
     }
 
     deinit {
         if let db { sqlite3_close(db) }
+    }
+
+    /**
+     Marks the serial index mutation queue so synchronous compatibility calls can detect re-entry.
+
+     - Side effects: associates an instance-local marker with `indexMutationQueue`.
+     - Failure modes: none; Dispatch queue-specific values are retained by the queue for the
+       service lifetime.
+     */
+    private func configureIndexMutationQueue() {
+        indexMutationQueue.setSpecific(key: indexMutationQueueSpecificKey, value: true)
     }
 
     private func openDatabase() {
@@ -294,6 +316,7 @@ public final class SearchIndexService: @unchecked Sendable {
      - Parameter moduleName: Module initials whose FTS rows and metadata should be removed.
      - Side effects:
        - blocks the caller until the serial mutation queue reaches this deletion request
+       - deletes directly when already executing on the serial mutation queue to avoid deadlock
        - mutates the FTS index database on the service's serial mutation queue
      - Failure modes:
        - missing indexes, closed database handles, and SQLite statement failures are treated as
@@ -303,6 +326,12 @@ public final class SearchIndexService: @unchecked Sendable {
      */
     @available(*, deprecated, message: "Use await deleteIndex(for:) so deletion can suspend instead of blocking.")
     public func deleteIndex(for moduleName: String) {
+        if DispatchQueue.getSpecific(key: indexMutationQueueSpecificKey) == true {
+            guard let db else { return }
+            deleteIndexData(db: db, moduleName: moduleName)
+            return
+        }
+
         indexMutationQueue.sync {
             guard let db else { return }
             deleteIndexData(db: db, moduleName: moduleName)
