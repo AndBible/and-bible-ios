@@ -194,6 +194,26 @@
 "no_modules_match_filters" = "No modules match your filters";
 "tap_refresh_to_load" = "Tap Refresh to load available modules";
 "search_modules" = "Search modules";
+"delete_module_index" = "Delete Index";
+"uninstall_module_title" = "Uninstall Module";
+"uninstall_module_message_format" = "Remove %@ from this device?";
+"delete_module_index_title" = "Delete Search Index";
+"delete_module_index_message_format" = "Delete the search index for %@?";
+"module_initials" = "Initials";
+"module_name" = "Name";
+"module_category" = "Category";
+"module_language" = "Language";
+"module_source" = "Source";
+"module_versions" = "Versions";
+"module_latest_version" = "Latest";
+"module_installed_version" = "Installed";
+"module_version_unavailable" = "No version metadata available.";
+"module_install_size" = "Install size";
+"module_local_state" = "Local State";
+"module_installed" = "Installed";
+"module_encrypted" = "Encrypted";
+"module_unlocked" = "Unlocked";
+"module_locked" = "Locked";
 
 /* ========================================
    Settings

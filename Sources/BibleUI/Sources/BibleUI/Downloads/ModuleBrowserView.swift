@@ -115,6 +115,20 @@ enum ModuleBrowserDownloadStatus: Equatable {
 
     /// The row can be installed.
     case installable
+
+    /**
+     Whether this row is in Android's active `BEING_INSTALLED` branch.
+
+     - Returns: `true` only for rows actively downloading or installing.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    var isBeingInstalled: Bool {
+        if case .beingInstalled = self {
+            return true
+        }
+        return false
+    }
 }
 
 /**
@@ -185,6 +199,9 @@ public struct ModuleBrowserView: View {
     /// Android's repository list staleness window before Downloads refreshes catalogs on open.
     static let downloadCatalogStaleInterval: TimeInterval = 24 * 60 * 60
 
+    /// Shared full-text search index service used for Android's Delete Index row action.
+    @Environment(SearchIndexService.self) private var searchIndexService
+
     /// Startup/default-document behavior requested by the caller.
     private let defaultDownloadMode: ModuleBrowserDefaultDownloadMode
 
@@ -244,6 +261,12 @@ public struct ModuleBrowserView: View {
 
     /// User-visible error text for refresh, install, or uninstall failures.
     @State private var errorMessage: String?
+
+    /// Module details currently presented from Android's row About action.
+    @State private var selectedModuleDetails: ModuleBrowserModuleDetails?
+
+    /// Destructive row action waiting for Android-style confirmation.
+    @State private var pendingRowActionConfirmation: ModuleBrowserRowActionConfirmation?
 
     /// Progress text describing which remote source is being refreshed.
     @State private var refreshProgress: String?
@@ -325,11 +348,6 @@ public struct ModuleBrowserView: View {
         }
     }
 
-    /// Installed module names for quick lookup.
-    private var installedModuleNames: Set<String> {
-        Set(installedModules.map(\.name))
-    }
-
     /// Available (remote) modules filtered by category, language, and search text.
     private var filteredAvailableModules: [RemoteModuleInfo] {
         Self.filteredDownloadModules(
@@ -350,6 +368,9 @@ public struct ModuleBrowserView: View {
      Builds the filtered Android-style download list and repository-management toolbar actions.
      */
     public var body: some View {
+        let visibleModules = filteredAvailableModules
+        let installedModulesByName = Self.installedModuleLookup(from: installedModules)
+
         List {
             // Category picker
             Section {
@@ -412,15 +433,18 @@ public struct ModuleBrowserView: View {
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 8)
                 }
-            } else if filteredAvailableModules.isEmpty && !availableModules.isEmpty {
+            } else if visibleModules.isEmpty && !availableModules.isEmpty {
                 Section {
                     Text(String(localized: "no_modules_match_filters"))
                         .foregroundStyle(.secondary)
                 }
-            } else if !filteredAvailableModules.isEmpty {
-                Section(String(localized: "document_filter_results \(filteredAvailableModules.count)")) {
-                    ForEach(filteredAvailableModules) { module in
-                        remoteModuleRow(module)
+            } else if !visibleModules.isEmpty {
+                Section(String(localized: "document_filter_results \(visibleModules.count)")) {
+                    ForEach(visibleModules) { module in
+                        remoteModuleRow(
+                            module,
+                            installedModulesByName: installedModulesByName
+                        )
                     }
                 }
             } else if availableModules.isEmpty && !isRefreshing && !isLoadingInitialState {
@@ -458,6 +482,41 @@ public struct ModuleBrowserView: View {
                     .disabled(isRefreshing || isLoadingInitialState)
                 }
             }
+        }
+        .sheet(item: $selectedModuleDetails) { details in
+            NavigationStack {
+                ModuleBrowserModuleDetailsView(details: details)
+            }
+        }
+        .alert(
+            pendingRowActionConfirmation?.title ?? "",
+            isPresented: Binding(
+                get: { pendingRowActionConfirmation != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        pendingRowActionConfirmation = nil
+                    }
+                }
+            ),
+            presenting: pendingRowActionConfirmation
+        ) { confirmation in
+            switch confirmation.kind {
+            case .uninstall:
+                Button(String(localized: "uninstall"), role: .destructive) {
+                    uninstallModuleAfterCancellingInstall(confirmation.moduleName)
+                    pendingRowActionConfirmation = nil
+                }
+            case .deleteIndex:
+                Button(String(localized: "delete_module_index", defaultValue: "Delete Index"), role: .destructive) {
+                    deleteModuleIndex(confirmation.moduleName)
+                    pendingRowActionConfirmation = nil
+                }
+            }
+            Button(String(localized: "cancel"), role: .cancel) {
+                pendingRowActionConfirmation = nil
+            }
+        } message: { confirmation in
+            Text(confirmation.message)
         }
         .task {
             await loadInitialStateIfNeeded()
@@ -515,14 +574,24 @@ public struct ModuleBrowserView: View {
     /**
      Builds one row for a remotely available module with install-state affordances.
 
-     - Parameter module: Remote module metadata to render.
+     - Parameters:
+       - module: Remote module metadata to render.
+       - installedModulesByName: Installed modules keyed by initials for O(1) row state lookup.
      - Returns: A row showing remote source metadata and an install affordance when applicable.
      */
-    private func remoteModuleRow(_ module: RemoteModuleInfo) -> some View {
+    private func remoteModuleRow(
+        _ module: RemoteModuleInfo,
+        installedModulesByName: [String: ModuleInfo]
+    ) -> some View {
         let status = Self.displayStatus(
             for: module,
-            installedModules: installedModules,
+            installedModulesByName: installedModulesByName,
             downloadActivities: downloadActivities
+        )
+        let installedModule = installedModulesByName[module.name]
+        let rowActions = ModuleDownloadRowActionPlanner.availableActions(
+            installedModule: installedModule,
+            isBeingInstalled: status.isBeingInstalled
         )
         let isRecommended = recommendedDocuments?.contains(module) == true
         let badAction = badDocuments?.badDocumentAction(for: module) ?? .none
@@ -570,72 +639,164 @@ public struct ModuleBrowserView: View {
 
             Spacer()
 
-            switch status {
-            case .installed:
-                Image(systemName: "checkmark.circle.fill")
-                    .foregroundStyle(.green)
-            case .beingInstalled(let progressPercent):
-                VStack(alignment: .trailing, spacing: 6) {
-                    Text("\(progressPercent)%")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    ProgressView(value: Double(progressPercent), total: 100)
-                        .frame(width: 76)
-                    Button {
-                        cancelInstall(module.name)
-                    } label: {
-                        Label(String(localized: "cancel"), systemImage: "arrow.uturn.backward.circle")
-                    }
-                    .labelStyle(.iconOnly)
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .accessibilityLabel(String(localized: "cancel"))
-                }
-            case .errorDownloading:
-                VStack(alignment: .trailing, spacing: 6) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.red)
-                    Button(String(localized: "retry", defaultValue: "Retry")) {
-                        installModule(module)
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                }
-            case .updateAvailable:
-                Button(String(localized: "update")) {
-                    installModule(module)
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-            case .unavailable:
-                Label(String(localized: "unavailable"), systemImage: "lock.slash")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            case .installable:
-                Button(String(localized: "install_module", defaultValue: "Install")) {
-                    installModule(module)
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-            }
+            rowTrailingControls(
+                for: module,
+                installedModule: installedModule,
+                status: status,
+                rowActions: rowActions
+            )
         }
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-            if installedModuleNames.contains(module.name) {
+            if rowActions.contains(.uninstall) {
                 Button(role: .destructive) {
-                    uninstallModule(module.name)
+                    pendingRowActionConfirmation = ModuleBrowserRowActionConfirmation(
+                        kind: .uninstall,
+                        module: module
+                    )
                 } label: {
                     Label(String(localized: "uninstall"), systemImage: "trash")
                 }
             }
         }
         .contextMenu {
-            if installedModuleNames.contains(module.name) {
+            if rowActions.contains(.about) {
+                Button {
+                    selectedModuleDetails = ModuleBrowserModuleDetails(
+                        module: module,
+                        installedModule: installedModule
+                    )
+                } label: {
+                    Label(String(localized: "about"), systemImage: "info.circle")
+                }
+            }
+            if rowActions.contains(.uninstall) {
                 Button(role: .destructive) {
-                    uninstallModule(module.name)
+                    pendingRowActionConfirmation = ModuleBrowserRowActionConfirmation(
+                        kind: .uninstall,
+                        module: module
+                    )
                 } label: {
                     Label(String(localized: "uninstall"), systemImage: "trash")
                 }
             }
+            if rowActions.contains(.deleteIndex) {
+                Button(role: .destructive) {
+                    pendingRowActionConfirmation = ModuleBrowserRowActionConfirmation(
+                        kind: .deleteIndex,
+                        module: module
+                    )
+                } label: {
+                    Label(
+                        String(localized: "delete_module_index", defaultValue: "Delete Index"),
+                        systemImage: "magnifyingglass"
+                    )
+                }
+            }
+        }
+    }
+
+    /**
+     Builds the trailing controls for a Downloads row from Android-compatible row actions.
+
+     - Parameters:
+       - module: Remote catalog row being rendered.
+       - installedModule: Matching installed row, when present.
+       - status: Current Android-equivalent install status.
+       - rowActions: Precomputed secondary actions from `ModuleDownloadRowActionPlanner`.
+     - Returns: SwiftUI controls for About plus the primary install/update/progress affordance.
+     - Side effects: Produced controls may mutate view state when tapped.
+     - Failure modes: Action failures are handled by `installModule(_:)`, `cancelInstall(_:)`, or
+       the confirmation alert handlers.
+     */
+    @ViewBuilder
+    private func rowTrailingControls(
+        for module: RemoteModuleInfo,
+        installedModule: ModuleInfo?,
+        status: ModuleBrowserDownloadStatus,
+        rowActions: [ModuleDownloadRowAction]
+    ) -> some View {
+        HStack(spacing: 8) {
+            if rowActions.contains(.about) {
+                Button {
+                    selectedModuleDetails = ModuleBrowserModuleDetails(
+                        module: module,
+                        installedModule: installedModule
+                    )
+                } label: {
+                    Label(String(localized: "about"), systemImage: "info.circle")
+                }
+                .labelStyle(.iconOnly)
+                .buttonStyle(.borderless)
+                .accessibilityLabel(String(localized: "about"))
+            }
+
+            rowPrimaryControl(for: module, status: status)
+        }
+    }
+
+    /**
+     Builds the primary install/status control for one Downloads row.
+
+     - Parameters:
+       - module: Remote catalog row being rendered.
+       - status: Current Android-equivalent install status.
+     - Returns: SwiftUI control matching Android's status branch for the row.
+     - Side effects: Buttons may start, retry, update, or cancel module installs.
+     - Failure modes: Install failures are caught and retained as row error state by
+       `installModule(_:)`.
+     */
+    @ViewBuilder
+    private func rowPrimaryControl(
+        for module: RemoteModuleInfo,
+        status: ModuleBrowserDownloadStatus
+    ) -> some View {
+        switch status {
+        case .installed:
+            Image(systemName: "checkmark.circle.fill")
+                .foregroundStyle(.green)
+        case .beingInstalled(let progressPercent):
+            VStack(alignment: .trailing, spacing: 6) {
+                Text("\(progressPercent)%")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                ProgressView(value: Double(progressPercent), total: 100)
+                    .frame(width: 76)
+                Button {
+                    cancelInstall(module.name)
+                } label: {
+                    Label(String(localized: "cancel"), systemImage: "arrow.uturn.backward.circle")
+                }
+                .labelStyle(.iconOnly)
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .accessibilityLabel(String(localized: "cancel"))
+            }
+        case .errorDownloading:
+            VStack(alignment: .trailing, spacing: 6) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.red)
+                Button(String(localized: "retry", defaultValue: "Retry")) {
+                    installModule(module)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
+        case .updateAvailable:
+            Button(String(localized: "update")) {
+                installModule(module)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+        case .unavailable:
+            Label(String(localized: "unavailable"), systemImage: "lock.slash")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        case .installable:
+            Button(String(localized: "install_module", defaultValue: "Install")) {
+                installModule(module)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
         }
     }
 
@@ -812,15 +973,17 @@ public struct ModuleBrowserView: View {
         selectedLanguage: String,
         recommendedDocuments: ModuleDownloadConfiguration?
     ) -> [RemoteModuleInfo] {
-        modules.sorted { lhs, rhs in
+        let installedModulesByName = installedModuleLookup(from: installedModules)
+
+        return modules.sorted { lhs, rhs in
             let lhsStatus = displayStatus(
                 for: lhs,
-                installedModules: installedModules,
+                installedModulesByName: installedModulesByName,
                 downloadActivities: downloadActivities
             )
             let rhsStatus = displayStatus(
                 for: rhs,
-                installedModules: installedModules,
+                installedModulesByName: installedModulesByName,
                 downloadActivities: downloadActivities
             )
             let lhsStatusRank = statusSortRank(lhsStatus)
@@ -829,8 +992,8 @@ public struct ModuleBrowserView: View {
                 return lhsStatusRank < rhsStatusRank
             }
 
-            let lhsInstalled = installedModules.contains { $0.name == lhs.name }
-            let rhsInstalled = installedModules.contains { $0.name == rhs.name }
+            let lhsInstalled = installedModulesByName[lhs.name] != nil
+            let rhsInstalled = installedModulesByName[rhs.name] != nil
             if lhsInstalled != rhsInstalled {
                 return lhsInstalled && !rhsInstalled
             }
@@ -873,6 +1036,33 @@ public struct ModuleBrowserView: View {
         installedModules: [ModuleInfo],
         downloadActivities: [String: ModuleBrowserDownloadActivity]
     ) -> ModuleBrowserDownloadStatus {
+        displayStatus(
+            for: module,
+            installedModulesByName: installedModuleLookup(from: installedModules),
+            downloadActivities: downloadActivities
+        )
+    }
+
+    /**
+     Resolves the Android-style download status using a precomputed installed-module lookup.
+
+     - Parameters:
+       - module: Remote module row.
+       - installedModulesByName: Installed modules keyed by initials.
+       - downloadActivities: Module initials with active progress or retained failure state.
+     - Returns: Status used for row affordances and sort order.
+
+     Side effects:
+     - none
+
+     Failure modes:
+     - invalid or absent version strings fall back to non-update installed state
+     */
+    private static func displayStatus(
+        for module: RemoteModuleInfo,
+        installedModulesByName: [String: ModuleInfo],
+        downloadActivities: [String: ModuleBrowserDownloadActivity]
+    ) -> ModuleBrowserDownloadStatus {
         if let activity = downloadActivities[module.name] {
             switch activity.phase {
             case .inProgress:
@@ -884,13 +1074,26 @@ public struct ModuleBrowserView: View {
         guard module.isInstallable else {
             return .unavailable
         }
-        guard let installedModule = installedModules.first(where: { $0.name == module.name }) else {
+        guard let installedModule = installedModulesByName[module.name] else {
             return .installable
         }
         if isRemoteVersionNewer(remoteVersion: module.version, installedVersion: installedModule.version) {
             return .updateAvailable
         }
         return .installed
+    }
+
+    /**
+     Builds an initials-keyed installed-module lookup for row rendering and sorting.
+
+     - Parameter installedModules: Installed module snapshots from the current SWORD manager.
+     - Returns: Dictionary keyed by module initials, preserving the first module when duplicate
+       initials appear.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    static func installedModuleLookup(from installedModules: [ModuleInfo]) -> [String: ModuleInfo] {
+        Dictionary(installedModules.map { ($0.name, $0) }, uniquingKeysWith: { first, _ in first })
     }
 
     /**
@@ -1501,15 +1704,20 @@ public struct ModuleBrowserView: View {
        state, matching Android `INSTALL_CANCELLED`
      - marks startup default activity complete when the cancelled module belonged to that flow
 
+     - Returns: Cancelled task that callers can await before touching module files, or `nil` when
+       no install was active.
      Failure modes:
      - missing or already-finished tasks are ignored
      */
-    private func cancelInstall(_ moduleName: String) {
-        installTasks[moduleName]?.cancel()
+    @discardableResult
+    private func cancelInstall(_ moduleName: String) -> Task<Void, Never>? {
+        let cancelledTask = installTasks[moduleName]
+        cancelledTask?.cancel()
         installTasks[moduleName] = nil
         installTaskIDs[moduleName] = nil
         downloadActivities[moduleName] = nil
         markDefaultDownloadModuleFinishedIfNeeded(moduleName)
+        return cancelledTask
     }
 
     /**
@@ -1555,25 +1763,62 @@ public struct ModuleBrowserView: View {
     }
 
     /**
-     Uninstalls one locally installed module and refreshes the installed-module list.
+     Uninstalls one locally installed module after cancelling any active install/update task.
 
      - Parameter name: Module name to remove from the local SWORD module store.
 
      Side effects:
-     - invokes repository-backed uninstall file I/O
+     - cancels and awaits any active install task for the same module before deleting files
+     - invokes repository-backed uninstall file I/O off the main actor
      - rebuilds the local SWORD manager and installed-module cache after a successful uninstall
      - records uninstall failures in `errorMessage`
 
      Failure modes:
+     - active install cancellation may delay uninstall until the installer finishes its rollback path
      - repository uninstall errors are caught and surfaced through `errorMessage`
      */
-    private func uninstallModule(_ name: String) {
-        do {
-            try repository.uninstallModule(named: name)
-            swordManager = SwordManager()
-            refreshInstalledList()
-        } catch {
-            errorMessage = "Uninstall failed: \(error.localizedDescription)"
+    private func uninstallModuleAfterCancellingInstall(_ name: String) {
+        let cancelledInstallTask = cancelInstall(name)
+        let repository = repository
+
+        Task {
+            if let cancelledInstallTask {
+                await cancelledInstallTask.value
+            }
+
+            do {
+                try await Task.detached(priority: .userInitiated) {
+                    try repository.uninstallModule(named: name)
+                }.value
+
+                await MainActor.run {
+                    swordManager = SwordManager()
+                    refreshInstalledList()
+                }
+            } catch {
+                await MainActor.run {
+                    errorMessage = "Uninstall failed: \(error.localizedDescription)"
+                }
+            }
+        }
+    }
+
+    /**
+     Deletes the local full-text search index for one installed module.
+
+     Android exposes this as the `delete_index` contextual document action and confirms before
+     dispatching to `SwordDocumentFacade.deleteDocumentIndex`. iOS uses its FTS5-backed
+     `SearchIndexService`; deleting a missing index is intentionally harmless so the action can
+     stay visible for every installed row like Android.
+
+     - Parameter name: Module initials whose local search index should be removed.
+     - Side effects: Mutates the shared search-index SQLite database through `SearchIndexService`.
+     - Failure modes: `SearchIndexService.deleteIndex(for:)` treats missing indexes and SQLite
+       failures as no-ops, matching Android's best-effort contextual action.
+     */
+    private func deleteModuleIndex(_ name: String) {
+        Task {
+            await searchIndexService.deleteIndex(for: name)
         }
     }
 }

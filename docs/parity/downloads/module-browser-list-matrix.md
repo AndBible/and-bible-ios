@@ -41,13 +41,11 @@ iOS references:
 | Install unavailable state | Android disables pseudo/unavailable rows and marks them visually. | Pass | iOS unavailable rows show a disabled lock affordance and no install action. |
 | In-progress state | Android shows progress, cancel, and download events through `DocumentDownloadItemAdapter`. | Adapted Pass | iOS now keeps per-module row activity with determinate staged-download progress, row cancel, and retained error/retry state. The Swift installer streams files and reports byte progress when the response exposes content length, then publishes staged data only after every required file succeeds. Both surfaces keep active downloads sorted first and clear cancelled rows back to normal installed/not-installed state. |
 | Row metadata | Android rows show initials, name, language, repository, size, lock/recommended/warning icons. | Partial | iOS rows show initials, description, language, repository, install size, recommended/warning badges, unavailable/update/install/installed state. Encrypted lock/unlock handling is still broader module-management work. |
-| Row actions | Android row tap downloads/updates, about button opens about, long press exposes delete/delete index/unlock. | Partial | iOS installs/updates from row buttons and uninstalls installed rows from swipe/context actions. About, delete index, unlock, and Android-style confirmation breadth are not complete. |
+| Row actions | Android row tap downloads/updates, about button opens about, long press exposes delete/delete index/unlock. | Adapted Pass | iOS installs/updates from row buttons, exposes About through row/context actions, confirms uninstall from swipe/context actions, and confirms Delete Index for installed rows. Unlock is a documented deviation until SwordKit has a real persisted cipher-key coordinator. See [row-actions-matrix.md](row-actions-matrix.md). |
 | Sorting | Android sorts being-installed, update, installed, recommended-for-language, category order, then abbreviation. | Pass | iOS now applies the same visible ordering dimensions to remote rows. |
 
 ## Follow-Ups
 
-- Add row action parity for about/delete index/unlock and Android confirmation
-  messages (#135).
 - Add iOS add-on modeling before exposing Android's Add-ons filter (#136).
 - Repository/source editing parity is documented in
   [repository-source-management-matrix.md](repository-source-management-matrix.md).
