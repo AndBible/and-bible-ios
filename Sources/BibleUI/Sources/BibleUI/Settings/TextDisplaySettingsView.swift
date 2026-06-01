@@ -108,56 +108,92 @@ public struct TextDisplaySettingsView: View {
      */
     public var body: some View {
         Form {
-            Section(String(localized: "settings_font")) {
-                HStack {
-                    Text(String(localized: "font_size"))
+            Section {
+                VStack(alignment: .leading, spacing: 8) {
+                    textDisplayRowLabel(
+                        androidKey: "FONTSIZE",
+                        title: String(localized: "font_size"),
+                        summary: String(
+                            format: String(
+                                localized: "prefs_font_text_size_summary",
+                                defaultValue: "Set the text size. Current value: %d"
+                            ),
+                            settings.fontSize ?? 18
+                        )
+                    )
                     Slider(value: fontSizeBinding, in: 10...30, step: 1)
-                    Text("\(settings.fontSize ?? 18)")
-                        .monospacedDigit()
+                        .padding(.leading, 66)
                 }
                 #if os(iOS)
                 Button {
                     showFontPicker = true
                 } label: {
-                    HStack {
-                        Text(String(localized: "font_family"))
-                            .foregroundStyle(.primary)
-                        Spacer()
-                        Text(currentFontName)
-                            .font(.custom(settings.fontFamily ?? "sans-serif", size: 16))
-                            .foregroundStyle(.secondary)
-                    }
+                    textDisplayRowLabel(
+                        androidKey: "FONTFAMILY",
+                        title: String(localized: "font_family"),
+                        summary: String(
+                            localized: "prefs_font_family_summary",
+                            defaultValue: "Choose font family"
+                        ),
+                        detail: currentFontName
+                    )
                 }
                 .accessibilityIdentifier("textDisplayFontFamilyButton")
                 .sheet(isPresented: $showFontPicker) {
                     FontPickerView(selectedFamily: fontFamilyBinding)
                 }
                 #else
-                Picker(String(localized: "font_family"), selection: fontFamilyBinding) {
+                Picker(selection: fontFamilyBinding) {
                     ForEach(Self.fontOptions, id: \.value) { option in
                         Text(option.label)
                             .font(.custom(option.previewFont, size: 16))
                             .tag(option.value)
                     }
+                } label: {
+                    textDisplayRowLabel(
+                        androidKey: "FONTFAMILY",
+                        title: String(localized: "font_family"),
+                        summary: String(
+                            localized: "prefs_font_family_summary",
+                            defaultValue: "Choose font family"
+                        ),
+                        detail: currentFontName
+                    )
                 }
                 #endif
+            } header: {
+                textDisplaySectionHeader(String(localized: "settings_font"))
             }
 
-            Section(String(localized: "settings_layout")) {
+            Section {
                 let justifyTextBinding = boolBinding(\.justifyText, default: false)
-                HStack {
-                    Text(String(localized: "line_spacing"))
+                VStack(alignment: .leading, spacing: 8) {
+                    textDisplayRowLabel(
+                        androidKey: "LINE_SPACING",
+                        title: String(localized: "line_spacing"),
+                        summary: String(
+                            format: String(
+                                localized: "line_spacing_summary",
+                                defaultValue: "Set the space between lines. Current value: %d"
+                            ),
+                            settings.lineSpacing ?? 10
+                        )
+                    )
                     Slider(value: lineSpacingBinding, in: 0...20, step: 1)
-                    Text("\(settings.lineSpacing ?? 10)")
-                        .monospacedDigit()
+                        .padding(.leading, 66)
                 }
-                HStack {
+                HStack(alignment: .top, spacing: 12) {
                     Button {
                         justifyTextBinding.wrappedValue.toggle()
                     } label: {
-                        Text(String(localized: "justify_text"))
-                            .foregroundStyle(.primary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                        textDisplayRowLabel(
+                            androidKey: "JUSTIFY",
+                            title: String(localized: "justify_text"),
+                            summary: String(
+                                localized: "prefs_justify_summary",
+                                defaultValue: "Align text in justify style, meaning left and right margins of the text are in line"
+                            )
+                        )
                     }
                     .buttonStyle(.plain)
                     .accessibilityIdentifier("textDisplayJustifyTextToggleButton")
@@ -167,19 +203,102 @@ public struct TextDisplaySettingsView: View {
                         .accessibilityIdentifier("textDisplayJustifyTextToggle")
                         .accessibilityValue((settings.justifyText ?? false) ? "justifyTextOn" : "justifyTextOff")
                 }
-                Toggle(String(localized: "verse_per_line"), isOn: boolBinding(\.showVersePerLine, default: false))
-                Toggle(String(localized: "hyphenation"), isOn: boolBinding(\.hyphenation, default: true))
+                Toggle(isOn: boolBinding(\.showVersePerLine, default: false)) {
+                    textDisplayRowLabel(
+                        androidKey: "VERSEPERLINE",
+                        title: String(localized: "verse_per_line"),
+                        summary: String(
+                            localized: "prefs_verse_per_line_summary",
+                            defaultValue: "Show each verse on a different line"
+                        )
+                    )
+                }
+                Toggle(isOn: boolBinding(\.hyphenation, default: true)) {
+                    textDisplayRowLabel(
+                        androidKey: "HYPHENATION",
+                        title: String(localized: "hyphenation"),
+                        summary: String(
+                            localized: "prefs_hyphenation_summary",
+                            defaultValue: "Automatically hyphenate words, if language is supported"
+                        )
+                    )
+                }
+            } header: {
+                textDisplaySectionHeader(String(localized: "settings_layout"))
             }
 
-            Section(String(localized: "settings_content")) {
-                Toggle(String(localized: "verse_numbers"), isOn: boolBinding(\.showVerseNumbers, default: true))
-                Toggle(String(localized: "section_titles"), isOn: boolBinding(\.showSectionTitles, default: true))
-                Toggle(String(localized: "footnotes"), isOn: boolBinding(\.showFootNotes, default: false))
-                Toggle(String(localized: "inline_footnotes"), isOn: boolBinding(\.showFootNotesInline, default: false))
-                Toggle(String(localized: "red_letters"), isOn: boolBinding(\.showRedLetters, default: true))
-                Toggle(String(localized: "cross_references"), isOn: boolBinding(\.showXrefs, default: false))
-                Toggle(String(localized: "expand_cross_references"), isOn: boolBinding(\.expandXrefs, default: false))
-                Picker(String(localized: "strongs_numbers"), selection: Binding(
+            Section {
+                Toggle(isOn: boolBinding(\.showVerseNumbers, default: true)) {
+                    textDisplayRowLabel(
+                        androidKey: "VERSENUMBERS",
+                        title: String(localized: "verse_numbers"),
+                        summary: String(
+                            localized: "prefs_show_verseno_summary",
+                            defaultValue: "Show verse numbers"
+                        )
+                    )
+                }
+                Toggle(isOn: boolBinding(\.showSectionTitles, default: true)) {
+                    textDisplayRowLabel(
+                        androidKey: "SECTIONTITLES",
+                        title: String(localized: "section_titles"),
+                        summary: String(
+                            localized: "prefs_section_title_summary",
+                            defaultValue: "Show non-canonical section titles"
+                        )
+                    )
+                }
+                Toggle(isOn: boolBinding(\.showFootNotes, default: false)) {
+                    textDisplayRowLabel(
+                        androidKey: "FOOTNOTES",
+                        title: String(localized: "footnotes"),
+                        summary: String(
+                            localized: "prefs_show_footnotes_summary",
+                            defaultValue: "Show footnotes, if they are available in the document"
+                        )
+                    )
+                }
+                Toggle(isOn: boolBinding(\.showFootNotesInline, default: false)) {
+                    textDisplayRowLabel(
+                        androidKey: "FOOTNOTES_INLINE",
+                        title: String(localized: "inline_footnotes"),
+                        summary: String(
+                            localized: "prefs_show_footnotes_inline_summary",
+                            defaultValue: "Show footnotes inline with the text instead of as clickable handles"
+                        )
+                    )
+                }
+                Toggle(isOn: boolBinding(\.showRedLetters, default: true)) {
+                    textDisplayRowLabel(
+                        androidKey: "REDLETTERS",
+                        title: String(localized: "red_letters"),
+                        summary: String(
+                            localized: "prefs_red_letter_summary",
+                            defaultValue: "Show words of Christ in red"
+                        )
+                    )
+                }
+                Toggle(isOn: boolBinding(\.showXrefs, default: false)) {
+                    textDisplayRowLabel(
+                        androidKey: "XREFS",
+                        title: String(localized: "cross_references"),
+                        summary: String(
+                            localized: "prefs_show_xrefs_summary",
+                            defaultValue: "Show cross references, if they are available in the document"
+                        )
+                    )
+                }
+                Toggle(isOn: boolBinding(\.expandXrefs, default: false)) {
+                    textDisplayRowLabel(
+                        androidKey: "EXPAND_XREFS",
+                        title: String(localized: "expand_cross_references"),
+                        summary: String(
+                            localized: "prefs_expand_footnotes_summary",
+                            defaultValue: "Show cross reference content inline within the text, instead of a link that opens a pop-up dialog"
+                        )
+                    )
+                }
+                Picker(selection: Binding(
                     get: { settings.strongsMode ?? 0 },
                     set: { settings.strongsMode = $0; onChange?() }
                 )) {
@@ -187,18 +306,99 @@ public struct TextDisplaySettingsView: View {
                     Text(String(localized: "inline")).tag(1)
                     Text(String(localized: "links")).tag(2)
                     Text(String(localized: "hidden")).tag(3)
+                } label: {
+                    textDisplayRowLabel(
+                        androidKey: "STRONGS",
+                        title: String(localized: "strongs_numbers"),
+                        summary: String(
+                            localized: "prefs_show_strongs_summary",
+                            defaultValue: "Links to Greek and Hebrew definitions"
+                        )
+                    )
                 }
-                Toggle(String(localized: "morphology"), isOn: boolBinding(\.showMorphology, default: false))
+                Toggle(isOn: boolBinding(\.showMorphology, default: false)) {
+                    textDisplayRowLabel(
+                        androidKey: "MORPH",
+                        title: String(localized: "morphology"),
+                        summary: String(
+                            localized: "prefs_show_morphology_summary",
+                            defaultValue: "Show Robinson's Greek morphology"
+                        )
+                    )
+                }
+            } header: {
+                textDisplaySectionHeader(String(localized: "settings_content"))
             }
 
-            Section(String(localized: "settings_annotations")) {
-                Toggle(String(localized: "show_bookmarks"), isOn: boolBinding(\.showBookmarks, default: true))
-                Toggle(String(localized: "show_my_notes"), isOn: boolBinding(\.showMyNotes, default: true))
+            Section {
+                Toggle(isOn: boolBinding(\.showBookmarks, default: true)) {
+                    textDisplayRowLabel(
+                        androidKey: "BOOKMARKS_SHOW",
+                        title: String(localized: "show_bookmarks"),
+                        summary: String(
+                            localized: "prefs_show_bookmarks_summary",
+                            defaultValue: "Uncheck to hide all bookmarks"
+                        )
+                    )
+                }
+                Toggle(isOn: boolBinding(\.showMyNotes, default: true)) {
+                    textDisplayRowLabel(
+                        androidKey: "MYNOTES",
+                        title: String(localized: "show_my_notes"),
+                        summary: String(
+                            localized: "prefs_show_mynotes_summary",
+                            defaultValue: "Show icon in verses with My Note"
+                        )
+                    )
+                }
+            } header: {
+                textDisplaySectionHeader(String(localized: "settings_annotations"))
             }
         }
         .accessibilityIdentifier("textDisplaySettingsScreen")
         .accessibilityValue(accessibilityState)
         .navigationTitle(String(localized: "text_display"))
+    }
+
+    /**
+     Builds one Android-shaped text-display settings row label using Android dynamic icon metadata.
+
+     - Parameters:
+       - androidKey: `TextDisplaySettings.Types` name from Android `OptionsMenuItems.kt`.
+       - title: Primary row title.
+       - summary: Optional secondary row text.
+       - detail: Optional tertiary state text.
+       - isEnabled: Whether the row should render with enabled or disabled emphasis.
+     - Returns: Shared row label aligned with Android preference geometry.
+     - Side effects: Renders an image from the module bundle when the key has catalog metadata.
+     - Failure modes: Unknown keys simply produce an un-iconed but aligned row.
+     */
+    private func textDisplayRowLabel(
+        androidKey: String,
+        title: String,
+        summary: String? = nil,
+        detail: String? = nil,
+        isEnabled: Bool = true
+    ) -> AndBibleSettingsRowLabel {
+        AndBibleSettingsRowLabel(
+            title: title,
+            summary: summary,
+            detail: detail,
+            icon: AndBibleIconCatalog.settingsIcon(forAndroidKey: androidKey),
+            isEnabled: isEnabled
+        )
+    }
+
+    /**
+     Builds an Android-shaped text-display section header using the active app accent color.
+
+     - Parameter title: User-visible section title.
+     - Returns: Section header aligned with row text rather than the icon column.
+     - Side effects: none.
+     - Failure modes: This helper cannot fail.
+     */
+    private func textDisplaySectionHeader(_ title: String) -> AndBibleSettingsSectionHeader {
+        AndBibleSettingsSectionHeader(title: title)
     }
 
     /**
