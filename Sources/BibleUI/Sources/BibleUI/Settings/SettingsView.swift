@@ -1521,13 +1521,13 @@ public struct SettingsView: View {
                 }
             }
 
-            let readingProgressEntry = readingProgressSettingsSearchEntry
-            if settingsSearchMatchesEntry(readingProgressEntry) {
+            if canOpenReadingProgressSettings,
+               settingsSearchMatchesEntry(readingProgressSettingsSearchEntry) {
                 settingsNavigationLink(
-                    title: readingProgressEntry.title,
+                    title: readingProgressSettingsSearchEntry.title,
                     androidKey: "reading_progress_settings_shortcut",
-                    summary: readingProgressEntry.summary,
-                    accessibilityIdentifier: readingProgressEntry.identifier
+                    summary: readingProgressSettingsSearchEntry.summary,
+                    accessibilityIdentifier: readingProgressSettingsSearchEntry.identifier
                 ) {
                     ReadingProgressSettingsView(controller: readingProgressController)
                         .accessibilityIdentifier("readingProgressSettingsScreen")
@@ -1541,6 +1541,11 @@ public struct SettingsView: View {
     /// Whether the current query should show the Android feature-shortcut section.
     private var shouldShowFeaturesSection: Bool {
         settingsSearchMatchesSection(featuresSettingsSearchEntries)
+    }
+
+    /// Whether Reading Progress Settings can be opened and persisted from this settings instance.
+    private var canOpenReadingProgressSettings: Bool {
+        readingProgressController != nil
     }
 
     /// Search entry for the sync feature shortcut.
@@ -1568,7 +1573,11 @@ public struct SettingsView: View {
 
     /// Search entries for feature shortcuts that can be opened from Application preferences.
     private var featuresSettingsSearchEntries: [AndBibleSettingsSearchEntry] {
-        [syncSettingsSearchEntry, readingProgressSettingsSearchEntry]
+        var entries = [syncSettingsSearchEntry]
+        if canOpenReadingProgressSettings {
+            entries.append(readingProgressSettingsSearchEntry)
+        }
+        return entries
     }
 
     /// Search entries for module-backed dictionary preference rows currently visible on this device.
@@ -2124,14 +2133,16 @@ public struct SettingsView: View {
         guard UITestRuntimeConfiguration.enablesDetailedAccessibilityExports else {
             return ""
         }
-        let primaryLinks = [
-            "settingsSyncLink",
-            "settingsReadingProgressLink",
+        var primaryLinks = ["settingsSyncLink"]
+        if canOpenReadingProgressSettings {
+            primaryLinks.append("settingsReadingProgressLink")
+        }
+        primaryLinks.append(contentsOf: [
             "settingsTextDisplayLink",
             "settingsColorsLink",
-        ].joined(separator: ",")
+        ])
         let searchToken = isSettingsSearchActive ? "active" : "inactive"
-        return "primaryLinks=\(primaryLinks);adminFlows=readerActions;search=\(searchToken)"
+        return "primaryLinks=\(primaryLinks.joined(separator: ","));adminFlows=readerActions;search=\(searchToken)"
     }
 
     /**

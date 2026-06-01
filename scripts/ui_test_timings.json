@@ -28,6 +28,8 @@
   "AndBibleUITests/AndBibleUITests/testSettingsColorsLinkOpensColorEditor": 18.54922103881836,
   "AndBibleUITests/AndBibleUITests/testSettingsImportExportFullBackupPresentsShareSheet": 18.399284958839417,
   "AndBibleUITests/AndBibleUITests/testSettingsImportExportImportPresentsFilePickerState": 17.958650946617126,
+  "AndBibleUITests/AndBibleUITests/testSettingsReadingProgressLinkOpensReadingProgressSettings": 16.167,
+  "AndBibleUITests/AndBibleUITests/testSettingsScreenShowsApplicationPreferenceShortcuts": 14.295,
   "AndBibleUITests/AndBibleUITests/testSettingsSyncLinkOpensSyncSettings": 18.14947998523712,
   "AndBibleUITests/AndBibleUITests/testSyncSettingsBackendSwitchMutatesVisibleSection": 26.499693989753723,
   "AndBibleUITests/AndBibleUITests/testSyncSettingsBackendSwitchPersistsAcrossDirectReopen": 32.7494170665741,
