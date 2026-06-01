@@ -503,7 +503,11 @@ public struct SettingsView: View {
     @ViewBuilder
     private var dictionarySettingsSection: some View {
         Section {
-            if !strongsGreekDictionaries.isEmpty {
+            if !strongsGreekDictionaries.isEmpty,
+               settingsSearchMatchesIdentifier(
+                   "settingsStrongsGreekDictionaryLink",
+                   in: dictionarySettingsSearchEntries
+               ) {
                 NavigationLink {
                     DictionaryMultiSelectView(
                         title: String(
@@ -533,7 +537,11 @@ public struct SettingsView: View {
                 .accessibilityIdentifier("settingsStrongsGreekDictionaryLink")
             }
 
-            if !strongsHebrewDictionaries.isEmpty {
+            if !strongsHebrewDictionaries.isEmpty,
+               settingsSearchMatchesIdentifier(
+                   "settingsStrongsHebrewDictionaryLink",
+                   in: dictionarySettingsSearchEntries
+               ) {
                 NavigationLink {
                     DictionaryMultiSelectView(
                         title: String(
@@ -563,7 +571,11 @@ public struct SettingsView: View {
                 .accessibilityIdentifier("settingsStrongsHebrewDictionaryLink")
             }
 
-            if !robinsonMorphologyDictionaries.isEmpty {
+            if !robinsonMorphologyDictionaries.isEmpty,
+               settingsSearchMatchesIdentifier(
+                   "settingsRobinsonMorphologyLink",
+                   in: dictionarySettingsSearchEntries
+               ) {
                 NavigationLink {
                     DictionaryMultiSelectView(
                         title: String(
@@ -593,7 +605,11 @@ public struct SettingsView: View {
                 .accessibilityIdentifier("settingsRobinsonMorphologyLink")
             }
 
-            if !wordLookupDictionaries.isEmpty {
+            if !wordLookupDictionaries.isEmpty,
+               settingsSearchMatchesIdentifier(
+                   "settingsWordLookupDictionariesLink",
+                   in: dictionarySettingsSearchEntries
+               ) {
                 NavigationLink {
                     DictionaryInverseMultiSelectView(
                         title: String(
@@ -637,200 +653,220 @@ public struct SettingsView: View {
     @ViewBuilder
     private var behaviorSettingsSection: some View {
         Section {
-            Toggle(isOn: Binding(
-                get: { navigateToVerse },
-                set: { newValue in
-                    navigateToVerse = newValue
-                    let store = SettingsStore(modelContext: modelContext)
-                    store.setBool(.navigateToVersePref, value: newValue)
-                }
-            )) {
-                settingsRowLabel(
-                    preferenceKey: .navigateToVersePref,
-                    title: String(
-                        localized: "prefs_navigate_to_verse_title",
-                        defaultValue: "Navigate to verse"
-                    ),
-                    summary: String(
-                        localized: "prefs_navigate_to_verse_summary",
-                        defaultValue: "Choose verse (and chapter) when selecting a passage"
-                    )
-                )
-            }
-            Toggle(isOn: Binding(
-                get: { openLinksInSpecialWindow },
-                set: { newValue in
-                    openLinksInSpecialWindow = newValue
-                    let store = SettingsStore(modelContext: modelContext)
-                    store.setBool(.openLinksInSpecialWindowPref, value: newValue)
-                }
-            )) {
-                settingsRowLabel(
-                    preferenceKey: .openLinksInSpecialWindowPref,
-                    title: String(
-                        localized: "prefs_open_links_in_special_window_title",
-                        defaultValue: "Links window"
-                    ),
-                    summary: String(
-                        localized: "prefs_open_links_in_special_window_summary",
-                        defaultValue: "Open links in special window, for quicker display of cross-references and Strongs"
-                    )
-                )
-            }
-            Toggle(isOn: Binding(
-                get: { screenKeepOn },
-                set: { newValue in
-                    screenKeepOn = newValue
-                    let store = SettingsStore(modelContext: modelContext)
-                    store.setBool(.screenKeepOnPref, value: newValue)
-                    applyScreenKeepOn(newValue)
-                }
-            )) {
-                settingsRowLabel(
-                    preferenceKey: .screenKeepOnPref,
-                    title: String(localized: "prefs_screen_keep_on_title", defaultValue: "Keep screen on"),
-                    summary: String(
-                        localized: "prefs_screen_keep_on_summary",
-                        defaultValue: "Prevent screen sleeping while using this app"
-                    )
-                )
-            }
-            Toggle(isOn: Binding(
-                get: { doubleTapToFullscreen },
-                set: { newValue in
-                    doubleTapToFullscreen = newValue
-                    let store = SettingsStore(modelContext: modelContext)
-                    store.setBool(.doubleTapToFullscreen, value: newValue)
-                }
-            )) {
-                settingsRowLabel(
-                    preferenceKey: .doubleTapToFullscreen,
-                    title: String(
-                        localized: "prefs_double_tap_to_fullscreen_title",
-                        defaultValue: "Double-tap to Fullscreen"
-                    ),
-                    summary: String(
-                        localized: "prefs_double_tap_to_fullscreen_summary",
-                        defaultValue: "Enter fullscreen mode by double-tapping window"
-                    )
-                )
-            }
-            Toggle(isOn: Binding(
-                get: { autoFullscreen },
-                set: { newValue in
-                    autoFullscreen = newValue
-                    let store = SettingsStore(modelContext: modelContext)
-                    store.setBool(.autoFullscreenPref, value: newValue)
-                }
-            )) {
-                settingsRowLabel(
-                    preferenceKey: .autoFullscreenPref,
-                    title: String(localized: "auto_fullscreen", defaultValue: "Fullscreen by scrolling"),
-                    summary: String(
-                        localized: "auto_fullscreen_summary",
-                        defaultValue: "Switch automatically to fullscreen when scrolling text. Tip: you can always also switch to full screen by doubletapping screen."
-                    )
-                )
-            }
-            Picker(selection: Binding(
-                    get: { Self.normalizedToolbarButtonActionsMode(toolbarButtonActionsMode) },
+            if settingsSearchMatchesPreference(.navigateToVersePref, in: behaviorSettingsSearchEntries) {
+                Toggle(isOn: Binding(
+                    get: { navigateToVerse },
                     set: { newValue in
-                        toolbarButtonActionsMode = Self.normalizedToolbarButtonActionsMode(newValue)
+                        navigateToVerse = newValue
                         let store = SettingsStore(modelContext: modelContext)
-                        store.setString(.toolbarButtonActions, value: toolbarButtonActionsMode)
+                        store.setBool(.navigateToVersePref, value: newValue)
                     }
                 )) {
-                Text(String(localized: "prefs_toolbar_button_action_default", defaultValue: "Default"))
-                    .tag("default")
-                Text(String(localized: "prefs_toolbar_button_action_swap_menu", defaultValue: "Swap menu"))
-                    .tag("swap-menu")
-                Text(String(localized: "prefs_toolbar_button_action_swap_activity", defaultValue: "Swap activity"))
-                    .tag("swap-activity")
-            } label: {
-                settingsRowLabel(
-                    preferenceKey: .toolbarButtonActions,
-                    title: String(
-                        localized: "prefs_toolbar_button_action_title",
-                        defaultValue: "Bible/commentary toolbar button action"
-                    ),
-                    summary: String(
-                        localized: "prefs_toolbar_button_action_summary",
-                        defaultValue: "Choose if one-tap of Bible/commentary toolbar buttons shows menu or activity directly."
+                    settingsRowLabel(
+                        preferenceKey: .navigateToVersePref,
+                        title: String(
+                            localized: "prefs_navigate_to_verse_title",
+                            defaultValue: "Navigate to verse"
+                        ),
+                        summary: String(
+                            localized: "prefs_navigate_to_verse_summary",
+                            defaultValue: "Choose verse (and chapter) when selecting a passage"
+                        )
                     )
-                )
-            }
-            Toggle(isOn: Binding(
-                get: { disableTwoStepBookmarking },
-                set: { newValue in
-                    disableTwoStepBookmarking = newValue
-                    let store = SettingsStore(modelContext: modelContext)
-                    store.setBool(.disableTwoStepBookmarking, value: newValue)
                 }
-            )) {
-                settingsRowLabel(
-                    preferenceKey: .disableTwoStepBookmarking,
-                    title: String(
-                        localized: "prefs_disable_two_step_bookmarking_title",
-                        defaultValue: "One-step bookmarking"
-                    ),
-                    summary: String(
-                        localized: "prefs_disable_two_step_bookmarking_summary",
-                        defaultValue: "Show \"Selection\" and \"Verses\" items directly in Bible view Selection menu"
-                    )
-                )
             }
-            Picker(selection: Binding(
-                    get: { Self.normalizedBibleViewSwipeMode(bibleViewSwipeMode) },
+            if settingsSearchMatchesPreference(.openLinksInSpecialWindowPref, in: behaviorSettingsSearchEntries) {
+                Toggle(isOn: Binding(
+                    get: { openLinksInSpecialWindow },
                     set: { newValue in
-                        bibleViewSwipeMode = Self.normalizedBibleViewSwipeMode(newValue)
+                        openLinksInSpecialWindow = newValue
                         let store = SettingsStore(modelContext: modelContext)
-                        store.setString(.bibleViewSwipeMode, value: bibleViewSwipeMode)
+                        store.setBool(.openLinksInSpecialWindowPref, value: newValue)
                     }
-            )) {
-                Text(String(localized: "prefs_swipe_mode_chapter", defaultValue: "Chapter"))
-                    .tag("CHAPTER")
-                Text(String(localized: "prefs_swipe_mode_page", defaultValue: "Page"))
-                    .tag("PAGE")
-                Text(String(localized: "prefs_swipe_mode_none", defaultValue: "None"))
-                    .tag("NONE")
-            } label: {
-                bibleViewSwipeModeSettingsRow
-            }
-            Toggle(isOn: Binding(
-                get: { volumeKeysScroll },
-                set: { newValue in
-                    volumeKeysScroll = newValue
-                    let store = SettingsStore(modelContext: modelContext)
-                    store.setBool(.volumeKeysScroll, value: newValue)
-                }
-            )) {
-                settingsRowLabel(
-                    preferenceKey: .volumeKeysScroll,
-                    title: String(
-                        localized: "prefs_volume_keys_scroll_title",
-                        defaultValue: "Volume buttons scroll"
-                    ),
-                    summary: String(
-                        localized: "prefs_volume_keys_scroll_summary",
-                        defaultValue: "Use volume up/down to scroll Bible text"
-                    ),
-                    detail: String(
-                        localized: "prefs_volume_keys_scroll_ios_note",
-                        defaultValue: "iOS does not expose volume-button presses to apps. This setting is kept for Android parity and cross-device sync."
+                )) {
+                    settingsRowLabel(
+                        preferenceKey: .openLinksInSpecialWindowPref,
+                        title: String(
+                            localized: "prefs_open_links_in_special_window_title",
+                            defaultValue: "Links window"
+                        ),
+                        summary: String(
+                            localized: "prefs_open_links_in_special_window_summary",
+                            defaultValue: "Open links in special window, for quicker display of cross-references and Strongs"
+                        )
                     )
-                )
-            }
-            Toggle(isOn: Binding(
-                get: { displaySettings.enableVerseSelection ?? true },
-                set: {
-                    displaySettings.enableVerseSelection = $0
-                    onSettingsChanged?()
                 }
-            )) {
-                settingsRowLabel(
-                    preferenceKey: nil,
-                    title: String(localized: "verse_selection")
-                )
+            }
+            if settingsSearchMatchesPreference(.screenKeepOnPref, in: behaviorSettingsSearchEntries) {
+                Toggle(isOn: Binding(
+                    get: { screenKeepOn },
+                    set: { newValue in
+                        screenKeepOn = newValue
+                        let store = SettingsStore(modelContext: modelContext)
+                        store.setBool(.screenKeepOnPref, value: newValue)
+                        applyScreenKeepOn(newValue)
+                    }
+                )) {
+                    settingsRowLabel(
+                        preferenceKey: .screenKeepOnPref,
+                        title: String(localized: "prefs_screen_keep_on_title", defaultValue: "Keep screen on"),
+                        summary: String(
+                            localized: "prefs_screen_keep_on_summary",
+                            defaultValue: "Prevent screen sleeping while using this app"
+                        )
+                    )
+                }
+            }
+            if settingsSearchMatchesPreference(.doubleTapToFullscreen, in: behaviorSettingsSearchEntries) {
+                Toggle(isOn: Binding(
+                    get: { doubleTapToFullscreen },
+                    set: { newValue in
+                        doubleTapToFullscreen = newValue
+                        let store = SettingsStore(modelContext: modelContext)
+                        store.setBool(.doubleTapToFullscreen, value: newValue)
+                    }
+                )) {
+                    settingsRowLabel(
+                        preferenceKey: .doubleTapToFullscreen,
+                        title: String(
+                            localized: "prefs_double_tap_to_fullscreen_title",
+                            defaultValue: "Double-tap to Fullscreen"
+                        ),
+                        summary: String(
+                            localized: "prefs_double_tap_to_fullscreen_summary",
+                            defaultValue: "Enter fullscreen mode by double-tapping window"
+                        )
+                    )
+                }
+            }
+            if settingsSearchMatchesPreference(.autoFullscreenPref, in: behaviorSettingsSearchEntries) {
+                Toggle(isOn: Binding(
+                    get: { autoFullscreen },
+                    set: { newValue in
+                        autoFullscreen = newValue
+                        let store = SettingsStore(modelContext: modelContext)
+                        store.setBool(.autoFullscreenPref, value: newValue)
+                    }
+                )) {
+                    settingsRowLabel(
+                        preferenceKey: .autoFullscreenPref,
+                        title: String(localized: "auto_fullscreen", defaultValue: "Fullscreen by scrolling"),
+                        summary: String(
+                            localized: "auto_fullscreen_summary",
+                            defaultValue: "Switch automatically to fullscreen when scrolling text. Tip: you can always also switch to full screen by doubletapping screen."
+                        )
+                    )
+                }
+            }
+            if settingsSearchMatchesPreference(.toolbarButtonActions, in: behaviorSettingsSearchEntries) {
+                Picker(selection: Binding(
+                        get: { Self.normalizedToolbarButtonActionsMode(toolbarButtonActionsMode) },
+                        set: { newValue in
+                            toolbarButtonActionsMode = Self.normalizedToolbarButtonActionsMode(newValue)
+                            let store = SettingsStore(modelContext: modelContext)
+                            store.setString(.toolbarButtonActions, value: toolbarButtonActionsMode)
+                        }
+                    )) {
+                    Text(String(localized: "prefs_toolbar_button_action_default", defaultValue: "Default"))
+                        .tag("default")
+                    Text(String(localized: "prefs_toolbar_button_action_swap_menu", defaultValue: "Swap menu"))
+                        .tag("swap-menu")
+                    Text(String(localized: "prefs_toolbar_button_action_swap_activity", defaultValue: "Swap activity"))
+                        .tag("swap-activity")
+                } label: {
+                    settingsRowLabel(
+                        preferenceKey: .toolbarButtonActions,
+                        title: String(
+                            localized: "prefs_toolbar_button_action_title",
+                            defaultValue: "Bible/commentary toolbar button action"
+                        ),
+                        summary: String(
+                            localized: "prefs_toolbar_button_action_summary",
+                            defaultValue: "Choose if one-tap of Bible/commentary toolbar buttons shows menu or activity directly."
+                        )
+                    )
+                }
+            }
+            if settingsSearchMatchesPreference(.disableTwoStepBookmarking, in: behaviorSettingsSearchEntries) {
+                Toggle(isOn: Binding(
+                    get: { disableTwoStepBookmarking },
+                    set: { newValue in
+                        disableTwoStepBookmarking = newValue
+                        let store = SettingsStore(modelContext: modelContext)
+                        store.setBool(.disableTwoStepBookmarking, value: newValue)
+                    }
+                )) {
+                    settingsRowLabel(
+                        preferenceKey: .disableTwoStepBookmarking,
+                        title: String(
+                            localized: "prefs_disable_two_step_bookmarking_title",
+                            defaultValue: "One-step bookmarking"
+                        ),
+                        summary: String(
+                            localized: "prefs_disable_two_step_bookmarking_summary",
+                            defaultValue: "Show \"Selection\" and \"Verses\" items directly in Bible view Selection menu"
+                        )
+                    )
+                }
+            }
+            if settingsSearchMatchesPreference(.bibleViewSwipeMode, in: behaviorSettingsSearchEntries) {
+                Picker(selection: Binding(
+                        get: { Self.normalizedBibleViewSwipeMode(bibleViewSwipeMode) },
+                        set: { newValue in
+                            bibleViewSwipeMode = Self.normalizedBibleViewSwipeMode(newValue)
+                            let store = SettingsStore(modelContext: modelContext)
+                            store.setString(.bibleViewSwipeMode, value: bibleViewSwipeMode)
+                        }
+                )) {
+                    Text(String(localized: "prefs_swipe_mode_chapter", defaultValue: "Chapter"))
+                        .tag("CHAPTER")
+                    Text(String(localized: "prefs_swipe_mode_page", defaultValue: "Page"))
+                        .tag("PAGE")
+                    Text(String(localized: "prefs_swipe_mode_none", defaultValue: "None"))
+                        .tag("NONE")
+                } label: {
+                    bibleViewSwipeModeSettingsRow
+                }
+            }
+            if settingsSearchMatchesPreference(.volumeKeysScroll, in: behaviorSettingsSearchEntries) {
+                Toggle(isOn: Binding(
+                    get: { volumeKeysScroll },
+                    set: { newValue in
+                        volumeKeysScroll = newValue
+                        let store = SettingsStore(modelContext: modelContext)
+                        store.setBool(.volumeKeysScroll, value: newValue)
+                    }
+                )) {
+                    settingsRowLabel(
+                        preferenceKey: .volumeKeysScroll,
+                        title: String(
+                            localized: "prefs_volume_keys_scroll_title",
+                            defaultValue: "Volume buttons scroll"
+                        ),
+                        summary: String(
+                            localized: "prefs_volume_keys_scroll_summary",
+                            defaultValue: "Use volume up/down to scroll Bible text"
+                        ),
+                        detail: String(
+                            localized: "prefs_volume_keys_scroll_ios_note",
+                            defaultValue: "iOS does not expose volume-button presses to apps. This setting is kept for Android parity and cross-device sync."
+                        )
+                    )
+                }
+            }
+            if settingsSearchMatchesIdentifier("settingsVerseSelection", in: behaviorSettingsSearchEntries) {
+                Toggle(isOn: Binding(
+                    get: { displaySettings.enableVerseSelection ?? true },
+                    set: {
+                        displaySettings.enableVerseSelection = $0
+                        onSettingsChanged?()
+                    }
+                )) {
+                    settingsRowLabel(
+                        preferenceKey: nil,
+                        title: String(localized: "verse_selection")
+                    )
+                }
             }
         } header: {
             settingsSectionHeader(
@@ -848,49 +884,57 @@ public struct SettingsView: View {
     @ViewBuilder
     private var securitySettingsSection: some View {
         Section {
-            Button {
-                showDiscreteHelp = true
-            } label: {
-                settingsRowLabel(
-                    preferenceKey: .discreteHelp,
-                    title: String(localized: "discrete_help_title"),
-                    summary: String(localized: "discrete_help_summary")
-                )
+            if settingsSearchMatchesPreference(.discreteHelp, in: securitySettingsSearchEntries) {
+                Button {
+                    showDiscreteHelp = true
+                } label: {
+                    settingsRowLabel(
+                        preferenceKey: .discreteHelp,
+                        title: String(localized: "discrete_help_title"),
+                        summary: String(localized: "discrete_help_summary")
+                    )
+                }
             }
 
-            Toggle(isOn: $discreteMode) {
-                settingsRowLabel(
-                    preferenceKey: .discreteMode,
-                    title: String(localized: "discrete_mode"),
-                    summary: String(localized: "discrete_mode_description")
-                )
+            if settingsSearchMatchesPreference(.discreteMode, in: securitySettingsSearchEntries) {
+                Toggle(isOn: $discreteMode) {
+                    settingsRowLabel(
+                        preferenceKey: .discreteMode,
+                        title: String(localized: "discrete_mode"),
+                        summary: String(localized: "discrete_mode_description")
+                    )
+                }
             }
 
-            Toggle(isOn: $showCalculator) {
-                settingsRowLabel(
-                    preferenceKey: .showCalculator,
-                    title: String(localized: "show_calculator"),
-                    summary: String(localized: "show_calculator_description")
-                )
+            if settingsSearchMatchesPreference(.showCalculator, in: securitySettingsSearchEntries) {
+                Toggle(isOn: $showCalculator) {
+                    settingsRowLabel(
+                        preferenceKey: .showCalculator,
+                        title: String(localized: "show_calculator"),
+                        summary: String(localized: "show_calculator_description")
+                    )
+                }
             }
 
-            HStack(alignment: .top, spacing: 12) {
-                settingsRowLabel(
-                    preferenceKey: .calculatorPin,
-                    title: String(localized: "calculator_pin"),
-                    summary: String(localized: "calculator_pin_description")
-                )
-                Spacer()
-                TextField(String(localized: "calculator_pin_placeholder"), text: $calculatorPin)
-                    #if os(iOS)
-                    .keyboardType(.numberPad)
-                    #endif
-                    .multilineTextAlignment(.trailing)
-                    .frame(width: 100)
-                    .onChange(of: calculatorPin) { _, newValue in
-                        let filtered = newValue.filter { $0.isNumber }
-                        if filtered != newValue { calculatorPin = filtered }
-                    }
+            if settingsSearchMatchesPreference(.calculatorPin, in: securitySettingsSearchEntries) {
+                HStack(alignment: .top, spacing: 12) {
+                    settingsRowLabel(
+                        preferenceKey: .calculatorPin,
+                        title: String(localized: "calculator_pin"),
+                        summary: String(localized: "calculator_pin_description")
+                    )
+                    Spacer()
+                    TextField(String(localized: "calculator_pin_placeholder"), text: $calculatorPin)
+                        #if os(iOS)
+                        .keyboardType(.numberPad)
+                        #endif
+                        .multilineTextAlignment(.trailing)
+                        .frame(width: 100)
+                        .onChange(of: calculatorPin) { _, newValue in
+                            let filtered = newValue.filter { $0.isNumber }
+                            if filtered != newValue { calculatorPin = filtered }
+                        }
+                }
             }
         } header: {
             settingsSectionHeader(String(localized: "settings_security"))
@@ -907,115 +951,125 @@ public struct SettingsView: View {
     @ViewBuilder
     private var advancedSettingsSection: some View {
         Section {
-            Toggle(isOn: Binding(
-                get: { enableBluetoothMediaButtons },
-                set: { newValue in
-                    enableBluetoothMediaButtons = newValue
-                    let store = SettingsStore(modelContext: modelContext)
-                    store.setBool(.enableBluetoothPref, value: newValue)
-                    onSettingsChanged?()
-                }
-            )) {
-                settingsRowLabel(
-                    preferenceKey: .enableBluetoothPref,
-                    title: String(
-                        localized: "prefs_enable_bluetooth_title",
-                        defaultValue: "Enable Bluetooth media buttons"
-                    ),
-                    summary: String(
-                        localized: "prefs_enable_bluetooth_summary",
-                        defaultValue: "Handle Bluetooth media buttons to start/stop speaking."
+            if settingsSearchMatchesPreference(.enableBluetoothPref, in: advancedSettingsSearchEntries) {
+                Toggle(isOn: Binding(
+                    get: { enableBluetoothMediaButtons },
+                    set: { newValue in
+                        enableBluetoothMediaButtons = newValue
+                        let store = SettingsStore(modelContext: modelContext)
+                        store.setBool(.enableBluetoothPref, value: newValue)
+                        onSettingsChanged?()
+                    }
+                )) {
+                    settingsRowLabel(
+                        preferenceKey: .enableBluetoothPref,
+                        title: String(
+                            localized: "prefs_enable_bluetooth_title",
+                            defaultValue: "Enable Bluetooth media buttons"
+                        ),
+                        summary: String(
+                            localized: "prefs_enable_bluetooth_summary",
+                            defaultValue: "Handle Bluetooth media buttons to start/stop speaking."
+                        )
                     )
-                )
+                }
             }
-            NavigationLink {
-                ExperimentalFeaturesMultiSelectView(
-                    title: String(
-                        localized: "prefs_experimental_features_title",
-                        defaultValue: "Experimental features"
-                    ),
-                    options: Self.experimentalFeatureOptions,
-                    selectedValues: $enabledExperimentalFeatures
-                )
-            } label: {
-                settingsSelectionRow(
-                    preferenceKey: .experimentalFeatures,
-                    title: String(
-                        localized: "prefs_experimental_features_title",
-                        defaultValue: "Experimental features"
-                    ),
-                    summary: String(
-                        localized: "prefs_experimental_features_summary",
-                        defaultValue: "Select which experimental features to enable. These features are still in development and may change or be removed"
-                    ),
-                    detail: experimentalFeaturesSummary(selectedValues: enabledExperimentalFeatures)
-                )
+            if settingsSearchMatchesPreference(.experimentalFeatures, in: advancedSettingsSearchEntries) {
+                NavigationLink {
+                    ExperimentalFeaturesMultiSelectView(
+                        title: String(
+                            localized: "prefs_experimental_features_title",
+                            defaultValue: "Experimental features"
+                        ),
+                        options: Self.experimentalFeatureOptions,
+                        selectedValues: $enabledExperimentalFeatures
+                    )
+                } label: {
+                    settingsSelectionRow(
+                        preferenceKey: .experimentalFeatures,
+                        title: String(
+                            localized: "prefs_experimental_features_title",
+                            defaultValue: "Experimental features"
+                        ),
+                        summary: String(
+                            localized: "prefs_experimental_features_summary",
+                            defaultValue: "Select which experimental features to enable. These features are still in development and may change or be removed"
+                        ),
+                        detail: experimentalFeaturesSummary(selectedValues: enabledExperimentalFeatures)
+                    )
+                }
             }
             #if DEBUG
-            Toggle(isOn: Binding(
-                get: { showErrorBox },
-                set: { newValue in
-                    showErrorBox = newValue
-                    let store = SettingsStore(modelContext: modelContext)
-                    store.setBool(.showErrorBox, value: newValue)
-                    onSettingsChanged?()
-                }
-            )) {
-                settingsRowLabel(
-                    preferenceKey: .showErrorBox,
-                    title: String(
-                        localized: "prefs_show_error_box_title",
-                        defaultValue: "Show Javascript error box"
-                    ),
-                    summary: String(
-                        localized: "prefs_show_error_box_summary",
-                        defaultValue: "Useful for developers when debugging BibleView javascript side errors. This will make the app slower."
+            if settingsSearchMatchesPreference(.showErrorBox, in: advancedSettingsSearchEntries) {
+                Toggle(isOn: Binding(
+                    get: { showErrorBox },
+                    set: { newValue in
+                        showErrorBox = newValue
+                        let store = SettingsStore(modelContext: modelContext)
+                        store.setBool(.showErrorBox, value: newValue)
+                        onSettingsChanged?()
+                    }
+                )) {
+                    settingsRowLabel(
+                        preferenceKey: .showErrorBox,
+                        title: String(
+                            localized: "prefs_show_error_box_title",
+                            defaultValue: "Show Javascript error box"
+                        ),
+                        summary: String(
+                            localized: "prefs_show_error_box_summary",
+                            defaultValue: "Useful for developers when debugging BibleView javascript side errors. This will make the app slower."
+                        )
                     )
-                )
+                }
             }
             #endif
 
             #if os(iOS)
-            Button {
-                openBibleLinkSystemSettings()
-            } label: {
-                settingsRowLabel(
-                    preferenceKey: .openLinks,
-                    title: String(
-                        localized: "open_bible_links_title",
-                        defaultValue: "Open Bible links in AndBible"
-                    ),
-                    summary: String(
-                        localized: "open_bible_links_summary",
-                        defaultValue: "When clicking links that refer to AndBible supported Bible URL, open them in AndBible"
+            if settingsSearchMatchesPreference(.openLinks, in: advancedSettingsSearchEntries) {
+                Button {
+                    openBibleLinkSystemSettings()
+                } label: {
+                    settingsRowLabel(
+                        preferenceKey: .openLinks,
+                        title: String(
+                            localized: "open_bible_links_title",
+                            defaultValue: "Open Bible links in AndBible"
+                        ),
+                        summary: String(
+                            localized: "open_bible_links_summary",
+                            defaultValue: "When clicking links that refer to AndBible supported Bible URL, open them in AndBible"
+                        )
                     )
-                )
+                }
             }
             #endif
 
             #if DEBUG
-            Button(role: .destructive) {
-                triggerDebugCrash()
-            } label: {
-                settingsRowLabel(
-                    preferenceKey: .crashApp,
-                    title: String(
-                        localized: "crash_app",
-                        defaultValue: "Crash app!"
-                    ),
-                    summary: debugCrashScheduled
-                        ? String(
-                            localized: "crash_app_scheduled_summary",
-                            defaultValue: "Crash scheduled in 10 seconds."
-                        )
-                        : String(
-                            localized: "crash_app_summary",
-                            defaultValue: "Crash app after 10 seconds. Debugging feature, visible only in debug builds."
+            if settingsSearchMatchesPreference(.crashApp, in: advancedSettingsSearchEntries) {
+                Button(role: .destructive) {
+                    triggerDebugCrash()
+                } label: {
+                    settingsRowLabel(
+                        preferenceKey: .crashApp,
+                        title: String(
+                            localized: "crash_app",
+                            defaultValue: "Crash app!"
                         ),
-                    isEnabled: !debugCrashScheduled
-                )
+                        summary: debugCrashScheduled
+                            ? String(
+                                localized: "crash_app_scheduled_summary",
+                                defaultValue: "Crash scheduled in 10 seconds."
+                            )
+                            : String(
+                                localized: "crash_app_summary",
+                                defaultValue: "Crash app after 10 seconds. Debugging feature, visible only in debug builds."
+                            ),
+                        isEnabled: !debugCrashScheduled
+                    )
+                }
+                .disabled(debugCrashScheduled)
             }
-            .disabled(debugCrashScheduled)
             #endif
         } header: {
             settingsSectionHeader(
@@ -1068,306 +1122,334 @@ public struct SettingsView: View {
     @ViewBuilder
     private var lookAndFeelSection: some View {
         Section {
-            settingsNavigationLink(
-                title: String(localized: "settings_text_display"),
-                androidKey: "global_text_display_settings",
-                accessibilityIdentifier: "settingsTextDisplayLink"
-            ) {
-                TextDisplaySettingsView(settings: $displaySettings, onChange: onSettingsChanged)
-            }
-            settingsNavigationLink(
-                title: String(localized: "settings_colors"),
-                accessibilityIdentifier: "settingsColorsLink"
-            ) {
-                ColorSettingsView(settings: $displaySettings, onChange: onSettingsChanged)
-            }
-            Picker(selection: Binding(
-                    get: { Self.nightModePickerSelection(from: nightModeMode) },
-                    set: { newValue in
-                        nightModeMode = newValue
-                        let store = SettingsStore(modelContext: modelContext)
-                        store.setString(.nightModePref3, value: newValue)
-                        let manualNightMode = store.getBool("night_mode")
-                        nightMode = NightModeSettingsResolver.isNightMode(
-                            rawValue: newValue,
-                            manualNightMode: manualNightMode,
-                            systemIsDark: colorScheme == .dark
-                        )
-                        onSettingsChanged?()
-                    }
-                )) {
-                ForEach(NightModeSettingsResolver.availableModes, id: \.rawValue) { mode in
-                    Text(Self.nightModeModeTitle(mode)).tag(mode.rawValue)
+            if settingsSearchMatchesIdentifier("settingsTextDisplayLink", in: lookAndFeelSettingsSearchEntries) {
+                settingsNavigationLink(
+                    title: String(localized: "settings_text_display"),
+                    androidKey: "global_text_display_settings",
+                    accessibilityIdentifier: "settingsTextDisplayLink"
+                ) {
+                    TextDisplaySettingsView(settings: $displaySettings, onChange: onSettingsChanged)
                 }
-            } label: {
-                settingsRowLabel(
-                    preferenceKey: .nightModePref3,
-                    title: String(localized: "prefs_night_mode_title", defaultValue: "Night mode switching"),
-                    summary: String(
-                        localized: "prefs_night_mode_summary",
-                        defaultValue: "Whether to switch to night mode manually or via system setting. Manual switching can be done from the 3-dot options menu on the main screen."
-                    )
-                )
             }
-            Toggle(isOn: Binding(
-                    get: { monochromeMode },
-                    set: { newValue in
-                        monochromeMode = newValue
-                        let store = SettingsStore(modelContext: modelContext)
-                        store.setBool(.monochromeMode, value: newValue)
-                        onSettingsChanged?()
-                    }
-                )) {
-                settingsRowLabel(
-                    preferenceKey: .monochromeMode,
-                    title: String(localized: "prefs_e_ink_mode_title", defaultValue: "Black & white mode"),
-                    summary: String(
-                        localized: "prefs_eink_mode_summary",
-                        defaultValue: "Use application in monochrome mode (no colors), making it more suitable for E-ink devices."
-                    )
-                )
+            if settingsSearchMatchesIdentifier("settingsColorsLink", in: lookAndFeelSettingsSearchEntries) {
+                settingsNavigationLink(
+                    title: String(localized: "settings_colors"),
+                    accessibilityIdentifier: "settingsColorsLink"
+                ) {
+                    ColorSettingsView(settings: $displaySettings, onChange: onSettingsChanged)
+                }
             }
-            Toggle(isOn: Binding(
-                    get: { disableAnimations },
-                    set: { newValue in
-                        disableAnimations = newValue
-                        let store = SettingsStore(modelContext: modelContext)
-                        store.setBool(.disableAnimations, value: newValue)
-                        onSettingsChanged?()
-                    }
-                )) {
-                settingsRowLabel(
-                    preferenceKey: .disableAnimations,
-                    title: String(localized: "prefs_disable_animations_title", defaultValue: "Disable animations"),
-                    summary: String(
-                        localized: "prefs_disable_animations_summary",
-                        defaultValue: "Disable various animations such as smooth scrolling."
-                    )
-                )
-            }
-            Toggle(isOn: Binding(
-                    get: { disableClickToEdit },
-                    set: { newValue in
-                        disableClickToEdit = newValue
-                        let store = SettingsStore(modelContext: modelContext)
-                        store.setBool(.disableClickToEdit, value: newValue)
-                        onSettingsChanged?()
-                    }
-                )) {
-                settingsRowLabel(
-                    preferenceKey: .disableClickToEdit,
-                    title: String(
-                        localized: "prefs_disable_click_to_edit_title",
-                        defaultValue: "Disable Study Pad click-to-edit"
-                    ),
-                    summary: String(
-                        localized: "prefs_disable_click_to_edit_summary",
-                        defaultValue: "Requires using the edit button to edit notes in the Study Pad."
-                    )
-                )
-            }
-            VStack(alignment: .leading, spacing: 8) {
-                settingsRowLabel(
-                    preferenceKey: .fontSizeMultiplier,
-                    title: String(
-                        localized: "pref_font_size_multiplier_title",
-                        defaultValue: "Font size multiplier"
-                    ),
-                    summary: String(
-                        format: String(
-                            localized: "prefs_font_size_multiplier_summary",
-                            defaultValue: "Multiply text font sizes by this number. Current value: %.1fx"
-                        ),
-                        Double(fontSizeMultiplier) / 100.0
-                    )
-                )
-                Slider(
-                    value: Binding(
-                        get: { Double(fontSizeMultiplier) },
+            if settingsSearchMatchesPreference(.nightModePref3, in: lookAndFeelSettingsSearchEntries) {
+                Picker(selection: Binding(
+                        get: { Self.nightModePickerSelection(from: nightModeMode) },
                         set: { newValue in
-                            let roundedValue = Int((newValue / 10.0).rounded() * 10.0)
-                            fontSizeMultiplier = min(max(roundedValue, 10), 500)
+                            nightModeMode = newValue
                             let store = SettingsStore(modelContext: modelContext)
-                            store.setInt(.fontSizeMultiplier, value: fontSizeMultiplier)
+                            store.setString(.nightModePref3, value: newValue)
+                            let manualNightMode = store.getBool("night_mode")
+                            nightMode = NightModeSettingsResolver.isNightMode(
+                                rawValue: newValue,
+                                manualNightMode: manualNightMode,
+                                systemIsDark: colorScheme == .dark
+                            )
                             onSettingsChanged?()
                         }
-                    ),
-                    in: 10...500,
-                    step: 10
-                )
-                .padding(.leading, 66)
-            }
-            Toggle(isOn: Binding(
-                    get: { fullScreenHideButtons },
-                    set: { newValue in
-                        fullScreenHideButtons = newValue
-                        let store = SettingsStore(modelContext: modelContext)
-                        store.setBool(.fullScreenHideButtonsPref, value: newValue)
-                        onSettingsChanged?()
+                    )) {
+                    ForEach(NightModeSettingsResolver.availableModes, id: \.rawValue) { mode in
+                        Text(Self.nightModeModeTitle(mode)).tag(mode.rawValue)
                     }
-                )) {
-                settingsRowLabel(
-                    preferenceKey: .fullScreenHideButtonsPref,
-                    title: String(
-                        localized: "full_screen_hide_buttons_pref_title",
-                        defaultValue: "Hide window button bar in fullscreen"
-                    ),
-                    summary: String(
-                        localized: "full_screen_hide_buttons_pref_summary",
-                        defaultValue: "When switching to fullscreen mode, hide automatically window button bar that is on the bottom of the screen"
+                } label: {
+                    settingsRowLabel(
+                        preferenceKey: .nightModePref3,
+                        title: String(localized: "prefs_night_mode_title", defaultValue: "Night mode switching"),
+                        summary: String(
+                            localized: "prefs_night_mode_summary",
+                            defaultValue: "Whether to switch to night mode manually or via system setting. Manual switching can be done from the 3-dot options menu on the main screen."
+                        )
                     )
-                )
-            }
-            Toggle(isOn: Binding(
-                    get: { hideWindowButtons },
-                    set: { newValue in
-                        hideWindowButtons = newValue
-                        let store = SettingsStore(modelContext: modelContext)
-                        store.setBool(.hideWindowButtons, value: newValue)
-                        onSettingsChanged?()
-                    }
-                )) {
-                settingsRowLabel(
-                    preferenceKey: .hideWindowButtons,
-                    title: String(
-                        localized: "hide_window_buttons_title",
-                        defaultValue: "Hide window buttons"
-                    ),
-                    summary: String(
-                        localized: "hide_window_buttons_summary",
-                        defaultValue: "Window buttons that are displayed on right side of the Bible views are hidden. Window navigation bar on the bottom is still displayed and you may open window popup menu by long-clicking them."
-                    )
-                )
-            }
-            Toggle(isOn: Binding(
-                    get: { hideBibleReferenceOverlay },
-                    set: { newValue in
-                        hideBibleReferenceOverlay = newValue
-                        let store = SettingsStore(modelContext: modelContext)
-                        store.setBool(.hideBibleReferenceOverlay, value: newValue)
-                        onSettingsChanged?()
-                    }
-                )) {
-                settingsRowLabel(
-                    preferenceKey: .hideBibleReferenceOverlay,
-                    title: String(
-                        localized: "hide_bible_reference_overlay_title",
-                        defaultValue: "Hide Bible reference overlay"
-                    ),
-                    summary: String(
-                        localized: "hide_bible_reference_overlay_summary",
-                        defaultValue: "Do not show the semi-transparent Bible reference overlay when app is in fullscreen mode"
-                    )
-                )
-            }
-            Toggle(isOn: Binding(
-                    get: { showActiveWindowIndicator },
-                    set: { newValue in
-                        showActiveWindowIndicator = newValue
-                        let store = SettingsStore(modelContext: modelContext)
-                        store.setBool(.showActiveWindowIndicator, value: newValue)
-                        onSettingsChanged?()
-                    }
-                )) {
-                settingsRowLabel(
-                    preferenceKey: .showActiveWindowIndicator,
-                    title: String(
-                        localized: "active_window_indicator_title",
-                        defaultValue: "Show active window indicator"
-                    ),
-                    summary: String(
-                        localized: "active_window_indicator_summary",
-                        defaultValue: "Highlight window corners to help recognising which window is active"
-                    )
-                )
-            }
-            NavigationLink {
-                BookmarkModalActionsInverseMultiSelectView(
-                    title: String(
-                        localized: "prefs_in_window_bible_bookmark_modal_buttons_title",
-                        defaultValue: "One-tap actions (Bibles)"
-                    ),
-                    options: Self.bibleBookmarkModalActionOptions,
-                    disabledValues: $disabledBibleBookmarkModalButtons
-                )
-            } label: {
-                settingsSelectionRow(
-                    preferenceKey: .disableBibleBookmarkModalButtons,
-                    title: String(
-                        localized: "prefs_in_window_bible_bookmark_modal_buttons_title",
-                        defaultValue: "One-tap actions (Bibles)"
-                    ),
-                    summary: String(
-                        localized: "prefs_in_window_bookmark_modal_buttons_description",
-                        defaultValue: "When a text is tapped, one-tap action window is shown. Which action buttons should be shown?"
-                    ),
-                    detail: inverseSelectionSummary(
-                        disabledValues: disabledBibleBookmarkModalButtons,
-                        options: Self.bibleBookmarkModalActionOptions
-                    )
-                )
-            }
-            NavigationLink {
-                BookmarkModalActionsInverseMultiSelectView(
-                    title: String(
-                        localized: "prefs_in_window_gen_bookmark_modal_buttons_title",
-                        defaultValue: "One-tap actions (Other)"
-                    ),
-                    options: Self.genBookmarkModalActionOptions,
-                    disabledValues: $disabledGenBookmarkModalButtons
-                )
-            } label: {
-                settingsSelectionRow(
-                    preferenceKey: .disableGenBookmarkModalButtons,
-                    title: String(
-                        localized: "prefs_in_window_gen_bookmark_modal_buttons_title",
-                        defaultValue: "One-tap actions (Other)"
-                    ),
-                    summary: String(
-                        localized: "prefs_in_window_bookmark_modal_buttons_description",
-                        defaultValue: "When a text is tapped, one-tap action window is shown. Which action buttons should be shown?"
-                    ),
-                    detail: inverseSelectionSummary(
-                        disabledValues: disabledGenBookmarkModalButtons,
-                        options: Self.genBookmarkModalActionOptions
-                    )
-                )
-            }
-            Picker(selection: $selectedLanguage) {
-                ForEach(Self.localeOptions) { lang in
-                    Text(Self.localizedLocaleOptionLabel(lang)).tag(lang.value)
                 }
-            } label: {
-                settingsRowLabel(
-                    preferenceKey: .localePref,
-                    title: String(localized: "prefs_interface_locale_title", defaultValue: "Application language"),
-                    summary: String(
-                        localized: "prefs_interface_locale_summary",
-                        defaultValue: "Select custom user interface language"
-                    ),
-                    detail: String(localized: "language_restart_required")
-                )
             }
-            .onChange(of: selectedLanguage) { _, newValue in
-                guard hasLoadedPreferences else { return }
-                let normalized = Self.localeOptions.contains(where: { $0.value == newValue }) ? newValue : ""
-                if normalized != selectedLanguage {
-                    selectedLanguage = normalized
-                    return
+            if settingsSearchMatchesPreference(.monochromeMode, in: lookAndFeelSettingsSearchEntries) {
+                Toggle(isOn: Binding(
+                        get: { monochromeMode },
+                        set: { newValue in
+                            monochromeMode = newValue
+                            let store = SettingsStore(modelContext: modelContext)
+                            store.setBool(.monochromeMode, value: newValue)
+                            onSettingsChanged?()
+                        }
+                    )) {
+                    settingsRowLabel(
+                        preferenceKey: .monochromeMode,
+                        title: String(localized: "prefs_e_ink_mode_title", defaultValue: "Black & white mode"),
+                        summary: String(
+                            localized: "prefs_eink_mode_summary",
+                            defaultValue: "Use application in monochrome mode (no colors), making it more suitable for E-ink devices."
+                        )
+                    )
                 }
+            }
+            if settingsSearchMatchesPreference(.disableAnimations, in: lookAndFeelSettingsSearchEntries) {
+                Toggle(isOn: Binding(
+                        get: { disableAnimations },
+                        set: { newValue in
+                            disableAnimations = newValue
+                            let store = SettingsStore(modelContext: modelContext)
+                            store.setBool(.disableAnimations, value: newValue)
+                            onSettingsChanged?()
+                        }
+                    )) {
+                    settingsRowLabel(
+                        preferenceKey: .disableAnimations,
+                        title: String(localized: "prefs_disable_animations_title", defaultValue: "Disable animations"),
+                        summary: String(
+                            localized: "prefs_disable_animations_summary",
+                            defaultValue: "Disable various animations such as smooth scrolling."
+                        )
+                    )
+                }
+            }
+            if settingsSearchMatchesPreference(.disableClickToEdit, in: lookAndFeelSettingsSearchEntries) {
+                Toggle(isOn: Binding(
+                        get: { disableClickToEdit },
+                        set: { newValue in
+                            disableClickToEdit = newValue
+                            let store = SettingsStore(modelContext: modelContext)
+                            store.setBool(.disableClickToEdit, value: newValue)
+                            onSettingsChanged?()
+                        }
+                    )) {
+                    settingsRowLabel(
+                        preferenceKey: .disableClickToEdit,
+                        title: String(
+                            localized: "prefs_disable_click_to_edit_title",
+                            defaultValue: "Disable Study Pad click-to-edit"
+                        ),
+                        summary: String(
+                            localized: "prefs_disable_click_to_edit_summary",
+                            defaultValue: "Requires using the edit button to edit notes in the Study Pad."
+                        )
+                    )
+                }
+            }
+            if settingsSearchMatchesPreference(.fontSizeMultiplier, in: lookAndFeelSettingsSearchEntries) {
+                VStack(alignment: .leading, spacing: 8) {
+                    settingsRowLabel(
+                        preferenceKey: .fontSizeMultiplier,
+                        title: String(
+                            localized: "pref_font_size_multiplier_title",
+                            defaultValue: "Font size multiplier"
+                        ),
+                        summary: String(
+                            format: String(
+                                localized: "prefs_font_size_multiplier_summary",
+                                defaultValue: "Multiply text font sizes by this number. Current value: %.1fx"
+                            ),
+                            Double(fontSizeMultiplier) / 100.0
+                        )
+                    )
+                    Slider(
+                        value: Binding(
+                            get: { Double(fontSizeMultiplier) },
+                            set: { newValue in
+                                let roundedValue = Int((newValue / 10.0).rounded() * 10.0)
+                                fontSizeMultiplier = min(max(roundedValue, 10), 500)
+                                let store = SettingsStore(modelContext: modelContext)
+                                store.setInt(.fontSizeMultiplier, value: fontSizeMultiplier)
+                                onSettingsChanged?()
+                            }
+                        ),
+                        in: 10...500,
+                        step: 10
+                    )
+                    .padding(.leading, 66)
+                }
+            }
+            if settingsSearchMatchesPreference(.fullScreenHideButtonsPref, in: lookAndFeelSettingsSearchEntries) {
+                Toggle(isOn: Binding(
+                        get: { fullScreenHideButtons },
+                        set: { newValue in
+                            fullScreenHideButtons = newValue
+                            let store = SettingsStore(modelContext: modelContext)
+                            store.setBool(.fullScreenHideButtonsPref, value: newValue)
+                            onSettingsChanged?()
+                        }
+                    )) {
+                    settingsRowLabel(
+                        preferenceKey: .fullScreenHideButtonsPref,
+                        title: String(
+                            localized: "full_screen_hide_buttons_pref_title",
+                            defaultValue: "Hide window button bar in fullscreen"
+                        ),
+                        summary: String(
+                            localized: "full_screen_hide_buttons_pref_summary",
+                            defaultValue: "When switching to fullscreen mode, hide automatically window button bar that is on the bottom of the screen"
+                        )
+                    )
+                }
+            }
+            if settingsSearchMatchesPreference(.hideWindowButtons, in: lookAndFeelSettingsSearchEntries) {
+                Toggle(isOn: Binding(
+                        get: { hideWindowButtons },
+                        set: { newValue in
+                            hideWindowButtons = newValue
+                            let store = SettingsStore(modelContext: modelContext)
+                            store.setBool(.hideWindowButtons, value: newValue)
+                            onSettingsChanged?()
+                        }
+                    )) {
+                    settingsRowLabel(
+                        preferenceKey: .hideWindowButtons,
+                        title: String(
+                            localized: "hide_window_buttons_title",
+                            defaultValue: "Hide window buttons"
+                        ),
+                        summary: String(
+                            localized: "hide_window_buttons_summary",
+                            defaultValue: "Window buttons that are displayed on right side of the Bible views are hidden. Window navigation bar on the bottom is still displayed and you may open window popup menu by long-clicking them."
+                        )
+                    )
+                }
+            }
+            if settingsSearchMatchesPreference(.hideBibleReferenceOverlay, in: lookAndFeelSettingsSearchEntries) {
+                Toggle(isOn: Binding(
+                        get: { hideBibleReferenceOverlay },
+                        set: { newValue in
+                            hideBibleReferenceOverlay = newValue
+                            let store = SettingsStore(modelContext: modelContext)
+                            store.setBool(.hideBibleReferenceOverlay, value: newValue)
+                            onSettingsChanged?()
+                        }
+                    )) {
+                    settingsRowLabel(
+                        preferenceKey: .hideBibleReferenceOverlay,
+                        title: String(
+                            localized: "hide_bible_reference_overlay_title",
+                            defaultValue: "Hide Bible reference overlay"
+                        ),
+                        summary: String(
+                            localized: "hide_bible_reference_overlay_summary",
+                            defaultValue: "Do not show the semi-transparent Bible reference overlay when app is in fullscreen mode"
+                        )
+                    )
+                }
+            }
+            if settingsSearchMatchesPreference(.showActiveWindowIndicator, in: lookAndFeelSettingsSearchEntries) {
+                Toggle(isOn: Binding(
+                        get: { showActiveWindowIndicator },
+                        set: { newValue in
+                            showActiveWindowIndicator = newValue
+                            let store = SettingsStore(modelContext: modelContext)
+                            store.setBool(.showActiveWindowIndicator, value: newValue)
+                            onSettingsChanged?()
+                        }
+                    )) {
+                    settingsRowLabel(
+                        preferenceKey: .showActiveWindowIndicator,
+                        title: String(
+                            localized: "active_window_indicator_title",
+                            defaultValue: "Show active window indicator"
+                        ),
+                        summary: String(
+                            localized: "active_window_indicator_summary",
+                            defaultValue: "Highlight window corners to help recognising which window is active"
+                        )
+                    )
+                }
+            }
+            if settingsSearchMatchesPreference(.disableBibleBookmarkModalButtons, in: lookAndFeelSettingsSearchEntries) {
+                NavigationLink {
+                    BookmarkModalActionsInverseMultiSelectView(
+                        title: String(
+                            localized: "prefs_in_window_bible_bookmark_modal_buttons_title",
+                            defaultValue: "One-tap actions (Bibles)"
+                        ),
+                        options: Self.bibleBookmarkModalActionOptions,
+                        disabledValues: $disabledBibleBookmarkModalButtons
+                    )
+                } label: {
+                    settingsSelectionRow(
+                        preferenceKey: .disableBibleBookmarkModalButtons,
+                        title: String(
+                            localized: "prefs_in_window_bible_bookmark_modal_buttons_title",
+                            defaultValue: "One-tap actions (Bibles)"
+                        ),
+                        summary: String(
+                            localized: "prefs_in_window_bookmark_modal_buttons_description",
+                            defaultValue: "When a text is tapped, one-tap action window is shown. Which action buttons should be shown?"
+                        ),
+                        detail: inverseSelectionSummary(
+                            disabledValues: disabledBibleBookmarkModalButtons,
+                            options: Self.bibleBookmarkModalActionOptions
+                        )
+                    )
+                }
+            }
+            if settingsSearchMatchesPreference(.disableGenBookmarkModalButtons, in: lookAndFeelSettingsSearchEntries) {
+                NavigationLink {
+                    BookmarkModalActionsInverseMultiSelectView(
+                        title: String(
+                            localized: "prefs_in_window_gen_bookmark_modal_buttons_title",
+                            defaultValue: "One-tap actions (Other)"
+                        ),
+                        options: Self.genBookmarkModalActionOptions,
+                        disabledValues: $disabledGenBookmarkModalButtons
+                    )
+                } label: {
+                    settingsSelectionRow(
+                        preferenceKey: .disableGenBookmarkModalButtons,
+                        title: String(
+                            localized: "prefs_in_window_gen_bookmark_modal_buttons_title",
+                            defaultValue: "One-tap actions (Other)"
+                        ),
+                        summary: String(
+                            localized: "prefs_in_window_bookmark_modal_buttons_description",
+                            defaultValue: "When a text is tapped, one-tap action window is shown. Which action buttons should be shown?"
+                        ),
+                        detail: inverseSelectionSummary(
+                            disabledValues: disabledGenBookmarkModalButtons,
+                            options: Self.genBookmarkModalActionOptions
+                        )
+                    )
+                }
+            }
+            if settingsSearchMatchesPreference(.localePref, in: lookAndFeelSettingsSearchEntries) {
+                Picker(selection: $selectedLanguage) {
+                    ForEach(Self.localeOptions) { lang in
+                        Text(Self.localizedLocaleOptionLabel(lang)).tag(lang.value)
+                    }
+                } label: {
+                    settingsRowLabel(
+                        preferenceKey: .localePref,
+                        title: String(localized: "prefs_interface_locale_title", defaultValue: "Application language"),
+                        summary: String(
+                            localized: "prefs_interface_locale_summary",
+                            defaultValue: "Select custom user interface language"
+                        ),
+                        detail: String(localized: "language_restart_required")
+                    )
+                }
+                .onChange(of: selectedLanguage) { _, newValue in
+                    guard hasLoadedPreferences else { return }
+                    let normalized = Self.localeOptions.contains(where: { $0.value == newValue }) ? newValue : ""
+                    if normalized != selectedLanguage {
+                        selectedLanguage = normalized
+                        return
+                    }
 
-                let store = SettingsStore(modelContext: modelContext)
-                guard shouldPersistLanguageSelection(normalized, using: store) else {
-                    return
-                }
-                store.setString(.localePref, value: normalized)
+                    let store = SettingsStore(modelContext: modelContext)
+                    guard shouldPersistLanguageSelection(normalized, using: store) else {
+                        return
+                    }
+                    store.setString(.localePref, value: normalized)
 
-                if let mapped = Self.appleLanguageCode(forLocalePrefValue: normalized) {
-                    UserDefaults.standard.set([mapped], forKey: "AppleLanguages")
-                } else {
-                    UserDefaults.standard.removeObject(forKey: "AppleLanguages")
+                    if let mapped = Self.appleLanguageCode(forLocalePrefValue: normalized) {
+                        UserDefaults.standard.set([mapped], forKey: "AppleLanguages")
+                    } else {
+                        UserDefaults.standard.removeObject(forKey: "AppleLanguages")
+                    }
+                    showRestartAlert = true
                 }
-                showRestartAlert = true
             }
         } header: {
             settingsSectionHeader(String(localized: "prefs_display_customization_cat", defaultValue: "Look & feel"))
@@ -1876,7 +1958,7 @@ public struct SettingsView: View {
 
     /// Search entries for advanced preferences and developer/debug action rows.
     private var advancedSettingsSearchEntries: [AndBibleSettingsSearchEntry] {
-        [
+        var entries = [
             preferenceSearchEntry(
                 .enableBluetoothPref,
                 title: String(localized: "prefs_enable_bluetooth_title", defaultValue: "Enable Bluetooth media buttons"),
@@ -1893,19 +1975,32 @@ public struct SettingsView: View {
                     defaultValue: "Select which experimental features to enable. These features are still in development and may change or be removed"
                 )
             ),
+        ]
+        #if DEBUG
+        entries.append(
             preferenceSearchEntry(
                 .showErrorBox,
                 title: String(localized: "prefs_show_error_box_title", defaultValue: "Show Javascript error box")
-            ),
+            )
+        )
+        #endif
+        #if os(iOS)
+        entries.append(
             preferenceSearchEntry(
                 .openLinks,
                 title: String(localized: "open_bible_links_title", defaultValue: "Open Bible links in AndBible")
-            ),
+            )
+        )
+        #endif
+        #if DEBUG
+        entries.append(
             preferenceSearchEntry(
                 .crashApp,
                 title: String(localized: "crash_app", defaultValue: "Crash app!")
-            ),
-        ]
+            )
+        )
+        #endif
+        return entries
     }
 
     /// Search entry for static application information retained in Settings.
@@ -1993,6 +2088,40 @@ public struct SettingsView: View {
      */
     private func settingsSearchMatchesEntry(_ entry: AndBibleSettingsSearchEntry) -> Bool {
         AndBibleSettingsSearchMatcher.matches(query: settingsSearchText, entry: entry)
+    }
+
+    /**
+     Returns whether a rendered row identifier matches the current search query.
+
+     - Parameters:
+       - identifier: Stable accessibility or preference identifier for the row.
+       - entries: Search entries for the row's section.
+     - Returns: `true` when search is inactive or the exact entry matches the current query.
+     - Side effects: none.
+     - Failure modes: Unknown identifiers are hidden only while search is active.
+     */
+    private func settingsSearchMatchesIdentifier(
+        _ identifier: String,
+        in entries: [AndBibleSettingsSearchEntry]
+    ) -> Bool {
+        AndBibleSettingsSearchMatcher.matchesIdentifier(identifier, query: settingsSearchText, entries: entries)
+    }
+
+    /**
+     Returns whether a preference-backed row matches the current search query.
+
+     - Parameters:
+       - key: Android parity key backing the rendered row.
+       - entries: Search entries for the row's section.
+     - Returns: `true` when search is inactive or the exact key-backed entry matches.
+     - Side effects: none.
+     - Failure modes: Unknown preference keys are hidden only while search is active.
+     */
+    private func settingsSearchMatchesPreference(
+        _ key: AppPreferenceKey,
+        in entries: [AndBibleSettingsSearchEntry]
+    ) -> Bool {
+        settingsSearchMatchesIdentifier(key.rawValue, in: entries)
     }
 
     /**

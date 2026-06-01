@@ -110,6 +110,36 @@ enum AndBibleSettingsSearchMatcher {
     }
 
     /**
+     Returns whether one concrete rendered row should remain visible for a query.
+
+     Settings sections can match because any child row matches, but row rendering must stay tied to
+     the specific entry behind that row. This helper centralizes that exact-entry lookup so
+     `SettingsView` does not duplicate matcher rules or accidentally keep unrelated rows visible.
+
+     - Parameters:
+       - identifier: Stable identifier of the row that is about to be rendered.
+       - query: User-entered search text.
+       - entries: Search entries for the containing visible section.
+     - Returns: `true` when search is empty, or when the matching entry exists and satisfies the
+       query; `false` for unknown identifiers during active search.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    static func matchesIdentifier(
+        _ identifier: String,
+        query: String,
+        entries: [AndBibleSettingsSearchEntry]
+    ) -> Bool {
+        guard !normalizedTerms(from: query).isEmpty else {
+            return true
+        }
+        guard let entry = entries.first(where: { $0.identifier == identifier }) else {
+            return false
+        }
+        return matches(query: query, entry: entry)
+    }
+
+    /**
      Applies the shared case/diacritic normalization used for both query and entry text.
 
      - Parameter value: Raw text to normalize.

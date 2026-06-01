@@ -1228,7 +1228,8 @@ extension AndBibleUITests {
      *   - app: Running application under test.
      *   - timeout: Maximum number of seconds to wait before returning `false`.
      * - Returns: `true` when the reader's compact state export reports that transient reader
-     *   surfaces are closed and My Notes is no longer fronting the primary reader chrome.
+     *   surfaces and pushed reader destinations are closed, and My Notes is no longer fronting the
+     *   primary reader chrome.
      * - Side effects:
      *   - polls the compact reader state export while modal surfaces dismiss back to the reader
      *     shell, avoiding full-toolbar snapshots while WebView content is settling
@@ -1246,9 +1247,16 @@ extension AndBibleUITests {
                 let drawerClosed = state.contains("drawerVisible=false") || !state.contains("drawerVisible=")
                 let overflowClosed = state.contains("overflowVisible=false") || !state.contains("overflowVisible=")
                 let sheetClosed = state.contains("readerSheet=none") || !state.contains("readerSheet=")
+                let destinationClosed = state.contains("readerDestination=none") ||
+                    !state.contains("readerDestination=")
                 let searchClosed = state.contains("searchVisible=false") || !state.contains("searchVisible=")
                 let myNotesClosed = state.contains("myNotesVisible=false") || !state.contains("myNotesVisible=")
-                return drawerClosed && overflowClosed && sheetClosed && searchClosed && myNotesClosed
+                return drawerClosed &&
+                    overflowClosed &&
+                    sheetClosed &&
+                    destinationClosed &&
+                    searchClosed &&
+                    myNotesClosed
             } ?? false
 
             if readerState != nil,
