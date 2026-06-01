@@ -53,7 +53,7 @@ public struct AboutView: View {
                         .font(.title.bold())
                         .accessibilityIdentifier("aboutAppTitle")
 
-                    Text(String(localized: "version \(versionMetadata.detailText)"))
+                    Text(verbatim: "\(String(localized: "version")) \(versionMetadata.detailText)")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }

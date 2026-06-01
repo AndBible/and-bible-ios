@@ -1133,7 +1133,8 @@ extension AndBibleUITests {
      *   - line: Source line used for XCTest failure attribution.
      * - Returns: The production settings row element.
      * - Side effects:
-     *   - scrolls the Settings form while re-querying the live XCUI hierarchy
+     *   - scans the current Settings viewport, then scrolls through the form while re-querying
+     *     the live XCUI hierarchy
      * - Failure modes:
      *   - records an XCTest failure if the production row never appears
      */
@@ -1186,19 +1187,6 @@ extension AndBibleUITests {
             return nil
         }
 
-        if visibleTitle != nil {
-            for _ in 0..<3 {
-                if let control = resolvedVisibleControl() {
-                    return control
-                }
-                guard settingsForm.exists, !settingsForm.frame.isEmpty, Date() < deadline else {
-                    break
-                }
-                settingsForm.swipeDown()
-                RunLoop.current.run(until: Date().addingTimeInterval(0.3))
-            }
-        }
-
         repeat {
             if let control = resolvedVisibleControl() {
                 return control
@@ -1210,6 +1198,19 @@ extension AndBibleUITests {
             settingsForm.swipeUp()
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         } while Date() < deadline
+
+        let recoveryDeadline = Date().addingTimeInterval(min(3, max(1, timeout / 4)))
+        repeat {
+            if let control = resolvedVisibleControl() {
+                return control
+            }
+            guard settingsForm.exists, !settingsForm.frame.isEmpty else {
+                break
+            }
+
+            settingsForm.swipeDown()
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        } while Date() < recoveryDeadline
 
         let control = unresolvedElement(identifier, in: app)
         if control.exists {
