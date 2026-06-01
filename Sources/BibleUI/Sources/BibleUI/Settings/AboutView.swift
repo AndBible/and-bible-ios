@@ -20,14 +20,16 @@ public struct AboutView: View {
     /// Dismiss action inherited from the surrounding navigation presentation.
     @Environment(\.dismiss) private var dismiss
 
-    /// Human-readable marketing version shown beneath the app title.
-    private var appVersion: String {
-        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
-    }
+    /**
+     Bundle-backed version metadata shown beneath the app title.
 
-    /// Internal build number shown alongside the marketing version.
-    private var buildNumber: String {
-        Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"
+     - Inputs: `Bundle.main` metadata.
+     - Outputs: The marketing version and build number used by the about screen.
+     - Side effects: none.
+     - Failure modes: Missing bundle values fall back through `AndBibleAppVersionMetadata`.
+     */
+    private var versionMetadata: AndBibleAppVersionMetadata {
+        AndBibleAppVersionMetadata.current()
     }
 
     /**
@@ -51,7 +53,7 @@ public struct AboutView: View {
                         .font(.title.bold())
                         .accessibilityIdentifier("aboutAppTitle")
 
-                    Text(String(localized: "version \(appVersion) (\(buildNumber))"))
+                    Text(String(localized: "version \(versionMetadata.detailText)"))
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }

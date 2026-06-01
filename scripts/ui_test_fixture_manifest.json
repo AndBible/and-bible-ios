@@ -36,7 +36,6 @@
   "AndBibleUITests/AndBibleUITests/testSettingsImportExportImportPresentsFilePickerState": "baseline",
   "AndBibleUITests/AndBibleUITests/testSettingsReadingProgressLinkOpensReadingProgressSettings": "baseline",
   "AndBibleUITests/AndBibleUITests/testSettingsScreenShowsApplicationPreferenceShortcuts": "baseline",
-  "AndBibleUITests/AndBibleUITests/testSettingsScreenShowsPrimaryNavigationRows": "baseline",
   "AndBibleUITests/AndBibleUITests/testSettingsSyncLinkOpensSyncSettings": "baseline",
   "AndBibleUITests/AndBibleUITests/testSyncSettingsAdoptCreateConfirmationCreateChoiceSynchronizesFromVisibleWorkflow": "none",
   "AndBibleUITests/AndBibleUITests/testSyncSettingsMyDocumentsCategoryToggleStartsManualSyncPath": "none",

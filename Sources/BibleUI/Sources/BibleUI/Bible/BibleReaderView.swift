@@ -2117,9 +2117,7 @@ public struct BibleReaderView: View {
 
     /// Current app version string shown in the drawer footer.
     private var readerNavigationDrawerVersionText: String {
-        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
-        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"
-        return "Version \(version) (\(build))"
+        AndBibleAppVersionMetadata.current().drawerFooterText
     }
 
     /// Category-specific browse icon used when reading non-Bible content.

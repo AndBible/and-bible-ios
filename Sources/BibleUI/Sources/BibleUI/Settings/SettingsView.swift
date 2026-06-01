@@ -1031,7 +1031,7 @@ public struct SettingsView: View {
                     title: String(localized: "version")
                 )
                 Spacer()
-                Text("1.0.0")
+                Text(AndBibleAppVersionMetadata.current().detailText)
                     .foregroundStyle(.secondary)
                     .padding(.vertical, 8)
             }
@@ -1359,7 +1359,6 @@ public struct SettingsView: View {
                 } else {
                     UserDefaults.standard.removeObject(forKey: "AppleLanguages")
                 }
-                UserDefaults.standard.synchronize()
                 showRestartAlert = true
             }
         } header: {
@@ -2290,7 +2289,6 @@ public struct SettingsView: View {
         let store = SettingsStore(modelContext: modelContext)
         store.resetApplicationPreferences()
         UserDefaults.standard.removeObject(forKey: "AppleLanguages")
-        UserDefaults.standard.synchronize()
         loadSettingsState()
         onSettingsChanged?()
     }

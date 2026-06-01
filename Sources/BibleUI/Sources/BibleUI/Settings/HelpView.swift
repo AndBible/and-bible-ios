@@ -54,12 +54,10 @@ struct HelpView: View {
 
                 Divider()
 
-                if let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String {
-                    Text("AndBible v\(version)")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .center)
-                }
+                Text(AndBibleAppVersionMetadata.current().helpFooterText)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .center)
             }
             .padding()
         }
