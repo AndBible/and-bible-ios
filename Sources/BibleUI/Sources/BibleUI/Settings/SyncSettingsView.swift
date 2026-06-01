@@ -510,7 +510,6 @@ public struct SyncSettingsView: View {
                     )
                 }
                 .disabled(isTestingConnection)
-                .accessibilityIdentifier("syncNextCloudTestConnectionButton")
 
                 LabeledContent {
                     remoteStatusView
@@ -564,7 +563,6 @@ public struct SyncSettingsView: View {
                         )
                     }
                     .disabled(isGoogleDriveSignInButtonDisabled)
-                    .accessibilityIdentifier("syncGoogleDriveSignInButton")
                 }
 
                 LabeledContent {
