@@ -337,7 +337,7 @@ public struct SettingsView: View {
                 settingsUITestShortcutSection
 
                 if hasDictionaryPreferences {
-                    Section(String(localized: "settings_dictionaries")) {
+                    Section {
                         if !strongsGreekDictionaries.isEmpty {
                             NavigationLink {
                                 DictionaryMultiSelectView(
@@ -350,6 +350,7 @@ public struct SettingsView: View {
                                 )
                             } label: {
                                 settingsSelectionRow(
+                                    preferenceKey: .strongsGreekDictionary,
                                     title: String(
                                         localized: "choose_strongs_greek_dictionary_title",
                                         defaultValue: "Strongs Greek dictionary"
@@ -379,6 +380,7 @@ public struct SettingsView: View {
                                 )
                             } label: {
                                 settingsSelectionRow(
+                                    preferenceKey: .strongsHebrewDictionary,
                                     title: String(
                                         localized: "choose_strongs_hebrew_dictionary_title",
                                         defaultValue: "Strongs Hebrew dictionary"
@@ -408,6 +410,7 @@ public struct SettingsView: View {
                                 )
                             } label: {
                                 settingsSelectionRow(
+                                    preferenceKey: .robinsonGreekMorphology,
                                     title: String(
                                         localized: "choose_strongs_greek_morphology_title",
                                         defaultValue: "Robinson Greek morphology"
@@ -437,6 +440,7 @@ public struct SettingsView: View {
                                 )
                             } label: {
                                 settingsSelectionRow(
+                                    preferenceKey: .disabledWordLookupDictionaries,
                                     title: String(
                                         localized: "choose_word_lookup_dictionary_title",
                                         defaultValue: "Word lookup dictionaries"
@@ -453,245 +457,258 @@ public struct SettingsView: View {
                             }
                             .accessibilityIdentifier("settingsWordLookupDictionariesLink")
                         }
+                    } header: {
+                        settingsSectionHeader(String(localized: "settings_dictionaries"))
                     }
                 }
 
-                Section(String(localized: "prefs_behavior_customization_cat", defaultValue: "Application behavior")) {
-                    Toggle(
-                        String(
-                            localized: "prefs_navigate_to_verse_title",
-                            defaultValue: "Navigate to verse"
-                        ),
-                        isOn: Binding(
-                            get: { navigateToVerse },
-                            set: { newValue in
-                                navigateToVerse = newValue
-                                let store = SettingsStore(modelContext: modelContext)
-                                store.setBool(.navigateToVersePref, value: newValue)
-                            }
+                Section {
+                    Toggle(isOn: Binding(
+                        get: { navigateToVerse },
+                        set: { newValue in
+                            navigateToVerse = newValue
+                            let store = SettingsStore(modelContext: modelContext)
+                            store.setBool(.navigateToVersePref, value: newValue)
+                        }
+                    )) {
+                        settingsRowLabel(
+                            preferenceKey: .navigateToVersePref,
+                            title: String(
+                                localized: "prefs_navigate_to_verse_title",
+                                defaultValue: "Navigate to verse"
+                            ),
+                            summary: String(
+                                localized: "prefs_navigate_to_verse_summary",
+                                defaultValue: "Choose verse (and chapter) when selecting a passage"
+                            )
                         )
-                    )
-                    Text(String(
-                        localized: "prefs_navigate_to_verse_summary",
-                        defaultValue: "Choose verse (and chapter) when selecting a passage"
-                    ))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Toggle(
-                        String(localized: "prefs_screen_keep_on_title", defaultValue: "Keep screen on"),
-                        isOn: Binding(
-                            get: { screenKeepOn },
-                            set: { newValue in
-                                screenKeepOn = newValue
-                                let store = SettingsStore(modelContext: modelContext)
-                                store.setBool(.screenKeepOnPref, value: newValue)
-                                applyScreenKeepOn(newValue)
-                            }
+                    }
+                    Toggle(isOn: Binding(
+                        get: { openLinksInSpecialWindow },
+                        set: { newValue in
+                            openLinksInSpecialWindow = newValue
+                            let store = SettingsStore(modelContext: modelContext)
+                            store.setBool(.openLinksInSpecialWindowPref, value: newValue)
+                        }
+                    )) {
+                        settingsRowLabel(
+                            preferenceKey: .openLinksInSpecialWindowPref,
+                            title: String(
+                                localized: "prefs_open_links_in_special_window_title",
+                                defaultValue: "Links window"
+                            ),
+                            summary: String(
+                                localized: "prefs_open_links_in_special_window_summary",
+                                defaultValue: "Open links in special window, for quicker display of cross-references and Strongs"
+                            )
                         )
-                    )
-                    Text(String(
-                        localized: "prefs_screen_keep_on_summary",
-                        defaultValue: "Prevent screen sleeping while using this app"
-                    ))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Toggle(
-                        String(
-                            localized: "prefs_double_tap_to_fullscreen_title",
-                            defaultValue: "Double-tap to Fullscreen"
-                        ),
-                        isOn: Binding(
-                            get: { doubleTapToFullscreen },
-                            set: { newValue in
-                                doubleTapToFullscreen = newValue
-                                let store = SettingsStore(modelContext: modelContext)
-                                store.setBool(.doubleTapToFullscreen, value: newValue)
-                            }
+                    }
+                    Toggle(isOn: Binding(
+                        get: { screenKeepOn },
+                        set: { newValue in
+                            screenKeepOn = newValue
+                            let store = SettingsStore(modelContext: modelContext)
+                            store.setBool(.screenKeepOnPref, value: newValue)
+                            applyScreenKeepOn(newValue)
+                        }
+                    )) {
+                        settingsRowLabel(
+                            preferenceKey: .screenKeepOnPref,
+                            title: String(localized: "prefs_screen_keep_on_title", defaultValue: "Keep screen on"),
+                            summary: String(
+                                localized: "prefs_screen_keep_on_summary",
+                                defaultValue: "Prevent screen sleeping while using this app"
+                            )
                         )
-                    )
-                    Text(String(
-                        localized: "prefs_double_tap_to_fullscreen_summary",
-                        defaultValue: "Enter fullscreen mode by double-tapping window"
-                    ))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Toggle(
-                        String(localized: "auto_fullscreen", defaultValue: "Fullscreen by scrolling"),
-                        isOn: Binding(
-                            get: { autoFullscreen },
-                            set: { newValue in
-                                autoFullscreen = newValue
-                                let store = SettingsStore(modelContext: modelContext)
-                                store.setBool(.autoFullscreenPref, value: newValue)
-                            }
+                    }
+                    Toggle(isOn: Binding(
+                        get: { doubleTapToFullscreen },
+                        set: { newValue in
+                            doubleTapToFullscreen = newValue
+                            let store = SettingsStore(modelContext: modelContext)
+                            store.setBool(.doubleTapToFullscreen, value: newValue)
+                        }
+                    )) {
+                        settingsRowLabel(
+                            preferenceKey: .doubleTapToFullscreen,
+                            title: String(
+                                localized: "prefs_double_tap_to_fullscreen_title",
+                                defaultValue: "Double-tap to Fullscreen"
+                            ),
+                            summary: String(
+                                localized: "prefs_double_tap_to_fullscreen_summary",
+                                defaultValue: "Enter fullscreen mode by double-tapping window"
+                            )
                         )
-                    )
-                    Text(String(
-                        localized: "auto_fullscreen_summary",
-                        defaultValue: "Switch automatically to fullscreen when scrolling text. Tip: you can always also switch to full screen by doubletapping screen."
-                    ))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Picker(
-                        String(
-                            localized: "prefs_toolbar_button_action_title",
-                            defaultValue: "Bible/commentary toolbar button action"
-                        ),
-                        selection: Binding(
+                    }
+                    Toggle(isOn: Binding(
+                        get: { autoFullscreen },
+                        set: { newValue in
+                            autoFullscreen = newValue
+                            let store = SettingsStore(modelContext: modelContext)
+                            store.setBool(.autoFullscreenPref, value: newValue)
+                        }
+                    )) {
+                        settingsRowLabel(
+                            preferenceKey: .autoFullscreenPref,
+                            title: String(localized: "auto_fullscreen", defaultValue: "Fullscreen by scrolling"),
+                            summary: String(
+                                localized: "auto_fullscreen_summary",
+                                defaultValue: "Switch automatically to fullscreen when scrolling text. Tip: you can always also switch to full screen by doubletapping screen."
+                            )
+                        )
+                    }
+                    Picker(selection: Binding(
                             get: { Self.normalizedToolbarButtonActionsMode(toolbarButtonActionsMode) },
                             set: { newValue in
                                 toolbarButtonActionsMode = Self.normalizedToolbarButtonActionsMode(newValue)
                                 let store = SettingsStore(modelContext: modelContext)
                                 store.setString(.toolbarButtonActions, value: toolbarButtonActionsMode)
                             }
-                        )
-                    ) {
+                        )) {
                         Text(String(localized: "prefs_toolbar_button_action_default", defaultValue: "Default"))
                             .tag("default")
                         Text(String(localized: "prefs_toolbar_button_action_swap_menu", defaultValue: "Swap menu"))
                             .tag("swap-menu")
                         Text(String(localized: "prefs_toolbar_button_action_swap_activity", defaultValue: "Swap activity"))
                             .tag("swap-activity")
-                    }
-                    Text(String(
-                        localized: "prefs_toolbar_button_action_summary",
-                        defaultValue: "Choose if one-tap of Bible/commentary toolbar buttons shows menu or activity directly."
-                    ))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Toggle(
-                        String(
-                            localized: "prefs_disable_two_step_bookmarking_title",
-                            defaultValue: "One-step bookmarking"
-                        ),
-                        isOn: Binding(
-                            get: { disableTwoStepBookmarking },
-                            set: { newValue in
-                                disableTwoStepBookmarking = newValue
-                                let store = SettingsStore(modelContext: modelContext)
-                                store.setBool(.disableTwoStepBookmarking, value: newValue)
-                            }
+                    } label: {
+                        settingsRowLabel(
+                            preferenceKey: .toolbarButtonActions,
+                            title: String(
+                                localized: "prefs_toolbar_button_action_title",
+                                defaultValue: "Bible/commentary toolbar button action"
+                            ),
+                            summary: String(
+                                localized: "prefs_toolbar_button_action_summary",
+                                defaultValue: "Choose if one-tap of Bible/commentary toolbar buttons shows menu or activity directly."
+                            )
                         )
-                    )
-                    Text(String(
-                        localized: "prefs_disable_two_step_bookmarking_summary",
-                        defaultValue: "Show \"Selection\" and \"Verses\" items directly in Bible view Selection menu"
-                    ))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Picker(
-                        String(
-                            localized: "prefs_bible_view_swipe_mode_title",
-                            defaultValue: "Action for swipe left / right gesture"
-                        ),
-                        selection: Binding(
+                    }
+                    Toggle(isOn: Binding(
+                        get: { disableTwoStepBookmarking },
+                        set: { newValue in
+                            disableTwoStepBookmarking = newValue
+                            let store = SettingsStore(modelContext: modelContext)
+                            store.setBool(.disableTwoStepBookmarking, value: newValue)
+                        }
+                    )) {
+                        settingsRowLabel(
+                            preferenceKey: .disableTwoStepBookmarking,
+                            title: String(
+                                localized: "prefs_disable_two_step_bookmarking_title",
+                                defaultValue: "One-step bookmarking"
+                            ),
+                            summary: String(
+                                localized: "prefs_disable_two_step_bookmarking_summary",
+                                defaultValue: "Show \"Selection\" and \"Verses\" items directly in Bible view Selection menu"
+                            )
+                        )
+                    }
+                    Picker(selection: Binding(
                             get: { Self.normalizedBibleViewSwipeMode(bibleViewSwipeMode) },
                             set: { newValue in
                                 bibleViewSwipeMode = Self.normalizedBibleViewSwipeMode(newValue)
                                 let store = SettingsStore(modelContext: modelContext)
                                 store.setString(.bibleViewSwipeMode, value: bibleViewSwipeMode)
                             }
-                        )
-                    ) {
+                        )) {
                         Text(String(localized: "prefs_swipe_mode_chapter", defaultValue: "Chapter"))
                             .tag("CHAPTER")
                         Text(String(localized: "prefs_swipe_mode_page", defaultValue: "Page"))
                             .tag("PAGE")
                         Text(String(localized: "prefs_swipe_mode_none", defaultValue: "None"))
                             .tag("NONE")
-                    }
-                    Text(String(
-                        localized: "prefs_bible_view_swipe_mode_summary",
-                        defaultValue: "Swipe left / right gesture can be used to go to next page / chapter."
-                    ))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Toggle(
-                        String(
-                            localized: "prefs_volume_keys_scroll_title",
-                            defaultValue: "Volume buttons scroll"
-                        ),
-                        isOn: Binding(
-                            get: { volumeKeysScroll },
-                            set: { newValue in
-                                volumeKeysScroll = newValue
-                                let store = SettingsStore(modelContext: modelContext)
-                                store.setBool(.volumeKeysScroll, value: newValue)
-                            }
+                    } label: {
+                        settingsRowLabel(
+                            preferenceKey: .bibleViewSwipeMode,
+                            title: String(
+                                localized: "prefs_bible_view_swipe_mode_title",
+                                defaultValue: "Action for swipe left / right gesture"
+                            ),
+                            summary: String(
+                                localized: "prefs_bible_view_swipe_mode_summary",
+                                defaultValue: "Swipe left / right gesture can be used to go to next page / chapter."
+                            )
                         )
-                    )
-                    Text(String(
-                        localized: "prefs_volume_keys_scroll_summary",
-                        defaultValue: "Use volume up/down to scroll Bible text"
-                    ))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Text(String(
-                        localized: "prefs_volume_keys_scroll_ios_note",
-                        defaultValue: "iOS does not expose volume-button presses to apps. This setting is kept for Android parity and cross-device sync."
-                    ))
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                    Toggle(String(localized: "verse_selection"), isOn: Binding(
+                    }
+                    Toggle(isOn: Binding(
+                        get: { volumeKeysScroll },
+                        set: { newValue in
+                            volumeKeysScroll = newValue
+                            let store = SettingsStore(modelContext: modelContext)
+                            store.setBool(.volumeKeysScroll, value: newValue)
+                        }
+                    )) {
+                        settingsRowLabel(
+                            preferenceKey: .volumeKeysScroll,
+                            title: String(
+                                localized: "prefs_volume_keys_scroll_title",
+                                defaultValue: "Volume buttons scroll"
+                            ),
+                            summary: String(
+                                localized: "prefs_volume_keys_scroll_summary",
+                                defaultValue: "Use volume up/down to scroll Bible text"
+                            ),
+                            detail: String(
+                                localized: "prefs_volume_keys_scroll_ios_note",
+                                defaultValue: "iOS does not expose volume-button presses to apps. This setting is kept for Android parity and cross-device sync."
+                            )
+                        )
+                    }
+                    Toggle(isOn: Binding(
                         get: { displaySettings.enableVerseSelection ?? true },
                         set: {
                             displaySettings.enableVerseSelection = $0
                             onSettingsChanged?()
                         }
-                    ))
-                    Toggle(
-                        String(
-                            localized: "prefs_open_links_in_special_window_title",
-                            defaultValue: "Links window"
-                        ),
-                        isOn: Binding(
-                            get: { openLinksInSpecialWindow },
-                            set: { newValue in
-                                openLinksInSpecialWindow = newValue
-                                let store = SettingsStore(modelContext: modelContext)
-                                store.setBool(.openLinksInSpecialWindowPref, value: newValue)
-                            }
+                    )) {
+                        settingsRowLabel(
+                            preferenceKey: nil,
+                            title: String(localized: "verse_selection")
                         )
+                    }
+                } header: {
+                    settingsSectionHeader(
+                        String(localized: "prefs_behavior_customization_cat", defaultValue: "Application behavior")
                     )
-                    Text(String(
-                        localized: "prefs_open_links_in_special_window_summary",
-                        defaultValue: "Open links in special window, for quicker display of cross-references and Strongs"
-                    ))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                 }
 
                 lookAndFeelSection
 
-                Section(String(localized: "settings_security")) {
+                Section {
                     Button {
                         showDiscreteHelp = true
                     } label: {
-                        HStack {
-                            Image(systemName: "exclamationmark.triangle.fill")
-                                .foregroundStyle(.red)
-                            VStack(alignment: .leading) {
-                                Text(String(localized: "discrete_help_title"))
-                                    .foregroundStyle(.primary)
-                                Text(String(localized: "discrete_help_summary"))
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
+                        settingsRowLabel(
+                            preferenceKey: .discreteHelp,
+                            title: String(localized: "discrete_help_title"),
+                            summary: String(localized: "discrete_help_summary")
+                        )
                     }
 
-                    Toggle(String(localized: "discrete_mode"), isOn: $discreteMode)
-                    Text(String(localized: "discrete_mode_description"))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    Toggle(isOn: $discreteMode) {
+                        settingsRowLabel(
+                            preferenceKey: .discreteMode,
+                            title: String(localized: "discrete_mode"),
+                            summary: String(localized: "discrete_mode_description")
+                        )
+                    }
 
-                    Toggle(String(localized: "show_calculator"), isOn: $showCalculator)
-                    Text(String(localized: "show_calculator_description"))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    Toggle(isOn: $showCalculator) {
+                        settingsRowLabel(
+                            preferenceKey: .showCalculator,
+                            title: String(localized: "show_calculator"),
+                            summary: String(localized: "show_calculator_description")
+                        )
+                    }
 
-                    HStack {
-                        Text(String(localized: "calculator_pin"))
+                    HStack(alignment: .top, spacing: 12) {
+                        settingsRowLabel(
+                            preferenceKey: .calculatorPin,
+                            title: String(localized: "calculator_pin"),
+                            summary: String(localized: "calculator_pin_description")
+                        )
                         Spacer()
                         TextField(String(localized: "calculator_pin_placeholder"), text: $calculatorPin)
                             #if os(iOS)
@@ -704,33 +721,32 @@ public struct SettingsView: View {
                                 if filtered != newValue { calculatorPin = filtered }
                             }
                     }
-                    Text(String(localized: "calculator_pin_description"))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                } header: {
+                    settingsSectionHeader(String(localized: "settings_security"))
                 }
 
-                Section(String(localized: "prefs_advanced_settings_cat", defaultValue: "Advanced settings")) {
-                    Toggle(
-                        String(
-                            localized: "prefs_enable_bluetooth_title",
-                            defaultValue: "Enable Bluetooth media buttons"
-                        ),
-                        isOn: Binding(
-                            get: { enableBluetoothMediaButtons },
-                            set: { newValue in
-                                enableBluetoothMediaButtons = newValue
-                                let store = SettingsStore(modelContext: modelContext)
-                                store.setBool(.enableBluetoothPref, value: newValue)
-                                onSettingsChanged?()
-                            }
+                Section {
+                    Toggle(isOn: Binding(
+                        get: { enableBluetoothMediaButtons },
+                        set: { newValue in
+                            enableBluetoothMediaButtons = newValue
+                            let store = SettingsStore(modelContext: modelContext)
+                            store.setBool(.enableBluetoothPref, value: newValue)
+                            onSettingsChanged?()
+                        }
+                    )) {
+                        settingsRowLabel(
+                            preferenceKey: .enableBluetoothPref,
+                            title: String(
+                                localized: "prefs_enable_bluetooth_title",
+                                defaultValue: "Enable Bluetooth media buttons"
+                            ),
+                            summary: String(
+                                localized: "prefs_enable_bluetooth_summary",
+                                defaultValue: "Handle Bluetooth media buttons to start/stop speaking."
+                            )
                         )
-                    )
-                    Text(String(
-                        localized: "prefs_enable_bluetooth_summary",
-                        defaultValue: "Handle Bluetooth media buttons to start/stop speaking."
-                    ))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    }
                     NavigationLink {
                         ExperimentalFeaturesMultiSelectView(
                             title: String(
@@ -742,6 +758,7 @@ public struct SettingsView: View {
                         )
                     } label: {
                         settingsSelectionRow(
+                            preferenceKey: .experimentalFeatures,
                             title: String(
                                 localized: "prefs_experimental_features_title",
                                 defaultValue: "Experimental features"
@@ -754,51 +771,44 @@ public struct SettingsView: View {
                         )
                     }
                     #if DEBUG
-                    Toggle(
-                        String(
-                            localized: "prefs_show_error_box_title",
-                            defaultValue: "Show Javascript error box"
-                        ),
-                        isOn: Binding(
-                            get: { showErrorBox },
-                            set: { newValue in
-                                showErrorBox = newValue
-                                let store = SettingsStore(modelContext: modelContext)
-                                store.setBool(.showErrorBox, value: newValue)
-                                onSettingsChanged?()
-                            }
+                    Toggle(isOn: Binding(
+                        get: { showErrorBox },
+                        set: { newValue in
+                            showErrorBox = newValue
+                            let store = SettingsStore(modelContext: modelContext)
+                            store.setBool(.showErrorBox, value: newValue)
+                            onSettingsChanged?()
+                        }
+                    )) {
+                        settingsRowLabel(
+                            preferenceKey: .showErrorBox,
+                            title: String(
+                                localized: "prefs_show_error_box_title",
+                                defaultValue: "Show Javascript error box"
+                            ),
+                            summary: String(
+                                localized: "prefs_show_error_box_summary",
+                                defaultValue: "Useful for developers when debugging BibleView javascript side errors. This will make the app slower."
+                            )
                         )
-                    )
-                    Text(String(
-                        localized: "prefs_show_error_box_summary",
-                        defaultValue: "Useful for developers when debugging BibleView javascript side errors. This will make the app slower."
-                    ))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    }
                     #endif
 
                     #if os(iOS)
                     Button {
                         openBibleLinkSystemSettings()
                     } label: {
-                        HStack {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(String(
-                                    localized: "open_bible_links_title",
-                                    defaultValue: "Open Bible links in AndBible"
-                                ))
-                                    .foregroundStyle(.primary)
-                                Text(String(
-                                    localized: "open_bible_links_summary",
-                                    defaultValue: "When clicking links that refer to AndBible supported Bible URL, open them in AndBible"
-                                ))
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                            Image(systemName: "arrow.up.right.square")
-                                .foregroundStyle(.secondary)
-                        }
+                        settingsRowLabel(
+                            preferenceKey: .openLinks,
+                            title: String(
+                                localized: "open_bible_links_title",
+                                defaultValue: "Open Bible links in AndBible"
+                            ),
+                            summary: String(
+                                localized: "open_bible_links_summary",
+                                defaultValue: "When clicking links that refer to AndBible supported Bible URL, open them in AndBible"
+                            )
+                        )
                     }
                     #endif
 
@@ -806,35 +816,33 @@ public struct SettingsView: View {
                     Button(role: .destructive) {
                         triggerDebugCrash()
                     } label: {
-                        HStack {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(String(
-                                    localized: "crash_app",
-                                    defaultValue: "Crash app!"
-                                ))
-                                .foregroundStyle(.red)
-                                Text(debugCrashScheduled
-                                    ? String(
-                                        localized: "crash_app_scheduled_summary",
-                                        defaultValue: "Crash scheduled in 10 seconds."
-                                    )
-                                    : String(
-                                        localized: "crash_app_summary",
-                                        defaultValue: "Crash app after 10 seconds. Debugging feature, visible only in debug builds."
-                                    ))
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                            Image(systemName: "exclamationmark.triangle.fill")
-                                .foregroundStyle(.red)
-                        }
+                        settingsRowLabel(
+                            preferenceKey: .crashApp,
+                            title: String(
+                                localized: "crash_app",
+                                defaultValue: "Crash app!"
+                            ),
+                            summary: debugCrashScheduled
+                                ? String(
+                                    localized: "crash_app_scheduled_summary",
+                                    defaultValue: "Crash scheduled in 10 seconds."
+                                )
+                                : String(
+                                    localized: "crash_app_summary",
+                                    defaultValue: "Crash app after 10 seconds. Debugging feature, visible only in debug builds."
+                                ),
+                            isEnabled: !debugCrashScheduled
+                        )
                     }
                     .disabled(debugCrashScheduled)
                     #endif
+                } header: {
+                    settingsSectionHeader(
+                        String(localized: "prefs_advanced_settings_cat", defaultValue: "Advanced settings")
+                    )
                 }
 
-                Section(String(localized: "settings_data")) {
+                Section {
                     settingsNavigationLink(
                         title: String(localized: "downloads"),
                         accessibilityIdentifier: "settingsDownloadsLink"
@@ -865,15 +873,23 @@ public struct SettingsView: View {
                     ) {
                         LabelManagerView()
                     }
+                } header: {
+                    settingsSectionHeader(String(localized: "settings_data"))
                 }
 
-                Section(String(localized: "settings_about")) {
-                    HStack {
-                        Text(String(localized: "version"))
+                Section {
+                    HStack(alignment: .top, spacing: 12) {
+                        settingsRowLabel(
+                            preferenceKey: nil,
+                            title: String(localized: "version")
+                        )
                         Spacer()
                         Text("1.0.0")
                             .foregroundStyle(.secondary)
+                            .padding(.vertical, 8)
                     }
+                } header: {
+                    settingsSectionHeader(String(localized: "settings_about"))
                 }
             }
             .accessibilityIdentifier("settingsForm")
@@ -1042,9 +1058,10 @@ public struct SettingsView: View {
      Builds the "Look & feel" section, including nested display editors and appearance toggles.
      */
     private var lookAndFeelSection: some View {
-        Section(String(localized: "prefs_display_customization_cat", defaultValue: "Look & feel")) {
+        Section {
             settingsNavigationLink(
                 title: String(localized: "settings_text_display"),
+                androidKey: "global_text_display_settings",
                 accessibilityIdentifier: "settingsTextDisplayLink"
             ) {
                 TextDisplaySettingsView(settings: $displaySettings, onChange: onSettingsChanged)
@@ -1055,9 +1072,7 @@ public struct SettingsView: View {
             ) {
                 ColorSettingsView(settings: $displaySettings, onChange: onSettingsChanged)
             }
-            Picker(
-                String(localized: "prefs_night_mode_title", defaultValue: "Night mode switching"),
-                selection: Binding(
+            Picker(selection: Binding(
                     get: { Self.nightModePickerSelection(from: nightModeMode) },
                     set: { newValue in
                         nightModeMode = newValue
@@ -1071,21 +1086,21 @@ public struct SettingsView: View {
                         )
                         onSettingsChanged?()
                     }
-                )
-            ) {
+                )) {
                 ForEach(NightModeSettingsResolver.availableModes, id: \.rawValue) { mode in
                     Text(Self.nightModeModeTitle(mode)).tag(mode.rawValue)
                 }
+            } label: {
+                settingsRowLabel(
+                    preferenceKey: .nightModePref3,
+                    title: String(localized: "prefs_night_mode_title", defaultValue: "Night mode switching"),
+                    summary: String(
+                        localized: "prefs_night_mode_summary",
+                        defaultValue: "Whether to switch to night mode manually or via system setting. Manual switching can be done from the 3-dot options menu on the main screen."
+                    )
+                )
             }
-            Text(String(
-                localized: "prefs_night_mode_summary",
-                defaultValue: "Whether to switch to night mode manually or via system setting. Manual switching can be done from the 3-dot options menu on the main screen."
-            ))
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Toggle(
-                String(localized: "prefs_e_ink_mode_title", defaultValue: "Black & white mode"),
-                isOn: Binding(
+            Toggle(isOn: Binding(
                     get: { monochromeMode },
                     set: { newValue in
                         monochromeMode = newValue
@@ -1093,17 +1108,17 @@ public struct SettingsView: View {
                         store.setBool(.monochromeMode, value: newValue)
                         onSettingsChanged?()
                     }
+                )) {
+                settingsRowLabel(
+                    preferenceKey: .monochromeMode,
+                    title: String(localized: "prefs_e_ink_mode_title", defaultValue: "Black & white mode"),
+                    summary: String(
+                        localized: "prefs_eink_mode_summary",
+                        defaultValue: "Use application in monochrome mode (no colors), making it more suitable for E-ink devices."
+                    )
                 )
-            )
-            Text(String(
-                localized: "prefs_eink_mode_summary",
-                defaultValue: "Use application in monochrome mode (no colors), making it more suitable for E-ink devices."
-            ))
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Toggle(
-                String(localized: "prefs_disable_animations_title", defaultValue: "Disable animations"),
-                isOn: Binding(
+            }
+            Toggle(isOn: Binding(
                     get: { disableAnimations },
                     set: { newValue in
                         disableAnimations = newValue
@@ -1111,20 +1126,17 @@ public struct SettingsView: View {
                         store.setBool(.disableAnimations, value: newValue)
                         onSettingsChanged?()
                     }
+                )) {
+                settingsRowLabel(
+                    preferenceKey: .disableAnimations,
+                    title: String(localized: "prefs_disable_animations_title", defaultValue: "Disable animations"),
+                    summary: String(
+                        localized: "prefs_disable_animations_summary",
+                        defaultValue: "Disable various animations such as smooth scrolling."
+                    )
                 )
-            )
-            Text(String(
-                localized: "prefs_disable_animations_summary",
-                defaultValue: "Disable various animations such as smooth scrolling."
-            ))
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Toggle(
-                String(
-                    localized: "prefs_disable_click_to_edit_title",
-                    defaultValue: "Disable Study Pad click-to-edit"
-                ),
-                isOn: Binding(
+            }
+            Toggle(isOn: Binding(
                     get: { disableClickToEdit },
                     set: { newValue in
                         disableClickToEdit = newValue
@@ -1132,43 +1144,51 @@ public struct SettingsView: View {
                         store.setBool(.disableClickToEdit, value: newValue)
                         onSettingsChanged?()
                     }
+                )) {
+                settingsRowLabel(
+                    preferenceKey: .disableClickToEdit,
+                    title: String(
+                        localized: "prefs_disable_click_to_edit_title",
+                        defaultValue: "Disable Study Pad click-to-edit"
+                    ),
+                    summary: String(
+                        localized: "prefs_disable_click_to_edit_summary",
+                        defaultValue: "Requires using the edit button to edit notes in the Study Pad."
+                    )
                 )
-            )
-            Text(String(
-                localized: "prefs_disable_click_to_edit_summary",
-                defaultValue: "Requires using the edit button to edit notes in the Study Pad."
-            ))
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Stepper(
-                value: Binding(
-                    get: { fontSizeMultiplier },
-                    set: { newValue in
-                        fontSizeMultiplier = min(max(newValue, 10), 500)
-                        let store = SettingsStore(modelContext: modelContext)
-                        store.setInt(.fontSizeMultiplier, value: fontSizeMultiplier)
-                        onSettingsChanged?()
-                    }
-                ),
-                in: 10...500,
-                step: 10
-            ) {
-                HStack {
-                    Text(String(
+            }
+            VStack(alignment: .leading, spacing: 8) {
+                settingsRowLabel(
+                    preferenceKey: .fontSizeMultiplier,
+                    title: String(
                         localized: "pref_font_size_multiplier_title",
                         defaultValue: "Font size multiplier"
-                    ))
-                    Spacer()
-                    Text("\(fontSizeMultiplier)%")
-                        .foregroundStyle(.secondary)
-                }
+                    ),
+                    summary: String(
+                        format: String(
+                            localized: "prefs_font_size_multiplier_summary",
+                            defaultValue: "Multiply text font sizes by this number. Current value: %.1fx"
+                        ),
+                        Double(fontSizeMultiplier) / 100.0
+                    )
+                )
+                Slider(
+                    value: Binding(
+                        get: { Double(fontSizeMultiplier) },
+                        set: { newValue in
+                            let roundedValue = Int((newValue / 10.0).rounded() * 10.0)
+                            fontSizeMultiplier = min(max(roundedValue, 10), 500)
+                            let store = SettingsStore(modelContext: modelContext)
+                            store.setInt(.fontSizeMultiplier, value: fontSizeMultiplier)
+                            onSettingsChanged?()
+                        }
+                    ),
+                    in: 10...500,
+                    step: 10
+                )
+                .padding(.leading, 66)
             }
-            Toggle(
-                String(
-                    localized: "full_screen_hide_buttons_pref_title",
-                    defaultValue: "Hide window button bar in fullscreen"
-                ),
-                isOn: Binding(
+            Toggle(isOn: Binding(
                     get: { fullScreenHideButtons },
                     set: { newValue in
                         fullScreenHideButtons = newValue
@@ -1176,20 +1196,20 @@ public struct SettingsView: View {
                         store.setBool(.fullScreenHideButtonsPref, value: newValue)
                         onSettingsChanged?()
                     }
+                )) {
+                settingsRowLabel(
+                    preferenceKey: .fullScreenHideButtonsPref,
+                    title: String(
+                        localized: "full_screen_hide_buttons_pref_title",
+                        defaultValue: "Hide window button bar in fullscreen"
+                    ),
+                    summary: String(
+                        localized: "full_screen_hide_buttons_pref_summary",
+                        defaultValue: "When switching to fullscreen mode, hide automatically window button bar that is on the bottom of the screen"
+                    )
                 )
-            )
-            Text(String(
-                localized: "full_screen_hide_buttons_pref_summary",
-                defaultValue: "When switching to fullscreen mode, hide automatically window button bar that is on the bottom of the screen"
-            ))
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Toggle(
-                String(
-                    localized: "hide_window_buttons_title",
-                    defaultValue: "Hide window buttons"
-                ),
-                isOn: Binding(
+            }
+            Toggle(isOn: Binding(
                     get: { hideWindowButtons },
                     set: { newValue in
                         hideWindowButtons = newValue
@@ -1197,20 +1217,20 @@ public struct SettingsView: View {
                         store.setBool(.hideWindowButtons, value: newValue)
                         onSettingsChanged?()
                     }
+                )) {
+                settingsRowLabel(
+                    preferenceKey: .hideWindowButtons,
+                    title: String(
+                        localized: "hide_window_buttons_title",
+                        defaultValue: "Hide window buttons"
+                    ),
+                    summary: String(
+                        localized: "hide_window_buttons_summary",
+                        defaultValue: "Window buttons that are displayed on right side of the Bible views are hidden. Window navigation bar on the bottom is still displayed and you may open window popup menu by long-clicking them."
+                    )
                 )
-            )
-            Text(String(
-                localized: "hide_window_buttons_summary",
-                defaultValue: "Window buttons that are displayed on right side of the Bible views are hidden. Window navigation bar on the bottom is still displayed and you may open window popup menu by long-clicking them."
-            ))
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Toggle(
-                String(
-                    localized: "hide_bible_reference_overlay_title",
-                    defaultValue: "Hide Bible reference overlay"
-                ),
-                isOn: Binding(
+            }
+            Toggle(isOn: Binding(
                     get: { hideBibleReferenceOverlay },
                     set: { newValue in
                         hideBibleReferenceOverlay = newValue
@@ -1218,20 +1238,20 @@ public struct SettingsView: View {
                         store.setBool(.hideBibleReferenceOverlay, value: newValue)
                         onSettingsChanged?()
                     }
+                )) {
+                settingsRowLabel(
+                    preferenceKey: .hideBibleReferenceOverlay,
+                    title: String(
+                        localized: "hide_bible_reference_overlay_title",
+                        defaultValue: "Hide Bible reference overlay"
+                    ),
+                    summary: String(
+                        localized: "hide_bible_reference_overlay_summary",
+                        defaultValue: "Do not show the semi-transparent Bible reference overlay when app is in fullscreen mode"
+                    )
                 )
-            )
-            Text(String(
-                localized: "hide_bible_reference_overlay_summary",
-                defaultValue: "Do not show the semi-transparent Bible reference overlay when app is in fullscreen mode"
-            ))
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Toggle(
-                String(
-                    localized: "active_window_indicator_title",
-                    defaultValue: "Show active window indicator"
-                ),
-                isOn: Binding(
+            }
+            Toggle(isOn: Binding(
                     get: { showActiveWindowIndicator },
                     set: { newValue in
                         showActiveWindowIndicator = newValue
@@ -1239,14 +1259,19 @@ public struct SettingsView: View {
                         store.setBool(.showActiveWindowIndicator, value: newValue)
                         onSettingsChanged?()
                     }
+                )) {
+                settingsRowLabel(
+                    preferenceKey: .showActiveWindowIndicator,
+                    title: String(
+                        localized: "active_window_indicator_title",
+                        defaultValue: "Show active window indicator"
+                    ),
+                    summary: String(
+                        localized: "active_window_indicator_summary",
+                        defaultValue: "Highlight window corners to help recognising which window is active"
+                    )
                 )
-            )
-            Text(String(
-                localized: "active_window_indicator_summary",
-                defaultValue: "Highlight window corners to help recognising which window is active"
-            ))
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            }
             NavigationLink {
                 BookmarkModalActionsInverseMultiSelectView(
                     title: String(
@@ -1258,6 +1283,7 @@ public struct SettingsView: View {
                 )
             } label: {
                 settingsSelectionRow(
+                    preferenceKey: .disableBibleBookmarkModalButtons,
                     title: String(
                         localized: "prefs_in_window_bible_bookmark_modal_buttons_title",
                         defaultValue: "One-tap actions (Bibles)"
@@ -1283,6 +1309,7 @@ public struct SettingsView: View {
                 )
             } label: {
                 settingsSelectionRow(
+                    preferenceKey: .disableGenBookmarkModalButtons,
                     title: String(
                         localized: "prefs_in_window_gen_bookmark_modal_buttons_title",
                         defaultValue: "One-tap actions (Other)"
@@ -1297,13 +1324,20 @@ public struct SettingsView: View {
                     )
                 )
             }
-            Picker(
-                String(localized: "prefs_interface_locale_title", defaultValue: "Application language"),
-                selection: $selectedLanguage
-            ) {
+            Picker(selection: $selectedLanguage) {
                 ForEach(Self.localeOptions) { lang in
                     Text(Self.localizedLocaleOptionLabel(lang)).tag(lang.value)
                 }
+            } label: {
+                settingsRowLabel(
+                    preferenceKey: .localePref,
+                    title: String(localized: "prefs_interface_locale_title", defaultValue: "Application language"),
+                    summary: String(
+                        localized: "prefs_interface_locale_summary",
+                        defaultValue: "Select custom user interface language"
+                    ),
+                    detail: String(localized: "language_restart_required")
+                )
             }
             .onChange(of: selectedLanguage) { _, newValue in
                 guard hasLoadedPreferences else { return }
@@ -1327,15 +1361,8 @@ public struct SettingsView: View {
                 UserDefaults.standard.synchronize()
                 showRestartAlert = true
             }
-            Text(String(
-                localized: "prefs_interface_locale_summary",
-                defaultValue: "Select custom user interface language"
-            ))
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Text(String(localized: "language_restart_required"))
-                .font(.caption)
-                .foregroundStyle(.secondary)
+        } header: {
+            settingsSectionHeader(String(localized: "prefs_display_customization_cat", defaultValue: "Look & feel"))
         }
     }
 
@@ -1351,17 +1378,18 @@ public struct SettingsView: View {
     /**
      Builds the common title/summary/detail row used by selection-style settings links.
      */
-    private func settingsSelectionRow(title: String, summary: String, detail: String) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title)
-                .foregroundStyle(.primary)
-            Text(summary)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Text(detail)
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
-        }
+    private func settingsSelectionRow(
+        preferenceKey: AppPreferenceKey? = nil,
+        title: String,
+        summary: String,
+        detail: String
+    ) -> some View {
+        settingsRowLabel(
+            preferenceKey: preferenceKey,
+            title: title,
+            summary: summary,
+            detail: detail
+        )
     }
 
     @ViewBuilder
@@ -1373,11 +1401,19 @@ public struct SettingsView: View {
      */
     private func settingsNavigationLink<Destination: View>(
         title: String,
+        preferenceKey: AppPreferenceKey? = nil,
+        androidKey: String? = nil,
+        summary: String? = nil,
         accessibilityIdentifier: String,
         @ViewBuilder destination: @escaping () -> Destination
     ) -> some View {
         NavigationLink(destination: destination) {
-            settingsNavigationRow(title: title)
+            settingsNavigationRow(
+                title: title,
+                preferenceKey: preferenceKey,
+                androidKey: androidKey,
+                summary: summary
+            )
         }
         .accessibilityLabel(title)
         .accessibilityIdentifier(accessibilityIdentifier)
@@ -1392,16 +1428,92 @@ public struct SettingsView: View {
      * - Side effects: none.
      * - Failure modes: This helper cannot fail.
      */
-    private func settingsNavigationRow(title: String) -> some View {
-        HStack {
-            Text(title)
-            Spacer()
-            Image(systemName: "chevron.right")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .contentShape(Rectangle())
+    private func settingsNavigationRow(
+        title: String,
+        preferenceKey: AppPreferenceKey? = nil,
+        androidKey: String? = nil,
+        summary: String? = nil
+    ) -> some View {
+        settingsRowLabel(
+            preferenceKey: preferenceKey,
+            androidKey: androidKey,
+            title: title,
+            summary: summary
+        )
+    }
+
+    /**
+     Builds one Android-shaped settings row label for native SwiftUI controls.
+
+     - Parameters:
+       - preferenceKey: Optional Android preference key used to resolve source icon metadata.
+       - androidKey: Optional raw Android key for action rows not represented by `AppPreferenceKey`.
+       - title: Primary row title.
+       - summary: Optional secondary row text.
+       - detail: Optional tertiary state text.
+       - isEnabled: Whether the row should render with enabled or disabled emphasis.
+     - Returns: Shared row label aligned with Android preference geometry.
+     - Side effects: Renders an image from the module bundle when `preferenceKey` has catalog metadata.
+     - Failure modes: Unknown keys simply produce an un-iconed but aligned row.
+     */
+    private func settingsRowLabel(
+        preferenceKey: AppPreferenceKey?,
+        androidKey: String? = nil,
+        title: String,
+        summary: String? = nil,
+        detail: String? = nil,
+        isEnabled: Bool = true
+    ) -> AndBibleSettingsRowLabel {
+        let icon = preferenceKey.flatMap { AndBibleIconCatalog.settingsIcon(forAndroidKey: $0.rawValue) } ??
+            androidKey.flatMap { AndBibleIconCatalog.settingsIcon(forAndroidKey: $0) }
+        return AndBibleSettingsRowLabel(
+            title: title,
+            summary: summary,
+            detail: detail,
+            icon: icon,
+            isEnabled: isEnabled
+        )
+    }
+
+    /**
+     Builds one Android-shaped settings row label for action rows backed by raw Android keys.
+
+     - Parameters:
+       - androidKey: Raw Android preference/action key used to resolve source icon metadata.
+       - title: Primary row title.
+       - summary: Optional secondary row text.
+       - detail: Optional tertiary state text.
+       - isEnabled: Whether the row should render with enabled or disabled emphasis.
+     - Returns: Shared row label aligned with Android preference geometry.
+     - Side effects: Renders an image from the module bundle when `androidKey` has catalog metadata.
+     - Failure modes: Unknown keys simply produce an un-iconed but aligned row.
+     */
+    private func settingsRowLabel(
+        androidKey: String,
+        title: String,
+        summary: String? = nil,
+        detail: String? = nil,
+        isEnabled: Bool = true
+    ) -> AndBibleSettingsRowLabel {
+        AndBibleSettingsRowLabel(
+            title: title,
+            summary: summary,
+            detail: detail,
+            icon: AndBibleIconCatalog.settingsIcon(forAndroidKey: androidKey),
+            isEnabled: isEnabled
+        )
+    }
+
+    /**
+     Builds an Android-shaped settings section header using the active app accent color.
+
+     - Parameter title: User-visible section title.
+     - Returns: Section header aligned with row text rather than the icon column.
+     - Side effects: none.
+     - Failure modes: This helper cannot fail.
+     */
+    private func settingsSectionHeader(_ title: String) -> AndBibleSettingsSectionHeader {
+        AndBibleSettingsSectionHeader(title: title)
     }
 
     @ViewBuilder
