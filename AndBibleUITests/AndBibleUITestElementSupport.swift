@@ -1133,13 +1133,17 @@ extension AndBibleUITests {
 
     /// Reads reader state from the early document-header chrome before probing rendered content.
     func readerDocumentHeaderStateValue(in app: XCUIApplication) -> String? {
-        let header = app.descendants(matching: .any)["readerDocumentHeader"].firstMatch
-        guard header.exists else {
-            return nil
-        }
-        for candidateValue in [header.value as? String, header.label] {
-            if let candidateValue, candidateValue.contains("windowOrder=") {
-                return candidateValue
+        let headerCandidates = [
+            app.otherElements["readerDocumentHeader"].firstMatch,
+            app.staticTexts["readerDocumentHeader"].firstMatch,
+        ]
+        for header in headerCandidates where header.exists {
+            if let value = header.value as? String, value.contains("windowOrder=") {
+                return value
+            }
+            let label = header.label
+            if label.contains("windowOrder=") {
+                return label
             }
         }
         return nil
