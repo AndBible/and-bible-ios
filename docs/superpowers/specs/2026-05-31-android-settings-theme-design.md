@@ -2,12 +2,12 @@
 
 ## Context
 
-Issue #166 exists because #155 and #159 should not each invent local settings styling. The shared layer must also not redesign AndBible. Android source is the source of truth for row icon assets; the Android screenshots supplied on 2026-05-31 are the visual source of truth for how those assets are placed and used:
+Issue #166 exists because #155 and #159 should not each invent local settings styling. The shared layer must also not redesign AndBible. Android source is the source of truth for row icon assets; the Android screenshots supplied on 2026-05-31 and uploaded to [issue #166](https://github.com/AndBible/and-bible-ios/issues/166#issuecomment-4589085013) are the visual source of truth for how those assets are placed and used:
 
-- `/Users/primetheus/Downloads/Download/Screenshot_20260531-211552.png`
-- `/Users/primetheus/Downloads/Download/Screenshot_20260531-211609.png`
-- `/Users/primetheus/Downloads/Download/Screenshot_20260531-211624.png`
-- `/Users/primetheus/Downloads/Download/Screenshot_20260531-211630.png`
+- [Screenshot_20260531-211552.png](https://github.com/user-attachments/assets/c08b2477-025f-4f74-a17d-cedf31975832)
+- [Screenshot_20260531-211609.png](https://github.com/user-attachments/assets/9c515308-bad0-438e-8fec-ac31f8e240e3)
+- [Screenshot_20260531-211624.png](https://github.com/user-attachments/assets/16301b49-739d-420a-92e3-232c16039e49)
+- [Screenshot_20260531-211630.png](https://github.com/user-attachments/assets/e779d546-9fb2-4b27-97ef-1566629f22ce)
 
 Those screenshots show Android native preference screens that still feel like AndBible through app chrome, left-side monochrome icons, full-width rows, title/summary hierarchy, inline controls, disabled-row states, and reset/help actions in the top bar. The screenshots are dark because the Android app was using a dark theme; they are not a requirement to force a dark settings surface on iOS.
 
