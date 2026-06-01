@@ -121,6 +121,51 @@ extension AndBibleTests {
         XCTAssertFalse(AndBibleSettingsSearchMatcher.matches(query: "sync tracking", entry: entry))
     }
 
+    func testSettingsSearchMatcherFiltersExactRenderedRowsWithinMatchingSection() {
+        let entries = [
+            AndBibleSettingsSearchEntry(
+                identifier: "monochrome_mode",
+                title: "Black & white mode",
+                summary: "Use application in monochrome mode"
+            ),
+            AndBibleSettingsSearchEntry(
+                identifier: "disable_animations",
+                title: "Disable animations",
+                summary: "Disable smooth scrolling animations"
+            ),
+        ]
+
+        XCTAssertTrue(entries.contains { AndBibleSettingsSearchMatcher.matches(query: "monochrome", entry: $0) })
+        XCTAssertTrue(
+            AndBibleSettingsSearchMatcher.matchesIdentifier(
+                "monochrome_mode",
+                query: "monochrome",
+                entries: entries
+            )
+        )
+        XCTAssertFalse(
+            AndBibleSettingsSearchMatcher.matchesIdentifier(
+                "disable_animations",
+                query: "monochrome",
+                entries: entries
+            )
+        )
+        XCTAssertFalse(
+            AndBibleSettingsSearchMatcher.matchesIdentifier(
+                "missing_row",
+                query: "monochrome",
+                entries: entries
+            )
+        )
+        XCTAssertTrue(
+            AndBibleSettingsSearchMatcher.matchesIdentifier(
+                "missing_row",
+                query: "",
+                entries: entries
+            )
+        )
+    }
+
     func testTextDisplayAppDefaultsStartWithStrongsDisabled() {
         XCTAssertEqual(TextDisplaySettings.appDefaults.strongsMode, 0)
     }

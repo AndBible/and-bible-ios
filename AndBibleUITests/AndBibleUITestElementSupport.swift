@@ -1122,11 +1122,9 @@ extension AndBibleUITests {
             return headerValue
         }
         for stateElement in readerRenderedContentStateElements(in: app) {
-            guard stateElement.exists,
-                  let value = stateElement.value as? String else {
-                continue
+            if let value = snapshotStateString(from: stateElement, containing: "windowOrder=") {
+                return value
             }
-            return value
         }
         return nil
     }
@@ -1137,14 +1135,44 @@ extension AndBibleUITests {
             app.otherElements["readerDocumentHeader"].firstMatch,
             app.staticTexts["readerDocumentHeader"].firstMatch,
         ]
-        for header in headerCandidates where header.exists {
-            if let value = header.value as? String, value.contains("windowOrder=") {
+        for header in headerCandidates {
+            if let value = snapshotStateString(from: header, containing: "windowOrder=") {
                 return value
             }
-            let label = header.label
-            if label.contains("windowOrder=") {
-                return label
-            }
+        }
+        return nil
+    }
+
+    /**
+     Reads an element's exported accessibility value or label without recording a snapshot failure.
+
+     The XCUITest convenience accessors `value` and `label` re-resolve their query and record a hard
+     "Failed to get matching snapshot" test failure when the element disappears between an earlier
+     `exists` check and the property read. Reader chrome (the document header and the compact state
+     export) is recreated during navigation transitions, so this optional probe instead takes a
+     single throwing `snapshot()` and tolerates absence via `try?`, returning `nil` rather than
+     failing the test when the element is mid-teardown.
+
+     - Parameters:
+       - element: Reader-state export element whose value or label should be read defensively.
+       - marker: Substring that must be present for the read to count as a valid reader-state export.
+     - Returns: The matching value or label string, or `nil` when the element cannot be snapshotted
+       or does not contain the marker.
+     - Side effects: none.
+     - Failure modes: never records an XCTest failure; absence resolves to `nil`.
+     */
+    private func snapshotStateString(
+        from element: XCUIElement,
+        containing marker: String
+    ) -> String? {
+        guard let snapshot = try? element.snapshot() else {
+            return nil
+        }
+        if let value = snapshot.value as? String, value.contains(marker) {
+            return value
+        }
+        if snapshot.label.contains(marker) {
+            return snapshot.label
         }
         return nil
     }
@@ -1200,7 +1228,8 @@ extension AndBibleUITests {
      *   - app: Running application under test.
      *   - timeout: Maximum number of seconds to wait before returning `false`.
      * - Returns: `true` when the reader's compact state export reports that transient reader
-     *   surfaces are closed and My Notes is no longer fronting the primary reader chrome.
+     *   surfaces and pushed reader destinations are closed, and My Notes is no longer fronting the
+     *   primary reader chrome.
      * - Side effects:
      *   - polls the compact reader state export while modal surfaces dismiss back to the reader
      *     shell, avoiding full-toolbar snapshots while WebView content is settling
@@ -1218,9 +1247,16 @@ extension AndBibleUITests {
                 let drawerClosed = state.contains("drawerVisible=false") || !state.contains("drawerVisible=")
                 let overflowClosed = state.contains("overflowVisible=false") || !state.contains("overflowVisible=")
                 let sheetClosed = state.contains("readerSheet=none") || !state.contains("readerSheet=")
+                let destinationClosed = state.contains("readerDestination=none") ||
+                    !state.contains("readerDestination=")
                 let searchClosed = state.contains("searchVisible=false") || !state.contains("searchVisible=")
                 let myNotesClosed = state.contains("myNotesVisible=false") || !state.contains("myNotesVisible=")
-                return drawerClosed && overflowClosed && sheetClosed && searchClosed && myNotesClosed
+                return drawerClosed &&
+                    overflowClosed &&
+                    sheetClosed &&
+                    destinationClosed &&
+                    searchClosed &&
+                    myNotesClosed
             } ?? false
 
             if readerState != nil,
