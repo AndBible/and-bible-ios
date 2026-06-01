@@ -1122,11 +1122,9 @@ extension AndBibleUITests {
             return headerValue
         }
         for stateElement in readerRenderedContentStateElements(in: app) {
-            guard stateElement.exists,
-                  let value = stateElement.value as? String else {
-                continue
+            if let value = snapshotStateString(from: stateElement, containing: "windowOrder=") {
+                return value
             }
-            return value
         }
         return nil
     }
@@ -1137,14 +1135,44 @@ extension AndBibleUITests {
             app.otherElements["readerDocumentHeader"].firstMatch,
             app.staticTexts["readerDocumentHeader"].firstMatch,
         ]
-        for header in headerCandidates where header.exists {
-            if let value = header.value as? String, value.contains("windowOrder=") {
+        for header in headerCandidates {
+            if let value = snapshotStateString(from: header, containing: "windowOrder=") {
                 return value
             }
-            let label = header.label
-            if label.contains("windowOrder=") {
-                return label
-            }
+        }
+        return nil
+    }
+
+    /**
+     Reads an element's exported accessibility value or label without recording a snapshot failure.
+
+     The XCUITest convenience accessors `value` and `label` re-resolve their query and record a hard
+     "Failed to get matching snapshot" test failure when the element disappears between an earlier
+     `exists` check and the property read. Reader chrome (the document header and the compact state
+     export) is recreated during navigation transitions, so this optional probe instead takes a
+     single throwing `snapshot()` and tolerates absence via `try?`, returning `nil` rather than
+     failing the test when the element is mid-teardown.
+
+     - Parameters:
+       - element: Reader-state export element whose value or label should be read defensively.
+       - marker: Substring that must be present for the read to count as a valid reader-state export.
+     - Returns: The matching value or label string, or `nil` when the element cannot be snapshotted
+       or does not contain the marker.
+     - Side effects: none.
+     - Failure modes: never records an XCTest failure; absence resolves to `nil`.
+     */
+    private func snapshotStateString(
+        from element: XCUIElement,
+        containing marker: String
+    ) -> String? {
+        guard let snapshot = try? element.snapshot() else {
+            return nil
+        }
+        if let value = snapshot.value as? String, value.contains(marker) {
+            return value
+        }
+        if snapshot.label.contains(marker) {
+            return snapshot.label
         }
         return nil
     }

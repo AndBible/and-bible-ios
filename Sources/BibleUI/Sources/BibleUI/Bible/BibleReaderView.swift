@@ -814,6 +814,13 @@ public struct BibleReaderView: View {
             #if os(iOS)
             .toolbar(.visible, for: .navigationBar)
             #endif
+            // The reader shell is removed from the accessibility tree while a destination is
+            // pushed, so re-emit the compact reader-state export here. This keeps reader routing
+            // tokens (for example `readerSheet=none;readerDestination=settings`) observable by UI
+            // tests on the pushed destination without exposing reader internals to SettingsView.
+            .overlay(alignment: .topLeading) {
+                readerRenderedContentStateExport
+            }
         }
     }
 
