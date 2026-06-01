@@ -2,7 +2,7 @@
 
 ## Context
 
-Issue #166 exists because #155 and #159 should not each invent local settings styling. The shared layer must also not redesign AndBible. The Android screenshots supplied on 2026-05-31 are the visual source of truth:
+Issue #166 exists because #155 and #159 should not each invent local settings styling. The shared layer must also not redesign AndBible. Android source is the source of truth for row icon assets; the Android screenshots supplied on 2026-05-31 are the visual source of truth for how those assets are placed and used:
 
 - `/Users/primetheus/Downloads/Download/Screenshot_20260531-211552.png`
 - `/Users/primetheus/Downloads/Download/Screenshot_20260531-211609.png`
@@ -10,6 +10,12 @@ Issue #166 exists because #155 and #159 should not each invent local settings st
 - `/Users/primetheus/Downloads/Download/Screenshot_20260531-211630.png`
 
 Those screenshots show Android native preference screens that still feel like AndBible through app chrome, left-side monochrome icons, full-width rows, title/summary hierarchy, inline controls, disabled-row states, and reset/help actions in the top bar. The screenshots are dark because the Android app was using a dark theme; they are not a requirement to force a dark settings surface on iOS.
+
+Primary Android icon sources:
+
+- Application preferences row/icon mapping: `and-bible/app/src/main/res/xml/settings.xml`
+- Sync settings row/icon mapping: `and-bible/app/src/main/res/xml/sync_settings.xml`
+- Drawable/vector assets: `and-bible/app/src/main/res/drawable/`
 
 ## Goal
 
@@ -36,6 +42,20 @@ The shared settings layer should encode these Android-derived presentation rules
 - Disabled rows visibly dim title, summary, icon, and control together.
 - Touch targets remain generous and row height grows naturally for multi-line summaries.
 - Accent controls use the app theme’s accent color instead of generic iOS blue.
+
+## Icon Source Contract
+
+Icons must be sourced from Android source, not inferred from screenshots.
+
+For each iOS settings row that corresponds to an Android preference row:
+
+- Use the `android:icon` drawable reference from `settings.xml` or `sync_settings.xml` as the canonical mapping.
+- Port the referenced Android drawable/vector asset into an iOS-friendly asset when licensing and format allow.
+- Preserve the Android icon metaphor, silhouette, fixed left-column placement, and disabled-state tinting.
+- If a direct Android drawable cannot be reused, document the row-level fallback and choose the nearest faithful native replacement. The fallback is a deviation, not a redesign.
+- Keep a mapping table in parity docs so future Android icon changes can be audited against iOS.
+
+The screenshots remain useful for validating size, placement, density, and disabled/active treatment after the source assets are mapped.
 
 ## Architecture
 
@@ -114,6 +134,7 @@ Update parity docs to say native SwiftUI is the implementation choice, but the v
 - A shared native SwiftUI settings presentation layer exists.
 - `SettingsView` uses it for at least the first Application preferences pass.
 - The resulting settings surface follows the Android screenshots for layout and icon treatment: full-width rows, left icons, themed section headers/accent controls, muted summaries, disabled states, and app-style toolbar actions.
+- Row icons are mapped from Android `android:icon` references and drawable/vector sources, with documented fallbacks for any asset that cannot be ported directly.
 - The settings surface inherits the rest of the app’s active theme in light and dark modes.
 - The implementation leaves search/reset behavior to #155 while providing the row metadata and presentation hooks those workflows need.
 - Parity docs describe the Android-derived native settings visual contract.
