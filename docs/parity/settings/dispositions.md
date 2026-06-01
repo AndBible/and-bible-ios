@@ -77,6 +77,39 @@ This file records explicit iOS disposition decisions for Android parity tickets 
   - #156 should not be implemented as written because it bundles this Android-only e-ink setting with the separate `notes_content_type` gap.
   - #163 tracks the real `notes_content_type` follow-up independently.
 
+## SETPAR-155 — Application preferences presentation and workflows
+
+- Android contract:
+  - `SettingsActivity` hosts Application preferences inside app chrome, adds
+    preference search, supports reset for the screen's preferences, and exposes
+    feature shortcuts for Sync, AI settings, and Reading Progress.
+  - Android keeps broader administration workflows, including downloads and backup,
+    outside Application preferences.
+- iOS adaptation (implemented):
+  - Keep the screen native SwiftUI, but open it as an integrated reader navigation
+    destination instead of a modal sheet.
+  - Use the shared Android icon catalog for Application preference rows and feature
+    shortcuts rather than inventing a separate iOS-only icon vocabulary.
+  - Add native search over Application preference row identifiers, titles,
+    summaries, details, and keywords.
+  - Add a reset action backed by `AppPreferenceRegistry.applicationPreferencesResetKeys`
+    and `SettingsStore.resetApplicationPreferences()`. Action rows and global
+    text-display settings are deliberately excluded from the reset scope.
+  - Add the Android-aligned Features shortcuts for Sync and Reading Progress.
+  - Keep Downloads, repositories, import/export, labels, and about in reader
+    drawer/overflow/admin flows rather than folding them into Application preferences.
+- iOS deviation:
+  - Do not add `ai_settings_shortcut` until iOS has an AI settings workflow. Adding a
+    dead row would make the screen look more Android-like while reducing functional
+    parity.
+- iOS references:
+  - Presentation and search UI: `Sources/BibleUI/Sources/BibleUI/Settings/SettingsView.swift`
+  - Search matcher: `Sources/BibleUI/Sources/BibleUI/Settings/AndBibleSettingsSearch.swift`
+  - Reset contract: `Sources/BibleCore/Sources/BibleCore/Database/AppPreferenceRegistry.swift`
+  - Reset implementation: `Sources/BibleCore/Sources/BibleCore/Database/SettingsStore.swift`
+  - Reader navigation destination: `Sources/BibleUI/Sources/BibleUI/Bible/BibleReaderView.swift`
+  - Icon mapping: `Sources/BibleUI/Sources/BibleUI/Shared/AndBibleIconCatalog.swift`
+
 ## SETPAR-505 — `open_links`
 
 - Android contract:

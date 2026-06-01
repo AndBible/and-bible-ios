@@ -92,7 +92,6 @@ public struct BibleReaderView: View {
     /// Top-level sheets launched from the reader shell or its global shortcuts.
     enum ReaderSheet: String, Identifiable {
         case bookmarks
-        case settings
         case downloads
         case history
         case readingPlans
@@ -101,6 +100,13 @@ public struct BibleReaderView: View {
         case chapterReadHistory
         case workspaces
         case about
+
+        var id: String { rawValue }
+    }
+
+    /// Reader-stack destinations opened from global reader actions.
+    enum ReaderDestination: String, Identifiable, Hashable {
+        case settings
 
         var id: String { rawValue }
     }
@@ -173,6 +179,9 @@ public struct BibleReaderView: View {
 
     /// Presents the current top-level reader sheet driven by the overflow menu and shortcuts.
     @State private var activeReaderSheet: ReaderSheet?
+
+    /// Presents the current reader-stack destination driven by drawer and overflow actions.
+    @State private var activeReaderDestination: ReaderDestination?
 
     /// Initial search applied when Downloads is opened from an Android-compatible download link.
     @State private var downloadsInitialSearchText = ""
@@ -432,9 +441,10 @@ public struct BibleReaderView: View {
         let drawerToken = "drawerVisible=\(showReaderNavigationDrawer ? "true" : "false")"
         let overflowToken = "overflowVisible=\(showReaderOverflowMenu ? "true" : "false")"
         let sheetToken = "readerSheet=\(activeReaderSheet?.rawValue ?? "none")"
+        let destinationToken = "readerDestination=\(activeReaderDestination?.rawValue ?? "none")"
         let modalToken = "readerModal=\(activeReaderModal?.rawValue ?? "none")"
         let searchToken = "searchVisible=\(showSearch ? "true" : "false")"
-        return "\(windowToken);\(contentToken);\(myNotesToken);\(studyPadToken);strongsMode=\(strongsMode);\(drawerToken);\(overflowToken);\(sheetToken);\(modalToken);\(searchToken)"
+        return "\(windowToken);\(contentToken);\(myNotesToken);\(studyPadToken);strongsMode=\(strongsMode);\(drawerToken);\(overflowToken);\(sheetToken);\(destinationToken);\(modalToken);\(searchToken)"
     }
 
     /// Compact dedicated state export used by UI tests instead of snapshotting the full reader.
@@ -584,6 +594,9 @@ public struct BibleReaderView: View {
         .sheet(item: $activeReaderSheet) { presentedSheet in
             activeReaderSheetContent(presentedSheet)
         }
+        .navigationDestination(item: $activeReaderDestination) { destination in
+            readerDestinationContent(destination)
+        }
         .confirmationDialog(
             String(localized: "picker_no_bible_modules"),
             isPresented: $showStartupDownloadPrompt,
@@ -609,6 +622,9 @@ public struct BibleReaderView: View {
         }
         .onChange(of: activeReaderSheet) { oldValue, newValue in
             handleActiveReaderSheetChange(from: oldValue, to: newValue)
+        }
+        .onChange(of: activeReaderDestination) { oldValue, newValue in
+            handleActiveReaderDestinationChange(from: oldValue, to: newValue)
         }
         .onChange(of: showReaderOverflowMenu) { oldValue, newValue in
             guard oldValue, !newValue else {
@@ -772,9 +788,6 @@ public struct BibleReaderView: View {
         BibleReaderActiveSheetContent(
             sheet: presentedSheet,
             controller: panePresentationController,
-            displaySettings: $globalDisplaySettings,
-            nightMode: $nightMode,
-            nightModeMode: $nightModeMode,
             readingProgressInitialTab: readingProgressInitialTab,
             chapterReadHistoryTarget: chapterReadHistoryTarget,
             downloadsInitialSearchText: downloadsInitialSearchText,
@@ -782,9 +795,26 @@ public struct BibleReaderView: View {
             onDefaultDownloadActivityChanged: { isInFlight in
                 handleStartupDefaultDownloadActivityChanged(isInFlight: isInFlight)
             },
-            onDismiss: dismissReaderSheet,
-            onSettingsChanged: applyGlobalDisplaySettingsChange
+            onDismiss: dismissReaderSheet
         )
+    }
+
+    /// Builds reader-stack destinations opened from the drawer, overflow, or keyboard shortcuts.
+    @ViewBuilder
+    private func readerDestinationContent(_ destination: ReaderDestination) -> some View {
+        switch destination {
+        case .settings:
+            SettingsView(
+                displaySettings: $globalDisplaySettings,
+                nightMode: $nightMode,
+                nightModeMode: $nightModeMode,
+                readingProgressController: panePresentationController,
+                onSettingsChanged: applyGlobalDisplaySettingsChange
+            )
+            #if os(iOS)
+            .toolbar(.visible, for: .navigationBar)
+            #endif
+        }
     }
 
     /// Buttons shown when startup detects there are no installed Bible modules.
@@ -871,7 +901,7 @@ public struct BibleReaderView: View {
             onNavigateNext: { navigateNextIfReaderCanHostNavigate(focusedController) },
             onCloseClientModal: { _ = closeFocusedWebModalIfNeeded() },
             onOpenDownloads: { presentDownloads(from: windowManager.activeWindow?.id) },
-            onOpenSettings: { presentReaderSheet(.settings, from: windowManager.activeWindow?.id) }
+            onOpenSettings: { presentSettings(from: windowManager.activeWindow?.id) }
         )
     }
 
@@ -940,6 +970,17 @@ public struct BibleReaderView: View {
         activeReaderSheet = sheet
     }
 
+    /// Presents a reader-stack destination and captures the pane target that should back it.
+    private func presentReaderDestination(_ destination: ReaderDestination, from windowId: UUID? = nil) {
+        setPanePresentationTarget(windowId)
+        activeReaderDestination = destination
+    }
+
+    /// Opens Application preferences as an integrated reader-stack destination.
+    private func presentSettings(from windowId: UUID? = nil) {
+        presentReaderDestination(.settings, from: windowId)
+    }
+
     /**
      Presents Downloads and seeds its free-text search from an Android `download://` target.
 
@@ -1006,7 +1047,6 @@ public struct BibleReaderView: View {
        - currentSheet: Sheet now visible after SwiftUI reported the change.
 
      Side effects:
-     - reloads behavior preferences after Settings closes
      - clears Downloads launch state after Downloads closes
      - refreshes installed-module caches for each reader controller
      - reopens the startup prompt when Downloads closes without an installed Bible unless Easy Start
@@ -1024,8 +1064,6 @@ public struct BibleReaderView: View {
         }
 
         switch previousSheet {
-        case .settings:
-            reloadBehaviorPreferences()
         case .downloads:
             downloadsInitialSearchText = ""
             downloadsDefaultDownloadMode = .disabled
@@ -1040,6 +1078,29 @@ public struct BibleReaderView: View {
         default:
             break
         }
+    }
+
+    /**
+     Handles side effects that belong to a reader-stack destination closing.
+
+     Settings is now a navigation destination instead of a sheet. Reloading behavior preferences on
+     pop keeps the same refresh boundary as the former modal route without coupling the behavior to
+     sheet state.
+
+     - Parameters:
+       - previousDestination: Destination that was visible before SwiftUI reported the change.
+       - currentDestination: Destination now visible after SwiftUI reported the change.
+     - Side Effects: Reloads reader behavior preferences after Settings closes.
+     - Failure: Non-closing destination transitions are ignored.
+     */
+    private func handleActiveReaderDestinationChange(
+        from previousDestination: ReaderDestination?,
+        to currentDestination: ReaderDestination?
+    ) {
+        guard currentDestination == nil, previousDestination == .settings else {
+            return
+        }
+        reloadBehaviorPreferences()
     }
 
     /// Presents a follow-up top-level sheet after another flow already captured the pane target.
@@ -1541,7 +1602,7 @@ public struct BibleReaderView: View {
             case .readingPlans:
                 presentReaderSheet(.readingPlans, from: windowManager.activeWindow?.id)
             case .settings:
-                presentReaderSheet(.settings, from: windowManager.activeWindow?.id)
+                presentSettings(from: windowManager.activeWindow?.id)
             case .workspaces:
                 presentReaderSheet(.workspaces, from: windowManager.activeWindow?.id)
             case .downloads:
@@ -1577,7 +1638,7 @@ public struct BibleReaderView: View {
 
     /** Opens Settings from the reader shell. */
     private func openSettingsFromReaderAction() {
-        presentReaderSheet(.settings, from: windowManager.activeWindow?.id)
+        presentSettings(from: windowManager.activeWindow?.id)
     }
 
     /** Opens Workspaces from the reader shell. */
@@ -1614,7 +1675,7 @@ public struct BibleReaderView: View {
             onShowBookChooser: { presentBookChooser(from: window.id) },
             onShowSearch: { presentSearch(from: window.id) },
             onShowBookmarks: { presentReaderSheet(.bookmarks, from: window.id) },
-            onShowSettings: { presentReaderSheet(.settings, from: window.id) },
+            onShowSettings: { presentSettings(from: window.id) },
             onShowDownloads: { initialSearchText in
                 presentDownloads(from: window.id, initialSearchText: initialSearchText)
             },
@@ -1995,7 +2056,7 @@ public struct BibleReaderView: View {
             dismissReaderNavigationDrawerAndPerform { presentReaderModal(.syncSettings) }
         case .settings:
             dismissReaderNavigationDrawerAndPerform {
-                presentReaderSheet(.settings, from: windowManager.activeWindow?.id)
+                presentSettings(from: windowManager.activeWindow?.id)
             }
         case .help:
             dismissReaderNavigationDrawerAndPerform { presentReaderModal(.help) }

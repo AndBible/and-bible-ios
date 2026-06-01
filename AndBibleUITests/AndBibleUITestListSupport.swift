@@ -98,22 +98,22 @@ extension AndBibleUITests {
     }
 
     /**
-     Opens Label Manager through Settings navigation.
+     Opens Label Manager through the reader overflow admin route.
      *
      * - Parameter app: Running application under test.
      * - Returns: The root accessibility-identified Label Manager screen element.
      * - Side effects:
-     *   - opens Settings and pushes the Label Manager screen
+     *   - opens the reader overflow menu and presents the Label Manager screen
      * - Failure modes:
      *   - fails when the Label Manager screen never appears
      */
     func openLabelManager(in app: XCUIApplication) -> XCUIElement {
-        openSettingsDestination(
-            linkIdentifier: "settingsLabelsLink",
+        openReaderActionDestination(
+            actionIdentifier: "readerOpenLabelSettingsAction",
             destinationIdentifier: "labelManagerScreen",
             readinessIdentifiers: ["labelManagerAddButton"],
             in: app,
-            destinationTimeout: 20
+            timeout: 20
         )
     }
 
@@ -788,22 +788,22 @@ extension AndBibleUITests {
     }
 
     /**
-     Opens Import and Export through Settings navigation.
+     Opens Import and Export through the reader drawer administration route.
      *
      * - Parameter app: Running application under test.
      * - Returns: The root accessibility-identified Import and Export screen element.
      * - Side effects:
-     *   - opens Settings and pushes the Import and Export screen
+     *   - opens the reader drawer and presents the Import and Export screen
      * - Failure modes:
      *   - fails when the Import and Export screen never appears
      */
     func openImportExport(in app: XCUIApplication) -> XCUIElement {
-        openSettingsDestination(
-            linkIdentifier: "settingsImportExportLink",
+        openReaderActionDestination(
+            actionIdentifier: "readerOpenImportExportAction",
             destinationIdentifier: "importExportScreen",
             readinessIdentifiers: ["importExportImportButton", "importExportFullBackupButton"],
             in: app,
-            destinationTimeout: 20
+            timeout: 20
         )
     }
 
@@ -939,17 +939,22 @@ extension AndBibleUITests {
     }
 
     /**
-     Dismisses the Settings sheet back to the reader shell.
+     Dismisses the integrated Settings destination back to the reader shell.
      *
      * - Parameter app: Running application whose Settings sheet should be dismissed.
      * - Side effects:
-     *   - drags the production Settings form downward to close the sheet
+     *   - activates the navigation back button when Settings is pushed on the reader stack
      * - Failure modes:
-     *   - fails when the Settings sheet cannot be dismissed back to the reader shell
+     *   - fails when Settings cannot be dismissed back to the reader shell
      */
     func dismissSettings(in app: XCUIApplication) {
         let settingsForm = requireElement("settingsForm", in: app, timeout: 10)
-        dismissSheetByDraggingDown(settingsForm)
+        let backButton = app.navigationBars.buttons.element(boundBy: 0)
+        if backButton.exists {
+            tapElementReliably(backButton, timeout: 10)
+        } else {
+            settingsForm.swipeRight()
+        }
         waitForElementToDisappear(settingsForm, timeout: 10)
         XCTAssertTrue(
             waitForReaderShellReady(in: app, timeout: 20),
@@ -1242,7 +1247,9 @@ extension AndBibleUITests {
         case "settingsImportExportLink":
             "Import & Export"
         case "settingsSyncLink":
-            "iCloud Sync"
+            "Device synchronization"
+        case "settingsReadingProgressLink":
+            "Reading Progress Settings"
         case "settingsLabelsLink":
             "Labels"
         case "settingsTextDisplayLink":

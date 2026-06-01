@@ -392,6 +392,25 @@ public enum AppPreferenceRegistry {
     }
 
     /**
+     * Returns the durable application-preference keys cleared by Android's reset action.
+     *
+     * The reset contract is derived from storage metadata rather than from the Settings UI so it
+     * stays stable when rows move between reader navigation, feature shortcuts, and platform-only
+     * presentation surfaces. Action rows are excluded because they do not represent persisted
+     * user choices.
+     *
+     * - Returns: Registered non-action preference keys in `AppPreferenceKey.allCases` order.
+     * - Side Effects: None.
+     * - Failure: Missing registry entries are filtered by `definitions`; completeness remains
+     *   enforced by `definition(for:)` and registry tests.
+     */
+    public static var applicationPreferencesResetKeys: [AppPreferenceKey] {
+        definitions
+            .filter { $0.storage != .action }
+            .map(\.key)
+    }
+
+    /**
      * Returns the registry definition for a single parity key.
      * - Parameter key: Android parity preference key.
      * - Returns: The corresponding definition.

@@ -269,6 +269,30 @@ extension AndBibleUITests {
     }
 
     /**
+     Verifies that Reading Progress settings are exposed from the Android-parity Settings features section.
+
+     - Side effects:
+     *   - launches the app on the reader shell and opens Settings
+     *   - opens Reading Progress Settings from the settings screen
+     - Failure modes:
+     *   - fails if the Settings reading-progress shortcut is missing or never becomes hittable
+     *   - fails if the Reading Progress settings screen does not render after navigation completes
+     */
+    func testSettingsReadingProgressLinkOpensReadingProgressSettings() {
+        let app = makeApp()
+        app.launch()
+
+        XCTAssertTrue(
+            openSettingsDestination(
+                linkIdentifier: "settingsReadingProgressLink",
+                destinationIdentifier: "readingProgressSettingsScreen",
+                in: app,
+                destinationTimeout: 20
+            ).exists
+        )
+    }
+
+    /**
      Verifies that invalid NextCloud server input surfaces the expected validation status.
      *
      * - Side effects:

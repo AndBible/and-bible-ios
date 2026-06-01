@@ -1,6 +1,6 @@
 # Android Settings Contract (Source Of Truth)
 
-Last audited: 2026-05-31 for #154.
+Last audited: 2026-06-01 for #155.
 
 This file records the Android Application preferences contract and the current iOS
 disposition for each Android preference row. It intentionally separates two layers:
@@ -24,6 +24,8 @@ Primary Android sources:
 Primary iOS sources:
 - Registry: `Sources/BibleCore/Sources/BibleCore/Database/AppPreferenceRegistry.swift`
 - Settings UI: `Sources/BibleUI/Sources/BibleUI/Settings/SettingsView.swift`
+- Settings search: `Sources/BibleUI/Sources/BibleUI/Settings/AndBibleSettingsSearch.swift`
+- Android icon mapping: `Sources/BibleUI/Sources/BibleUI/Shared/AndBibleIconCatalog.swift`
 - Reader config payload: `Sources/BibleUI/Sources/BibleUI/Bible/BibleReaderController.swift`
 - Shared Vue reader config: `bibleview-js/src/composables/config.ts`
 
@@ -37,6 +39,10 @@ Primary iOS sources:
   `ai_settings_shortcut`, and `reading_progress_settings_shortcut` are action rows,
   not durable preference values. They should not be added to `AppPreferenceRegistry`
   unless iOS intentionally models them as registry-backed actions.
+- iOS Application preferences reset uses `AppPreferenceRegistry.applicationPreferencesResetKeys`.
+  Action rows and global text-display settings are excluded from that reset contract.
+- iOS Application preferences search is native SwiftUI search over normalized row
+  identifiers, titles, summaries, details, and keywords. All query terms must match.
 - `eink_mode` is an Android e-ink feature switch and is intentionally not registered
   on iOS unless iOS gains equivalent e-ink behavior.
 - `notes_content_type` is a real Android preference and is tracked separately by #163
@@ -92,9 +98,9 @@ Primary iOS sources:
 | `discrete_mode` | XML `settings.xml:222-227`; hidden in discrete flavor at `SettingsActivity.kt:310-314`. | Registry-backed adapted pass. |
 | `show_calculator` | XML `settings.xml:228-232`; hidden/summary adjusted at `SettingsActivity.kt:315-324`. | Registry-backed pass. |
 | `calculator_pin` | XML `settings.xml:233-238`; numeric editor enforced at `SettingsActivity.kt:280-282`. | Registry-backed pass. |
-| `sync_settings_shortcut` | XML `settings.xml:241-245`; starts `SyncSettingsActivity` at `SettingsActivity.kt:284-287`. | Outside registry, adapted by iOS Settings data link to `SyncSettingsView`; broader shortcut presentation is tracked by #155. |
-| `ai_settings_shortcut` | XML `settings.xml:246-250`; starts `AiSettingsActivity` at `SettingsActivity.kt:289-292`. | Outside registry, deferred to the iOS AI parity track (#5, #74, #89-#92) and settings presentation track (#155). |
-| `reading_progress_settings_shortcut` | XML `settings.xml:251-255`; starts `ReadingProgressSettingsActivity` at `SettingsActivity.kt:294-297`. | Outside registry, partially adapted through the reader bridge/native reading-progress settings; top-level settings shortcut alignment is tracked by #155. |
+| `sync_settings_shortcut` | XML `settings.xml:241-245`; starts `SyncSettingsActivity` at `SettingsActivity.kt:284-287`. | Outside registry, adapted as an iOS Features shortcut to `SyncSettingsView` with Android-sourced icon mapping. |
+| `ai_settings_shortcut` | XML `settings.xml:246-250`; starts `AiSettingsActivity` at `SettingsActivity.kt:289-292`. | Outside registry, intentionally absent until iOS has an AI settings contract; tracked by the iOS AI parity issues (#5, #74, #89-#92). |
+| `reading_progress_settings_shortcut` | XML `settings.xml:251-255`; starts `ReadingProgressSettingsActivity` at `SettingsActivity.kt:294-297`. | Outside registry, adapted as an iOS Features shortcut to native `ReadingProgressSettingsView` with Android-sourced icon mapping. |
 | `experimental_features` | XML `settings.xml:258-265`; option arrays are `arrays.xml:273-280`. | Registry-backed pass. |
 | `enable_bluetooth_pref` | XML `settings.xml:266-270`; default `true`. | Registry-backed adapted pass through iOS remote command handling. |
 | `request_sdcard_permission_pref` | XML `settings.xml:271-274`; hidden on Android Q+ at `SettingsActivity.kt:275-278`. | Registry-backed documented divergence. iOS has no SD-card permission model. |
@@ -125,7 +131,7 @@ Primary iOS sources:
 | `font_size_multiplier` summary shows the current multiplier. | `SettingsActivity.kt:255-268` | Implemented with a SwiftUI stepper value. |
 | `request_sdcard_permission_pref` hidden on Android Q+. | `SettingsActivity.kt:275-278` | iOS divergence. |
 | `calculator_pin` editor forced to numeric input. | `SettingsActivity.kt:280-282` | Implemented. |
-| Sync, AI, and Reading Progress shortcuts open adjacent settings screens. | `SettingsActivity.kt:284-297` | Sync adapted; AI and top-level Reading Progress shortcut alignment tracked by #155 and AI parity issues. |
+| Sync, AI, and Reading Progress shortcuts open adjacent settings screens. | `SettingsActivity.kt:284-297` | Sync and Reading Progress are adapted as native iOS Features shortcuts. AI remains deferred because iOS has no AI settings workflow yet. |
 | `global_text_display_settings` opens global text-display settings. | `SettingsActivity.kt:299-308` | Adapted through Look & feel settings links and `SettingsStore.globalTextDisplaySettingsKey`. |
 | `discrete_mode` and `show_calculator` hidden in discrete flavor. | `SettingsActivity.kt:310-324` | Adapted through iOS app-icon/calculator behavior. |
 | `discrete_help` shows flavor-dependent help dialog. | `SettingsActivity.kt:325-353` | Adapted as iOS help sheet. |

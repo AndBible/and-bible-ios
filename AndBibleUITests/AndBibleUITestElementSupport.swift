@@ -634,6 +634,7 @@ extension AndBibleUITests {
             "settingsRepositoriesLink",
             "settingsImportExportLink",
             "settingsSyncLink",
+            "settingsReadingProgressLink",
             "settingsLabelsLink",
             "settingsTextDisplayLink",
             "settingsColorsLink":
@@ -670,6 +671,7 @@ extension AndBibleUITests {
             "labelManagerScreen",
             "labelEditScreen",
             "syncSettingsScreen",
+            "readingProgressSettingsScreen",
             "colorSettingsScreen",
             "importExportScreen",
             "modulePickerScreen",
