@@ -446,39 +446,47 @@ public struct SettingsView: View {
      Adds persistence observers for multi-select settings whose state is edited in child screens.
 
      - Side Effects: Writes selected dictionary/action/experimental-feature values into SwiftData and
-       refreshes reader content for options that affect rendered documents.
+       refreshes reader content for options that affect rendered documents after initial preference
+       hydration has completed.
      - Failure Modes: Store writes use the same `SettingsStore` defaults and model-context error
        handling as the rest of settings.
      */
     private var settingsFormWithPreferencePersistence: some View {
         settingsFormWithPresentation
             .onChange(of: selectedStrongsGreekDictionaryNames) { _, newValue in
+                guard hasLoadedPreferences else { return }
                 let store = SettingsStore(modelContext: modelContext)
                 store.setStringSet(.strongsGreekDictionary, values: Array(newValue))
             }
             .onChange(of: selectedStrongsHebrewDictionaryNames) { _, newValue in
+                guard hasLoadedPreferences else { return }
                 let store = SettingsStore(modelContext: modelContext)
                 store.setStringSet(.strongsHebrewDictionary, values: Array(newValue))
             }
             .onChange(of: selectedRobinsonMorphologyDictionaryNames) { _, newValue in
+                guard hasLoadedPreferences else { return }
                 let store = SettingsStore(modelContext: modelContext)
                 store.setStringSet(.robinsonGreekMorphology, values: Array(newValue))
             }
             .onChange(of: disabledWordLookupDictionaryNames) { _, newValue in
+                guard hasLoadedPreferences else { return }
                 let store = SettingsStore(modelContext: modelContext)
                 store.setStringSet(.disabledWordLookupDictionaries, values: Array(newValue))
             }
             .onChange(of: disabledBibleBookmarkModalButtons) { _, newValue in
+                guard hasLoadedPreferences else { return }
                 let store = SettingsStore(modelContext: modelContext)
                 store.setStringSet(.disableBibleBookmarkModalButtons, values: Array(newValue))
                 onSettingsChanged?()
             }
             .onChange(of: disabledGenBookmarkModalButtons) { _, newValue in
+                guard hasLoadedPreferences else { return }
                 let store = SettingsStore(modelContext: modelContext)
                 store.setStringSet(.disableGenBookmarkModalButtons, values: Array(newValue))
                 onSettingsChanged?()
             }
             .onChange(of: enabledExperimentalFeatures) { _, newValue in
+                guard hasLoadedPreferences else { return }
                 let store = SettingsStore(modelContext: modelContext)
                 store.setStringSet(.experimentalFeatures, values: Array(newValue))
                 onSettingsChanged?()
