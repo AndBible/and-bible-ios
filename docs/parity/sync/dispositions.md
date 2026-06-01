@@ -118,3 +118,32 @@ Reason:
 Reference:
 
 - #49 records the decision to split the categories into distinct parity targets.
+
+## 6. Sync settings uses native controls with Android-backed row presentation
+
+- Status: intentional native implementation with Android presentation contract
+- Scope: Sync settings rows, icons, section grouping, and status summaries
+
+Disposition:
+
+- iOS keeps native SwiftUI controls for the backend picker, credential fields,
+  toggles, and connection-test button.
+- The visible row presentation is source-backed by Android
+  `sync_settings.xml` keys for backend selection, storage credentials,
+  reset/sign-out, status/info, and supported category rows.
+- The NextCloud/WebDAV connection test remains an iOS additive workflow while
+  the category toggles continue to use the Android bootstrap/sync behavior.
+
+Reason:
+
+- Android also uses platform-native settings primitives, but those primitives
+  are made to feel like AndBible through custom icons, summaries, grouping, and
+  dynamic status rows.
+- Matching that behavior on iOS means reusing native controls where they are the
+  honest platform path while preventing generic SwiftUI rows from drifting away
+  from Android's information architecture.
+
+Reference:
+
+- #159 tracks this presentation and workflow alignment.
+- #116 tracks Google Drive removal and the follow-up reset/sign-out cleanup.

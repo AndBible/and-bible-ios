@@ -311,7 +311,7 @@ public struct SyncSettingsView: View {
      */
     private var backendSection: some View {
         Section {
-            Picker(String(localized: "sync_adapter"), selection: $selectedBackend) {
+            Picker(selection: $selectedBackend) {
                 Text(String(localized: "icloud_sync"))
                     .tag(RemoteSyncBackend.iCloud)
                     .accessibilityIdentifier("syncBackendOption::\(RemoteSyncBackend.iCloud.rawValue)")
@@ -321,13 +321,19 @@ public struct SyncSettingsView: View {
                 Text(String(localized: "adapters_google_drive"))
                     .tag(RemoteSyncBackend.googleDrive)
                     .accessibilityIdentifier("syncBackendOption::\(RemoteSyncBackend.googleDrive.rawValue)")
+            } label: {
+                syncSettingsRowLabel(
+                    SyncSettingsPresentation.backend,
+                    title: String(localized: "sync_adapter"),
+                    summary: String(localized: "prefs_sync_introduction_summary1"),
+                    detail: String(format: String(localized: "sync_adapter_summary"), selectedBackendTitle)
+                )
             }
             .accessibilityIdentifier("syncBackendPicker")
 
         } footer: {
-            VStack(alignment: .leading, spacing: 6) {
-                Text(String(localized: "prefs_sync_introduction_summary1"))
-                if selectedBackend == .googleDrive {
+            if selectedBackend == .googleDrive {
+                VStack(alignment: .leading, spacing: 6) {
                     Text(
                         String(
                             format: String(localized: "prefs_sync_introduction_summary2"),
@@ -335,7 +341,6 @@ public struct SyncSettingsView: View {
                         )
                     )
                 }
-                Text(String(format: String(localized: "sync_adapter_summary"), selectedBackendTitle))
             }
         }
     }
@@ -347,7 +352,7 @@ public struct SyncSettingsView: View {
     private var iCloudSections: some View {
         Group {
             Section {
-                Toggle(String(localized: "icloud_sync_enabled"), isOn: Binding(
+                Toggle(isOn: Binding(
                     get: { syncService.isEnabled },
                     set: { newValue in
                         if !newValue {
@@ -357,48 +362,63 @@ public struct SyncSettingsView: View {
                             showRestartAlert = true
                         }
                     }
-                ))
+                )) {
+                    syncSettingsRowLabel(
+                        SyncSettingsPresentation.backend,
+                        title: String(localized: "icloud_sync_enabled"),
+                        summary: String(localized: "icloud_sync_description"),
+                        isEnabled: !syncService.requiresRestart
+                    )
+                }
                 .disabled(syncService.requiresRestart)
-                Text(String(localized: "icloud_sync_description"))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             } header: {
-                Text(String(localized: "icloud_sync"))
+                syncSettingsSectionHeader(String(localized: "icloud_sync"))
             }
 
             Section {
-                HStack {
-                    Text(String(localized: "status"))
-                    Spacer()
+                LabeledContent {
                     iCloudStatusView
+                } label: {
+                    syncSettingsRowLabel(
+                        SyncSettingsPresentation.syncInfo,
+                        title: String(localized: "status")
+                    )
                 }
 
                 if syncService.isEnabled && !syncService.requiresRestart {
-                    HStack {
-                        Text(String(localized: "icloud_account"))
-                        Spacer()
+                    LabeledContent {
                         Text(accountText)
                             .foregroundStyle(.secondary)
+                    } label: {
+                        syncSettingsRowLabel(
+                            SyncSettingsPresentation.nextCloudCredential,
+                            title: String(localized: "icloud_account")
+                        )
                     }
 
-                    HStack {
-                        Text(String(localized: "last_sync"))
-                        Spacer()
+                    LabeledContent {
                         Text(lastSyncText)
                             .foregroundStyle(.secondary)
+                    } label: {
+                        syncSettingsRowLabel(
+                            SyncSettingsPresentation.syncInfo,
+                            title: String(localized: "last_sync")
+                        )
                     }
                 }
             } header: {
-                Text(String(localized: "sync_status"))
+                syncSettingsSectionHeader(String(localized: "sync_status"))
             }
 
             if syncService.isEnabled && !syncService.requiresRestart {
                 Section {
-                    Text(String(localized: "sync_what_syncs"))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    syncSettingsRowLabel(
+                        SyncSettingsPresentation.syncInfo,
+                        title: String(localized: "sync_data_included"),
+                        summary: String(localized: "sync_what_syncs")
+                    )
                 } header: {
-                    Text(String(localized: "sync_data_included"))
+                    syncSettingsSectionHeader(String(localized: "sync_data_included"))
                 }
             }
         }
@@ -410,64 +430,106 @@ public struct SyncSettingsView: View {
     private var nextCloudSections: some View {
         Group {
             Section {
-                TextField(String(localized: "auth_server_uri"), text: $serverURL)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .accessibilityIdentifier("syncNextCloudServerURLField")
-                    #if os(iOS)
-                    .textContentType(.URL)
-                    #endif
+                LabeledContent {
+                    TextField(String(localized: "auth_server_uri"), text: $serverURL)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .multilineTextAlignment(.trailing)
+                        .accessibilityIdentifier("syncNextCloudServerURLField")
+                        #if os(iOS)
+                        .textContentType(.URL)
+                        #endif
+                } label: {
+                    syncSettingsRowLabel(
+                        SyncSettingsPresentation.nextCloudCredential,
+                        title: String(localized: "auth_server_uri")
+                    )
+                }
 
-                TextField(String(localized: "auth_username"), text: $username)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .accessibilityIdentifier("syncNextCloudUsernameField")
-                    #if os(iOS)
-                    .textContentType(.username)
-                    #endif
+                LabeledContent {
+                    TextField(String(localized: "auth_username"), text: $username)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .multilineTextAlignment(.trailing)
+                        .accessibilityIdentifier("syncNextCloudUsernameField")
+                        #if os(iOS)
+                        .textContentType(.username)
+                        #endif
+                } label: {
+                    syncSettingsRowLabel(
+                        SyncSettingsPresentation.nextCloudCredential,
+                        title: String(localized: "auth_username")
+                    )
+                }
 
-                SecureField(String(localized: "auth_password"), text: $password)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .accessibilityIdentifier("syncNextCloudPasswordField")
-                    #if os(iOS)
-                    .textContentType(.password)
-                    #endif
+                LabeledContent {
+                    SecureField(String(localized: "auth_password"), text: $password)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .multilineTextAlignment(.trailing)
+                        .accessibilityIdentifier("syncNextCloudPasswordField")
+                        #if os(iOS)
+                        .textContentType(.password)
+                        #endif
+                } label: {
+                    syncSettingsRowLabel(
+                        SyncSettingsPresentation.nextCloudCredential,
+                        title: String(localized: "auth_password")
+                    )
+                }
 
-                TextField(String(localized: "auth_folder_path"), text: $folderPath)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .accessibilityIdentifier("syncNextCloudFolderPathField")
+                LabeledContent {
+                    TextField(String(localized: "auth_folder_path"), text: $folderPath)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .multilineTextAlignment(.trailing)
+                        .accessibilityIdentifier("syncNextCloudFolderPathField")
+                } label: {
+                    syncSettingsRowLabel(
+                        SyncSettingsPresentation.nextCloudCredential,
+                        title: String(localized: "auth_folder_path")
+                    )
+                }
             } header: {
-                Text(String(localized: "adapters_next_cloud"))
+                syncSettingsSectionHeader(String(localized: "adapters_next_cloud"))
             } footer: {
                 Text(String(localized: "auth_folder_path_summary"))
             }
 
             Section {
-                Button(String(localized: "test_connection")) {
+                Button {
                     Task {
                         await testRemoteConnection()
                     }
+                } label: {
+                    syncSettingsButtonLabel(
+                        SyncSettingsPresentation.syncInfo,
+                        title: String(localized: "test_connection"),
+                        isEnabled: !isTestingConnection,
+                        accessibilityIdentifier: "syncNextCloudTestConnectionButton"
+                    )
                 }
                 .disabled(isTestingConnection)
                 .accessibilityIdentifier("syncNextCloudTestConnectionButton")
 
-                HStack(alignment: .top) {
-                    Text(String(localized: "status"))
-                    Spacer()
+                LabeledContent {
                     remoteStatusView
+                } label: {
+                    syncSettingsRowLabel(
+                        SyncSettingsPresentation.syncInfo,
+                        title: String(localized: "status")
+                    )
                 }
                 .accessibilityIdentifier("syncRemoteStatus")
                 .accessibilityValue(remoteStatusAccessibilityValue)
             } header: {
-                Text(String(localized: "sync_status"))
+                syncSettingsSectionHeader(String(localized: "sync_status"))
             }
 
             Section {
                 remoteCategoryList
             } header: {
-                Text(String(localized: "synchronization_categories"))
+                syncSettingsSectionHeader(String(localized: "synchronization_categories"))
             }
         }
     }
@@ -478,43 +540,62 @@ public struct SyncSettingsView: View {
     private var googleDriveSections: some View {
         Group {
             Section {
-                HStack(alignment: .top) {
-                    Text(String(localized: "status"))
-                    Spacer()
+                if case .signedIn = googleDriveAuthService.state {
+                    Button(role: .destructive) {
+                        showGoogleDriveResetConfirmation = true
+                    } label: {
+                        syncSettingsButtonLabel(
+                            SyncSettingsPresentation.resetOrSignOut,
+                            title: String(localized: "google_drive_sign_out"),
+                            accessibilityIdentifier: "syncGoogleDriveSignOutButton"
+                        )
+                    }
+                } else {
+                    Button {
+                        Task {
+                            await signInToGoogleDrive()
+                        }
+                    } label: {
+                        syncSettingsButtonLabel(
+                            SyncSettingsPresentation.syncInfo,
+                            title: String(localized: "google_drive_sign_in"),
+                            isEnabled: !isGoogleDriveSignInButtonDisabled,
+                            accessibilityIdentifier: "syncGoogleDriveSignInButton"
+                        )
+                    }
+                    .disabled(isGoogleDriveSignInButtonDisabled)
+                    .accessibilityIdentifier("syncGoogleDriveSignInButton")
+                }
+
+                LabeledContent {
                     googleDriveStatusView
+                } label: {
+                    syncSettingsRowLabel(
+                        SyncSettingsPresentation.syncInfo,
+                        title: String(localized: "status")
+                    )
                 }
 
                 if let accountLabel = googleDriveAuthService.currentAccountLabel {
-                    HStack {
-                        Text(String(localized: "google_drive_account"))
-                        Spacer()
+                    LabeledContent {
                         Text(accountLabel)
                             .foregroundStyle(.secondary)
                             .multilineTextAlignment(.trailing)
-                    }
-                }
-
-                Button(String(localized: "google_drive_sign_in")) {
-                    Task {
-                        await signInToGoogleDrive()
-                    }
-                }
-                .disabled(isGoogleDriveSignInButtonDisabled)
-                .accessibilityIdentifier("syncGoogleDriveSignInButton")
-
-                if case .signedIn = googleDriveAuthService.state {
-                    Button(String(localized: "google_drive_sign_out"), role: .destructive) {
-                        showGoogleDriveResetConfirmation = true
+                    } label: {
+                        syncSettingsRowLabel(
+                            SyncSettingsPresentation.nextCloudCredential,
+                            title: String(localized: "google_drive_account")
+                        )
                     }
                 }
             } header: {
-                Text(String(localized: "adapters_google_drive"))
+                syncSettingsSectionHeader(String(localized: "adapters_google_drive"))
             }
 
             Section {
                 remoteCategoryList
             } header: {
-                Text(String(localized: "synchronization_categories"))
+                syncSettingsSectionHeader(String(localized: "synchronization_categories"))
             }
         }
     }
@@ -530,19 +611,13 @@ public struct SyncSettingsView: View {
                     Button {
                         categoryBinding.wrappedValue.toggle()
                     } label: {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(remoteCategoryTitle(for: category))
-                            Text(remoteCategoryContentDescription(for: category))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-
-                            if let supplementalText = remoteCategorySupplementalText(for: category) {
-                                Text(supplementalText)
-                                    .font(.caption)
-                                    .foregroundStyle(remoteCategorySupplementalColor(for: category))
-                            }
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                        syncSettingsRowLabel(
+                            SyncSettingsPresentation.category(category),
+                            title: remoteCategoryTitle(for: category),
+                            summary: remoteCategoryContentDescription(for: category),
+                            detail: remoteCategorySupplementalText(for: category),
+                            isEnabled: !isRemoteSyncInteractionLocked
+                        )
                     }
                     .buttonStyle(.plain)
                     .accessibilityIdentifier("syncCategoryToggle::\(category.rawValue)")
@@ -557,6 +632,75 @@ public struct SyncSettingsView: View {
 
             }
         }
+    }
+
+    /**
+     Builds one Android-backed sync settings row label for native SwiftUI controls.
+
+     - Parameters:
+       - row: Android sync-settings presentation row that supplies icon metadata.
+       - title: Primary row title.
+       - summary: Optional secondary row text.
+       - detail: Optional tertiary state text.
+       - isEnabled: Whether the row should render with enabled or disabled emphasis.
+     - Returns: Shared Android-shaped row label aligned with the main settings presentation.
+     - Side effects: Renders an image from the module bundle when `row` has catalog metadata.
+     - Failure modes: Missing icon metadata simply keeps the row aligned without an icon.
+     */
+    private func syncSettingsRowLabel(
+        _ row: SyncSettingsPresentation.Row,
+        title: String,
+        summary: String? = nil,
+        detail: String? = nil,
+        isEnabled: Bool = true
+    ) -> AndBibleSettingsRowLabel {
+        AndBibleSettingsRowLabel(
+            title: title,
+            summary: summary,
+            detail: detail,
+            icon: row.icon,
+            isEnabled: isEnabled
+        )
+    }
+
+    /**
+     Builds an Android-backed label for action rows that must remain discoverable in UI tests.
+
+     SwiftUI can expose disabled custom `Button` labels differently than string-backed buttons.
+     Applying the identifier to the combined label preserves the existing UI-test contract while
+     leaving the button itself as the interactive control when it is enabled.
+
+     - Parameters:
+       - row: Android sync-settings presentation row that supplies icon metadata.
+       - title: Primary row title.
+       - isEnabled: Whether the row should render with enabled or disabled emphasis.
+       - accessibilityIdentifier: Stable identifier already used by UI automation.
+     - Returns: Combined row label with button traits and the supplied accessibility identifier.
+     - Side effects: Renders an image from the module bundle when `row` has catalog metadata.
+     - Failure modes: Missing icon metadata simply keeps the row aligned without an icon.
+     */
+    private func syncSettingsButtonLabel(
+        _ row: SyncSettingsPresentation.Row,
+        title: String,
+        isEnabled: Bool = true,
+        accessibilityIdentifier: String
+    ) -> some View {
+        syncSettingsRowLabel(row, title: title, isEnabled: isEnabled)
+            .accessibilityElement(children: .combine)
+            .accessibilityAddTraits(.isButton)
+            .accessibilityIdentifier(accessibilityIdentifier)
+    }
+
+    /**
+     Builds an Android-shaped sync settings section header.
+
+     - Parameter title: User-visible section title.
+     - Returns: Section header aligned to the text column used by Android-backed settings rows.
+     - Side effects: none.
+     - Failure modes: This helper cannot fail.
+     */
+    private func syncSettingsSectionHeader(_ title: String) -> AndBibleSettingsSectionHeader {
+        AndBibleSettingsSectionHeader(title: title)
     }
 
     /**
@@ -676,6 +820,7 @@ public struct SyncSettingsView: View {
             "backend=\(selectedBackend.rawValue)",
             "enabled=\(enabledToken)",
             "remoteStatus=\(remoteStatusAccessibilityValue)",
+            "presentation=androidRows",
             "bootstrapPrompt=\(remoteBootstrapPromptAccessibilityToken)",
             "pendingConfirmation=\(remoteConfirmationAccessibilityToken)",
             "lastConfirmation=\(lastRemoteConfirmationAction ?? "none")",
@@ -1318,25 +1463,6 @@ public struct SyncSettingsView: View {
             format: String(localized: "last_updated"),
             formattedSyncTimestamp(milliseconds: lastSynchronized)
         )
-    }
-
-    /**
-     Returns the color used for the supplemental category caption.
-
-     - Parameter category: Logical sync category being rendered.
-     - Returns: Semantic color for the category's supplemental caption.
-     - Side effects: none.
-     - Failure modes: This helper cannot fail.
-     */
-    private func remoteCategorySupplementalColor(for category: RemoteSyncCategory) -> Color {
-        switch remoteCategoryStatuses[category] ?? .idle {
-        case .idle:
-            return .secondary
-        case .syncing:
-            return .secondary
-        case .failed:
-            return .orange
-        }
     }
 
     /**
