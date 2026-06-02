@@ -206,11 +206,11 @@ xcodebuild -project AndBible.xcodeproj -scheme AndBible \
   - bundled modules being available in the harness
 - If Search suddenly returns zero bundled hits, inspect the harness setup before changing assertions
 
-### Google Drive
+### Sync Backends
 
-- Google Drive OAuth is intentionally build-config dependent
-- See `docs/howto/google-drive-oauth-setup.md`
-- `not configured` is expected in local/CI builds without real credentials
+- iOS sync supports iCloud and NextCloud/WebDAV only
+- Google Drive is intentionally removed from the iOS sync surface
+- Legacy `GOOGLE_DRIVE` backend values should fall back to iCloud
 
 ## Copilot Workflow Recommendations
 

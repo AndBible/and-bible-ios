@@ -268,11 +268,11 @@ cd libsword
 - UI Search tests depend on the test harness restoring bundled modules and using a temporary index path
 - If Search suddenly returns zero bundled hits, inspect the temporary SWORD root and Search index setup before changing the UI test itself
 
-### Google Drive
+### Sync Backends
 
-- Google Drive OAuth is intentionally build-config dependent
-- See `docs/howto/google-drive-oauth-setup.md`
-- `not configured` is expected in local or CI builds without real credentials
+- iOS sync supports iCloud and NextCloud/WebDAV only
+- Google Drive is intentionally removed from the iOS sync surface
+- Legacy `GOOGLE_DRIVE` backend values should fall back to iCloud
 
 ## Git Conventions
 

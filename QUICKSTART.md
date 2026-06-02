@@ -130,7 +130,6 @@ Rebuild the frontend bundle before app validation when frontend assets changed.
 - Full repo guidance: `CLAUDE.md`
 - Android reference repository: https://github.com/andbible/and-bible
 - Shared frontend code: `bibleview-js/`
-- Google Drive OAuth setup notes: `docs/howto/google-drive-oauth-setup.md`
 
 ## Development Workflow
 
