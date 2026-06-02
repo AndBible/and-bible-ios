@@ -984,8 +984,8 @@ extension AndBibleUITests {
         tapElementReliably(picker, timeout: timeout)
 
         let backendLabel: String = switch backendRawValue {
-        case "GOOGLE_DRIVE":
-            "Google Drive"
+        case "ICLOUD":
+            "iCloud Sync"
         case "NEXT_CLOUD":
             "NextCloud"
         default:

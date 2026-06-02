@@ -7,17 +7,16 @@ import BibleCore
 /**
  Configures the active sync backend and surfaces backend-specific settings.
 
- The screen now acts as the entry point for the existing CloudKit implementation plus the Android-
- aligned NextCloud/WebDAV and Google Drive backends. It preserves the current iCloud toggle/status
- flow while allowing the remote backends to edit credentials, restore cached auth state, and
- perform category-scoped synchronization without changing the active CloudKit runtime mid-session.
+ The screen acts as the entry point for the existing CloudKit implementation plus the Android-
+ aligned NextCloud/WebDAV backend. It preserves the current iCloud toggle/status flow while
+ allowing the remote backend to edit credentials and perform category-scoped synchronization
+ without changing the active CloudKit runtime mid-session.
 
  Data dependencies:
  - `SyncService` provides the effective iCloud sync mode, account description, runtime state, and
    last known sync timestamp
  - SwiftData's environment `modelContext` provides access to `SettingsStore` through
    `RemoteSyncSettingsStore`
- - `GoogleDriveAuthService` provides Google OAuth session state, scope readiness, and access tokens
  - localized strings provide backend labels, field titles, status text, and warnings
 
  Side effects:
@@ -25,18 +24,12 @@ import BibleCore
  - editing WebDAV credentials updates local state and can be persisted to SwiftData plus Keychain
  - testing a NextCloud/WebDAV connection builds a transient `WebDAVClient` and performs a network
    request against the configured server
- - switching to Google Drive can trigger best-effort cached-session restoration through
-   `GoogleDriveAuthService`
- - starting Google Drive sync can present interactive Google Sign-In or scope-consent UI
  - toggling iCloud sync calls back into `SyncService` and can persist a restart-required sync mode
  - disabling iCloud sync first presents a confirmation dialog before mutating the service state
  */
 public struct SyncSettingsView: View {
     /// Shared CloudKit sync service injected from the app environment.
     @Environment(SyncService.self) private var syncService
-
-    /// Shared Google Drive auth/session service injected from the app environment.
-    @Environment(GoogleDriveAuthService.self) private var googleDriveAuthService
 
     /// SwiftData context used to materialize the local settings store.
     @Environment(\.modelContext) private var modelContext
@@ -82,9 +75,6 @@ public struct SyncSettingsView: View {
 
     /// Pending destructive confirmation after the user chose adopt or replace.
     @State private var pendingRemoteConfirmation: PendingRemoteConfirmation?
-
-    /// Whether the Android-aligned Google Drive sign-out/reset confirmation is presented.
-    @State private var showGoogleDriveResetConfirmation = false
 
     /// Global remote-sync error message shown in an alert after a category sync failure.
     @State private var remoteSyncErrorMessage: String?
@@ -172,8 +162,6 @@ public struct SyncSettingsView: View {
                 iCloudSections
             } else if selectedBackend == .nextCloud {
                 nextCloudSections
-            } else if selectedBackend == .googleDrive {
-                googleDriveSections
             }
         }
         .accessibilityIdentifier("syncSettingsScreen")
@@ -194,11 +182,6 @@ public struct SyncSettingsView: View {
         .onChange(of: selectedBackend) { _, newValue in
             remoteSettingsStore.selectedBackend = newValue
             remoteConnectionStatus = nil
-            if newValue == .googleDrive {
-                Task {
-                    await googleDriveAuthService.restorePreviousSignInIfNeeded()
-                }
-            }
         }
         .alert(
             String(localized: "cloud_sync_title"),
@@ -275,18 +258,6 @@ public struct SyncSettingsView: View {
         } message: {
             Text(String(localized: "restart_to_apply_sync"))
         }
-        .confirmationDialog(
-            String(localized: "cloud_sync_title"),
-            isPresented: $showGoogleDriveResetConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button(String(localized: "google_drive_sign_out"), role: .destructive) {
-                resetGoogleDriveSynchronization()
-            }
-            Button(String(localized: "cancel"), role: .cancel) {}
-        } message: {
-            Text(String(localized: "sync_confirmation"))
-        }
         .alert(
             String(localized: "cloud_sync_title"),
             isPresented: Binding(
@@ -318,9 +289,6 @@ public struct SyncSettingsView: View {
                 Text(String(localized: "adapters_next_cloud"))
                     .tag(RemoteSyncBackend.nextCloud)
                     .accessibilityIdentifier("syncBackendOption::\(RemoteSyncBackend.nextCloud.rawValue)")
-                Text(String(localized: "adapters_google_drive"))
-                    .tag(RemoteSyncBackend.googleDrive)
-                    .accessibilityIdentifier("syncBackendOption::\(RemoteSyncBackend.googleDrive.rawValue)")
             } label: {
                 syncSettingsRowLabel(
                     SyncSettingsPresentation.backend,
@@ -330,18 +298,6 @@ public struct SyncSettingsView: View {
                 )
             }
             .accessibilityIdentifier("syncBackendPicker")
-
-        } footer: {
-            if selectedBackend == .googleDrive {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(
-                        String(
-                            format: String(localized: "prefs_sync_introduction_summary2"),
-                            appDisplayName
-                        )
-                    )
-                }
-            }
         }
     }
 
@@ -371,6 +327,7 @@ public struct SyncSettingsView: View {
                     )
                 }
                 .disabled(syncService.requiresRestart)
+                .accessibilityIdentifier("syncICloudEnabledToggle")
             } header: {
                 syncSettingsSectionHeader(String(localized: "icloud_sync"))
             }
@@ -523,71 +480,6 @@ public struct SyncSettingsView: View {
                 .accessibilityValue(remoteStatusAccessibilityValue)
             } header: {
                 syncSettingsSectionHeader(String(localized: "sync_status"))
-            }
-
-            Section {
-                remoteCategoryList
-            } header: {
-                syncSettingsSectionHeader(String(localized: "synchronization_categories"))
-            }
-        }
-    }
-
-    /**
-     Groups Google Drive auth status and Android-style category toggles.
-     */
-    private var googleDriveSections: some View {
-        Group {
-            Section {
-                if case .signedIn = googleDriveAuthService.state {
-                    Button(role: .destructive) {
-                        showGoogleDriveResetConfirmation = true
-                    } label: {
-                        syncSettingsButtonLabel(
-                            SyncSettingsPresentation.resetOrSignOut,
-                            title: String(localized: "google_drive_sign_out"),
-                            accessibilityIdentifier: "syncGoogleDriveSignOutButton"
-                        )
-                    }
-                } else {
-                    Button {
-                        Task {
-                            await signInToGoogleDrive()
-                        }
-                    } label: {
-                        syncSettingsButtonLabel(
-                            SyncSettingsPresentation.syncInfo,
-                            title: String(localized: "google_drive_sign_in"),
-                            isEnabled: !isGoogleDriveSignInButtonDisabled,
-                            accessibilityIdentifier: "syncGoogleDriveSignInButton"
-                        )
-                    }
-                    .disabled(isGoogleDriveSignInButtonDisabled)
-                }
-
-                LabeledContent {
-                    googleDriveStatusView
-                } label: {
-                    syncSettingsRowLabel(
-                        SyncSettingsPresentation.syncInfo,
-                        title: String(localized: "status")
-                    )
-                }
-
-                if let accountLabel = googleDriveAuthService.currentAccountLabel {
-                    LabeledContent {
-                        Text(accountLabel)
-                            .foregroundStyle(.secondary)
-                            .multilineTextAlignment(.trailing)
-                    } label: {
-                        syncSettingsRowLabel(
-                            SyncSettingsPresentation.nextCloudCredential,
-                            title: String(localized: "google_drive_account")
-                        )
-                    }
-                }
-            } header: {
-                syncSettingsSectionHeader(String(localized: "adapters_google_drive"))
             }
 
             Section {
@@ -894,41 +786,6 @@ public struct SyncSettingsView: View {
     }
 
     /**
-     Builds the trailing auth/session state for the Google Drive section.
-     */
-    @ViewBuilder
-    private var googleDriveStatusView: some View {
-        switch googleDriveAuthService.state {
-        case .notConfigured(let message):
-            SwiftUI.Label(message, systemImage: "exclamationmark.triangle.fill")
-                .foregroundStyle(.orange)
-                .multilineTextAlignment(.trailing)
-        case .signedOut:
-            SwiftUI.Label(String(localized: "google_drive_not_signed_in"), systemImage: "person.crop.circle.badge.xmark")
-                .foregroundStyle(.secondary)
-        case .authenticating:
-            HStack(spacing: 8) {
-                ProgressView()
-                Text(String(localized: "loading"))
-                    .foregroundStyle(.secondary)
-            }
-        case .signedIn(_, let driveAccessGranted):
-            if driveAccessGranted {
-                SwiftUI.Label(String(localized: "ok"), systemImage: "checkmark.circle.fill")
-                    .foregroundStyle(.green)
-            } else {
-                SwiftUI.Label(String(localized: "google_drive_permission_required"), systemImage: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.orange)
-                    .multilineTextAlignment(.trailing)
-            }
-        case .error(let message):
-            SwiftUI.Label(message, systemImage: "exclamationmark.triangle.fill")
-                .foregroundStyle(.orange)
-                .multilineTextAlignment(.trailing)
-        }
-    }
-
-    /**
      Binding used by the Android-style category toggles in the remote-backend sections.
 
      Side effects:
@@ -972,29 +829,6 @@ public struct SyncSettingsView: View {
     }
 
     /**
-     Whether the Google Drive sign-in button should be disabled.
-     *
-     * Failure modes:
-     * - returns `true` while remote sync is already in flight or the auth service is authenticating
-     */
-    private var isGoogleDriveSignInButtonDisabled: Bool {
-        if isRemoteSyncInteractionLocked {
-            return true
-        }
-
-        switch googleDriveAuthService.state {
-        case .notConfigured:
-            return true
-        case .authenticating:
-            return true
-        case .signedIn(_, let driveAccessGranted):
-            return driveAccessGranted
-        default:
-            return false
-        }
-    }
-
-    /**
      Human-readable backend name used in the backend summary footer.
      */
     private var selectedBackendTitle: String {
@@ -1003,20 +837,7 @@ public struct SyncSettingsView: View {
             return String(localized: "icloud_sync")
         case .nextCloud:
             return String(localized: "adapters_next_cloud")
-        case .googleDrive:
-            return String(localized: "adapters_google_drive")
         }
-    }
-
-    /**
-     Display name used in Android's Google Drive permission-summary footer.
-     */
-    private var appDisplayName: String {
-        let displayName = Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String
-        let bundleName = Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String
-        let resolved = displayName ?? bundleName ?? "AndBible"
-        let trimmed = resolved.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? "AndBible" : trimmed
     }
 
     /**
@@ -1103,50 +924,6 @@ public struct SyncSettingsView: View {
     }
 
     /**
-     Starts an interactive Google Drive sign-in or scope-consent flow.
-     *
-     * Side effects:
-     * - may present Google Sign-In or scope-consent UI
-     * - updates the global remote-sync alert state when sign-in fails
-     *
-     * Failure modes:
-     * - sign-in failures surface their localized description through `remoteSyncErrorMessage`
-     */
-    @MainActor
-    private func signInToGoogleDrive() async {
-        do {
-            try await googleDriveAuthService.signInInteractively()
-        } catch {
-            let message = error.localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines)
-            remoteSyncErrorMessage = message.isEmpty ? String(localized: "sign_in_failed") : message
-        }
-    }
-
-    /**
-     Signs out of Google Drive and clears Android-aligned local sync bookkeeping.
-     *
-     * Side effects:
-     * - signs the Google account out through `GoogleDriveAuthService`
-     * - clears local remote-sync metadata through `RemoteSyncResetService`
-     * - resets transient category UI state and pending prompts
-     *
-     * Failure modes:
-     * - local bookkeeping clears are best-effort through the underlying settings-backed stores
-     */
-    @MainActor
-    private func resetGoogleDriveSynchronization() {
-        googleDriveAuthService.signOut()
-        RemoteSyncResetService(settingsStore: SettingsStore(modelContext: modelContext))
-            .resetAllCategories()
-        remoteCategoryEnabled = [:]
-        remoteCategoryStatuses = [:]
-        pendingRemoteAdoption = nil
-        pendingRemoteConfirmation = nil
-        remoteConnectionStatus = nil
-        remoteSyncErrorMessage = nil
-    }
-
-    /**
      Starts Android-style synchronization for one enabled remote category.
 
      The first pass mirrors Android's `setupDrivePref()` path:
@@ -1158,7 +935,6 @@ public struct SyncSettingsView: View {
      - Parameter category: Logical sync category the user just enabled.
      - Side effects:
        - persists the current backend configuration before synchronization starts
-       - may present interactive Google sign-in when Google Drive is selected and no ready session exists
        - may perform remote bootstrap validation, initial-backup restore, or sparse patch sync
        - may present adopt-versus-create alerts by mutating view state
      - Failure modes:
@@ -1171,10 +947,6 @@ public struct SyncSettingsView: View {
         lastRemoteConfirmationAction = nil
 
         do {
-            if selectedBackend == .googleDrive && !googleDriveAuthService.isReadyForSync {
-                try await googleDriveAuthService.signInInteractively()
-            }
-
             let service = try makeRemoteSynchronizationService()
             let settingsStore = SettingsStore(modelContext: modelContext)
 
@@ -1327,10 +1099,6 @@ public struct SyncSettingsView: View {
             message = String(localized: "invalid_url_message")
         case RemoteSyncSynchronizationServiceFactoryError.missingWebDAVPassword:
             message = String(localized: "sign_in_failed")
-        case RemoteSyncSynchronizationServiceFactoryError.googleDriveAuthenticationRequired:
-            message = String(localized: "google_drive_not_signed_in")
-        case let authError as GoogleDriveAuthServiceError:
-            message = authError.localizedDescription
         case RemoteSyncPatchDiscoveryError.incompatiblePatchVersion:
             disableRemoteSync(for: category)
             message = [
@@ -1362,7 +1130,7 @@ public struct SyncSettingsView: View {
        - reads and may generate the stable remote device identifier through `RemoteSyncSettingsStore`
      - Failure modes:
        - throws `RemoteSyncSynchronizationServiceFactoryError` when the selected backend is missing
-         required local configuration or authentication state
+         required local configuration
        - throws `WebDAVClientError.invalidURL` when the stored NextCloud server URL cannot be normalized
      */
     private func makeRemoteSynchronizationService() throws -> RemoteSyncSynchronizationService {
@@ -1376,12 +1144,7 @@ public struct SyncSettingsView: View {
             )
         }
 
-        let factory = RemoteSyncSynchronizationServiceFactory(
-            bundleIdentifier: bundleIdentifier,
-            googleDriveAccessTokenProvider: { [googleDriveAuthService] in
-                try await googleDriveAuthService.accessToken()
-            }
-        )
+        let factory = RemoteSyncSynchronizationServiceFactory(bundleIdentifier: bundleIdentifier)
         return try factory.makeSynchronizationService(using: remoteSettingsStore)
     }
 

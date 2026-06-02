@@ -74,6 +74,30 @@ extension AndBibleTests {
         XCTAssertEqual(store.selectedBackend, .iCloud)
     }
 
+    func testRemoteSyncSettingsStoreFallsBackToICloudForRemovedGoogleDriveValue() throws {
+        let settingsStore = try makeInMemorySettingsStore()
+        settingsStore.setString("sync_adapter", value: "GOOGLE_DRIVE")
+
+        let store = RemoteSyncSettingsStore(
+            settingsStore: settingsStore,
+            secretStore: InMemorySecretStore()
+        )
+
+        XCTAssertEqual(store.selectedBackend, .iCloud)
+    }
+
+    func testRemoteSyncSettingsStorePreservesExistingNextCloudBackendValue() throws {
+        let settingsStore = try makeInMemorySettingsStore()
+        settingsStore.setString("sync_adapter", value: "NEXT_CLOUD")
+
+        let store = RemoteSyncSettingsStore(
+            settingsStore: settingsStore,
+            secretStore: InMemorySecretStore()
+        )
+
+        XCTAssertEqual(store.selectedBackend, .nextCloud)
+    }
+
     func testRemoteSyncSettingsStoreClearsStoredValuesAndPassword() throws {
         let settingsStore = try makeInMemorySettingsStore()
         let secretStore = InMemorySecretStore()

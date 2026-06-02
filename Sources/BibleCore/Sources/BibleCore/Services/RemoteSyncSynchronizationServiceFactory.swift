@@ -19,9 +19,6 @@ public enum RemoteSyncSynchronizationServiceFactoryError: Error, Equatable {
 
     /// NextCloud/WebDAV settings do not currently have a usable password.
     case missingWebDAVPassword
-
-    /// Google Drive requires a configured auth/token provider before sync can run.
-    case googleDriveAuthenticationRequired
 }
 
 extension RemoteSyncSynchronizationServiceFactoryError: LocalizedError {
@@ -40,8 +37,6 @@ extension RemoteSyncSynchronizationServiceFactoryError: LocalizedError {
             return String(localized: "invalid_url_message")
         case .missingWebDAVPassword:
             return String(localized: "sign_in_failed")
-        case .googleDriveAuthenticationRequired:
-            return String(localized: "google_drive_not_signed_in")
         }
     }
 }
@@ -51,8 +46,6 @@ extension RemoteSyncSynchronizationServiceFactoryError: LocalizedError {
 
  Data dependencies:
  - `RemoteSyncSettingsStore` provides backend selection, WebDAV settings, and the stable device ID
- - `GoogleDriveAccessTokenProvider`, when supplied, yields OAuth access tokens for the Google Drive
-   backend
 
  Side effects:
  - may generate and persist a stable remote device identifier on first use through
@@ -65,29 +58,20 @@ extension RemoteSyncSynchronizationServiceFactoryError: LocalizedError {
    NextCloud/WebDAV fields are missing or malformed
  - throws `RemoteSyncSynchronizationServiceFactoryError.missingWebDAVPassword` when the WebDAV
    password is blank
- - throws `RemoteSyncSynchronizationServiceFactoryError.googleDriveAuthenticationRequired` when the
-   selected backend is Google Drive but no token provider was supplied
  */
 public final class RemoteSyncSynchronizationServiceFactory {
     private let bundleIdentifier: String
-    private let googleDriveAccessTokenProvider: GoogleDriveAccessTokenProvider?
 
     /**
      Creates a synchronization-service factory.
 
      - Parameters:
        - bundleIdentifier: App bundle identifier used to build Android-style sync folder names.
-       - googleDriveAccessTokenProvider: Optional OAuth access-token provider used when Google Drive
-         is the selected backend.
      - Side effects: none.
      - Failure modes: This initializer cannot fail.
      */
-    public init(
-        bundleIdentifier: String,
-        googleDriveAccessTokenProvider: GoogleDriveAccessTokenProvider? = nil
-    ) {
+    public init(bundleIdentifier: String) {
         self.bundleIdentifier = bundleIdentifier
-        self.googleDriveAccessTokenProvider = googleDriveAccessTokenProvider
     }
 
     /**
@@ -141,11 +125,6 @@ public final class RemoteSyncSynchronizationServiceFactory {
             }
 
             return try NextCloudSyncAdapter(configuration: configuration, password: password)
-        case .googleDrive:
-            guard let googleDriveAccessTokenProvider else {
-                throw RemoteSyncSynchronizationServiceFactoryError.googleDriveAuthenticationRequired
-            }
-            return GoogleDriveSyncAdapter(accessTokenProvider: googleDriveAccessTokenProvider)
         }
     }
 }

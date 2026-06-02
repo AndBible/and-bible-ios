@@ -525,7 +525,6 @@
 "sign_in_failed" = "Conectarea la serviciul de sincronizare a eșuat.";
 "sync_adapter" = "Serviciu de sincronizare";
 "sync_adapter_summary" = "Actual: %@";
-"adapters_google_drive" = "Google Drive";
 "adapters_next_cloud" = "NextCloud";
 "auth_server_uri" = "URL-ul serverului";
 "auth_username" = "Nume de utilizator";
@@ -553,18 +552,6 @@
 "sync_disabling" = "Dezactivarea sincronizării pentru %s deocamdată.";
 "sync_update_app" = "Actualizează aplicația pentru a continua sincronizarea.";
 "last_updated" = "Ultima actualizare: %s";
-
-/* Google Drive Sync */
-"prefs_sync_introduction_summary2" = "Dacă folosești Google Drive, %@ primește acces numai la fișierele aplicațiilor, nu și la fișierele personale.";
-"sync_confirmation" = "Sigur vrei să te deconectezi și să restabilești sincronizarea?";
-"google_drive_account" = "Google Drive Account";
-"google_drive_sign_in" = "Sign In to Google Drive";
-"google_drive_sign_out" = "Sign Out and Reset Synchronization";
-"google_drive_not_configured" = "Google Drive sign-in is not configured for this build.";
-"google_drive_missing_url_scheme" = "Google Drive sign-in callback is not configured for this build.";
-"google_drive_missing_presenter" = "Google Drive sign-in could not present authentication UI.";
-"google_drive_not_signed_in" = "Not signed in";
-"google_drive_permission_required" = "Google Drive permission is required";
 
 "help_workspaces_title" = "Spații de studiu";
 "reading_plans_plural" = "Planuri de citire";

@@ -525,7 +525,6 @@
 "sign_in_failed" = "ஒத்திசைவு பின்தள சேவையில் உள்நுழைவது தோல்வியடைந்தது.";
 "sync_adapter" = "ஒத்திசைவு பின்தளம்";
 "sync_adapter_summary" = "தற்போதையது: %@";
-"adapters_google_drive" = "Google Drive";
 "adapters_next_cloud" = "NextCloud";
 "auth_server_uri" = "Server URL";
 "auth_username" = "பயனர் பெயர்";
@@ -553,18 +552,6 @@
 "sync_disabling" = "இப்போதைக்கு %sஇன் ஒத்திசைவை முடக்கு.";
 "sync_update_app" = "ஒத்திசைவை தொடர செயலியை புதுப்பிக்கவும்.";
 "last_updated" = "கடைசியாக புதுப்பிக்கப்பட்டது: %s";
-
-/* Google Drive Sync */
-"prefs_sync_introduction_summary2" = "Google Drive பயன்படுத்தும் போது, பயன்பாட்டுக் கோப்புகளுக்கு மட்டுமே %@க்கு அணுகல் வழங்கப்படும், தனிப்பட்ட கோப்புகள் அல்ல.";
-"sync_confirmation" = "வெளியேறி விட்டு ஒத்திசைவை மீட்டமைக்க விரும்புகிறீர்களா?";
-"google_drive_account" = "Google Drive Account";
-"google_drive_sign_in" = "Sign In to Google Drive";
-"google_drive_sign_out" = "Sign Out and Reset Synchronization";
-"google_drive_not_configured" = "Google Drive sign-in is not configured for this build.";
-"google_drive_missing_url_scheme" = "Google Drive sign-in callback is not configured for this build.";
-"google_drive_missing_presenter" = "Google Drive sign-in could not present authentication UI.";
-"google_drive_not_signed_in" = "Not signed in";
-"google_drive_permission_required" = "Google Drive permission is required";
 
 "help_workspaces_title" = "பணியிடங்கள்";
 "reading_plans_plural" = "வாசிப்பு திட்டங்கள்";

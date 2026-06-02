@@ -20,8 +20,8 @@ import Network
  Tracks best-effort network availability for lifecycle-driven remote sync.
 
  Android suppresses remote sync when the network is unavailable. iOS uses `NWPathMonitor` to
- mirror that guard so lifecycle-triggered NextCloud or Google Drive sync does not immediately fail
- and surface avoidable transport errors while offline.
+ mirror that guard so lifecycle-triggered NextCloud/WebDAV sync does not immediately fail and
+ surface avoidable transport errors while offline.
 
  Side effects:
  - starts `NWPathMonitor` updates on a dedicated background queue at initialization time
@@ -143,7 +143,6 @@ struct AndBibleApp: App {
     private let speakService = SpeakService()
     @State private var syncService: SyncService
     @State private var searchIndexService = SearchIndexService()
-    @State private var googleDriveAuthService: GoogleDriveAuthService
     @State private var remoteSyncLifecycleService: RemoteSyncLifecycleService
     @State private var pendingRemoteAdoption: RemoteSyncBootstrapCandidate?
     @State private var queuedRemoteAdoptions: [RemoteSyncBootstrapCandidate] = []
@@ -246,18 +245,13 @@ struct AndBibleApp: App {
             let workspaceStore = WorkspaceStore(modelContext: context)
             let windowMgr = WindowManager(workspaceStore: workspaceStore)
             self._windowManager = State(initialValue: windowMgr)
-            let googleDriveAuthService = GoogleDriveAuthService()
-            self._googleDriveAuthService = State(initialValue: googleDriveAuthService)
 
             let remoteSyncLifecycleService = RemoteSyncLifecycleService(
                 modelContainer: container,
                 bundleIdentifier: Bundle.main.bundleIdentifier ?? "org.andbible.ios",
                 synchronizationServiceFactory: { remoteSettingsStore in
                     try RemoteSyncSynchronizationServiceFactory(
-                        bundleIdentifier: Bundle.main.bundleIdentifier ?? "org.andbible.ios",
-                        googleDriveAccessTokenProvider: { [googleDriveAuthService] in
-                            try await googleDriveAuthService.accessToken()
-                        }
+                        bundleIdentifier: Bundle.main.bundleIdentifier ?? "org.andbible.ios"
                     )
                     .makeSynchronizationService(using: remoteSettingsStore)
                 },
@@ -326,7 +320,6 @@ struct AndBibleApp: App {
                         .environment(windowManager)
                         .environment(syncService)
                         .environment(searchIndexService)
-                        .environment(googleDriveAuthService)
                 }
             }
             .task {
@@ -334,7 +327,6 @@ struct AndBibleApp: App {
                 #if os(iOS)
                 remoteSyncBackgroundRefreshCoordinator.scheduleNextRefreshIfNeeded()
                 #endif
-                await googleDriveAuthService.restorePreviousSignInIfNeeded()
             }
             .onChange(of: scenePhase) { _, newPhase in
                 if newPhase == .active {
@@ -364,9 +356,6 @@ struct AndBibleApp: App {
                 if !newValue {
                     isUnlocked = false
                 }
-            }
-            .onOpenURL { url in
-                _ = googleDriveAuthService.handle(url: url)
             }
             .alert(
                 String(localized: "cloud_sync_title"),
