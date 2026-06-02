@@ -1,9 +1,21 @@
-# Android Sync Contract (Current iOS Surface)
+# Android Sync Contract and iOS Target
 
-This document captures the current Android-aligned sync contract implemented in
-the iOS repo.
+Source audit date: 2026-06-02
 
-Primary code references:
+This document captures the Android sync settings contract and the iOS target
+state. It separates current iOS implementation details from deliberate iOS
+platform deviations so follow-up implementation work does not preserve stale
+assumptions.
+
+Primary Android references:
+
+- `../and-bible/app/src/main/res/xml/sync_settings.xml`
+- `../and-bible/app/src/main/java/net/bible/android/view/activity/settings/SyncSettings.kt`
+- `../and-bible/app/src/main/java/net/bible/service/cloudsync/CloudSync.kt`
+- `../and-bible/app/src/main/java/net/bible/service/cloudsync/SyncUtilities.kt`
+- `../and-bible/app/src/main/res/values/strings.xml`
+
+Primary iOS references:
 
 - backend selection and credential persistence:
   `Sources/BibleCore/Sources/BibleCore/Services/RemoteSyncSettingsStore.swift`
@@ -16,33 +28,110 @@ Primary code references:
 
 ## Backend Contract
 
-### Android-aligned remote backends
+Android currently models sync as remote-cloud-only:
 
-The iOS remote sync layer currently preserves Android-style backend values under
-the `sync_adapter` setting:
-
-| Backend | Persisted value | Notes |
+| Android backend | Persisted value | Source-backed behavior |
 |---|---|---|
-| NextCloud / WebDAV | `NEXT_CLOUD` | Uses Android-compatible persisted keys for server URL, username, folder path, and password storage semantics. |
-| Google Drive | `GOOGLE_DRIVE` | Uses Google OAuth plus Drive `appDataFolder`, matching Android's high-level model. |
+| Google Drive | `GOOGLE_DRIVE` | Enabled outside F-Droid builds; uses Drive `appDataFolder`; hidden NextCloud credential rows when selected. |
+| Next Cloud | `NEXT_CLOUD` | Uses server URL, username, password, and folder-path preferences. |
 
-### iOS-only backend extension
+Android falls back to the first enabled adapter when `sync_adapter` is missing.
+iOS must not copy that fallback literally because iCloud is the platform-native
+default.
 
-| Backend | Persisted value | Notes |
+The iOS target backend contract is:
+
+| iOS backend | Persisted value | Target state |
 |---|---|---|
-| iCloud / CloudKit | `ICLOUD` | Existing iOS-native backend kept alongside the Android-aligned remote backends. This is an iOS extension, not part of Android parity. |
+| iCloud / CloudKit | `ICLOUD` | Default iOS backend. Missing, unknown, removed, or legacy backend values should fall back to iCloud. Tracked by #160. |
+| NextCloud / WebDAV | `NEXT_CLOUD` | Explicit cross-platform remote choice. Uses Android-compatible persisted keys for server URL, username, folder path, and password storage semantics. |
+| Google Drive | `GOOGLE_DRIVE` | Removal target, not a future iOS backend. #116 owns removing the selectable backend, auth flow, adapter code, tests, and OAuth setup docs. |
+
+The historical `gdrive_*` WebDAV preference keys are compatibility surface even
+after Google Drive is removed. #116 must not rename or delete those keys
+casually if that would break existing NextCloud/WebDAV users.
+
+## Android Settings Row Inventory
+
+Android declares the sync settings screen in `sync_settings.xml` and applies
+runtime behavior in `SyncSettings.kt`.
+
+### General Rows
+
+| Android key | Android title | Icon | Runtime behavior |
+|---|---|---|---|
+| `sync_adapter` | Synchronization Backend | `ic_syncdb_24dp` | Disabled while signed in. Summary includes the introduction and `Current: <adapter>`. Google Drive-specific app-files copy is appended only when Google Drive is selected. |
+| `cloud_sync_reset` | Sign Out | `baseline_logout_24` | Visible only when cloud sync is enabled and signed in. Confirmation signs out, disables sync categories, clears sync status/configuration, and recreates the settings activity. |
+| `cloud_sync_info` | Cloud information | `ic_info_grey_24dp` | Visible only when cloud sync is enabled and signed in. Summary reports total remote storage used. |
+| `cloud_sync_server_url` | Server URL | `outline_shield_24` | NextCloud credential row. Hidden for Google Drive and disabled while signed in. Rejects blank/invalid URLs, `/login` URLs, spaces, and non-HTTP(S) schemes. |
+| `cloud_sync_username` | User name | `outline_shield_24` | NextCloud credential row. Hidden for Google Drive and disabled while signed in. |
+| `cloud_sync_password` | Password | `outline_shield_24` | NextCloud credential row. Hidden for Google Drive and disabled while signed in. |
+| `cloud_sync_folder_path` | Sync folder path | `outline_shield_24` | NextCloud credential row. Hidden for Google Drive and disabled while signed in. Summary: parent folder for sync data, empty means root. |
+
+### Category Rows
+
+| Android key | Android title | Summary | Icon | Android runtime visibility |
+|---|---|---|---|---|
+| `sync_enable_bookmarks` | Bookmarks | Bookmarks, Labels and Study Pads | `ic_bookmark_24dp` | Visible |
+| `sync_enable_workspaces` | Workspaces | Workspaces and Windows | `ic_baseline_workspace_24` | Visible |
+| `sync_enable_readingplans` | Reading plans | Reading plans and their statuses | `ic_reading_plan_24dp` | Declared but hidden by `SyncSettings.kt` |
+| `sync_enable_mydocuments` | My Documents | My Documents and their content | `ic_baseline_description_gray_24` | Visible |
+| `sync_enable_ai_settings` | AI Settings | AI prompts and provider configurations | `icon_robot` | Visible |
+| `sync_enable_progress` | Reading Progress | Memorized verses and chapter reading records | `ic_baseline_check_circle_24` | Visible |
+
+Android toggle behavior:
+
+- enabling a category starts the sign-in/bootstrap/sync path before the toggle is
+  allowed to appear enabled
+- if not signed in, Android signs in first
+- after sign-in, Android waits for any current sync, starts sync, waits for it,
+  posts the after-restore event, dismisses the hourglass, and recreates the
+  settings activity
+- disabling a category writes `sync_enable_<category>=false` immediately
+- enabled categories append `Last updated: <date>` to the summary when a
+  category-level `lastSynchronized` timestamp exists
+
+## iOS Settings Target
+
+The iOS settings screen may stay native SwiftUI, but native controls are an
+implementation choice, not a parity exemption. The visible information
+architecture should match Android where the behavior exists:
+
+- backend row first
+- iCloud default, NextCloud/WebDAV explicit, Google Drive removed by #116
+- NextCloud credential rows use Android titles and folder-path summary
+- reset/sign-out and cloud-info/status rows should appear only when meaningful
+- category rows should use Android ordering, labels, summaries, icons, and
+  `sync_enable_*` keys when implemented
+- enabling a category should run the Android-style sign-in/bootstrap/sync path
+  before presenting the category as effectively enabled
+- disabling a category should be immediate
+
+Current iOS additions and gaps:
+
+- iCloud is an intentional iOS platform extension and default backend.
+- The NextCloud/WebDAV connection test is an iOS additive workflow. It is
+  acceptable only as a documented improvement that does not contradict Android's
+  sync behavior.
+- iOS currently exposes `bookmarks`, `workspaces`, `readingplans`, and
+  `mydocuments` as active remote sync toggles. Android currently hides Reading
+  Plans at runtime and exposes AI Settings plus Reading Progress. #158 owns the
+  visible toggle alignment decision.
+- #73 owns Android `progress` remote sync parity.
+- #74 owns Android `ai_settings` remote sync parity.
 
 ## Category Contract
 
-The Android-style remote sync implementation preserves four independent
-category streams on iOS:
+Android's `SyncableDatabaseDefinition` defines six sync categories:
 
-| Category | Persisted value | Scope |
-|---|---|---|
-| Bookmarks | `bookmarks` | bookmarks, labels, note-bearing bookmarks, StudyPad data |
-| Workspaces | `workspaces` | workspaces, windows, page managers, workspace history |
-| Reading plans | `readingplans` | reading-plan definitions and completion state |
-| My Documents | `mydocuments` | documents, pages, page content, and AI page cache metadata |
+| Category | Android raw name | Android visible toggle | Current iOS state | Follow-up |
+|---|---|---|---|---|
+| Bookmarks | `BOOKMARKS` / `bookmarks` | Visible | Implemented and visible | Keep aligned |
+| Workspaces | `WORKSPACES` / `workspaces` | Visible | Implemented and visible | Keep aligned |
+| Reading plans | `READINGPLANS` / `readingplans` | Hidden at runtime | Implemented and currently visible | #158 decides final visible-row parity |
+| My Documents | `MYDOCUMENTS` / `mydocuments` | Visible | Implemented and visible | Keep aligned |
+| AI Settings | `AI_SETTINGS` / `ai_settings` | Visible | Not implemented | #74 |
+| Reading Progress | `PROGRESS` / `progress` | Visible | Not implemented | #73 |
 
 These categories are tracked independently for:
 
@@ -51,27 +140,15 @@ These categories are tracked independently for:
 - patch progress
 - initial-backup restore/upload
 - patch replay/upload
+- settings toggle persistence
 
-The current Android app also defines `ai_settings` and `progress` sync
-categories that are not implemented in the current iOS sync surface yet. Issue
-#49 records the decision to keep those as separate deferred parity targets:
-
-- `ai_settings`: tracked by #74, pending the shared AI backend/settings contract
-  from #5. The AI bridge disposition in #53 and bridge shell contract in #89
-  keep bridge-facing settings ownership aligned with that shared backend
-  direction.
-- `progress`: tracked by #73, pending Android remote `progress` compatibility
-  design. The reading-progress bridge decision in #52 now has a local
-  model/storage/settings contract in `../bridge/reading-progress-model.md`, and
-  memorization bridge state has local iOS storage in
-  `../bridge/memorization-progress-model.md`. Remote Android `progress` sync
-  still needs an explicit #73 model decision for KJVA persistence, adoption,
-  and conflicts before sync behavior is implemented.
+Reading Progress must not be folded into Reading Plans. Android treats
+`readingplans` and `progress` as distinct sync streams.
 
 ## Bootstrap Contract
 
-For each category, iOS mirrors Android's top-level remote bootstrap decision
-points:
+For each implemented category, iOS mirrors Android's top-level remote bootstrap
+decision points:
 
 1. inspect remote state
 2. decide whether the category is ready, adoptable, or missing remotely
@@ -86,7 +163,7 @@ Possible synchronization outcomes:
 
 ## Initial Backup Contract
 
-### Remote adoption
+### Remote Adoption
 
 When adopting an existing Android-style remote folder, iOS expects the staged
 remote baseline archive:
@@ -96,19 +173,20 @@ remote baseline archive:
 The adopted initial backup is restored into local SwiftData plus fidelity
 stores before normal patch replay continues.
 
-### Remote creation
+### Remote Creation
 
-When creating a fresh remote folder, iOS exports and uploads a local Android-
-shaped:
+When creating a fresh remote folder, iOS exports and uploads a local
+Android-shaped:
 
 - `initial.sqlite3.gz`
 
-This establishes the same patch-zero baseline Android expects before steady-
-state patch synchronization begins.
+This establishes the same patch-zero baseline Android expects before
+steady-state patch synchronization begins.
 
 ## Ready-State Synchronization Contract
 
-For a category with ready bootstrap state, iOS performs the Android-aligned flow:
+For a category with ready bootstrap state, iOS performs the Android-aligned
+flow:
 
 1. discover pending remote patches
 2. stage and download archives
@@ -122,32 +200,15 @@ Current outbound patch coverage exists for:
 - bookmarks
 - workspaces
 - reading plans
-
-## Settings UI Contract
-
-The Sync settings screen currently provides:
-
-- backend picker
-- iCloud controls
-- NextCloud/WebDAV credential editing and connection test
-- Google Drive sign-in/sign-out/reset flow
-- per-supported-category enable/disable controls
-- adopt/create confirmation flow for discovered remote folders
-
-Rows that overlap Android `sync_settings.xml` source their visible icon
-metadata and row keys from that Android contract while retaining native iOS
-controls for pickers, text fields, buttons, and toggles.
-
-The settings screen is the user-facing branch point for Android-style remote
-bootstrap decisions on iOS.
+- My Documents
 
 ## Out of Scope
 
 This contract does not describe:
 
-- local-only CloudKit implementation details
-- release engineering steps for provisioning Google OAuth values
+- local-only CloudKit implementation details beyond iCloud's default/backend
+  disposition
+- Google Drive removal implementation details owned by #116
+- AI Settings sync implementation details owned by #74
+- Reading Progress sync implementation details owned by #73
 - local task tracking outside repo history
-
-For Google Drive operational setup, use
-[../../howto/google-drive-oauth-setup.md](../../howto/google-drive-oauth-setup.md).

@@ -12,11 +12,6 @@ This directory holds Android-aligned sync parity documentation for iOS.
 5. [regression-report.md](regression-report.md): focused validation evidence
 6. [guardrails.md](guardrails.md): maintenance rules for high-risk sync changes
 
-Operational companion docs:
-
-- [../../howto/google-drive-oauth-setup.md](../../howto/google-drive-oauth-setup.md):
-  developer/release guidance for the parked Google Drive OAuth dependency
-
 ## Scope
 
 This subtree is for parity-sensitive sync behavior:
@@ -26,6 +21,7 @@ This subtree is for parity-sensitive sync behavior:
 - bootstrap/adopt/create flows
 - initial-backup and patch behavior
 - explicit iOS divergences from Android
+- Google Drive removal tracking for #116
 
 It is not the place for one-off local task tracking or release checklists.
 
@@ -35,6 +31,7 @@ Primary references:
 - `Sources/BibleCore/Sources/BibleCore/Services/RemoteSyncBootstrapCoordinator.swift`
 - `Sources/BibleCore/Sources/BibleCore/Services/RemoteSyncSynchronizationService.swift`
 - `Sources/BibleCore/Sources/BibleCore/Services/NextCloudSyncAdapter.swift`
-- `Sources/BibleCore/Sources/BibleCore/Services/GoogleDriveAuthService.swift`
-- `Sources/BibleCore/Sources/BibleCore/Services/GoogleDriveSyncAdapter.swift`
 - `Sources/BibleUI/Sources/BibleUI/Settings/SyncSettingsView.swift`
+
+Historical Google Drive docs and code remain only until #116 removes that iOS
+backend surface. They are not future parity targets.
