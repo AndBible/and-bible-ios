@@ -1135,6 +1135,8 @@ extension AndBibleUITests {
      * - Side effects:
      *   - scans the current Settings viewport, then scrolls through the form while re-querying
      *     the live XCUI hierarchy
+     *   - uses the production Settings search field as a final reveal path when CI scrolling cannot
+     *     reliably bring an offscreen row into the accessibility hierarchy
      * - Failure modes:
      *   - records an XCTest failure if the production row never appears
      */
@@ -1212,6 +1214,16 @@ extension AndBibleUITests {
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         } while Date() < recoveryDeadline
 
+        if let control = resolveSettingsNavigationControlViaSearch(
+            title: visibleTitle,
+            settingsForm: settingsForm,
+            app: app,
+            timeout: min(max(timeout / 2, 5), 10),
+            resolveControl: resolvedVisibleControl
+        ) {
+            return control
+        }
+
         let control = unresolvedElement(identifier, in: app)
         if control.exists {
             return control
@@ -1224,6 +1236,92 @@ extension AndBibleUITests {
             line: line
         )
         return control
+    }
+
+    /**
+     Reveals one Settings navigation row by narrowing the production Settings search field.
+
+     This is a fallback for hosted simulator runs where repeated `Form` swipes do not expose a
+     lower Settings row before the XCTest timeout. It does not bypass production navigation; after
+     search narrows the form, callers still tap the same native row element.
+     *
+     * - Parameters:
+     *   - title: Visible English title used as the search query.
+     *   - settingsForm: The live Settings form element.
+     *   - app: Running application under test.
+     *   - timeout: Maximum number of seconds to spend revealing and applying Settings search.
+     *   - resolveControl: Existing row resolver scoped to the live Settings hierarchy.
+     * - Returns: The resolved native row element, or `nil` when Settings search cannot reveal it.
+     * - Side effects:
+     *   - scrolls toward the top of the Settings form to reveal SwiftUI's searchable field
+     *   - types the visible row title into Settings search
+     * - Failure modes: This helper does not fail directly; the caller reports a single row-missing
+     *   assertion if both direct scanning and search reveal fail.
+     */
+    func resolveSettingsNavigationControlViaSearch(
+        title: String?,
+        settingsForm: XCUIElement,
+        app: XCUIApplication,
+        timeout: TimeInterval,
+        resolveControl: () -> XCUIElement?
+    ) -> XCUIElement? {
+        guard let title, !title.isEmpty else {
+            return nil
+        }
+
+        let searchDeadline = Date().addingTimeInterval(timeout)
+        var searchField: XCUIElement?
+        repeat {
+            if let field = settingsSearchFieldCandidates(in: app, settingsForm: settingsForm).first(
+                where: { $0.exists && !$0.frame.isEmpty }
+            ) {
+                searchField = field
+                break
+            }
+
+            guard settingsForm.exists, !settingsForm.frame.isEmpty else {
+                return nil
+            }
+            settingsForm.swipeDown()
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        } while Date() < searchDeadline
+
+        guard let searchField else {
+            return nil
+        }
+
+        replaceText(in: searchField, with: title, placeholderHints: ["Search"])
+
+        let resultDeadline = Date().addingTimeInterval(min(max(timeout / 2, 3), 5))
+        repeat {
+            if let control = resolveControl() {
+                return control
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        } while Date() < resultDeadline
+
+        return nil
+    }
+
+    /**
+     Returns Settings search-field candidates exposed by SwiftUI's `searchable` modifier.
+
+     * - Parameters:
+     *   - app: Running application under test.
+     *   - settingsForm: The live Settings form element.
+     * - Returns: Search and text-field candidates ordered from form-scoped to broader app queries.
+     * - Side effects: none.
+     * - Failure modes: This helper cannot fail.
+     */
+    func settingsSearchFieldCandidates(in app: XCUIApplication, settingsForm: XCUIElement) -> [XCUIElement] {
+        [
+            settingsForm.searchFields["Search"].firstMatch,
+            settingsForm.textFields["Search"].firstMatch,
+            app.navigationBars.searchFields["Search"].firstMatch,
+            app.navigationBars.textFields["Search"].firstMatch,
+            app.searchFields["Search"].firstMatch,
+            app.textFields["Search"].firstMatch,
+        ]
     }
 
     /**
