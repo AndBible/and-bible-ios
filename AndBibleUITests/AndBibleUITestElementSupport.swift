@@ -216,6 +216,41 @@ extension AndBibleUITests {
         return directCandidates + scopedCandidates
     }
 
+    /**
+     Returns state-bearing elements in the order safest for repeated value polling.
+     *
+     * Screen roots are preferred when they publish the same accessibility value because reading a
+     * known root avoids enumerating every `StaticText` in dynamic lists. The hidden probe remains a
+     * fallback for screens whose root does not carry the detailed automation state.
+     */
+    func semanticStateValueCandidates(
+        for identifier: String,
+        in app: XCUIApplication
+    ) -> [XCUIElement] {
+        switch identifier {
+        case "searchStateExport":
+            return [
+                app.otherElements["searchScreen"].firstMatch,
+            ] + screenScopedStateCandidates(identifier, within: "searchScreen", in: app)
+        case "bookmarkListStateExport":
+            return screenRootCandidates("bookmarkListScreen", in: app)
+                + screenScopedStateCandidates(identifier, within: "bookmarkListScreen", in: app)
+        case "readingPlanListStateExport":
+            return screenRootCandidates("readingPlanListScreen", in: app)
+                + screenScopedStateCandidates(identifier, within: "readingPlanListScreen", in: app)
+        case "availablePlansStateExport":
+            return screenRootCandidates("availablePlansScreen", in: app)
+                + screenScopedStateCandidates(identifier, within: "availablePlansScreen", in: app)
+        case "labelManagerStateExport":
+            return screenScopedStateCandidates(identifier, within: "labelManagerScreen", in: app)
+        case "syncSettingsState":
+            return screenRootCandidates("syncSettingsScreen", in: app)
+                + screenScopedStateCandidates(identifier, within: "syncSettingsScreen", in: app)
+        default:
+            return semanticStateCandidates(for: identifier, in: app)
+        }
+    }
+
     /// Returns the first modal presentation surface currently visible to XCTest.
     func resolvedModalPrompt(
         in app: XCUIApplication,

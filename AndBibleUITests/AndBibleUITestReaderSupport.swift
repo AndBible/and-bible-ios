@@ -1113,7 +1113,7 @@ extension AndBibleUITests {
         _ identifier: String,
         in app: XCUIApplication
     ) -> String? {
-        for candidate in semanticStateCandidates(for: identifier, in: app) {
+        for candidate in semanticStateValueCandidates(for: identifier, in: app) {
             if let value = candidate.value as? String,
                !value.isEmpty
             {

@@ -422,27 +422,13 @@ extension AndBibleUITests {
         resolvedStateExportElement("searchStateExport", in: app)
     }
 
-    /**
-     Reads Search state from the compact export only. The full Search root is intentionally not a
-     fallback here because XCTest can time out snapshotting that container while results rerender.
-     */
+    /// Reads Search state from the first state-bearing candidate that exposes a settled value.
     func searchStateCandidateValues(in app: XCUIApplication) -> [String] {
-        let candidates = [
-            resolvedStateExportElement("searchStateExport", in: app),
-        ]
-
-        var values: [String] = []
-        for candidate in candidates {
-            guard let candidate,
-                  candidate.exists,
-                  let value = candidate.value as? String,
-                  value.contains("state="),
-                  !values.contains(value) else {
-                continue
-            }
-            values.append(value)
+        if let value = semanticStateExportValue("searchStateExport", in: app),
+           value.contains("state=") {
+            return [value]
         }
-        return values
+        return []
     }
 
     /// Reads the current exported Search state from the state-bearing root element.
@@ -452,8 +438,7 @@ extension AndBibleUITests {
 
     /// Reads the current exported Bookmark List state without walking the full list hierarchy.
     func resolvedBookmarkListStateValue(in app: XCUIApplication) -> String? {
-        if let stateElement = resolvedStateExportElement("bookmarkListStateExport", in: app),
-           let value = stateElement.value as? String {
+        if let value = semanticStateExportValue("bookmarkListStateExport", in: app) {
             return value
         }
         if let screen = resolvedElement("bookmarkListScreen", in: app),
@@ -465,8 +450,7 @@ extension AndBibleUITests {
 
     /// Reads the current exported Reading Plans list state without walking the full list hierarchy.
     func resolvedReadingPlanListStateValue(in app: XCUIApplication) -> String? {
-        if let stateElement = resolvedStateExportElement("readingPlanListStateExport", in: app),
-           let value = stateElement.value as? String {
+        if let value = semanticStateExportValue("readingPlanListStateExport", in: app) {
             return value
         }
         if let screen = resolvedElement("readingPlanListScreen", in: app),
@@ -478,8 +462,7 @@ extension AndBibleUITests {
 
     /// Reads the current exported Available Plans state without walking the full picker hierarchy.
     func resolvedAvailablePlansStateValue(in app: XCUIApplication) -> String? {
-        if let stateElement = resolvedStateExportElement("availablePlansStateExport", in: app),
-           let value = stateElement.value as? String {
+        if let value = semanticStateExportValue("availablePlansStateExport", in: app) {
             return value
         }
         if let screen = resolvedElement("availablePlansScreen", in: app),
@@ -491,8 +474,7 @@ extension AndBibleUITests {
 
     /// Reads the current exported Label Manager state without broad prompt/list queries.
     func resolvedLabelManagerStateValue(in app: XCUIApplication) -> String? {
-        if let stateElement = resolvedStateExportElement("labelManagerStateExport", in: app),
-           let value = stateElement.value as? String {
+        if let value = semanticStateExportValue("labelManagerStateExport", in: app) {
             return value
         }
         if let screen = resolvedElement("labelManagerScreen", in: app),
