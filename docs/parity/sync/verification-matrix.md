@@ -1,60 +1,57 @@
 # SYNC-701 Verification Matrix (Android Sync -> iOS)
 
-Date: 2026-05-19
+Date: 2026-06-02
 
 ## Scope and Method
 
 - Contract baseline: `docs/parity/sync/contract.md`
 - Verification method:
-  - direct code inspection of `RemoteSyncSettingsStore`, `RemoteSyncBootstrapCoordinator`,
-    `RemoteSyncSynchronizationService`, `NextCloudSyncAdapter`, `GoogleDriveAuthService`,
-    `GoogleDriveSyncAdapter`, and `SyncSettingsView`
+  - direct code inspection of `RemoteSyncSettingsStore`, `RemoteSyncStateStore`,
+    `RemoteSyncBootstrapCoordinator`, `RemoteSyncSynchronizationService`,
+    `NextCloudSyncAdapter`, `GoogleDriveAuthService`, `GoogleDriveSyncAdapter`,
+    and `SyncSettingsView`
   - direct comparison with a local Android reference checkout, especially
-    `SyncUtilities.kt`, `CloudSync.kt`, `SyncSettings.kt`, and
-    `GoogleDriveCloudAdapter.kt`
+    `sync_settings.xml`, `SyncSettings.kt`, `CloudSync.kt`, `SyncUtilities.kt`,
+    and `strings.xml`
   - focused simulator-backed UI coverage from `AndBibleUITests`
   - focused unit and integration coverage from `AndBibleTests`, including
-    `WorkspaceSyncRestoreTests.swift`
+    `WorkspaceSyncRestoreTests.swift` and `RemoteSyncMyDocumentRestoreTests.swift`
 - Regression evidence: `docs/parity/sync/regression-report.md`
 
 ## Status Legend
 
-- `Pass`: implemented and backed by direct code evidence plus current regression coverage
-- `Adapted Pass`: parity delivered with explicit iOS implementation differences documented in
-  `dispositions.md`
-- `Partial`: implemented or exposed, but not yet backed by enough focused evidence to treat the
-  area as locked
+- `Pass`: implemented and backed by direct code evidence plus current regression
+  coverage
+- `Adapted Pass`: parity delivered with explicit iOS implementation differences
+  documented in `dispositions.md`
+- `Partial`: implemented or exposed, but not yet aligned with the audited
+  Android source or current iOS product direction
 
 ## Summary
 
-- `Pass`: 7
-- `Adapted Pass`: 2
-- `Partial`: 1
+- `Pass`: 6
+- `Adapted Pass`: 1
+- `Partial`: 4
 
-The remaining `Partial` item is implementation breadth, not an unresolved
-category-breadth decision. Issue #49 records the decision to track Android's
-remaining `ai_settings` and `progress` categories as separate deferred parity
-targets in #74 and #73. The `mydocuments` category is now implemented through
-#72/#104/#105/#106/#108/#107/#109 and remains mapped to the iOS My Documents
-model/storage contract in `../bridge/my-documents-model.md` plus the Android
-sync schema and policy in `mydocuments-schema.md`. The `ai_settings` category is
-blocked on the shared AI backend direction in #5 and the #53/#89 bridge
-disposition. The `progress` category has the local iOS reading-progress
-model/storage/settings contract recorded in `../bridge/reading-progress-model.md`,
-but remote sync remains blocked on #73 and the #52 bridge disposition.
+The remaining partials are now explicit:
+
+- #116 removes Google Drive from the iOS backend surface.
+- #160 preserves iCloud as the iOS default after Google Drive removal.
+- #158 reconciles visible category toggles against Android's runtime behavior.
+- #73 and #74 own the Android `progress` and `ai_settings` sync categories.
 
 ## Matrix
 
 | Sync Contract Area | iOS Evidence | Status | Notes |
 |---|---|---|---|
-| Backend selection plus Android-compatible persisted keys for NextCloud/WebDAV and supported category toggles | `RemoteSyncSettingsStore.swift`; unit tests `testRemoteSyncSettingsStoreDefaultsToICloudWhenBackendMissing`, `testRemoteSyncSettingsStorePersistsAndroidCompatibleNextCloudKeys`, `testRemoteSyncSettingsStoreFallsBackToICloudForUnknownBackendValue`, `testRemoteSyncSettingsStoreClearsStoredValuesAndPassword`, `testRemoteSyncSettingsStorePersistsAndroidCompatibleCategoryToggleKeys`, `testRemoteSyncSettingsStoreGeneratesStableLowercaseDeviceIdentifier` | Pass | This locks the Android-shaped settings contract for iOS-supported categories while preserving iCloud as an iOS extension. |
-| NextCloud/WebDAV URL normalization, DAV transport, and invalid-input handling | `WebDAVSyncConfiguration`, `WebDAVClient`, `NextCloudSyncAdapter`; unit tests `testWebDAVPropfindBuildsAuthenticatedRequestAndParsesMultiStatus`, `testWebDAVSearchBuildsSearchRequestBody`, `testWebDAVMultiStatusParserDecodesPercentEncodedHrefs`, `testWebDAVSyncConfigurationExpandsServerRootToNextCloudDAVEndpoint`, `testWebDAVSyncConfigurationPreservesExplicitDAVEndpoint`, `testWebDAVSyncConfigurationRejectsLoginPageURLs`; UI test `testSyncSettingsNextCloudInvalidURLShowsValidationStatus` | Pass | The current evidence covers both low-level DAV request semantics and the user-visible invalid-URL branch in Sync Settings. |
-| Bootstrap inspection and the ready/adopt/create decision tree | `RemoteSyncBootstrapCoordinator`, `RemoteSyncSynchronizationService`; unit tests `testRemoteSyncBootstrapCoordinatorReturnsReadyForKnownStoredFolder`, `testRemoteSyncBootstrapCoordinatorRepairsMissingDeviceFolderForKnownStoredFolder`, `testRemoteSyncBootstrapCoordinatorRequiresRemoteAdoptionWhenNamedFolderExists`, `testRemoteSyncBootstrapCoordinatorClearsStaleBootstrapAndRequestsCreationWhenMarkerMissing`, `testRemoteSyncBootstrapCoordinatorAdoptRemoteFolderPersistsMarkerAndDeviceFolder`, `testRemoteSyncBootstrapCoordinatorCreateRemoteFolderCanReplaceExistingRemoteFolder`, `testRemoteSyncSynchronizationServiceReturnsRemoteAdoptionDecision` | Pass | Bootstrap decisions are regression-gated before any local mutation or remote overwrite occurs. |
-| Initial-backup restore and initial-backup upload preserve Android baseline semantics for supported categories | `RemoteSyncInitialBackupRestoreService`, `RemoteSyncInitialBackupUploadService`; shared-scheme unit tests `testRemoteSyncInitialBackupRestoreDispatchesReadingPlanBackups`, `testRemoteSyncInitialBackupRestoreDispatchesBookmarkBackups`, `testRemoteSyncInitialBackupRestoreDispatchesWorkspaceBackups`, `testRemoteSyncInitialBackupRestoreDispatchesMyDocumentBackups`, `testRemoteSyncInitialBackupUploadWritesReadingPlanDatabaseAndResetsBaseline`, `testRemoteSyncInitialBackupUploadWritesBookmarkDatabaseAndResetsBaseline`, `testRemoteSyncInitialBackupUploadWritesWorkspaceDatabaseAndResetsBaseline`, `testRemoteSyncInitialBackupUploadWritesMyDocumentDatabaseAndResetsBaseline`, `testRemoteSyncSynchronizationServiceCreateRemoteFolderUploadsInitialBackupAndSuppressesSparseUpload`, `testRemoteSyncSynchronizationServiceAdoptRemoteFolderRestoresInitialAndRecordsPatchZero` | Pass | Bookmark, reading-plan, workspace, and My Documents baseline flows are in the shared `AndBibleTests` target through the shared `AndBible` scheme. |
-| Ready-state sparse patch replay/upload and steady-state synchronization run for supported categories | `RemoteSyncSynchronizationService`, category-specific patch apply/upload services; shared-scheme unit tests `testRemoteSyncSynchronizationServiceUploadsLocalBookmarkChangesWhenNoRemotePatchesExist`, `testRemoteSyncSynchronizationServiceUploadsLocalReadingPlanChangesWhenNoRemotePatchesExist`, `testRemoteSyncSynchronizationServiceUploadsLocalWorkspaceChangesWhenNoRemotePatchesExist`, `testRemoteSyncSynchronizationServiceUploadsLocalMyDocumentChangesWhenNoRemotePatchesExist`, `testRemoteSyncSynchronizationServiceSynchronizesReadyReadingPlanCategory`, `testRemoteSyncSynchronizationServiceReplaysRemoteMyDocumentPatch`, `testRemoteSyncSynchronizationServiceAdoptRemoteFolderReplaysRemotePatchWithoutUploadingLocally`, `WorkspaceSyncRestoreTests.swift` patch apply/upload coverage, and `RemoteSyncMyDocumentRestoreTests.swift` patch replay/upload coverage | Pass | Bookmark, reading-plan, workspace, and My Documents steady-state flows are covered by the shared scheme. |
-| Full current Android category breadth | Android `SyncableDatabaseDefinition` currently includes `BOOKMARKS`, `WORKSPACES`, `READINGPLANS`, `MYDOCUMENTS`, `AI_SETTINGS`, and `PROGRESS`; iOS `RemoteSyncCategory` currently includes `bookmarks`, `workspaces`, `readingplans`, and `mydocuments`; #49 records the disposition split for the remaining categories | Partial | iOS aligns with Android names and file semantics for the first four categories. Android's remaining `ai_settings` and `progress` categories are deferred as distinct parity targets tracked by #74 and #73 rather than one broad implementation task; `ai_settings` remains blocked on #5 and the #53/#89 bridge disposition, and `progress` has the local model recorded in `../bridge/reading-progress-model.md` but remote sync remains blocked on #73. |
-| Sync settings row presentation uses Android-backed icons and keys | `SyncSettingsPresentation.swift`, `AndBibleIconCatalog.swift`; unit tests `testSyncSettingsPresentationUsesAndroidBackedRows`, `testSyncCategoryPresentationMatchesAndroidCategoryIcons` | Pass | Native SwiftUI controls remain in place, but backend, credential, reset/sign-out, status, and supported category rows now source their visible icon metadata from Android `sync_settings.xml` keys. |
-| Sync settings UI supports backend switching and category persistence across reopen | `SyncSettingsView.swift`; UI tests `testSettingsSyncLinkOpensSyncSettings`, `testSyncSettingsCategoryToggleMutatesExportedState`, `testSyncSettingsCategoryDisablePersistsAcrossDirectReopen`, `testSyncSettingsMyDocumentsCategoryToggleStartsManualSyncPath`, `testSyncSettingsBackendSwitchMutatesVisibleSection`, `testSyncSettingsBackendSwitchPersistsAcrossDirectReopen` | Pass | The current gate is focused on persisted state, visible section changes, and My Documents manual-sync entry rather than just navigation smoke. |
-| Google Drive uses the Android-aligned OAuth + Drive API model but is operationally parked until real iOS OAuth provisioning exists | `GoogleDriveAuthService.swift`, `GoogleDriveSyncAdapter.swift`, `RemoteSyncSynchronizationServiceFactory`; unit tests `testGoogleDriveSyncAdapterListsFilesFromAppDataFolderWithPagination`, `testGoogleDriveSyncAdapterCreatesFolderUnderAppDataRoot`, `testGoogleDriveSyncAdapterUploadsMultipartPatchArchive`, `testGoogleDriveSyncAdapterUsesFolderExistenceForOwnershipProof`, `testGoogleDriveOAuthConfigurationParsesValidInfoDictionary`, `testGoogleDriveOAuthConfigurationRejectsMissingURLScheme`, `testGoogleDriveAuthServiceRestoresPreviousSignInOnceAndBecomesReadyForSync`, `testRemoteSyncSynchronizationServiceFactoryBuildsGoogleDriveAdapter`; documented in `dispositions.md` | Adapted Pass | The code path is regression-backed, but live end-user sign-in remains intentionally parked until release OAuth credentials exist. |
-| iCloud remains a first-class backend alongside Android-aligned remote sync | `RemoteSyncBackend.iCloud`, `SyncSettingsView.swift`, `dispositions.md` | Adapted Pass | This is an intentional iOS extension and does not redefine the Android parity contract for remote backends. |
-| UI coverage for the adopt-versus-create confirmation branch itself | `SyncSettingsView.swift`; UI test `testSyncSettingsAdoptCreateConfirmationCreateChoiceSynchronizesFromVisibleWorkflow` | Pass | The focused workflow drives the visible adopt/create sheet, chooses the create-new cloud replacement branch, confirms the destructive reset-cloud alert, and waits for the bookmarks category to finish enabled with `lastConfirmation=resetCloud:bookmarks`. |
+| Backend selection and persisted keys for the post-#116 target | `RemoteSyncSettingsStore.swift`; tests `testRemoteSyncSettingsStoreDefaultsToICloudWhenBackendMissing`, `testRemoteSyncSettingsStorePersistsAndroidCompatibleNextCloudKeys`, `testRemoteSyncSettingsStoreFallsBackToICloudForUnknownBackendValue`, `testRemoteSyncSettingsStorePersistsAndroidCompatibleCategoryToggleKeys`, `testRemoteSyncSettingsStoreGeneratesStableLowercaseDeviceIdentifier` | Partial | iCloud already defaults missing/unknown values and NextCloud/WebDAV keys are covered. Current code still exposes Google Drive; #116 removes it and #160 preserves iCloud as default for removed `GOOGLE_DRIVE` values. |
+| NextCloud/WebDAV URL normalization, DAV transport, and invalid-input handling | `WebDAVSyncConfiguration`, `WebDAVClient`, `NextCloudSyncAdapter`; tests `testWebDAVPropfindBuildsAuthenticatedRequestAndParsesMultiStatus`, `testWebDAVSearchBuildsSearchRequestBody`, `testWebDAVMultiStatusParserDecodesPercentEncodedHrefs`, `testWebDAVSyncConfigurationExpandsServerRootToNextCloudDAVEndpoint`, `testWebDAVSyncConfigurationPreservesExplicitDAVEndpoint`, `testWebDAVSyncConfigurationRejectsLoginPageURLs`; UI test `testSyncSettingsNextCloudInvalidURLShowsValidationStatus` | Pass | The current evidence covers low-level DAV semantics and the user-visible invalid-URL branch. The historical `gdrive_*` WebDAV keys remain compatibility surface after Google Drive removal. |
+| Bootstrap inspection and ready/adopt/create decision tree | `RemoteSyncBootstrapCoordinator`, `RemoteSyncSynchronizationService`; tests `testRemoteSyncBootstrapCoordinatorReturnsReadyForKnownStoredFolder`, `testRemoteSyncBootstrapCoordinatorRepairsMissingDeviceFolderForKnownStoredFolder`, `testRemoteSyncBootstrapCoordinatorRequiresRemoteAdoptionWhenNamedFolderExists`, `testRemoteSyncBootstrapCoordinatorClearsStaleBootstrapAndRequestsCreationWhenMarkerMissing`, `testRemoteSyncBootstrapCoordinatorAdoptRemoteFolderPersistsMarkerAndDeviceFolder`, `testRemoteSyncBootstrapCoordinatorCreateRemoteFolderCanReplaceExistingRemoteFolder`, `testRemoteSyncSynchronizationServiceReturnsRemoteAdoptionDecision` | Pass | Bootstrap decisions are regression-gated before local mutation or remote overwrite occurs. |
+| Initial-backup restore and upload preserve Android baseline semantics for implemented categories | `RemoteSyncInitialBackupRestoreService`, `RemoteSyncInitialBackupUploadService`; tests `testRemoteSyncInitialBackupRestoreDispatchesReadingPlanBackups`, `testRemoteSyncInitialBackupRestoreDispatchesBookmarkBackups`, `testRemoteSyncInitialBackupRestoreDispatchesWorkspaceBackups`, `testRemoteSyncInitialBackupRestoreDispatchesMyDocumentBackups`, `testRemoteSyncInitialBackupUploadWritesReadingPlanDatabaseAndResetsBaseline`, `testRemoteSyncInitialBackupUploadWritesBookmarkDatabaseAndResetsBaseline`, `testRemoteSyncInitialBackupUploadWritesWorkspaceDatabaseAndResetsBaseline`, `testRemoteSyncInitialBackupUploadWritesMyDocumentDatabaseAndResetsBaseline`, `testRemoteSyncSynchronizationServiceCreateRemoteFolderUploadsInitialBackupAndSuppressesSparseUpload`, `testRemoteSyncSynchronizationServiceAdoptRemoteFolderRestoresInitialAndRecordsPatchZero` | Pass | Bookmark, reading-plan, workspace, and My Documents baseline flows are covered by the shared `AndBible` scheme. |
+| Ready-state sparse patch replay/upload and steady-state synchronization for implemented categories | `RemoteSyncSynchronizationService`, category-specific patch apply/upload services; tests `testRemoteSyncSynchronizationServiceUploadsLocalBookmarkChangesWhenNoRemotePatchesExist`, `testRemoteSyncSynchronizationServiceUploadsLocalReadingPlanChangesWhenNoRemotePatchesExist`, `testRemoteSyncSynchronizationServiceUploadsLocalWorkspaceChangesWhenNoRemotePatchesExist`, `testRemoteSyncSynchronizationServiceUploadsLocalMyDocumentChangesWhenNoRemotePatchesExist`, `testRemoteSyncSynchronizationServiceSynchronizesReadyReadingPlanCategory`, `testRemoteSyncSynchronizationServiceReplaysRemoteMyDocumentPatch`, `testRemoteSyncSynchronizationServiceAdoptRemoteFolderReplaysRemotePatchWithoutUploadingLocally`, workspace patch coverage, and My Documents patch replay/upload coverage | Pass | Bookmark, reading-plan, workspace, and My Documents steady-state flows are covered by the shared scheme. |
+| Android category breadth and visible toggle behavior | Android `SyncableDatabaseDefinition` includes `BOOKMARKS`, `WORKSPACES`, `READINGPLANS`, `MYDOCUMENTS`, `AI_SETTINGS`, and `PROGRESS`; Android `SyncSettings.kt` hides `sync_enable_readingplans`; iOS `RemoteSyncCategory.activeSyncCases` includes `bookmarks`, `workspaces`, `readingplans`, and `mydocuments` | Partial | iOS currently shows Reading Plans even though Android hides it, and iOS does not expose AI Settings or Reading Progress. #158 owns visible toggle alignment; #74 and #73 own the missing sync categories. |
+| Sync settings row presentation, grouping, dynamic visibility, and status behavior | `SyncSettingsView.swift`, `SyncSettingsPresentation.swift`, `AndBibleIconCatalog.swift`; tests `testSyncSettingsPresentationUsesAndroidBackedRows`, `testSyncCategoryPresentationMatchesAndroidCategoryIcons`, and Sync Settings UI tests | Partial | Icons and some row metadata are source-backed, but the audited contract now requires stricter behavioral parity: Google Drive UI removal (#116), iCloud default positioning (#160), Android-visible category reconciliation (#158), and reset/status visibility after backend cleanup. |
+| Sync settings UI persists backend and category state across reopen | `SyncSettingsView.swift`; UI tests `testSettingsSyncLinkOpensSyncSettings`, `testSyncSettingsCategoryToggleMutatesExportedState`, `testSyncSettingsCategoryDisablePersistsAcrossDirectReopen`, `testSyncSettingsMyDocumentsCategoryToggleStartsManualSyncPath`, `testSyncSettingsBackendSwitchMutatesVisibleSection`, `testSyncSettingsBackendSwitchPersistsAcrossDirectReopen` | Pass | The current gate covers persisted state and visible section changes. Tests need pruning/updating when #116 removes Google Drive. |
+| Google Drive removal from iOS sync | `GoogleDriveAuthService.swift`, `GoogleDriveSyncAdapter.swift`, `RemoteSyncSynchronizationServiceFactory`, `SyncSettingsView.swift`, GoogleSignIn dependency, Google-focused tests, and OAuth docs | Partial | Current code still contains Google Drive. #116 is the source of truth: remove the selectable backend, auth UI, adapter/auth paths, tests, dependency, and OAuth setup docs unless a documented non-sync dependency remains. |
+| iCloud remains the default iOS backend | `RemoteSyncBackend.iCloud`, `RemoteSyncSettingsStore.selectedBackend`, `SyncSettingsView.swift`, `dispositions.md`; tests `testRemoteSyncSettingsStoreDefaultsToICloudWhenBackendMissing`, `testRemoteSyncSettingsStoreFallsBackToICloudForUnknownBackendValue` | Adapted Pass | This is an intentional iOS platform extension. #160 extends the gate to removed `GOOGLE_DRIVE` values once #116 lands. |
+| Adopt-versus-create confirmation branch | `SyncSettingsView.swift`; UI test `testSyncSettingsAdoptCreateConfirmationCreateChoiceSynchronizesFromVisibleWorkflow` | Pass | The focused workflow drives the visible adopt/create sheet, chooses the create-new cloud replacement branch, confirms the destructive reset-cloud alert, and waits for the selected category to finish enabled. |

@@ -32,18 +32,22 @@ rules explicit for changes in:
    - settings persistence
 
    Any category rename or remapping is a compatibility change.
-   Current iOS-supported Android-aligned categories are `bookmarks`, `workspaces`,
-   `readingplans`, and `mydocuments`. Android also exposes `ai_settings` and `progress`, which are
-   not implemented on iOS yet. Issue #49 records these as separate deferred parity targets tracked
-   by #74 and #73; adding either one is new parity surface, not a local cleanup. `mydocuments`
+   Current iOS-implemented Android-aligned categories are `bookmarks`,
+   `workspaces`, `readingplans`, and `mydocuments`. Android also exposes
+   `ai_settings` and `progress`, which are not implemented on iOS yet. Issue #49
+   records these as separate deferred parity targets tracked by #74 and #73;
+   adding either one is new parity surface, not a local cleanup. Android
+   currently hides the Reading Plans toggle at runtime, while iOS currently
+   shows it; #158 owns that visible-toggle parity decision. `mydocuments`
    remains governed by the iOS My Documents model/storage contract recorded in
-   `../bridge/my-documents-model.md` and the Android-backed sync schema contract in
-   `mydocuments-schema.md`.
-   `ai_settings` depends on the shared AI backend/settings direction in #5 and the bridge
-   shell ownership contract in #89; it must not introduce an iOS-only AI settings schema.
-   `progress` depends on the iOS reading-progress model/storage and settings contract in
-   `../bridge/reading-progress-model.md` and must stay distinct from reading-plan completion
-   unless a later compatibility decision explicitly changes that.
+   `../bridge/my-documents-model.md` and the Android-backed sync schema contract
+   in `mydocuments-schema.md`.
+   `ai_settings` depends on the shared AI backend/settings direction in #5 and
+   the bridge shell ownership contract in #89; it must not introduce an iOS-only
+   AI settings schema. `progress` depends on the iOS reading-progress
+   model/storage and settings contract in `../bridge/reading-progress-model.md`
+   and must stay distinct from reading-plan completion unless a later
+   compatibility decision explicitly changes that.
 
 3. Treat bootstrap markers and remote-folder ownership semantics as contract
    surface.
@@ -64,17 +68,22 @@ rules explicit for changes in:
    Changing URL normalization, login-page rejection, or authenticated DAV
    request semantics needs coordinated validation, not ad hoc tweaking.
 
-6. Treat the Google Drive parked branch as operationally blocked, not removed.
+6. Treat Google Drive as a removal target.
 
-   Google Drive remains part of the parity contract even though live iOS OAuth
-   provisioning is intentionally parked. Do not delete or redefine that branch
-   because local/CI builds show “not configured”.
+   #116 supersedes the prior Google Drive posture. Do not add new Google Drive
+   sync UI, auth behavior, tests, or docs. When #116 is implemented, remove the
+   selectable backend, auth/session UI, adapter/auth paths, GoogleSignIn
+   dependency, Google-focused tests, and OAuth setup docs unless a documented
+   non-sync dependency remains. Preserve the historical `gdrive_*` WebDAV keys
+   until an explicit migration decision says otherwise.
 
-7. Keep iCloud scoped as an iOS extension, not a redefinition of Android remote
-   sync.
+7. Keep iCloud scoped as the default iOS platform backend.
 
-   iCloud can coexist as an iOS-native backend, but it must not change the
-   Android-compatible semantics for NextCloud/WebDAV or Google Drive.
+   iCloud is a legitimate iOS platform extension and the default backend. Do
+   not make NextCloud/WebDAV the implicit default merely because #116 removes
+   Google Drive. #160 owns the removed-backend and unknown-backend fallback
+   contract. iCloud must not change the Android-compatible semantics for
+   NextCloud/WebDAV.
 
 8. Sync UI changes must preserve stored-state hydration and reopen persistence.
 
@@ -91,7 +100,7 @@ rules explicit for changes in:
    - `docs/parity/sync/dispositions.md` when behavior is iOS-specific
    - `docs/parity/sync/verification-matrix.md` if status changes
    - `docs/parity/sync/regression-report.md` when validation scope changes
-   - `docs/howto/google-drive-oauth-setup.md` if Google Drive operational status changes
+   - `docs/howto/google-drive-oauth-setup.md` if Google Drive removal changes its status
 
 ## Validation Expectations
 
@@ -120,7 +129,9 @@ focused coverage rather than relying on the existing subset alone.
 ## Potential Improvements
 
 - add a machine-readable snapshot of Android-compatible sync keys and category names
-- expand iOS coverage to Android's remaining `ai_settings` and `progress`
-  sync categories only through their separate tracking issues (#74, #73), with
+- add a machine-readable snapshot of Android's visible sync settings rows,
+  including the runtime-hidden Reading Plans row
+- expand iOS coverage to Android's remaining `ai_settings` and `progress` sync
+  categories only through their separate tracking issues (#74, #73), with
   `ai_settings` gated by #5/#89 and `progress` gated by the local model in
   `../bridge/reading-progress-model.md`

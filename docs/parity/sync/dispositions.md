@@ -1,48 +1,57 @@
 # iOS Sync Parity Dispositions
 
 This file records explicit iOS sync dispositions where behavior is intentionally
-extended or constrained relative to Android.
+extended, constrained, or deferred relative to Android.
 
-## 1. iCloud remains a first-class iOS backend
+## 1. iCloud is the default iOS backend
 
-- Status: intentional iOS extension
-- Scope: backend picker and sync settings surface
-
-Disposition:
-
-- iOS keeps `ICLOUD` as a first-class backend alongside the Android-aligned
-  remote backends.
-- This does not replace or redefine the Android parity contract for
-  `NEXT_CLOUD` and `GOOGLE_DRIVE`.
-
-Reason:
-
-- CloudKit is already a shipped iOS-native sync path and must coexist with the
-  Android-style remote sync implementation during parity rollout.
-
-## 2. Google Drive is code-ready but operationally parked
-
-- Status: intentional operational constraint
-- Scope: Google Drive backend
+- Status: intentional iOS platform extension
+- Scope: backend picker, missing-backend fallback, and sync settings surface
 
 Disposition:
 
-- The repo contains the Google Drive transport, auth service, settings flow,
-  and test coverage.
-- End-user Google Drive sync is still parked until a real iOS OAuth client is
-  provisioned for the app bundle.
+- iOS keeps `ICLOUD` as the default backend.
+- Fresh installs, missing `sync_adapter` values, unknown backend values, removed
+  backend values, and legacy `GOOGLE_DRIVE` selections after #116 should resolve
+  to iCloud.
+- NextCloud/WebDAV remains available as an explicit user choice.
+- This does not redefine Android's remote-cloud backend contract; it documents a
+  legitimate platform difference.
 
 Reason:
 
-- iOS requires build-time bundle OAuth configuration and callback URL scheme
-  wiring before Google Sign-In can complete successfully.
-- This is a release/developer setup dependency, not a user workflow.
+- Android has only remote cloud backends in this settings area. iOS already has
+  a shipped platform-native CloudKit path, and the product direction is to make
+  that the default iOS sync path.
+- #160 tracks preserving the iCloud default when #116 removes Google Drive.
+
+## 2. Google Drive is a removal target
+
+- Status: planned removal
+- Scope: Google Drive backend, auth flow, transport code, tests, and docs
+
+Disposition:
+
+- Google Drive should no longer be treated as a retained iOS backend.
+- #116 owns removing the selectable backend, Google auth/session UI, Drive
+  adapter/auth services, GoogleSignIn dependency, Google-focused tests, and OAuth
+  setup documentation.
+- Until #116 lands, existing Google Drive code is historical implementation
+  surface, not a future parity target to preserve.
+
+Reason:
+
+- The iOS sync product target is iCloud plus NextCloud/WebDAV.
+- The previous Google Drive posture required build-time OAuth setup and Google
+  integration maintenance that is no longer desired for iOS.
+- Android Google Drive behavior can remain Android source context, but iOS
+  parity work should not add new Google Drive functionality.
 
 Reference:
 
-- [../../howto/google-drive-oauth-setup.md](../../howto/google-drive-oauth-setup.md)
+- #116 records the removal scope.
 
-## 3. WebDAV persisted key names remain Android-compatible
+## 3. WebDAV persisted key names remain compatibility surface
 
 - Status: intentional compatibility preservation
 - Scope: NextCloud / WebDAV settings persistence
@@ -53,11 +62,13 @@ Disposition:
   `gdrive_server_url`, `gdrive_username`, `gdrive_folder_path`, and
   `gdrive_password` even though they now back NextCloud/WebDAV configuration on
   iOS.
+- #116 removes Google Drive functionality, but does not automatically authorize
+  deleting or renaming these historical WebDAV keys.
 
 Reason:
 
-- The awkward names are part of the cross-platform persistence contract and
-  should not be "cleaned up" casually if the goal is Android compatibility.
+- The awkward names are part of the cross-platform and existing-user persistence
+  contract. Changing them is a migration decision, not a cleanup.
 
 ## 4. Adopt-versus-create stays explicit
 
@@ -67,83 +78,75 @@ Reason:
 Disposition:
 
 - iOS does not silently adopt or overwrite a discovered remote folder.
-- The user must explicitly choose whether to restore from the remote baseline
-  or replace the remote folder with local state.
+- The user must explicitly choose whether to restore from the remote baseline or
+  replace the remote folder with local state.
 
 Reason:
 
 - This matches Android's top-level synchronization branch point and avoids
   accidental destructive behavior during remote bootstrap.
 
-## 5. Remaining Android-only categories stay split into distinct parity targets
+## 5. Sync category breadth and visibility stay source-backed
 
-- Status: `mydocuments` implemented; remaining Android-only categories deferred
-- Scope: remote sync categories
+- Status: partial parity, split into focused follow-ups
+- Scope: remote sync categories and visible toggle rows
 
 Disposition:
 
+- Android defines six sync categories: `bookmarks`, `workspaces`,
+  `readingplans`, `mydocuments`, `ai_settings`, and `progress`.
+- Android currently hides the Reading Plans toggle at runtime while keeping the
+  category in the sync definition.
 - iOS currently implements Android-aligned sync for `bookmarks`, `workspaces`,
   `readingplans`, and `mydocuments`.
-- Android currently also exposes `ai_settings` and `progress`. Those categories
-  are not implemented on iOS yet and must not be treated as one broad
-  implementation task.
-- `mydocuments` remains documented under #72. The local model, rendering, and
-  bridge prerequisites are recorded in `../bridge/my-documents-model.md`.
-  #104 records the Android-source-backed sync schema and policy contract in
-  `mydocuments-schema.md`; restore (#105), initial upload (#106), patch replay
-  (#108), patch upload (#107), and settings/docs exposure (#109) complete the
-  runtime sync surface.
-- `ai_settings` is tracked separately in #74. It is deferred behind #5 so iOS
-  does not invent an AI settings sync schema before the shared AI backend and
-  settings contract exist. The #53 AI bridge disposition and #89 bridge shell
-  contract keep bridge-facing AI settings ownership aligned with that shared
-  backend direction.
-- `progress` is tracked separately in #73. It should not be folded into
-  `readingplans` without an explicit compatibility decision. The #52
-  reading-progress bridge disposition now has a local model/storage/settings
-  contract in `../bridge/reading-progress-model.md`. The #50 memorization
-  bridge state slice also has local iOS storage, with the #77 model recorded in
-  `../bridge/memorization-progress-model.md`. Remote Android `progress` sync
-  compatibility, including KJVA persistence, remote adoption, and conflicts,
-  still belongs to #73.
+- iOS currently shows Reading Plans, while Android hides that row. #158 owns the
+  final visible-toggle parity decision.
+- Android exposes AI Settings and Reading Progress toggle rows. iOS does not
+  implement those remote sync categories yet; they remain separate parity
+  targets in #74 and #73.
+- Reading Progress must stay distinct from Reading Plans unless a later
+  documented compatibility decision explicitly changes that.
 
 Reason:
 
-- The current iOS product surface now exposes the matching Android My Documents
-  sync flow, backed by the Android schema and focused regression coverage.
-- Android exposes AI settings and reading progress as separate sync categories,
-  so each still needs its own product ownership, Android schema reference, iOS
-  data mapping, settings UI decision, and regression plan.
+- Android models each category as an independent sync stream. Folding missing
+  categories together or silently omitting visible Android rows would hide real
+  parity work.
 
 Reference:
 
-- #49 records the decision to split the categories into distinct parity targets.
+- #49 records the decision to split broad category parity into distinct targets.
+- #158 tracks visible category toggle alignment.
+- #74 tracks `ai_settings`.
+- #73 tracks `progress`.
 
-## 6. Sync settings uses native controls with Android-backed row presentation
+## 6. Sync settings can be native, but must match Android behavior
 
-- Status: intentional native implementation with Android presentation contract
-- Scope: Sync settings rows, icons, section grouping, and status summaries
+- Status: intentional native implementation with Android behavior contract
+- Scope: Sync settings rows, icons, grouping, dynamic visibility, and status
+  summaries
 
 Disposition:
 
-- iOS keeps native SwiftUI controls for the backend picker, credential fields,
-  toggles, and connection-test button.
-- The visible row presentation is source-backed by Android
-  `sync_settings.xml` keys for backend selection, storage credentials,
-  reset/sign-out, status/info, and supported category rows.
-- The NextCloud/WebDAV connection test remains an iOS additive workflow while
-  the category toggles continue to use the Android bootstrap/sync behavior.
+- iOS may use native SwiftUI controls for picker, text fields, buttons, and
+  toggles.
+- Native implementation is not permission to drift into a generic platform form.
+- The visible settings experience should follow Android's information
+  architecture: backend row first, Android row labels/summaries/icons where rows
+  overlap, dynamic credential/reset/status visibility, and category toggle
+  behavior that reflects sync bootstrap state.
+- The NextCloud/WebDAV connection test remains an iOS additive workflow only if
+  it improves the experience without contradicting Android behavior.
 
 Reason:
 
-- Android also uses platform-native settings primitives, but those primitives
-  are made to feel like AndBible through custom icons, summaries, grouping, and
-  dynamic status rows.
-- Matching that behavior on iOS means reusing native controls where they are the
-  honest platform path while preventing generic SwiftUI rows from drifting away
-  from Android's information architecture.
+- Android also uses native preference primitives, but the screen feels integrated
+  with AndBible through custom icons, grouping, summaries, dynamic visibility,
+  and sync-side effects.
+- iOS parity should target that behavior and experience, not only the presence
+  of similarly named controls.
 
 Reference:
 
-- #159 tracks this presentation and workflow alignment.
-- #116 tracks Google Drive removal and the follow-up reset/sign-out cleanup.
+- #159 completed the first presentation/workflow pass.
+- #116, #158, and #160 own the remaining source-backed follow-ups.

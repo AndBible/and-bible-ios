@@ -1,6 +1,6 @@
 # SYNC-702 Regression Report
 
-Date: 2026-05-18
+Date: 2026-06-02
 
 ## Scope
 
@@ -14,7 +14,7 @@ Regression verification for the current sync parity surface, covering:
 - ready-state patch replay and steady-state outbound upload
 - Sync settings backend/category mutation, My Documents category exposure, and reopen persistence
 - Sync settings adopt-versus-create confirmation branch
-- the parked Google Drive auth and adapter contract
+- legacy Google Drive auth and adapter coverage pending #116 removal
 - local Android reference comparison
 
 Contract reference:
@@ -25,9 +25,9 @@ Verification matrix:
 
 - `docs/parity/sync/verification-matrix.md`
 
-Operational setup reference:
+Removal reference:
 
-- `docs/howto/google-drive-oauth-setup.md`
+- #116 removes Google Drive as an iOS sync backend
 
 ## Environment
 
@@ -126,11 +126,13 @@ Operational setup reference:
 - bookmark, reading-plan, and workspace category streams are in the shared `AndBible`
   scheme through the `AndBibleTests` target
 
-### Google Drive parked branch
+### Legacy Google Drive branch pending removal
 
-- the adapter uses Drive `appDataFolder` semantics for listing, folder creation, upload, and ownership checks
-- OAuth bundle configuration is validated before sign-in can begin
-- auth state can restore a prior sign-in and still reject access-token reads when Drive scope is missing
+- current tests still cover Drive `appDataFolder` semantics, OAuth bundle
+  validation, restored sign-in state, and Drive-scope rejection while the code is
+  present
+- #116 should remove these tests or replace them with removal/migration tests
+  when Google Drive leaves the iOS sync backend surface
 
 ## Historical Result And Current Interpretation
 
@@ -154,22 +156,24 @@ The checked-in shared-scheme test set gives the sync domain rerunnable regressio
 - initial-backup restore and initial-backup upload for bookmark, workspace, reading-plan, and
   My Documents flows
 - ready-state synchronization for bookmark, workspace, reading-plan, and My Documents categories
-- parked Google Drive auth and adapter contracts
+- legacy Google Drive auth and adapter contracts pending #116 removal
 - Sync settings backend/category mutation plus reopen persistence
 - Sync settings adopt-versus-create confirmation UI coverage, including My Documents category entry
 
-## Remaining Gap
+## Remaining Gaps
 
-The current sync parity gap is not the core bootstrap or patch engine. It is
-implementation breadth beyond the supported category set:
+The current sync parity gap is not the core bootstrap or patch engine. The
+remaining gaps are target alignment and category breadth:
 
-- Android category breadth beyond iOS's supported `bookmarks`, `workspaces`,
-  `readingplans`, and `mydocuments` categories.
-- Android also exposes `ai_settings` and `progress`.
+- #116 removes Google Drive as an iOS sync backend.
+- #160 preserves iCloud as the default iOS backend after Google Drive removal.
+- #158 reconciles Android's visible sync category toggles with the iOS active
+  toggle list, including Android's runtime-hidden Reading Plans row.
+- Android also exposes `ai_settings` and `progress`, which remain distinct sync
+  parity targets.
 
-The adopt-versus-create branch is now covered both below the UI through coordinator and
-synchronization tests and through a focused simulator workflow. The remaining `Partial` sync parity
-area is Android category breadth beyond the currently supported iOS categories.
+The adopt-versus-create branch is now covered both below the UI through
+coordinator and synchronization tests and through a focused simulator workflow.
 
 Issue #49 resolves the category-breadth decision by splitting Android-only
 categories into distinct parity targets:
