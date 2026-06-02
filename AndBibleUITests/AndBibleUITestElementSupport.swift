@@ -219,9 +219,10 @@ extension AndBibleUITests {
     /**
      Returns state-bearing elements in the order safest for repeated value polling.
      *
-     * Screen roots are preferred when they publish the same accessibility value because reading a
-     * known root avoids enumerating every `StaticText` in dynamic lists. The hidden probe remains a
-     * fallback for screens whose root does not carry the detailed automation state.
+     * Screen roots are preferred when they publish the same accessibility value and the screen is
+     * stable because reading a known root avoids enumerating every `StaticText` in dynamic lists.
+     * Transition-prone surfaces use the direct hidden export so a temporarily absent root does not
+     * register an XCTest snapshot failure during polling.
      */
     func semanticStateValueCandidates(
         for identifier: String,
@@ -236,8 +237,9 @@ extension AndBibleUITests {
             return screenRootCandidates("bookmarkListScreen", in: app)
                 + screenScopedStateCandidates(identifier, within: "bookmarkListScreen", in: app)
         case "readingPlanListStateExport":
-            return screenRootCandidates("readingPlanListScreen", in: app)
-                + screenScopedStateCandidates(identifier, within: "readingPlanListScreen", in: app)
+            return [
+                app.staticTexts[identifier].firstMatch,
+            ]
         case "availablePlansStateExport":
             return screenRootCandidates("availablePlansScreen", in: app)
                 + screenScopedStateCandidates(identifier, within: "availablePlansScreen", in: app)
