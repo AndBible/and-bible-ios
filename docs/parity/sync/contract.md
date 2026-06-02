@@ -134,6 +134,10 @@ The Sync settings screen currently provides:
 - per-supported-category enable/disable controls
 - adopt/create confirmation flow for discovered remote folders
 
+Rows that overlap Android `sync_settings.xml` source their visible icon
+metadata and row keys from that Android contract while retaining native iOS
+controls for pickers, text fields, buttons, and toggles.
+
 The settings screen is the user-facing branch point for Android-style remote
 bootstrap decisions on iOS.
 

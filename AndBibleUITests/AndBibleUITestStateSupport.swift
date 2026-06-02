@@ -90,7 +90,7 @@ extension AndBibleUITests {
         ) else {
             return
         }
-        tapElementReliably(requireLabelManagerCreateButton(in: app, timeout: 10), timeout: 10)
+        tapLabelCreationPromptCreateButton(in: app, timeout: 10)
     }
 
     /**
@@ -319,6 +319,46 @@ extension AndBibleUITests {
         XCTFail("Expected the Label Manager create prompt to appear within \(timeout) seconds.")
     }
 
+    /**
+     Submits the native create-label alert without repeatedly snapshotting its action button.
+
+     Hosted simulators can wedge XCTest while evaluating the alert's `Create` button after text
+     entry. Once the prompt and committed text are already observed, tapping the alert's trailing
+     action area exercises the same visible control while avoiding that unstable query path.
+
+     - Parameters:
+       - app: Running application under test.
+       - timeout: Maximum time to wait for the prompt surface to expose a usable frame.
+       - file: Source file used for XCTest failure attribution.
+       - line: Source line used for XCTest failure attribution.
+     - Side effects:
+       - taps the native alert action area that confirms label creation
+     - Failure modes:
+       - records an XCTest failure if the prompt never exposes a tappable frame
+     */
+    func tapLabelCreationPromptCreateButton(
+        in app: XCUIApplication,
+        timeout: TimeInterval = 10,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            if let prompt = resolvedLabelCreationPrompt(in: app),
+               elementFrameIsUsable(prompt.frame) {
+                prompt.coordinate(withNormalizedOffset: CGVector(dx: 0.76, dy: 0.86)).tap()
+                return
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        } while Date() < deadline
+
+        XCTFail(
+            "Expected the create-label prompt to expose a usable frame within \(timeout) seconds.",
+            file: file,
+            line: line
+        )
+    }
+
     /// Returns the visible prompt container used by the create-label flow.
     func resolvedLabelCreationPrompt(in app: XCUIApplication) -> XCUIElement? {
         resolvedModalPrompt(in: app, timeout: 0.2)
@@ -382,27 +422,13 @@ extension AndBibleUITests {
         resolvedStateExportElement("searchStateExport", in: app)
     }
 
-    /**
-     Reads Search state from the compact export only. The full Search root is intentionally not a
-     fallback here because XCTest can time out snapshotting that container while results rerender.
-     */
+    /// Reads Search state from the first state-bearing candidate that exposes a settled value.
     func searchStateCandidateValues(in app: XCUIApplication) -> [String] {
-        let candidates = [
-            resolvedStateExportElement("searchStateExport", in: app),
-        ]
-
-        var values: [String] = []
-        for candidate in candidates {
-            guard let candidate,
-                  candidate.exists,
-                  let value = candidate.value as? String,
-                  value.contains("state="),
-                  !values.contains(value) else {
-                continue
-            }
-            values.append(value)
+        if let value = semanticStateExportValue("searchStateExport", in: app),
+           value.contains("state=") {
+            return [value]
         }
-        return values
+        return []
     }
 
     /// Reads the current exported Search state from the state-bearing root element.
@@ -412,8 +438,7 @@ extension AndBibleUITests {
 
     /// Reads the current exported Bookmark List state without walking the full list hierarchy.
     func resolvedBookmarkListStateValue(in app: XCUIApplication) -> String? {
-        if let stateElement = resolvedStateExportElement("bookmarkListStateExport", in: app),
-           let value = stateElement.value as? String {
+        if let value = semanticStateExportValue("bookmarkListStateExport", in: app) {
             return value
         }
         if let screen = resolvedElement("bookmarkListScreen", in: app),
@@ -425,8 +450,7 @@ extension AndBibleUITests {
 
     /// Reads the current exported Reading Plans list state without walking the full list hierarchy.
     func resolvedReadingPlanListStateValue(in app: XCUIApplication) -> String? {
-        if let stateElement = resolvedStateExportElement("readingPlanListStateExport", in: app),
-           let value = stateElement.value as? String {
+        if let value = semanticStateExportValue("readingPlanListStateExport", in: app) {
             return value
         }
         if let screen = resolvedElement("readingPlanListScreen", in: app),
@@ -438,8 +462,7 @@ extension AndBibleUITests {
 
     /// Reads the current exported Available Plans state without walking the full picker hierarchy.
     func resolvedAvailablePlansStateValue(in app: XCUIApplication) -> String? {
-        if let stateElement = resolvedStateExportElement("availablePlansStateExport", in: app),
-           let value = stateElement.value as? String {
+        if let value = semanticStateExportValue("availablePlansStateExport", in: app) {
             return value
         }
         if let screen = resolvedElement("availablePlansScreen", in: app),
@@ -451,8 +474,7 @@ extension AndBibleUITests {
 
     /// Reads the current exported Label Manager state without broad prompt/list queries.
     func resolvedLabelManagerStateValue(in app: XCUIApplication) -> String? {
-        if let stateElement = resolvedStateExportElement("labelManagerStateExport", in: app),
-           let value = stateElement.value as? String {
+        if let value = semanticStateExportValue("labelManagerStateExport", in: app) {
             return value
         }
         if let screen = resolvedElement("labelManagerScreen", in: app),

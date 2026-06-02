@@ -43,6 +43,48 @@ extension AndBibleTests {
         )
     }
 
+    func testSyncSettingsPresentationUsesAndroidBackedRows() {
+        XCTAssertEqual(
+            SyncSettingsPresentation.backend.androidKey,
+            "sync_adapter"
+        )
+        XCTAssertEqual(
+            SyncSettingsPresentation.backend.icon?.androidDrawableName,
+            "ic_syncdb_24dp"
+        )
+        XCTAssertEqual(
+            SyncSettingsPresentation.nextCloudCredential.icon?.androidDrawableName,
+            "outline_shield_24"
+        )
+        XCTAssertEqual(
+            SyncSettingsPresentation.resetOrSignOut.icon?.androidDrawableName,
+            "baseline_logout_24"
+        )
+    }
+
+    func testSyncCategoryPresentationMatchesAndroidCategoryIcons() {
+        XCTAssertEqual(
+            SyncSettingsPresentation.category(.bookmarks).androidKey,
+            "sync_bookmarks"
+        )
+        XCTAssertEqual(
+            SyncSettingsPresentation.category(.bookmarks).icon?.androidDrawableName,
+            "ic_bookmark_24dp"
+        )
+        XCTAssertEqual(
+            SyncSettingsPresentation.category(.workspaces).icon?.androidDrawableName,
+            "ic_baseline_workspace_24"
+        )
+        XCTAssertEqual(
+            SyncSettingsPresentation.category(.readingPlans).icon?.androidDrawableName,
+            "ic_reading_plan_24dp"
+        )
+        XCTAssertEqual(
+            SyncSettingsPresentation.category(.myDocuments).icon?.androidDrawableName,
+            "ic_baseline_description_gray_24"
+        )
+    }
+
     func testTextDisplayIconsComeFromAndroidOptionsMenuItems() {
         XCTAssertEqual(
             AndBibleIconCatalog.settingsIcon(forAndroidKey: "REDLETTERS")?.androidDrawableName,
