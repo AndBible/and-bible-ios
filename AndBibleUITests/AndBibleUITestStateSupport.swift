@@ -90,7 +90,7 @@ extension AndBibleUITests {
         ) else {
             return
         }
-        tapElementReliably(requireLabelManagerCreateButton(in: app, timeout: 10), timeout: 10)
+        tapLabelCreationPromptCreateButton(in: app, timeout: 10)
     }
 
     /**
@@ -317,6 +317,46 @@ extension AndBibleUITests {
         } while Date() < deadline
 
         XCTFail("Expected the Label Manager create prompt to appear within \(timeout) seconds.")
+    }
+
+    /**
+     Submits the native create-label alert without repeatedly snapshotting its action button.
+
+     Hosted simulators can wedge XCTest while evaluating the alert's `Create` button after text
+     entry. Once the prompt and committed text are already observed, tapping the alert's trailing
+     action area exercises the same visible control while avoiding that unstable query path.
+
+     - Parameters:
+       - app: Running application under test.
+       - timeout: Maximum time to wait for the prompt surface to expose a usable frame.
+       - file: Source file used for XCTest failure attribution.
+       - line: Source line used for XCTest failure attribution.
+     - Side effects:
+       - taps the native alert action area that confirms label creation
+     - Failure modes:
+       - records an XCTest failure if the prompt never exposes a tappable frame
+     */
+    func tapLabelCreationPromptCreateButton(
+        in app: XCUIApplication,
+        timeout: TimeInterval = 10,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            if let prompt = resolvedLabelCreationPrompt(in: app),
+               elementFrameIsUsable(prompt.frame) {
+                prompt.coordinate(withNormalizedOffset: CGVector(dx: 0.76, dy: 0.86)).tap()
+                return
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        } while Date() < deadline
+
+        XCTFail(
+            "Expected the create-label prompt to expose a usable frame within \(timeout) seconds.",
+            file: file,
+            line: line
+        )
     }
 
     /// Returns the visible prompt container used by the create-label flow.
