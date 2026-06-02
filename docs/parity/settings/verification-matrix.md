@@ -1,6 +1,6 @@
 # SETPAR-701 Verification Matrix (Android Application Preferences -> iOS)
 
-Date: 2026-05-31
+Date: 2026-06-01
 
 ## Scope and Method
 
@@ -38,6 +38,8 @@ divergences.
 - Non-registry documented divergence: 1 (`eink_mode`).
 - Android action shortcuts outside registry: 4 (`global_text_display_settings`,
   `sync_settings_shortcut`, `ai_settings_shortcut`, `reading_progress_settings_shortcut`).
+  Three are implemented as native iOS navigation/actions; `ai_settings_shortcut`
+  remains deferred until iOS has an AI settings workflow.
 
 ## Key-by-Key Matrix
 
@@ -75,9 +77,9 @@ divergences.
 | `discrete_mode` | `AppPreferenceRegistry`; `SettingsView`; `AndBibleApp` alternate icon behavior | Adapted Pass | Android launcher identity behavior adapted to iOS alternate icon API. |
 | `show_calculator` | `AppPreferenceRegistry`; `SettingsView`; `AndBibleApp` startup calculator gate | Pass | Startup calculator gate follows persisted preference. |
 | `calculator_pin` | `AppPreferenceRegistry`; `SettingsView` numeric field; `CalculatorView` unlock | Pass | Numeric PIN entry and unlock behavior are wired. |
-| `sync_settings_shortcut` | `SettingsView` Data section links to `SyncSettingsView` | Outside Registry | Shortcut adapted outside registry; presentation alignment tracked by #155. |
-| `ai_settings_shortcut` | No direct iOS Application preferences shortcut | Outside Registry | Deferred to AI parity issues (#5, #74, #89-#92) and settings presentation issue #155. |
-| `reading_progress_settings_shortcut` | Reader bridge presents native `ReadingProgressSettingsView`; no top-level Settings shortcut | Outside Registry | Runtime feature exists; top-level shortcut alignment tracked by #155. |
+| `sync_settings_shortcut` | `SettingsView` Features section exposes `settingsSyncLink` to `SyncSettingsView`; `AndBibleIconCatalog` maps Android icon | Outside Registry | Implemented as a native iOS shortcut, not a durable preference. |
+| `ai_settings_shortcut` | No direct iOS Application preferences shortcut | Outside Registry | Deferred to AI parity issues (#5, #74, #89-#92) because iOS has no AI settings workflow to open. |
+| `reading_progress_settings_shortcut` | `SettingsView` Features section exposes `settingsReadingProgressLink` to `ReadingProgressSettingsView`; `AndBibleIconCatalog` maps Android icon | Outside Registry | Implemented as a native iOS shortcut, not a durable preference. |
 | `experimental_features` | `AppPreferenceRegistry`; `SettingsView` multi-select; iOS Vue `enabledExperimentalFeatures` payload | Pass | Android feature IDs are sanitized and emitted. |
 | `enable_bluetooth_pref` | `AppPreferenceRegistry`; `SettingsView`; `SpeakService` remote command handling | Adapted Pass | Android media-button behavior adapted to iOS remote command center. |
 | `request_sdcard_permission_pref` | `AppPreferenceRegistry`; not surfaced; `dispositions.md` | Documented Divergence | iOS has no SD-card permission model equivalent. |
@@ -91,11 +93,30 @@ divergences.
   same HTML/Markdown default behavior Android exposes.
 - #164: reconcile `locale_pref` option arrays with Android source and actual iOS
   localization resources.
-- #155: decide how far iOS Application preferences should align Android's shortcut
-  presentation for Sync, AI settings, Reading Progress settings, search, reset, and
-  broader admin-flow placement.
+- AI settings shortcut remains intentionally absent until the iOS AI settings workflow
+  exists. The shortcut is tracked with the AI parity issues (#5, #74, #89-#92), not
+  as a standalone dead Application preferences row.
 - `eink_mode` is not an implementation gap today. It is an Android-only e-ink
   behavior and is intentionally documented as a divergence.
+
+## Application Preferences Workflow Parity
+
+- Settings presentation: Application preferences are opened as an integrated reader
+  navigation destination, not as a modal sheet.
+- Search: native SwiftUI search filters visible Application preferences sections by
+  normalized all-term matching across row identifiers, titles, summaries, details,
+  and keywords.
+- Reset: native reset action restores registry-backed Application preferences through
+  `SettingsStore.resetApplicationPreferences()` and
+  `AppPreferenceRegistry.applicationPreferencesResetKeys`; action rows and global
+  text-display settings are outside that reset scope.
+- Feature shortcuts: Sync and Reading Progress are visible in the Android-aligned
+  Features section with Android-sourced icon mappings. AI is documented as deferred
+  because iOS has no AI settings workflow yet.
+- Admin-flow placement: Downloads, repositories, import/export, labels, and about
+  remain reader drawer/overflow/admin workflows rather than Application preferences
+  rows, matching Android's separation of Application preferences from broader app
+  administration.
 
 Regression hardening note: Strong's "Find all occurrences" retains module-backed
 simulator coverage to prevent recurrence of the `H02022` no-results failure.

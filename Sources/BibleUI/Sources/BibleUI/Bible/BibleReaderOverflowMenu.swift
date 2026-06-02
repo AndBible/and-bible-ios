@@ -107,6 +107,7 @@ struct BibleReaderOverflowMenu: View {
             button(
                 title: ellipsisTitle(String(localized: "label_settings")),
                 assetName: "OverflowLabelSettings",
+                identifier: "readerOpenLabelSettingsAction",
                 action: .openLabelSettings
             )
 

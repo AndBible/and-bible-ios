@@ -565,6 +565,35 @@ public extension SettingsStore {
     }
 
     /**
+     Clears all persisted Android-parity application preferences back to registry defaults.
+
+     Reset is expressed as removal rather than writing default values so future registry default
+     changes are picked up consistently and storage remains equivalent to a fresh install. The
+     key list lives in `AppPreferenceRegistry.applicationPreferencesResetKeys`; UI placement does
+     not decide what is reset.
+
+     - Side Effects:
+       - deletes SwiftData `Setting` rows for resettable `.swiftData` preferences
+       - removes `UserDefaults` objects for resettable `.userDefaults` preferences
+       - leaves `.action` rows and unrelated settings, including global text display JSON, intact
+     - Failure: SwiftData save failures are swallowed by `remove(_:)`, matching other settings
+       writes in this store.
+     */
+    func resetApplicationPreferences() {
+        for key in AppPreferenceRegistry.applicationPreferencesResetKeys {
+            let definition = AppPreferenceRegistry.definition(for: key)
+            switch definition.storage {
+            case .swiftData:
+                remove(key.rawValue)
+            case .userDefaults:
+                UserDefaults.standard.removeObject(forKey: key.rawValue)
+            case .action:
+                break
+            }
+        }
+    }
+
+    /**
      * Reads a parity preference as a raw string regardless of the configured storage backend.
      * - Parameter key: Android parity preference key.
      * - Returns: Raw stored representation, or `nil` when absent or when the preference is an action.

@@ -7,38 +7,31 @@ import UIKit
 
 extension AndBibleUITests {
     /**
-     Verifies that the reader overflow menu exposes its primary actions and that Settings can be
-     opened from the reader shell.
+     Verifies that Settings opens as a reader navigation destination and exposes Android-parity
+     application-preference shortcuts.
      *
      * - Side effects:
      *   - launches the app with the calculator gate disabled, in-memory persistence, and one
      *     deterministic seeded bookmark-label pair for stable reader-shell startup
-     *   - opens the reader overflow menu, validates the primary overflow rows, dismisses the menu,
-     *     and pushes the settings screen
+     *   - pushes Settings from the reader action surface and samples the exported reader/settings
+     *     accessibility state
      * - Failure modes:
-     *   - fails if any primary overflow-menu action is absent
      *   - fails if settings cannot be reached from the reader shell
-     *   - fails if the settings form does not render after navigation completes
+     *   - fails if Settings is still presented as a reader sheet rather than a navigation
+     *     destination
+     *   - fails if the feature shortcuts or reader-admin-flow contract are absent
      */
-    func testSettingsScreenShowsPrimaryNavigationRows() {
+    func testSettingsScreenShowsApplicationPreferenceShortcuts() {
         let app = makeApp()
         app.launch()
 
-        tapReaderMoreMenuButton(in: app)
-        XCTAssertTrue(requireElement("readerOverflowSectionTitlesToggle", in: app, timeout: 10).exists)
-        XCTAssertTrue(requireElement("readerOverflowStrongsModeAction", in: app, timeout: 10).exists)
-        XCTAssertTrue(requireElement("readerOverflowVerseNumbersToggle", in: app, timeout: 10).exists)
-        dismissReaderOverflowMenu(in: app, timeout: 15)
-        XCTAssertTrue(
-            waitForReaderShellReady(in: app, timeout: 20),
-            "Expected overflow dismissal to restore the reader shell before opening Settings."
-        )
-
         openSettings(in: app)
         XCTAssertTrue(requireElement("settingsForm", in: app, timeout: 10).exists)
-        waitForSettingsState(containing: "settingsImportExportLink", in: app, timeout: 10)
+        waitForReaderRenderedContentState(containing: "readerSheet=none", in: app, timeout: 10)
+        waitForReaderRenderedContentState(containing: "readerDestination=settings", in: app, timeout: 10)
         waitForSettingsState(containing: "settingsSyncLink", in: app, timeout: 10)
-        waitForSettingsState(containing: "settingsLabelsLink", in: app, timeout: 10)
+        waitForSettingsState(containing: "settingsReadingProgressLink", in: app, timeout: 10)
+        waitForSettingsState(containing: "adminFlows=readerActions", in: app, timeout: 10)
     }
 
     /**

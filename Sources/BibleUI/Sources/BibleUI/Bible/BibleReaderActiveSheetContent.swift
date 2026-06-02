@@ -6,13 +6,10 @@ import SwiftUI
 
  `BibleReaderView` decides when a sheet is active and supplies the focused controller. This view
  owns only the sheet content switch and forwards dismiss/navigation side effects through closures.
- */
+    */
 struct BibleReaderActiveSheetContent: View {
     let sheet: BibleReaderView.ReaderSheet
     let controller: BibleReaderController?
-    @Binding var displaySettings: TextDisplaySettings
-    @Binding var nightMode: Bool
-    @Binding var nightModeMode: String
     let readingProgressInitialTab: ReadingProgressTab
     let chapterReadHistoryTarget: ChapterReadHistoryTarget?
 
@@ -26,7 +23,6 @@ struct BibleReaderActiveSheetContent: View {
     let onDefaultDownloadActivityChanged: (Bool) -> Void
 
     let onDismiss: () -> Void
-    let onSettingsChanged: () -> Void
 
     /**
      Creates active reader sheet content for the currently presented sheet route.
@@ -34,9 +30,6 @@ struct BibleReaderActiveSheetContent: View {
      - Parameters:
        - sheet: Reader sheet route to render.
        - controller: Focused reader controller backing sheet navigation actions.
-       - displaySettings: Shared text display settings binding for Settings.
-       - nightMode: Shared night-mode binding for Settings.
-       - nightModeMode: Shared night-mode mode binding for Settings.
        - readingProgressInitialTab: Initial reading-progress tab for progress routes.
        - chapterReadHistoryTarget: Optional chapter read-history target.
        - downloadsInitialSearchText: Initial Downloads filter from Android-compatible links.
@@ -44,7 +37,6 @@ struct BibleReaderActiveSheetContent: View {
        - onDefaultDownloadActivityChanged: Callback invoked when Easy Start Downloads starts or
          finishes refresh/install activity.
        - onDismiss: Callback used to close the active sheet.
-       - onSettingsChanged: Callback used after Settings mutates display preferences.
 
      Side effects:
      - none during initialization
@@ -55,29 +47,21 @@ struct BibleReaderActiveSheetContent: View {
     init(
         sheet: BibleReaderView.ReaderSheet,
         controller: BibleReaderController?,
-        displaySettings: Binding<TextDisplaySettings>,
-        nightMode: Binding<Bool>,
-        nightModeMode: Binding<String>,
         readingProgressInitialTab: ReadingProgressTab,
         chapterReadHistoryTarget: ChapterReadHistoryTarget?,
         downloadsInitialSearchText: String,
         downloadsDefaultDownloadMode: ModuleBrowserDefaultDownloadMode = .disabled,
         onDefaultDownloadActivityChanged: @escaping (Bool) -> Void = { _ in },
-        onDismiss: @escaping () -> Void,
-        onSettingsChanged: @escaping () -> Void
+        onDismiss: @escaping () -> Void
     ) {
         self.sheet = sheet
         self.controller = controller
-        self._displaySettings = displaySettings
-        self._nightMode = nightMode
-        self._nightModeMode = nightModeMode
         self.readingProgressInitialTab = readingProgressInitialTab
         self.chapterReadHistoryTarget = chapterReadHistoryTarget
         self.downloadsInitialSearchText = downloadsInitialSearchText
         self.downloadsDefaultDownloadMode = downloadsDefaultDownloadMode
         self.onDefaultDownloadActivityChanged = onDefaultDownloadActivityChanged
         self.onDismiss = onDismiss
-        self.onSettingsChanged = onSettingsChanged
     }
 
     var body: some View {
@@ -93,20 +77,6 @@ struct BibleReaderActiveSheetContent: View {
                         controller?.loadStudyPadDocument(labelId: labelId)
                     }
                 )
-            }
-        case .settings:
-            NavigationStack {
-                SettingsView(
-                    displaySettings: $displaySettings,
-                    nightMode: $nightMode,
-                    nightModeMode: $nightModeMode,
-                    onSettingsChanged: onSettingsChanged
-                )
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button(String(localized: "done"), action: onDismiss)
-                    }
-                }
             }
         case .downloads:
             NavigationStack {

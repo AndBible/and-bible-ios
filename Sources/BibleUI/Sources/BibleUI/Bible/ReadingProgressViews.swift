@@ -119,6 +119,17 @@ struct ReadingProgressView: View {
     }
 }
 
+/**
+ Native settings form for reading and memorization progress behavior.
+
+ The view edits the focused reader controller's progress settings when a controller is available
+ and otherwise renders default values for routes opened before a pane controller is ready.
+
+ - Parameters:
+   - controller: Optional reader controller that owns the progress stores to mutate.
+ - Side effects: User edits call `saveReadingProgressSettings(_:)` on the supplied controller.
+ - Failure modes: Missing controllers keep edits local to the view state.
+ */
 struct ReadingProgressSettingsView: View {
     let controller: BibleReaderController?
     @State private var settings: ReadingProgressSettingsSnapshot
@@ -152,8 +163,18 @@ struct ReadingProgressSettingsView: View {
             }
         }
         .navigationTitle(String(localized: "reading_progress_settings", defaultValue: "Reading Progress Settings"))
+        .accessibilityIdentifier("readingProgressSettingsScreen")
     }
 
+    /**
+     Creates a binding that persists one reading-progress setting after each edit.
+
+     - Parameter keyPath: Writable key path for the setting value inside the local snapshot.
+     - Returns: A SwiftUI binding suitable for toggles and pickers.
+     - Side Effects: Mutates local state and saves through the optional reader controller.
+     - Failure: When the controller is absent or saving fails, the local edited value remains until
+       the view is recreated.
+     */
     private func settingBinding<Value>(_ keyPath: WritableKeyPath<ReadingProgressSettingsSnapshot, Value>) -> Binding<Value> {
         Binding(
             get: { settings[keyPath: keyPath] },

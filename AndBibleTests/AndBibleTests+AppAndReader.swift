@@ -61,6 +61,111 @@ extension AndBibleTests {
         }
     }
 
+    func testApplicationPreferencesResetContractExcludesActionRowsAndIncludesVisibleParityKeys() {
+        let resetKeys = AppPreferenceRegistry.applicationPreferencesResetKeys
+
+        XCTAssertTrue(resetKeys.contains(.navigateToVersePref))
+        XCTAssertTrue(resetKeys.contains(.volumeKeysScroll))
+        XCTAssertTrue(resetKeys.contains(.localePref))
+        XCTAssertTrue(resetKeys.contains(.calculatorPin))
+        XCTAssertTrue(resetKeys.contains(.experimentalFeatures))
+        XCTAssertFalse(resetKeys.contains(.discreteHelp))
+        XCTAssertFalse(resetKeys.contains(.openLinks))
+        XCTAssertFalse(resetKeys.contains(.crashApp))
+        XCTAssertEqual(Set(resetKeys).count, resetKeys.count)
+    }
+
+    func testSettingsStoreResetApplicationPreferencesRestoresRegistryDefaults() throws {
+        let userDefaultsKeys: [AppPreferenceKey] = [.localePref, .showCalculator, .calculatorPin, .discreteMode]
+        userDefaultsKeys.forEach { UserDefaults.standard.removeObject(forKey: $0.rawValue) }
+        defer {
+            userDefaultsKeys.forEach { UserDefaults.standard.removeObject(forKey: $0.rawValue) }
+        }
+
+        let settingsStore = try makeInMemorySettingsStore()
+        settingsStore.setBool(.navigateToVersePref, value: true)
+        settingsStore.setString(.toolbarButtonActions, value: "swap-menu")
+        settingsStore.setInt(.fontSizeMultiplier, value: 180)
+        settingsStore.setStringSet(.experimentalFeatures, values: ["feature_b", "feature_a"])
+        settingsStore.setString(.localePref, value: "fi")
+        settingsStore.setBool(.showCalculator, value: true)
+        settingsStore.setString(.calculatorPin, value: "9999")
+        settingsStore.setBool(.discreteMode, value: true)
+        settingsStore.setString(SettingsStore.globalTextDisplaySettingsKey, value: #"{"fontSize":22}"#)
+
+        settingsStore.resetApplicationPreferences()
+
+        XCTAssertEqual(settingsStore.getBool(.navigateToVersePref), false)
+        XCTAssertEqual(settingsStore.getString(.toolbarButtonActions), "default")
+        XCTAssertEqual(settingsStore.getInt(.fontSizeMultiplier), 100)
+        XCTAssertEqual(settingsStore.getStringSet(.experimentalFeatures), [])
+        XCTAssertEqual(settingsStore.getString(.localePref), "")
+        XCTAssertEqual(settingsStore.getBool(.showCalculator), false)
+        XCTAssertEqual(settingsStore.getString(.calculatorPin), "1234")
+        XCTAssertEqual(settingsStore.getBool(.discreteMode), false)
+        XCTAssertNotNil(settingsStore.getString(SettingsStore.globalTextDisplaySettingsKey))
+    }
+
+    func testSettingsSearchMatcherRequiresAllNormalizedTermsAcrossEntryText() {
+        let entry = AndBibleSettingsSearchEntry(
+            identifier: "settingsReadingProgressLink",
+            title: "Reading Progress Settings",
+            summary: "Configure automatic reading tracking",
+            detail: "Memorization",
+            keywords: ["features", "progress"]
+        )
+
+        XCTAssertTrue(AndBibleSettingsSearchMatcher.matches(query: "", entry: entry))
+        XCTAssertTrue(AndBibleSettingsSearchMatcher.matches(query: "reading tracking", entry: entry))
+        XCTAssertTrue(AndBibleSettingsSearchMatcher.matches(query: "FEATURES progress", entry: entry))
+        XCTAssertFalse(AndBibleSettingsSearchMatcher.matches(query: "sync tracking", entry: entry))
+    }
+
+    func testSettingsSearchMatcherFiltersExactRenderedRowsWithinMatchingSection() {
+        let entries = [
+            AndBibleSettingsSearchEntry(
+                identifier: "monochrome_mode",
+                title: "Black & white mode",
+                summary: "Use application in monochrome mode"
+            ),
+            AndBibleSettingsSearchEntry(
+                identifier: "disable_animations",
+                title: "Disable animations",
+                summary: "Disable smooth scrolling animations"
+            ),
+        ]
+
+        XCTAssertTrue(entries.contains { AndBibleSettingsSearchMatcher.matches(query: "monochrome", entry: $0) })
+        XCTAssertTrue(
+            AndBibleSettingsSearchMatcher.matchesIdentifier(
+                "monochrome_mode",
+                query: "monochrome",
+                entries: entries
+            )
+        )
+        XCTAssertFalse(
+            AndBibleSettingsSearchMatcher.matchesIdentifier(
+                "disable_animations",
+                query: "monochrome",
+                entries: entries
+            )
+        )
+        XCTAssertFalse(
+            AndBibleSettingsSearchMatcher.matchesIdentifier(
+                "missing_row",
+                query: "monochrome",
+                entries: entries
+            )
+        )
+        XCTAssertTrue(
+            AndBibleSettingsSearchMatcher.matchesIdentifier(
+                "missing_row",
+                query: "",
+                entries: entries
+            )
+        )
+    }
+
     func testTextDisplayAppDefaultsStartWithStrongsDisabled() {
         XCTAssertEqual(TextDisplaySettings.appDefaults.strongsMode, 0)
     }
@@ -288,18 +393,14 @@ extension AndBibleTests {
         XCTAssertTrue(String(describing: type(of: view)).contains("BibleReaderOverflowMenu"))
     }
 
-    func testBibleReaderActiveSheetContentBuildsSettingsSheet() {
+    func testBibleReaderActiveSheetContentBuildsDownloadsSheet() {
         let view = BibleReaderActiveSheetContent(
-            sheet: .settings,
+            sheet: .downloads,
             controller: nil,
-            displaySettings: Binding.constant(TextDisplaySettings()),
-            nightMode: Binding.constant(false),
-            nightModeMode: Binding.constant("system"),
             readingProgressInitialTab: .reading,
             chapterReadHistoryTarget: nil,
             downloadsInitialSearchText: "",
-            onDismiss: {},
-            onSettingsChanged: {}
+            onDismiss: {}
         )
 
         XCTAssertTrue(String(describing: type(of: view)).contains("BibleReaderActiveSheetContent"))

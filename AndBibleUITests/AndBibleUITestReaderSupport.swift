@@ -857,6 +857,8 @@ extension AndBibleUITests {
             return "Backup & Restore"
         case "readerOpenSyncSettingsAction":
             return "Device synchronization"
+        case "readerOpenLabelSettingsAction":
+            return "Label Settings…"
         case "readerOpenHelpAction":
             return "Help & Tips"
         case "readerSponsorDevelopmentAction":

@@ -98,22 +98,22 @@ extension AndBibleUITests {
     }
 
     /**
-     Opens Label Manager through Settings navigation.
+     Opens Label Manager through the reader overflow admin route.
      *
      * - Parameter app: Running application under test.
      * - Returns: The root accessibility-identified Label Manager screen element.
      * - Side effects:
-     *   - opens Settings and pushes the Label Manager screen
+     *   - opens the reader overflow menu and presents the Label Manager screen
      * - Failure modes:
      *   - fails when the Label Manager screen never appears
      */
     func openLabelManager(in app: XCUIApplication) -> XCUIElement {
-        openSettingsDestination(
-            linkIdentifier: "settingsLabelsLink",
+        openReaderActionDestination(
+            actionIdentifier: "readerOpenLabelSettingsAction",
             destinationIdentifier: "labelManagerScreen",
             readinessIdentifiers: ["labelManagerAddButton"],
             in: app,
-            destinationTimeout: 20
+            timeout: 20
         )
     }
 
@@ -788,22 +788,22 @@ extension AndBibleUITests {
     }
 
     /**
-     Opens Import and Export through Settings navigation.
+     Opens Import and Export through the reader drawer administration route.
      *
      * - Parameter app: Running application under test.
      * - Returns: The root accessibility-identified Import and Export screen element.
      * - Side effects:
-     *   - opens Settings and pushes the Import and Export screen
+     *   - opens the reader drawer and presents the Import and Export screen
      * - Failure modes:
      *   - fails when the Import and Export screen never appears
      */
     func openImportExport(in app: XCUIApplication) -> XCUIElement {
-        openSettingsDestination(
-            linkIdentifier: "settingsImportExportLink",
+        openReaderActionDestination(
+            actionIdentifier: "readerOpenImportExportAction",
             destinationIdentifier: "importExportScreen",
             readinessIdentifiers: ["importExportImportButton", "importExportFullBackupButton"],
             in: app,
-            destinationTimeout: 20
+            timeout: 20
         )
     }
 
@@ -939,17 +939,22 @@ extension AndBibleUITests {
     }
 
     /**
-     Dismisses the Settings sheet back to the reader shell.
+     Dismisses the integrated Settings destination back to the reader shell.
      *
      * - Parameter app: Running application whose Settings sheet should be dismissed.
      * - Side effects:
-     *   - drags the production Settings form downward to close the sheet
+     *   - activates the navigation back button when Settings is pushed on the reader stack
      * - Failure modes:
-     *   - fails when the Settings sheet cannot be dismissed back to the reader shell
+     *   - fails when Settings cannot be dismissed back to the reader shell
      */
     func dismissSettings(in app: XCUIApplication) {
         let settingsForm = requireElement("settingsForm", in: app, timeout: 10)
-        dismissSheetByDraggingDown(settingsForm)
+        let backButton = app.navigationBars.buttons.element(boundBy: 0)
+        if backButton.exists {
+            tapElementReliably(backButton, timeout: 10)
+        } else {
+            settingsForm.swipeRight()
+        }
         waitForElementToDisappear(settingsForm, timeout: 10)
         XCTAssertTrue(
             waitForReaderShellReady(in: app, timeout: 20),
@@ -1128,7 +1133,10 @@ extension AndBibleUITests {
      *   - line: Source line used for XCTest failure attribution.
      * - Returns: The production settings row element.
      * - Side effects:
-     *   - scrolls the Settings form while re-querying the live XCUI hierarchy
+     *   - scans the current Settings viewport, then scrolls through the form while re-querying
+     *     the live XCUI hierarchy
+     *   - uses the production Settings search field as a final reveal path when CI scrolling cannot
+     *     reliably bring an offscreen row into the accessibility hierarchy
      * - Failure modes:
      *   - records an XCTest failure if the production row never appears
      */
@@ -1181,19 +1189,6 @@ extension AndBibleUITests {
             return nil
         }
 
-        if visibleTitle != nil {
-            for _ in 0..<3 {
-                if let control = resolvedVisibleControl() {
-                    return control
-                }
-                guard settingsForm.exists, !settingsForm.frame.isEmpty, Date() < deadline else {
-                    break
-                }
-                settingsForm.swipeDown()
-                RunLoop.current.run(until: Date().addingTimeInterval(0.3))
-            }
-        }
-
         repeat {
             if let control = resolvedVisibleControl() {
                 return control
@@ -1205,6 +1200,29 @@ extension AndBibleUITests {
             settingsForm.swipeUp()
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         } while Date() < deadline
+
+        let recoveryDeadline = Date().addingTimeInterval(min(3, max(1, timeout / 4)))
+        repeat {
+            if let control = resolvedVisibleControl() {
+                return control
+            }
+            guard settingsForm.exists, !settingsForm.frame.isEmpty else {
+                break
+            }
+
+            settingsForm.swipeDown()
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        } while Date() < recoveryDeadline
+
+        if let control = resolveSettingsNavigationControlViaSearch(
+            title: visibleTitle,
+            settingsForm: settingsForm,
+            app: app,
+            timeout: min(max(timeout / 2, 5), 10),
+            resolveControl: resolvedVisibleControl
+        ) {
+            return control
+        }
 
         let control = unresolvedElement(identifier, in: app)
         if control.exists {
@@ -1218,6 +1236,92 @@ extension AndBibleUITests {
             line: line
         )
         return control
+    }
+
+    /**
+     Reveals one Settings navigation row by narrowing the production Settings search field.
+
+     This is a fallback for hosted simulator runs where repeated `Form` swipes do not expose a
+     lower Settings row before the XCTest timeout. It does not bypass production navigation; after
+     search narrows the form, callers still tap the same native row element.
+     *
+     * - Parameters:
+     *   - title: Visible English title used as the search query.
+     *   - settingsForm: The live Settings form element.
+     *   - app: Running application under test.
+     *   - timeout: Maximum number of seconds to spend revealing and applying Settings search.
+     *   - resolveControl: Existing row resolver scoped to the live Settings hierarchy.
+     * - Returns: The resolved native row element, or `nil` when Settings search cannot reveal it.
+     * - Side effects:
+     *   - scrolls toward the top of the Settings form to reveal SwiftUI's searchable field
+     *   - types the visible row title into Settings search
+     * - Failure modes: This helper does not fail directly; the caller reports a single row-missing
+     *   assertion if both direct scanning and search reveal fail.
+     */
+    func resolveSettingsNavigationControlViaSearch(
+        title: String?,
+        settingsForm: XCUIElement,
+        app: XCUIApplication,
+        timeout: TimeInterval,
+        resolveControl: () -> XCUIElement?
+    ) -> XCUIElement? {
+        guard let title, !title.isEmpty else {
+            return nil
+        }
+
+        let searchDeadline = Date().addingTimeInterval(timeout)
+        var searchField: XCUIElement?
+        repeat {
+            if let field = settingsSearchFieldCandidates(in: app, settingsForm: settingsForm).first(
+                where: { $0.exists && !$0.frame.isEmpty }
+            ) {
+                searchField = field
+                break
+            }
+
+            guard settingsForm.exists, !settingsForm.frame.isEmpty else {
+                return nil
+            }
+            settingsForm.swipeDown()
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        } while Date() < searchDeadline
+
+        guard let searchField else {
+            return nil
+        }
+
+        replaceText(in: searchField, with: title, placeholderHints: ["Search"])
+
+        let resultDeadline = Date().addingTimeInterval(min(max(timeout / 2, 3), 5))
+        repeat {
+            if let control = resolveControl() {
+                return control
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        } while Date() < resultDeadline
+
+        return nil
+    }
+
+    /**
+     Returns Settings search-field candidates exposed by SwiftUI's `searchable` modifier.
+
+     * - Parameters:
+     *   - app: Running application under test.
+     *   - settingsForm: The live Settings form element.
+     * - Returns: Search and text-field candidates ordered from form-scoped to broader app queries.
+     * - Side effects: none.
+     * - Failure modes: This helper cannot fail.
+     */
+    func settingsSearchFieldCandidates(in app: XCUIApplication, settingsForm: XCUIElement) -> [XCUIElement] {
+        [
+            settingsForm.searchFields["Search"].firstMatch,
+            settingsForm.textFields["Search"].firstMatch,
+            app.navigationBars.searchFields["Search"].firstMatch,
+            app.navigationBars.textFields["Search"].firstMatch,
+            app.searchFields["Search"].firstMatch,
+            app.textFields["Search"].firstMatch,
+        ]
     }
 
     /**
@@ -1242,7 +1346,9 @@ extension AndBibleUITests {
         case "settingsImportExportLink":
             "Import & Export"
         case "settingsSyncLink":
-            "iCloud Sync"
+            "Device synchronization"
+        case "settingsReadingProgressLink":
+            "Reading Progress Settings"
         case "settingsLabelsLink":
             "Labels"
         case "settingsTextDisplayLink":
