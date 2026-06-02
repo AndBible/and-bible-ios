@@ -638,10 +638,7 @@ extension AndBibleUITests {
         let app = makeApp()
         app.launch()
 
-        openSettings(in: app)
-        tapSettingsElement("settingsColorsLink", in: app)
-
-        XCTAssertTrue(requireElement("colorSettingsScreen", in: app, timeout: 10).exists)
+        XCTAssertTrue(openColorSettings(in: app).exists)
     }
 
     /**
