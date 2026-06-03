@@ -68,21 +68,18 @@ rules explicit for changes in:
    Changing URL normalization, login-page rejection, or authenticated DAV
    request semantics needs coordinated validation, not ad hoc tweaking.
 
-6. Treat Google Drive as a removal target.
+6. Treat Google Drive as removed from iOS sync.
 
    #116 supersedes the prior Google Drive posture. Do not add new Google Drive
-   sync UI, auth behavior, tests, or docs. When #116 is implemented, remove the
-   selectable backend, auth/session UI, adapter/auth paths, GoogleSignIn
-   dependency, Google-focused tests, and OAuth setup docs unless a documented
-   non-sync dependency remains. Preserve the historical `gdrive_*` WebDAV keys
-   until an explicit migration decision says otherwise.
+   sync UI, auth behavior, tests, or docs. Preserve the historical `gdrive_*`
+   WebDAV keys until an explicit migration decision says otherwise.
 
 7. Keep iCloud scoped as the default iOS platform backend.
 
    iCloud is a legitimate iOS platform extension and the default backend. Do
-   not make NextCloud/WebDAV the implicit default merely because #116 removes
-   Google Drive. #160 owns the removed-backend and unknown-backend fallback
-   contract. iCloud must not change the Android-compatible semantics for
+   not make NextCloud/WebDAV the implicit default merely because Google Drive
+   was removed. Removed-backend and unknown-backend values must fall back to
+   iCloud. iCloud must not change the Android-compatible semantics for
    NextCloud/WebDAV.
 
 8. Sync UI changes must preserve stored-state hydration and reopen persistence.
@@ -100,7 +97,7 @@ rules explicit for changes in:
    - `docs/parity/sync/dispositions.md` when behavior is iOS-specific
    - `docs/parity/sync/verification-matrix.md` if status changes
    - `docs/parity/sync/regression-report.md` when validation scope changes
-   - `docs/howto/google-drive-oauth-setup.md` if Google Drive removal changes its status
+   - `docs/parity/sync/dispositions.md` if removed-backend fallback behavior changes
 
 ## Validation Expectations
 

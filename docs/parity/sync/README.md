@@ -21,7 +21,7 @@ This subtree is for parity-sensitive sync behavior:
 - bootstrap/adopt/create flows
 - initial-backup and patch behavior
 - explicit iOS divergences from Android
-- Google Drive removal tracking for #116
+- removed Google Drive fallback guardrails
 
 It is not the place for one-off local task tracking or release checklists.
 
@@ -33,5 +33,5 @@ Primary references:
 - `Sources/BibleCore/Sources/BibleCore/Services/NextCloudSyncAdapter.swift`
 - `Sources/BibleUI/Sources/BibleUI/Settings/SyncSettingsView.swift`
 
-Historical Google Drive docs and code remain only until #116 removes that iOS
-backend surface. They are not future parity targets.
+Android Google Drive behavior remains source context only. It is not a future
+iOS backend target.

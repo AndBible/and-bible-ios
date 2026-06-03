@@ -492,11 +492,11 @@ extension AndBibleUITests {
      *   - launches the app on the reader shell with persisted NextCloud settings from host-side
      *     fixture seeding
      *   - opens Sync Settings from the reader action and switches the production picker from
-     *     NextCloud to Google Drive
+     *     NextCloud to iCloud
      * - Failure modes:
-     *   - fails if the seeded NextCloud field or the Google Drive sign-in control never appears
+     *   - fails if the seeded NextCloud field or the iCloud enable toggle never appears
      *   - fails if the exported Sync screen state does not move from `backend=NEXT_CLOUD;enabled=none`
-     *     to `backend=GOOGLE_DRIVE;enabled=none`
+     *     to `backend=ICLOUD;enabled=none`
      */
     func testSyncSettingsBackendSwitchMutatesVisibleSection() {
         let app = makeApp()
@@ -511,13 +511,13 @@ extension AndBibleUITests {
         )
         XCTAssertTrue(requireElement("syncNextCloudServerURLField", in: app, timeout: 10).exists)
 
-        tapSyncBackend("GOOGLE_DRIVE", in: app)
+        tapSyncBackend("ICLOUD", in: app)
         waitForSyncState(
-            ["backend": "GOOGLE_DRIVE", "enabled": "none"],
+            ["backend": "ICLOUD", "enabled": "none"],
             in: app,
             timeout: 10
         )
-        XCTAssertTrue(requireElement("syncGoogleDriveSignInButton", in: app, timeout: 10).exists)
+        XCTAssertTrue(requireElement("syncICloudEnabledToggle", in: app, timeout: 10).exists)
     }
 
     /**
@@ -526,14 +526,14 @@ extension AndBibleUITests {
      *
      * - Side effects:
      *   - launches the app on the reader shell and opens Sync Settings with its persisted backend
-     *   - switches the backend from NextCloud to Google Drive through the production picker
+     *   - switches the backend from NextCloud to iCloud through the production picker
      *   - dismisses and reopens Sync Settings from the reader action so the sheet rehydrates from
      *     persisted settings state
      * - Failure modes:
      *   - fails if the seeded Sync screen does not start in the NextCloud branch
      *   - fails if the dismiss or reopen controls never appear
-     *   - fails if reopening the sheet does not preserve the exported `backend=GOOGLE_DRIVE;enabled=none`
-     *     state token or the Google Drive section
+     *   - fails if reopening the sheet does not preserve the exported `backend=ICLOUD;enabled=none`
+     *     state token or the iCloud section
      */
     func testSyncSettingsBackendSwitchPersistsAcrossDirectReopen() {
         let app = makeApp()
@@ -547,23 +547,23 @@ extension AndBibleUITests {
             enabled: "none"
         )
 
-        tapSyncBackend("GOOGLE_DRIVE", in: app)
+        tapSyncBackend("ICLOUD", in: app)
         waitForSyncState(
-            ["backend": "GOOGLE_DRIVE", "enabled": "none"],
+            ["backend": "ICLOUD", "enabled": "none"],
             in: app,
             timeout: 10
         )
-        XCTAssertTrue(requireElement("syncGoogleDriveSignInButton", in: app, timeout: 10).exists)
+        XCTAssertTrue(requireElement("syncICloudEnabledToggle", in: app, timeout: 10).exists)
 
         dismissSyncSettings(in: app)
         _ = openSyncSettingsFromReaderAction(in: app)
 
         waitForSyncState(
-            ["backend": "GOOGLE_DRIVE", "enabled": "none"],
+            ["backend": "ICLOUD", "enabled": "none"],
             in: app,
             timeout: 10
         )
-        XCTAssertTrue(requireElement("syncGoogleDriveSignInButton", in: app, timeout: 10).exists)
+        XCTAssertTrue(requireElement("syncICloudEnabledToggle", in: app, timeout: 10).exists)
     }
 
     /**

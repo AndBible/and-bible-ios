@@ -43,13 +43,15 @@ The iOS target backend contract is:
 
 | iOS backend | Persisted value | Target state |
 |---|---|---|
-| iCloud / CloudKit | `ICLOUD` | Default iOS backend. Missing, unknown, removed, or legacy backend values should fall back to iCloud. Tracked by #160. |
+| iCloud / CloudKit | `ICLOUD` | Default iOS backend. Missing, unknown, removed, or legacy backend values fall back to iCloud. |
 | NextCloud / WebDAV | `NEXT_CLOUD` | Explicit cross-platform remote choice. Uses Android-compatible persisted keys for server URL, username, folder path, and password storage semantics. |
-| Google Drive | `GOOGLE_DRIVE` | Removal target, not a future iOS backend. #116 owns removing the selectable backend, auth flow, adapter code, tests, and OAuth setup docs. |
 
 The historical `gdrive_*` WebDAV preference keys are compatibility surface even
-after Google Drive is removed. #116 must not rename or delete those keys
-casually if that would break existing NextCloud/WebDAV users.
+after Google Drive is removed. Do not rename or delete those keys casually if
+that would break existing NextCloud/WebDAV users.
+
+Legacy persisted `sync_adapter=GOOGLE_DRIVE` values are not retained as a
+selectable iOS backend. They resolve to `ICLOUD`.
 
 ## Android Settings Row Inventory
 
@@ -98,7 +100,7 @@ implementation choice, not a parity exemption. The visible information
 architecture should match Android where the behavior exists:
 
 - backend row first
-- iCloud default, NextCloud/WebDAV explicit, Google Drive removed by #116
+- iCloud default, NextCloud/WebDAV explicit, Google Drive removed from iOS
 - NextCloud credential rows use Android titles and folder-path summary
 - reset/sign-out and cloud-info/status rows should appear only when meaningful
 - category rows should use Android ordering, labels, summaries, icons, and
@@ -208,7 +210,8 @@ This contract does not describe:
 
 - local-only CloudKit implementation details beyond iCloud's default/backend
   disposition
-- Google Drive removal implementation details owned by #116
+- Android Google Drive implementation details beyond their value as source
+  context for iOS removal/fallback behavior
 - AI Settings sync implementation details owned by #74
 - Reading Progress sync implementation details owned by #73
 - local task tracking outside repo history

@@ -12,8 +12,7 @@ Disposition:
 
 - iOS keeps `ICLOUD` as the default backend.
 - Fresh installs, missing `sync_adapter` values, unknown backend values, removed
-  backend values, and legacy `GOOGLE_DRIVE` selections after #116 should resolve
-  to iCloud.
+  backend values, and legacy `GOOGLE_DRIVE` selections resolve to iCloud.
 - NextCloud/WebDAV remains available as an explicit user choice.
 - This does not redefine Android's remote-cloud backend contract; it documents a
   legitimate platform difference.
@@ -23,21 +22,20 @@ Reason:
 - Android has only remote cloud backends in this settings area. iOS already has
   a shipped platform-native CloudKit path, and the product direction is to make
   that the default iOS sync path.
-- #160 tracks preserving the iCloud default when #116 removes Google Drive.
+- #160 preserves the iCloud default after #116 removes Google Drive.
 
-## 2. Google Drive is a removal target
+## 2. Google Drive is removed from iOS sync
 
-- Status: planned removal
+- Status: implemented removal
 - Scope: Google Drive backend, auth flow, transport code, tests, and docs
 
 Disposition:
 
-- Google Drive should no longer be treated as a retained iOS backend.
-- #116 owns removing the selectable backend, Google auth/session UI, Drive
-  adapter/auth services, GoogleSignIn dependency, Google-focused tests, and OAuth
-  setup documentation.
-- Until #116 lands, existing Google Drive code is historical implementation
-  surface, not a future parity target to preserve.
+- Google Drive is no longer a retained iOS backend.
+- iOS sync exposes iCloud and NextCloud/WebDAV only.
+- The selectable backend, Google auth/session UI, Drive adapter/auth services,
+  GoogleSignIn dependency, Google-focused tests, and OAuth setup documentation
+  have been removed from iOS.
 
 Reason:
 
@@ -62,8 +60,8 @@ Disposition:
   `gdrive_server_url`, `gdrive_username`, `gdrive_folder_path`, and
   `gdrive_password` even though they now back NextCloud/WebDAV configuration on
   iOS.
-- #116 removes Google Drive functionality, but does not automatically authorize
-  deleting or renaming these historical WebDAV keys.
+- #116 removes Google Drive functionality, but does not authorize deleting or
+  renaming these historical WebDAV keys.
 
 Reason:
 

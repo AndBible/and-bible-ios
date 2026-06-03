@@ -90,7 +90,6 @@ Use `xcodebuild` when you need:
 
 ## Related Docs
 
-- For live Google Drive sign-in setup, see `docs/howto/google-drive-oauth-setup.md`.
 - For the current UI shard model, runtime interpretation, and guardrails, see
   `docs/howto/ui-test-sharding.md`.
 

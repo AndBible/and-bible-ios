@@ -6,10 +6,10 @@ import Security
 /**
  Supported sync backends that can be selected by the evolving cross-platform sync settings flow.
 
- Android stores remote adapter selection under the `sync_adapter` key with enum-like string
- values such as `NEXT_CLOUD` and `GOOGLE_DRIVE`. iOS extends that value set with `ICLOUD` so the
- new settings layer can coexist with the already-shipping CloudKit sync path without inventing a
- second backend-selection key.
+ Android stores remote adapter selection under the `sync_adapter` key with enum-like string values.
+ iOS supports the native `ICLOUD` path and the Android-compatible `NEXT_CLOUD` path. Removed or
+ unknown stored values, including the legacy `GOOGLE_DRIVE` value, intentionally fall back to
+ `ICLOUD` so users are not left on an unavailable backend.
  */
 public enum RemoteSyncBackend: String, CaseIterable, Sendable {
     /// Native iCloud/CloudKit sync used by the current iOS implementation.
@@ -17,9 +17,6 @@ public enum RemoteSyncBackend: String, CaseIterable, Sendable {
 
     /// WebDAV / NextCloud / ownCloud sync, matching Android's `CloudAdapters.NEXT_CLOUD`.
     case nextCloud = "NEXT_CLOUD"
-
-    /// Google Drive sync, matching Android's `CloudAdapters.GOOGLE_DRIVE`.
-    case googleDrive = "GOOGLE_DRIVE"
 }
 
 /**

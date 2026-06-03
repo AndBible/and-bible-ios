@@ -14,7 +14,7 @@ Regression verification for the current sync parity surface, covering:
 - ready-state patch replay and steady-state outbound upload
 - Sync settings backend/category mutation, My Documents category exposure, and reopen persistence
 - Sync settings adopt-versus-create confirmation branch
-- legacy Google Drive auth and adapter coverage pending #116 removal
+- removed Google Drive fallback to iCloud
 - local Android reference comparison
 
 Contract reference:
@@ -24,10 +24,6 @@ Contract reference:
 Verification matrix:
 
 - `docs/parity/sync/verification-matrix.md`
-
-Removal reference:
-
-- #116 removes Google Drive as an iOS sync backend
 
 ## Environment
 
@@ -45,6 +41,8 @@ Removal reference:
 - `AndBibleTests/testRemoteSyncSettingsStoreDefaultsToICloudWhenBackendMissing`
 - `AndBibleTests/testRemoteSyncSettingsStorePersistsAndroidCompatibleNextCloudKeys`
 - `AndBibleTests/testRemoteSyncSettingsStoreFallsBackToICloudForUnknownBackendValue`
+- `AndBibleTests/testRemoteSyncSettingsStoreFallsBackToICloudForRemovedGoogleDriveValue`
+- `AndBibleTests/testRemoteSyncSettingsStorePreservesExistingNextCloudBackendValue`
 - `AndBibleTests/testRemoteSyncSettingsStoreClearsStoredValuesAndPassword`
 - `AndBibleTests/testRemoteSyncSettingsStoreClearsPasswordWhenSaveReceivesWhitespaceOnlySecret`
 - `AndBibleTests/testRemoteSyncSettingsStorePersistsAndroidCompatibleCategoryToggleKeys`
@@ -59,6 +57,7 @@ Removal reference:
 - `AndBibleTests/testRemoteSyncBootstrapCoordinatorAdoptRemoteFolderPersistsMarkerAndDeviceFolder`
 - `AndBibleTests/testRemoteSyncBootstrapCoordinatorCreateRemoteFolderCanReplaceExistingRemoteFolder`
 - `AndBibleTests/testRemoteSyncSynchronizationServiceReturnsRemoteAdoptionDecision`
+- `AndBibleTests/testRemoteSyncSynchronizationServiceFactoryBuildsNextCloudAdapter`
 - `AndBibleTests/testRemoteSyncInitialBackupRestoreDispatchesReadingPlanBackups`
 - `AndBibleTests/testRemoteSyncInitialBackupRestoreDispatchesBookmarkBackups`
 - `AndBibleTests/testRemoteSyncInitialBackupRestoreDispatchesWorkspaceBackups`
@@ -76,18 +75,6 @@ Removal reference:
 - `AndBibleTests/testRemoteSyncSynchronizationServiceUploadsLocalReadingPlanChangesWhenNoRemotePatchesExist`
 - `AndBibleTests/testRemoteSyncSynchronizationServiceUploadsLocalWorkspaceChangesWhenNoRemotePatchesExist`
 - `RemoteSyncMyDocumentRestoreTests/testRemoteSyncSynchronizationServiceUploadsLocalMyDocumentChangesWhenNoRemotePatchesExist`
-- `AndBibleTests/testGoogleDriveSyncAdapterListsFilesFromAppDataFolderWithPagination`
-- `AndBibleTests/testGoogleDriveSyncAdapterCreatesFolderUnderAppDataRoot`
-- `AndBibleTests/testGoogleDriveSyncAdapterUploadsMultipartPatchArchive`
-- `AndBibleTests/testGoogleDriveSyncAdapterUsesFolderExistenceForOwnershipProof`
-- `AndBibleTests/testGoogleDriveOAuthConfigurationParsesValidInfoDictionary`
-- `AndBibleTests/testGoogleDriveOAuthConfigurationRejectsMissingURLScheme`
-- `AndBibleTests/testGoogleDriveOAuthConfigurationRejectsBlankClientID`
-- `AndBibleTests/testGoogleDriveAuthServiceRestoresPreviousSignInOnceAndBecomesReadyForSync`
-- `AndBibleTests/testGoogleDriveAuthServiceAccessTokenThrowsWhenDriveScopeMissing`
-- `AndBibleTests/testRemoteSyncSynchronizationServiceFactoryRequiresGoogleDriveAuthProvider`
-- `AndBibleTests/testRemoteSyncSynchronizationServiceFactoryBuildsGoogleDriveAdapter`
-
 ### UI
 
 - `AndBibleUITests/testSettingsSyncLinkOpensSyncSettings`
@@ -126,14 +113,6 @@ Removal reference:
 - bookmark, reading-plan, and workspace category streams are in the shared `AndBible`
   scheme through the `AndBibleTests` target
 
-### Legacy Google Drive branch pending removal
-
-- current tests still cover Drive `appDataFolder` semantics, OAuth bundle
-  validation, restored sign-in state, and Drive-scope rejection while the code is
-  present
-- #116 should remove these tests or replace them with removal/migration tests
-  when Google Drive leaves the iOS sync backend surface
-
 ## Historical Result And Current Interpretation
 
 Focused sync validation passed on 2026-03-16 for the then-current non-workspace subset:
@@ -156,7 +135,7 @@ The checked-in shared-scheme test set gives the sync domain rerunnable regressio
 - initial-backup restore and initial-backup upload for bookmark, workspace, reading-plan, and
   My Documents flows
 - ready-state synchronization for bookmark, workspace, reading-plan, and My Documents categories
-- legacy Google Drive auth and adapter contracts pending #116 removal
+- removed Google Drive fallback to iCloud
 - Sync settings backend/category mutation plus reopen persistence
 - Sync settings adopt-versus-create confirmation UI coverage, including My Documents category entry
 
@@ -165,8 +144,6 @@ The checked-in shared-scheme test set gives the sync domain rerunnable regressio
 The current sync parity gap is not the core bootstrap or patch engine. The
 remaining gaps are target alignment and category breadth:
 
-- #116 removes Google Drive as an iOS sync backend.
-- #160 preserves iCloud as the default iOS backend after Google Drive removal.
 - #158 reconciles Android's visible sync category toggles with the iOS active
   toggle list, including Android's runtime-hidden Reading Plans row.
 - Android also exposes `ai_settings` and `progress`, which remain distinct sync

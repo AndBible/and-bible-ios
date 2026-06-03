@@ -1798,209 +1798,31 @@ extension AndBibleTests {
         XCTAssertEqual(remoteSettingsStore.globalLastSynchronized, 144_000)
     }
 
-    func testGoogleDriveOAuthConfigurationParsesValidInfoDictionary() throws {
-        let clientID = "1234567890-abcdefg.apps.googleusercontent.com"
-        let reversedScheme = GoogleDriveOAuthConfiguration.reversedClientIDScheme(from: clientID)
-        let infoDictionary: [String: Any] = [
-            "GIDClientID": clientID,
-            "GIDServerClientID": "server-123.apps.googleusercontent.com",
-            "CFBundleURLTypes": [
-                [
-                    "CFBundleURLSchemes": [
-                        reversedScheme,
-                        "org.andbible.ios",
-                    ],
-                ],
-            ],
-        ]
-
-        let configuration = try GoogleDriveOAuthConfiguration.from(infoDictionary: infoDictionary)
-
-        XCTAssertEqual(configuration.clientID, clientID)
-        XCTAssertEqual(configuration.serverClientID, "server-123.apps.googleusercontent.com")
-        XCTAssertEqual(configuration.reversedClientIDScheme, reversedScheme)
-    }
-
-    func testGoogleDriveOAuthConfigurationRejectsMissingURLScheme() {
-        let clientID = "1234567890-abcdefg.apps.googleusercontent.com"
-        let infoDictionary: [String: Any] = [
-            "GIDClientID": clientID,
-            "CFBundleURLTypes": [
-                [
-                    "CFBundleURLSchemes": [
-                        "org.andbible.ios",
-                    ],
-                ],
-            ],
-        ]
-
-        XCTAssertThrowsError(
-            try GoogleDriveOAuthConfiguration.from(infoDictionary: infoDictionary)
-        ) { error in
-            XCTAssertEqual(
-                error as? GoogleDriveAuthServiceError,
-                .missingURLScheme(
-                    GoogleDriveOAuthConfiguration.reversedClientIDScheme(from: clientID)
-                )
-            )
-        }
-    }
-
-    func testGoogleDriveOAuthConfigurationRejectsBlankClientID() {
-        let infoDictionary: [String: Any] = [
-            "GIDClientID": "   ",
-            "GIDServerClientID": "",
-            "CFBundleURLTypes": [
-                [
-                    "CFBundleURLSchemes": [
-                        "",
-                    ],
-                ],
-            ],
-        ]
-
-        XCTAssertThrowsError(
-            try GoogleDriveOAuthConfiguration.from(infoDictionary: infoDictionary)
-        ) { error in
-            XCTAssertEqual(error as? GoogleDriveAuthServiceError, .notConfigured)
-        }
-    }
-
-    @MainActor
-    func testGoogleDriveAuthServiceRestoresPreviousSignInOnceAndBecomesReadyForSync() async {
-        let clientID = "1234567890-abcdefg.apps.googleusercontent.com"
-        let reversedScheme = GoogleDriveOAuthConfiguration.reversedClientIDScheme(from: clientID)
-        let infoDictionary: [String: Any] = [
-            "GIDClientID": clientID,
-            "CFBundleURLTypes": [
-                [
-                    "CFBundleURLSchemes": [
-                        reversedScheme,
-                    ],
-                ],
-            ],
-        ]
-        let restoredUser = FakeGoogleDriveUser(
-            emailAddress: "alice@example.com",
-            displayName: "Alice",
-            grantedScopes: [GoogleDriveAuthService.driveAppDataScope],
-            accessTokenString: "token-1"
-        )
-        let signInClient = FakeGoogleDriveSignInClient()
-        signInClient.hasPreviousSignIn = true
-        signInClient.restoreResult = .success(restoredUser)
-
-        #if os(iOS)
-        let service = GoogleDriveAuthService(
-            signInClient: signInClient,
-            infoDictionary: infoDictionary,
-            presentingViewControllerProvider: { UIViewController() }
-        )
-        #else
-        let service = GoogleDriveAuthService(
-            signInClient: signInClient,
-            infoDictionary: infoDictionary
-        )
-        #endif
-
-        await service.restorePreviousSignInIfNeeded()
-        await service.restorePreviousSignInIfNeeded()
-
-        XCTAssertTrue(service.isConfigured)
-        XCTAssertTrue(service.isReadyForSync)
-        XCTAssertEqual(service.currentAccountLabel, "Alice")
-        XCTAssertEqual(signInClient.restoreCallCount, 1)
-        XCTAssertEqual(signInClient.configuredClientID, clientID)
-    }
-
-    @MainActor
-    func testGoogleDriveAuthServiceAccessTokenThrowsWhenDriveScopeMissing() async {
-        let clientID = "1234567890-abcdefg.apps.googleusercontent.com"
-        let reversedScheme = GoogleDriveOAuthConfiguration.reversedClientIDScheme(from: clientID)
-        let infoDictionary: [String: Any] = [
-            "GIDClientID": clientID,
-            "CFBundleURLTypes": [
-                [
-                    "CFBundleURLSchemes": [
-                        reversedScheme,
-                    ],
-                ],
-            ],
-        ]
-        let currentUser = FakeGoogleDriveUser(
-            emailAddress: "alice@example.com",
-            displayName: "Alice",
-            grantedScopes: [],
-            accessTokenString: "token-1"
-        )
-        let signInClient = FakeGoogleDriveSignInClient()
-        signInClient.currentUser = currentUser
-
-        #if os(iOS)
-        let service = GoogleDriveAuthService(
-            signInClient: signInClient,
-            infoDictionary: infoDictionary,
-            presentingViewControllerProvider: { UIViewController() }
-        )
-        #else
-        let service = GoogleDriveAuthService(
-            signInClient: signInClient,
-            infoDictionary: infoDictionary
-        )
-        #endif
-
-        do {
-            _ = try await service.accessToken()
-            XCTFail("Expected missingDriveScope error")
-        } catch {
-            XCTAssertEqual(error as? GoogleDriveAuthServiceError, .missingDriveScope)
-        }
-
-        XCTAssertFalse(service.isReadyForSync)
-    }
-
-    func testRemoteSyncSynchronizationServiceFactoryRequiresGoogleDriveAuthProvider() throws {
+    func testRemoteSyncSynchronizationServiceFactoryBuildsNextCloudAdapter() throws {
         let settingsStore = try makeInMemorySettingsStore()
         let remoteSettingsStore = RemoteSyncSettingsStore(
             settingsStore: settingsStore,
             secretStore: InMemorySecretStore()
         )
-        remoteSettingsStore.selectedBackend = .googleDrive
+        remoteSettingsStore.selectedBackend = .nextCloud
+        try remoteSettingsStore.saveWebDAVConfiguration(
+            WebDAVSyncConfiguration(
+                serverURL: "https://nextcloud.example.com",
+                username: "alice",
+                folderPath: nil
+            ),
+            password: "secret"
+        )
 
         let factory = RemoteSyncSynchronizationServiceFactory(bundleIdentifier: "org.andbible.ios")
 
-        XCTAssertThrowsError(
-            try factory.makeAdapter(using: remoteSettingsStore)
-        ) { error in
-            XCTAssertEqual(
-                error as? RemoteSyncSynchronizationServiceFactoryError,
-                .googleDriveAuthenticationRequired
-            )
-        }
-    }
-
-    func testRemoteSyncSynchronizationServiceFactoryBuildsGoogleDriveAdapter() throws {
-        let settingsStore = try makeInMemorySettingsStore()
-        let remoteSettingsStore = RemoteSyncSettingsStore(
-            settingsStore: settingsStore,
-            secretStore: InMemorySecretStore()
-        )
-        remoteSettingsStore.selectedBackend = .googleDrive
-
-        let factory = RemoteSyncSynchronizationServiceFactory(
-            bundleIdentifier: "org.andbible.ios",
-            googleDriveAccessTokenProvider: {
-                "access-token"
-            }
-        )
-
         let adapter = try factory.makeAdapter(using: remoteSettingsStore)
 
-        XCTAssertTrue(adapter is GoogleDriveSyncAdapter)
+        XCTAssertTrue(adapter is NextCloudSyncAdapter)
     }
 
     @MainActor
-    func testRemoteSyncLifecycleServiceSynchronizesEnabledGoogleDriveCategories() async throws {
+    func testRemoteSyncLifecycleServiceSynchronizesEnabledNextCloudCategories() async throws {
         let container = try makeInMemorySettingsContainer()
         let settingsStore = SettingsStore(modelContext: ModelContext(container))
         let secretStore = InMemorySecretStore()
@@ -2008,7 +1830,7 @@ extension AndBibleTests {
             settingsStore: settingsStore,
             secretStore: secretStore
         )
-        remoteSettingsStore.selectedBackend = .googleDrive
+        remoteSettingsStore.selectedBackend = .nextCloud
         remoteSettingsStore.setSyncEnabled(true, for: .readingPlans)
 
         let synchronizer = MockRemoteSyncLifecycleSynchronizer()
@@ -2020,7 +1842,7 @@ extension AndBibleTests {
             modelContainer: container,
             bundleIdentifier: "org.andbible.ios",
             synchronizationServiceFactory: { remoteSettingsStore in
-                XCTAssertEqual(remoteSettingsStore.selectedBackend, .googleDrive)
+                XCTAssertEqual(remoteSettingsStore.selectedBackend, .nextCloud)
                 return synchronizer
             },
             remoteSettingsStoreFactory: { RemoteSyncSettingsStore(settingsStore: $0, secretStore: secretStore) },
@@ -2042,7 +1864,7 @@ extension AndBibleTests {
             settingsStore: settingsStore,
             secretStore: InMemorySecretStore()
         )
-        remoteSettingsStore.selectedBackend = .googleDrive
+        remoteSettingsStore.selectedBackend = .nextCloud
         remoteSettingsStore.setSyncEnabled(true, for: .bookmarks)
         settingsStore.setString("gdrive_sync_interval", value: "900")
 
@@ -2080,7 +1902,7 @@ extension AndBibleTests {
             settingsStore: settingsStore,
             secretStore: InMemorySecretStore()
         )
-        remoteSettingsStore.selectedBackend = .googleDrive
+        remoteSettingsStore.selectedBackend = .nextCloud
 
         let scheduler = FakeRemoteSyncBackgroundRefreshScheduler()
         let coordinator = RemoteSyncBackgroundRefreshCoordinator(
@@ -2106,7 +1928,7 @@ extension AndBibleTests {
             settingsStore: settingsStore,
             secretStore: InMemorySecretStore()
         )
-        remoteSettingsStore.selectedBackend = .googleDrive
+        remoteSettingsStore.selectedBackend = .nextCloud
         remoteSettingsStore.setSyncEnabled(true, for: .bookmarks)
 
         let scheduler = FakeRemoteSyncBackgroundRefreshScheduler()
@@ -2148,7 +1970,7 @@ extension AndBibleTests {
             settingsStore: settingsStore,
             secretStore: InMemorySecretStore()
         )
-        remoteSettingsStore.selectedBackend = .googleDrive
+        remoteSettingsStore.selectedBackend = .nextCloud
         remoteSettingsStore.setSyncEnabled(true, for: .bookmarks)
 
         let scheduler = FakeRemoteSyncBackgroundRefreshScheduler()
