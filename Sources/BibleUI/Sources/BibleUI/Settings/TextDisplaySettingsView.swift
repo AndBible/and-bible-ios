@@ -578,7 +578,9 @@ public struct TextDisplaySettingsView: View {
      - Side effects: none.
      - Failure modes: This helper cannot fail.
      */
-    private var preferenceDividerLeadingInset: CGFloat { 82 }
+    private var preferenceDividerLeadingInset: CGFloat {
+        AndBibleSettingsPreferenceLayout.dividerLeadingInset
+    }
 
     /**
      Chevron accessory used for rows that open another editor.
@@ -631,10 +633,10 @@ public struct TextDisplaySettingsView: View {
     ) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             textDisplaySectionHeader(section.titleDefault)
-                .padding(.bottom, 18)
+                .padding(.bottom, AndBibleSettingsPreferenceLayout.sectionHeaderBottomPadding)
             content()
         }
-        .padding(.bottom, 18)
+        .padding(.bottom, AndBibleSettingsPreferenceLayout.sectionBottomPadding)
     }
 
     /**
@@ -659,7 +661,7 @@ public struct TextDisplaySettingsView: View {
         isEnabled: Bool = true,
         @ViewBuilder accessory: () -> Accessory
     ) -> some View {
-        HStack(alignment: .center, spacing: 12) {
+        HStack(alignment: .center, spacing: AndBibleSettingsPreferenceLayout.accessorySpacing) {
             textDisplayRowLabel(
                 androidKey: androidKey,
                 title: title,
@@ -671,7 +673,7 @@ public struct TextDisplaySettingsView: View {
 
             accessory()
         }
-        .padding(.horizontal, 16)
+        .padding(.horizontal, AndBibleSettingsPreferenceLayout.rowHorizontalPadding)
         .background(textDisplayScreenBackground)
         .contentShape(Rectangle())
     }
@@ -741,7 +743,7 @@ public struct TextDisplaySettingsView: View {
         rowAccessibilityIdentifier: String? = nil,
         switchAccessibilityIdentifier: String? = nil
     ) -> some View {
-        HStack(alignment: .center, spacing: 12) {
+        HStack(alignment: .center, spacing: AndBibleSettingsPreferenceLayout.accessorySpacing) {
             Button {
                 if isEnabled {
                     isOn.wrappedValue.toggle()
@@ -765,7 +767,7 @@ public struct TextDisplaySettingsView: View {
                 .accessibilityIdentifier(switchAccessibilityIdentifier ?? "textDisplaySwitch-\(androidKey)")
                 .accessibilityValue(isOn.wrappedValue ? "on" : "off")
         }
-        .padding(.horizontal, 16)
+        .padding(.horizontal, AndBibleSettingsPreferenceLayout.rowHorizontalPadding)
         .background(textDisplayScreenBackground)
         preferenceDivider()
     }

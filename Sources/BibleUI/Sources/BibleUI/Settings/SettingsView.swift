@@ -2321,7 +2321,7 @@ public struct SettingsView: View {
                 }
             }
         } label: {
-            HStack(alignment: .center, spacing: 8) {
+            HStack(alignment: .center, spacing: AndBibleSettingsPreferenceLayout.accessorySpacing) {
                 settingsRowLabel(
                     preferenceKey: preferenceKey,
                     title: title,
@@ -2329,7 +2329,7 @@ public struct SettingsView: View {
                     isEnabled: !options.isEmpty
                 )
 
-                Spacer(minLength: 8)
+                Spacer(minLength: AndBibleSettingsPreferenceLayout.accessorySpacing)
 
                 Image(systemName: "chevron.up.chevron.down")
                     .font(.system(size: 13, weight: .semibold))
@@ -2404,11 +2404,11 @@ public struct SettingsView: View {
     ) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             settingsSectionHeader(title)
-                .padding(.bottom, 10)
+                .padding(.bottom, AndBibleSettingsPreferenceLayout.sectionHeaderBottomPadding)
             content()
-                .padding(.horizontal, 16)
+                .padding(.horizontal, AndBibleSettingsPreferenceLayout.rowHorizontalPadding)
         }
-        .padding(.bottom, 14)
+        .padding(.bottom, AndBibleSettingsPreferenceLayout.sectionBottomPadding)
     }
 
     /**

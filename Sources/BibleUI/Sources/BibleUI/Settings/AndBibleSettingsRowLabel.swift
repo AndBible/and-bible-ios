@@ -1,6 +1,55 @@
 import SwiftUI
 
 /**
+ Shared spacing and alignment metrics for Android-shaped native SwiftUI preference screens.
+
+ These constants keep Application Preferences, All Text Options, and related settings surfaces on
+ the same visual grid while letting each screen own its controls, navigation, and persistence. The
+ metrics intentionally mirror Android preference-list geometry rather than SwiftUI `Form` density:
+ row labels have a stable icon column, section headers align to the text column, and rows keep
+ enough vertical breathing room for wrapped summaries.
+
+ - Inputs: none; values are fixed layout constants used by sibling SwiftUI settings views.
+ - Outputs: CGFloat metrics consumed by row labels, section wrappers, and divider alignment.
+ - Side effects: none.
+ - Failure modes: none; callers can still override spacing locally when a platform-specific
+   control requires it.
+ */
+enum AndBibleSettingsPreferenceLayout {
+    /// Fixed icon column width matching Android preference row geometry.
+    static let iconColumnWidth: CGFloat = 48
+
+    /// Default Android-style preference icon size in points.
+    static let iconSize: CGFloat = 32
+
+    /// Horizontal gap between the icon column and the row text column.
+    static let contentSpacing: CGFloat = 16
+
+    /// Horizontal padding used by full-width flat preference rows.
+    static let rowHorizontalPadding: CGFloat = 16
+
+    /// Gap between the row label and trailing controls such as switches or chevrons.
+    static let accessorySpacing: CGFloat = 18
+
+    /// Vertical gap between title, summary, and detail labels in one preference row.
+    static let labelTextSpacing: CGFloat = 5
+
+    /// Vertical padding applied to the shared label block inside each preference row.
+    static let rowVerticalPadding: CGFloat = 11
+
+    /// Spacing below a section header before the first row begins.
+    static let sectionHeaderBottomPadding: CGFloat = 14
+
+    /// Spacing after each section before the next section header begins.
+    static let sectionBottomPadding: CGFloat = 20
+
+    /// Divider inset that starts row separators at the text column instead of the icon column.
+    static var dividerLeadingInset: CGFloat {
+        rowHorizontalPadding + iconColumnWidth + contentSpacing
+    }
+}
+
+/**
  Shared label layout for Android-shaped native SwiftUI settings rows.
 
  The view keeps the Android preference-screen geometry, icon placement, row density, and
@@ -37,20 +86,20 @@ struct AndBibleSettingsRowLabel: View {
     var isEnabled = true
 
     /// Fixed icon column width matching Android preference row geometry.
-    static let iconColumnWidth: CGFloat = 48
+    static let iconColumnWidth = AndBibleSettingsPreferenceLayout.iconColumnWidth
 
     /// Default Android-style preference icon size in points.
-    static let iconSize: CGFloat = 32
+    static let iconSize = AndBibleSettingsPreferenceLayout.iconSize
 
     /// Horizontal gap between the icon column and the row text column.
-    static let contentSpacing: CGFloat = 16
+    static let contentSpacing = AndBibleSettingsPreferenceLayout.contentSpacing
 
     /// Complete title/summary/detail label with a stable leading icon column.
     var body: some View {
         HStack(alignment: .top, spacing: Self.contentSpacing) {
             iconColumn
 
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: AndBibleSettingsPreferenceLayout.labelTextSpacing) {
                 Text(title)
                     .font(.system(size: 16, weight: .regular))
                     .foregroundStyle(isEnabled ? .primary : .tertiary)
@@ -72,7 +121,7 @@ struct AndBibleSettingsRowLabel: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.vertical, 8)
+        .padding(.vertical, AndBibleSettingsPreferenceLayout.rowVerticalPadding)
         .contentShape(Rectangle())
     }
 
@@ -119,7 +168,7 @@ struct AndBibleSettingsSectionHeader: View {
             .textCase(nil)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.leading, textOffset)
-            .padding(.top, 10)
+            .padding(.top, AndBibleSettingsPreferenceLayout.sectionHeaderBottomPadding)
             .fixedSize(horizontal: false, vertical: true)
     }
 }
