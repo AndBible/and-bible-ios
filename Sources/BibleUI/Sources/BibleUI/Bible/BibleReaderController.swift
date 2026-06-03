@@ -7090,6 +7090,11 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         settingsStore?.getInt(key) ?? (AppPreferenceRegistry.intDefault(for: key) ?? 0)
     }
 
+    /// Reads a string parity preference, falling back to the registry default when unset.
+    private func appPreferenceString(_ key: AppPreferenceKey) -> String {
+        settingsStore?.getString(key) ?? (AppPreferenceRegistry.stringDefault(for: key) ?? "")
+    }
+
     /// Reads a string-set parity preference and returns an empty array when unset.
     private func appPreferenceStringSet(_ key: AppPreferenceKey) -> [String] {
         settingsStore?.getStringSet(key) ?? []
@@ -7285,6 +7290,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         let monochromeMode: Bool
         let disableAnimations: Bool
         let disableClickToEdit: Bool
+        let notesContentType: String
         let fontSizeMultiplier: Double
         let enabledExperimentalFeatures: [String]
         let autoTrackReading: Bool
@@ -7345,6 +7351,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
                 monochromeMode: appPreferenceBool(.monochromeMode),
                 disableAnimations: appPreferenceBool(.disableAnimations),
                 disableClickToEdit: appPreferenceBool(.disableClickToEdit),
+                notesContentType: appPreferenceString(.notesContentType),
                 fontSizeMultiplier: fontSizeMultiplier,
                 enabledExperimentalFeatures: appPreferenceStringSet(.experimentalFeatures),
                 autoTrackReading: readingProgressSettings.autoTrackReading,

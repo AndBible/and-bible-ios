@@ -18,6 +18,8 @@
 import {Nullable} from "@/types/common";
 import {isGenericBookmark} from "@/composables/bookmarks";
 
+export type TextContentType = "HTML" | "MARKDOWN"
+
 export type BookCategory = "BIBLE" | "COMMENTARY" | "GENERAL_BOOK" | "DICTIONARY"
 export type V11N = string
 export type Features = {

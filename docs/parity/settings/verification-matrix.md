@@ -1,6 +1,6 @@
 # SETPAR-701 Verification Matrix (Android Application Preferences -> iOS)
 
-Date: 2026-06-01
+Date: 2026-06-03
 
 ## Scope and Method
 
@@ -8,11 +8,11 @@ Date: 2026-06-01
   `and-bible/app/src/main/res/xml/settings.xml:23-293`.
 - Android actionable preference rows: 41.
 - iOS registry baseline: `Sources/BibleCore/Sources/BibleCore/Database/AppPreferenceRegistry.swift`
-  (`AppPreferenceKey.allCases` = 35).
+  (`AppPreferenceKey.allCases` = 36).
 - Verification method: direct inspection of Android XML/runtime sources, iOS registry,
   iOS Settings UI, iOS reader payload, and the Android/iOS Vue `appSettings` contracts.
 
-The previous matrix treated the 35 iOS registry keys as the complete Android contract.
+The previous matrix treated the iOS registry keys as the complete Android contract.
 That was incorrect. The matrix now distinguishes registry-backed iOS parity from
 Android rows that are action shortcuts, deferred feature gaps, or platform-specific
 divergences.
@@ -29,12 +29,12 @@ divergences.
 ## Summary
 
 - Android actionable rows inventoried: 41/41.
-- iOS registry-backed rows: 35.
+- iOS registry-backed rows: 36.
 - Registry-backed `Pass`: 21.
 - Registry-backed `Adapted Pass`: 11.
-- Registry-backed `Partial`: 1 (`locale_pref`, tracked by #164).
+- Registry-backed `Partial`: 2 (`locale_pref`, tracked by #164; `notes_content_type`, tracked by #163).
 - Registry-backed `Documented Divergence`: 2 (`volume_keys_scroll`, `request_sdcard_permission_pref`).
-- Non-registry tracked gap: 1 (`notes_content_type`, tracked by #163).
+- Non-registry tracked gap: 0.
 - Non-registry documented divergence: 1 (`eink_mode`).
 - Android action shortcuts outside registry: 4 (`global_text_display_settings`,
   `sync_settings_shortcut`, `ai_settings_shortcut`, `reading_progress_settings_shortcut`).
@@ -62,7 +62,7 @@ divergences.
 | `global_text_display_settings` | `SettingsStore.globalTextDisplaySettingsKey`; `SettingsView.lookAndFeelSection`; `TextDisplaySettingsView`/`ColorSettingsView` | Outside Registry | Android action row is adapted as iOS Look & feel navigation, not a registry preference. |
 | `locale_pref` | `AppPreferenceRegistry`; `SettingsView.localeOptions`; `AppleLanguages` override | Partial | Persistence works, but Android locale arrays are not fully represented; tracked by #164. |
 | `disable_click_to_edit` | `AppPreferenceRegistry`; `SettingsView`; iOS Vue `appSettings.disableClickToEdit` | Pass | Emitted into iOS reader payload. |
-| `notes_content_type` | No iOS registry key; no iOS Vue `appSettings.notesContentType`; Android source emits and consumes it | Tracked Gap | Real note-editor parity gap tracked by #163. |
+| `notes_content_type` | `AppPreferenceRegistry`; `SettingsView` picker; iOS Vue `appSettings.notesContentType` payload | Partial | Settings/default/payload parity is implemented. Applying the value to newly created bookmark notes and Study Pad entries remains tracked by #163. |
 | `font_size_multiplier` | `AppPreferenceRegistry`; `SettingsView` stepper; iOS Vue `fontSizeMultiplier` payload | Pass | 10-500 clamp and percent-to-float conversion implemented. |
 | `full_screen_hide_buttons_pref` | `AppPreferenceRegistry`; `SettingsView`; `BibleReaderView` fullscreen controls | Pass | Fullscreen button-bar visibility follows preference. |
 | `hide_window_buttons` | `AppPreferenceRegistry`; `SettingsView`; `BibleWindowPane` window control visibility | Pass | In-window button visibility follows preference. |
@@ -89,8 +89,9 @@ divergences.
 
 ## Open Gaps Identified By This Matrix
 
-- #163: implement `notes_content_type` only after the iOS note editor supports the
-  same HTML/Markdown default behavior Android exposes.
+- #163: apply `notes_content_type` when creating bookmark notes and Study Pad
+  entries so the stored note content type follows the same HTML/Markdown default
+  behavior Android exposes.
 - #164: reconcile `locale_pref` option arrays with Android source and actual iOS
   localization resources.
 - AI settings shortcut remains intentionally absent until the iOS AI settings workflow

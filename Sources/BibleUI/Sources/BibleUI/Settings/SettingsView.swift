@@ -104,6 +104,10 @@ public struct SettingsView: View {
     /// Whether Study Pad click-to-edit should be disabled.
     @State private var disableClickToEdit = AppPreferenceRegistry.boolDefault(for: .disableClickToEdit) ?? false
 
+    /// Text format used for newly created bookmark notes and Study Pad entries.
+    @State private var notesContentType =
+        AppPreferenceRegistry.stringDefault(for: .notesContentType) ?? "HTML"
+
     /// Whether the active reader window indicator should be shown.
     @State private var showActiveWindowIndicator =
         AppPreferenceRegistry.boolDefault(for: .showActiveWindowIndicator) ?? true
@@ -234,6 +238,23 @@ public struct SettingsView: View {
         var id: String { value }
     }
 
+    /**
+     Picker option for Android's `notes_content_type` preference.
+     */
+    private struct NotesContentTypeOption: Identifiable {
+        /// Persisted Android value.
+        let value: String
+
+        /// Localization key for the visible option label.
+        let titleKey: String
+
+        /// English fallback title used when the localization key is missing.
+        let titleDefault: String
+
+        /// Stable identity derived from the persisted value.
+        var id: String { value }
+    }
+
     /// Locale options mirror Android arrays.xml order/value contract.
     private static let localeOptions: [LocaleOption] = [
         .init(value: "", labelKey: "lang_default", labelDefault: "Default"),
@@ -312,6 +333,12 @@ public struct SettingsView: View {
         .init(value: "BOOKMARK_NOTES", titleKey: "create_bookmark_with_a_note", titleDefault: "Create a new Bookmark with a note"),
         .init(value: "ADD_PARAGRAPH_BREAK", titleKey: "add_paragraph_break", titleDefault: "Paragraph break"),
         .init(value: "SPEAK", titleKey: "speak", titleDefault: "Speak")
+    ]
+
+    /// Android arrays.xml: prefs_notes_content_type_entries / _values.
+    private static let notesContentTypeOptions: [NotesContentTypeOption] = [
+        .init(value: "HTML", titleKey: "notes_content_type_html", titleDefault: "Rich text (HTML)"),
+        .init(value: "MARKDOWN", titleKey: "notes_content_type_markdown", titleDefault: "Markdown")
     ]
 
     /**
@@ -1237,6 +1264,35 @@ public struct SettingsView: View {
                     )
                 }
             }
+            if settingsSearchMatchesPreference(.notesContentType, in: lookAndFeelSettingsSearchEntries) {
+                Picker(selection: Binding(
+                    get: { Self.normalizedNotesContentType(notesContentType) },
+                    set: { newValue in
+                        let normalized = Self.normalizedNotesContentType(newValue)
+                        notesContentType = normalized
+                        let store = SettingsStore(modelContext: modelContext)
+                        store.setString(.notesContentType, value: normalized)
+                        onSettingsChanged?()
+                    }
+                )) {
+                    ForEach(Self.notesContentTypeOptions) { option in
+                        Text(Self.localizedNotesContentTypeTitle(option)).tag(option.value)
+                    }
+                } label: {
+                    settingsRowLabel(
+                        preferenceKey: .notesContentType,
+                        title: String(
+                            localized: "prefs_notes_content_type_title",
+                            defaultValue: "Format for new bookmark notes"
+                        ),
+                        summary: String(
+                            localized: "prefs_notes_content_type_summary",
+                            defaultValue: "Text format used when creating new bookmark notes and Study Pad entries"
+                        ),
+                        detail: Self.localizedNotesContentTypeSelectionTitle(notesContentType)
+                    )
+                }
+            }
             if settingsSearchMatchesPreference(.fontSizeMultiplier, in: lookAndFeelSettingsSearchEntries) {
                 VStack(alignment: .leading, spacing: 8) {
                     settingsRowLabel(
@@ -1267,7 +1323,10 @@ public struct SettingsView: View {
                         in: 10...500,
                         step: 10
                     )
-                    .padding(.leading, 66)
+                    .padding(
+                        .leading,
+                        AndBibleSettingsRowLabel.iconColumnWidth + AndBibleSettingsRowLabel.contentSpacing
+                    )
                 }
             }
             if settingsSearchMatchesPreference(.fullScreenHideButtonsPref, in: lookAndFeelSettingsSearchEntries) {
@@ -1835,6 +1894,17 @@ public struct SettingsView: View {
                 )
             ),
             preferenceSearchEntry(
+                .notesContentType,
+                title: String(
+                    localized: "prefs_notes_content_type_title",
+                    defaultValue: "Format for new bookmark notes"
+                ),
+                summary: String(
+                    localized: "prefs_notes_content_type_summary",
+                    defaultValue: "Text format used when creating new bookmark notes and Study Pad entries"
+                )
+            ),
+            preferenceSearchEntry(
                 .fontSizeMultiplier,
                 title: String(localized: "pref_font_size_multiplier_title", defaultValue: "Font size multiplier")
             ),
@@ -2241,11 +2311,11 @@ public struct SettingsView: View {
     ) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             settingsSectionHeader(title)
-                .padding(.bottom, 18)
+                .padding(.bottom, 8)
             content()
                 .padding(.horizontal, 16)
         }
-        .padding(.bottom, 18)
+        .padding(.bottom, 10)
     }
 
     /**
@@ -2306,6 +2376,7 @@ public struct SettingsView: View {
         monochromeMode = store.getBool(.monochromeMode)
         disableAnimations = store.getBool(.disableAnimations)
         disableClickToEdit = store.getBool(.disableClickToEdit)
+        notesContentType = Self.normalizedNotesContentType(store.getString(.notesContentType))
         showActiveWindowIndicator = store.getBool(.showActiveWindowIndicator)
         showErrorBox = store.getBool(.showErrorBox)
         enableBluetoothMediaButtons = store.getBool(.enableBluetoothPref)
@@ -2668,6 +2739,16 @@ public struct SettingsView: View {
         }
     }
 
+    /// Normalizes persisted notes-content format values to Android's supported list preference values.
+    private static func normalizedNotesContentType(_ rawValue: String) -> String {
+        switch rawValue {
+        case "HTML", "MARKDOWN":
+            return rawValue
+        default:
+            return "HTML"
+        }
+    }
+
     /**
      Normalizes one persisted locale string against the supported Android parity values.
 
@@ -2708,6 +2789,21 @@ public struct SettingsView: View {
     fileprivate static func localizedBookmarkModalActionTitle(_ option: BookmarkModalActionOption) -> String {
         let localized = String(localized: String.LocalizationValue(option.titleKey))
         return localized == option.titleKey ? option.titleDefault : localized
+    }
+
+    /// Localized title for one notes-content format option with English fallback behavior.
+    private static func localizedNotesContentTypeTitle(_ option: NotesContentTypeOption) -> String {
+        let localized = String(localized: String.LocalizationValue(option.titleKey))
+        return localized == option.titleKey ? option.titleDefault : localized
+    }
+
+    /// Localized title for the current notes-content format value with Android default fallback.
+    private static func localizedNotesContentTypeSelectionTitle(_ rawValue: String) -> String {
+        let normalized = normalizedNotesContentType(rawValue)
+        guard let option = notesContentTypeOptions.first(where: { $0.value == normalized }) else {
+            return localizedNotesContentTypeTitle(notesContentTypeOptions[0])
+        }
+        return localizedNotesContentTypeTitle(option)
     }
 
     /**

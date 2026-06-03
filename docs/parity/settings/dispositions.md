@@ -74,8 +74,8 @@ This file records explicit iOS disposition decisions for Android parity tickets 
   - `monochrome_mode` and `disable_animations` remain the supported cross-platform rendering preferences on iOS.
 - Tracking:
   - #154 records the source-backed audit.
-  - #156 should not be implemented as written because it bundles this Android-only e-ink setting with the separate `notes_content_type` gap.
-  - #163 tracks the real `notes_content_type` follow-up independently.
+  - #156 should not be implemented as written because it bundles this Android-only e-ink setting with the separate `notes_content_type` content-type behavior follow-up.
+  - #163 tracks applying the registry-backed `notes_content_type` preference to newly created note content.
 
 ## SETPAR-155 — Application preferences presentation and workflows
 
