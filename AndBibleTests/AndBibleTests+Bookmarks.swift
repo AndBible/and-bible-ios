@@ -102,6 +102,13 @@ extension AndBibleTests {
 
         controller.refreshBookmarkInVueJS(bookmarkId: bookmark.id)
 
+        let payloadJSON = try bridgeEmissionPayloadJSON(
+            from: recordedScripts(),
+            event: "add_or_update_bookmarks"
+        )
+        assertBridgeJSONIntegerField("createdAt", in: payloadJSON)
+        assertBridgeJSONIntegerField("lastUpdatedOn", in: payloadJSON)
+
         let payload = try XCTUnwrap(
             bridgeEmissionPayload(from: recordedScripts(), event: "add_or_update_bookmarks") as? [[String: Any]]
         )
@@ -145,6 +152,14 @@ extension AndBibleTests {
         )
         bookmark.book = "Genesis"
         _ = bookmarkService.toggleLabel(bookmarkId: bookmark.id, labelId: label.id)
+        let genericBookmark = bookmarkService.addGenericBookmark(
+            bookInitials: "DICT",
+            key: "entry-key",
+            startOrdinal: 2,
+            endOrdinal: 2
+        )
+        _ = bookmarkService.toggleLabel(bookmarkId: genericBookmark.id, labelId: label.id)
+        bookmarkService.saveBibleBookmarkNote(bookmarkId: genericBookmark.id, note: "Generic \"note\"")
         let createdEntry = try XCTUnwrap(
             bookmarkService.createStudyPadEntry(labelId: label.id, afterOrderNumber: -1)
         ).0
@@ -153,10 +168,18 @@ extension AndBibleTests {
         controller.bridgeDidSetClientReady(bridge)
         let scriptCount = recordedScripts().count
         controller.loadStudyPadDocument(labelId: label.id, bookmarkId: bookmark.id)
+        let studyPadScripts = Array(recordedScripts().dropFirst(scriptCount))
+
+        let payloadJSON = try bridgeEmissionPayloadJSON(
+            from: studyPadScripts,
+            event: "add_documents"
+        )
+        assertBridgeJSONIntegerField("createdAt", in: payloadJSON)
+        assertBridgeJSONIntegerField("lastUpdatedOn", in: payloadJSON)
 
         let payload = try XCTUnwrap(
             bridgeEmissionPayload(
-                from: Array(recordedScripts().dropFirst(scriptCount)),
+                from: studyPadScripts,
                 event: "add_documents"
             ) as? [String: Any]
         )
@@ -171,6 +194,13 @@ extension AndBibleTests {
         let bookmarkObject = try XCTUnwrap(bookmarks.first)
         XCTAssertEqual(bookmarkObject["id"] as? String, bookmark.id.uuidString)
         XCTAssertTrue(bookmarkObject["primaryLabelId"] is NSNull)
+
+        let genericBookmarks = try XCTUnwrap(payload["genericBookmarks"] as? [[String: Any]])
+        let genericBookmarkObject = try XCTUnwrap(genericBookmarks.first)
+        XCTAssertEqual(genericBookmarkObject["id"] as? String, genericBookmark.id.uuidString)
+        XCTAssertEqual(genericBookmarkObject["type"] as? String, "generic-bookmark")
+        XCTAssertEqual(genericBookmarkObject["notes"] as? String, "Generic \"note\"")
+        XCTAssertTrue(genericBookmarkObject["primaryLabelId"] is NSNull)
 
         let relationships = try XCTUnwrap(payload["bookmarkToLabels"] as? [[String: Any]])
         let relationship = try XCTUnwrap(relationships.first)

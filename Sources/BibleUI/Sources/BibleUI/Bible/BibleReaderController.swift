@@ -3925,6 +3925,11 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             logger.warning("loadStudyPadDocument: label not found for \(labelId)")
             return
         }
+        guard let labelData = buildLabelData(label) else {
+            logger.warning("loadStudyPadDocument: label deleted before serialization for \(labelId)")
+            return
+        }
+
         showingMyNotes = false
         showingStudyPad = true
         activeStudyPadLabelId = labelId
@@ -3939,11 +3944,6 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         let bibleBtls = service.bibleBookmarkToLabels(labelId: labelId)
         let genericBtls = service.genericBookmarkToLabels(labelId: labelId)
         let entries = service.studyPadEntries(labelId: labelId)
-
-        guard let labelData = buildLabelData(label) else {
-            logger.warning("loadStudyPadDocument: label deleted before serialization for \(labelId)")
-            return
-        }
 
         let document = StudyPadDocumentPayload(
             id: "journal_\(labelId.uuidString)",
@@ -6725,8 +6725,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     private func buildBookmarkJSON(_ bookmark: BibleBookmark) -> BibleBookmarkData {
         let id = bookmark.id.uuidString
         let hashCode = abs(id.hashValue)
-        let createdAt = bookmark.createdAt.timeIntervalSince1970 * 1000
-        let lastUpdated = bookmark.lastUpdatedOn.timeIntervalSince1970 * 1000
+        let createdAt = bridgeTimestampMilliseconds(bookmark.createdAt)
+        let lastUpdated = bridgeTimestampMilliseconds(bookmark.lastUpdatedOn)
         let noteText = bookmark.notes?.notes ?? ""
         let hasNote = !noteText.isEmpty
         let labelPayload = BookmarkLabelSerializationSupport.biblePayload(
@@ -6905,13 +6905,30 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     }
 
     /**
+     Converts a native `Date` into the integer millisecond timestamp expected by the web bridge.
+
+     Android and the existing hand-built iOS JSON emit epoch milliseconds as integral JSON numbers.
+     Keeping this conversion centralized prevents typed DTO encoding from widening the bridge
+     contract to fractional `Double` values.
+
+     - Parameter date: Native timestamp to serialize into the bridge payload.
+     - Returns: Unix epoch milliseconds, truncating sub-millisecond precision to match the previous
+       manual JSON builders.
+     - Side effects: None.
+     - Failure modes: None for valid `Date` values.
+     */
+    private func bridgeTimestampMilliseconds(_ date: Date) -> Int {
+        Int(date.timeIntervalSince1970 * 1000)
+    }
+
+    /**
      Builds a typed Bible bookmark payload for a StudyPad document.
      */
     private func buildBookmarkJSONForStudyPad(_ bookmark: BibleBookmark) -> BibleBookmarkData {
         let id = bookmark.id.uuidString
         let hashCode = abs(id.hashValue)
-        let createdAt = bookmark.createdAt.timeIntervalSince1970 * 1000
-        let lastUpdated = bookmark.lastUpdatedOn.timeIntervalSince1970 * 1000
+        let createdAt = bridgeTimestampMilliseconds(bookmark.createdAt)
+        let lastUpdated = bridgeTimestampMilliseconds(bookmark.lastUpdatedOn)
         let noteText = bookmark.notes?.notes ?? ""
         let hasNote = !noteText.isEmpty
         let labelPayload = BookmarkLabelSerializationSupport.biblePayload(
@@ -6989,8 +7006,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     private func buildGenericBookmarkJSONForStudyPad(_ bookmark: GenericBookmark) -> GenericBookmarkData {
         let id = bookmark.id.uuidString
         let hashCode = abs(id.hashValue)
-        let createdAt = bookmark.createdAt.timeIntervalSince1970 * 1000
-        let lastUpdated = bookmark.lastUpdatedOn.timeIntervalSince1970 * 1000
+        let createdAt = bridgeTimestampMilliseconds(bookmark.createdAt)
+        let lastUpdated = bridgeTimestampMilliseconds(bookmark.lastUpdatedOn)
         let noteText = bookmark.notes?.notes ?? ""
         let hasNote = !noteText.isEmpty
         let labelPayload = BookmarkLabelSerializationSupport.genericPayload(

@@ -104,6 +104,22 @@ extension AndBibleTests {
         file: StaticString = #filePath,
         line: UInt = #line
     ) throws -> Any {
+        let json = try bridgeEmissionPayloadJSON(from: scripts, event: event, file: file, line: line)
+        let data = try XCTUnwrap(
+            json.data(using: .utf8),
+            "Expected UTF-8 JSON payload",
+            file: file,
+            line: line
+        )
+        return try JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed])
+    }
+
+    func bridgeEmissionPayloadJSON(
+        from scripts: [String],
+        event: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) throws -> String {
         let script = try XCTUnwrap(
             scripts.first { $0.contains("bibleView.emit('\(event)'") },
             "Expected a \(event) bridge emission",
@@ -123,14 +139,30 @@ extension AndBibleTests {
             file: file,
             line: line
         )
-        let json = String(script[start..<end])
-        let data = try XCTUnwrap(
-            json.data(using: .utf8),
-            "Expected UTF-8 JSON payload",
+        return String(script[start..<end])
+    }
+
+    func assertBridgeJSONIntegerField(
+        _ field: String,
+        in json: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let escapedField = NSRegularExpression.escapedPattern(for: field)
+        let integerPattern = #"""# + escapedField + #""\s*:\s*\d+(?=[,}])"#
+        let decimalPattern = #"""# + escapedField + #""\s*:\s*\d+\.\d+"#
+        XCTAssertNotNil(
+            json.range(of: integerPattern, options: .regularExpression),
+            "Expected \(field) to be emitted as an integer JSON number in \(json)",
             file: file,
             line: line
         )
-        return try JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed])
+        XCTAssertNil(
+            json.range(of: decimalPattern, options: .regularExpression),
+            "Expected \(field) to avoid decimal JSON encoding in \(json)",
+            file: file,
+            line: line
+        )
     }
     #endif
     func bridgeJSONObject<T: Encodable>(_ value: T) throws -> [String: Any] {

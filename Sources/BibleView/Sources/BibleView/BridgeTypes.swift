@@ -280,8 +280,8 @@ public struct BibleBookmarkData: Codable, Sendable {
     public var bookName: String
     /// Compact module abbreviation.
     public var bookAbbreviation: String
-    /// Creation timestamp in milliseconds since 1970.
-    public var createdAt: Double // timestamp
+    /// Creation timestamp in integer milliseconds since 1970.
+    public var createdAt: Int // timestamp
     /// Short text excerpt shown in bookmark lists.
     public var text: String
     /// Full text payload available for notes and sharing.
@@ -290,8 +290,8 @@ public struct BibleBookmarkData: Codable, Sendable {
     public var bookmarkToLabels: [BookmarkToLabelData]
     /// Identifier of the primary label controlling styling precedence, or `nil` when unset.
     public var primaryLabelId: IdType?
-    /// Last modification timestamp in milliseconds since 1970.
-    public var lastUpdatedOn: Double
+    /// Last modification timestamp in integer milliseconds since 1970.
+    public var lastUpdatedOn: Int
     /// Optional user-authored note.
     public var notes: String?
     /// Precomputed note-presence flag for cheap client rendering.
@@ -329,12 +329,12 @@ public struct BibleBookmarkData: Codable, Sendable {
         bookInitials: String,
         bookName: String,
         bookAbbreviation: String,
-        createdAt: Double,
+        createdAt: Int,
         text: String,
         fullText: String,
         bookmarkToLabels: [BookmarkToLabelData],
         primaryLabelId: IdType?,
-        lastUpdatedOn: Double,
+        lastUpdatedOn: Int,
         notes: String?,
         hasNote: Bool,
         wholeVerse: Bool,
@@ -436,8 +436,8 @@ public struct GenericBookmarkData: Codable, Sendable {
     public var bookName: String
     /// Compact module abbreviation.
     public var bookAbbreviation: String
-    /// Creation timestamp in milliseconds since 1970.
-    public var createdAt: Double
+    /// Creation timestamp in integer milliseconds since 1970.
+    public var createdAt: Int
     /// Short text excerpt shown in bookmark lists.
     public var text: String
     /// Full text payload available for notes and sharing.
@@ -446,8 +446,8 @@ public struct GenericBookmarkData: Codable, Sendable {
     public var bookmarkToLabels: [BookmarkToLabelData]
     /// Identifier of the primary label controlling styling precedence, or `nil` when unset.
     public var primaryLabelId: IdType?
-    /// Last modification timestamp in milliseconds since 1970.
-    public var lastUpdatedOn: Double
+    /// Last modification timestamp in integer milliseconds since 1970.
+    public var lastUpdatedOn: Int
     /// Optional user-authored note.
     public var notes: String?
     /// Precomputed note-presence flag for cheap client rendering.
@@ -477,12 +477,12 @@ public struct GenericBookmarkData: Codable, Sendable {
         bookInitials: String,
         bookName: String,
         bookAbbreviation: String,
-        createdAt: Double,
+        createdAt: Int,
         text: String,
         fullText: String,
         bookmarkToLabels: [BookmarkToLabelData],
         primaryLabelId: IdType?,
-        lastUpdatedOn: Double,
+        lastUpdatedOn: Int,
         notes: String?,
         hasNote: Bool,
         wholeVerse: Bool,
