@@ -232,9 +232,14 @@ public struct BookmarkListView: View {
         }
     }
 
-    /// Stable bookmark-list state exported for UI automation.
+    /// Stable bookmark-list state exported for UI automation, including modal presentation flags.
     private var bookmarkListAccessibilityValue: String {
-        let baseState = "count=\(filteredBookmarks.count);selectedLabel=\(bookmarkListSelectedLabelAccessibilityToken);query=\(bookmarkListAccessibilitySegment(searchText))"
+        let baseState = [
+            "count=\(filteredBookmarks.count)",
+            "selectedLabel=\(bookmarkListSelectedLabelAccessibilityToken)",
+            "query=\(bookmarkListAccessibilitySegment(searchText))",
+            "labelAssignment=\(editingLabelsBookmarkId == nil ? "false" : "true")",
+        ].joined(separator: ";")
         guard UITestRuntimeConfiguration.enablesDetailedAccessibilityExports else {
             return baseState
         }
