@@ -35,8 +35,8 @@ extension AndBibleUITests {
     }
 
     /**
-     Verifies that the reader overflow All Text Options action opens workspace text-display
-     settings instead of the left-drawer Application Preferences destination.
+     Verifies that the reader overflow All Text Options action opens window text-display settings
+     with Android-style parent links instead of the left-drawer Application Preferences destination.
      *
      * - Side effects:
      *   - launches the reader shell with deterministic in-memory data
@@ -54,6 +54,7 @@ extension AndBibleUITests {
             actionIdentifier: "readerOpenTextOptionsAction",
             destinationIdentifier: "textDisplaySettingsScreen",
             readinessIdentifiers: [
+                "textDisplayWorkspaceSettingsLink",
                 "textDisplayFontFamilyButton",
                 "textDisplayJustifyTextToggleButton",
             ],

@@ -683,9 +683,13 @@ extension AndBibleUITests {
             ]
         case "syncSettingsState":
             return semanticStateCandidates(for: identifier, in: app)
-        case "textDisplayFontFamilyButton":
+        case "textDisplayFontFamilyButton",
+             "textDisplayWorkspaceSettingsLink",
+             "textDisplayGlobalSettingsLink":
             return [
+                app.links[identifier].firstMatch,
                 app.buttons[identifier].firstMatch,
+                app.cells[identifier].firstMatch,
                 app.otherElements[identifier].firstMatch,
             ]
         case "textDisplayJustifyTextToggle":
