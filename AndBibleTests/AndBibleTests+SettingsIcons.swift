@@ -38,6 +38,10 @@ extension AndBibleTests {
             "ic_bookmark_24dp"
         )
         XCTAssertEqual(
+            AndBibleIconCatalog.settingsIcon(forAndroidKey: "sync_ai")?.androidDrawableName,
+            "icon_robot"
+        )
+        XCTAssertEqual(
             AndBibleIconCatalog.settingsIcon(forAndroidKey: "sync_reading_progress")?.androidDrawableName,
             "ic_baseline_check_circle_24"
         )
@@ -62,6 +66,19 @@ extension AndBibleTests {
         )
     }
 
+    func testSyncSettingsVisibleCategoryRowsMatchAndroidRuntimeVisibility() {
+        XCTAssertEqual(
+            SyncSettingsPresentation.visibleCategoryRows,
+            [
+                .active(.bookmarks),
+                .active(.workspaces),
+                .active(.myDocuments),
+                .deferred(.aiSettings),
+                .deferred(.progress),
+            ]
+        )
+    }
+
     func testSyncCategoryPresentationMatchesAndroidCategoryIcons() {
         XCTAssertEqual(
             SyncSettingsPresentation.category(.bookmarks).androidKey,
@@ -83,6 +100,29 @@ extension AndBibleTests {
             SyncSettingsPresentation.category(.myDocuments).icon?.androidDrawableName,
             "ic_baseline_description_gray_24"
         )
+        XCTAssertEqual(
+            SyncSettingsPresentation.deferredCategory(.aiSettings).androidKey,
+            "sync_ai"
+        )
+        XCTAssertEqual(
+            SyncSettingsPresentation.deferredCategory(.aiSettings).icon?.androidDrawableName,
+            "icon_robot"
+        )
+        XCTAssertEqual(
+            SyncSettingsPresentation.deferredCategory(.progress).androidKey,
+            "sync_reading_progress"
+        )
+        XCTAssertEqual(
+            SyncSettingsPresentation.deferredCategory(.progress).icon?.androidDrawableName,
+            "ic_baseline_check_circle_24"
+        )
+    }
+
+    func testDeferredSyncCategoriesReserveAndroidCompatibleKeysAndTrackingIssues() {
+        XCTAssertEqual(RemoteSyncDeferredCategory.aiSettings.androidSyncEnabledKey, "sync_enable_ai_settings")
+        XCTAssertEqual(RemoteSyncDeferredCategory.aiSettings.trackingIssueNumber, 74)
+        XCTAssertEqual(RemoteSyncDeferredCategory.progress.androidSyncEnabledKey, "sync_enable_progress")
+        XCTAssertEqual(RemoteSyncDeferredCategory.progress.trackingIssueNumber, 73)
     }
 
     func testTextDisplayIconsComeFromAndroidOptionsMenuItems() {

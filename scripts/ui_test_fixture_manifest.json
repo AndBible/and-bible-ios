@@ -41,6 +41,7 @@
   "AndBibleUITests/AndBibleUITests/testSyncSettingsMyDocumentsCategoryToggleStartsManualSyncPath": "none",
   "AndBibleUITests/AndBibleUITests/testSyncSettingsBackendSwitchMutatesVisibleSection": "sync-nextcloud",
   "AndBibleUITests/AndBibleUITests/testSyncSettingsBackendSwitchPersistsAcrossDirectReopen": "sync-nextcloud",
+  "AndBibleUITests/AndBibleUITests/testSyncSettingsCategoryRowsMatchAndroidRuntimeVisibility": "sync-nextcloud",
   "AndBibleUITests/AndBibleUITests/testSyncSettingsCategoryDisablePersistsAcrossDirectReopen": "sync-nextcloud-bookmarks-enabled",
   "AndBibleUITests/AndBibleUITests/testSyncSettingsCategoryToggleMutatesExportedState": "sync-nextcloud-bookmarks-enabled",
   "AndBibleUITests/AndBibleUITests/testSyncSettingsNextCloudInvalidURLShowsValidationStatus": "sync-nextcloud",

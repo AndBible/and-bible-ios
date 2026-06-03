@@ -13,6 +13,7 @@ Regression verification for the current sync parity surface, covering:
   workspaces, reading plans, and My Documents
 - ready-state patch replay and steady-state outbound upload
 - Sync settings backend/category mutation, My Documents category exposure, and reopen persistence
+- Sync settings Android-runtime-visible category row set and deferred AI/progress disclosure
 - Sync settings adopt-versus-create confirmation branch
 - removed Google Drive fallback to iCloud
 - local Android reference comparison
@@ -47,6 +48,8 @@ Verification matrix:
 - `AndBibleTests/testRemoteSyncSettingsStoreClearsPasswordWhenSaveReceivesWhitespaceOnlySecret`
 - `AndBibleTests/testRemoteSyncSettingsStorePersistsAndroidCompatibleCategoryToggleKeys`
 - `AndBibleTests/testRemoteSyncSettingsStoreGeneratesStableLowercaseDeviceIdentifier`
+- `AndBibleTests/testSyncSettingsVisibleCategoryRowsMatchAndroidRuntimeVisibility`
+- `AndBibleTests/testDeferredSyncCategoriesReserveAndroidCompatibleKeysAndTrackingIssues`
 - `AndBibleTests/testWebDAVSyncConfigurationExpandsServerRootToNextCloudDAVEndpoint`
 - `AndBibleTests/testWebDAVSyncConfigurationPreservesExplicitDAVEndpoint`
 - `AndBibleTests/testWebDAVSyncConfigurationRejectsLoginPageURLs`
@@ -83,6 +86,7 @@ Verification matrix:
 - `AndBibleUITests/testSyncSettingsCategoryDisablePersistsAcrossDirectReopen`
 - `AndBibleUITests/testSyncSettingsAdoptCreateConfirmationCreateChoiceSynchronizesFromVisibleWorkflow`
 - `AndBibleUITests/testSyncSettingsMyDocumentsCategoryToggleStartsManualSyncPath`
+- `AndBibleUITests/testSyncSettingsCategoryRowsMatchAndroidRuntimeVisibility`
 - `AndBibleUITests/testSyncSettingsBackendSwitchMutatesVisibleSection`
 - `AndBibleUITests/testSyncSettingsBackendSwitchPersistsAcrossDirectReopen`
 
@@ -142,12 +146,13 @@ The checked-in shared-scheme test set gives the sync domain rerunnable regressio
 ## Remaining Gaps
 
 The current sync parity gap is not the core bootstrap or patch engine. The
-remaining gaps are target alignment and category breadth:
+remaining gaps are reset/status presentation parity and category breadth:
 
-- #158 reconciles Android's visible sync category toggles with the iOS active
-  toggle list, including Android's runtime-hidden Reading Plans row.
-- Android also exposes `ai_settings` and `progress`, which remain distinct sync
-  parity targets.
+- #158 aligns Android's visible sync category toggles with iOS settings:
+  Reading Plans is hidden, while AI Settings and Reading Progress are visible as
+  disabled deferred rows.
+- Android `ai_settings` and `progress` sync engines remain distinct parity
+  targets in #74 and #73.
 
 The adopt-versus-create branch is now covered both below the UI through
 coordinator and synchronization tests and through a focused simulator workflow.

@@ -23,7 +23,12 @@ public enum RemoteSyncCategory: String, CaseIterable, Sendable {
     /// My Documents document/page/content data.
     case myDocuments = "mydocuments"
 
-    /// Categories currently ready for the broad iOS sync UI and lifecycle sweep.
+    /**
+     Categories currently backed by iOS sync engines and eligible for lifecycle sweeps.
+
+     Android hides the Reading Plans settings toggle at runtime even though the database remains
+     syncable, so visible settings rows are curated separately by the UI presentation layer.
+     */
     public static var activeSyncCases: [RemoteSyncCategory] {
         [.bookmarks, .workspaces, .readingPlans, .myDocuments]
     }
