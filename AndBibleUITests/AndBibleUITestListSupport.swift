@@ -1091,6 +1091,30 @@ extension AndBibleUITests {
     }
 
     /**
+     Opens Android's All Text Options route from the reader overflow menu.
+     *
+     * - Parameter app: Running application under test.
+     * - Returns: The root accessibility-identified Text Display screen element.
+     * - Side effects:
+     *   - opens the reader overflow menu and activates the production All Text Options action
+     *   - pushes the window-scoped Text Display screen onto the reader navigation stack
+     * - Failure modes:
+     *   - fails when the All Text Options action or Text Display screen never appears
+     */
+    func openAllTextOptions(in app: XCUIApplication) -> XCUIElement {
+        openReaderActionDestination(
+            actionIdentifier: "readerOpenTextOptionsAction",
+            destinationIdentifier: "textDisplaySettingsScreen",
+            readinessIdentifiers: [
+                "textDisplayFontFamilyButton",
+                "textDisplayJustifyTextToggleButton",
+            ],
+            in: app,
+            timeout: 20
+        )
+    }
+
+    /**
      Opens Settings from the reader shell action surface.
      *
      * - Parameter app: Running application under test.
@@ -1139,6 +1163,10 @@ extension AndBibleUITests {
      *     reliably bring an offscreen row into the accessibility hierarchy
      * - Failure modes:
      *   - records an XCTest failure if the production row never appears
+     *
+     * Broad `otherElements.containing(staticText:)` fallbacks are intentionally avoided here:
+     * after the Android-style flat settings conversion they resolve to the full scroll surface
+     * instead of the target row and produce false-positive container taps.
      */
     func requireSettingsNavigationControl(
         _ identifier: String,
@@ -1169,7 +1197,6 @@ extension AndBibleUITests {
                     settingsForm.cells[visibleTitle].firstMatch,
                     settingsForm.otherElements[visibleTitle].firstMatch,
                     settingsForm.cells.containing(.staticText, identifier: visibleTitle).firstMatch,
-                    settingsForm.otherElements.containing(.staticText, identifier: visibleTitle).firstMatch,
                     settingsForm.staticTexts[visibleTitle].firstMatch,
                     app.links[visibleTitle].firstMatch,
                     app.buttons[visibleTitle].firstMatch,

@@ -342,7 +342,7 @@ public struct SettingsView: View {
     }
 
     /**
-     Builds the full settings form, preference hydration, alerts, and settings-side effects.
+     Builds the full settings surface, preference hydration, alerts, and settings-side effects.
      */
     public var body: some View {
         settingsFormWithPreferencePersistence
@@ -351,51 +351,58 @@ public struct SettingsView: View {
     /**
      Composes the visible settings sections without presentation modifiers or persistence observers.
 
-     Keeping this as a small builder gives SwiftUI a stable root expression and keeps search gating
-     declarative at the section level.
+     The Android preferences screen is a flat scrolling preference surface, not a grouped card form.
+     Keeping this as a small builder gives SwiftUI a stable root expression while the section gates
+     remain declarative.
      *
      - Side Effects: none directly; child controls perform their own preference writes.
      - Failure Modes: Sections omitted by search or missing data are simply not rendered.
      */
     @ViewBuilder
     private var settingsForm: some View {
-        Form {
-            if shouldShowFeaturesSection {
-                featuresSettingsSection
-            }
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                if shouldShowFeaturesSection {
+                    featuresSettingsSection
+                }
 
-            if shouldShowDictionarySection {
-                dictionarySettingsSection
-            }
+                if shouldShowDictionarySection {
+                    dictionarySettingsSection
+                }
 
-            if shouldShowBehaviorSection {
-                behaviorSettingsSection
-            }
+                if shouldShowBehaviorSection {
+                    behaviorSettingsSection
+                }
 
-            if shouldShowLookAndFeelSection {
-                lookAndFeelSection
-            }
+                if shouldShowLookAndFeelSection {
+                    lookAndFeelSection
+                }
 
-            if shouldShowSecuritySection {
-                securitySettingsSection
-            }
+                if shouldShowSecuritySection {
+                    securitySettingsSection
+                }
 
-            if shouldShowAdvancedSection {
-                advancedSettingsSection
-            }
+                if shouldShowAdvancedSection {
+                    advancedSettingsSection
+                }
 
-            if shouldShowAboutSection {
-                aboutSettingsSection
-            }
+                if shouldShowAboutSection {
+                    aboutSettingsSection
+                }
 
-            if shouldShowNoSettingsSearchResults {
-                noSettingsSearchResultsSection
+                if shouldShowNoSettingsSearchResults {
+                    noSettingsSearchResultsSection
+                }
             }
+            .padding(.vertical, 8)
         }
+        .accessibilityIdentifier("settingsForm")
+        .accessibilityValue(settingsAccessibilityValue)
+        .background(settingsScreenBackground.ignoresSafeArea())
     }
 
     /**
-     Applies navigation, alerts, sheet presentation, search, and toolbar controls to the form.
+     Applies navigation, alerts, sheet presentation, search, and toolbar controls to the settings surface.
 
      - Side Effects: `onAppear` reloads persisted state; toolbar and alerts mutate local presentation
        state and reset preferences when confirmed.
@@ -403,8 +410,6 @@ public struct SettingsView: View {
      */
     private var settingsFormWithPresentation: some View {
         settingsForm
-            .accessibilityIdentifier("settingsForm")
-            .accessibilityValue(settingsAccessibilityValue)
             .navigationTitle(settingsNavigationTitleText)
             .alert(
                 languageRestartAlertTitleText,
@@ -502,7 +507,7 @@ public struct SettingsView: View {
      */
     @ViewBuilder
     private var dictionarySettingsSection: some View {
-        Section {
+        settingsPreferenceSection(String(localized: "settings_dictionaries")) {
             if !strongsGreekDictionaries.isEmpty,
                settingsSearchMatchesIdentifier(
                    "settingsStrongsGreekDictionaryLink",
@@ -535,6 +540,7 @@ public struct SettingsView: View {
                     )
                 }
                 .accessibilityIdentifier("settingsStrongsGreekDictionaryLink")
+                .buttonStyle(.plain)
             }
 
             if !strongsHebrewDictionaries.isEmpty,
@@ -569,6 +575,7 @@ public struct SettingsView: View {
                     )
                 }
                 .accessibilityIdentifier("settingsStrongsHebrewDictionaryLink")
+                .buttonStyle(.plain)
             }
 
             if !robinsonMorphologyDictionaries.isEmpty,
@@ -603,6 +610,7 @@ public struct SettingsView: View {
                     )
                 }
                 .accessibilityIdentifier("settingsRobinsonMorphologyLink")
+                .buttonStyle(.plain)
             }
 
             if !wordLookupDictionaries.isEmpty,
@@ -637,9 +645,8 @@ public struct SettingsView: View {
                     )
                 }
                 .accessibilityIdentifier("settingsWordLookupDictionariesLink")
+                .buttonStyle(.plain)
             }
-        } header: {
-            settingsSectionHeader(String(localized: "settings_dictionaries"))
         }
     }
 
@@ -652,7 +659,9 @@ public struct SettingsView: View {
      */
     @ViewBuilder
     private var behaviorSettingsSection: some View {
-        Section {
+        settingsPreferenceSection(
+            String(localized: "prefs_behavior_customization_cat", defaultValue: "Application behavior")
+        ) {
             if settingsSearchMatchesPreference(.navigateToVersePref, in: behaviorSettingsSearchEntries) {
                 Toggle(isOn: Binding(
                     get: { navigateToVerse },
@@ -868,10 +877,6 @@ public struct SettingsView: View {
                     )
                 }
             }
-        } header: {
-            settingsSectionHeader(
-                String(localized: "prefs_behavior_customization_cat", defaultValue: "Application behavior")
-            )
         }
     }
 
@@ -883,7 +888,7 @@ public struct SettingsView: View {
      */
     @ViewBuilder
     private var securitySettingsSection: some View {
-        Section {
+        settingsPreferenceSection(String(localized: "settings_security")) {
             if settingsSearchMatchesPreference(.discreteHelp, in: securitySettingsSearchEntries) {
                 Button {
                     showDiscreteHelp = true
@@ -936,8 +941,6 @@ public struct SettingsView: View {
                         }
                 }
             }
-        } header: {
-            settingsSectionHeader(String(localized: "settings_security"))
         }
     }
 
@@ -950,7 +953,9 @@ public struct SettingsView: View {
      */
     @ViewBuilder
     private var advancedSettingsSection: some View {
-        Section {
+        settingsPreferenceSection(
+            String(localized: "prefs_advanced_settings_cat", defaultValue: "Advanced settings")
+        ) {
             if settingsSearchMatchesPreference(.enableBluetoothPref, in: advancedSettingsSearchEntries) {
                 Toggle(isOn: Binding(
                     get: { enableBluetoothMediaButtons },
@@ -998,6 +1003,7 @@ public struct SettingsView: View {
                         detail: experimentalFeaturesSummary(selectedValues: enabledExperimentalFeatures)
                     )
                 }
+                .buttonStyle(.plain)
             }
             #if DEBUG
             if settingsSearchMatchesPreference(.showErrorBox, in: advancedSettingsSearchEntries) {
@@ -1071,10 +1077,6 @@ public struct SettingsView: View {
                 .disabled(debugCrashScheduled)
             }
             #endif
-        } header: {
-            settingsSectionHeader(
-                String(localized: "prefs_advanced_settings_cat", defaultValue: "Advanced settings")
-            )
         }
     }
 
@@ -1086,7 +1088,7 @@ public struct SettingsView: View {
      */
     @ViewBuilder
     private var aboutSettingsSection: some View {
-        Section {
+        settingsPreferenceSection(String(localized: "settings_about")) {
             HStack(alignment: .top, spacing: 12) {
                 settingsRowLabel(
                     preferenceKey: nil,
@@ -1097,8 +1099,6 @@ public struct SettingsView: View {
                     .foregroundStyle(.secondary)
                     .padding(.vertical, 8)
             }
-        } header: {
-            settingsSectionHeader(String(localized: "settings_about"))
         }
     }
 
@@ -1110,10 +1110,10 @@ public struct SettingsView: View {
      */
     @ViewBuilder
     private var noSettingsSearchResultsSection: some View {
-        Section {
-            Text(String(localized: "settings_search_no_results", defaultValue: "No settings found"))
-                .foregroundStyle(.secondary)
-        }
+        Text(String(localized: "settings_search_no_results", defaultValue: "No settings found"))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
     }
 
     /**
@@ -1121,7 +1121,7 @@ public struct SettingsView: View {
      */
     @ViewBuilder
     private var lookAndFeelSection: some View {
-        Section {
+        settingsPreferenceSection(String(localized: "prefs_display_customization_cat", defaultValue: "Look & feel")) {
             if settingsSearchMatchesIdentifier("settingsTextDisplayLink", in: lookAndFeelSettingsSearchEntries) {
                 settingsNavigationLink(
                     title: String(localized: "settings_text_display"),
@@ -1384,6 +1384,7 @@ public struct SettingsView: View {
                         )
                     )
                 }
+                .buttonStyle(.plain)
             }
             if settingsSearchMatchesPreference(.disableGenBookmarkModalButtons, in: lookAndFeelSettingsSearchEntries) {
                 NavigationLink {
@@ -1412,6 +1413,7 @@ public struct SettingsView: View {
                         )
                     )
                 }
+                .buttonStyle(.plain)
             }
             if settingsSearchMatchesPreference(.localePref, in: lookAndFeelSettingsSearchEntries) {
                 Picker(selection: $selectedLanguage) {
@@ -1451,8 +1453,6 @@ public struct SettingsView: View {
                     showRestartAlert = true
                 }
             }
-        } header: {
-            settingsSectionHeader(String(localized: "prefs_display_customization_cat", defaultValue: "Look & feel"))
         }
     }
 
@@ -1598,7 +1598,7 @@ public struct SettingsView: View {
      */
     @ViewBuilder
     private var featuresSettingsSection: some View {
-        Section {
+        settingsPreferenceSection(String(localized: "features", defaultValue: "Features")) {
             let syncEntry = syncSettingsSearchEntry
             if settingsSearchMatchesEntry(syncEntry) {
                 settingsNavigationLink(
@@ -1623,8 +1623,6 @@ public struct SettingsView: View {
                         .accessibilityIdentifier("readingProgressSettingsScreen")
                 }
             }
-        } header: {
-            settingsSectionHeader(String(localized: "features", defaultValue: "Features"))
         }
     }
 
@@ -2164,9 +2162,14 @@ public struct SettingsView: View {
                 androidKey: androidKey,
                 summary: summary
             )
+            .accessibilityElement(children: .combine)
+            .accessibilityAddTraits(.isButton)
+            .accessibilityLabel(title)
+            .accessibilityIdentifier(accessibilityIdentifier)
         }
-        .accessibilityLabel(title)
-        .accessibilityIdentifier(accessibilityIdentifier)
+        .buttonStyle(.plain)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
     }
 
     /**
@@ -2264,6 +2267,48 @@ public struct SettingsView: View {
      */
     private func settingsSectionHeader(_ title: String) -> AndBibleSettingsSectionHeader {
         AndBibleSettingsSectionHeader(title: title)
+    }
+
+    /**
+     Builds one Android-style Application Preferences section without SwiftUI `Form` grouping.
+
+     Android renders settings as a continuous preference list with tinted section captions and
+     full-width rows. This helper keeps that surface explicit so native controls can still own
+     accessibility and persistence while the container no longer contributes iOS grouped-card chrome.
+
+     - Parameters:
+       - title: User-visible section title aligned with the row text column.
+       - content: Preference rows and controls shown under the header.
+     - Returns: A flat preference section matching the Text Display settings treatment.
+     - Side effects: none; row content owns preference writes and navigation.
+     - Failure modes: This helper cannot fail.
+     */
+    private func settingsPreferenceSection<Content: View>(
+        _ title: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            settingsSectionHeader(title)
+                .padding(.bottom, 18)
+            content()
+                .padding(.horizontal, 16)
+        }
+        .padding(.bottom, 18)
+    }
+
+    /**
+     Platform background for the flat Android-style Application Preferences surface.
+
+     - Returns: A system background color on iOS and a transparent fallback on macOS package builds.
+     - Side effects: none.
+     - Failure modes: This helper cannot fail.
+     */
+    private var settingsScreenBackground: Color {
+        #if os(iOS)
+        Color(.systemBackground)
+        #else
+        Color.clear
+        #endif
     }
 
     private var settingsAccessibilityValue: String {

@@ -611,7 +611,7 @@ extension AndBibleUITests {
         let app = makeApp()
         app.launch()
 
-        let textDisplayScreen = openTextDisplaySettings(in: app)
+        let textDisplayScreen = openAllTextOptions(in: app)
         XCTAssertTrue(textDisplayScreen.exists)
 
         let justifyToggleButton = app.buttons["textDisplayJustifyTextToggleButton"].firstMatch
@@ -647,7 +647,7 @@ extension AndBibleUITests {
         let app = makeApp()
         app.launch()
 
-        let textDisplayScreen = openTextDisplaySettings(in: app)
+        let textDisplayScreen = openAllTextOptions(in: app)
         XCTAssertTrue(textDisplayScreen.exists)
         let fontFamilyButton = requireReachableTextDisplayButton("textDisplayFontFamilyButton", in: app, timeout: 10)
         tapElementReliably(fontFamilyButton, timeout: 10)

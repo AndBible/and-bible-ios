@@ -631,6 +631,7 @@ public struct TextDisplaySettingsView: View {
     ) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             textDisplaySectionHeader(section.titleDefault)
+                .padding(.bottom, 18)
             content()
         }
         .padding(.bottom, 18)
