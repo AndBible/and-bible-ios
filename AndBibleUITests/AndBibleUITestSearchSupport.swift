@@ -504,20 +504,40 @@ extension AndBibleUITests {
         XCTFail("Expected Search translation picker to open within \(timeout) seconds.")
     }
 
-    /// Returns true once the Search translation picker sheet has exposed any stable child element.
+    /**
+     Returns true once the Search translation picker sheet has exposed any stable child element.
+     *
+     * - Parameters:
+     *   - app: Running application under test.
+     *   - timeout: Total time budget for polling the candidate set.
+     * - Returns: `true` when a picker-specific Done button or picker list exists.
+     * - Side effects:
+     *   - polls the live accessibility hierarchy while SwiftUI presents or dismisses the picker
+     * - Failure modes: This helper does not fail directly.
+     */
     func searchTranslationPickerIsOpen(
         in app: XCUIApplication,
         timeout: TimeInterval
     ) -> Bool {
-        firstExistingElement(searchTranslationPickerOpenCandidates(in: app), timeout: timeout) != nil
+        let deadline = Date().addingTimeInterval(max(0, timeout))
+
+        repeat {
+            if firstExistingElement(searchTranslationPickerOpenCandidates(in: app), timeout: 0) != nil {
+                return true
+            }
+            if timeout <= 0 {
+                return false
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        } while Date() < deadline
+
+        return firstExistingElement(searchTranslationPickerOpenCandidates(in: app), timeout: 0) != nil
     }
 
     /// Returns stable picker descendants that prove the Search translation picker sheet is open.
     func searchTranslationPickerOpenCandidates(in app: XCUIApplication) -> [XCUIElement] {
-        [
-            app.buttons["searchTranslationDoneButton"].firstMatch,
-            app.navigationBars.buttons["searchTranslationDoneButton"].firstMatch,
-        ] + searchTranslationPickerListCandidates(in: app)
+        searchTranslationDoneCandidates(in: app, includeLocalizedFallbacks: false)
+            + searchTranslationPickerListCandidates(in: app)
     }
 
     /**
@@ -545,12 +565,20 @@ extension AndBibleUITests {
                 searchTranslationRowCandidates(identifier, moduleName: moduleName, in: app),
                 timeout: 0.2
             ) {
+                let expectedValue = expectedSearchTranslationRowValue(afterTapping: row)
                 if waitForElementToBecomeHittable(row, timeout: 1),
                    elementHasUsableFrame(row) {
                     row.coordinate(withNormalizedOffset: CGVector(dx: 0.15, dy: 0.5)).tap()
                 } else {
                     tapElementReliably(row, timeout: 1)
                 }
+                waitForSearchTranslationRowMutation(
+                    identifier: identifier,
+                    moduleName: moduleName,
+                    expectedValue: expectedValue,
+                    in: app,
+                    timeout: min(3, timeout)
+                )
                 return
             }
 
@@ -573,6 +601,114 @@ extension AndBibleUITests {
             app.scrollViews[identifier].firstMatch,
             app.otherElements[identifier].firstMatch,
         ]
+    }
+
+    /**
+     Returns scoped Done button candidates for the Search translation picker.
+     *
+     * SwiftUI can expose toolbar buttons through navigation bars, toolbars, sheets, or finally the
+     * app-wide button query depending on runtime. The helper keeps the app-wide query as a fallback
+     * only, because broad button snapshots are the least stable while the picker list is refreshing
+     * after a translation row toggles.
+     *
+     * - Parameters:
+     *   - app: Running application under test.
+     *   - includeLocalizedFallbacks: Whether to include generic localized Done buttons after the
+     *     stable identifier candidates. Picker-open checks pass `false` to avoid matching keyboard
+     *     or unrelated toolbar Done controls before the translation picker is open.
+     * - Returns: Ordered button candidates, from picker-scoped surfaces to broad fallbacks.
+     * - Side effects: none.
+     * - Failure modes: This helper does not fail directly.
+     */
+    func searchTranslationDoneCandidates(
+        in app: XCUIApplication,
+        includeLocalizedFallbacks: Bool = true
+    ) -> [XCUIElement] {
+        let identifiedCandidates = [
+            app.navigationBars.buttons["searchTranslationDoneButton"].firstMatch,
+            app.toolbars.buttons["searchTranslationDoneButton"].firstMatch,
+            app.sheets.buttons["searchTranslationDoneButton"].firstMatch,
+            app.buttons["searchTranslationDoneButton"].firstMatch,
+        ]
+        guard includeLocalizedFallbacks else {
+            return identifiedCandidates
+        }
+        return identifiedCandidates + [
+            app.navigationBars.buttons["Done"].firstMatch,
+            app.toolbars.buttons["Done"].firstMatch,
+            app.sheets.buttons["Done"].firstMatch,
+            app.buttons["Done"].firstMatch,
+        ]
+    }
+
+    /**
+     Determines the semantic accessibility value expected after one translation-row tap.
+     *
+     * - Parameter row: The row element that is about to be tapped.
+     * - Returns: `selected` or `unselected` when the row exposes a known pre-tap value; otherwise
+     *   `nil` so callers only wait for picker stability.
+     * - Side effects: none.
+     * - Failure modes: This helper does not fail directly.
+     */
+    func expectedSearchTranslationRowValue(afterTapping row: XCUIElement) -> String? {
+        switch row.value as? String {
+        case "selected":
+            return "unselected"
+        case "unselected":
+            return "selected"
+        default:
+            return nil
+        }
+    }
+
+    /**
+     Waits for a translation-row tap to settle before the picker toolbar is queried again.
+     *
+     * The grouped multi-translation search test toggles a row, which triggers SwiftUI to re-render
+     * the list and starts a background search rerun. Waiting for either the row accessibility value
+     * to update or the picker list to remain visible prevents the next step from querying toolbar
+     * buttons during the most volatile part of that transition.
+     *
+     * - Parameters:
+     *   - identifier: Stable row accessibility identifier.
+     *   - moduleName: Module abbreviation displayed by the row.
+     *   - expectedValue: Optional post-tap accessibility value to wait for.
+     *   - app: Running application under test.
+     *   - timeout: Maximum time to wait for the mutation to settle.
+     * - Side effects:
+     *   - polls the live picker accessibility hierarchy while SwiftUI settles row state
+     * - Failure modes: This helper does not fail directly; downstream assertions still validate
+     *   the selected-module Search state.
+     */
+    func waitForSearchTranslationRowMutation(
+        identifier: String,
+        moduleName: String,
+        expectedValue: String?,
+        in app: XCUIApplication,
+        timeout: TimeInterval
+    ) {
+        let deadline = Date().addingTimeInterval(max(0, timeout))
+
+        repeat {
+            if let row = firstExistingElement(
+                searchTranslationRowCandidates(identifier, moduleName: moduleName, in: app),
+                timeout: 0.1
+            ) {
+                if let expectedValue, row.value as? String == expectedValue {
+                    return
+                }
+                if expectedValue == nil, elementHasUsableFrame(row) {
+                    return
+                }
+            }
+
+            if expectedValue == nil,
+               firstExistingElement(searchTranslationPickerListCandidates(in: app), timeout: 0.1) != nil {
+                return
+            }
+
+            RunLoop.current.run(until: Date().addingTimeInterval(0.15))
+        } while Date() < deadline
     }
 
     /// Returns row candidates for one Search translation picker module.
@@ -642,18 +778,20 @@ extension AndBibleUITests {
         in app: XCUIApplication,
         timeout: TimeInterval
     ) {
-        let done = app.buttons["searchTranslationDoneButton"].firstMatch
-        if done.waitForExistence(timeout: timeout) {
-            tapElementReliably(done, timeout: timeout)
-            return
-        }
+        let deadline = Date().addingTimeInterval(timeout)
 
-        let fallbackDone = app.buttons["Done"].firstMatch
-        XCTAssertTrue(
-            fallbackDone.waitForExistence(timeout: timeout),
-            "Expected Search translation Done button to exist within \(timeout) seconds."
-        )
-        tapElementReliably(fallbackDone, timeout: timeout)
+        repeat {
+            if let done = firstExistingElement(searchTranslationDoneCandidates(in: app), timeout: 0.2) {
+                tapElementReliably(done, timeout: min(2, max(0.5, deadline.timeIntervalSinceNow)))
+                if !searchTranslationPickerIsOpen(in: app, timeout: 2) {
+                    return
+                }
+            }
+
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        } while Date() < deadline
+
+        XCTFail("Expected Search translation Done button to exist within \(timeout) seconds.")
     }
 
     /**
