@@ -672,9 +672,7 @@ extension AndBibleUITests {
             "settingsImportExportLink",
             "settingsSyncLink",
             "settingsReadingProgressLink",
-            "settingsLabelsLink",
-            "settingsTextDisplayLink",
-            "settingsColorsLink":
+            "settingsLabelsLink":
             return [
                 app.links[identifier].firstMatch,
                 app.buttons[identifier].firstMatch,
@@ -683,7 +681,7 @@ extension AndBibleUITests {
             ]
         case "syncSettingsState":
             return semanticStateCandidates(for: identifier, in: app)
-        case "textDisplayFontFamilyButton":
+        case "textDisplayColorsLink", "textDisplayFontFamilyButton":
             return [
                 app.links[identifier].firstMatch,
                 app.buttons[identifier].firstMatch,

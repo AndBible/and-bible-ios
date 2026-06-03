@@ -1051,43 +1051,35 @@ extension AndBibleUITests {
     }
 
     /**
-     Opens Colors through Settings navigation.
+     Opens Colors through Android's All Text Options navigation.
      *
      * - Parameter app: Running application under test.
      * - Returns: The root accessibility-identified Colors screen element.
      * - Side effects:
-     *   - opens Settings and pushes the Colors screen
+     *   - opens the reader All Text Options screen
+     *   - taps the Colors preference row and pushes the Colors screen
      * - Failure modes:
      *   - fails when the Colors screen never appears
      */
     func openColorSettings(in app: XCUIApplication) -> XCUIElement {
-        openSettingsDestination(
-            linkIdentifier: "settingsColorsLink",
-            destinationIdentifier: "colorSettingsScreen",
-            readinessIdentifiers: ["colorSettingsResetButton"],
-            in: app,
-            destinationTimeout: 20
-        )
+        _ = openAllTextOptions(in: app)
+        let colorsLink = requireReachableTextDisplayButton("textDisplayColorsLink", in: app, timeout: 10)
+        tapElementReliably(colorsLink, timeout: 10)
+        return requireElement("colorSettingsScreen", in: app, timeout: 20)
     }
 
     /**
-     Opens Text Display through Settings navigation.
+     Opens Text Display through Android's All Text Options route.
      *
      * - Parameter app: Running application under test.
      * - Returns: The root accessibility-identified Text Display screen element.
      * - Side effects:
-     *   - opens Settings and pushes the Text Display screen
+     *   - opens the reader All Text Options screen
      * - Failure modes:
      *   - fails when the Text Display screen never appears
      */
     func openTextDisplaySettings(in app: XCUIApplication) -> XCUIElement {
-        openSettingsDestination(
-            linkIdentifier: "settingsTextDisplayLink",
-            destinationIdentifier: "textDisplaySettingsScreen",
-            readinessIdentifiers: ["textDisplayFontFamilyButton"],
-            in: app,
-            destinationTimeout: 20
-        )
+        openAllTextOptions(in: app)
     }
 
     /**
@@ -1378,10 +1370,6 @@ extension AndBibleUITests {
             "Reading Progress Settings"
         case "settingsLabelsLink":
             "Labels"
-        case "settingsTextDisplayLink":
-            "Text Display"
-        case "settingsColorsLink":
-            "Colors"
         default:
             nil
         }

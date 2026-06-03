@@ -655,13 +655,13 @@ extension AndBibleUITests {
     }
 
     /**
-     Verifies that the color editor can be opened from Settings.
+     Verifies that the color editor can be opened from All Text Options.
      *
      * - Side effects:
-     *   - launches the app on the reader shell and opens Settings
-     *   - opens Colors from the settings screen
+     *   - launches the app on the reader shell and opens All Text Options
+     *   - opens Colors from the text-display settings screen
      * - Failure modes:
-     *   - fails if the Settings colors link is missing or never becomes hittable
+     *   - fails if the Text Options colors link is missing or never becomes hittable
      *   - fails if the color settings screen does not render after navigation completes
      */
     func testSettingsColorsLinkOpensColorEditor() {

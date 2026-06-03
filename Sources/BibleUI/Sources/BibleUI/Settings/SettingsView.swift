@@ -12,12 +12,12 @@ import UIKit
  Top-level application settings screen covering reader behavior, appearance, security, sync, and
  module-backed preference selection.
 
- The view mixes direct global `TextDisplaySettings` bindings with persisted Android-parity
- preferences stored through `SettingsStore` and `UserDefaults`-backed `AppStorage`.
+The view renders Android-parity application preferences backed by `SettingsStore` and
+`UserDefaults`-backed `AppStorage`.
 
  Data dependencies:
  - `modelContext` is used to load and persist Android-parity settings through `SettingsStore`
- - `displaySettings`, `nightMode`, and `nightModeMode` are shared global settings owned by the parent
+- `nightMode` and `nightModeMode` are shared global settings owned by the parent
  - `colorScheme` and `openURL` influence night-mode resolution and system-settings actions
 
  Side effects:
@@ -36,9 +36,6 @@ public struct SettingsView: View {
 
     /// URL opener used for system-settings actions.
     @Environment(\.openURL) private var openURL
-
-    /// Shared global text-display settings edited by nested settings screens.
-    @Binding var displaySettings: TextDisplaySettings
 
     /// Shared effective night-mode state used by the reader.
     @Binding var nightMode: Bool
@@ -321,20 +318,17 @@ public struct SettingsView: View {
      Creates the top-level settings screen bound to shared reader settings.
 
      - Parameters:
-       - displaySettings: Shared text-display settings edited by nested settings views.
        - nightMode: Shared effective night-mode state used by the reader.
        - nightModeMode: Shared persisted night-mode mode string.
        - readingProgressController: Optional reader controller used by Reading Progress Settings.
        - onSettingsChanged: Optional callback invoked when changes should refresh reader content.
      */
     public init(
-        displaySettings: Binding<TextDisplaySettings>,
         nightMode: Binding<Bool>,
         nightModeMode: Binding<String>,
         readingProgressController: BibleReaderController? = nil,
         onSettingsChanged: (() -> Void)? = nil
     ) {
-        self._displaySettings = displaySettings
         self._nightMode = nightMode
         self._nightModeMode = nightModeMode
         self.readingProgressController = readingProgressController
@@ -362,10 +356,6 @@ public struct SettingsView: View {
     private var settingsForm: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                if shouldShowFeaturesSection {
-                    featuresSettingsSection
-                }
-
                 if shouldShowDictionarySection {
                     dictionarySettingsSection
                 }
@@ -380,6 +370,10 @@ public struct SettingsView: View {
 
                 if shouldShowSecuritySection {
                     securitySettingsSection
+                }
+
+                if shouldShowFeaturesSection {
+                    featuresSettingsSection
                 }
 
                 if shouldShowAdvancedSection {
@@ -863,17 +857,33 @@ public struct SettingsView: View {
                     )
                 }
             }
-            if settingsSearchMatchesIdentifier("settingsVerseSelection", in: behaviorSettingsSearchEntries) {
-                Toggle(isOn: Binding(
-                    get: { displaySettings.enableVerseSelection ?? true },
-                    set: {
-                        displaySettings.enableVerseSelection = $0
-                        onSettingsChanged?()
+            if settingsSearchMatchesPreference(.nightModePref3, in: behaviorSettingsSearchEntries) {
+                Picker(selection: Binding(
+                        get: { Self.nightModePickerSelection(from: nightModeMode) },
+                        set: { newValue in
+                            nightModeMode = newValue
+                            let store = SettingsStore(modelContext: modelContext)
+                            store.setString(.nightModePref3, value: newValue)
+                            let manualNightMode = store.getBool("night_mode")
+                            nightMode = NightModeSettingsResolver.isNightMode(
+                                rawValue: newValue,
+                                manualNightMode: manualNightMode,
+                                systemIsDark: colorScheme == .dark
+                            )
+                            onSettingsChanged?()
+                        }
+                    )) {
+                    ForEach(NightModeSettingsResolver.availableModes, id: \.rawValue) { mode in
+                        Text(Self.nightModeModeTitle(mode)).tag(mode.rawValue)
                     }
-                )) {
+                } label: {
                     settingsRowLabel(
-                        preferenceKey: nil,
-                        title: String(localized: "verse_selection")
+                        preferenceKey: .nightModePref3,
+                        title: String(localized: "prefs_night_mode_title", defaultValue: "Night mode switching"),
+                        summary: String(
+                            localized: "prefs_night_mode_summary",
+                            defaultValue: "Whether to switch to night mode manually or via system setting. Manual switching can be done from the 3-dot options menu on the main screen."
+                        )
                     )
                 }
             }
@@ -1117,56 +1127,51 @@ public struct SettingsView: View {
     }
 
     /**
-     Builds the "Look & feel" section, including nested display editors and appearance toggles.
+     Builds Android's root "Look & feel" Application Preferences section.
+
+     Text display and color editors stay on the reader All Text Options route; this root section
+     mirrors the Android application-preference rows visible in production, such as language,
+     animation, window chrome, and one-tap action preferences.
      */
     @ViewBuilder
     private var lookAndFeelSection: some View {
         settingsPreferenceSection(String(localized: "prefs_display_customization_cat", defaultValue: "Look & feel")) {
-            if settingsSearchMatchesIdentifier("settingsTextDisplayLink", in: lookAndFeelSettingsSearchEntries) {
-                settingsNavigationLink(
-                    title: String(localized: "settings_text_display"),
-                    androidKey: "global_text_display_settings",
-                    accessibilityIdentifier: "settingsTextDisplayLink"
-                ) {
-                    TextDisplaySettingsView(settings: $displaySettings, onChange: onSettingsChanged)
-                }
-            }
-            if settingsSearchMatchesIdentifier("settingsColorsLink", in: lookAndFeelSettingsSearchEntries) {
-                settingsNavigationLink(
-                    title: String(localized: "settings_colors"),
-                    accessibilityIdentifier: "settingsColorsLink"
-                ) {
-                    ColorSettingsView(settings: $displaySettings, onChange: onSettingsChanged)
-                }
-            }
-            if settingsSearchMatchesPreference(.nightModePref3, in: lookAndFeelSettingsSearchEntries) {
-                Picker(selection: Binding(
-                        get: { Self.nightModePickerSelection(from: nightModeMode) },
-                        set: { newValue in
-                            nightModeMode = newValue
-                            let store = SettingsStore(modelContext: modelContext)
-                            store.setString(.nightModePref3, value: newValue)
-                            let manualNightMode = store.getBool("night_mode")
-                            nightMode = NightModeSettingsResolver.isNightMode(
-                                rawValue: newValue,
-                                manualNightMode: manualNightMode,
-                                systemIsDark: colorScheme == .dark
-                            )
-                            onSettingsChanged?()
-                        }
-                    )) {
-                    ForEach(NightModeSettingsResolver.availableModes, id: \.rawValue) { mode in
-                        Text(Self.nightModeModeTitle(mode)).tag(mode.rawValue)
+            if settingsSearchMatchesPreference(.localePref, in: lookAndFeelSettingsSearchEntries) {
+                Picker(selection: $selectedLanguage) {
+                    ForEach(Self.localeOptions) { lang in
+                        Text(Self.localizedLocaleOptionLabel(lang)).tag(lang.value)
                     }
                 } label: {
                     settingsRowLabel(
-                        preferenceKey: .nightModePref3,
-                        title: String(localized: "prefs_night_mode_title", defaultValue: "Night mode switching"),
+                        preferenceKey: .localePref,
+                        title: String(localized: "prefs_interface_locale_title", defaultValue: "Application language"),
                         summary: String(
-                            localized: "prefs_night_mode_summary",
-                            defaultValue: "Whether to switch to night mode manually or via system setting. Manual switching can be done from the 3-dot options menu on the main screen."
-                        )
+                            localized: "prefs_interface_locale_summary",
+                            defaultValue: "Select custom user interface language"
+                        ),
+                        detail: String(localized: "language_restart_required")
                     )
+                }
+                .onChange(of: selectedLanguage) { _, newValue in
+                    guard hasLoadedPreferences else { return }
+                    let normalized = Self.localeOptions.contains(where: { $0.value == newValue }) ? newValue : ""
+                    if normalized != selectedLanguage {
+                        selectedLanguage = normalized
+                        return
+                    }
+
+                    let store = SettingsStore(modelContext: modelContext)
+                    guard shouldPersistLanguageSelection(normalized, using: store) else {
+                        return
+                    }
+                    store.setString(.localePref, value: normalized)
+
+                    if let mapped = Self.appleLanguageCode(forLocalePrefValue: normalized) {
+                        UserDefaults.standard.set([mapped], forKey: "AppleLanguages")
+                    } else {
+                        UserDefaults.standard.removeObject(forKey: "AppleLanguages")
+                    }
+                    showRestartAlert = true
                 }
             }
             if settingsSearchMatchesPreference(.monochromeMode, in: lookAndFeelSettingsSearchEntries) {
@@ -1414,44 +1419,6 @@ public struct SettingsView: View {
                     )
                 }
                 .buttonStyle(.plain)
-            }
-            if settingsSearchMatchesPreference(.localePref, in: lookAndFeelSettingsSearchEntries) {
-                Picker(selection: $selectedLanguage) {
-                    ForEach(Self.localeOptions) { lang in
-                        Text(Self.localizedLocaleOptionLabel(lang)).tag(lang.value)
-                    }
-                } label: {
-                    settingsRowLabel(
-                        preferenceKey: .localePref,
-                        title: String(localized: "prefs_interface_locale_title", defaultValue: "Application language"),
-                        summary: String(
-                            localized: "prefs_interface_locale_summary",
-                            defaultValue: "Select custom user interface language"
-                        ),
-                        detail: String(localized: "language_restart_required")
-                    )
-                }
-                .onChange(of: selectedLanguage) { _, newValue in
-                    guard hasLoadedPreferences else { return }
-                    let normalized = Self.localeOptions.contains(where: { $0.value == newValue }) ? newValue : ""
-                    if normalized != selectedLanguage {
-                        selectedLanguage = normalized
-                        return
-                    }
-
-                    let store = SettingsStore(modelContext: modelContext)
-                    guard shouldPersistLanguageSelection(normalized, using: store) else {
-                        return
-                    }
-                    store.setString(.localePref, value: normalized)
-
-                    if let mapped = Self.appleLanguageCode(forLocalePrefValue: normalized) {
-                        UserDefaults.standard.set([mapped], forKey: "AppleLanguages")
-                    } else {
-                        UserDefaults.standard.removeObject(forKey: "AppleLanguages")
-                    }
-                    showRestartAlert = true
-                }
             }
         }
     }
@@ -1822,27 +1789,6 @@ public struct SettingsView: View {
                     defaultValue: "Use volume up/down to scroll Bible text"
                 )
             ),
-            .init(
-                identifier: "settingsVerseSelection",
-                title: String(localized: "verse_selection"),
-                keywords: ["application behavior", "selection"]
-            ),
-        ]
-    }
-
-    /// Search entries for appearance and global text-display preferences.
-    private var lookAndFeelSettingsSearchEntries: [AndBibleSettingsSearchEntry] {
-        [
-            .init(
-                identifier: "settingsTextDisplayLink",
-                title: String(localized: "settings_text_display"),
-                keywords: ["look and feel", "display", "font", "text"]
-            ),
-            .init(
-                identifier: "settingsColorsLink",
-                title: String(localized: "settings_colors"),
-                keywords: ["look and feel", "colors", "theme"]
-            ),
             preferenceSearchEntry(
                 .nightModePref3,
                 title: String(localized: "prefs_night_mode_title", defaultValue: "Night mode switching"),
@@ -1850,6 +1796,16 @@ public struct SettingsView: View {
                     localized: "prefs_night_mode_summary",
                     defaultValue: "Whether to switch to night mode manually or via system setting. Manual switching can be done from the 3-dot options menu on the main screen."
                 )
+            ),
+        ]
+    }
+
+    /// Search entries for appearance preferences shown in Android's root Application Preferences.
+    private var lookAndFeelSettingsSearchEntries: [AndBibleSettingsSearchEntry] {
+        [
+            preferenceSearchEntry(
+                .localePref,
+                title: String(localized: "prefs_interface_locale_title", defaultValue: "Application language")
             ),
             preferenceSearchEntry(
                 .monochromeMode,
@@ -1920,10 +1876,6 @@ public struct SettingsView: View {
                     localized: "prefs_in_window_gen_bookmark_modal_buttons_title",
                     defaultValue: "One-tap actions (Other)"
                 )
-            ),
-            preferenceSearchEntry(
-                .localePref,
-                title: String(localized: "prefs_interface_locale_title", defaultValue: "Application language")
             ),
         ]
     }
@@ -2319,10 +2271,6 @@ public struct SettingsView: View {
         if canOpenReadingProgressSettings {
             primaryLinks.append("settingsReadingProgressLink")
         }
-        primaryLinks.append(contentsOf: [
-            "settingsTextDisplayLink",
-            "settingsColorsLink",
-        ])
         let searchToken = isSettingsSearchActive ? "active" : "inactive"
         return "primaryLinks=\(primaryLinks.joined(separator: ","));adminFlows=readerActions;search=\(searchToken)"
     }

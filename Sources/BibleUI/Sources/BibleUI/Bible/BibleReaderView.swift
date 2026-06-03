@@ -828,11 +828,10 @@ public struct BibleReaderView: View {
         switch destination {
         case .settings:
             SettingsView(
-                displaySettings: $globalDisplaySettings,
                 nightMode: $nightMode,
                 nightModeMode: $nightModeMode,
                 readingProgressController: panePresentationController,
-                onSettingsChanged: applyGlobalDisplaySettingsChange
+                onSettingsChanged: applyApplicationPreferenceChange
             )
             #if os(iOS)
             .toolbar(.visible, for: .navigationBar)
@@ -2529,22 +2528,20 @@ public struct BibleReaderView: View {
     }
 
     /**
-     Persists app-level text-display defaults and refreshes reader controllers.
+     Refreshes reader controllers after root Application Preferences mutate app-level settings.
 
-     This mirrors Android's global text-display layer: application Settings edits the global
-     fallback, while workspace and window overrides remain separate scopes in the inheritance chain.
+     The root settings screen no longer edits global text-display defaults; it only changes
+     Android-parity application preferences such as display chrome, animation, and behavior flags.
+     Refreshing without writing `globalDisplaySettings` keeps text-display persistence scoped to the
+     dedicated Text Options screens while still pushing updated app preferences into visible panes.
 
      - Side effects:
-       - writes `globalDisplaySettings` through `SettingsStore`
-       - pushes each visible reader its own resolved display settings
-       - reloads behavior preferences so non-display settings changed from the same Settings screen
-         stay in sync
-     - Failure modes: Settings-store persistence failures are intentionally swallowed by
-       `SettingsStore`.
+       - pushes each visible reader its resolved display settings and app preference payload
+       - reloads behavior preferences mirrored by the SwiftUI reader shell
+     - Failure modes: Reader refresh failures are handled by the controller update paths; preference
+       reloads fall back through `SettingsStore` defaults.
      */
-    private func applyGlobalDisplaySettingsChange() {
-        let store = SettingsStore(modelContext: modelContext)
-        store.setGlobalTextDisplaySettings(globalDisplaySettings)
+    private func applyApplicationPreferenceChange() {
         refreshVisibleControllerDisplaySettings()
         syncActiveDisplaySettings()
         reloadBehaviorPreferences()
