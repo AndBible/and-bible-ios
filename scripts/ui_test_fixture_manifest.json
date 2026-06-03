@@ -35,6 +35,7 @@
   "AndBibleUITests/AndBibleUITests/testSettingsImportExportFullBackupPresentsShareSheet": "baseline",
   "AndBibleUITests/AndBibleUITests/testSettingsImportExportImportPresentsFilePickerState": "baseline",
   "AndBibleUITests/AndBibleUITests/testSettingsReadingProgressLinkOpensReadingProgressSettings": "baseline",
+  "AndBibleUITests/AndBibleUITests/testApplicationPreferencesRenderAndroidListPreferenceRowsWithoutInlineValues": "baseline",
   "AndBibleUITests/AndBibleUITests/testSettingsScreenShowsApplicationPreferenceShortcuts": "baseline",
   "AndBibleUITests/AndBibleUITests/testSettingsSyncLinkOpensSyncSettings": "baseline",
   "AndBibleUITests/AndBibleUITests/testAllTextOptionsOpensReaderTextDisplaySurface": "baseline",

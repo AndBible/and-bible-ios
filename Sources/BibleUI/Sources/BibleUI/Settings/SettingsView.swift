@@ -2286,7 +2286,8 @@ public struct SettingsView: View {
      Android `ListPreference` rows render as compact title/summary rows and open a chooser when
      tapped. SwiftUI's default `Picker` style expands selected values inline inside a `ScrollView`,
      which creates large blue standalone labels and breaks the Android settings rhythm. This helper
-     keeps the row visually stable while still using native menu affordances and checkmarks.
+     keeps the row visually stable while still using native menu affordances and checkmarks, and
+     exposes one stable accessibility identifier so UI tests can detect accidental picker reverts.
 
      - Parameters:
        - preferenceKey: Android parity key used for icon lookup and accessibility context.
@@ -2339,6 +2340,7 @@ public struct SettingsView: View {
         }
         .buttonStyle(.plain)
         .disabled(options.isEmpty)
+        .accessibilityIdentifier("settingsListPreferenceMenu::\(preferenceKey.rawValue)")
     }
 
     /**
