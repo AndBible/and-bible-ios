@@ -5,6 +5,30 @@ import Foundation
 /// Type alias for UUID-based identifiers matching Android's IdType.
 public typealias IdType = String
 
+private extension KeyedEncodingContainer {
+    /**
+     Encodes an optional bridge field while preserving an explicit JSON `null`.
+
+     The Vue client object contract distinguishes omitted fields from nullable fields for several
+     reader payloads. Swift's synthesized `Encodable` uses `encodeIfPresent` for optionals, which
+     drops the key entirely; bridge payload types call this helper for fields that TypeScript marks
+     as nullable so the native wire shape stays aligned with Android and existing hand-built JSON.
+
+     - Parameters:
+       - value: Optional value to encode.
+       - key: Coding key whose entry must be present in the emitted JSON.
+     - Side effects: writes into the encoder's keyed container.
+     - Failure modes: rethrows encoding failures from the wrapped value.
+     */
+    mutating func encodeNullable<T: Encodable>(_ value: T?, forKey key: Key) throws {
+        if let value {
+            try encode(value, forKey: key)
+        } else {
+            try encodeNil(forKey: key)
+        }
+    }
+}
+
 // MARK: - OSIS Fragment
 
 /// A fragment of Bible text with metadata, matching TypeScript OsisFragment.
@@ -76,6 +100,12 @@ public struct OsisFeatures: Codable, Sendable {
     public var type: String? // "hebrew-and-greek", "hebrew", "greek"
     /// Key used by the client when rendering per-word feature affordances.
     public var keyName: String?
+
+    /// Creates an optional OSIS feature payload for bridge fragments.
+    public init(type: String? = nil, keyName: String? = nil) {
+        self.type = type
+        self.keyName = keyName
+    }
 }
 
 // MARK: - Bookmark Data (for bridge serialization)
@@ -127,6 +157,27 @@ public struct BookmarkStyleData: Codable, Sendable {
         self.hideStyleWholeVerse = hideStyleWholeVerse
         self.customIcon = customIcon
     }
+
+    /**
+     Encodes every bookmark-style key expected by the web client, including nullable icon state.
+
+     - Parameter encoder: Destination encoder for bridge JSON.
+     - Side effects: writes this style into the encoder.
+     - Failure modes: rethrows encoder failures.
+     */
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(color, forKey: .color)
+        try container.encode(isSpeak, forKey: .isSpeak)
+        try container.encode(isParagraphBreak, forKey: .isParagraphBreak)
+        try container.encode(underline, forKey: .underline)
+        try container.encode(underlineWholeVerse, forKey: .underlineWholeVerse)
+        try container.encode(markerStyle, forKey: .markerStyle)
+        try container.encode(markerStyleWholeVerse, forKey: .markerStyleWholeVerse)
+        try container.encode(hideStyle, forKey: .hideStyle)
+        try container.encode(hideStyleWholeVerse, forKey: .hideStyleWholeVerse)
+        try container.encodeNullable(customIcon, forKey: .customIcon)
+    }
 }
 
 /// Label data for bridge serialization, matching TypeScript Label.
@@ -139,6 +190,14 @@ public struct LabelData: Codable, Sendable {
     public var style: BookmarkStyleData
     /// Whether the label is user-visible rather than an internal/system label.
     public var isRealLabel: Bool
+
+    /// Creates a label payload matching the reader client's label contract.
+    public init(id: IdType, name: String, style: BookmarkStyleData, isRealLabel: Bool) {
+        self.id = id
+        self.name = name
+        self.style = style
+        self.isRealLabel = isRealLabel
+    }
 }
 
 /// Edit action data matching TypeScript editAction.
@@ -147,6 +206,25 @@ public struct EditActionData: Codable, Sendable {
     public var mode: String? // "APPEND", "PREPEND", null
     /// Optional text payload used by the selected edit mode.
     public var content: String?
+
+    /// Creates edit-action metadata for a bookmark payload.
+    public init(mode: String? = nil, content: String? = nil) {
+        self.mode = mode
+        self.content = content
+    }
+
+    /**
+     Encodes both edit-action keys, preserving `null` for unset mode/content.
+
+     - Parameter encoder: Destination encoder for bridge JSON.
+     - Side effects: writes this edit-action object into the encoder.
+     - Failure modes: rethrows encoder failures.
+     */
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeNullable(mode, forKey: .mode)
+        try container.encodeNullable(content, forKey: .content)
+    }
 }
 
 /// Base bookmark-to-label relationship data.
@@ -163,6 +241,23 @@ public struct BookmarkToLabelData: Codable, Sendable {
     public var expandContent: Bool
     /// Concrete junction type name understood by the web client.
     public var type: String // "BibleBookmarkToLabel" or "GenericBookmarkToLabel"
+
+    /// Creates a bookmark-to-label junction payload for StudyPad and bookmark label updates.
+    public init(
+        bookmarkId: IdType,
+        labelId: IdType,
+        orderNumber: Int,
+        indentLevel: Int,
+        expandContent: Bool,
+        type: String
+    ) {
+        self.bookmarkId = bookmarkId
+        self.labelId = labelId
+        self.orderNumber = orderNumber
+        self.indentLevel = indentLevel
+        self.expandContent = expandContent
+        self.type = type
+    }
 }
 
 /// Bible bookmark data for bridge serialization, matching TypeScript BibleBookmark.
@@ -193,8 +288,8 @@ public struct BibleBookmarkData: Codable, Sendable {
     public var fullText: String
     /// Expanded junction rows used by StudyPad and label management UIs.
     public var bookmarkToLabels: [BookmarkToLabelData]
-    /// Identifier of the primary label controlling styling precedence.
-    public var primaryLabelId: IdType
+    /// Identifier of the primary label controlling styling precedence, or `nil` when unset.
+    public var primaryLabelId: IdType?
     /// Last modification timestamp in milliseconds since 1970.
     public var lastUpdatedOn: Double
     /// Optional user-authored note.
@@ -222,6 +317,103 @@ public struct BibleBookmarkData: Codable, Sendable {
     public var v11n: String
     /// Optional rendered fragment attached for inline bookmark display.
     public var osisFragment: OsisFragment?
+
+    /// Creates a Bible bookmark bridge payload matching the TypeScript client object.
+    public init(
+        id: IdType,
+        type: String,
+        hashCode: Int,
+        ordinalRange: [Int],
+        offsetRange: [Int?]?,
+        labels: [IdType],
+        bookInitials: String,
+        bookName: String,
+        bookAbbreviation: String,
+        createdAt: Double,
+        text: String,
+        fullText: String,
+        bookmarkToLabels: [BookmarkToLabelData],
+        primaryLabelId: IdType?,
+        lastUpdatedOn: Double,
+        notes: String?,
+        hasNote: Bool,
+        wholeVerse: Bool,
+        customIcon: String?,
+        editAction: EditActionData?,
+        osisRef: String,
+        originalOrdinalRange: [Int],
+        verseRange: String,
+        verseRangeOnlyNumber: String,
+        verseRangeAbbreviated: String,
+        v11n: String,
+        osisFragment: OsisFragment?
+    ) {
+        self.id = id
+        self.type = type
+        self.hashCode = hashCode
+        self.ordinalRange = ordinalRange
+        self.offsetRange = offsetRange
+        self.labels = labels
+        self.bookInitials = bookInitials
+        self.bookName = bookName
+        self.bookAbbreviation = bookAbbreviation
+        self.createdAt = createdAt
+        self.text = text
+        self.fullText = fullText
+        self.bookmarkToLabels = bookmarkToLabels
+        self.primaryLabelId = primaryLabelId
+        self.lastUpdatedOn = lastUpdatedOn
+        self.notes = notes
+        self.hasNote = hasNote
+        self.wholeVerse = wholeVerse
+        self.customIcon = customIcon
+        self.editAction = editAction
+        self.osisRef = osisRef
+        self.originalOrdinalRange = originalOrdinalRange
+        self.verseRange = verseRange
+        self.verseRangeOnlyNumber = verseRangeOnlyNumber
+        self.verseRangeAbbreviated = verseRangeAbbreviated
+        self.v11n = v11n
+        self.osisFragment = osisFragment
+    }
+
+    /**
+     Encodes the bookmark object with Android/Vue nullable keys preserved.
+
+     - Parameter encoder: Destination encoder for bridge JSON.
+     - Side effects: writes this bookmark into the encoder.
+     - Failure modes: rethrows encoder failures.
+     */
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(type, forKey: .type)
+        try container.encode(hashCode, forKey: .hashCode)
+        try container.encode(ordinalRange, forKey: .ordinalRange)
+        try container.encodeNullable(offsetRange, forKey: .offsetRange)
+        try container.encode(labels, forKey: .labels)
+        try container.encode(bookInitials, forKey: .bookInitials)
+        try container.encode(bookName, forKey: .bookName)
+        try container.encode(bookAbbreviation, forKey: .bookAbbreviation)
+        try container.encode(createdAt, forKey: .createdAt)
+        try container.encode(text, forKey: .text)
+        try container.encode(fullText, forKey: .fullText)
+        try container.encode(bookmarkToLabels, forKey: .bookmarkToLabels)
+        try container.encodeNullable(primaryLabelId, forKey: .primaryLabelId)
+        try container.encode(lastUpdatedOn, forKey: .lastUpdatedOn)
+        try container.encodeNullable(notes, forKey: .notes)
+        try container.encode(hasNote, forKey: .hasNote)
+        try container.encode(wholeVerse, forKey: .wholeVerse)
+        try container.encodeNullable(customIcon, forKey: .customIcon)
+        try container.encodeNullable(editAction, forKey: .editAction)
+        try container.encode(osisRef, forKey: .osisRef)
+        try container.encode(originalOrdinalRange, forKey: .originalOrdinalRange)
+        try container.encode(verseRange, forKey: .verseRange)
+        try container.encode(verseRangeOnlyNumber, forKey: .verseRangeOnlyNumber)
+        try container.encode(verseRangeAbbreviated, forKey: .verseRangeAbbreviated)
+        try container.encode(v11n, forKey: .v11n)
+        try container.encodeNullable(osisFragment, forKey: .osisFragment)
+    }
 }
 
 /// Generic bookmark data for bridge serialization, matching TypeScript GenericBookmark.
@@ -252,8 +444,8 @@ public struct GenericBookmarkData: Codable, Sendable {
     public var fullText: String
     /// Expanded junction rows used by StudyPad and label management UIs.
     public var bookmarkToLabels: [BookmarkToLabelData]
-    /// Identifier of the primary label controlling styling precedence.
-    public var primaryLabelId: IdType
+    /// Identifier of the primary label controlling styling precedence, or `nil` when unset.
+    public var primaryLabelId: IdType?
     /// Last modification timestamp in milliseconds since 1970.
     public var lastUpdatedOn: Double
     /// Optional user-authored note.
@@ -273,6 +465,91 @@ public struct GenericBookmarkData: Codable, Sendable {
     public var keyName: String
     /// HTML/text snippet with the bookmarked segment emphasized.
     public var highlightedText: String
+
+    /// Creates a generic bookmark bridge payload matching the TypeScript client object.
+    public init(
+        id: IdType,
+        type: String,
+        hashCode: Int,
+        ordinalRange: [Int],
+        offsetRange: [Int?]?,
+        labels: [IdType],
+        bookInitials: String,
+        bookName: String,
+        bookAbbreviation: String,
+        createdAt: Double,
+        text: String,
+        fullText: String,
+        bookmarkToLabels: [BookmarkToLabelData],
+        primaryLabelId: IdType?,
+        lastUpdatedOn: Double,
+        notes: String?,
+        hasNote: Bool,
+        wholeVerse: Bool,
+        customIcon: String?,
+        editAction: EditActionData?,
+        key: String,
+        keyName: String,
+        highlightedText: String
+    ) {
+        self.id = id
+        self.type = type
+        self.hashCode = hashCode
+        self.ordinalRange = ordinalRange
+        self.offsetRange = offsetRange
+        self.labels = labels
+        self.bookInitials = bookInitials
+        self.bookName = bookName
+        self.bookAbbreviation = bookAbbreviation
+        self.createdAt = createdAt
+        self.text = text
+        self.fullText = fullText
+        self.bookmarkToLabels = bookmarkToLabels
+        self.primaryLabelId = primaryLabelId
+        self.lastUpdatedOn = lastUpdatedOn
+        self.notes = notes
+        self.hasNote = hasNote
+        self.wholeVerse = wholeVerse
+        self.customIcon = customIcon
+        self.editAction = editAction
+        self.key = key
+        self.keyName = keyName
+        self.highlightedText = highlightedText
+    }
+
+    /**
+     Encodes the generic bookmark object with Android/Vue nullable keys preserved.
+
+     - Parameter encoder: Destination encoder for bridge JSON.
+     - Side effects: writes this bookmark into the encoder.
+     - Failure modes: rethrows encoder failures.
+     */
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(type, forKey: .type)
+        try container.encode(hashCode, forKey: .hashCode)
+        try container.encode(ordinalRange, forKey: .ordinalRange)
+        try container.encodeNullable(offsetRange, forKey: .offsetRange)
+        try container.encode(labels, forKey: .labels)
+        try container.encode(bookInitials, forKey: .bookInitials)
+        try container.encode(bookName, forKey: .bookName)
+        try container.encode(bookAbbreviation, forKey: .bookAbbreviation)
+        try container.encode(createdAt, forKey: .createdAt)
+        try container.encode(text, forKey: .text)
+        try container.encode(fullText, forKey: .fullText)
+        try container.encode(bookmarkToLabels, forKey: .bookmarkToLabels)
+        try container.encodeNullable(primaryLabelId, forKey: .primaryLabelId)
+        try container.encode(lastUpdatedOn, forKey: .lastUpdatedOn)
+        try container.encodeNullable(notes, forKey: .notes)
+        try container.encode(hasNote, forKey: .hasNote)
+        try container.encode(wholeVerse, forKey: .wholeVerse)
+        try container.encodeNullable(customIcon, forKey: .customIcon)
+        try container.encodeNullable(editAction, forKey: .editAction)
+        try container.encode(key, forKey: .key)
+        try container.encode(keyName, forKey: .keyName)
+        try container.encode(highlightedText, forKey: .highlightedText)
+    }
 }
 
 // MARK: - StudyPad Data
@@ -293,6 +570,25 @@ public struct StudyPadTextItemData: Codable, Sendable {
     public var orderNumber: Int
     /// Nesting depth within the StudyPad tree.
     public var indentLevel: Int
+
+    /// Creates a StudyPad text item payload matching the reader client's journal item contract.
+    public init(
+        id: IdType,
+        type: String,
+        hashCode: Int,
+        labelId: IdType,
+        text: String,
+        orderNumber: Int,
+        indentLevel: Int
+    ) {
+        self.id = id
+        self.type = type
+        self.hashCode = hashCode
+        self.labelId = labelId
+        self.text = text
+        self.orderNumber = orderNumber
+        self.indentLevel = indentLevel
+    }
 }
 
 // MARK: - Selection Query

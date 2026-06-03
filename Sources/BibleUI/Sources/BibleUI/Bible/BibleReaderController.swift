@@ -2484,8 +2484,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         }
 
         // Send the bookmark to Vue.js
-        let json = buildBookmarkJSON(bookmark)
-        bridge.emit(event: "add_or_update_bookmarks", data: "[\(json)]")
+        bridge.emit(event: "add_or_update_bookmarks", data: [buildBookmarkJSON(bookmark)])
 
         // Open the bookmark modal (matching Android's makeBookmark behavior):
         // - New bookmarks always open with label assignment
@@ -2551,8 +2550,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         )
 
         // Send the bookmark to Vue.js and open modal
-        let json = buildGenericBookmarkJSONForStudyPad(bookmark)
-        bridge.emit(event: "add_or_update_bookmarks", data: "[\(json)]")
+        bridge.emit(event: "add_or_update_bookmarks", data: [buildGenericBookmarkJSONForStudyPad(bookmark)])
 
         let bmId = bookmark.id.uuidString
         if addNote {
@@ -2573,8 +2571,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             book: currentBook
         )
         sendLabelsToVueJS()
-        let json = buildBookmarkJSON(bookmark)
-        bridge.emit(event: "add_or_update_bookmarks", data: "[\(json)]")
+        bridge.emit(event: "add_or_update_bookmarks", data: [buildBookmarkJSON(bookmark)])
     }
 
     /// Creates a generic paragraph-break bookmark requested from the web client.
@@ -2588,8 +2585,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             endOrdinal: endOrdinal
         )
         sendLabelsToVueJS()
-        let json = buildGenericBookmarkJSONForStudyPad(bookmark)
-        bridge.emit(event: "add_or_update_bookmarks", data: "[\(json)]")
+        bridge.emit(event: "add_or_update_bookmarks", data: [buildGenericBookmarkJSONForStudyPad(bookmark)])
     }
 
     /**
@@ -2699,10 +2695,15 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         service.updateStudyPadTextEntryText(id: entry.id, text: text)
         studyPadMutationRevision += 1
         let updatedEntry = service.studyPadEntry(id: entry.id) ?? entry
-        let entryJSON = buildStudyPadEntryJSON(updatedEntry)
-        bridge.emit(event: "add_or_update_study_pad", data: """
-        {"studyPadTextEntry":\(entryJSON),"bookmarkToLabelsOrdered":[],"genericBookmarkToLabelsOrdered":[],"studyPadItemsOrdered":[]}
-        """)
+        bridge.emit(
+            event: "add_or_update_study_pad",
+            data: StudyPadUpdatePayload(
+                studyPadTextEntry: buildStudyPadEntryJSON(updatedEntry),
+                bookmarkToLabelsOrdered: [],
+                genericBookmarkToLabelsOrdered: [],
+                studyPadItemsOrdered: []
+            )
+        )
         return true
     }
 
@@ -2747,8 +2748,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     public func refreshBookmarkInVueJS(bookmarkId: UUID) {
         guard let service = bookmarkService,
               let bookmark = service.bibleBookmark(id: bookmarkId) else { return }
-        let json = buildBookmarkJSON(bookmark)
-        bridge.emit(event: "add_or_update_bookmarks", data: "[\(json)]")
+        bridge.emit(event: "add_or_update_bookmarks", data: [buildBookmarkJSON(bookmark)])
         sendLabelsToVueJS()
         // Re-send config to update favouriteLabels in Vue.js appSettings
         bridge.emit(event: "set_config", data: buildConfigJSON())
@@ -2914,10 +2914,15 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
         // Emit update back to Vue.js
         if let entry = service.studyPadEntry(id: uuid) {
-            let entryJSON = buildStudyPadEntryJSON(entry)
-            bridge.emit(event: "add_or_update_study_pad", data: """
-            {"studyPadTextEntry":\(entryJSON),"bookmarkToLabelsOrdered":[],"genericBookmarkToLabelsOrdered":[],"studyPadItemsOrdered":[]}
-            """)
+            bridge.emit(
+                event: "add_or_update_study_pad",
+                data: StudyPadUpdatePayload(
+                    studyPadTextEntry: buildStudyPadEntryJSON(entry),
+                    bookmarkToLabelsOrdered: [],
+                    genericBookmarkToLabelsOrdered: [],
+                    studyPadItemsOrdered: []
+                )
+            )
         }
     }
 
@@ -2961,13 +2966,15 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         let gbtls = service.genericBookmarkToLabels(labelId: lblId)
         let entries = service.studyPadEntries(labelId: lblId)
 
-        let btlsJSON = btls.compactMap { buildBibleBookmarkToLabelJSON($0) }.joined(separator: ",")
-        let gbtlsJSON = gbtls.compactMap { buildGenericBookmarkToLabelJSON($0) }.joined(separator: ",")
-        let entriesJSON = entries.map { buildStudyPadEntryJSON($0) }.joined(separator: ",")
-
-        bridge.emit(event: "add_or_update_study_pad", data: """
-        {"studyPadTextEntry":null,"bookmarkToLabelsOrdered":[\(btlsJSON)],"genericBookmarkToLabelsOrdered":[\(gbtlsJSON)],"studyPadItemsOrdered":[\(entriesJSON)]}
-        """)
+        bridge.emit(
+            event: "add_or_update_study_pad",
+            data: StudyPadUpdatePayload(
+                studyPadTextEntry: nil,
+                bookmarkToLabelsOrdered: btls.compactMap { buildBibleBookmarkToLabelJSON($0) },
+                genericBookmarkToLabelsOrdered: gbtls.compactMap { buildGenericBookmarkToLabelJSON($0) },
+                studyPadItemsOrdered: entries.map { buildStudyPadEntryJSON($0) }
+            )
+        )
     }
 
     /**
@@ -2993,8 +3000,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
         // Emit update
         if let btl = service.bibleBookmarkToLabel(bookmarkId: bmId, labelId: lblId) {
-            guard let btlJSON = buildBibleBookmarkToLabelJSON(btl) else { return }
-            bridge.emit(event: "add_or_update_bookmark_to_label", data: btlJSON)
+            guard let btlPayload = buildBibleBookmarkToLabelJSON(btl) else { return }
+            bridge.emit(event: "add_or_update_bookmark_to_label", data: btlPayload)
         }
     }
 
@@ -3021,8 +3028,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
         // Emit update
         if let gbtl = service.genericBookmarkToLabel(bookmarkId: bmId, labelId: lblId) {
-            guard let gbtlJSON = buildGenericBookmarkToLabelJSON(gbtl) else { return }
-            bridge.emit(event: "add_or_update_bookmark_to_label", data: gbtlJSON)
+            guard let gbtlPayload = buildGenericBookmarkToLabelJSON(gbtl) else { return }
+            bridge.emit(event: "add_or_update_bookmark_to_label", data: gbtlPayload)
         }
     }
 
@@ -3050,8 +3057,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
         // Emit updated bookmark
         if let bookmark = service.bibleBookmark(id: uuid) {
-            let json = buildBookmarkJSON(bookmark)
-            bridge.emit(event: "add_or_update_bookmarks", data: "[\(json)]")
+            bridge.emit(event: "add_or_update_bookmarks", data: [buildBookmarkJSON(bookmark)])
         }
     }
 
@@ -3832,25 +3838,25 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         // Get bookmarks with notes for this chapter
         let bookmarks = currentChapterMyNotesBookmarks()
 
-        // Build the MyNotesDocument JSON (type: "notes")
-        let bookmarksJSON = bookmarks.isEmpty ? "[]" :
-            "[" + bookmarks.map { buildBookmarkJSONForMyNotes($0) }.joined(separator: ",") + "]"
-
         let verseRange = "\(currentBook) \(currentChapter):1-\(verseCount)"
         let docId = "\(osisBookId).\(currentChapter).1-\(osisBookId).\(currentChapter).\(verseCount)"
 
-        let document = """
-        {"id":"\(docId)","type":"notes","bookmarks":\(bookmarksJSON),"verseRange":"\(verseRange)","ordinalRange":[\(range.start),\(range.end)]}
-        """
+        let document = MyNotesDocumentPayload(
+            id: docId,
+            type: "notes",
+            bookmarks: bookmarks.map { buildBookmarkJSONForMyNotes($0) },
+            verseRange: verseRange,
+            ordinalRange: [range.start, range.end]
+        )
 
         // Send to Vue.js using the same sequence as loadCurrentChapter
         bridge.emit(event: "clear_document")
         sendLabelsToVueJS()
         bridge.emit(event: "add_documents", data: document)
-        let jumpToOrdinalJSON = jumpToOrdinal.map(String.init) ?? "null"
-        bridge.emit(event: "setup_content", data: """
-        {"jumpToOrdinal":\(jumpToOrdinalJSON),"jumpToAnchor":null,"jumpToId":null,"topOffset":0,"bottomOffset":0}
-        """)
+        bridge.emit(
+            event: "setup_content",
+            data: ReaderSetupContentPayload(jumpToOrdinal: jumpToOrdinal)
+        )
 
         setRenderedContentState(
             category: .bible,
@@ -3934,22 +3940,21 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         let genericBtls = service.genericBookmarkToLabels(labelId: labelId)
         let entries = service.studyPadEntries(labelId: labelId)
 
-        // Build JSON arrays
-        let bookmarksJSON = bibleBookmarks.isEmpty ? "[]" :
-            "[" + bibleBookmarks.map { buildBookmarkJSONForStudyPad($0) }.joined(separator: ",") + "]"
-        let genericBookmarksJSON = genericBookmarks.isEmpty ? "[]" :
-            "[" + genericBookmarks.map { buildGenericBookmarkJSONForStudyPad($0) }.joined(separator: ",") + "]"
-        let btlsJSON = bibleBtls.isEmpty ? "[]" :
-            "[" + bibleBtls.compactMap { buildBibleBookmarkToLabelJSON($0) }.joined(separator: ",") + "]"
-        let gbtlsJSON = genericBtls.isEmpty ? "[]" :
-            "[" + genericBtls.compactMap { buildGenericBookmarkToLabelJSON($0) }.joined(separator: ",") + "]"
-        let entriesJSON = entries.isEmpty ? "[]" :
-            "[" + entries.map { buildStudyPadEntryJSON($0) }.joined(separator: ",") + "]"
-        let labelJSON = buildLabelJSON(label)
+        guard let labelData = buildLabelData(label) else {
+            logger.warning("loadStudyPadDocument: label deleted before serialization for \(labelId)")
+            return
+        }
 
-        let document = """
-        {"id":"journal_\(labelId.uuidString)","type":"journal","label":\(labelJSON),"bookmarks":\(bookmarksJSON),"genericBookmarks":\(genericBookmarksJSON),"bookmarkToLabels":\(btlsJSON),"genericBookmarkToLabels":\(gbtlsJSON),"journalTextEntries":\(entriesJSON)}
-        """
+        let document = StudyPadDocumentPayload(
+            id: "journal_\(labelId.uuidString)",
+            type: "journal",
+            label: labelData,
+            bookmarks: bibleBookmarks.map { buildBookmarkJSONForStudyPad($0) },
+            genericBookmarks: genericBookmarks.map { buildGenericBookmarkJSONForStudyPad($0) },
+            bookmarkToLabels: bibleBtls.compactMap { buildBibleBookmarkToLabelJSON($0) },
+            genericBookmarkToLabels: genericBtls.compactMap { buildGenericBookmarkToLabelJSON($0) },
+            journalTextEntries: entries.map { buildStudyPadEntryJSON($0) }
+        )
 
         // Send to Vue.js
         bridge.emit(event: "clear_document")
@@ -3957,10 +3962,10 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         bridge.emit(event: "add_documents", data: document)
 
         // Setup content with optional jump target
-        let jumpToId = bookmarkId.map { "\"\($0.uuidString)\"" } ?? "null"
-        bridge.emit(event: "setup_content", data: """
-        {"jumpToOrdinal":null,"jumpToAnchor":null,"jumpToId":\(jumpToId),"topOffset":0,"bottomOffset":0}
-        """)
+        bridge.emit(
+            event: "setup_content",
+            data: ReaderSetupContentPayload(jumpToId: bookmarkId?.uuidString)
+        )
 
         setRenderedContentState(
             category: .bible,
@@ -4359,7 +4364,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      */
     func buildStrongsMultiDocJSON(strongs: [String], robinson: [String], stateJSON: String? = nil) -> String? {
         logger.info("buildStrongsMultiDocJSON: strongs=\(strongs), robinson=\(robinson), swordManager=\(self.swordManager == nil ? "nil" : "alive")")
-        var fragments: [(xml: String, key: String, keyName: String, bookInitials: String, bookAbbreviation: String, features: String)] = []
+        var fragments: [(xml: String, key: String, keyName: String, bookInitials: String, bookAbbreviation: String, features: OsisFeatures)] = []
 
         for num in strongs {
             let lexModules = findAllLexiconModules(for: num)
@@ -4377,7 +4382,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
                         renderedText: lookup.renderedText,
                         strongsLinkPrefix: Self.strongsLinkPrefix(for: num)
                     )
-                    let featuresJSON = "{\"type\":\"\(featureType)\",\"keyName\":\"\(keyName)\"}"
+                    let features = OsisFeatures(type: featureType, keyName: keyName)
 
                     fragments.append((
                         xml: xml,
@@ -4385,7 +4390,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
                         keyName: keyName,
                         bookInitials: mod.info.name,
                         bookAbbreviation: moduleDisplayLabel(mod),
-                        features: featuresJSON
+                        features: features
                     ))
                 }
             }
@@ -4409,7 +4414,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
                             keyName: code,
                             bookInitials: mod.info.name,
                             bookAbbreviation: moduleDisplayLabel(mod),
-                            features: "{}"
+                            features: OsisFeatures()
                         ))
                     }
                 }
@@ -4438,10 +4443,10 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
      Android falls back to a synthetic dictionary document with a download link instead of leaving
      the user with an enabled Strong's UI and no actionable destination.
-     */
+    */
     private func missingStrongsDictionaryFragment(
         for strongsNumber: String
-    ) -> (xml: String, key: String, keyName: String, bookInitials: String, bookAbbreviation: String, features: String) {
+    ) -> (xml: String, key: String, keyName: String, bookInitials: String, bookAbbreviation: String, features: OsisFeatures) {
         let isHebrew = Self.isHebrewStrongsNumber(strongsNumber)
         let moduleName = isHebrew ? "StrongsHebrew" : "StrongsGreek"
         let featureType = isHebrew ? "hebrew" : "greek"
@@ -4475,7 +4480,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             keyName: keyName,
             bookInitials: moduleName,
             bookAbbreviation: moduleName,
-            features: "{\"type\":\"\(featureType)\",\"keyName\":\"\(keyName)\"}"
+            features: OsisFeatures(type: featureType, keyName: keyName)
         )
     }
 
@@ -4696,35 +4701,55 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         return mutable as String
     }
 
-    /// Build a MultiFragmentDocument JSON string for rendering in Vue.js document views.
+    /**
+     Build a typed MultiFragmentDocument JSON string for rendering in Vue.js document views.
+
+     - Parameters:
+       - fragments: Dictionary fragments to project into Vue `OsisFragment` values.
+       - contentType: Optional document content type such as `strongs`.
+       - stateJSON: Optional saved Vue state JSON to attach to the document.
+     - Returns: Serialized bridge JSON, or `{}` if typed encoding unexpectedly fails.
+     - Side effects: none.
+     - Failure modes: logs and returns `{}` when the payload cannot be encoded.
+     */
     private func buildMultiFragmentJSON(
-        fragments: [(xml: String, key: String, keyName: String, bookInitials: String, bookAbbreviation: String, features: String)],
+        fragments: [(xml: String, key: String, keyName: String, bookInitials: String, bookAbbreviation: String, features: OsisFeatures)],
         contentType: String? = nil,
         stateJSON: String? = nil
     ) -> String {
         let id = "strongs-multi-\(UUID().uuidString)"
-        var osisFragmentsJSON: [String] = []
-
-        for frag in fragments {
-            let escapedXml = frag.xml
-                .replacingOccurrences(of: "\\", with: "\\\\")
-                .replacingOccurrences(of: "\"", with: "\\\"")
-                .replacingOccurrences(of: "\n", with: "\\n")
-                .replacingOccurrences(of: "\r", with: "")
-            let escapedKey = frag.key.replacingOccurrences(of: "\"", with: "\\\"")
-            let escapedKeyName = frag.keyName.replacingOccurrences(of: "\"", with: "\\\"")
-            let escapedInitials = frag.bookInitials.replacingOccurrences(of: "\"", with: "\\\"")
-            let escapedAbbrev = frag.bookAbbreviation.replacingOccurrences(of: "\"", with: "\\\"")
-
-            osisFragmentsJSON.append("""
-            {"xml":"\(escapedXml)","key":"\(escapedKey)","keyName":"\(escapedKeyName)","v11n":"KJVA","bookCategory":"DICTIONARY","bookInitials":"\(escapedInitials)","bookAbbreviation":"\(escapedAbbrev)","osisRef":"\(escapedKeyName)","isNewTestament":false,"features":\(frag.features),"ordinalRange":[0,0],"language":"en","direction":"ltr"}
-            """)
+        let osisFragments = fragments.map { frag in
+            OsisFragment(
+                xml: frag.xml.replacingOccurrences(of: "\r", with: ""),
+                key: frag.key,
+                keyName: frag.keyName,
+                v11n: "KJVA",
+                bookCategory: DocumentCategory.dictionary.rawValue,
+                bookInitials: frag.bookInitials,
+                bookAbbreviation: frag.bookAbbreviation,
+                osisRef: frag.keyName,
+                isNewTestament: false,
+                features: frag.features,
+                ordinalRange: [0, 0],
+                language: "en",
+                direction: "ltr"
+            )
         }
 
-        let escapedContentType = contentType?.replacingOccurrences(of: "\"", with: "\\\"")
-        let contentTypeField = escapedContentType.map { ",\"contentType\":\"\($0)\"" } ?? ""
-        let stateField = stateJSON.map { ",\"state\":\($0)" } ?? ""
-        return "{\"id\":\"\(id)\",\"type\":\"multi\",\"osisFragments\":[\(osisFragmentsJSON.joined(separator: ","))],\"compare\":false\(contentTypeField)\(stateField)}"
+        let payload = MultiFragmentDocumentPayload(
+            id: id,
+            type: "multi",
+            osisFragments: osisFragments,
+            compare: false,
+            contentType: contentType,
+            state: bridgeJSONValue(from: stateJSON)
+        )
+        guard let data = try? bridgeEncoder.encode(payload),
+              let json = String(data: data, encoding: .utf8) else {
+            logger.error("Failed to encode multi-fragment bridge document")
+            return "{}"
+        }
+        return json
     }
 
     /**
@@ -5633,7 +5658,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
         // Try common case variants, while still requiring exact key match after normalization.
         let keyOptions = [query, query.lowercased(), query.capitalized]
-        var fragments: [(xml: String, key: String, keyName: String, bookInitials: String, bookAbbreviation: String, features: String)] = []
+        var fragments: [(xml: String, key: String, keyName: String, bookInitials: String, bookAbbreviation: String, features: OsisFeatures)] = []
 
         for mod in modules {
             guard let html = lookupInModule(mod, keyOptions: keyOptions) else { continue }
@@ -5645,7 +5670,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
                 keyName: query,
                 bookInitials: mod.info.name,
                 bookAbbreviation: String(mod.info.name.prefix(10)),
-                features: "{}"
+                features: OsisFeatures()
             ))
         }
 
@@ -6651,57 +6676,68 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         recentLabelIds = stored.components(separatedBy: ",")
     }
 
-    /// Send bookmark label data to Vue.js. Must be called before documents that contain bookmarks.
-    private func sendLabelsToVueJS() {
-        // Always include the default "Unlabeled" label
-        let unlabeledJSON = """
-        {"id":"\(Self.unlabeledLabelId)","name":"__UNLABELED__","isRealLabel":false,"style":{"color":\(BibleCore.Label.defaultColor),"isSpeak":false,"isParagraphBreak":false,"underline":false,"underlineWholeVerse":false,"markerStyle":false,"markerStyleWholeVerse":false,"hideStyle":false,"hideStyleWholeVerse":false,"customIcon":null}}
-        """
-        let paragraphBreakJSON = """
-        {"id":"\(BibleCore.Label.paragraphBreakLabelId.uuidString)","name":"\(BibleCore.Label.paragraphBreakLabelName)","isRealLabel":false,"style":{"color":\(BibleCore.Label.defaultColor),"isSpeak":false,"isParagraphBreak":true,"underline":false,"underlineWholeVerse":false,"markerStyle":false,"markerStyleWholeVerse":false,"hideStyle":false,"hideStyleWholeVerse":false,"customIcon":null}}
-        """
+    /**
+     Sends bookmark label data to Vue.js before bookmark-bearing documents are emitted.
 
-        // Build user labels JSON
-        var allLabelsJSON = [unlabeledJSON, paragraphBreakJSON]
+     - Side effects: emits `update_labels` through the WebView bridge.
+     - Failure modes: skips labels whose SwiftData model has already been deleted; bridge encoding
+       failures are handled by `BibleBridge.emit<T: Encodable>`.
+     */
+    private func sendLabelsToVueJS() {
+        var allLabels = [
+            LabelData(
+                id: Self.unlabeledLabelId,
+                name: BibleCore.Label.unlabeledName,
+                style: BookmarkStyleData(color: BibleCore.Label.defaultColor),
+                isRealLabel: false
+            ),
+            LabelData(
+                id: BibleCore.Label.paragraphBreakLabelId.uuidString,
+                name: BibleCore.Label.paragraphBreakLabelName,
+                style: BookmarkStyleData(
+                    color: BibleCore.Label.defaultColor,
+                    isParagraphBreak: true
+                ),
+                isRealLabel: false
+            ),
+        ]
         if let service = bookmarkService {
             for label in service.allLabels() {
-                guard let labelID = BookmarkLabelSerializationSupport.liveLabelIDString(for: label) else {
+                guard let labelData = buildLabelData(label) else {
                     continue
                 }
-                let labelJSON = """
-                {"id":"\(labelID)","name":"\(label.name.replacingOccurrences(of: "\"", with: "\\\""))","isRealLabel":\(label.isRealLabel),"style":{"color":\(label.color),"isSpeak":false,"isParagraphBreak":false,"underline":\(label.underlineStyle),"underlineWholeVerse":\(label.underlineStyleWholeVerse),"markerStyle":\(label.markerStyle),"markerStyleWholeVerse":\(label.markerStyleWholeVerse),"hideStyle":\(label.hideStyle),"hideStyleWholeVerse":\(label.hideStyleWholeVerse),"customIcon":\(label.customIcon.map { "\"\($0)\"" } ?? "null")}}
-                """
-                allLabelsJSON.append(labelJSON)
+                allLabels.append(labelData)
             }
         }
 
-        bridge.emit(event: "update_labels", data: "[\(allLabelsJSON.joined(separator: ","))]")
+        bridge.emit(event: "update_labels", data: allLabels)
     }
 
-    /// Serialize a BibleBookmark to the JSON format Vue.js expects.
-    private func buildBookmarkJSON(_ bookmark: BibleBookmark) -> String {
+    /**
+     Builds the typed Bible bookmark bridge payload consumed by Vue.js.
+
+     - Parameter bookmark: SwiftData Bible bookmark model to project.
+     - Returns: A key-preserving bridge DTO; nullable fields encode as explicit JSON `null`.
+     - Side effects: reads verse text from the active SWORD module when available.
+     - Failure modes: missing label relationships are filtered and replaced with the synthetic
+       unlabeled relation required by the web client.
+     */
+    private func buildBookmarkJSON(_ bookmark: BibleBookmark) -> BibleBookmarkData {
         let id = bookmark.id.uuidString
         let hashCode = abs(id.hashValue)
-        let createdAt = Int(bookmark.createdAt.timeIntervalSince1970 * 1000)
-        let lastUpdated = Int(bookmark.lastUpdatedOn.timeIntervalSince1970 * 1000)
+        let createdAt = bookmark.createdAt.timeIntervalSince1970 * 1000
+        let lastUpdated = bookmark.lastUpdatedOn.timeIntervalSince1970 * 1000
         let noteText = bookmark.notes?.notes ?? ""
-        let escapedNote = noteText
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "\"", with: "\\\"")
-            .replacingOccurrences(of: "\n", with: "\\n")
         let hasNote = !noteText.isEmpty
-        let customIcon = bookmark.customIcon.map { "\"\($0)\"" } ?? "null"
         let labelPayload = BookmarkLabelSerializationSupport.biblePayload(
             bookmarkID: bookmark.id,
             links: bookmark.bookmarkToLabels,
             unlabeledLabelID: Self.unlabeledLabelId
         )
-        let primaryLabelId = BookmarkLabelSerializationSupport.primaryLabelIDJSON(
+        let primaryLabelId = BookmarkLabelSerializationSupport.primaryLabelID(
             primaryLabelID: bookmark.primaryLabelId,
             validLabelIDs: labelPayload.labelIDs
         )
-        let labelsJSON = labelPayload.labelsJSON
-        let btlJSON = labelPayload.relationsJSON
 
         // Compute verse references from ordinals
         let osisBookId = osisBookId(for: currentBook)
@@ -6727,77 +6763,43 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
         // Load verse text from SWORD if available
         let fullText = loadVerseText(osisBookId: osisBookId, chapter: currentChapter, startVerse: startVerse, endVerse: endVerse)
-        let escapedFullText = fullText
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "\"", with: "\\\"")
-            .replacingOccurrences(of: "\n", with: "\\n")
 
-        let offsetRangeJSON = jsonOffsetRange(startOffset: bookmark.startOffset, endOffset: bookmark.endOffset)
-
-        return """
-        {"id":"\(id)","type":"bookmark","hashCode":\(hashCode),"ordinalRange":[\(bookmark.ordinalStart),\(bookmark.ordinalEnd)],"originalOrdinalRange":[\(bookmark.kjvOrdinalStart),\(bookmark.kjvOrdinalEnd)],"offsetRange":\(offsetRangeJSON),"bookInitials":"\(activeModuleName)","bookName":"\(activeModuleName)","bookAbbreviation":"\(osisBookId)","createdAt":\(createdAt),"lastUpdatedOn":\(lastUpdated),"notes":\(hasNote ? "\"\(escapedNote)\"" : "null"),"hasNote":\(hasNote),"verseRange":"\(verseRange)","verseRangeOnlyNumber":"\(verseRangeOnlyNumber)","verseRangeAbbreviated":"\(verseRangeAbbreviated)","text":"\(escapedFullText)","fullText":"\(escapedFullText)","osisRef":"\(osisRef)","v11n":"\(bookmark.v11n)","labels":\(labelsJSON),"bookmarkToLabels":\(btlJSON),"osisFragment":null,"primaryLabelId":\(primaryLabelId),"wholeVerse":\(bookmark.wholeVerse),"customIcon":\(customIcon),"editAction":{"mode":null,"content":null}}
-        """
+        return BibleBookmarkData(
+            id: id,
+            type: "bookmark",
+            hashCode: hashCode,
+            ordinalRange: [bookmark.ordinalStart, bookmark.ordinalEnd],
+            offsetRange: bookmarkOffsetRange(startOffset: bookmark.startOffset, endOffset: bookmark.endOffset),
+            labels: labelPayload.labelIDs,
+            bookInitials: activeModuleName,
+            bookName: activeModuleName,
+            bookAbbreviation: osisBookId,
+            createdAt: createdAt,
+            text: fullText,
+            fullText: fullText,
+            bookmarkToLabels: labelPayload.relationItems,
+            primaryLabelId: primaryLabelId,
+            lastUpdatedOn: lastUpdated,
+            notes: hasNote ? noteText : nil,
+            hasNote: hasNote,
+            wholeVerse: bookmark.wholeVerse,
+            customIcon: bookmark.customIcon,
+            editAction: EditActionData(),
+            osisRef: osisRef,
+            originalOrdinalRange: [bookmark.kjvOrdinalStart, bookmark.kjvOrdinalEnd],
+            verseRange: verseRange,
+            verseRangeOnlyNumber: verseRangeOnlyNumber,
+            verseRangeAbbreviated: verseRangeAbbreviated,
+            v11n: bookmark.v11n,
+            osisFragment: nil
+        )
     }
 
-    /// Serialize a BibleBookmark for the MyNotes document, with populated verse references.
-    private func buildBookmarkJSONForMyNotes(_ bookmark: BibleBookmark) -> String {
-        let id = bookmark.id.uuidString
-        let hashCode = abs(id.hashValue)
-        let createdAt = Int(bookmark.createdAt.timeIntervalSince1970 * 1000)
-        let lastUpdated = Int(bookmark.lastUpdatedOn.timeIntervalSince1970 * 1000)
-        let noteText = bookmark.notes?.notes ?? ""
-        let escapedNote = noteText
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "\"", with: "\\\"")
-            .replacingOccurrences(of: "\n", with: "\\n")
-        let hasNote = !noteText.isEmpty
-        let customIcon = bookmark.customIcon.map { "\"\($0)\"" } ?? "null"
-        let labelPayload = BookmarkLabelSerializationSupport.biblePayload(
-            bookmarkID: bookmark.id,
-            links: bookmark.bookmarkToLabels,
-            unlabeledLabelID: Self.unlabeledLabelId
-        )
-        let primaryLabelId = BookmarkLabelSerializationSupport.primaryLabelIDJSON(
-            primaryLabelID: bookmark.primaryLabelId,
-            validLabelIDs: labelPayload.labelIDs
-        )
-        let labelsJSON = labelPayload.labelsJSON
-        let btlJSON = labelPayload.relationsJSON
-
-        // Compute verse references from ordinals
-        let osisBookId = osisBookId(for: currentBook)
-        let chapterBase = (currentChapter - 1) * 40
-        let startVerse = max(1, bookmark.ordinalStart - chapterBase)
-        let endVerse = max(startVerse, bookmark.ordinalEnd - chapterBase)
-
-        let osisRef: String
-        let verseRange: String
-        let verseRangeOnlyNumber: String
-        let verseRangeAbbreviated: String
-        if startVerse == endVerse {
-            osisRef = "\(osisBookId).\(currentChapter).\(startVerse)"
-            verseRange = "\(currentBook) \(currentChapter):\(startVerse)"
-            verseRangeOnlyNumber = "\(startVerse)"
-            verseRangeAbbreviated = "\(osisBookId) \(currentChapter):\(startVerse)"
-        } else {
-            osisRef = "\(osisBookId).\(currentChapter).\(startVerse)-\(osisBookId).\(currentChapter).\(endVerse)"
-            verseRange = "\(currentBook) \(currentChapter):\(startVerse)-\(endVerse)"
-            verseRangeOnlyNumber = "\(startVerse)-\(endVerse)"
-            verseRangeAbbreviated = "\(osisBookId) \(currentChapter):\(startVerse)-\(endVerse)"
-        }
-
-        // Load verse text from SWORD if available
-        let fullText = loadVerseText(osisBookId: osisBookId, chapter: currentChapter, startVerse: startVerse, endVerse: endVerse)
-        let escapedFullText = fullText
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "\"", with: "\\\"")
-            .replacingOccurrences(of: "\n", with: "\\n")
-
-        let offsetRangeJSON = jsonOffsetRange(startOffset: bookmark.startOffset, endOffset: bookmark.endOffset)
-
-        return """
-        {"id":"\(id)","type":"bookmark","hashCode":\(hashCode),"ordinalRange":[\(bookmark.ordinalStart),\(bookmark.ordinalEnd)],"originalOrdinalRange":[\(bookmark.kjvOrdinalStart),\(bookmark.kjvOrdinalEnd)],"offsetRange":\(offsetRangeJSON),"bookInitials":"\(activeModuleName)","bookName":"\(activeModuleName)","bookAbbreviation":"\(osisBookId)","createdAt":\(createdAt),"lastUpdatedOn":\(lastUpdated),"notes":\(hasNote ? "\"\(escapedNote)\"" : "null"),"hasNote":\(hasNote),"verseRange":"\(verseRange)","verseRangeOnlyNumber":"\(verseRangeOnlyNumber)","verseRangeAbbreviated":"\(verseRangeAbbreviated)","text":"\(escapedFullText)","fullText":"\(escapedFullText)","osisRef":"\(osisRef)","v11n":"\(bookmark.v11n)","labels":\(labelsJSON),"bookmarkToLabels":\(btlJSON),"osisFragment":null,"primaryLabelId":\(primaryLabelId),"wholeVerse":\(bookmark.wholeVerse),"customIcon":\(customIcon),"editAction":{"mode":null,"content":null}}
-        """
+    /**
+     Builds a My Notes bookmark payload with the same shape as a standard Bible bookmark.
+     */
+    private func buildBookmarkJSONForMyNotes(_ bookmark: BibleBookmark) -> BibleBookmarkData {
+        buildBookmarkJSON(bookmark)
     }
 
     /// Load plain text for a verse range from the active SWORD module.
@@ -6819,83 +6821,108 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         return parts.joined(separator: " ")
     }
 
-    // MARK: - StudyPad JSON Builders
+    // MARK: - StudyPad Bridge Payload Builders
 
-    /// Serialize a StudyPadTextEntry to JSON for Vue.js.
-    private func buildStudyPadEntryJSON(_ entry: StudyPadTextEntry) -> String {
+    /**
+     Builds a typed StudyPad text entry payload for Vue.js.
+     */
+    private func buildStudyPadEntryJSON(_ entry: StudyPadTextEntry) -> StudyPadTextItemData {
         let id = entry.id.uuidString
         let hashCode = abs(id.hashValue)
         let labelId = BookmarkLabelSerializationSupport.liveLabelIDString(for: entry.label) ?? ""
         let text = entry.textEntry?.text ?? ""
-        let escapedText = text
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "\"", with: "\\\"")
-            .replacingOccurrences(of: "\n", with: "\\n")
-        return """
-        {"id":"\(id)","type":"journal","hashCode":\(hashCode),"labelId":"\(labelId)","text":"\(escapedText)","orderNumber":\(entry.orderNumber),"indentLevel":\(entry.indentLevel)}
-        """
+        return StudyPadTextItemData(
+            id: id,
+            type: "journal",
+            hashCode: hashCode,
+            labelId: labelId,
+            text: text,
+            orderNumber: entry.orderNumber,
+            indentLevel: entry.indentLevel
+        )
     }
 
-    /// Serialize a BibleBookmarkToLabel to JSON for Vue.js.
-    private func buildBibleBookmarkToLabelJSON(_ btl: BibleBookmarkToLabel) -> String? {
+    /**
+     Builds a typed Bible bookmark-to-label payload for Vue.js.
+     */
+    private func buildBibleBookmarkToLabelJSON(_ btl: BibleBookmarkToLabel) -> BookmarkToLabelData? {
         let bmId = btl.bookmark?.id.uuidString ?? ""
         guard let lblId = BookmarkLabelSerializationSupport.liveLabelIDString(for: btl.label) else {
             return nil
         }
-        return """
-        {"type":"BibleBookmarkToLabel","bookmarkId":"\(bmId)","labelId":"\(lblId)","orderNumber":\(btl.orderNumber),"indentLevel":\(btl.indentLevel),"expandContent":\(btl.expandContent)}
-        """
+        return BookmarkToLabelData(
+            bookmarkId: bmId,
+            labelId: lblId,
+            orderNumber: btl.orderNumber,
+            indentLevel: btl.indentLevel,
+            expandContent: btl.expandContent,
+            type: "BibleBookmarkToLabel"
+        )
     }
 
-    /// Serialize a GenericBookmarkToLabel to JSON for Vue.js.
-    private func buildGenericBookmarkToLabelJSON(_ gbtl: GenericBookmarkToLabel) -> String? {
+    /**
+     Builds a typed generic bookmark-to-label payload for Vue.js.
+     */
+    private func buildGenericBookmarkToLabelJSON(_ gbtl: GenericBookmarkToLabel) -> BookmarkToLabelData? {
         let bmId = gbtl.bookmark?.id.uuidString ?? ""
         guard let lblId = BookmarkLabelSerializationSupport.liveLabelIDString(for: gbtl.label) else {
             return nil
         }
-        return """
-        {"type":"GenericBookmarkToLabel","bookmarkId":"\(bmId)","labelId":"\(lblId)","orderNumber":\(gbtl.orderNumber),"indentLevel":\(gbtl.indentLevel),"expandContent":\(gbtl.expandContent)}
-        """
+        return BookmarkToLabelData(
+            bookmarkId: bmId,
+            labelId: lblId,
+            orderNumber: gbtl.orderNumber,
+            indentLevel: gbtl.indentLevel,
+            expandContent: gbtl.expandContent,
+            type: "GenericBookmarkToLabel"
+        )
     }
 
-    /// Serialize a Label to JSON for Vue.js StudyPad document.
-    private func buildLabelJSON(_ label: Label) -> String {
+    /**
+     Builds a typed label payload for bridge documents and label update events.
+     */
+    private func buildLabelData(_ label: Label) -> LabelData? {
         guard let labelID = BookmarkLabelSerializationSupport.liveLabelIDString(for: label) else {
-            return "null"
+            return nil
         }
-        let customIcon = label.customIcon.map { "\"\($0)\"" } ?? "null"
-        let escapedName = label.name
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "\"", with: "\\\"")
-        return """
-        {"id":"\(labelID)","name":"\(escapedName)","isRealLabel":\(label.isRealLabel),"style":{"color":\(label.color),"isSpeak":\(label.name == BibleCore.Label.speakLabelName),"isParagraphBreak":\(label.name == BibleCore.Label.paragraphBreakLabelName),"underline":\(label.underlineStyle),"underlineWholeVerse":\(label.underlineStyleWholeVerse),"markerStyle":\(label.markerStyle),"markerStyleWholeVerse":\(label.markerStyleWholeVerse),"hideStyle":\(label.hideStyle),"hideStyleWholeVerse":\(label.hideStyleWholeVerse),"customIcon":\(customIcon)}}
-        """
+        return LabelData(
+            id: labelID,
+            name: label.name,
+            style: BookmarkStyleData(
+                color: label.color,
+                isSpeak: label.name == BibleCore.Label.speakLabelName,
+                isParagraphBreak: label.name == BibleCore.Label.paragraphBreakLabelName,
+                underline: label.underlineStyle,
+                underlineWholeVerse: label.underlineStyleWholeVerse,
+                markerStyle: label.markerStyle,
+                markerStyleWholeVerse: label.markerStyleWholeVerse,
+                hideStyle: label.hideStyle,
+                hideStyleWholeVerse: label.hideStyleWholeVerse,
+                customIcon: label.customIcon
+            ),
+            isRealLabel: label.isRealLabel
+        )
     }
 
-    /// Serialize a BibleBookmark for StudyPad document (includes "type" in BTLs).
-    private func buildBookmarkJSONForStudyPad(_ bookmark: BibleBookmark) -> String {
+    /**
+     Builds a typed Bible bookmark payload for a StudyPad document.
+     */
+    private func buildBookmarkJSONForStudyPad(_ bookmark: BibleBookmark) -> BibleBookmarkData {
         let id = bookmark.id.uuidString
         let hashCode = abs(id.hashValue)
-        let createdAt = Int(bookmark.createdAt.timeIntervalSince1970 * 1000)
-        let lastUpdated = Int(bookmark.lastUpdatedOn.timeIntervalSince1970 * 1000)
+        let createdAt = bookmark.createdAt.timeIntervalSince1970 * 1000
+        let lastUpdated = bookmark.lastUpdatedOn.timeIntervalSince1970 * 1000
         let noteText = bookmark.notes?.notes ?? ""
-        let escapedNote = noteText
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "\"", with: "\\\"")
-            .replacingOccurrences(of: "\n", with: "\\n")
         let hasNote = !noteText.isEmpty
-        let customIcon = bookmark.customIcon.map { "\"\($0)\"" } ?? "null"
         let labelPayload = BookmarkLabelSerializationSupport.biblePayload(
             bookmarkID: bookmark.id,
             links: bookmark.bookmarkToLabels,
             unlabeledLabelID: Self.unlabeledLabelId
         )
-        let primaryLabelId = BookmarkLabelSerializationSupport.primaryLabelIDJSON(
+        let primaryLabelId = BookmarkLabelSerializationSupport.primaryLabelID(
             primaryLabelID: bookmark.primaryLabelId,
             validLabelIDs: labelPayload.labelIDs
         )
-        let labelsJSON = labelPayload.labelsJSON
-        let btlJSON = labelPayload.relationsJSON
 
         // Compute verse references
         let bookOsisId: String
@@ -6924,87 +6951,408 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             : "\(bookOsisId) \(chapter):\(startVerse)-\(endVerse)"
 
         let fullText = loadVerseText(osisBookId: bookOsisId, chapter: chapter, startVerse: startVerse, endVerse: endVerse)
-        let escapedFullText = fullText
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "\"", with: "\\\"")
-            .replacingOccurrences(of: "\n", with: "\\n")
 
-        // Edit action
-        let editActionJSON: String
-        if let ea = bookmark.editAction {
-            let mode = ea.mode.map { "\"\($0.rawValue)\"" } ?? "null"
-            let content = ea.content.map { "\"\($0.replacingOccurrences(of: "\"", with: "\\\""))\"" } ?? "null"
-            editActionJSON = "{\"mode\":\(mode),\"content\":\(content)}"
-        } else {
-            editActionJSON = "{\"mode\":null,\"content\":null}"
-        }
-
-        let offsetRangeJSON = jsonOffsetRange(startOffset: bookmark.startOffset, endOffset: bookmark.endOffset)
-
-        return """
-        {"id":"\(id)","type":"bookmark","hashCode":\(hashCode),"ordinalRange":[\(bookmark.ordinalStart),\(bookmark.ordinalEnd)],"originalOrdinalRange":[\(bookmark.kjvOrdinalStart),\(bookmark.kjvOrdinalEnd)],"offsetRange":\(offsetRangeJSON),"bookInitials":"\(activeModuleName)","bookName":"\(activeModuleName)","bookAbbreviation":"\(bookOsisId)","createdAt":\(createdAt),"lastUpdatedOn":\(lastUpdated),"notes":\(hasNote ? "\"\(escapedNote)\"" : "null"),"hasNote":\(hasNote),"verseRange":"\(verseRange)","verseRangeOnlyNumber":"\(verseRangeOnlyNumber)","verseRangeAbbreviated":"\(verseRangeAbbreviated)","text":"\(escapedFullText)","fullText":"\(escapedFullText)","osisRef":"\(osisRef)","v11n":"\(bookmark.v11n)","labels":\(labelsJSON),"bookmarkToLabels":\(btlJSON),"osisFragment":null,"primaryLabelId":\(primaryLabelId),"wholeVerse":\(bookmark.wholeVerse),"customIcon":\(customIcon),"editAction":\(editActionJSON)}
-        """
+        return BibleBookmarkData(
+            id: id,
+            type: "bookmark",
+            hashCode: hashCode,
+            ordinalRange: [bookmark.ordinalStart, bookmark.ordinalEnd],
+            offsetRange: bookmarkOffsetRange(startOffset: bookmark.startOffset, endOffset: bookmark.endOffset),
+            labels: labelPayload.labelIDs,
+            bookInitials: activeModuleName,
+            bookName: activeModuleName,
+            bookAbbreviation: bookOsisId,
+            createdAt: createdAt,
+            text: fullText,
+            fullText: fullText,
+            bookmarkToLabels: labelPayload.relationItems,
+            primaryLabelId: primaryLabelId,
+            lastUpdatedOn: lastUpdated,
+            notes: hasNote ? noteText : nil,
+            hasNote: hasNote,
+            wholeVerse: bookmark.wholeVerse,
+            customIcon: bookmark.customIcon,
+            editAction: editActionData(bookmark.editAction),
+            osisRef: osisRef,
+            originalOrdinalRange: [bookmark.kjvOrdinalStart, bookmark.kjvOrdinalEnd],
+            verseRange: verseRange,
+            verseRangeOnlyNumber: verseRangeOnlyNumber,
+            verseRangeAbbreviated: verseRangeAbbreviated,
+            v11n: bookmark.v11n,
+            osisFragment: nil
+        )
     }
 
-    /// Serialize a GenericBookmark for StudyPad document.
-    private func buildGenericBookmarkJSONForStudyPad(_ bookmark: GenericBookmark) -> String {
+    /**
+     Builds a typed generic bookmark payload for StudyPad and bookmark update events.
+     */
+    private func buildGenericBookmarkJSONForStudyPad(_ bookmark: GenericBookmark) -> GenericBookmarkData {
         let id = bookmark.id.uuidString
         let hashCode = abs(id.hashValue)
-        let createdAt = Int(bookmark.createdAt.timeIntervalSince1970 * 1000)
-        let lastUpdated = Int(bookmark.lastUpdatedOn.timeIntervalSince1970 * 1000)
+        let createdAt = bookmark.createdAt.timeIntervalSince1970 * 1000
+        let lastUpdated = bookmark.lastUpdatedOn.timeIntervalSince1970 * 1000
         let noteText = bookmark.notes?.notes ?? ""
-        let escapedNote = noteText
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "\"", with: "\\\"")
-            .replacingOccurrences(of: "\n", with: "\\n")
         let hasNote = !noteText.isEmpty
-        let customIcon = bookmark.customIcon.map { "\"\($0)\"" } ?? "null"
         let labelPayload = BookmarkLabelSerializationSupport.genericPayload(
             bookmarkID: bookmark.id,
             links: bookmark.bookmarkToLabels,
             unlabeledLabelID: Self.unlabeledLabelId
         )
-        let primaryLabelId = BookmarkLabelSerializationSupport.primaryLabelIDJSON(
+        let primaryLabelId = BookmarkLabelSerializationSupport.primaryLabelID(
             primaryLabelID: bookmark.primaryLabelId,
             validLabelIDs: labelPayload.labelIDs
         )
-        let labelsJSON = labelPayload.labelsJSON
-        let btlJSON = labelPayload.relationsJSON
 
-        let escapedKey = bookmark.key
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "\"", with: "\\\"")
-
-        // Edit action
-        let editActionJSON: String
-        if let ea = bookmark.editAction {
-            let mode = ea.mode.map { "\"\($0.rawValue)\"" } ?? "null"
-            let content = ea.content.map { "\"\($0.replacingOccurrences(of: "\"", with: "\\\""))\"" } ?? "null"
-            editActionJSON = "{\"mode\":\(mode),\"content\":\(content)}"
-        } else {
-            editActionJSON = "{\"mode\":null,\"content\":null}"
-        }
-
-        let offsetRangeJSON = jsonOffsetRange(startOffset: bookmark.startOffset, endOffset: bookmark.endOffset)
-
-        return """
-        {"id":"\(id)","type":"generic-bookmark","hashCode":\(hashCode),"ordinalRange":[\(bookmark.ordinalStart),\(bookmark.ordinalEnd)],"offsetRange":\(offsetRangeJSON),"bookInitials":"\(bookmark.bookInitials)","bookName":"\(bookmark.bookInitials)","bookAbbreviation":"","createdAt":\(createdAt),"lastUpdatedOn":\(lastUpdated),"notes":\(hasNote ? "\"\(escapedNote)\"" : "null"),"hasNote":\(hasNote),"text":"","fullText":"","key":"\(escapedKey)","keyName":"\(escapedKey)","highlightedText":"","labels":\(labelsJSON),"bookmarkToLabels":\(btlJSON),"primaryLabelId":\(primaryLabelId),"wholeVerse":\(bookmark.wholeVerse),"customIcon":\(customIcon),"editAction":\(editActionJSON)}
-        """
+        return GenericBookmarkData(
+            id: id,
+            type: "generic-bookmark",
+            hashCode: hashCode,
+            ordinalRange: [bookmark.ordinalStart, bookmark.ordinalEnd],
+            offsetRange: bookmarkOffsetRange(startOffset: bookmark.startOffset, endOffset: bookmark.endOffset),
+            labels: labelPayload.labelIDs,
+            bookInitials: bookmark.bookInitials,
+            bookName: bookmark.bookInitials,
+            bookAbbreviation: "",
+            createdAt: createdAt,
+            text: "",
+            fullText: "",
+            bookmarkToLabels: labelPayload.relationItems,
+            primaryLabelId: primaryLabelId,
+            lastUpdatedOn: lastUpdated,
+            notes: hasNote ? noteText : nil,
+            hasNote: hasNote,
+            wholeVerse: bookmark.wholeVerse,
+            customIcon: bookmark.customIcon,
+            editAction: editActionData(bookmark.editAction),
+            key: bookmark.key,
+            keyName: bookmark.key,
+            highlightedText: ""
+        )
     }
 
     /**
-     Serializes optional bookmark text offsets into the JSON array form expected by Vue.js.
+     Projects optional bookmark text offsets into the array form expected by Vue.js.
 
      - Parameters:
        - startOffset: Optional inclusive start offset inside the verse text.
        - endOffset: Optional inclusive end offset inside the verse text.
 
-     - Returns: `null` when no start offset exists, otherwise a two-element JSON array string.
+     - Returns: `nil` when no start offset exists, otherwise a two-element array whose end may be
+       `nil` and therefore encodes as JSON `null`.
      */
-    private func jsonOffsetRange(startOffset: Int?, endOffset: Int?) -> String {
-        guard let startOffset else { return "null" }
-        let endValue = endOffset.map(String.init) ?? "null"
-        return "[\(startOffset),\(endValue)]"
+    private func bookmarkOffsetRange(startOffset: Int?, endOffset: Int?) -> [Int?]? {
+        guard let startOffset else { return nil }
+        return [startOffset, endOffset]
+    }
+
+    /**
+     Projects a persisted bookmark edit action into the bridge DTO.
+     */
+    private func editActionData(_ editAction: EditAction?) -> EditActionData {
+        EditActionData(mode: editAction?.mode?.rawValue, content: editAction?.content)
+    }
+
+    /**
+     Wire payload for Vue's My Notes document.
+
+     The shape matches the web client's `type: "notes"` document and keeps bookmark entries as
+     typed Bible bookmark DTOs rather than pre-rendered JSON fragments.
+     */
+    private struct MyNotesDocumentPayload: Encodable {
+        /// Stable document identifier for the rendered chapter notes view.
+        let id: String
+        /// Client document discriminator, always `notes`.
+        let type: String
+        /// Bible bookmarks with notes rendered in this document.
+        let bookmarks: [BibleBookmarkData]
+        /// Human-readable verse range covered by the notes document.
+        let verseRange: String
+        /// Inclusive ordinal range covered by the notes document.
+        let ordinalRange: [Int]
+    }
+
+    /**
+     Wire payload for Vue's StudyPad document.
+
+     The payload mirrors Android's StudyPad document object while using typed bookmark, label, and
+     relationship DTOs for every nested collection.
+     */
+    private struct StudyPadDocumentPayload: Encodable {
+        /// Stable document identifier for the StudyPad label.
+        let id: String
+        /// Client document discriminator, always `journal`.
+        let type: String
+        /// Label whose StudyPad is being rendered.
+        let label: LabelData
+        /// Bible bookmarks attached to the label.
+        let bookmarks: [BibleBookmarkData]
+        /// Generic bookmarks attached to the label.
+        let genericBookmarks: [GenericBookmarkData]
+        /// Bible bookmark-to-label relationships for this label.
+        let bookmarkToLabels: [BookmarkToLabelData]
+        /// Generic bookmark-to-label relationships for this label.
+        let genericBookmarkToLabels: [BookmarkToLabelData]
+        /// StudyPad text entries attached to this label.
+        let journalTextEntries: [StudyPadTextItemData]
+    }
+
+    /**
+     Wire payload for Vue's `setup_content` event.
+
+     All jump target keys are encoded on every emission because the web client destructures them
+     with `null` defaults rather than treating omitted keys as equivalent.
+     */
+    private struct ReaderSetupContentPayload: Encodable {
+        private enum CodingKeys: String, CodingKey {
+            case jumpToOrdinal
+            case jumpToAnchor
+            case jumpToId
+            case topOffset
+            case bottomOffset
+        }
+
+        /// Optional ordinal to scroll to after document setup.
+        let jumpToOrdinal: Int?
+        /// Optional anchor id to scroll to after document setup.
+        let jumpToAnchor: String?
+        /// Optional element id to scroll to after document setup.
+        let jumpToId: String?
+        /// Top inset passed to the web client.
+        let topOffset: Int
+        /// Bottom inset passed to the web client.
+        let bottomOffset: Int
+
+        /// Creates a setup-content event payload with zero offsets by default.
+        init(
+            jumpToOrdinal: Int? = nil,
+            jumpToAnchor: String? = nil,
+            jumpToId: String? = nil,
+            topOffset: Int = 0,
+            bottomOffset: Int = 0
+        ) {
+            self.jumpToOrdinal = jumpToOrdinal
+            self.jumpToAnchor = jumpToAnchor
+            self.jumpToId = jumpToId
+            self.topOffset = topOffset
+            self.bottomOffset = bottomOffset
+        }
+
+        /**
+         Encodes nullable jump keys explicitly for Vue's event handler.
+         */
+        func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            if let jumpToOrdinal {
+                try container.encode(jumpToOrdinal, forKey: .jumpToOrdinal)
+            } else {
+                try container.encodeNil(forKey: .jumpToOrdinal)
+            }
+            if let jumpToAnchor {
+                try container.encode(jumpToAnchor, forKey: .jumpToAnchor)
+            } else {
+                try container.encodeNil(forKey: .jumpToAnchor)
+            }
+            if let jumpToId {
+                try container.encode(jumpToId, forKey: .jumpToId)
+            } else {
+                try container.encodeNil(forKey: .jumpToId)
+            }
+            try container.encode(topOffset, forKey: .topOffset)
+            try container.encode(bottomOffset, forKey: .bottomOffset)
+        }
+    }
+
+    /**
+     Encodable representation of arbitrary JSON values already validated by `JSONSerialization`.
+
+     This is used only for opaque Vue state blobs that native code stores and replays without
+     interpreting. It lets typed bridge documents include that state without inserting a raw JSON
+     string into another JSON document.
+     */
+    private enum BridgeJSONValue: Encodable {
+        /// JSON null.
+        case null
+        /// JSON boolean.
+        case bool(Bool)
+        /// JSON number.
+        case number(Double)
+        /// JSON string.
+        case string(String)
+        /// JSON array.
+        case array([BridgeJSONValue])
+        /// JSON object.
+        case object([String: BridgeJSONValue])
+
+        /**
+         Creates a typed JSON value from a `JSONSerialization` result.
+
+         - Parameter value: Value returned from `JSONSerialization.jsonObject`.
+         - Failure modes: returns `nil` when the value contains an unsupported Foundation type.
+         */
+        init?(_ value: Any) {
+            switch value {
+            case is NSNull:
+                self = .null
+            case let value as Bool:
+                self = .bool(value)
+            case let value as NSNumber:
+                if CFGetTypeID(value) == CFBooleanGetTypeID() {
+                    self = .bool(value.boolValue)
+                } else {
+                    self = .number(value.doubleValue)
+                }
+            case let value as String:
+                self = .string(value)
+            case let value as [Any]:
+                var array: [BridgeJSONValue] = []
+                for item in value {
+                    guard let jsonValue = BridgeJSONValue(item) else { return nil }
+                    array.append(jsonValue)
+                }
+                self = .array(array)
+            case let value as [String: Any]:
+                var object: [String: BridgeJSONValue] = [:]
+                for (key, item) in value {
+                    guard let jsonValue = BridgeJSONValue(item) else { return nil }
+                    object[key] = jsonValue
+                }
+                self = .object(object)
+            default:
+                return nil
+            }
+        }
+
+        /**
+         Encodes the represented JSON value into the bridge document.
+         */
+        func encode(to encoder: Encoder) throws {
+            switch self {
+            case .null:
+                var container = encoder.singleValueContainer()
+                try container.encodeNil()
+            case .bool(let value):
+                var container = encoder.singleValueContainer()
+                try container.encode(value)
+            case .number(let value):
+                var container = encoder.singleValueContainer()
+                try container.encode(value)
+            case .string(let value):
+                var container = encoder.singleValueContainer()
+                try container.encode(value)
+            case .array(let values):
+                var container = encoder.unkeyedContainer()
+                for value in values {
+                    try container.encode(value)
+                }
+            case .object(let values):
+                var container = encoder.container(keyedBy: DynamicCodingKey.self)
+                for key in values.keys.sorted() {
+                    guard let codingKey = DynamicCodingKey(stringValue: key),
+                          let value = values[key] else { continue }
+                    try container.encode(value, forKey: codingKey)
+                }
+            }
+        }
+    }
+
+    /**
+     Dynamic coding key used for opaque JSON object state.
+     */
+    private struct DynamicCodingKey: CodingKey {
+        /// String key carried by an arbitrary JSON object.
+        let stringValue: String
+        /// Integer keys are unsupported for JSON objects.
+        let intValue: Int? = nil
+
+        /// Creates a string coding key.
+        init?(stringValue: String) {
+            self.stringValue = stringValue
+        }
+
+        /// Integer keys are not used by bridge JSON objects.
+        init?(intValue: Int) {
+            return nil
+        }
+    }
+
+    /**
+     Parses an optional raw JSON state blob into a typed bridge JSON value.
+
+     - Parameter json: Raw JSON saved from Vue state.
+     - Returns: Typed JSON value, or `nil` when no state was provided or parsing fails.
+     - Side effects: logs malformed state and otherwise performs no mutation.
+     - Failure modes: malformed JSON is dropped so document rendering can continue.
+     */
+    private func bridgeJSONValue(from json: String?) -> BridgeJSONValue? {
+        guard let json,
+              let data = json.data(using: .utf8) else { return nil }
+        do {
+            let object = try JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed])
+            return BridgeJSONValue(object)
+        } catch {
+            logger.error("Failed to parse saved bridge state JSON: \(error.localizedDescription, privacy: .public)")
+            return nil
+        }
+    }
+
+    /**
+     Wire payload for Vue's multi-fragment document.
+
+     `state` and `contentType` are omitted when absent, matching the previous document shape while
+     using typed `OsisFragment` values for all rendered fragments.
+     */
+    private struct MultiFragmentDocumentPayload: Encodable {
+        /// Stable document identifier.
+        let id: String
+        /// Client document discriminator, always `multi`.
+        let type: String
+        /// Rendered OSIS fragments in display order.
+        let osisFragments: [OsisFragment]
+        /// Whether this is a Bible comparison document.
+        let compare: Bool
+        /// Optional content type such as `strongs`.
+        let contentType: String?
+        /// Optional opaque Vue state restored into the document.
+        let state: BridgeJSONValue?
+    }
+
+    /**
+     Wire payload for Vue's StudyPad update event.
+
+     The web client expects all four keys on every `add_or_update_study_pad` event, with
+     `studyPadTextEntry` explicitly set to `null` for reorder-only updates.
+     */
+    private struct StudyPadUpdatePayload: Encodable {
+        private enum CodingKeys: String, CodingKey {
+            case studyPadTextEntry
+            case bookmarkToLabelsOrdered
+            case genericBookmarkToLabelsOrdered
+            case studyPadItemsOrdered
+        }
+
+        /// Newly created or changed StudyPad text entry, or `nil` for reorder-only updates.
+        let studyPadTextEntry: StudyPadTextItemData?
+        /// Changed Bible bookmark-to-label relationships in StudyPad order.
+        let bookmarkToLabelsOrdered: [BookmarkToLabelData]
+        /// Changed generic bookmark-to-label relationships in StudyPad order.
+        let genericBookmarkToLabelsOrdered: [BookmarkToLabelData]
+        /// Changed StudyPad text entries in StudyPad order.
+        let studyPadItemsOrdered: [StudyPadTextItemData]
+
+        /**
+         Encodes all StudyPad event keys, preserving explicit `null` for absent entries.
+         */
+        func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            if let studyPadTextEntry {
+                try container.encode(studyPadTextEntry, forKey: .studyPadTextEntry)
+            } else {
+                try container.encodeNil(forKey: .studyPadTextEntry)
+            }
+            try container.encode(bookmarkToLabelsOrdered, forKey: .bookmarkToLabelsOrdered)
+            try container.encode(genericBookmarkToLabelsOrdered, forKey: .genericBookmarkToLabelsOrdered)
+            try container.encode(studyPadItemsOrdered, forKey: .studyPadItemsOrdered)
+        }
     }
 
     // MARK: - StudyPad Event Helpers
@@ -7016,14 +7364,15 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         changedGenericBtls: [GenericBookmarkToLabel],
         changedEntries: [StudyPadTextEntry]
     ) {
-        let entryJSON = newEntry.map { buildStudyPadEntryJSON($0) } ?? "null"
-        let btlsJSON = changedBibleBtls.compactMap { buildBibleBookmarkToLabelJSON($0) }.joined(separator: ",")
-        let gbtlsJSON = changedGenericBtls.compactMap { buildGenericBookmarkToLabelJSON($0) }.joined(separator: ",")
-        let entriesJSON = changedEntries.map { buildStudyPadEntryJSON($0) }.joined(separator: ",")
-
-        bridge.emit(event: "add_or_update_study_pad", data: """
-        {"studyPadTextEntry":\(entryJSON),"bookmarkToLabelsOrdered":[\(btlsJSON)],"genericBookmarkToLabelsOrdered":[\(gbtlsJSON)],"studyPadItemsOrdered":[\(entriesJSON)]}
-        """)
+        bridge.emit(
+            event: "add_or_update_study_pad",
+            data: StudyPadUpdatePayload(
+                studyPadTextEntry: newEntry.map { buildStudyPadEntryJSON($0) },
+                bookmarkToLabelsOrdered: changedBibleBtls.compactMap { buildBibleBookmarkToLabelJSON($0) },
+                genericBookmarkToLabelsOrdered: changedGenericBtls.compactMap { buildGenericBookmarkToLabelJSON($0) },
+                studyPadItemsOrdered: changedEntries.map { buildStudyPadEntryJSON($0) }
+            )
+        )
     }
 
     /// Emit an updated bookmark (Bible or generic) back to Vue.js after label changes.
@@ -7032,15 +7381,13 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
         // Try Bible bookmark first (or if type hint says "bible")
         if type != "generic", let bookmark = service.bibleBookmark(id: bookmarkId) {
-            let json = buildBookmarkJSON(bookmark)
-            bridge.emit(event: "add_or_update_bookmarks", data: "[\(json)]")
+            bridge.emit(event: "add_or_update_bookmarks", data: [buildBookmarkJSON(bookmark)])
             return
         }
 
         // Try generic bookmark
         if let bookmark = service.genericBookmark(id: bookmarkId) {
-            let json = buildGenericBookmarkJSONForStudyPad(bookmark)
-            bridge.emit(event: "add_or_update_bookmarks", data: "[\(json)]")
+            bridge.emit(event: "add_or_update_bookmarks", data: [buildGenericBookmarkJSONForStudyPad(bookmark)])
         }
     }
 
@@ -7444,8 +7791,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         let ordinalEnd = (chapter - 1) * 40 + verseCount
         let initials = bookInitials ?? activeModuleName
 
-        func jsonObject(from string: String) -> Any? {
-            guard let data = string.data(using: .utf8) else { return nil }
+        func jsonObject<T: Encodable>(from value: T) -> Any? {
+            guard let data = try? bridgeEncoder.encode(value) else { return nil }
             return try? JSONSerialization.jsonObject(with: data)
         }
 

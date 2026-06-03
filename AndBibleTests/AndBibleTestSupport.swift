@@ -97,6 +97,41 @@ extension AndBibleTests {
             line: line
         )
     }
+
+    func bridgeEmissionPayload(
+        from scripts: [String],
+        event: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) throws -> Any {
+        let script = try XCTUnwrap(
+            scripts.first { $0.contains("bibleView.emit('\(event)'") },
+            "Expected a \(event) bridge emission",
+            file: file,
+            line: line
+        )
+        let prefix = "bibleView.emit('\(event)', "
+        let start = try XCTUnwrap(
+            script.range(of: prefix)?.upperBound,
+            "Expected \(event) payload prefix in script: \(script)",
+            file: file,
+            line: line
+        )
+        let end = try XCTUnwrap(
+            script.range(of: "); } catch", range: start..<script.endIndex)?.lowerBound,
+            "Expected \(event) payload suffix in script: \(script)",
+            file: file,
+            line: line
+        )
+        let json = String(script[start..<end])
+        let data = try XCTUnwrap(
+            json.data(using: .utf8),
+            "Expected UTF-8 JSON payload",
+            file: file,
+            line: line
+        )
+        return try JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed])
+    }
     #endif
     func bridgeJSONObject<T: Encodable>(_ value: T) throws -> [String: Any] {
         let data = try bridgeEncoder.encode(value)

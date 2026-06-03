@@ -414,12 +414,23 @@ extension AndBibleTests {
             controller.buildStrongsMultiDocJSON(strongs: ["H00430"], robinson: []),
             "Expected Android-style missing-document fallback when no Strong's dictionary is installed"
         )
+        let payloadData = try XCTUnwrap(multiDocJSON.data(using: .utf8))
+        let payload = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: payloadData) as? [String: Any]
+        )
+        let fragments = try XCTUnwrap(payload["osisFragments"] as? [[String: Any]])
+        let fragment = try XCTUnwrap(fragments.first)
+        let features = try XCTUnwrap(fragment["features"] as? [String: Any])
 
-        XCTAssertTrue(multiDocJSON.contains("No dictionary module installed"))
-        XCTAssertTrue(multiDocJSON.contains(#""features":{"type":"hebrew","keyName":"00430"}"#))
-        XCTAssertTrue(multiDocJSON.contains(#""keyName":"00430""#))
-        XCTAssertTrue(multiDocJSON.contains(#"download://"#))
-        XCTAssertFalse(multiDocJSON.contains("initials="))
+        XCTAssertEqual(payload["type"] as? String, "multi")
+        XCTAssertEqual(payload["contentType"] as? String, "strongs")
+        XCTAssertEqual(fragment["bookCategory"] as? String, "DICTIONARY")
+        XCTAssertEqual(fragment["keyName"] as? String, "00430")
+        XCTAssertEqual(features["type"] as? String, "hebrew")
+        XCTAssertEqual(features["keyName"] as? String, "00430")
+        XCTAssertTrue((fragment["xml"] as? String)?.contains("No dictionary module installed") == true)
+        XCTAssertTrue((fragment["xml"] as? String)?.contains("download://") == true)
+        XCTAssertFalse((fragment["xml"] as? String)?.contains("initials=") == true)
     }
 
     @MainActor
@@ -431,16 +442,18 @@ extension AndBibleTests {
 
         controller.bridge(bridge, openExternalLink: "ab-w://?strong=H00430")
 
-        let addDocumentsScript = try XCTUnwrap(
-            recordedScripts().first(where: { $0.contains("emit('add_documents'") })
+        let payload = try XCTUnwrap(
+            bridgeEmissionPayload(from: recordedScripts(), event: "add_documents") as? [String: Any]
         )
-        XCTAssertTrue(
-            addDocumentsScript.contains(#""type":"multi""#),
-            "Expected Strong's link to render through the Vue document pipeline. Script: \(addDocumentsScript)"
-        )
-        XCTAssertTrue(addDocumentsScript.contains(#""contentType":"strongs""#))
-        XCTAssertTrue(addDocumentsScript.contains(#""bookCategory":"DICTIONARY""#))
-        XCTAssertTrue(addDocumentsScript.contains(#""features":{"type":"hebrew","keyName":"00430"}"#))
+        let fragments = try XCTUnwrap(payload["osisFragments"] as? [[String: Any]])
+        let fragment = try XCTUnwrap(fragments.first)
+        let features = try XCTUnwrap(fragment["features"] as? [String: Any])
+
+        XCTAssertEqual(payload["type"] as? String, "multi")
+        XCTAssertEqual(payload["contentType"] as? String, "strongs")
+        XCTAssertEqual(fragment["bookCategory"] as? String, "DICTIONARY")
+        XCTAssertEqual(features["type"] as? String, "hebrew")
+        XCTAssertEqual(features["keyName"] as? String, "00430")
         XCTAssertEqual(
             controller.renderedContentState,
             "category=dictionary;module=StrongsHebrew;book=H00430;chapter=none;key=H00430"
@@ -504,12 +517,17 @@ extension AndBibleTests {
         controller.bridgeDidSetClientReady(bridge)
 
         let clientReadyScripts = Array(recordedScripts().dropFirst(scriptCountBeforeClientReady))
-        let addDocumentsScript = try XCTUnwrap(
-            clientReadyScripts.first(where: { $0.contains("emit('add_documents'") })
+        let payload = try XCTUnwrap(
+            bridgeEmissionPayload(from: clientReadyScripts, event: "add_documents") as? [String: Any]
         )
-        XCTAssertTrue(addDocumentsScript.contains(#""contentType":"strongs""#))
-        XCTAssertTrue(addDocumentsScript.contains(#""features":{"type":"hebrew","keyName":"00430"}"#))
-        XCTAssertFalse(addDocumentsScript.contains(#""osisRef":"Gen.1""#))
+        let fragments = try XCTUnwrap(payload["osisFragments"] as? [[String: Any]])
+        let fragment = try XCTUnwrap(fragments.first)
+        let features = try XCTUnwrap(fragment["features"] as? [String: Any])
+
+        XCTAssertEqual(payload["contentType"] as? String, "strongs")
+        XCTAssertEqual(features["type"] as? String, "hebrew")
+        XCTAssertEqual(features["keyName"] as? String, "00430")
+        XCTAssertNotEqual(fragment["osisRef"] as? String, "Gen.1")
         XCTAssertEqual(
             controller.renderedContentState,
             "category=dictionary;module=StrongsHebrew;book=H00430;chapter=none;key=H00430"

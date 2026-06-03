@@ -1,44 +1,23 @@
 import Foundation
 import SwiftData
 import BibleCore
+import BibleView
 
 /**
- Normalizes bookmark-to-label relationships into the JSON-ready pieces consumed by the reader web
- layer.
+ Normalizes bookmark-to-label relationships into typed bridge payload pieces consumed by the reader
+ web layer.
 
  The reader previously dereferenced `Label.id` directly from live SwiftData relationship objects.
  That is unsafe when a `Label` has already been deleted but bookmark junction rows still hold a
  stale in-memory reference. This helper filters those deleted labels before serialization so the
  native reader can tolerate both in-flight deletions and older orphaned relationship state.
  */
-struct BookmarkLabelSerializationPayload: Equatable {
+struct BookmarkLabelSerializationPayload {
     /// Ordered label identifiers that should be emitted on the bookmark JSON object.
     let labelIDs: [String]
 
-    /// Pre-rendered JSON fragments for bookmark-to-label junction rows.
-    let relationItemsJSON: [String]
-
-    /**
-     Renders the ordered label identifiers as a JSON array string.
-
-     - Returns: JSON array text containing the serialized `labelIDs` values.
-     - Side effects: none.
-     - Failure modes: This computed property cannot fail.
-     */
-    var labelsJSON: String {
-        "[" + labelIDs.map { "\"\($0)\"" }.joined(separator: ",") + "]"
-    }
-
-    /**
-     Renders the bookmark-to-label relation fragments as a JSON array string.
-
-     - Returns: JSON array text containing the serialized `relationItemsJSON` fragments.
-     - Side effects: none.
-     - Failure modes: This computed property cannot fail.
-     */
-    var relationsJSON: String {
-        "[" + relationItemsJSON.joined(separator: ",") + "]"
-    }
+    /// Typed bookmark-to-label junction rows for bridge encoding.
+    let relationItems: [BookmarkToLabelData]
 }
 
 /**
@@ -72,13 +51,13 @@ enum BookmarkLabelSerializationSupport {
     }
 
     /**
-     Serializes Bible bookmark label relationships into reader JSON payload pieces.
+     Projects Bible bookmark label relationships into reader bridge payload pieces.
 
      - Parameters:
        - bookmarkID: Identifier of the owning Bible bookmark.
        - links: Optional bookmark-to-label relationship rows attached to that bookmark.
        - unlabeledLabelID: Synthetic unlabeled label identifier used when no valid labels remain.
-     - Returns: Ordered label identifiers plus JSON fragments for the surviving relation rows.
+     - Returns: Ordered label identifiers plus typed relation rows for the surviving relationships.
      - Side effects: none.
      - Failure modes:
        - filters out relationship rows whose `label` is missing or already deleted
@@ -92,38 +71,48 @@ enum BookmarkLabelSerializationSupport {
         let resolvedLabelIDs = links?.compactMap { liveLabelIDString(for: $0.label) } ?? []
         let labelIDs = resolvedLabelIDs.isEmpty ? [unlabeledLabelID] : resolvedLabelIDs
 
-        let relationItemsJSON = links?.compactMap { link -> String? in
+        let relationItems = links?.compactMap { link -> BookmarkToLabelData? in
             guard let labelID = liveLabelIDString(for: link.label) else { return nil }
-            return """
-            {"type":"BibleBookmarkToLabel","bookmarkId":"\(bookmarkID.uuidString)","labelId":"\(labelID)","orderNumber":\(link.orderNumber),"indentLevel":\(link.indentLevel),"expandContent":\(link.expandContent)}
-            """
+            return BookmarkToLabelData(
+                bookmarkId: bookmarkID.uuidString,
+                labelId: labelID,
+                orderNumber: link.orderNumber,
+                indentLevel: link.indentLevel,
+                expandContent: link.expandContent,
+                type: "BibleBookmarkToLabel"
+            )
         } ?? []
 
-        if relationItemsJSON.isEmpty {
+        if relationItems.isEmpty {
             return BookmarkLabelSerializationPayload(
                 labelIDs: labelIDs,
-                relationItemsJSON: [
-                    """
-                    {"type":"BibleBookmarkToLabel","bookmarkId":"\(bookmarkID.uuidString)","labelId":"\(unlabeledLabelID)","orderNumber":0,"indentLevel":0,"expandContent":false}
-                    """
+                relationItems: [
+                    BookmarkToLabelData(
+                        bookmarkId: bookmarkID.uuidString,
+                        labelId: unlabeledLabelID,
+                        orderNumber: 0,
+                        indentLevel: 0,
+                        expandContent: false,
+                        type: "BibleBookmarkToLabel"
+                    ),
                 ]
             )
         }
 
         return BookmarkLabelSerializationPayload(
             labelIDs: labelIDs,
-            relationItemsJSON: relationItemsJSON
+            relationItems: relationItems
         )
     }
 
     /**
-     Serializes generic bookmark label relationships into reader JSON payload pieces.
+     Projects generic bookmark label relationships into reader bridge payload pieces.
 
      - Parameters:
        - bookmarkID: Identifier of the owning generic bookmark.
        - links: Optional bookmark-to-label relationship rows attached to that bookmark.
        - unlabeledLabelID: Synthetic unlabeled label identifier used when no valid labels remain.
-     - Returns: Ordered label identifiers plus JSON fragments for the surviving relation rows.
+     - Returns: Ordered label identifiers plus typed relation rows for the surviving relationships.
      - Side effects: none.
      - Failure modes:
        - filters out relationship rows whose `label` is missing or already deleted
@@ -137,46 +126,56 @@ enum BookmarkLabelSerializationSupport {
         let resolvedLabelIDs = links?.compactMap { liveLabelIDString(for: $0.label) } ?? []
         let labelIDs = resolvedLabelIDs.isEmpty ? [unlabeledLabelID] : resolvedLabelIDs
 
-        let relationItemsJSON = links?.compactMap { link -> String? in
+        let relationItems = links?.compactMap { link -> BookmarkToLabelData? in
             guard let labelID = liveLabelIDString(for: link.label) else { return nil }
-            return """
-            {"type":"GenericBookmarkToLabel","bookmarkId":"\(bookmarkID.uuidString)","labelId":"\(labelID)","orderNumber":\(link.orderNumber),"indentLevel":\(link.indentLevel),"expandContent":\(link.expandContent)}
-            """
+            return BookmarkToLabelData(
+                bookmarkId: bookmarkID.uuidString,
+                labelId: labelID,
+                orderNumber: link.orderNumber,
+                indentLevel: link.indentLevel,
+                expandContent: link.expandContent,
+                type: "GenericBookmarkToLabel"
+            )
         } ?? []
 
-        if relationItemsJSON.isEmpty {
+        if relationItems.isEmpty {
             return BookmarkLabelSerializationPayload(
                 labelIDs: labelIDs,
-                relationItemsJSON: [
-                    """
-                    {"type":"GenericBookmarkToLabel","bookmarkId":"\(bookmarkID.uuidString)","labelId":"\(unlabeledLabelID)","orderNumber":0,"indentLevel":0,"expandContent":false}
-                    """
+                relationItems: [
+                    BookmarkToLabelData(
+                        bookmarkId: bookmarkID.uuidString,
+                        labelId: unlabeledLabelID,
+                        orderNumber: 0,
+                        indentLevel: 0,
+                        expandContent: false,
+                        type: "GenericBookmarkToLabel"
+                    ),
                 ]
             )
         }
 
         return BookmarkLabelSerializationPayload(
             labelIDs: labelIDs,
-            relationItemsJSON: relationItemsJSON
+            relationItems: relationItems
         )
     }
 
     /**
-     Serializes a bookmark's primary label identifier only when it is still present in the emitted
+     Resolves a bookmark's primary label identifier only when it is still present in the emitted
      label set.
 
      - Parameters:
        - primaryLabelID: Optional stored primary-label UUID from the bookmark.
        - validLabelIDs: Ordered label identifiers that survived relation sanitization.
-     - Returns: A quoted JSON string for the primary label identifier or `null`.
+     - Returns: The primary label identifier when valid, otherwise `nil`.
      - Side effects: none.
      - Failure modes:
-       - returns `null` when `primaryLabelID` is absent
-       - returns `null` when `primaryLabelID` no longer exists in `validLabelIDs`
+       - returns `nil` when `primaryLabelID` is absent
+       - returns `nil` when `primaryLabelID` no longer exists in `validLabelIDs`
      */
-    static func primaryLabelIDJSON(primaryLabelID: UUID?, validLabelIDs: [String]) -> String {
-        guard let primaryLabelID else { return "null" }
+    static func primaryLabelID(primaryLabelID: UUID?, validLabelIDs: [String]) -> String? {
+        guard let primaryLabelID else { return nil }
         let primaryLabel = primaryLabelID.uuidString
-        return validLabelIDs.contains(primaryLabel) ? "\"\(primaryLabel)\"" : "null"
+        return validLabelIDs.contains(primaryLabel) ? primaryLabel : nil
     }
 }
