@@ -2,9 +2,9 @@ name: iOS CI
 
 on:
   pull_request:
+    types: [opened,reopened,ready_for_review,synchronize]
   push:
-    branches:
-      - main
+    branches-ignore: [main]
 
 concurrency:
   group: ios-ci-${{ github.event.pull_request.number || github.ref }}
