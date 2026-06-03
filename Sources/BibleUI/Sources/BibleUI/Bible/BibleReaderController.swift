@@ -7368,7 +7368,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      */
     private func buildConfigJSON() -> String {
         let payload = buildConfigPayload()
-        guard let data = try? bridgeEncoder.encode(payload),
+        let encoder = JSONEncoder()
+        guard let data = try? encoder.encode(payload),
               let json = String(data: data, encoding: .utf8) else {
             logger.error("Failed to encode set_config bridge payload")
             return "{}"
