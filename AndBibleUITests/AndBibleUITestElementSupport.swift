@@ -70,7 +70,7 @@ extension AndBibleUITests {
             ]
         }
 
-        if identifier.hasSuffix("Menu") {
+        if identifier.hasSuffix("Menu") || identifier.contains("Menu::") {
             return [
                 app.buttons[identifier].firstMatch,
                 app.otherElements[identifier].firstMatch,

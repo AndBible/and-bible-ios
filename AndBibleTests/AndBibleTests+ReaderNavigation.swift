@@ -743,6 +743,7 @@ extension AndBibleTests {
         settingsStore.setBool(.disableAnimations, value: true)
         settingsStore.setBool(.disableClickToEdit, value: true)
         settingsStore.setInt(.fontSizeMultiplier, value: 125)
+        settingsStore.setString(.notesContentType, value: "PLAINTEXT")
         settingsStore.setStringSet(.disableBibleBookmarkModalButtons, values: ["speak", "bookmark"])
         settingsStore.setStringSet(.disableGenBookmarkModalButtons, values: ["generic-note"])
         settingsStore.setStringSet(
@@ -863,6 +864,7 @@ extension AndBibleTests {
                 "monochromeMode",
                 "disableAnimations",
                 "disableClickToEdit",
+                "notesContentType",
                 "fontSizeMultiplier",
                 "enabledExperimentalFeatures",
                 "autoTrackReading",
@@ -922,6 +924,7 @@ extension AndBibleTests {
         XCTAssertEqual(appSettings["monochromeMode"] as? Bool, true)
         XCTAssertEqual(appSettings["disableAnimations"] as? Bool, true)
         XCTAssertEqual(appSettings["disableClickToEdit"] as? Bool, true)
+        XCTAssertEqual(appSettings["notesContentType"] as? String, "HTML")
         XCTAssertEqual(appSettings["fontSizeMultiplier"] as? Double, 1.25)
         XCTAssertEqual(appSettings["autoTrackReading"] as? Bool, true)
         XCTAssertNotNil(appSettings["activeSince"] as? Int)

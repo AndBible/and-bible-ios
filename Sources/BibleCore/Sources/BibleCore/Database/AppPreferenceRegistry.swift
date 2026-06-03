@@ -84,6 +84,38 @@ public enum AppPreferenceValueType: Sendable {
 }
 
 /**
+ * Normalizes Android's notes-content-type list preference before the value reaches UI or bridge
+ * consumers.
+ *
+ * Sync, old builds, or direct storage edits can leave unexpected strings in persistence. Android's
+ * contract only supports `HTML` and `MARKDOWN`, and the Vue reader models the value as that closed
+ * set. Centralizing the normalizer keeps Settings writes and reader payload emission consistent.
+ *
+ * - Parameter rawValue: Persisted or incoming notes-content-type value.
+ * - Returns: `HTML` or `MARKDOWN`; unknown values fall back to Android's default `HTML`.
+ * - Side effects: none.
+ * - Failure modes: This helper cannot fail.
+ */
+public enum AppPreferenceValueNormalizer {
+    /**
+     Normalizes persisted notes-content format values to Android's supported list preference values.
+     *
+     - Parameter rawValue: Raw value read from persistence or sync.
+     - Returns: `HTML` or `MARKDOWN`, falling back to `HTML` for invalid values.
+     - Side effects: none.
+     - Failure modes: This helper cannot fail.
+     */
+    public static func notesContentType(_ rawValue: String) -> String {
+        switch rawValue {
+        case "HTML", "MARKDOWN":
+            return rawValue
+        default:
+            return "HTML"
+        }
+    }
+}
+
+/**
  * Defines the full iOS-side contract for one Android parity preference key.
  *
  * Each definition records the durable key, storage backend, logical value type, optional default,

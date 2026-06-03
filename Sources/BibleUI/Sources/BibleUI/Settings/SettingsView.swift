@@ -1329,9 +1329,9 @@ public struct SettingsView: View {
                         defaultValue: "Text format used when creating new bookmark notes and Study Pad entries"
                     ),
                     options: Self.notesContentTypeMenuOptions,
-                    selectedValue: Self.normalizedNotesContentType(notesContentType)
+                    selectedValue: AppPreferenceValueNormalizer.notesContentType(notesContentType)
                 ) { newValue in
-                    let normalized = Self.normalizedNotesContentType(newValue)
+                    let normalized = AppPreferenceValueNormalizer.notesContentType(newValue)
                     notesContentType = normalized
                     let store = SettingsStore(modelContext: modelContext)
                     store.setString(.notesContentType, value: normalized)
@@ -2286,7 +2286,8 @@ public struct SettingsView: View {
      Android `ListPreference` rows render as compact title/summary rows and open a chooser when
      tapped. SwiftUI's default `Picker` style expands selected values inline inside a `ScrollView`,
      which creates large blue standalone labels and breaks the Android settings rhythm. This helper
-     keeps the row visually stable while still using native menu affordances and checkmarks.
+     keeps the row visually stable while still using native menu affordances and checkmarks, and
+     exposes one stable accessibility identifier so UI tests can detect accidental picker reverts.
 
      - Parameters:
        - preferenceKey: Android parity key used for icon lookup and accessibility context.
@@ -2320,7 +2321,7 @@ public struct SettingsView: View {
                 }
             }
         } label: {
-            HStack(alignment: .center, spacing: 8) {
+            HStack(alignment: .center, spacing: AndBibleSettingsPreferenceLayout.accessorySpacing) {
                 settingsRowLabel(
                     preferenceKey: preferenceKey,
                     title: title,
@@ -2328,7 +2329,7 @@ public struct SettingsView: View {
                     isEnabled: !options.isEmpty
                 )
 
-                Spacer(minLength: 8)
+                Spacer(minLength: AndBibleSettingsPreferenceLayout.accessorySpacing)
 
                 Image(systemName: "chevron.up.chevron.down")
                     .font(.system(size: 13, weight: .semibold))
@@ -2339,6 +2340,7 @@ public struct SettingsView: View {
         }
         .buttonStyle(.plain)
         .disabled(options.isEmpty)
+        .accessibilityIdentifier("settingsListPreferenceMenu::\(preferenceKey.rawValue)")
     }
 
     /**
@@ -2402,11 +2404,11 @@ public struct SettingsView: View {
     ) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             settingsSectionHeader(title)
-                .padding(.bottom, 10)
+                .padding(.bottom, AndBibleSettingsPreferenceLayout.sectionHeaderBottomPadding)
             content()
-                .padding(.horizontal, 16)
+                .padding(.horizontal, AndBibleSettingsPreferenceLayout.rowHorizontalPadding)
         }
-        .padding(.bottom, 14)
+        .padding(.bottom, AndBibleSettingsPreferenceLayout.sectionBottomPadding)
     }
 
     /**
@@ -2467,7 +2469,7 @@ public struct SettingsView: View {
         monochromeMode = store.getBool(.monochromeMode)
         disableAnimations = store.getBool(.disableAnimations)
         disableClickToEdit = store.getBool(.disableClickToEdit)
-        notesContentType = Self.normalizedNotesContentType(store.getString(.notesContentType))
+        notesContentType = AppPreferenceValueNormalizer.notesContentType(store.getString(.notesContentType))
         showActiveWindowIndicator = store.getBool(.showActiveWindowIndicator)
         showErrorBox = store.getBool(.showErrorBox)
         enableBluetoothMediaButtons = store.getBool(.enableBluetoothPref)
@@ -2865,16 +2867,6 @@ public struct SettingsView: View {
             return rawValue
         default:
             return "default"
-        }
-    }
-
-    /// Normalizes persisted notes-content format values to Android's supported list preference values.
-    private static func normalizedNotesContentType(_ rawValue: String) -> String {
-        switch rawValue {
-        case "HTML", "MARKDOWN":
-            return rawValue
-        default:
-            return "HTML"
         }
     }
 

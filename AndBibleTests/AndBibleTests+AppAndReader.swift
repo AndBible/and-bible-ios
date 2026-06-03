@@ -39,6 +39,14 @@ extension AndBibleTests {
         XCTAssertEqual(AppPreferenceRegistry.boolDefault(for: .enableBluetoothPref), true)
     }
 
+    func testNotesContentTypeNormalizerUsesAndroidSupportedValues() {
+        XCTAssertEqual(AppPreferenceValueNormalizer.notesContentType("HTML"), "HTML")
+        XCTAssertEqual(AppPreferenceValueNormalizer.notesContentType("MARKDOWN"), "MARKDOWN")
+        XCTAssertEqual(AppPreferenceValueNormalizer.notesContentType("markdown"), "HTML")
+        XCTAssertEqual(AppPreferenceValueNormalizer.notesContentType("PLAINTEXT"), "HTML")
+        XCTAssertEqual(AppPreferenceValueNormalizer.notesContentType(""), "HTML")
+    }
+
     func testActionPreferencesUseActionShape() {
         let actionKeys: [AppPreferenceKey] = [
             .discreteHelp,
