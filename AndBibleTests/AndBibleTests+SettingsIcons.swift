@@ -200,6 +200,117 @@ extension AndBibleTests {
         )
     }
 
+    func testTextDisplaySectionTitlesMatchAndroidXml() {
+        XCTAssertEqual(
+            TextDisplaySettingsPresentation.Section.allCases.map(\.titleDefault),
+            [
+                "Parent settings",
+                "Font & Colors",
+                "Text Layout",
+                "Strong's & Morphology",
+                "Footnotes & Cross-references",
+                "Verses & Headings",
+                "Page Scrolling",
+                "Bookmark & My Notes settings",
+                "Reading & Memorization",
+            ]
+        )
+    }
+
+    func testTextDisplayRowTitlesMatchAndroidXml() {
+        let titlesByKey = Dictionary(
+            uniqueKeysWithValues: TextDisplaySettingsPresentation.androidRows.map {
+                ($0.androidKey, $0.titleDefault)
+            }
+        )
+
+        XCTAssertEqual(
+            titlesByKey,
+            [
+                "open_workspace_settings": "Workspace text options",
+                "open_global_settings": "Global text options",
+                "COLORS": "Color settings",
+                "FONTSIZE": "Font size",
+                "FONTFAMILY": "Font family",
+                "LINE_SPACING": "Line spacing",
+                "REDLETTERS": "Red Letter",
+                "MARGINSIZE": "Change margin size",
+                "TOPMARGIN": "Top margin",
+                "JUSTIFY": "Justify-align text",
+                "HYPHENATION": "Hyphenation",
+                "VERSEPERLINE": "One verse per line",
+                "STRONGS": "Strong's numbers",
+                "MORPH": "Morphological codes",
+                "NON_STRONGS_WORD_ITALIC": "Italicize added words",
+                "FOOTNOTES": "Footnotes",
+                "FOOTNOTES_INLINE": "Footnotes inline",
+                "XREFS": "Cross references",
+                "EXPAND_XREFS": "Inline cross references",
+                "VERSENUMBERS": "Chapter & verse numbers",
+                "SECTIONTITLES": "Section titles",
+                "TITLE_SCROLL_BUTTON": "Title scroll button",
+                "PAGENUMBER": "Relative page number",
+                "INFINITE_SCROLL": "Infinite scroll",
+                "PAGE_SCROLL_AMOUNT": "Page scroll amount",
+                "SCROLL_HELPER_LINES": "Scroll helper lines",
+                "SCROLL_HELPER_LINE_STYLE": "Helper line style",
+                "PAGE_BUTTONS": "Page scroll buttons",
+                "ORDINALS": "Show ordinal numbers",
+                "BOOKMARKS_SHOW": "Show bookmarks",
+                "MYNOTES": "Show My Note icons",
+                "AI_DOC_MARKERS": "Show AI document markers",
+                "BOOKMARKS_HIDELABELS": "Hide specified labels",
+                "MARK_AS_READ_BUTTON": "Mark as read button",
+                "MEMORIZATION_INDICATORS": "Memorization indicators",
+                "AUTO_TRACK_READING": "Auto-track reading",
+            ]
+        )
+    }
+
+    func testTextDisplayVisibleRowsMatchAndroidScopeVisibility() {
+        let windowVisibleRows = [
+            "open_workspace_settings",
+            "open_global_settings",
+            "COLORS",
+            "FONTSIZE",
+            "FONTFAMILY",
+            "LINE_SPACING",
+            "REDLETTERS",
+            "MARGINSIZE",
+            "TOPMARGIN",
+            "JUSTIFY",
+            "HYPHENATION",
+            "VERSEPERLINE",
+            "STRONGS",
+            "MORPH",
+            "NON_STRONGS_WORD_ITALIC",
+            "FOOTNOTES",
+            "FOOTNOTES_INLINE",
+            "XREFS",
+            "EXPAND_XREFS",
+            "VERSENUMBERS",
+            "SECTIONTITLES",
+            "TITLE_SCROLL_BUTTON",
+            "PAGENUMBER",
+            "INFINITE_SCROLL",
+            "PAGE_SCROLL_AMOUNT",
+            "ORDINALS",
+            "BOOKMARKS_SHOW",
+            "MYNOTES",
+            "AI_DOC_MARKERS",
+            "BOOKMARKS_HIDELABELS",
+            "MARK_AS_READ_BUTTON",
+            "MEMORIZATION_INDICATORS",
+            "AUTO_TRACK_READING",
+        ]
+        let workspaceVisibleRows = Array(windowVisibleRows.dropFirst())
+        let globalVisibleRows = Array(windowVisibleRows.dropFirst(2))
+
+        XCTAssertEqual(TextDisplaySettingsPresentation.iosWindowVisibleAndroidKeys, windowVisibleRows)
+        XCTAssertEqual(TextDisplaySettingsPresentation.iosWorkspaceVisibleAndroidKeys, workspaceVisibleRows)
+        XCTAssertEqual(TextDisplaySettingsPresentation.iosGlobalVisibleAndroidKeys, globalVisibleRows)
+    }
+
     func testTextDisplayImplementedRowsExposeSupportedIosConfigKeys() {
         XCTAssertTrue(TextDisplaySettingsPresentation.implementedAndroidKeys.contains("COLORS"))
         XCTAssertTrue(TextDisplaySettingsPresentation.implementedAndroidKeys.contains("MARGINSIZE"))

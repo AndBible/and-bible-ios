@@ -10,18 +10,21 @@ import UIKit
 /**
  Form-driven editor for text presentation settings used by the Bible reader.
 
- The view exposes the Android All Text Options rows that already have complete iOS model, bridge,
- and renderer support. Unsupported Android rows stay documented in
- `TextDisplaySettingsPresentation` instead of appearing as inert controls.
+ The view renders Android's All Text Options category and row inventory. Rows that already have a
+ complete iOS model, bridge, and renderer path are interactive; Android rows that are not yet backed
+ on iOS remain visible in their Android position but disabled.
 
  Data dependencies:
  - `settings` is the persisted display-settings model owned by the parent screen
  - SwiftData labels back the Android `BOOKMARKS_HIDELABELS` picker
+ - `workspaceSettings` optionally backs Android's window-scope parent link to workspace text options
+ - `globalSettings` optionally backs Android's window/workspace parent link to global text options
  - `onChange` lets the parent push updated settings into the reader after each mutation
 
  Side effects:
  - every binding write mutates `settings` and invokes `onChange`
  - hidden bookmark-label choices mutate `settings.bookmarksHideLabels`
+ - workspace/global parent-link edits mutate their supplied bindings
  - on iOS, presenting the font picker bridges into `UIFontPickerViewController`
  */
 public struct TextDisplaySettingsView: View {
@@ -30,6 +33,24 @@ public struct TextDisplaySettingsView: View {
 
     /// Callback invoked after any user-visible settings mutation.
     var onChange: (() -> Void)?
+
+    /// Optional workspace text-display binding used by Android's window-level parent section.
+    private let workspaceSettings: Binding<TextDisplaySettings>?
+
+    /// User-visible workspace name used in Android's window-level parent link title.
+    private let workspaceName: String?
+
+    /// Callback invoked after workspace parent-link settings mutate.
+    private let onWorkspaceSettingsChanged: (() -> Void)?
+
+    /// Optional global text-display binding used by Android's workspace-level parent section.
+    private let globalSettings: Binding<TextDisplaySettings>?
+
+    /// Callback invoked after global parent-link settings mutate.
+    private let onGlobalSettingsChanged: (() -> Void)?
+
+    /// Navigation title that reflects the Android settings scope currently being edited.
+    private let navigationTitleText: String
 
     /// User-visible and system labels available for the hidden-bookmark-label picker.
     @Query private var allLabels: [BibleCore.Label]
@@ -47,11 +68,32 @@ public struct TextDisplaySettingsView: View {
 
      - Parameters:
        - settings: Shared display settings value to mutate from the form.
-       - onChange: Optional callback invoked after any setting changes.
+       - workspaceSettings: Optional workspace text-display settings for the window-scope parent link.
+       - workspaceName: Workspace name used in Android's dynamic parent-link title.
+       - globalSettings: Optional global text-display settings for the Android parent link.
+       - navigationTitle: Android-scope title shown by the surrounding navigation stack.
+       - onChange: Optional callback invoked after current-scope setting changes.
+       - onWorkspaceSettingsChanged: Optional callback invoked after workspace parent-link changes.
+       - onGlobalSettingsChanged: Optional callback invoked after global parent-link changes.
      */
-    public init(settings: Binding<TextDisplaySettings>, onChange: (() -> Void)? = nil) {
+    public init(
+        settings: Binding<TextDisplaySettings>,
+        workspaceSettings: Binding<TextDisplaySettings>? = nil,
+        workspaceName: String? = nil,
+        globalSettings: Binding<TextDisplaySettings>? = nil,
+        navigationTitle: String = "Global text options",
+        onChange: (() -> Void)? = nil,
+        onWorkspaceSettingsChanged: (() -> Void)? = nil,
+        onGlobalSettingsChanged: (() -> Void)? = nil
+    ) {
         self._settings = settings
+        self.workspaceSettings = workspaceSettings
+        self.workspaceName = workspaceName
+        self.globalSettings = globalSettings
+        self.navigationTitleText = navigationTitle
         self.onChange = onChange
+        self.onWorkspaceSettingsChanged = onWorkspaceSettingsChanged
+        self.onGlobalSettingsChanged = onGlobalSettingsChanged
     }
 
     /// Slider binding that maps the optional stored font size to a concrete numeric control.
@@ -191,13 +233,50 @@ public struct TextDisplaySettingsView: View {
         )
     }
 
-    /// Human-readable current font label used by the iOS font picker row.
-    private var currentFontName: String {
-        let family = settings.fontFamily ?? "sans-serif"
-        if family == "sans-serif" { return "Sans Serif (Default)" }
-        if family == "serif" { return "Serif" }
-        if family == "monospace" { return "Monospace" }
-        return family
+    /// Android dynamic `FONTSIZE` row title containing the current point size.
+    private var fontSizeTitle: String {
+        String(format: "Font size (%d pt)", settings.fontSize ?? 18)
+    }
+
+    /// Android dynamic `FONTFAMILY` row title containing the persisted font-family value.
+    private var fontFamilyTitle: String {
+        String(format: "Font family (%@)", settings.fontFamily ?? "sans-serif")
+    }
+
+    /// Android dynamic `LINE_SPACING` row title containing the current line-spacing multiplier.
+    private var lineSpacingTitle: String {
+        String(format: "Line spacing (%1.1fx)", Double(displayedLineSpacing) / 10.0)
+    }
+
+    /// Android dynamic `MARGINSIZE` row title containing left/right/max-width values.
+    private var marginSizeTitle: String {
+        String(
+            format: "Margin size (%d/%d/%d mm)",
+            settings.marginLeft ?? 2,
+            settings.marginRight ?? 2,
+            settings.maxWidth ?? 600
+        )
+    }
+
+    /// Android dynamic `TOPMARGIN` row title containing the current top margin.
+    private var topMarginTitle: String {
+        String(format: "Top margin (%d mm)", settings.topMargin ?? 0)
+    }
+
+    /// Android window-level parent link title scoped to the active workspace name.
+    private var workspaceSettingsLinkTitle: String {
+        guard let workspaceName, !workspaceName.isEmpty else {
+            return androidTitle("open_workspace_settings")
+        }
+        return "Workspace text options — \(workspaceName)"
+    }
+
+    /// Android workspace-level settings screen title scoped to the active workspace name.
+    private var workspaceSettingsTitle: String {
+        guard let workspaceName, !workspaceName.isEmpty else {
+            return "Text options"
+        }
+        return "Text options - \(workspaceName)"
     }
 
     /// Accessibility-exported state for the currently edited justify-text preference.
@@ -216,17 +295,56 @@ public struct TextDisplaySettingsView: View {
      */
     public var body: some View {
         Form {
+            if workspaceSettings != nil || globalSettings != nil {
+                Section {
+                    if let workspaceSettings {
+                        NavigationLink {
+                            TextDisplaySettingsView(
+                                settings: workspaceSettings,
+                                globalSettings: globalSettings,
+                                navigationTitle: workspaceSettingsTitle,
+                                onChange: onWorkspaceSettingsChanged,
+                                onGlobalSettingsChanged: onGlobalSettingsChanged
+                            )
+                        } label: {
+                            textDisplayRowLabel(
+                                androidKey: "open_workspace_settings",
+                                title: workspaceSettingsLinkTitle,
+                                summary: androidSummary("open_workspace_settings")
+                            )
+                        }
+                        .accessibilityIdentifier("textDisplayWorkspaceSettingsLink")
+                    }
+
+                    if let globalSettings {
+                        NavigationLink {
+                            TextDisplaySettingsView(
+                                settings: globalSettings,
+                                navigationTitle: "Global text options",
+                                onChange: onGlobalSettingsChanged
+                            )
+                        } label: {
+                            textDisplayRowLabel(
+                                androidKey: "open_global_settings",
+                                title: androidTitle("open_global_settings"),
+                                summary: androidSummary("open_global_settings")
+                            )
+                        }
+                        .accessibilityIdentifier("textDisplayGlobalSettingsLink")
+                    }
+                } header: {
+                    textDisplaySectionHeader(TextDisplaySettingsPresentation.Section.parent.titleDefault)
+                }
+            }
+
             Section {
                 NavigationLink {
                     ColorSettingsView(settings: $settings, onChange: onChange)
                 } label: {
                     textDisplayRowLabel(
                         androidKey: "COLORS",
-                        title: String(localized: "colors", defaultValue: "Colors"),
-                        summary: String(
-                            localized: "prefs_colors_summary",
-                            defaultValue: "Configure reader text and background colors"
-                        )
+                        title: androidTitle("COLORS"),
+                        summary: androidSummary("COLORS")
                     )
                 }
                 .accessibilityIdentifier("textDisplayColorsLink")
@@ -234,14 +352,8 @@ public struct TextDisplaySettingsView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     textDisplayRowLabel(
                         androidKey: "FONTSIZE",
-                        title: String(localized: "font_size"),
-                        summary: String(
-                            format: String(
-                                localized: "prefs_font_text_size_summary",
-                                defaultValue: "Set the text size. Current value: %d"
-                            ),
-                            settings.fontSize ?? 18
-                        )
+                        title: fontSizeTitle,
+                        summary: androidSummary("FONTSIZE")
                     )
                     Slider(value: fontSizeBinding, in: 1...60, step: 1)
                         .padding(.leading, 66)
@@ -252,12 +364,8 @@ public struct TextDisplaySettingsView: View {
                 } label: {
                     textDisplayRowLabel(
                         androidKey: "FONTFAMILY",
-                        title: String(localized: "font_family"),
-                        summary: String(
-                            localized: "prefs_font_family_summary",
-                            defaultValue: "Choose font family"
-                        ),
-                        detail: currentFontName
+                        title: fontFamilyTitle,
+                        summary: androidSummary("FONTFAMILY")
                     )
                 }
                 .accessibilityIdentifier("textDisplayFontFamilyButton")
@@ -274,12 +382,8 @@ public struct TextDisplaySettingsView: View {
                 } label: {
                     textDisplayRowLabel(
                         androidKey: "FONTFAMILY",
-                        title: String(localized: "font_family"),
-                        summary: String(
-                            localized: "prefs_font_family_summary",
-                            defaultValue: "Choose font family"
-                        ),
-                        detail: currentFontName
+                        title: fontFamilyTitle,
+                        summary: androidSummary("FONTFAMILY")
                     )
                 }
                 #endif
@@ -287,14 +391,8 @@ public struct TextDisplaySettingsView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     textDisplayRowLabel(
                         androidKey: "LINE_SPACING",
-                        title: String(localized: "line_spacing"),
-                        summary: String(
-                            format: String(
-                                localized: "line_spacing_summary",
-                                defaultValue: "Set the space between lines. Current value: %d"
-                            ),
-                            displayedLineSpacing
-                        )
+                        title: lineSpacingTitle,
+                        summary: androidSummary("LINE_SPACING")
                     )
                     Slider(
                         value: lineSpacingBinding,
@@ -307,15 +405,12 @@ public struct TextDisplaySettingsView: View {
                 Toggle(isOn: boolBinding(\.showRedLetters, default: true)) {
                     textDisplayRowLabel(
                         androidKey: "REDLETTERS",
-                        title: String(localized: "red_letters"),
-                        summary: String(
-                            localized: "prefs_red_letter_summary",
-                            defaultValue: "Show words of Christ in red"
-                        )
+                        title: androidTitle("REDLETTERS"),
+                        summary: androidSummary("REDLETTERS")
                     )
                 }
             } header: {
-                textDisplaySectionHeader(String(localized: "prefs_font_and_colors_title", defaultValue: "Font and colors"))
+                textDisplaySectionHeader(TextDisplaySettingsPresentation.Section.fontAndColors.titleDefault)
             }
 
             Section {
@@ -323,29 +418,26 @@ public struct TextDisplaySettingsView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     textDisplayRowLabel(
                         androidKey: "MARGINSIZE",
-                        title: String(localized: "margins", defaultValue: "Margins"),
-                        summary: String(
-                            localized: "prefs_margins_summary",
-                            defaultValue: "Set reader side margins and maximum text width"
-                        )
+                        title: marginSizeTitle,
+                        summary: androidSummary("MARGINSIZE")
                     )
                     VStack(alignment: .leading, spacing: 10) {
                         marginSlider(
-                            title: String(localized: "left_margin", defaultValue: "Left"),
+                            title: String(format: "Left margin (%d mm)", settings.marginLeft ?? 2),
                             value: settings.marginLeft ?? 2,
                             binding: marginLeftBinding,
                             range: 0...30,
                             step: 1
                         )
                         marginSlider(
-                            title: String(localized: "right_margin", defaultValue: "Right"),
+                            title: String(format: "Right margin (%d mm)", settings.marginRight ?? 2),
                             value: settings.marginRight ?? 2,
                             binding: marginRightBinding,
                             range: 0...30,
                             step: 1
                         )
                         marginSlider(
-                            title: String(localized: "max_width", defaultValue: "Max width"),
+                            title: String(format: "Maximum width of text (%d mm)", settings.maxWidth ?? 600),
                             value: settings.maxWidth ?? 600,
                             binding: maxWidthBinding,
                             range: 0...1000,
@@ -358,14 +450,8 @@ public struct TextDisplaySettingsView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     textDisplayRowLabel(
                         androidKey: "TOPMARGIN",
-                        title: String(localized: "top_margin", defaultValue: "Top margin"),
-                        summary: String(
-                            format: String(
-                                localized: "top_margin_summary",
-                                defaultValue: "Set the top margin. Current value: %d"
-                            ),
-                            settings.topMargin ?? 0
-                        )
+                        title: topMarginTitle,
+                        summary: androidSummary("TOPMARGIN")
                     )
                     Slider(value: topMarginBinding, in: 0...60, step: 1)
                         .padding(.leading, 66)
@@ -377,11 +463,8 @@ public struct TextDisplaySettingsView: View {
                     } label: {
                         textDisplayRowLabel(
                             androidKey: "JUSTIFY",
-                            title: String(localized: "justify_text"),
-                            summary: String(
-                                localized: "prefs_justify_summary",
-                                defaultValue: "Align text in justify style, meaning left and right margins of the text are in line"
-                            )
+                            title: androidTitle("JUSTIFY"),
+                            summary: androidSummary("JUSTIFY")
                         )
                     }
                     .buttonStyle(.plain)
@@ -392,28 +475,22 @@ public struct TextDisplaySettingsView: View {
                         .accessibilityIdentifier("textDisplayJustifyTextToggle")
                         .accessibilityValue((settings.justifyText ?? false) ? "justifyTextOn" : "justifyTextOff")
                 }
-                Toggle(isOn: boolBinding(\.showVersePerLine, default: false)) {
-                    textDisplayRowLabel(
-                        androidKey: "VERSEPERLINE",
-                        title: String(localized: "verse_per_line"),
-                        summary: String(
-                            localized: "prefs_verse_per_line_summary",
-                            defaultValue: "Show each verse on a different line"
-                        )
-                    )
-                }
                 Toggle(isOn: boolBinding(\.hyphenation, default: true)) {
                     textDisplayRowLabel(
                         androidKey: "HYPHENATION",
-                        title: String(localized: "hyphenation"),
-                        summary: String(
-                            localized: "prefs_hyphenation_summary",
-                            defaultValue: "Automatically hyphenate words, if language is supported"
-                        )
+                        title: androidTitle("HYPHENATION"),
+                        summary: androidSummary("HYPHENATION")
+                    )
+                }
+                Toggle(isOn: boolBinding(\.showVersePerLine, default: false)) {
+                    textDisplayRowLabel(
+                        androidKey: "VERSEPERLINE",
+                        title: androidTitle("VERSEPERLINE"),
+                        summary: androidSummary("VERSEPERLINE")
                     )
                 }
             } header: {
-                textDisplaySectionHeader(String(localized: "prefs_text_layout_title", defaultValue: "Text layout"))
+                textDisplaySectionHeader(TextDisplaySettingsPresentation.Section.textLayout.titleDefault)
             }
 
             Section {
@@ -428,27 +505,20 @@ public struct TextDisplaySettingsView: View {
                 } label: {
                     textDisplayRowLabel(
                         androidKey: "STRONGS",
-                        title: String(localized: "strongs_numbers"),
-                        summary: String(
-                            localized: "prefs_show_strongs_summary",
-                            defaultValue: "Links to Greek and Hebrew definitions"
-                        )
+                        title: androidTitle("STRONGS"),
+                        summary: androidSummary("STRONGS")
                     )
                 }
                 Toggle(isOn: boolBinding(\.showMorphology, default: false)) {
                     textDisplayRowLabel(
                         androidKey: "MORPH",
-                        title: String(localized: "morphology"),
-                        summary: String(
-                            localized: "prefs_show_morphology_summary",
-                            defaultValue: "Show Robinson's Greek morphology"
-                        )
+                        title: androidTitle("MORPH"),
+                        summary: androidSummary("MORPH")
                     )
                 }
+                disabledAndroidToggle(androidKey: "NON_STRONGS_WORD_ITALIC")
             } header: {
-                textDisplaySectionHeader(
-                    String(localized: "prefs_strongs_and_morphology_title", defaultValue: "Strong's and morphology")
-                )
+                textDisplaySectionHeader(TextDisplaySettingsPresentation.Section.strongsAndMorphology.titleDefault)
             }
 
             Section {
@@ -457,21 +527,15 @@ public struct TextDisplaySettingsView: View {
                 Toggle(isOn: footnotesBinding) {
                     textDisplayRowLabel(
                         androidKey: "FOOTNOTES",
-                        title: String(localized: "footnotes"),
-                        summary: String(
-                            localized: "prefs_show_footnotes_summary",
-                            defaultValue: "Show footnotes, if they are available in the document"
-                        )
+                        title: androidTitle("FOOTNOTES"),
+                        summary: androidSummary("FOOTNOTES")
                     )
                 }
                 Toggle(isOn: boolBinding(\.showFootNotesInline, default: false)) {
                     textDisplayRowLabel(
                         androidKey: "FOOTNOTES_INLINE",
-                        title: String(localized: "inline_footnotes"),
-                        summary: String(
-                            localized: "prefs_show_footnotes_inline_summary",
-                            defaultValue: "Show footnotes inline with the text instead of as clickable handles"
-                        ),
+                        title: androidTitle("FOOTNOTES_INLINE"),
+                        summary: androidSummary("FOOTNOTES_INLINE"),
                         isEnabled: footnotesBinding.wrappedValue
                     )
                 }
@@ -480,89 +544,74 @@ public struct TextDisplaySettingsView: View {
                 Toggle(isOn: xrefsBinding) {
                     textDisplayRowLabel(
                         androidKey: "XREFS",
-                        title: String(localized: "cross_references"),
-                        summary: String(
-                            localized: "prefs_show_xrefs_summary",
-                            defaultValue: "Show cross references, if they are available in the document"
-                        )
+                        title: androidTitle("XREFS"),
+                        summary: androidSummary("XREFS")
                     )
                 }
                 Toggle(isOn: boolBinding(\.expandXrefs, default: false)) {
                     textDisplayRowLabel(
                         androidKey: "EXPAND_XREFS",
-                        title: String(localized: "expand_cross_references"),
-                        summary: String(
-                            localized: "prefs_expand_footnotes_summary",
-                            defaultValue: "Show cross reference content inline within the text, instead of a link that opens a pop-up dialog"
-                        ),
+                        title: androidTitle("EXPAND_XREFS"),
+                        summary: androidSummary("EXPAND_XREFS"),
                         isEnabled: xrefsBinding.wrappedValue
                     )
                 }
                 .disabled(!xrefsBinding.wrappedValue)
             } header: {
-                textDisplaySectionHeader(
-                    String(localized: "prefs_footnotes_and_xrefs_title", defaultValue: "Footnotes and cross references")
-                )
+                textDisplaySectionHeader(TextDisplaySettingsPresentation.Section.footnotesAndXrefs.titleDefault)
             }
 
             Section {
                 Toggle(isOn: boolBinding(\.showVerseNumbers, default: true)) {
                     textDisplayRowLabel(
                         androidKey: "VERSENUMBERS",
-                        title: String(localized: "verse_numbers"),
-                        summary: String(
-                            localized: "prefs_show_verseno_summary",
-                            defaultValue: "Show verse numbers"
-                        )
+                        title: androidTitle("VERSENUMBERS"),
+                        summary: androidSummary("VERSENUMBERS")
                     )
                 }
                 Toggle(isOn: boolBinding(\.showSectionTitles, default: true)) {
                     textDisplayRowLabel(
                         androidKey: "SECTIONTITLES",
-                        title: String(localized: "section_titles"),
-                        summary: String(
-                            localized: "prefs_section_title_summary",
-                            defaultValue: "Show non-canonical section titles"
-                        )
+                        title: androidTitle("SECTIONTITLES"),
+                        summary: androidSummary("SECTIONTITLES")
                     )
                 }
+                disabledAndroidToggle(androidKey: "TITLE_SCROLL_BUTTON")
                 Toggle(isOn: boolBinding(\.showPageNumber, default: false)) {
                     textDisplayRowLabel(
                         androidKey: "PAGENUMBER",
-                        title: String(localized: "page_number", defaultValue: "Page number"),
-                        summary: String(
-                            localized: "prefs_page_number_summary",
-                            defaultValue: "Show page numbers when available"
-                        )
+                        title: androidTitle("PAGENUMBER"),
+                        summary: androidSummary("PAGENUMBER")
                     )
                 }
             } header: {
-                textDisplaySectionHeader(
-                    String(localized: "prefs_verses_and_headings_title", defaultValue: "Verses and headings")
-                )
+                textDisplaySectionHeader(TextDisplaySettingsPresentation.Section.versesAndHeadings.titleDefault)
+            }
+
+            Section {
+                disabledAndroidToggle(androidKey: "INFINITE_SCROLL")
+                disabledAndroidRow(androidKey: "PAGE_SCROLL_AMOUNT")
+                disabledAndroidToggle(androidKey: "ORDINALS")
+            } header: {
+                textDisplaySectionHeader(TextDisplaySettingsPresentation.Section.pageScrolling.titleDefault)
             }
 
             Section {
                 Toggle(isOn: boolBinding(\.showBookmarks, default: true)) {
                     textDisplayRowLabel(
                         androidKey: "BOOKMARKS_SHOW",
-                        title: String(localized: "show_bookmarks"),
-                        summary: String(
-                            localized: "prefs_show_bookmarks_summary",
-                            defaultValue: "Uncheck to hide all bookmarks"
-                        )
+                        title: androidTitle("BOOKMARKS_SHOW"),
+                        summary: androidSummary("BOOKMARKS_SHOW")
                     )
                 }
                 Toggle(isOn: boolBinding(\.showMyNotes, default: true)) {
                     textDisplayRowLabel(
                         androidKey: "MYNOTES",
-                        title: String(localized: "show_my_notes"),
-                        summary: String(
-                            localized: "prefs_show_mynotes_summary",
-                            defaultValue: "Show icon in verses with My Note"
-                        )
+                        title: androidTitle("MYNOTES"),
+                        summary: androidSummary("MYNOTES")
                     )
                 }
+                disabledAndroidToggle(androidKey: "AI_DOC_MARKERS")
                 NavigationLink {
                     HiddenBookmarkLabelsView(
                         labels: userLabels,
@@ -572,22 +621,94 @@ public struct TextDisplaySettingsView: View {
                 } label: {
                     textDisplayRowLabel(
                         androidKey: "BOOKMARKS_HIDELABELS",
-                        title: String(localized: "hide_labels", defaultValue: "Hide labels"),
-                        summary: String(
-                            localized: "prefs_bookmarks_hide_labels_summary",
-                            defaultValue: "Hide bookmarks assigned to selected labels"
-                        ),
+                        title: androidTitle("BOOKMARKS_HIDELABELS"),
+                        summary: androidSummary("BOOKMARKS_HIDELABELS"),
                         detail: hiddenBookmarkLabelsDetail
                     )
                 }
                 .accessibilityIdentifier("textDisplayHiddenBookmarkLabelsLink")
             } header: {
-                textDisplaySectionHeader(String(localized: "prefs_text_bookmarks_title", defaultValue: "Text bookmarks"))
+                textDisplaySectionHeader(TextDisplaySettingsPresentation.Section.textBookmarks.titleDefault)
+            }
+
+            Section {
+                disabledAndroidToggle(androidKey: "MARK_AS_READ_BUTTON")
+                disabledAndroidToggle(androidKey: "MEMORIZATION_INDICATORS")
+                disabledAndroidToggle(androidKey: "AUTO_TRACK_READING")
+            } header: {
+                textDisplaySectionHeader(TextDisplaySettingsPresentation.Section.readingAndMemorization.titleDefault)
             }
         }
         .accessibilityIdentifier("textDisplaySettingsScreen")
         .accessibilityValue(accessibilityState)
-        .navigationTitle(String(localized: "text_display"))
+        .navigationTitle(navigationTitleText)
+    }
+
+    /**
+     Resolves the Android-sourced default title for one text-display row.
+
+     - Parameter androidKey: Android preference key from `text_display_settings.xml`.
+     - Returns: English Android title from the presentation catalog, or the key when uncataloged.
+     - Side effects: none.
+     - Failure modes: Missing catalog entries fall back to the key rather than failing.
+     */
+    private func androidTitle(_ androidKey: String) -> String {
+        TextDisplaySettingsPresentation.rowByAndroidKey[androidKey]?.titleDefault ?? androidKey
+    }
+
+    /**
+     Resolves the Android-sourced default summary for one text-display row.
+
+     - Parameter androidKey: Android preference key from `text_display_settings.xml`.
+     - Returns: English Android summary from the presentation catalog, or `nil` when Android has
+       no summary for the key.
+     - Side effects: none.
+     - Failure modes: Missing catalog entries simply omit the summary.
+     */
+    private func androidSummary(_ androidKey: String) -> String? {
+        TextDisplaySettingsPresentation.rowByAndroidKey[androidKey]?.summaryDefault
+    }
+
+    /**
+     Builds a disabled Android-parity row for settings that exist in Android but are not yet backed
+     by iOS storage and renderer behavior.
+
+     - Parameter androidKey: Android preference key from `text_display_settings.xml`.
+     - Returns: A disabled preference-shaped row using Android's title, summary, and icon.
+     - Side effects: none; the row intentionally does not mutate settings.
+     - Failure modes: Unknown keys still render with the key as the title and no icon.
+     */
+    private func disabledAndroidRow(androidKey: String) -> some View {
+        textDisplayRowLabel(
+            androidKey: androidKey,
+            title: androidTitle(androidKey),
+            summary: androidSummary(androidKey),
+            isEnabled: false
+        )
+        .accessibilityIdentifier("textDisplayDisabled-\(androidKey)")
+        .disabled(true)
+    }
+
+    /**
+     Builds a disabled Android-style switch row for unsupported boolean settings.
+
+     - Parameter androidKey: Android preference key from `text_display_settings.xml`.
+     - Returns: A disabled switch row that preserves Android's row shape without pretending the
+       setting is functional on iOS.
+     - Side effects: none; the constant binding cannot write.
+     - Failure modes: Unknown keys still render with the key as the title and no icon.
+     */
+    private func disabledAndroidToggle(androidKey: String) -> some View {
+        Toggle(isOn: .constant(false)) {
+            textDisplayRowLabel(
+                androidKey: androidKey,
+                title: androidTitle(androidKey),
+                summary: androidSummary(androidKey),
+                isEnabled: false
+            )
+        }
+        .accessibilityIdentifier("textDisplayDisabled-\(androidKey)")
+        .disabled(true)
     }
 
     /**
