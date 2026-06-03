@@ -37,42 +37,42 @@ struct AndBibleSettingsRowLabel: View {
     var isEnabled = true
 
     /// Fixed icon column width matching Android preference row geometry.
-    static let iconColumnWidth: CGFloat = 42
+    static let iconColumnWidth: CGFloat = 48
 
     /// Default Android-style preference icon size in points.
-    static let iconSize: CGFloat = 30
+    static let iconSize: CGFloat = 32
 
     /// Horizontal gap between the icon column and the row text column.
-    static let contentSpacing: CGFloat = 14
+    static let contentSpacing: CGFloat = 16
 
     /// Complete title/summary/detail label with a stable leading icon column.
     var body: some View {
         HStack(alignment: .top, spacing: Self.contentSpacing) {
             iconColumn
 
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 3) {
                 Text(title)
-                    .font(.system(size: 15, weight: .regular))
+                    .font(.system(size: 16, weight: .regular))
                     .foregroundStyle(isEnabled ? .primary : .tertiary)
                     .fixedSize(horizontal: false, vertical: true)
 
                 if let summary, !summary.isEmpty {
                     Text(summary)
-                        .font(.system(size: 13, weight: .regular))
+                        .font(.system(size: 14, weight: .regular))
                         .foregroundStyle(isEnabled ? .secondary : .tertiary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
                 if let detail, !detail.isEmpty {
                     Text(detail)
-                        .font(.system(size: 11, weight: .regular))
+                        .font(.system(size: 12, weight: .regular))
                         .foregroundStyle(.tertiary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.vertical, 5)
+        .padding(.vertical, 8)
         .contentShape(Rectangle())
     }
 
@@ -114,12 +114,12 @@ struct AndBibleSettingsSectionHeader: View {
     /// Accent-colored section title aligned to the row text column.
     var body: some View {
         Text(title)
-            .font(.system(size: 13, weight: .semibold))
+            .font(.system(size: 14, weight: .semibold))
             .foregroundStyle(Color.accentColor)
             .textCase(nil)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.leading, textOffset)
-            .padding(.top, 8)
+            .padding(.top, 10)
             .fixedSize(horizontal: false, vertical: true)
     }
 }
