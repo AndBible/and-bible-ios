@@ -17,36 +17,28 @@ import Foundation
  */
 enum TextDisplaySettingsPresentation {
     /**
-     Android `PreferenceCategory` group represented by one text-display row.
+     Android rendered category group represented by one text-display row.
 
-     Explicit raw values preserve Android source identifiers when the category key is needed for
-     parity docs or tests. Cases without explicit raw values use stable Swift identifiers for local
-     grouping only; row-level `androidKey` values remain the source-of-truth Android metadata.
+     The Android source has carried both finer internal categories and the broader rendered groups
+     shown in the issue screenshot. iOS follows the user-verified Android All Text Options target
+     for this issue rather than blindly mirroring whichever raw XML bucket names appear in one
+     source branch.
      */
     enum Section: String, CaseIterable, Sendable {
         /// Parent links between workspace/global text options in Android's nested activity.
         case parent = "parent_settings_category"
 
-        /// Android `prefs_font_and_colors_title`.
-        case fontAndColors
+        /// User-verified Android `prefs_text_display_settings_title`.
+        case formatting
 
-        /// Android `prefs_text_layout_title`.
-        case textLayout
-
-        /// Android `prefs_strongs_and_morphology_title`.
-        case strongsAndMorphology
-
-        /// Android `prefs_footnotes_and_xrefs_title`.
-        case footnotesAndXrefs
-
-        /// Android `prefs_verses_and_headings_title`.
-        case versesAndHeadings
-
-        /// Android `prefs_page_scrolling_title`.
-        case pageScrolling
+        /// User-verified Android `prefs_text_appearance_title`.
+        case appearance
 
         /// Android `prefs_text_bookmarks_title`.
         case textBookmarks
+
+        /// Android `prefs_page_scrolling_title`.
+        case pageScrolling
 
         /// Android `prefs_reading_and_memorization_title`.
         case readingAndMemorization
@@ -56,16 +48,10 @@ enum TextDisplaySettingsPresentation {
             switch self {
             case .parent:
                 return "Parent settings"
-            case .fontAndColors:
-                return "Font & Colors"
-            case .textLayout:
-                return "Text Layout"
-            case .strongsAndMorphology:
-                return "Strong's & Morphology"
-            case .footnotesAndXrefs:
-                return "Footnotes & Cross-references"
-            case .versesAndHeadings:
-                return "Verses & Headings"
+            case .formatting:
+                return "Formatting"
+            case .appearance:
+                return "Appearance"
             case .pageScrolling:
                 return "Page Scrolling"
             case .textBookmarks:
@@ -245,7 +231,7 @@ enum TextDisplaySettingsPresentation {
         ]
     }
 
-    /// Complete Android `text_display_settings.xml` row order with current iOS dispositions.
+    /// Complete Android text-display row inventory in the user-verified rendered group order.
     static let androidRows: [Row] = [
         Row(
             androidKey: "open_workspace_settings",
@@ -259,39 +245,42 @@ enum TextDisplaySettingsPresentation {
             disposition: .adaptedElsewhere,
             note: "iOS keeps global text-display defaults under Application Preferences."
         ),
-        Row(androidKey: "COLORS", section: .fontAndColors, disposition: .implemented),
-        Row(androidKey: "FONTSIZE", section: .fontAndColors, disposition: .implemented),
-        Row(androidKey: "FONTFAMILY", section: .fontAndColors, disposition: .implemented),
-        Row(androidKey: "LINE_SPACING", section: .fontAndColors, disposition: .implemented),
-        Row(androidKey: "REDLETTERS", section: .fontAndColors, disposition: .implemented),
-        Row(androidKey: "MARGINSIZE", section: .textLayout, disposition: .implemented),
-        Row(androidKey: "TOPMARGIN", section: .textLayout, disposition: .implemented),
-        Row(androidKey: "JUSTIFY", section: .textLayout, disposition: .implemented),
-        Row(androidKey: "HYPHENATION", section: .textLayout, disposition: .implemented),
-        Row(androidKey: "VERSEPERLINE", section: .textLayout, disposition: .implemented),
-        Row(androidKey: "STRONGS", section: .strongsAndMorphology, disposition: .implemented),
-        Row(androidKey: "MORPH", section: .strongsAndMorphology, disposition: .implemented),
+        Row(androidKey: "STRONGS", section: .formatting, disposition: .implemented),
+        Row(androidKey: "MORPH", section: .formatting, disposition: .implemented),
         Row(
             androidKey: "NON_STRONGS_WORD_ITALIC",
-            section: .strongsAndMorphology,
+            section: .formatting,
             disposition: .deferred,
             trackingIssueNumber: 174,
             note: "iOS shared client has no config/rendering field yet."
         ),
-        Row(androidKey: "FOOTNOTES", section: .footnotesAndXrefs, disposition: .implemented),
-        Row(androidKey: "FOOTNOTES_INLINE", section: .footnotesAndXrefs, disposition: .implemented),
-        Row(androidKey: "XREFS", section: .footnotesAndXrefs, disposition: .implemented),
-        Row(androidKey: "EXPAND_XREFS", section: .footnotesAndXrefs, disposition: .implemented),
-        Row(androidKey: "VERSENUMBERS", section: .versesAndHeadings, disposition: .implemented),
-        Row(androidKey: "SECTIONTITLES", section: .versesAndHeadings, disposition: .implemented),
+        Row(androidKey: "FOOTNOTES", section: .formatting, disposition: .implemented),
+        Row(androidKey: "FOOTNOTES_INLINE", section: .formatting, disposition: .implemented),
+        Row(androidKey: "XREFS", section: .formatting, disposition: .implemented),
+        Row(androidKey: "EXPAND_XREFS", section: .formatting, disposition: .implemented),
+        Row(androidKey: "SECTIONTITLES", section: .formatting, disposition: .implemented),
         Row(
             androidKey: "TITLE_SCROLL_BUTTON",
-            section: .versesAndHeadings,
+            section: .formatting,
             disposition: .deferred,
             trackingIssueNumber: 174,
             note: "iOS shared client has no title-scroll-button field yet."
         ),
-        Row(androidKey: "PAGENUMBER", section: .versesAndHeadings, disposition: .implemented),
+        Row(androidKey: "VERSENUMBERS", section: .formatting, disposition: .implemented),
+        Row(androidKey: "COLORS", section: .appearance, disposition: .implemented),
+        Row(androidKey: "FONTSIZE", section: .appearance, disposition: .implemented),
+        Row(androidKey: "FONTFAMILY", section: .appearance, disposition: .implemented),
+        Row(androidKey: "MARGINSIZE", section: .appearance, disposition: .implemented),
+        Row(androidKey: "TOPMARGIN", section: .appearance, disposition: .implemented),
+        Row(androidKey: "LINE_SPACING", section: .appearance, disposition: .implemented),
+        Row(androidKey: "REDLETTERS", section: .appearance, disposition: .implemented),
+        Row(androidKey: "VERSEPERLINE", section: .appearance, disposition: .implemented),
+        Row(androidKey: "JUSTIFY", section: .appearance, disposition: .implemented),
+        Row(androidKey: "HYPHENATION", section: .appearance, disposition: .implemented),
+        Row(androidKey: "PAGENUMBER", section: .appearance, disposition: .implemented),
+        Row(androidKey: "BOOKMARKS_SHOW", section: .textBookmarks, disposition: .implemented),
+        Row(androidKey: "MYNOTES", section: .textBookmarks, disposition: .implemented),
+        Row(androidKey: "BOOKMARKS_HIDELABELS", section: .textBookmarks, disposition: .implemented),
         Row(
             androidKey: "INFINITE_SCROLL",
             section: .pageScrolling,
@@ -331,8 +320,6 @@ enum TextDisplaySettingsPresentation {
             trackingIssueNumber: 174,
             note: "iOS shared client has no ordinals visibility field yet."
         ),
-        Row(androidKey: "BOOKMARKS_SHOW", section: .textBookmarks, disposition: .implemented),
-        Row(androidKey: "MYNOTES", section: .textBookmarks, disposition: .implemented),
         Row(
             androidKey: "AI_DOC_MARKERS",
             section: .textBookmarks,
@@ -340,7 +327,6 @@ enum TextDisplaySettingsPresentation {
             trackingIssueNumber: 174,
             note: "iOS AI document marker rendering is not implemented yet."
         ),
-        Row(androidKey: "BOOKMARKS_HIDELABELS", section: .textBookmarks, disposition: .implemented),
         Row(
             androidKey: "MARK_AS_READ_BUTTON",
             section: .readingAndMemorization,
@@ -385,15 +371,41 @@ enum TextDisplaySettingsPresentation {
     /**
      Android rows visible in the normal iOS window-level All Text Options screen.
 
-     Android shows workspace/global parent links at window scope and hides e-ink-only
-     page-scrolling rows unless e-ink mode is enabled. iOS has no e-ink mode, so
-     platform-divergence e-ink rows stay documented in `androidRows` but are not rendered in the
-     standard iOS list.
+     This list follows the Android rendered menu from the screenshot-backed target:
+     broad `Formatting`, `Appearance`, and `Bookmark & My Notes settings` groups. Rows introduced
+     in newer Android source buckets remain documented in `androidRows` as deferred work, but they
+     are not inserted into this visible iOS surface until a scoped parity issue confirms that they
+     belong in the rendered target.
      */
     static var iosWindowVisibleAndroidKeys: [String] {
-        androidRows
-            .filter { $0.disposition != .platformDivergence }
-            .map(\.androidKey)
+        [
+            "open_workspace_settings",
+            "open_global_settings",
+            "STRONGS",
+            "MORPH",
+            "NON_STRONGS_WORD_ITALIC",
+            "FOOTNOTES",
+            "FOOTNOTES_INLINE",
+            "XREFS",
+            "EXPAND_XREFS",
+            "SECTIONTITLES",
+            "TITLE_SCROLL_BUTTON",
+            "VERSENUMBERS",
+            "COLORS",
+            "FONTSIZE",
+            "FONTFAMILY",
+            "MARGINSIZE",
+            "TOPMARGIN",
+            "LINE_SPACING",
+            "REDLETTERS",
+            "VERSEPERLINE",
+            "JUSTIFY",
+            "HYPHENATION",
+            "PAGENUMBER",
+            "BOOKMARKS_SHOW",
+            "MYNOTES",
+            "BOOKMARKS_HIDELABELS",
+        ]
     }
 
     /**
@@ -403,12 +415,7 @@ enum TextDisplaySettingsPresentation {
      visible, and still hides e-ink-only page-scrolling rows when e-ink mode is disabled.
      */
     static var iosWorkspaceVisibleAndroidKeys: [String] {
-        androidRows
-            .filter { row in
-                row.androidKey != "open_workspace_settings" &&
-                    row.disposition != .platformDivergence
-            }
-            .map(\.androidKey)
+        Array(iosWindowVisibleAndroidKeys.dropFirst())
     }
 
     /**
@@ -418,11 +425,6 @@ enum TextDisplaySettingsPresentation {
      e-ink-only page-scrolling rows documented but hidden because there is no iOS e-ink mode.
      */
     static var iosGlobalVisibleAndroidKeys: [String] {
-        androidRows
-            .filter { row in
-                row.section != .parent &&
-                    row.disposition != .platformDivergence
-            }
-            .map(\.androidKey)
+        Array(iosWindowVisibleAndroidKeys.dropFirst(2))
     }
 }

@@ -10,9 +10,11 @@ import UIKit
 /**
  Form-driven editor for text presentation settings used by the Bible reader.
 
- The view renders Android's All Text Options category and row inventory. Rows that already have a
- complete iOS model, bridge, and renderer path are interactive; Android rows that are not yet backed
- on iOS remain visible in their Android position but disabled.
+ The view renders the user-verified Android All Text Options category and row inventory. Rows that
+ already have a complete iOS model, bridge, and renderer path are interactive; Android rows in that
+ target that are not yet backed on iOS remain visible in their Android position but disabled.
+ Newer Android-source rows that are not part of the screenshot-backed target stay tracked in
+ `TextDisplaySettingsPresentation` instead of being injected into this surface.
 
  Data dependencies:
  - `settings` is the persisted display-settings model owned by the parent screen
@@ -338,6 +340,85 @@ public struct TextDisplaySettingsView: View {
             }
 
             Section {
+                Picker(selection: Binding(
+                    get: { settings.strongsMode ?? 0 },
+                    set: { settings.strongsMode = $0; onChange?() }
+                )) {
+                    Text(String(localized: "off")).tag(0)
+                    Text(String(localized: "inline")).tag(1)
+                    Text(String(localized: "links")).tag(2)
+                    Text(String(localized: "hidden")).tag(3)
+                } label: {
+                    textDisplayRowLabel(
+                        androidKey: "STRONGS",
+                        title: androidTitle("STRONGS"),
+                        summary: androidSummary("STRONGS")
+                    )
+                }
+                Toggle(isOn: boolBinding(\.showMorphology, default: false)) {
+                    textDisplayRowLabel(
+                        androidKey: "MORPH",
+                        title: androidTitle("MORPH"),
+                        summary: androidSummary("MORPH")
+                    )
+                }
+                disabledAndroidToggle(androidKey: "NON_STRONGS_WORD_ITALIC")
+                let footnotesBinding = boolBinding(\.showFootNotes, default: false)
+                let xrefsBinding = boolBinding(\.showXrefs, default: false)
+                Toggle(isOn: footnotesBinding) {
+                    textDisplayRowLabel(
+                        androidKey: "FOOTNOTES",
+                        title: androidTitle("FOOTNOTES"),
+                        summary: androidSummary("FOOTNOTES")
+                    )
+                }
+                Toggle(isOn: boolBinding(\.showFootNotesInline, default: false)) {
+                    textDisplayRowLabel(
+                        androidKey: "FOOTNOTES_INLINE",
+                        title: androidTitle("FOOTNOTES_INLINE"),
+                        summary: androidSummary("FOOTNOTES_INLINE"),
+                        isEnabled: footnotesBinding.wrappedValue
+                    )
+                }
+                .disabled(!footnotesBinding.wrappedValue)
+
+                Toggle(isOn: xrefsBinding) {
+                    textDisplayRowLabel(
+                        androidKey: "XREFS",
+                        title: androidTitle("XREFS"),
+                        summary: androidSummary("XREFS")
+                    )
+                }
+                Toggle(isOn: boolBinding(\.expandXrefs, default: false)) {
+                    textDisplayRowLabel(
+                        androidKey: "EXPAND_XREFS",
+                        title: androidTitle("EXPAND_XREFS"),
+                        summary: androidSummary("EXPAND_XREFS"),
+                        isEnabled: xrefsBinding.wrappedValue
+                    )
+                }
+                .disabled(!xrefsBinding.wrappedValue)
+                Toggle(isOn: boolBinding(\.showSectionTitles, default: true)) {
+                    textDisplayRowLabel(
+                        androidKey: "SECTIONTITLES",
+                        title: androidTitle("SECTIONTITLES"),
+                        summary: androidSummary("SECTIONTITLES")
+                    )
+                }
+                disabledAndroidToggle(androidKey: "TITLE_SCROLL_BUTTON")
+                Toggle(isOn: boolBinding(\.showVerseNumbers, default: true)) {
+                    textDisplayRowLabel(
+                        androidKey: "VERSENUMBERS",
+                        title: androidTitle("VERSENUMBERS"),
+                        summary: androidSummary("VERSENUMBERS")
+                    )
+                }
+            } header: {
+                textDisplaySectionHeader(TextDisplaySettingsPresentation.Section.formatting.titleDefault)
+            }
+
+            Section {
+                let justifyTextBinding = boolBinding(\.justifyText, default: false)
                 NavigationLink {
                     ColorSettingsView(settings: $settings, onChange: onChange)
                 } label: {
@@ -390,33 +471,6 @@ public struct TextDisplaySettingsView: View {
 
                 VStack(alignment: .leading, spacing: 8) {
                     textDisplayRowLabel(
-                        androidKey: "LINE_SPACING",
-                        title: lineSpacingTitle,
-                        summary: androidSummary("LINE_SPACING")
-                    )
-                    Slider(
-                        value: lineSpacingBinding,
-                        in: Double(Self.lineSpacingRange.lowerBound)...Double(Self.lineSpacingRange.upperBound),
-                        step: 1
-                    )
-                        .padding(.leading, 66)
-                }
-
-                Toggle(isOn: boolBinding(\.showRedLetters, default: true)) {
-                    textDisplayRowLabel(
-                        androidKey: "REDLETTERS",
-                        title: androidTitle("REDLETTERS"),
-                        summary: androidSummary("REDLETTERS")
-                    )
-                }
-            } header: {
-                textDisplaySectionHeader(TextDisplaySettingsPresentation.Section.fontAndColors.titleDefault)
-            }
-
-            Section {
-                let justifyTextBinding = boolBinding(\.justifyText, default: false)
-                VStack(alignment: .leading, spacing: 8) {
-                    textDisplayRowLabel(
                         androidKey: "MARGINSIZE",
                         title: marginSizeTitle,
                         summary: androidSummary("MARGINSIZE")
@@ -457,6 +511,34 @@ public struct TextDisplaySettingsView: View {
                         .padding(.leading, 66)
                 }
 
+                VStack(alignment: .leading, spacing: 8) {
+                    textDisplayRowLabel(
+                        androidKey: "LINE_SPACING",
+                        title: lineSpacingTitle,
+                        summary: androidSummary("LINE_SPACING")
+                    )
+                    Slider(
+                        value: lineSpacingBinding,
+                        in: Double(Self.lineSpacingRange.lowerBound)...Double(Self.lineSpacingRange.upperBound),
+                        step: 1
+                    )
+                        .padding(.leading, 66)
+                }
+
+                Toggle(isOn: boolBinding(\.showRedLetters, default: true)) {
+                    textDisplayRowLabel(
+                        androidKey: "REDLETTERS",
+                        title: androidTitle("REDLETTERS"),
+                        summary: androidSummary("REDLETTERS")
+                    )
+                }
+                Toggle(isOn: boolBinding(\.showVersePerLine, default: false)) {
+                    textDisplayRowLabel(
+                        androidKey: "VERSEPERLINE",
+                        title: androidTitle("VERSEPERLINE"),
+                        summary: androidSummary("VERSEPERLINE")
+                    )
+                }
                 HStack(alignment: .top, spacing: 12) {
                     Button {
                         justifyTextBinding.wrappedValue.toggle()
@@ -482,101 +564,6 @@ public struct TextDisplaySettingsView: View {
                         summary: androidSummary("HYPHENATION")
                     )
                 }
-                Toggle(isOn: boolBinding(\.showVersePerLine, default: false)) {
-                    textDisplayRowLabel(
-                        androidKey: "VERSEPERLINE",
-                        title: androidTitle("VERSEPERLINE"),
-                        summary: androidSummary("VERSEPERLINE")
-                    )
-                }
-            } header: {
-                textDisplaySectionHeader(TextDisplaySettingsPresentation.Section.textLayout.titleDefault)
-            }
-
-            Section {
-                Picker(selection: Binding(
-                    get: { settings.strongsMode ?? 0 },
-                    set: { settings.strongsMode = $0; onChange?() }
-                )) {
-                    Text(String(localized: "off")).tag(0)
-                    Text(String(localized: "inline")).tag(1)
-                    Text(String(localized: "links")).tag(2)
-                    Text(String(localized: "hidden")).tag(3)
-                } label: {
-                    textDisplayRowLabel(
-                        androidKey: "STRONGS",
-                        title: androidTitle("STRONGS"),
-                        summary: androidSummary("STRONGS")
-                    )
-                }
-                Toggle(isOn: boolBinding(\.showMorphology, default: false)) {
-                    textDisplayRowLabel(
-                        androidKey: "MORPH",
-                        title: androidTitle("MORPH"),
-                        summary: androidSummary("MORPH")
-                    )
-                }
-                disabledAndroidToggle(androidKey: "NON_STRONGS_WORD_ITALIC")
-            } header: {
-                textDisplaySectionHeader(TextDisplaySettingsPresentation.Section.strongsAndMorphology.titleDefault)
-            }
-
-            Section {
-                let footnotesBinding = boolBinding(\.showFootNotes, default: false)
-                let xrefsBinding = boolBinding(\.showXrefs, default: false)
-                Toggle(isOn: footnotesBinding) {
-                    textDisplayRowLabel(
-                        androidKey: "FOOTNOTES",
-                        title: androidTitle("FOOTNOTES"),
-                        summary: androidSummary("FOOTNOTES")
-                    )
-                }
-                Toggle(isOn: boolBinding(\.showFootNotesInline, default: false)) {
-                    textDisplayRowLabel(
-                        androidKey: "FOOTNOTES_INLINE",
-                        title: androidTitle("FOOTNOTES_INLINE"),
-                        summary: androidSummary("FOOTNOTES_INLINE"),
-                        isEnabled: footnotesBinding.wrappedValue
-                    )
-                }
-                .disabled(!footnotesBinding.wrappedValue)
-
-                Toggle(isOn: xrefsBinding) {
-                    textDisplayRowLabel(
-                        androidKey: "XREFS",
-                        title: androidTitle("XREFS"),
-                        summary: androidSummary("XREFS")
-                    )
-                }
-                Toggle(isOn: boolBinding(\.expandXrefs, default: false)) {
-                    textDisplayRowLabel(
-                        androidKey: "EXPAND_XREFS",
-                        title: androidTitle("EXPAND_XREFS"),
-                        summary: androidSummary("EXPAND_XREFS"),
-                        isEnabled: xrefsBinding.wrappedValue
-                    )
-                }
-                .disabled(!xrefsBinding.wrappedValue)
-            } header: {
-                textDisplaySectionHeader(TextDisplaySettingsPresentation.Section.footnotesAndXrefs.titleDefault)
-            }
-
-            Section {
-                Toggle(isOn: boolBinding(\.showVerseNumbers, default: true)) {
-                    textDisplayRowLabel(
-                        androidKey: "VERSENUMBERS",
-                        title: androidTitle("VERSENUMBERS"),
-                        summary: androidSummary("VERSENUMBERS")
-                    )
-                }
-                Toggle(isOn: boolBinding(\.showSectionTitles, default: true)) {
-                    textDisplayRowLabel(
-                        androidKey: "SECTIONTITLES",
-                        title: androidTitle("SECTIONTITLES"),
-                        summary: androidSummary("SECTIONTITLES")
-                    )
-                }
-                disabledAndroidToggle(androidKey: "TITLE_SCROLL_BUTTON")
                 Toggle(isOn: boolBinding(\.showPageNumber, default: false)) {
                     textDisplayRowLabel(
                         androidKey: "PAGENUMBER",
@@ -585,15 +572,7 @@ public struct TextDisplaySettingsView: View {
                     )
                 }
             } header: {
-                textDisplaySectionHeader(TextDisplaySettingsPresentation.Section.versesAndHeadings.titleDefault)
-            }
-
-            Section {
-                disabledAndroidToggle(androidKey: "INFINITE_SCROLL")
-                disabledAndroidRow(androidKey: "PAGE_SCROLL_AMOUNT")
-                disabledAndroidToggle(androidKey: "ORDINALS")
-            } header: {
-                textDisplaySectionHeader(TextDisplaySettingsPresentation.Section.pageScrolling.titleDefault)
+                textDisplaySectionHeader(TextDisplaySettingsPresentation.Section.appearance.titleDefault)
             }
 
             Section {
@@ -611,7 +590,6 @@ public struct TextDisplaySettingsView: View {
                         summary: androidSummary("MYNOTES")
                     )
                 }
-                disabledAndroidToggle(androidKey: "AI_DOC_MARKERS")
                 NavigationLink {
                     HiddenBookmarkLabelsView(
                         labels: userLabels,
@@ -629,14 +607,6 @@ public struct TextDisplaySettingsView: View {
                 .accessibilityIdentifier("textDisplayHiddenBookmarkLabelsLink")
             } header: {
                 textDisplaySectionHeader(TextDisplaySettingsPresentation.Section.textBookmarks.titleDefault)
-            }
-
-            Section {
-                disabledAndroidToggle(androidKey: "MARK_AS_READ_BUTTON")
-                disabledAndroidToggle(androidKey: "MEMORIZATION_INDICATORS")
-                disabledAndroidToggle(androidKey: "AUTO_TRACK_READING")
-            } header: {
-                textDisplaySectionHeader(TextDisplaySettingsPresentation.Section.readingAndMemorization.titleDefault)
             }
         }
         .accessibilityIdentifier("textDisplaySettingsScreen")
