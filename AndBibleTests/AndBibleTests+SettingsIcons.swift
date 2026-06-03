@@ -160,8 +160,6 @@ extension AndBibleTests {
         XCTAssertEqual(
             TextDisplaySettingsPresentation.androidRows.map(\.androidKey),
             [
-                "open_workspace_settings",
-                "open_global_settings",
                 "STRONGS",
                 "MORPH",
                 "NON_STRONGS_WORD_ITALIC",
@@ -204,7 +202,6 @@ extension AndBibleTests {
         XCTAssertEqual(
             TextDisplaySettingsPresentation.Section.allCases.map(\.titleDefault),
             [
-                "Parent settings",
                 "Formatting",
                 "Appearance",
                 "Bookmark & My Notes settings",
@@ -224,8 +221,6 @@ extension AndBibleTests {
         XCTAssertEqual(
             titlesByKey,
             [
-                "open_workspace_settings": "Workspace text options",
-                "open_global_settings": "Global text options",
                 "COLORS": "Color settings",
                 "FONTSIZE": "Font size",
                 "FONTFAMILY": "Font family",
@@ -266,8 +261,6 @@ extension AndBibleTests {
 
     func testTextDisplayVisibleRowsMatchAndroidScopeVisibility() {
         let windowVisibleRows = [
-            "open_workspace_settings",
-            "open_global_settings",
             "STRONGS",
             "MORPH",
             "NON_STRONGS_WORD_ITALIC",
@@ -293,8 +286,8 @@ extension AndBibleTests {
             "MYNOTES",
             "BOOKMARKS_HIDELABELS",
         ]
-        let workspaceVisibleRows = Array(windowVisibleRows.dropFirst())
-        let globalVisibleRows = Array(windowVisibleRows.dropFirst(2))
+        let workspaceVisibleRows = windowVisibleRows
+        let globalVisibleRows = windowVisibleRows
 
         XCTAssertEqual(TextDisplaySettingsPresentation.iosWindowVisibleAndroidKeys, windowVisibleRows)
         XCTAssertEqual(TextDisplaySettingsPresentation.iosWorkspaceVisibleAndroidKeys, workspaceVisibleRows)

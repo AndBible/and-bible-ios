@@ -649,7 +649,7 @@ extension AndBibleUITests {
 
         let textDisplayScreen = openTextDisplaySettings(in: app)
         XCTAssertTrue(textDisplayScreen.exists)
-        let fontFamilyButton = requireElement("textDisplayFontFamilyButton", in: app, timeout: 10)
+        let fontFamilyButton = requireReachableTextDisplayButton("textDisplayFontFamilyButton", in: app, timeout: 10)
         tapElementReliably(fontFamilyButton, timeout: 10)
         waitForElementValue("textDisplaySettingsScreen", toContain: "fontPickerPresented", in: app, timeout: 10)
     }

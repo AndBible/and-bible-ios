@@ -25,9 +25,6 @@ enum TextDisplaySettingsPresentation {
      source branch.
      */
     enum Section: String, CaseIterable, Sendable {
-        /// Parent links between workspace/global text options in Android's nested activity.
-        case parent = "parent_settings_category"
-
         /// User-verified Android `prefs_text_display_settings_title`.
         case formatting
 
@@ -46,8 +43,6 @@ enum TextDisplaySettingsPresentation {
         /// English Android section title from `text_display_settings.xml`.
         var titleDefault: String {
             switch self {
-            case .parent:
-                return "Parent settings"
             case .formatting:
                 return "Formatting"
             case .appearance:
@@ -152,8 +147,6 @@ enum TextDisplaySettingsPresentation {
 
         /// English Android title defaults keyed by Android preference key.
         private static let titleDefaultsByAndroidKey: [String: String] = [
-            "open_workspace_settings": "Workspace text options",
-            "open_global_settings": "Global text options",
             "COLORS": "Color settings",
             "FONTSIZE": "Font size",
             "FONTFAMILY": "Font family",
@@ -192,8 +185,6 @@ enum TextDisplaySettingsPresentation {
 
         /// English Android summary defaults keyed by Android preference key.
         private static let summaryDefaultsByAndroidKey: [String: String] = [
-            "open_workspace_settings": "Edit text display settings for this workspace",
-            "open_global_settings": "Edit default text display settings for all workspaces",
             "COLORS": "Adjust text and background colors and noise effect",
             "FONTSIZE": "Adjust main text font size",
             "FONTFAMILY": "Change font family. Tip: more fonts can be installed via Download Documents / Add-ons.",
@@ -233,18 +224,6 @@ enum TextDisplaySettingsPresentation {
 
     /// Complete Android text-display row inventory in the user-verified rendered group order.
     static let androidRows: [Row] = [
-        Row(
-            androidKey: "open_workspace_settings",
-            section: .parent,
-            disposition: .adaptedElsewhere,
-            note: "iOS exposes this as the window-scope parent link to workspace text options."
-        ),
-        Row(
-            androidKey: "open_global_settings",
-            section: .parent,
-            disposition: .adaptedElsewhere,
-            note: "iOS keeps global text-display defaults under Application Preferences."
-        ),
         Row(androidKey: "STRONGS", section: .formatting, disposition: .implemented),
         Row(androidKey: "MORPH", section: .formatting, disposition: .implemented),
         Row(
@@ -379,8 +358,6 @@ enum TextDisplaySettingsPresentation {
      */
     static var iosWindowVisibleAndroidKeys: [String] {
         [
-            "open_workspace_settings",
-            "open_global_settings",
             "STRONGS",
             "MORPH",
             "NON_STRONGS_WORD_ITALIC",
@@ -409,22 +386,23 @@ enum TextDisplaySettingsPresentation {
     }
 
     /**
-     Android rows visible when the user follows the parent link to workspace-level text options.
+     Android rows visible when editing workspace-level text options.
 
-     Android hides the workspace parent link at workspace scope, leaves the global parent link
-     visible, and still hides e-ink-only page-scrolling rows when e-ink mode is disabled.
+     The user-verified Android target for this issue does not expose parent settings links in the
+     rendered All Text Options list, so workspace scope uses the same visible row set as window
+     scope.
      */
     static var iosWorkspaceVisibleAndroidKeys: [String] {
-        Array(iosWindowVisibleAndroidKeys.dropFirst())
+        iosWindowVisibleAndroidKeys
     }
 
     /**
      Android rows visible when editing global text options.
 
-     Android hides the whole parent category at global scope. iOS follows that behavior and keeps
-     e-ink-only page-scrolling rows documented but hidden because there is no iOS e-ink mode.
+     The user-verified Android target for this issue does not expose parent settings links in the
+     rendered All Text Options list, so global scope uses the same visible row set as window scope.
      */
     static var iosGlobalVisibleAndroidKeys: [String] {
-        Array(iosWindowVisibleAndroidKeys.dropFirst(2))
+        iosWindowVisibleAndroidKeys
     }
 }
