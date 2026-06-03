@@ -97,11 +97,11 @@ Disposition:
   category in the sync definition.
 - iOS currently implements Android-aligned sync for `bookmarks`, `workspaces`,
   `readingplans`, and `mydocuments`.
-- iOS currently shows Reading Plans, while Android hides that row. #158 owns the
-  final visible-toggle parity decision.
-- Android exposes AI Settings and Reading Progress toggle rows. iOS does not
-  implement those remote sync categories yet; they remain separate parity
-  targets in #74 and #73.
+- iOS hides the Reading Plans settings row to match Android runtime behavior
+  while leaving the underlying sync engine intact.
+- Android exposes AI Settings and Reading Progress toggle rows. iOS now shows
+  those rows as disabled deferred sync categories; their implementations remain
+  separate parity targets in #74 and #73.
 - Reading Progress must stay distinct from Reading Plans unless a later
   documented compatibility decision explicitly changes that.
 
@@ -114,7 +114,7 @@ Reason:
 Reference:
 
 - #49 records the decision to split broad category parity into distinct targets.
-- #158 tracks visible category toggle alignment.
+- #158 implemented visible category toggle alignment.
 - #74 tracks `ai_settings`.
 - #73 tracks `progress`.
 
@@ -147,4 +147,4 @@ Reason:
 Reference:
 
 - #159 completed the first presentation/workflow pass.
-- #116, #158, and #160 own the remaining source-backed follow-ups.
+- #116, #158, and #160 completed the current source-backed sync settings follow-ups.

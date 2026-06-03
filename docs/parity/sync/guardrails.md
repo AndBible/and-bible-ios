@@ -37,8 +37,8 @@ rules explicit for changes in:
    `ai_settings` and `progress`, which are not implemented on iOS yet. Issue #49
    records these as separate deferred parity targets tracked by #74 and #73;
    adding either one is new parity surface, not a local cleanup. Android
-   currently hides the Reading Plans toggle at runtime, while iOS currently
-   shows it; #158 owns that visible-toggle parity decision. `mydocuments`
+   currently hides the Reading Plans toggle at runtime, so iOS settings must
+   keep that row hidden unless Android changes. `mydocuments`
    remains governed by the iOS My Documents model/storage contract recorded in
    `../bridge/my-documents-model.md` and the Android-backed sync schema contract
    in `mydocuments-schema.md`.
@@ -126,8 +126,8 @@ focused coverage rather than relying on the existing subset alone.
 ## Potential Improvements
 
 - add a machine-readable snapshot of Android-compatible sync keys and category names
-- add a machine-readable snapshot of Android's visible sync settings rows,
-  including the runtime-hidden Reading Plans row
+- add a machine-readable snapshot of Android's sync settings category rows,
+  recording runtime visibility for Reading Plans and iOS deferred status for AI/progress rows
 - expand iOS coverage to Android's remaining `ai_settings` and `progress` sync
   categories only through their separate tracking issues (#74, #73), with
   `ai_settings` gated by #5/#89 and `progress` gated by the local model in

@@ -238,18 +238,19 @@ extension AndBibleUITests {
     }
 
     /**
-     Dismisses Label Assignment back to the bookmark list and waits for the transition to settle.
+     Dismisses Label Assignment back to the bookmark list and waits for the parent state to settle.
      *
      * - Parameters:
      *   - app: Running application under test.
      *   - timeout: Maximum time to wait for the sheet dismissal to complete.
      * - Side effects:
-     *   - taps the production done button on Label Assignment
-     *   - polls the live hierarchy until the label-assignment surface disappears and the bookmark
-     *     list becomes visible again
+     *   - taps the production done button on Label Assignment, retrying when a hosted simulator
+     *     accepts the event without running the SwiftUI action
+     *   - polls the bookmark-list state export until the parent reports that Label Assignment is
+     *     no longer presented
      * - Failure modes:
-     *   - fails if the dismiss action cannot be tapped
-     *   - fails if the sheet never dismisses fully back to the bookmark list within the timeout
+     *   - fails if the parent bookmark-list state never reports Label Assignment dismissed within
+     *     the timeout
      */
     func dismissLabelAssignmentToBookmarkList(
         in app: XCUIApplication,
@@ -264,23 +265,21 @@ extension AndBibleUITests {
 
         let deadline = Date().addingTimeInterval(timeout)
         repeat {
-            let labelAssignmentVisible = resolvedElement("labelAssignmentScreen", in: app) != nil
-            let bookmarkListVisible = resolvedElement("bookmarkListScreen", in: app) != nil
-            if !labelAssignmentVisible && bookmarkListVisible {
+            if let bookmarkListState = resolvedBookmarkListStateValue(in: app),
+               bookmarkListState.contains("labelAssignment=false") {
                 return
+            }
+
+            if let doneButton = resolvedElement("labelAssignmentDoneButton", in: app) {
+                _ = tapElementIfPossible(doneButton, timeout: min(1, max(0.1, deadline.timeIntervalSinceNow)))
             }
             RunLoop.current.run(until: Date().addingTimeInterval(0.5))
         } while Date() < deadline
 
-        XCTAssertFalse(
-            unresolvedElement("labelAssignmentScreen", in: app).exists,
-            "Expected Label Assignment to dismiss within \(timeout) seconds.",
-            file: file,
-            line: line
-        )
+        let finalState = resolvedBookmarkListStateValue(in: app) ?? "nil"
         XCTAssertTrue(
-            unresolvedElement("bookmarkListScreen", in: app).exists,
-            "Expected the bookmark list to reappear within \(timeout) seconds after dismissing Label Assignment.",
+            finalState.contains("labelAssignment=false"),
+            "Expected Label Assignment to dismiss within \(timeout) seconds. Final bookmark-list state: '\(finalState)'.",
             file: file,
             line: line
         )
@@ -365,13 +364,14 @@ extension AndBibleUITests {
     }
 
     /**
-     Returns create-label text field candidates with the alert-owned ordinal field before slower
-     identifier and title matching.
+     Returns create-label text field candidates using stable alert names.
+
+     Hosted simulators can wedge XCTest while resolving the first ordinal `TextField` inside a
+     SwiftUI alert, so normal prompt polling avoids that query and relies on the explicit production
+     identifier/title instead.
      */
     func labelCreationPromptTextFieldCandidates(in prompt: XCUIElement) -> [XCUIElement] {
         [
-            prompt.textFields.element(boundBy: 0),
-            prompt.secureTextFields.element(boundBy: 0),
             prompt.textFields["labelManagerNewLabelNameField"].firstMatch,
             prompt.secureTextFields["labelManagerNewLabelNameField"].firstMatch,
             prompt.textFields["Label name"].firstMatch,

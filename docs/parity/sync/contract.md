@@ -115,10 +115,10 @@ Current iOS additions and gaps:
 - The NextCloud/WebDAV connection test is an iOS additive workflow. It is
   acceptable only as a documented improvement that does not contradict Android's
   sync behavior.
-- iOS currently exposes `bookmarks`, `workspaces`, `readingplans`, and
-  `mydocuments` as active remote sync toggles. Android currently hides Reading
-  Plans at runtime and exposes AI Settings plus Reading Progress. #158 owns the
-  visible toggle alignment decision.
+- iOS exposes the Android-runtime-visible row order: `bookmarks`, `workspaces`,
+  `mydocuments`, deferred `ai_settings`, and deferred `progress`.
+- iOS keeps Reading Plans sync implemented, but hides its settings toggle to
+  match Android runtime behavior.
 - #73 owns Android `progress` remote sync parity.
 - #74 owns Android `ai_settings` remote sync parity.
 
@@ -130,10 +130,10 @@ Android's `SyncableDatabaseDefinition` defines six sync categories:
 |---|---|---|---|---|
 | Bookmarks | `BOOKMARKS` / `bookmarks` | Visible | Implemented and visible | Keep aligned |
 | Workspaces | `WORKSPACES` / `workspaces` | Visible | Implemented and visible | Keep aligned |
-| Reading plans | `READINGPLANS` / `readingplans` | Hidden at runtime | Implemented and currently visible | #158 decides final visible-row parity |
+| Reading plans | `READINGPLANS` / `readingplans` | Hidden at runtime | Implemented and hidden from settings | Keep hidden unless Android changes |
 | My Documents | `MYDOCUMENTS` / `mydocuments` | Visible | Implemented and visible | Keep aligned |
-| AI Settings | `AI_SETTINGS` / `ai_settings` | Visible | Not implemented | #74 |
-| Reading Progress | `PROGRESS` / `progress` | Visible | Not implemented | #73 |
+| AI Settings | `AI_SETTINGS` / `ai_settings` | Visible | Visible as disabled deferred row | #74 |
+| Reading Progress | `PROGRESS` / `progress` | Visible | Visible as disabled deferred row | #73 |
 
 These categories are tracked independently for:
 

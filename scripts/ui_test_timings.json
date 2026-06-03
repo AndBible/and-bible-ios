@@ -33,6 +33,7 @@
   "AndBibleUITests/AndBibleUITests/testSettingsSyncLinkOpensSyncSettings": 18.14947998523712,
   "AndBibleUITests/AndBibleUITests/testSyncSettingsBackendSwitchMutatesVisibleSection": 26.499693989753723,
   "AndBibleUITests/AndBibleUITests/testSyncSettingsBackendSwitchPersistsAcrossDirectReopen": 32.7494170665741,
+  "AndBibleUITests/AndBibleUITests/testSyncSettingsCategoryRowsMatchAndroidRuntimeVisibility": 18.0,
   "AndBibleUITests/AndBibleUITests/testSyncSettingsCategoryDisablePersistsAcrossDirectReopen": 20.849236011505127,
   "AndBibleUITests/AndBibleUITests/testSyncSettingsCategoryToggleMutatesExportedState": 13.599888920783997,
   "AndBibleUITests/AndBibleUITests/testSyncSettingsNextCloudInvalidURLShowsValidationStatus": 48.90251803398132,

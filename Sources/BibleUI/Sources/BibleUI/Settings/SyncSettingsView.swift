@@ -494,34 +494,85 @@ public struct SyncSettingsView: View {
      Shared Android-style remote category toggle list used by supported remote backends.
      */
     private var remoteCategoryList: some View {
-        ForEach(RemoteSyncCategory.activeSyncCases, id: \.self) { category in
-            let categoryBinding = remoteCategoryBinding(for: category)
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(alignment: .top, spacing: 12) {
-                    Button {
-                        categoryBinding.wrappedValue.toggle()
-                    } label: {
-                        syncSettingsRowLabel(
-                            SyncSettingsPresentation.category(category),
-                            title: remoteCategoryTitle(for: category),
-                            summary: remoteCategoryContentDescription(for: category),
-                            detail: remoteCategorySupplementalText(for: category),
-                            isEnabled: !isRemoteSyncInteractionLocked
-                        )
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityIdentifier("syncCategoryToggle::\(category.rawValue)")
-                    .accessibilityValue(remoteCategoryAccessibilityValue(for: category))
-
-                    Toggle("", isOn: categoryBinding)
-                        .labelsHidden()
-                        .accessibilityIdentifier("syncCategoryToggleSwitch::\(category.rawValue)")
-                        .accessibilityValue(remoteCategoryAccessibilityValue(for: category))
-                }
-                .disabled(isRemoteSyncInteractionLocked)
-
+        ForEach(SyncSettingsPresentation.visibleCategoryRows) { row in
+            switch row {
+            case .active(let category):
+                activeRemoteCategoryRow(for: category)
+            case .deferred(let category):
+                deferredRemoteCategoryRow(for: category)
             }
         }
+    }
+
+    /**
+     Builds one implemented Android-style category row with a live synchronization toggle.
+
+     - Parameter category: Implemented remote sync category to render.
+     - Returns: Row content that can enable or disable remote sync for the category.
+     - Side effects:
+       - tapping the row or switch mutates `remoteCategoryEnabled`
+       - enabling starts the category bootstrap/synchronization flow
+       - disabling persists the Android-compatible disabled state immediately
+     - Failure modes:
+       - synchronization failures are captured by `beginRemoteSynchronization(for:)` and surfaced
+         through the row status and alert state
+     */
+    private func activeRemoteCategoryRow(for category: RemoteSyncCategory) -> some View {
+        let categoryBinding = remoteCategoryBinding(for: category)
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top, spacing: 12) {
+                Button {
+                    categoryBinding.wrappedValue.toggle()
+                } label: {
+                    syncSettingsRowLabel(
+                        SyncSettingsPresentation.category(category),
+                        title: remoteCategoryTitle(for: category),
+                        summary: remoteCategoryContentDescription(for: category),
+                        detail: remoteCategorySupplementalText(for: category),
+                        isEnabled: !isRemoteSyncInteractionLocked
+                    )
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("syncCategoryToggle::\(category.rawValue)")
+                .accessibilityValue(remoteCategoryAccessibilityValue(for: category))
+
+                Toggle("", isOn: categoryBinding)
+                    .labelsHidden()
+                    .accessibilityIdentifier("syncCategoryToggleSwitch::\(category.rawValue)")
+                    .accessibilityValue(remoteCategoryAccessibilityValue(for: category))
+            }
+            .disabled(isRemoteSyncInteractionLocked)
+        }
+    }
+
+    /**
+     Builds one Android-visible category row whose iOS sync implementation is still deferred.
+
+     - Parameter category: Deferred Android-visible category to disclose.
+     - Returns: Disabled row content that mirrors Android ordering, title, summary, and icon.
+     - Side effects: none; the row never writes `sync_enable_*` or starts synchronization.
+     - Failure modes: The row cannot fail; it remains disabled until the referenced follow-up issue
+       implements the category-specific sync engine.
+     */
+    private func deferredRemoteCategoryRow(for category: RemoteSyncDeferredCategory) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            syncSettingsRowLabel(
+                SyncSettingsPresentation.deferredCategory(category),
+                title: deferredRemoteCategoryTitle(for: category),
+                summary: deferredRemoteCategoryContentDescription(for: category),
+                detail: deferredRemoteCategorySupplementalText(for: category),
+                isEnabled: false
+            )
+            .accessibilityIdentifier("syncCategoryDeferred::\(category.rawValue)")
+            .accessibilityValue("deferred")
+
+            Toggle("", isOn: .constant(false))
+                .labelsHidden()
+                .disabled(true)
+                .accessibilityIdentifier("syncCategoryDeferredSwitch::\(category.rawValue)")
+                .accessibilityValue("deferred")
+        }
+        .disabled(true)
     }
 
     /**
@@ -709,6 +760,8 @@ public struct SyncSettingsView: View {
         return [
             "backend=\(selectedBackend.rawValue)",
             "enabled=\(enabledToken)",
+            "visible=\(visibleRemoteCategoryRowsAccessibilityToken)",
+            "deferred=\(deferredRemoteCategoryRowsAccessibilityToken)",
             "remoteStatus=\(remoteStatusAccessibilityValue)",
             "presentation=androidRows",
             "bootstrapPrompt=\(remoteBootstrapPromptAccessibilityToken)",
@@ -716,6 +769,36 @@ public struct SyncSettingsView: View {
             "lastConfirmation=\(lastRemoteConfirmationAction ?? "none")",
         ]
         .joined(separator: ";")
+    }
+
+    /**
+     Accessibility-exported token for the Android-runtime-visible category row order.
+
+     - Returns: Comma-separated row identifiers in display order.
+     - Side effects: none.
+     - Failure modes: This helper cannot fail.
+     */
+    private var visibleRemoteCategoryRowsAccessibilityToken: String {
+        SyncSettingsPresentation.visibleCategoryRows
+            .map(\.id)
+            .joined(separator: ",")
+    }
+
+    /**
+     Accessibility-exported token for rows shown as deferred rather than interactive.
+
+     - Returns: Comma-separated deferred row identifiers, or `none` when no rows are deferred.
+     - Side effects: none.
+     - Failure modes: This helper cannot fail.
+     */
+    private var deferredRemoteCategoryRowsAccessibilityToken: String {
+        let deferredRows = SyncSettingsPresentation.visibleCategoryRows.compactMap { row -> String? in
+            if case .deferred(let category) = row {
+                return category.rawValue
+            }
+            return nil
+        }
+        return deferredRows.isEmpty ? "none" : deferredRows.joined(separator: ",")
     }
 
     /**
@@ -1188,6 +1271,61 @@ public struct SyncSettingsView: View {
         case .myDocuments:
             return String(localized: "my_documents_contents")
         }
+    }
+
+    /**
+     Returns the Android title string for a deferred category row.
+
+     - Parameter category: Deferred category to label.
+     - Returns: Localized title matching Android's visible sync setting where available.
+     - Side effects: none.
+     - Failure modes: Missing localizations fall back to English defaults.
+     */
+    private func deferredRemoteCategoryTitle(for category: RemoteSyncDeferredCategory) -> String {
+        switch category {
+        case .aiSettings:
+            return String(localized: "ai_settings_sync_title", defaultValue: "AI Settings")
+        case .progress:
+            return String(localized: "progress_sync_title", defaultValue: "Reading Progress")
+        }
+    }
+
+    /**
+     Returns the Android summary string for a deferred category row.
+
+     - Parameter category: Deferred category to describe.
+     - Returns: Localized summary matching Android's sync setting where available.
+     - Side effects: none.
+     - Failure modes: Missing localizations fall back to English defaults.
+     */
+    private func deferredRemoteCategoryContentDescription(for category: RemoteSyncDeferredCategory) -> String {
+        switch category {
+        case .aiSettings:
+            return String(
+                localized: "ai_settings_sync_contents",
+                defaultValue: "AI prompts and provider configurations"
+            )
+        case .progress:
+            return String(
+                localized: "progress_sync_contents",
+                defaultValue: "Memorized verses and chapter reading records"
+            )
+        }
+    }
+
+    /**
+     Returns the explicit deferred-state caption for an Android-visible row without iOS sync support.
+
+     - Parameter category: Deferred category whose follow-up issue should be named.
+     - Returns: Human-readable caption that explains why the row is disabled.
+     - Side effects: none.
+     - Failure modes: This helper cannot fail.
+     */
+    private func deferredRemoteCategorySupplementalText(for category: RemoteSyncDeferredCategory) -> String {
+        String(
+            format: String(localized: "sync_category_deferred_issue", defaultValue: "Sync support is deferred (#%d)."),
+            category.trackingIssueNumber
+        )
     }
 
     /**
