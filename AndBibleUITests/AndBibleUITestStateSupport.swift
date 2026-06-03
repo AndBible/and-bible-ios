@@ -365,13 +365,14 @@ extension AndBibleUITests {
     }
 
     /**
-     Returns create-label text field candidates with the alert-owned ordinal field before slower
-     identifier and title matching.
+     Returns create-label text field candidates using stable alert names.
+
+     Hosted simulators can wedge XCTest while resolving the first ordinal `TextField` inside a
+     SwiftUI alert, so normal prompt polling avoids that query and relies on the explicit production
+     identifier/title instead.
      */
     func labelCreationPromptTextFieldCandidates(in prompt: XCUIElement) -> [XCUIElement] {
         [
-            prompt.textFields.element(boundBy: 0),
-            prompt.secureTextFields.element(boundBy: 0),
             prompt.textFields["labelManagerNewLabelNameField"].firstMatch,
             prompt.secureTextFields["labelManagerNewLabelNameField"].firstMatch,
             prompt.textFields["Label name"].firstMatch,

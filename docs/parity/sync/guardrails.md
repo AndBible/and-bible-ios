@@ -126,8 +126,8 @@ focused coverage rather than relying on the existing subset alone.
 ## Potential Improvements
 
 - add a machine-readable snapshot of Android-compatible sync keys and category names
-- add a machine-readable snapshot of Android's visible sync settings rows,
-  including the runtime-hidden Reading Plans row and the deferred iOS AI/progress rows
+- add a machine-readable snapshot of Android's sync settings category rows,
+  recording runtime visibility for Reading Plans and iOS deferred status for AI/progress rows
 - expand iOS coverage to Android's remaining `ai_settings` and `progress` sync
   categories only through their separate tracking issues (#74, #73), with
   `ai_settings` gated by #5/#89 and `progress` gated by the local model in
