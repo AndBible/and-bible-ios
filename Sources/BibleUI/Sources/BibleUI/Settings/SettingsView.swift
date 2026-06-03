@@ -1329,9 +1329,9 @@ public struct SettingsView: View {
                         defaultValue: "Text format used when creating new bookmark notes and Study Pad entries"
                     ),
                     options: Self.notesContentTypeMenuOptions,
-                    selectedValue: Self.normalizedNotesContentType(notesContentType)
+                    selectedValue: AppPreferenceValueNormalizer.notesContentType(notesContentType)
                 ) { newValue in
-                    let normalized = Self.normalizedNotesContentType(newValue)
+                    let normalized = AppPreferenceValueNormalizer.notesContentType(newValue)
                     notesContentType = normalized
                     let store = SettingsStore(modelContext: modelContext)
                     store.setString(.notesContentType, value: normalized)
@@ -2469,7 +2469,7 @@ public struct SettingsView: View {
         monochromeMode = store.getBool(.monochromeMode)
         disableAnimations = store.getBool(.disableAnimations)
         disableClickToEdit = store.getBool(.disableClickToEdit)
-        notesContentType = Self.normalizedNotesContentType(store.getString(.notesContentType))
+        notesContentType = AppPreferenceValueNormalizer.notesContentType(store.getString(.notesContentType))
         showActiveWindowIndicator = store.getBool(.showActiveWindowIndicator)
         showErrorBox = store.getBool(.showErrorBox)
         enableBluetoothMediaButtons = store.getBool(.enableBluetoothPref)
@@ -2867,16 +2867,6 @@ public struct SettingsView: View {
             return rawValue
         default:
             return "default"
-        }
-    }
-
-    /// Normalizes persisted notes-content format values to Android's supported list preference values.
-    private static func normalizedNotesContentType(_ rawValue: String) -> String {
-        switch rawValue {
-        case "HTML", "MARKDOWN":
-            return rawValue
-        default:
-            return "HTML"
         }
     }
 

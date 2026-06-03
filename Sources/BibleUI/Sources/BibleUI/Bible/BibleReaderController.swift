@@ -7351,7 +7351,9 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
                 monochromeMode: appPreferenceBool(.monochromeMode),
                 disableAnimations: appPreferenceBool(.disableAnimations),
                 disableClickToEdit: appPreferenceBool(.disableClickToEdit),
-                notesContentType: appPreferenceString(.notesContentType),
+                notesContentType: AppPreferenceValueNormalizer.notesContentType(
+                    appPreferenceString(.notesContentType)
+                ),
                 fontSizeMultiplier: fontSizeMultiplier,
                 enabledExperimentalFeatures: appPreferenceStringSet(.experimentalFeatures),
                 autoTrackReading: readingProgressSettings.autoTrackReading,

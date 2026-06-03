@@ -411,12 +411,16 @@ public struct BibleReaderView: View {
 
     /// Android-style window-level All Text Options navigation title for the captured pane.
     private var textOptionsWindowTitle: String {
+        let titleFormat = String(
+            localized: "window_text_display_settings_title",
+            defaultValue: "Text options - Window %d"
+        )
         guard let window = panePresentationTargetWindow else {
-            return "Text options - Window 1"
+            return String.localizedStringWithFormat(titleFormat, 1)
         }
         let position = windowManager.allWindows.firstIndex { $0.id == window.id }
             .map { $0 + 1 } ?? (window.orderNumber + 1)
-        return "Text options - Window \(position)"
+        return String.localizedStringWithFormat(titleFormat, position)
     }
 
     /// User-visible reference string for the currently focused Bible location.
@@ -853,7 +857,7 @@ public struct BibleReaderView: View {
             .toolbar(.visible, for: .navigationBar)
             #endif
             // Mirror the Settings destination's state export so UI tests can distinguish the
-            // reader overflow All Text Options route from global Application Preferences.
+            // window-level All Text Options route from global Application Preferences.
             .overlay(alignment: .topLeading) {
                 readerRenderedContentStateExport
             }
@@ -1025,7 +1029,7 @@ public struct BibleReaderView: View {
     }
 
     /**
-     Opens Android's reader All Text Options route as window-scoped text-display settings.
+     Opens Android's per-window All Text Options route as window-scoped text-display settings.
 
      - Parameter windowId: Pane whose reader stack should own the pushed destination.
      - Side effects:

@@ -2,7 +2,7 @@
 
 Last audited: 2026-06-03 for #170.
 
-This document records the Android source inventory for the reader overflow **All Text Options**
+This document records the Android source inventory for the reader **All Text Options**
 surface and the current iOS disposition for each row. The goal is to keep iOS aligned with Android
 without exposing controls that do not yet have an iOS model, bridge payload, and renderer path.
 
@@ -17,7 +17,7 @@ without exposing controls that do not yet have an iOS model, bridge payload, and
 
 ## iOS Sources
 
-- `Sources/BibleUI/Sources/BibleUI/Bible/BibleReaderView.swift`: reader drawer, overflow, destination routing, and workspace persistence.
+- `Sources/BibleUI/Sources/BibleUI/Bible/BibleReaderView.swift`: reader drawer, destination routing, and window-scoped text-display persistence.
 - `Sources/BibleUI/Sources/BibleUI/Bible/BibleReaderOverflowMenu.swift`: Android-style overflow menu row identifiers.
 - `Sources/BibleUI/Sources/BibleUI/Settings/TextDisplaySettingsView.swift`: native SwiftUI All Text Options editor.
 - `Sources/BibleUI/Sources/BibleUI/Settings/TextDisplaySettingsPresentation.swift`: Android row inventory and iOS dispositions.
@@ -27,26 +27,26 @@ without exposing controls that do not yet have an iOS model, bridge payload, and
 
 ## Routing Contract
 
-Android has two relevant routes:
+Android has two relevant text-display settings routes:
 
 - Main reader overflow `allTextOptions` opens workspace-scoped text display settings.
 - Per-window popup settings open window-scoped text display settings.
 
-iOS now maps the reader overflow `readerOpenTextOptionsAction` to `ReaderDestination.textOptions`,
-backed by workspace-scoped `TextDisplaySettingsView`. The left drawer
-`readerOpenSettingsAction` remains global Application Preferences. This prevents the reader overflow
-from mutating app defaults when Android would mutate workspace text-display settings.
+iOS now maps `readerOpenTextOptionsAction` to `ReaderDestination.textOptions`, backed by
+window-scoped `TextDisplaySettingsView`, because the current iOS entry point is attached to the
+selected reader window and matches Android's `SplitBibleArea` per-window popup route. The left
+drawer `readerOpenSettingsAction` remains global Application Preferences.
 
-The iOS change intentionally does not implement Android's per-window popup route. That is a separate
-scope from the main reader overflow route and should be handled explicitly if iOS gains the matching
-window-level entry point.
+iOS has not yet added a separate workspace-scoped All Text Options entry matching Android's main
+reader overflow route. If that route is added, it should be implemented as a distinct workspace-level
+destination rather than changing the existing window-scoped route.
 
 ## Row Inventory
 
 | Android key | Android category | iOS disposition | Notes |
 | --- | --- | --- | --- |
-| `open_workspace_settings` | Parent links | Adapted elsewhere | iOS overflow opens workspace text options directly. |
-| `open_global_settings` | Parent links | Adapted elsewhere | iOS global defaults remain in Application Preferences. |
+| `open_workspace_settings` | Parent links | Not implemented in this route | iOS window-level All Text Options maps to Android's per-window route; workspace text options need a separate entry point. |
+| `open_global_settings` | Parent links | Adapted elsewhere | iOS global Application Preferences remain a separate left-drawer route. |
 | `COLORS` | Font and colors | Implemented | Native color editor backed by existing config color fields. |
 | `FONTSIZE` | Font and colors | Implemented | Existing `fontSize` model and renderer field. |
 | `FONTFAMILY` | Font and colors | Implemented | Existing `fontFamily` model and renderer field. |
@@ -89,5 +89,8 @@ window-level entry point.
 - Keep `TextDisplaySettingsPresentation.androidRows` in the same order as Android
   `text_display_settings.xml`.
 - Do not add e-ink-only rows to iOS unless iOS gets an explicit e-ink feature.
-- Keep reader overflow All Text Options workspace-scoped. Global settings belong to Application
-  Preferences, and window-scoped text settings need a separate window-level entry point.
+- Keep the current iOS All Text Options entry window-scoped because it matches Android's
+  `SplitBibleArea` per-window popup route.
+- If iOS adds Android's main reader overflow `allTextOptions` route, implement it as a separate
+  workspace-scoped destination. Do not reuse the window-scoped destination and silently change its
+  persistence scope.

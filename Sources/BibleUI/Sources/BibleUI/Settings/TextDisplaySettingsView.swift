@@ -35,7 +35,7 @@ public struct TextDisplaySettingsView: View {
     /// Callback invoked after any user-visible settings mutation.
     var onChange: (() -> Void)?
 
-    /// Navigation title that reflects the Android settings scope currently being edited.
+    /// Localized navigation title that reflects the Android settings scope currently being edited.
     private let navigationTitleText: String
 
     /// User-visible and system labels available for the hidden-bookmark-label picker.
@@ -86,16 +86,20 @@ public struct TextDisplaySettingsView: View {
 
      - Parameters:
        - settings: Shared display settings value to mutate from the form.
-       - navigationTitle: Android-scope title shown by the surrounding navigation stack.
+       - navigationTitle: Optional Android-scope title shown by the surrounding navigation stack.
+         Passing `nil` uses the localized global text-options title.
        - onChange: Optional callback invoked after current-scope setting changes.
      */
     public init(
         settings: Binding<TextDisplaySettings>,
-        navigationTitle: String = "Global text options",
+        navigationTitle: String? = nil,
         onChange: (() -> Void)? = nil
     ) {
         self._settings = settings
-        self.navigationTitleText = navigationTitle
+        self.navigationTitleText = navigationTitle ?? String(
+            localized: "global_text_display_settings_title",
+            defaultValue: "Global text options"
+        )
         self.onChange = onChange
     }
 
@@ -262,23 +266,44 @@ public struct TextDisplaySettingsView: View {
 
     /// Android dynamic `FONTSIZE` row title containing the current point size.
     private var fontSizeTitle: String {
-        String(format: "Font size (%d pt)", settings.fontSize ?? 18)
+        String.localizedStringWithFormat(
+            String(
+                localized: "text_display_font_size_title_format",
+                defaultValue: "Font size (%d pt)"
+            ),
+            settings.fontSize ?? 18
+        )
     }
 
     /// Android dynamic `FONTFAMILY` row title containing the persisted font-family value.
     private var fontFamilyTitle: String {
-        String(format: "Font family (%@)", settings.fontFamily ?? "sans-serif")
+        String.localizedStringWithFormat(
+            String(
+                localized: "text_display_font_family_title_format",
+                defaultValue: "Font family (%@)"
+            ),
+            settings.fontFamily ?? "sans-serif"
+        )
     }
 
     /// Android dynamic `LINE_SPACING` row title containing the current line-spacing multiplier.
     private var lineSpacingTitle: String {
-        String(format: "Line spacing (%1.1fx)", Double(displayedLineSpacing) / 10.0)
+        String.localizedStringWithFormat(
+            String(
+                localized: "text_display_line_spacing_title_format",
+                defaultValue: "Line spacing (%1.1fx)"
+            ),
+            Double(displayedLineSpacing) / 10.0
+        )
     }
 
     /// Android dynamic `MARGINSIZE` row title containing left/right/max-width values.
     private var marginSizeTitle: String {
-        String(
-            format: "Margin size (%d/%d/%d mm)",
+        String.localizedStringWithFormat(
+            String(
+                localized: "text_display_margin_size_title_format",
+                defaultValue: "Margin size (%d/%d/%d mm)"
+            ),
             settings.marginLeft ?? 2,
             settings.marginRight ?? 2,
             settings.maxWidth ?? 600
@@ -287,7 +312,13 @@ public struct TextDisplaySettingsView: View {
 
     /// Android dynamic `TOPMARGIN` row title containing the current top margin.
     private var topMarginTitle: String {
-        String(format: "Top margin (%d mm)", settings.topMargin ?? 0)
+        String.localizedStringWithFormat(
+            String(
+                localized: "text_display_top_margin_title_format",
+                defaultValue: "Top margin (%d mm)"
+            ),
+            settings.topMargin ?? 0
+        )
     }
 
     /// Current user-visible Strong's mode value shown in the row editor.
@@ -841,21 +872,39 @@ public struct TextDisplaySettingsView: View {
                     }
                 case .margins:
                     marginSlider(
-                        title: String(format: "Left margin (%d mm)", settings.marginLeft ?? 2),
+                        title: String.localizedStringWithFormat(
+                            String(
+                                localized: "text_display_left_margin_title_format",
+                                defaultValue: "Left margin (%d mm)"
+                            ),
+                            settings.marginLeft ?? 2
+                        ),
                         value: settings.marginLeft ?? 2,
                         binding: marginLeftBinding,
                         range: 0...30,
                         step: 1
                     )
                     marginSlider(
-                        title: String(format: "Right margin (%d mm)", settings.marginRight ?? 2),
+                        title: String.localizedStringWithFormat(
+                            String(
+                                localized: "text_display_right_margin_title_format",
+                                defaultValue: "Right margin (%d mm)"
+                            ),
+                            settings.marginRight ?? 2
+                        ),
                         value: settings.marginRight ?? 2,
                         binding: marginRightBinding,
                         range: 0...30,
                         step: 1
                     )
                     marginSlider(
-                        title: String(format: "Maximum width of text (%d mm)", settings.maxWidth ?? 600),
+                        title: String.localizedStringWithFormat(
+                            String(
+                                localized: "text_display_max_width_title_format",
+                                defaultValue: "Maximum width of text (%d mm)"
+                            ),
+                            settings.maxWidth ?? 600
+                        ),
                         value: settings.maxWidth ?? 600,
                         binding: maxWidthBinding,
                         range: 0...1000,
