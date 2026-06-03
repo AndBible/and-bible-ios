@@ -39,6 +39,9 @@ public struct TextDisplaySettingsView: View {
     @State private var showFontPicker = false
     #endif
 
+    /// Inclusive Android-backed slider bounds used by `LINE_SPACING`.
+    private static let lineSpacingRange: ClosedRange<Int> = 10...30
+
     /**
      Creates a text-display settings editor bound to a persisted settings model.
 
@@ -67,10 +70,25 @@ public struct TextDisplaySettingsView: View {
         )
     }
 
+    /**
+     Current line-spacing value constrained to the visible Android-backed slider range.
+
+     Persisted values can predate the current 10...30 control bounds, so the row summary and slider
+     must present a bounded value even when storage contains an older lower or higher value. The
+     persisted setting is only updated when the user moves the slider.
+
+     - Returns: Stored line spacing clamped to the supported slider range.
+     - Side effects: none.
+     - Failure modes: none; nil settings fall back to Android-compatible default spacing.
+     */
+    private var displayedLineSpacing: Int {
+        min(max(settings.lineSpacing ?? 10, Self.lineSpacingRange.lowerBound), Self.lineSpacingRange.upperBound)
+    }
+
     /// Slider binding that maps the optional stored line spacing to a concrete numeric control.
     private var lineSpacingBinding: Binding<Double> {
         Binding(
-            get: { Double(settings.lineSpacing ?? 10) },
+            get: { Double(displayedLineSpacing) },
             set: { settings.lineSpacing = Int($0); onChange?() }
         )
     }
@@ -141,8 +159,9 @@ public struct TextDisplaySettingsView: View {
 
     /// Current hidden-label count shown on the Android `BOOKMARKS_HIDELABELS` row.
     private var hiddenBookmarkLabelsDetail: String {
+        let hiddenLabelIds = Set(settings.bookmarksHideLabels ?? [])
         let visibleHiddenCount = userLabels
-            .filter { Set(settings.bookmarksHideLabels ?? []).contains($0.id) }
+            .filter { hiddenLabelIds.contains($0.id) }
             .count
         if visibleHiddenCount == 0 {
             return String(localized: "no_hidden_labels", defaultValue: "No hidden labels")
@@ -255,10 +274,14 @@ public struct TextDisplaySettingsView: View {
                                 localized: "line_spacing_summary",
                                 defaultValue: "Set the space between lines. Current value: %d"
                             ),
-                            settings.lineSpacing ?? 10
+                            displayedLineSpacing
                         )
                     )
-                    Slider(value: lineSpacingBinding, in: 10...30, step: 1)
+                    Slider(
+                        value: lineSpacingBinding,
+                        in: Double(Self.lineSpacingRange.lowerBound)...Double(Self.lineSpacingRange.upperBound),
+                        step: 1
+                    )
                         .padding(.leading, 66)
                 }
 

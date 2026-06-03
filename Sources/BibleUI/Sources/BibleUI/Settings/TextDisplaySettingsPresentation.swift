@@ -19,7 +19,9 @@ enum TextDisplaySettingsPresentation {
     /**
      Android `PreferenceCategory` group represented by one text-display row.
 
-     The raw value is stable Android source metadata, not user-visible copy.
+     Explicit raw values preserve Android source identifiers when the category key is needed for
+     parity docs or tests. Cases without explicit raw values use stable Swift identifiers for local
+     grouping only; row-level `androidKey` values remain the source-of-truth Android metadata.
      */
     enum Section: String, CaseIterable, Sendable {
         /// Parent links between workspace/global text options in Android's nested activity.
