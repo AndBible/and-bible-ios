@@ -4708,15 +4708,16 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
        - fragments: Dictionary fragments to project into Vue `OsisFragment` values.
        - contentType: Optional document content type such as `strongs`.
        - stateJSON: Optional saved Vue state JSON to attach to the document.
-     - Returns: Serialized bridge JSON, or `{}` if typed encoding unexpectedly fails.
+     - Returns: Serialized bridge JSON, or `nil` if typed encoding unexpectedly fails.
      - Side effects: none.
-     - Failure modes: logs and returns `{}` when the payload cannot be encoded.
+     - Failure modes: logs and returns `nil` when the payload cannot be encoded, allowing callers
+       to avoid emitting an invalid Vue document shape.
      */
     private func buildMultiFragmentJSON(
         fragments: [(xml: String, key: String, keyName: String, bookInitials: String, bookAbbreviation: String, features: OsisFeatures)],
         contentType: String? = nil,
         stateJSON: String? = nil
-    ) -> String {
+    ) -> String? {
         let id = "strongs-multi-\(UUID().uuidString)"
         let osisFragments = fragments.map { frag in
             OsisFragment(
@@ -4747,7 +4748,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         guard let data = try? bridgeEncoder.encode(payload),
               let json = String(data: data, encoding: .utf8) else {
             logger.error("Failed to encode multi-fragment bridge document")
-            return "{}"
+            return nil
         }
         return json
     }
