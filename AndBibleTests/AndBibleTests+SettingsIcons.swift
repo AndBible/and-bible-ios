@@ -208,6 +208,12 @@ extension AndBibleTests {
         XCTAssertTrue(TextDisplaySettingsPresentation.implementedAndroidKeys.contains("BOOKMARKS_HIDELABELS"))
     }
 
+    func testTextDisplaySliderIntegerRoundsSteppedFloatingPointValues() {
+        XCTAssertEqual(TextDisplaySettingsView.sliderInteger(639.999999999, fallback: 600), 640)
+        XCTAssertEqual(TextDisplaySettingsView.sliderInteger(640.000000001, fallback: 600), 640)
+        XCTAssertEqual(TextDisplaySettingsView.sliderInteger(.nan, fallback: 600), 600)
+    }
+
     func testTextDisplayDeferredRowsAreTrackedByIssue174() {
         let deferredRows = TextDisplaySettingsPresentation.androidRows
             .filter { $0.disposition == .deferred }

@@ -58,7 +58,7 @@ public struct TextDisplaySettingsView: View {
     private var fontSizeBinding: Binding<Double> {
         Binding(
             get: { Double(settings.fontSize ?? 18) },
-            set: { settings.fontSize = Int($0); onChange?() }
+            set: { settings.fontSize = Self.sliderInteger($0, fallback: settings.fontSize ?? 18); onChange?() }
         )
     }
 
@@ -89,7 +89,7 @@ public struct TextDisplaySettingsView: View {
     private var lineSpacingBinding: Binding<Double> {
         Binding(
             get: { Double(displayedLineSpacing) },
-            set: { settings.lineSpacing = Int($0); onChange?() }
+            set: { settings.lineSpacing = Self.sliderInteger($0, fallback: displayedLineSpacing); onChange?() }
         )
     }
 
@@ -97,7 +97,7 @@ public struct TextDisplaySettingsView: View {
     private var marginLeftBinding: Binding<Double> {
         Binding(
             get: { Double(settings.marginLeft ?? 2) },
-            set: { settings.marginLeft = Int($0); onChange?() }
+            set: { settings.marginLeft = Self.sliderInteger($0, fallback: settings.marginLeft ?? 2); onChange?() }
         )
     }
 
@@ -105,7 +105,7 @@ public struct TextDisplaySettingsView: View {
     private var marginRightBinding: Binding<Double> {
         Binding(
             get: { Double(settings.marginRight ?? 2) },
-            set: { settings.marginRight = Int($0); onChange?() }
+            set: { settings.marginRight = Self.sliderInteger($0, fallback: settings.marginRight ?? 2); onChange?() }
         )
     }
 
@@ -113,7 +113,7 @@ public struct TextDisplaySettingsView: View {
     private var maxWidthBinding: Binding<Double> {
         Binding(
             get: { Double(settings.maxWidth ?? 600) },
-            set: { settings.maxWidth = Int($0); onChange?() }
+            set: { settings.maxWidth = Self.sliderInteger($0, fallback: settings.maxWidth ?? 600); onChange?() }
         )
     }
 
@@ -121,8 +121,27 @@ public struct TextDisplaySettingsView: View {
     private var topMarginBinding: Binding<Double> {
         Binding(
             get: { Double(settings.topMargin ?? 0) },
-            set: { settings.topMargin = Int($0); onChange?() }
+            set: { settings.topMargin = Self.sliderInteger($0, fallback: settings.topMargin ?? 0); onChange?() }
         )
+    }
+
+    /**
+     Converts a SwiftUI slider value into a stable integer setting value.
+
+     SwiftUI sliders emit `Double` values even when their visual control is stepped to integer
+     increments. Binary floating-point representation can leave values just below the displayed
+     step, so truncating would persist an off-by-one value such as 639 for a visible 640 max width.
+
+     - Parameters:
+       - value: Finite value emitted by a slider binding after SwiftUI applies its step.
+       - fallback: Existing stored value to preserve if a future caller passes a non-finite value.
+     - Returns: Nearest integer value suitable for persistence in `TextDisplaySettings`.
+     - Side effects: none.
+     - Failure modes: Does not throw; non-finite inputs return `fallback`.
+     */
+    static func sliderInteger(_ value: Double, fallback: Int) -> Int {
+        guard value.isFinite else { return fallback }
+        return Int(value.rounded())
     }
 
     /// Optional hidden-label IDs normalized for the nested picker screen.
