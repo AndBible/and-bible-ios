@@ -708,6 +708,7 @@ extension AndBibleTests {
         let workspace = workspaceStore.createWorkspace(name: "Reader Config")
         let studyPadCursorId = try XCTUnwrap(UUID(uuidString: "11111111-1111-1111-1111-111111111111"))
         let autoAssignLabelId = try XCTUnwrap(UUID(uuidString: "22222222-2222-2222-2222-222222222222"))
+        let hiddenLabelId = try XCTUnwrap(UUID(uuidString: "33333333-3333-3333-3333-333333333333"))
         workspace.workspaceSettings = WorkspaceSettings(
             autoAssignLabels: [autoAssignLabelId],
             studyPadCursors: [studyPadCursorId: 7],
@@ -754,6 +755,7 @@ extension AndBibleTests {
         display.maxWidth = 410
         display.topMargin = 12
         display.showPageNumber = true
+        display.bookmarksHideLabels = [hiddenLabelId]
         display.dayBackground = -2
         display.dayNoise = 3
         display.nightBackground = -123_456
@@ -872,6 +874,10 @@ extension AndBibleTests {
         XCTAssertEqual(config["fontSize"] as? Int, 21)
         XCTAssertEqual(config["showBookmarks"] as? Bool, false)
         XCTAssertEqual(config["showMyNotes"] as? Bool, false)
+        XCTAssertEqual(
+            try XCTUnwrap(config["bookmarksHideLabels"] as? [String]),
+            [hiddenLabelId.uuidString]
+        )
         XCTAssertEqual(config["hyphenation"] as? Bool, false)
         XCTAssertEqual(config["lineSpacing"] as? Int, 14)
         XCTAssertEqual(config["justifyText"] as? Bool, true)

@@ -2,6 +2,7 @@
 
 import SwiftUI
 import BibleCore
+import SwiftData
 #if os(iOS)
 import UIKit
 #endif
@@ -9,15 +10,18 @@ import UIKit
 /**
  Form-driven editor for text presentation settings used by the Bible reader.
 
- The view exposes bindings for typography, spacing, content toggles, annotation visibility, and
- Strong's display modes by mutating a shared `TextDisplaySettings` value.
+ The view exposes the Android All Text Options rows that already have complete iOS model, bridge,
+ and renderer support. Unsupported Android rows stay documented in
+ `TextDisplaySettingsPresentation` instead of appearing as inert controls.
 
  Data dependencies:
  - `settings` is the persisted display-settings model owned by the parent screen
+ - SwiftData labels back the Android `BOOKMARKS_HIDELABELS` picker
  - `onChange` lets the parent push updated settings into the reader after each mutation
 
  Side effects:
  - every binding write mutates `settings` and invokes `onChange`
+ - hidden bookmark-label choices mutate `settings.bookmarksHideLabels`
  - on iOS, presenting the font picker bridges into `UIFontPickerViewController`
  */
 public struct TextDisplaySettingsView: View {
@@ -26,6 +30,9 @@ public struct TextDisplaySettingsView: View {
 
     /// Callback invoked after any user-visible settings mutation.
     var onChange: (() -> Void)?
+
+    /// User-visible and system labels available for the hidden-bookmark-label picker.
+    @Query private var allLabels: [BibleCore.Label]
 
     #if os(iOS)
     /// Whether the native iOS font picker sheet is currently presented.
@@ -68,6 +75,46 @@ public struct TextDisplaySettingsView: View {
         )
     }
 
+    /// Left margin slider binding backed by the Android `MARGINSIZE` setting.
+    private var marginLeftBinding: Binding<Double> {
+        Binding(
+            get: { Double(settings.marginLeft ?? 2) },
+            set: { settings.marginLeft = Int($0); onChange?() }
+        )
+    }
+
+    /// Right margin slider binding backed by the Android `MARGINSIZE` setting.
+    private var marginRightBinding: Binding<Double> {
+        Binding(
+            get: { Double(settings.marginRight ?? 2) },
+            set: { settings.marginRight = Int($0); onChange?() }
+        )
+    }
+
+    /// Maximum text width slider binding backed by the Android `MARGINSIZE` setting.
+    private var maxWidthBinding: Binding<Double> {
+        Binding(
+            get: { Double(settings.maxWidth ?? 600) },
+            set: { settings.maxWidth = Int($0); onChange?() }
+        )
+    }
+
+    /// Top margin slider binding backed by the Android `TOPMARGIN` setting.
+    private var topMarginBinding: Binding<Double> {
+        Binding(
+            get: { Double(settings.topMargin ?? 0) },
+            set: { settings.topMargin = Int($0); onChange?() }
+        )
+    }
+
+    /// Optional hidden-label IDs normalized for the nested picker screen.
+    private var bookmarksHideLabelsBinding: Binding<[UUID]?> {
+        Binding(
+            get: { settings.bookmarksHideLabels },
+            set: { settings.bookmarksHideLabels = $0; onChange?() }
+        )
+    }
+
     /**
      Creates a `Bool` binding for optional toggle-backed fields in `TextDisplaySettings`.
 
@@ -80,6 +127,29 @@ public struct TextDisplaySettingsView: View {
         Binding(
             get: { settings[keyPath: keyPath] ?? defaultValue },
             set: { settings[keyPath: keyPath] = $0; onChange?() }
+        )
+    }
+
+    /// User-created labels sorted for stable `BOOKMARKS_HIDELABELS` presentation.
+    private var userLabels: [BibleCore.Label] {
+        allLabels
+            .filter(\.isRealLabel)
+            .sorted { lhs, rhs in
+                lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
+            }
+    }
+
+    /// Current hidden-label count shown on the Android `BOOKMARKS_HIDELABELS` row.
+    private var hiddenBookmarkLabelsDetail: String {
+        let visibleHiddenCount = userLabels
+            .filter { Set(settings.bookmarksHideLabels ?? []).contains($0.id) }
+            .count
+        if visibleHiddenCount == 0 {
+            return String(localized: "no_hidden_labels", defaultValue: "No hidden labels")
+        }
+        return String(
+            format: String(localized: "hidden_labels_count", defaultValue: "%d hidden"),
+            visibleHiddenCount
         )
     }
 
@@ -104,11 +174,25 @@ public struct TextDisplaySettingsView: View {
     }
 
     /**
-     Builds the grouped typography, layout, content, and annotation settings form.
+     Builds the Android-ordered text-display settings form.
      */
     public var body: some View {
         Form {
             Section {
+                NavigationLink {
+                    ColorSettingsView(settings: $settings, onChange: onChange)
+                } label: {
+                    textDisplayRowLabel(
+                        androidKey: "COLORS",
+                        title: String(localized: "colors", defaultValue: "Colors"),
+                        summary: String(
+                            localized: "prefs_colors_summary",
+                            defaultValue: "Configure reader text and background colors"
+                        )
+                    )
+                }
+                .accessibilityIdentifier("textDisplayColorsLink")
+
                 VStack(alignment: .leading, spacing: 8) {
                     textDisplayRowLabel(
                         androidKey: "FONTSIZE",
@@ -121,7 +205,7 @@ public struct TextDisplaySettingsView: View {
                             settings.fontSize ?? 18
                         )
                     )
-                    Slider(value: fontSizeBinding, in: 10...30, step: 1)
+                    Slider(value: fontSizeBinding, in: 1...60, step: 1)
                         .padding(.leading, 66)
                 }
                 #if os(iOS)
@@ -161,12 +245,7 @@ public struct TextDisplaySettingsView: View {
                     )
                 }
                 #endif
-            } header: {
-                textDisplaySectionHeader(String(localized: "settings_font"))
-            }
 
-            Section {
-                let justifyTextBinding = boolBinding(\.justifyText, default: false)
                 VStack(alignment: .leading, spacing: 8) {
                     textDisplayRowLabel(
                         androidKey: "LINE_SPACING",
@@ -179,9 +258,77 @@ public struct TextDisplaySettingsView: View {
                             settings.lineSpacing ?? 10
                         )
                     )
-                    Slider(value: lineSpacingBinding, in: 0...20, step: 1)
+                    Slider(value: lineSpacingBinding, in: 10...30, step: 1)
                         .padding(.leading, 66)
                 }
+
+                Toggle(isOn: boolBinding(\.showRedLetters, default: true)) {
+                    textDisplayRowLabel(
+                        androidKey: "REDLETTERS",
+                        title: String(localized: "red_letters"),
+                        summary: String(
+                            localized: "prefs_red_letter_summary",
+                            defaultValue: "Show words of Christ in red"
+                        )
+                    )
+                }
+            } header: {
+                textDisplaySectionHeader(String(localized: "prefs_font_and_colors_title", defaultValue: "Font and colors"))
+            }
+
+            Section {
+                let justifyTextBinding = boolBinding(\.justifyText, default: false)
+                VStack(alignment: .leading, spacing: 8) {
+                    textDisplayRowLabel(
+                        androidKey: "MARGINSIZE",
+                        title: String(localized: "margins", defaultValue: "Margins"),
+                        summary: String(
+                            localized: "prefs_margins_summary",
+                            defaultValue: "Set reader side margins and maximum text width"
+                        )
+                    )
+                    VStack(alignment: .leading, spacing: 10) {
+                        marginSlider(
+                            title: String(localized: "left_margin", defaultValue: "Left"),
+                            value: settings.marginLeft ?? 2,
+                            binding: marginLeftBinding,
+                            range: 0...30,
+                            step: 1
+                        )
+                        marginSlider(
+                            title: String(localized: "right_margin", defaultValue: "Right"),
+                            value: settings.marginRight ?? 2,
+                            binding: marginRightBinding,
+                            range: 0...30,
+                            step: 1
+                        )
+                        marginSlider(
+                            title: String(localized: "max_width", defaultValue: "Max width"),
+                            value: settings.maxWidth ?? 600,
+                            binding: maxWidthBinding,
+                            range: 0...1000,
+                            step: 10
+                        )
+                    }
+                    .padding(.leading, 66)
+                }
+
+                VStack(alignment: .leading, spacing: 8) {
+                    textDisplayRowLabel(
+                        androidKey: "TOPMARGIN",
+                        title: String(localized: "top_margin", defaultValue: "Top margin"),
+                        summary: String(
+                            format: String(
+                                localized: "top_margin_summary",
+                                defaultValue: "Set the top margin. Current value: %d"
+                            ),
+                            settings.topMargin ?? 0
+                        )
+                    )
+                    Slider(value: topMarginBinding, in: 0...60, step: 1)
+                        .padding(.leading, 66)
+                }
+
                 HStack(alignment: .top, spacing: 12) {
                     Button {
                         justifyTextBinding.wrappedValue.toggle()
@@ -224,80 +371,10 @@ public struct TextDisplaySettingsView: View {
                     )
                 }
             } header: {
-                textDisplaySectionHeader(String(localized: "settings_layout"))
+                textDisplaySectionHeader(String(localized: "prefs_text_layout_title", defaultValue: "Text layout"))
             }
 
             Section {
-                Toggle(isOn: boolBinding(\.showVerseNumbers, default: true)) {
-                    textDisplayRowLabel(
-                        androidKey: "VERSENUMBERS",
-                        title: String(localized: "verse_numbers"),
-                        summary: String(
-                            localized: "prefs_show_verseno_summary",
-                            defaultValue: "Show verse numbers"
-                        )
-                    )
-                }
-                Toggle(isOn: boolBinding(\.showSectionTitles, default: true)) {
-                    textDisplayRowLabel(
-                        androidKey: "SECTIONTITLES",
-                        title: String(localized: "section_titles"),
-                        summary: String(
-                            localized: "prefs_section_title_summary",
-                            defaultValue: "Show non-canonical section titles"
-                        )
-                    )
-                }
-                Toggle(isOn: boolBinding(\.showFootNotes, default: false)) {
-                    textDisplayRowLabel(
-                        androidKey: "FOOTNOTES",
-                        title: String(localized: "footnotes"),
-                        summary: String(
-                            localized: "prefs_show_footnotes_summary",
-                            defaultValue: "Show footnotes, if they are available in the document"
-                        )
-                    )
-                }
-                Toggle(isOn: boolBinding(\.showFootNotesInline, default: false)) {
-                    textDisplayRowLabel(
-                        androidKey: "FOOTNOTES_INLINE",
-                        title: String(localized: "inline_footnotes"),
-                        summary: String(
-                            localized: "prefs_show_footnotes_inline_summary",
-                            defaultValue: "Show footnotes inline with the text instead of as clickable handles"
-                        )
-                    )
-                }
-                Toggle(isOn: boolBinding(\.showRedLetters, default: true)) {
-                    textDisplayRowLabel(
-                        androidKey: "REDLETTERS",
-                        title: String(localized: "red_letters"),
-                        summary: String(
-                            localized: "prefs_red_letter_summary",
-                            defaultValue: "Show words of Christ in red"
-                        )
-                    )
-                }
-                Toggle(isOn: boolBinding(\.showXrefs, default: false)) {
-                    textDisplayRowLabel(
-                        androidKey: "XREFS",
-                        title: String(localized: "cross_references"),
-                        summary: String(
-                            localized: "prefs_show_xrefs_summary",
-                            defaultValue: "Show cross references, if they are available in the document"
-                        )
-                    )
-                }
-                Toggle(isOn: boolBinding(\.expandXrefs, default: false)) {
-                    textDisplayRowLabel(
-                        androidKey: "EXPAND_XREFS",
-                        title: String(localized: "expand_cross_references"),
-                        summary: String(
-                            localized: "prefs_expand_footnotes_summary",
-                            defaultValue: "Show cross reference content inline within the text, instead of a link that opens a pop-up dialog"
-                        )
-                    )
-                }
                 Picker(selection: Binding(
                     get: { settings.strongsMode ?? 0 },
                     set: { settings.strongsMode = $0; onChange?() }
@@ -327,7 +404,100 @@ public struct TextDisplaySettingsView: View {
                     )
                 }
             } header: {
-                textDisplaySectionHeader(String(localized: "settings_content"))
+                textDisplaySectionHeader(
+                    String(localized: "prefs_strongs_and_morphology_title", defaultValue: "Strong's and morphology")
+                )
+            }
+
+            Section {
+                let footnotesBinding = boolBinding(\.showFootNotes, default: false)
+                let xrefsBinding = boolBinding(\.showXrefs, default: false)
+                Toggle(isOn: footnotesBinding) {
+                    textDisplayRowLabel(
+                        androidKey: "FOOTNOTES",
+                        title: String(localized: "footnotes"),
+                        summary: String(
+                            localized: "prefs_show_footnotes_summary",
+                            defaultValue: "Show footnotes, if they are available in the document"
+                        )
+                    )
+                }
+                Toggle(isOn: boolBinding(\.showFootNotesInline, default: false)) {
+                    textDisplayRowLabel(
+                        androidKey: "FOOTNOTES_INLINE",
+                        title: String(localized: "inline_footnotes"),
+                        summary: String(
+                            localized: "prefs_show_footnotes_inline_summary",
+                            defaultValue: "Show footnotes inline with the text instead of as clickable handles"
+                        ),
+                        isEnabled: footnotesBinding.wrappedValue
+                    )
+                }
+                .disabled(!footnotesBinding.wrappedValue)
+
+                Toggle(isOn: xrefsBinding) {
+                    textDisplayRowLabel(
+                        androidKey: "XREFS",
+                        title: String(localized: "cross_references"),
+                        summary: String(
+                            localized: "prefs_show_xrefs_summary",
+                            defaultValue: "Show cross references, if they are available in the document"
+                        )
+                    )
+                }
+                Toggle(isOn: boolBinding(\.expandXrefs, default: false)) {
+                    textDisplayRowLabel(
+                        androidKey: "EXPAND_XREFS",
+                        title: String(localized: "expand_cross_references"),
+                        summary: String(
+                            localized: "prefs_expand_footnotes_summary",
+                            defaultValue: "Show cross reference content inline within the text, instead of a link that opens a pop-up dialog"
+                        ),
+                        isEnabled: xrefsBinding.wrappedValue
+                    )
+                }
+                .disabled(!xrefsBinding.wrappedValue)
+            } header: {
+                textDisplaySectionHeader(
+                    String(localized: "prefs_footnotes_and_xrefs_title", defaultValue: "Footnotes and cross references")
+                )
+            }
+
+            Section {
+                Toggle(isOn: boolBinding(\.showVerseNumbers, default: true)) {
+                    textDisplayRowLabel(
+                        androidKey: "VERSENUMBERS",
+                        title: String(localized: "verse_numbers"),
+                        summary: String(
+                            localized: "prefs_show_verseno_summary",
+                            defaultValue: "Show verse numbers"
+                        )
+                    )
+                }
+                Toggle(isOn: boolBinding(\.showSectionTitles, default: true)) {
+                    textDisplayRowLabel(
+                        androidKey: "SECTIONTITLES",
+                        title: String(localized: "section_titles"),
+                        summary: String(
+                            localized: "prefs_section_title_summary",
+                            defaultValue: "Show non-canonical section titles"
+                        )
+                    )
+                }
+                Toggle(isOn: boolBinding(\.showPageNumber, default: false)) {
+                    textDisplayRowLabel(
+                        androidKey: "PAGENUMBER",
+                        title: String(localized: "page_number", defaultValue: "Page number"),
+                        summary: String(
+                            localized: "prefs_page_number_summary",
+                            defaultValue: "Show page numbers when available"
+                        )
+                    )
+                }
+            } header: {
+                textDisplaySectionHeader(
+                    String(localized: "prefs_verses_and_headings_title", defaultValue: "Verses and headings")
+                )
             }
 
             Section {
@@ -351,8 +521,26 @@ public struct TextDisplaySettingsView: View {
                         )
                     )
                 }
+                NavigationLink {
+                    HiddenBookmarkLabelsView(
+                        labels: userLabels,
+                        hiddenLabelIds: bookmarksHideLabelsBinding,
+                        onChange: onChange
+                    )
+                } label: {
+                    textDisplayRowLabel(
+                        androidKey: "BOOKMARKS_HIDELABELS",
+                        title: String(localized: "hide_labels", defaultValue: "Hide labels"),
+                        summary: String(
+                            localized: "prefs_bookmarks_hide_labels_summary",
+                            defaultValue: "Hide bookmarks assigned to selected labels"
+                        ),
+                        detail: hiddenBookmarkLabelsDetail
+                    )
+                }
+                .accessibilityIdentifier("textDisplayHiddenBookmarkLabelsLink")
             } header: {
-                textDisplaySectionHeader(String(localized: "settings_annotations"))
+                textDisplaySectionHeader(String(localized: "prefs_text_bookmarks_title", defaultValue: "Text bookmarks"))
             }
         }
         .accessibilityIdentifier("textDisplaySettingsScreen")
@@ -402,6 +590,39 @@ public struct TextDisplaySettingsView: View {
     }
 
     /**
+     Builds one numeric slider row nested beneath the Android `MARGINSIZE` label.
+
+     - Parameters:
+       - title: User-visible subfield title.
+       - value: Current numeric value shown beside the subfield.
+       - binding: Slider binding that writes back into `TextDisplaySettings`.
+       - range: Allowed slider range.
+       - step: Slider increment.
+     - Returns: A compact labeled slider aligned beneath the parent row text.
+     - Side effects: Mutating the slider writes through `binding`.
+     - Failure modes: This helper cannot fail.
+     */
+    private func marginSlider(
+        title: String,
+        value: Int,
+        binding: Binding<Double>,
+        range: ClosedRange<Double>,
+        step: Double
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text(title)
+                    .font(.callout)
+                Spacer()
+                Text("\(value)")
+                    .font(.callout.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+            Slider(value: binding, in: range, step: step)
+        }
+    }
+
+    /**
      Static font option descriptor used by the macOS fallback picker.
      */
     private struct FontOption {
@@ -428,6 +649,100 @@ public struct TextDisplaySettingsView: View {
         FontOption(label: "Menlo", value: "Menlo", previewFont: "Menlo-Regular"),
         FontOption(label: "Monospace", value: "monospace", previewFont: "Menlo-Regular"),
     ]
+}
+
+/**
+ Nested Android `BOOKMARKS_HIDELABELS` picker backed by the persisted label catalog.
+
+ - Parameters:
+   - labels: User-visible labels available for hiding bookmark highlights.
+   - hiddenLabelIds: Optional label IDs written into `TextDisplaySettings.bookmarksHideLabels`.
+   - onChange: Callback invoked after each toggle mutation.
+ - Returns: A SwiftUI list of label toggles with Android-style color swatches.
+ - Side effects: Toggle changes mutate `hiddenLabelIds` and invoke `onChange`.
+ - Failure modes: Missing labels produce an empty-state row instead of failing.
+ */
+private struct HiddenBookmarkLabelsView: View {
+    /// User-visible labels available for hidden-bookmark filtering.
+    let labels: [BibleCore.Label]
+
+    /// Optional hidden label IDs persisted in text-display settings.
+    @Binding var hiddenLabelIds: [UUID]?
+
+    /// Callback invoked after a hidden-label mutation.
+    var onChange: (() -> Void)?
+
+    /// Stable set of label IDs visible in the current SwiftData query.
+    private var visibleLabelIds: Set<UUID> {
+        Set(labels.map(\.id))
+    }
+
+    /**
+     Creates a toggle binding for one label while preserving hidden IDs that are not currently
+     visible in the label picker.
+
+     - Parameter label: Label whose hidden state should be edited.
+     - Returns: Toggle binding backed by `hiddenLabelIds`.
+     - Side effects: Writes a normalized hidden-label list and invokes `onChange`.
+     - Failure modes: This helper cannot fail.
+     */
+    private func hiddenBinding(for label: BibleCore.Label) -> Binding<Bool> {
+        Binding(
+            get: { Set(hiddenLabelIds ?? []).contains(label.id) },
+            set: { isHidden in
+                var ids = hiddenLabelIds ?? []
+                let preservedHiddenIds = ids.filter { !visibleLabelIds.contains($0) }
+                let visibleHiddenIds = ids.filter { visibleLabelIds.contains($0) && $0 != label.id }
+                ids = preservedHiddenIds + visibleHiddenIds
+                if isHidden {
+                    ids.append(label.id)
+                }
+                hiddenLabelIds = ids
+                onChange?()
+            }
+        )
+    }
+
+    /**
+     Builds the hidden-label picker list.
+     */
+    var body: some View {
+        List {
+            if labels.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(String(localized: "no_labels", defaultValue: "No labels"))
+                        .font(.body)
+                    Text(
+                        String(
+                            localized: "no_labels_to_hide_summary",
+                            defaultValue: "Create labels before hiding bookmark highlights by label."
+                        )
+                    )
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                }
+                .padding(.vertical, 8)
+            } else {
+                ForEach(labels, id: \.id) { label in
+                    Toggle(isOn: hiddenBinding(for: label)) {
+                        HStack(spacing: 12) {
+                            RoundedRectangle(cornerRadius: 3, style: .continuous)
+                                .fill(Color(argbInt: label.color))
+                                .frame(width: 22, height: 22)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 3, style: .continuous)
+                                        .strokeBorder(Color.secondary.opacity(0.35), lineWidth: 1)
+                                )
+                            Text(label.name)
+                        }
+                    }
+                    .accessibilityIdentifier("textDisplayHiddenBookmarkLabel::\(label.id.uuidString)")
+                }
+            }
+        }
+        .accessibilityIdentifier("textDisplayHiddenBookmarkLabelsScreen")
+        .navigationTitle(String(localized: "hide_labels", defaultValue: "Hide labels"))
+    }
 }
 
 // MARK: - UIFontPickerViewController Wrapper (iOS only)

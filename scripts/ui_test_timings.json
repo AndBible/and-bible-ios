@@ -31,6 +31,7 @@
   "AndBibleUITests/AndBibleUITests/testSettingsReadingProgressLinkOpensReadingProgressSettings": 16.167,
   "AndBibleUITests/AndBibleUITests/testSettingsScreenShowsApplicationPreferenceShortcuts": 14.295,
   "AndBibleUITests/AndBibleUITests/testSettingsSyncLinkOpensSyncSettings": 18.14947998523712,
+  "AndBibleUITests/AndBibleUITests/testAllTextOptionsOpensReaderTextDisplaySurface": 26.856,
   "AndBibleUITests/AndBibleUITests/testSyncSettingsBackendSwitchMutatesVisibleSection": 26.499693989753723,
   "AndBibleUITests/AndBibleUITests/testSyncSettingsBackendSwitchPersistsAcrossDirectReopen": 32.7494170665741,
   "AndBibleUITests/AndBibleUITests/testSyncSettingsCategoryRowsMatchAndroidRuntimeVisibility": 18.0,

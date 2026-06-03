@@ -348,9 +348,33 @@ enum AndBibleIconCatalog {
             assetName: "SettingsIconFullscreenByScrolling",
             androidDrawableName: "ic_full_screen_by_scrolling_24dp"
         ),
+        "PAGE_SCROLL_AMOUNT": .init(
+            assetName: "SettingsIconStar",
+            androidDrawableName: "ic_baseline_star_24"
+        ),
+        "SCROLL_HELPER_LINES": .init(
+            assetName: "SettingsIconStar",
+            androidDrawableName: "ic_baseline_star_24"
+        ),
+        "SCROLL_HELPER_LINE_STYLE": .init(
+            assetName: "SettingsIconStar",
+            androidDrawableName: "ic_baseline_star_24"
+        ),
+        "PAGE_BUTTONS": .init(
+            assetName: "SettingsIconStar",
+            androidDrawableName: "ic_baseline_star_24"
+        ),
+        "ORDINALS": .init(
+            assetName: "SettingsIconStar",
+            androidDrawableName: "ic_baseline_star_24"
+        ),
         "NON_STRONGS_WORD_ITALIC": .init(
             assetName: "SettingsIconItalic",
             androidDrawableName: "ic_format_italic_24dp"
+        ),
+        "AI_DOC_MARKERS": .init(
+            assetName: "SettingsIconStar",
+            androidDrawableName: "ic_baseline_star_24"
         ),
         "MARK_AS_READ_BUTTON": .init(
             assetName: "SettingsIconCheckCircle",

@@ -849,6 +849,8 @@ extension AndBibleUITests {
             return "Reading Plan"
         case "readerOpenSettingsAction":
             return "Application preferences"
+        case "readerOpenTextOptionsAction":
+            return "All text options…"
         case "readerOpenWorkspacesAction":
             return "Workspaces…"
         case "readerOpenDownloadsAction":

@@ -107,6 +107,7 @@ public struct BibleReaderView: View {
     /// Reader-stack destinations opened from global reader actions.
     enum ReaderDestination: String, Identifiable, Hashable {
         case settings
+        case textOptions
 
         var id: String { rawValue }
     }
@@ -147,6 +148,7 @@ public struct BibleReaderView: View {
         case history
         case readingPlans
         case settings
+        case textOptions
         case workspaces
         case downloads
         case epubLibrary
@@ -233,6 +235,9 @@ public struct BibleReaderView: View {
 
     /// App-level text-display defaults edited from the full Application Settings flow.
     @State private var globalDisplaySettings: TextDisplaySettings = .appDefaults
+
+    /// Workspace-scoped text-display state edited from Android's reader All Text Options route.
+    @State private var workspaceDisplaySettings: TextDisplaySettings = .appDefaults
 
     /// Effective night-mode value currently applied to pane controllers and overlays.
     @State private var nightMode = false
@@ -821,6 +826,19 @@ public struct BibleReaderView: View {
             .overlay(alignment: .topLeading) {
                 readerRenderedContentStateExport
             }
+        case .textOptions:
+            TextDisplaySettingsView(
+                settings: $workspaceDisplaySettings,
+                onChange: applyWorkspaceDisplaySettingsChange
+            )
+            #if os(iOS)
+            .toolbar(.visible, for: .navigationBar)
+            #endif
+            // Mirror the Settings destination's state export so UI tests can distinguish the
+            // reader overflow All Text Options route from global Application Preferences.
+            .overlay(alignment: .topLeading) {
+                readerRenderedContentStateExport
+            }
         }
     }
 
@@ -986,6 +1004,21 @@ public struct BibleReaderView: View {
     /// Opens Application preferences as an integrated reader-stack destination.
     private func presentSettings(from windowId: UUID? = nil) {
         presentReaderDestination(.settings, from: windowId)
+    }
+
+    /**
+     Opens Android's reader All Text Options route as workspace-scoped text-display settings.
+
+     - Parameter windowId: Pane whose reader stack should own the pushed destination.
+     - Side effects:
+       - refreshes the workspace editor state from the current inheritance chain
+       - pushes the `.textOptions` reader destination
+     - Failure modes: If no active workspace exists, the editor still opens against global/default
+       fallback values and writes become no-ops in `persistWorkspaceDisplaySettings`.
+     */
+    private func presentTextOptions(from windowId: UUID? = nil) {
+        workspaceDisplaySettings = resolvedWorkspaceDisplaySettings()
+        presentReaderDestination(.textOptions, from: windowId)
     }
 
     /**
@@ -1610,6 +1643,8 @@ public struct BibleReaderView: View {
                 presentReaderSheet(.readingPlans, from: windowManager.activeWindow?.id)
             case .settings:
                 presentSettings(from: windowManager.activeWindow?.id)
+            case .textOptions:
+                presentTextOptions(from: windowManager.activeWindow?.id)
             case .workspaces:
                 presentReaderSheet(.workspaces, from: windowManager.activeWindow?.id)
             case .downloads:
@@ -1933,7 +1968,7 @@ public struct BibleReaderView: View {
         case .toggleVerseNumbers:
             toggleDisplaySetting(\.showVerseNumbers, default: true)
         case .openTextOptions:
-            dismissReaderOverflowMenuAndQueue(.settings)
+            dismissReaderOverflowMenuAndQueue(.textOptions)
         }
     }
 
@@ -2402,12 +2437,17 @@ public struct BibleReaderView: View {
     ) {
         if let workspace = windowManager.activeWorkspace {
             let hadWorkspaceThemeColors = workspace.textDisplaySettings?.hasThemeColorOverrides ?? false
+            let changedThemeColors = Self.themeColorsDiffer(
+                workspaceSettings,
+                previousResolvedSettings
+            )
+            let shouldPersistThemeColors = hadWorkspaceThemeColors || changedThemeColors
             var workspaceScopedSettings = workspaceSettings
-            if !hadWorkspaceThemeColors {
+            if !shouldPersistThemeColors {
                 workspaceScopedSettings.clearThemeColors()
             }
             _ = workspaceScopedSettings.clearRedundantOverrides(matching: globalDisplaySettings)
-            if hadWorkspaceThemeColors {
+            if shouldPersistThemeColors {
                 workspaceScopedSettings.restoreThemeColors(from: workspaceSettings)
             }
 
@@ -2435,6 +2475,29 @@ public struct BibleReaderView: View {
         refreshVisibleControllerDisplaySettings()
         syncActiveDisplaySettings()
         reloadBehaviorPreferences()
+    }
+
+    /**
+     Persists the workspace-scoped All Text Options editor and refreshes visible readers.
+
+     This is the Android main reader overflow scope: workspace text-display settings are edited
+     separately from global Application Preferences and separately from per-window overrides.
+
+     Side effects:
+     - writes `workspaceDisplaySettings` into the active workspace display settings
+     - pushes resolved display settings to every visible reader pane
+     - clears redundant child window overrides affected by the workspace change
+
+     Failure modes:
+     - if no active workspace exists, the persistence helper returns after refreshing in-memory
+       controller state
+     */
+    private func applyWorkspaceDisplaySettingsChange() {
+        let previousWorkspaceSettings = resolvedWorkspaceDisplaySettings()
+        persistWorkspaceDisplaySettings(
+            workspaceDisplaySettings,
+            previousResolvedSettings: previousWorkspaceSettings
+        )
     }
 
     /**
@@ -2480,6 +2543,29 @@ public struct BibleReaderView: View {
     /// Re-syncs the focused toolbar/settings state from the current active window.
     private func syncActiveDisplaySettings() {
         displaySettings = resolvedDisplaySettings(for: windowManager.activeWindow)
+        workspaceDisplaySettings = resolvedWorkspaceDisplaySettings()
+    }
+
+    /**
+     Compares the day/night theme color tuple between two display settings values.
+
+     - Parameters:
+       - lhs: First display settings value.
+       - rhs: Second display settings value.
+     - Returns: `true` when any theme color or noise field differs.
+     - Side effects: none.
+     - Failure modes: This helper cannot fail.
+     */
+    private static func themeColorsDiffer(
+        _ lhs: TextDisplaySettings,
+        _ rhs: TextDisplaySettings
+    ) -> Bool {
+        lhs.dayTextColor != rhs.dayTextColor ||
+            lhs.dayBackground != rhs.dayBackground ||
+            lhs.dayNoise != rhs.dayNoise ||
+            lhs.nightTextColor != rhs.nightTextColor ||
+            lhs.nightBackground != rhs.nightBackground ||
+            lhs.nightNoise != rhs.nightNoise
     }
 
     /// Refreshes each visible reader pane using that pane's own resolved display settings.

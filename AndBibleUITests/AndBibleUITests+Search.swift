@@ -35,6 +35,42 @@ extension AndBibleUITests {
     }
 
     /**
+     Verifies that the reader overflow All Text Options action opens workspace text-display
+     settings instead of the left-drawer Application Preferences destination.
+     *
+     * - Side effects:
+     *   - launches the reader shell with deterministic in-memory data
+     *   - opens the real overflow menu action identified by Android's All Text Options row
+     *   - pushes the native Text Display settings destination
+     * - Failure modes:
+     *   - fails if the overflow action is routed to global Application Preferences
+     *   - fails if the Text Display settings screen never becomes ready
+     */
+    func testAllTextOptionsOpensReaderTextDisplaySurface() {
+        let app = makeApp()
+        app.launch()
+
+        openReaderActionDestination(
+            actionIdentifier: "readerOpenTextOptionsAction",
+            destinationIdentifier: "textDisplaySettingsScreen",
+            readinessIdentifiers: [
+                "textDisplayFontFamilyButton",
+                "textDisplayJustifyTextToggleButton",
+            ],
+            in: app,
+            timeout: 20
+        )
+
+        XCTAssertTrue(requireElement("textDisplaySettingsScreen", in: app, timeout: 10).exists)
+        waitForReaderRenderedContentState(containing: "readerSheet=none", in: app, timeout: 10)
+        waitForReaderRenderedContentState(containing: "readerDestination=textOptions", in: app, timeout: 10)
+        XCTAssertFalse(
+            unresolvedElement("settingsForm", in: app).exists,
+            "Expected All Text Options to open the Text Display destination, not Application Preferences."
+        )
+    }
+
+    /**
      Verifies that Search preserves a seeded initial query typed through the real UI.
      *
      * - Side effects:

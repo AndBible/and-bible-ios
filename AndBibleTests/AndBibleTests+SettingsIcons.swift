@@ -138,5 +138,106 @@ extension AndBibleTests {
             AndBibleIconCatalog.settingsIcon(forAndroidKey: "JUSTIFY")?.assetName,
             "SettingsIconJustifyText"
         )
+        XCTAssertEqual(
+            AndBibleIconCatalog.settingsIcon(forAndroidKey: "MARGINSIZE")?.androidDrawableName,
+            "ic_margin_size_24dp"
+        )
+        XCTAssertEqual(
+            AndBibleIconCatalog.settingsIcon(forAndroidKey: "TOPMARGIN")?.androidDrawableName,
+            "ic_margin_top_24dp"
+        )
+        XCTAssertEqual(
+            AndBibleIconCatalog.settingsIcon(forAndroidKey: "BOOKMARKS_HIDELABELS")?.androidDrawableName,
+            "ic_labels_hide_24dp"
+        )
+        XCTAssertEqual(
+            AndBibleIconCatalog.settingsIcon(forAndroidKey: "ORDINALS")?.androidDrawableName,
+            "ic_baseline_star_24"
+        )
+    }
+
+    func testTextDisplayPresentationMatchesAndroidXmlOrder() {
+        XCTAssertEqual(
+            TextDisplaySettingsPresentation.androidRows.map(\.androidKey),
+            [
+                "open_workspace_settings",
+                "open_global_settings",
+                "COLORS",
+                "FONTSIZE",
+                "FONTFAMILY",
+                "LINE_SPACING",
+                "REDLETTERS",
+                "MARGINSIZE",
+                "TOPMARGIN",
+                "JUSTIFY",
+                "HYPHENATION",
+                "VERSEPERLINE",
+                "STRONGS",
+                "MORPH",
+                "NON_STRONGS_WORD_ITALIC",
+                "FOOTNOTES",
+                "FOOTNOTES_INLINE",
+                "XREFS",
+                "EXPAND_XREFS",
+                "VERSENUMBERS",
+                "SECTIONTITLES",
+                "TITLE_SCROLL_BUTTON",
+                "PAGENUMBER",
+                "INFINITE_SCROLL",
+                "PAGE_SCROLL_AMOUNT",
+                "SCROLL_HELPER_LINES",
+                "SCROLL_HELPER_LINE_STYLE",
+                "PAGE_BUTTONS",
+                "ORDINALS",
+                "BOOKMARKS_SHOW",
+                "MYNOTES",
+                "AI_DOC_MARKERS",
+                "BOOKMARKS_HIDELABELS",
+                "MARK_AS_READ_BUTTON",
+                "MEMORIZATION_INDICATORS",
+                "AUTO_TRACK_READING",
+            ]
+        )
+    }
+
+    func testTextDisplayImplementedRowsExposeSupportedIosConfigKeys() {
+        XCTAssertTrue(TextDisplaySettingsPresentation.implementedAndroidKeys.contains("COLORS"))
+        XCTAssertTrue(TextDisplaySettingsPresentation.implementedAndroidKeys.contains("MARGINSIZE"))
+        XCTAssertTrue(TextDisplaySettingsPresentation.implementedAndroidKeys.contains("TOPMARGIN"))
+        XCTAssertTrue(TextDisplaySettingsPresentation.implementedAndroidKeys.contains("PAGENUMBER"))
+        XCTAssertTrue(TextDisplaySettingsPresentation.implementedAndroidKeys.contains("BOOKMARKS_HIDELABELS"))
+    }
+
+    func testTextDisplayDeferredRowsAreTrackedByIssue174() {
+        let deferredRows = TextDisplaySettingsPresentation.androidRows
+            .filter { $0.disposition == .deferred }
+
+        XCTAssertEqual(
+            deferredRows.map(\.androidKey),
+            [
+                "NON_STRONGS_WORD_ITALIC",
+                "TITLE_SCROLL_BUTTON",
+                "INFINITE_SCROLL",
+                "PAGE_SCROLL_AMOUNT",
+                "ORDINALS",
+                "AI_DOC_MARKERS",
+                "MARK_AS_READ_BUTTON",
+                "MEMORIZATION_INDICATORS",
+            ]
+        )
+        XCTAssertTrue(deferredRows.allSatisfy { $0.trackingIssueNumber == 174 })
+    }
+
+    func testTextDisplayEinkRowsAreDocumentedPlatformDivergences() {
+        XCTAssertEqual(
+            TextDisplaySettingsPresentation.androidRows
+                .filter { $0.disposition == .platformDivergence }
+                .map(\.androidKey),
+            [
+                "SCROLL_HELPER_LINES",
+                "SCROLL_HELPER_LINE_STYLE",
+                "PAGE_BUTTONS",
+            ]
+        )
     }
 }
