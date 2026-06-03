@@ -20,7 +20,7 @@ import struct SwiftUI.Color
 extension AndBibleTests {
     func testAppPreferenceRegistryHasDefinitionForAllKeys() {
         let keys = AppPreferenceKey.allCases
-        XCTAssertEqual(keys.count, 35)
+        XCTAssertEqual(keys.count, 36)
         XCTAssertEqual(Set(keys).count, keys.count)
         XCTAssertEqual(AppPreferenceRegistry.definitions.count, keys.count)
 
@@ -33,6 +33,7 @@ extension AndBibleTests {
         XCTAssertEqual(AppPreferenceRegistry.stringDefault(for: .nightModePref3), "system")
         XCTAssertEqual(AppPreferenceRegistry.stringDefault(for: .toolbarButtonActions), "default")
         XCTAssertEqual(AppPreferenceRegistry.stringDefault(for: .bibleViewSwipeMode), "CHAPTER")
+        XCTAssertEqual(AppPreferenceRegistry.stringDefault(for: .notesContentType), "HTML")
         XCTAssertEqual(AppPreferenceRegistry.intDefault(for: .fontSizeMultiplier), 100)
         XCTAssertEqual(AppPreferenceRegistry.boolDefault(for: .openLinksInSpecialWindowPref), true)
         XCTAssertEqual(AppPreferenceRegistry.boolDefault(for: .enableBluetoothPref), true)
@@ -85,6 +86,7 @@ extension AndBibleTests {
         let settingsStore = try makeInMemorySettingsStore()
         settingsStore.setBool(.navigateToVersePref, value: true)
         settingsStore.setString(.toolbarButtonActions, value: "swap-menu")
+        settingsStore.setString(.notesContentType, value: "MARKDOWN")
         settingsStore.setInt(.fontSizeMultiplier, value: 180)
         settingsStore.setStringSet(.experimentalFeatures, values: ["feature_b", "feature_a"])
         settingsStore.setString(.localePref, value: "fi")
@@ -97,6 +99,7 @@ extension AndBibleTests {
 
         XCTAssertEqual(settingsStore.getBool(.navigateToVersePref), false)
         XCTAssertEqual(settingsStore.getString(.toolbarButtonActions), "default")
+        XCTAssertEqual(settingsStore.getString(.notesContentType), "HTML")
         XCTAssertEqual(settingsStore.getInt(.fontSizeMultiplier), 100)
         XCTAssertEqual(settingsStore.getStringSet(.experimentalFeatures), [])
         XCTAssertEqual(settingsStore.getString(.localePref), "")

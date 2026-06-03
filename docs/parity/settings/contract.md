@@ -1,6 +1,6 @@
 # Android Settings Contract (Source Of Truth)
 
-Last audited: 2026-06-01 for #155.
+Last audited: 2026-06-03 for #170.
 
 This file records the Android Application preferences contract and the current iOS
 disposition for each Android preference row. It intentionally separates two layers:
@@ -11,7 +11,7 @@ disposition for each Android preference row. It intentionally separates two laye
   iOS parity settings and action rows that iOS currently implements.
 
 The two counts are not expected to be equal. Android currently exposes 41 actionable
-preference rows. iOS currently registers 35 of them in `AppPreferenceRegistry`; every
+preference rows. iOS currently registers 36 of them in `AppPreferenceRegistry`; every
 Android row outside that registry must have an explicit disposition below.
 
 Primary Android sources:
@@ -45,8 +45,8 @@ Primary iOS sources:
   identifiers, titles, summaries, details, and keywords. All query terms must match.
 - `eink_mode` is an Android e-ink feature switch and is intentionally not registered
   on iOS unless iOS gains equivalent e-ink behavior.
-- `notes_content_type` is a real Android preference and is tracked separately by #163
-  because it depends on note-editor Markdown parity, not e-ink behavior.
+- `notes_content_type` is registry-backed on iOS for Settings/default/appSettings
+  parity. Full note-editor content-type behavior remains tracked by #163.
 - `locale_pref` is registry-backed, but the option list is not currently complete
   against Android `arrays.xml`; that drift is tracked by #164.
 
@@ -83,7 +83,7 @@ Primary iOS sources:
 | `global_text_display_settings` | XML `settings.xml:118-122`; action starts global `TextDisplaySettingsActivity` at `SettingsActivity.kt:299-308`. | Outside registry, adapted on iOS. Global display settings use `SettingsStore.globalTextDisplaySettingsKey`; Settings links live in `SettingsView.lookAndFeelSection`. |
 | `locale_pref` | XML `settings.xml:124-130`; option arrays are `arrays.xml:121-230`. | Registry-backed partial. iOS persists/applies locale overrides, but its option list is stale against Android arrays; tracked by #164. |
 | `disable_click_to_edit` | XML `settings.xml:131-137`; Android emits `disableClickToEdit` into `appSettings`. | Registry-backed pass. |
-| `notes_content_type` | XML `settings.xml:138-145`; default `HTML`; values `HTML`/`MARKDOWN` at `arrays.xml:264-271`; Android emits `notesContentType` at `BibleView.kt:1537`. | Missing on iOS; tracked by #163. Not e-ink related. |
+| `notes_content_type` | XML `settings.xml:138-145`; default `HTML`; values `HTML`/`MARKDOWN` at `arrays.xml:264-271`; Android emits `notesContentType` at `BibleView.kt:1537`. | Registry-backed partial. iOS shows the row, persists the value, and emits `appSettings.notesContentType`; applying it to newly created bookmark notes and Study Pad entries remains tracked by #163. |
 | `font_size_multiplier` | XML `settings.xml:146-153`; default `100`, min `10`, max `500`; summary updates at `SettingsActivity.kt:255-268`. | Registry-backed pass. |
 | `full_screen_hide_buttons_pref` | XML `settings.xml:154-159`; effective default `true`. | Registry-backed pass. |
 | `hide_window_buttons` | XML `settings.xml:160-165`; default `false`. | Registry-backed pass. |
@@ -116,7 +116,7 @@ Primary iOS sources:
 | `bible_view_swipe_mode` | `CHAPTER`, `PAGE`, `NONE` | `arrays.xml:77-87` | Implemented with native iOS gestures. |
 | `night_mode_pref3` | runtime-dependent `system`/`automatic`/`manual` or `system`/`manual` | `arrays.xml:90-116`, `SettingsActivity.kt:233-242` | Adapted: iOS supports system/manual and documents excluded automatic behavior. |
 | `locale_pref` | Android language label/value arrays | `arrays.xml:121-230` | Partial: option drift tracked by #164. |
-| `notes_content_type` | `HTML`, `MARKDOWN` | `arrays.xml:264-271` | Missing: tracked by #163. |
+| `notes_content_type` | `HTML`, `MARKDOWN` | `arrays.xml:264-271` | Implemented for Settings/default/payload; note creation/storage behavior remains #163. |
 | `disable_bible_bookmark_modal_buttons` | Bible one-tap action IDs | `arrays.xml:231-250` | Implemented. |
 | `disable_gen_bookmark_modal_buttons` | Generic one-tap action IDs | `arrays.xml:251-262` | Implemented. |
 | `experimental_features` | `bookmark_edit_actions`, `add_paragraph_break` | `arrays.xml:273-280` | Implemented. |
@@ -152,5 +152,5 @@ Checklist for parity updates:
 - Confirm defaults in XML/runtime code still match this contract.
 - Confirm labels/summaries and option arrays still match this contract.
 - Confirm runtime visibility/dynamic rules still match this contract.
-- Confirm the verification matrix does not summarize parity as a 35-key Android
+- Confirm the verification matrix does not summarize parity as a 36-key Android
   contract unless Android source still proves that count.

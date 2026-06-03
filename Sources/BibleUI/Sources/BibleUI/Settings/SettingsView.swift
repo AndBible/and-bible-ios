@@ -12,12 +12,12 @@ import UIKit
  Top-level application settings screen covering reader behavior, appearance, security, sync, and
  module-backed preference selection.
 
- The view mixes direct global `TextDisplaySettings` bindings with persisted Android-parity
- preferences stored through `SettingsStore` and `UserDefaults`-backed `AppStorage`.
+The view renders Android-parity application preferences backed by `SettingsStore` and
+`UserDefaults`-backed `AppStorage`.
 
  Data dependencies:
  - `modelContext` is used to load and persist Android-parity settings through `SettingsStore`
- - `displaySettings`, `nightMode`, and `nightModeMode` are shared global settings owned by the parent
+- `nightMode` and `nightModeMode` are shared global settings owned by the parent
  - `colorScheme` and `openURL` influence night-mode resolution and system-settings actions
 
  Side effects:
@@ -36,9 +36,6 @@ public struct SettingsView: View {
 
     /// URL opener used for system-settings actions.
     @Environment(\.openURL) private var openURL
-
-    /// Shared global text-display settings edited by nested settings screens.
-    @Binding var displaySettings: TextDisplaySettings
 
     /// Shared effective night-mode state used by the reader.
     @Binding var nightMode: Bool
@@ -106,6 +103,10 @@ public struct SettingsView: View {
 
     /// Whether Study Pad click-to-edit should be disabled.
     @State private var disableClickToEdit = AppPreferenceRegistry.boolDefault(for: .disableClickToEdit) ?? false
+
+    /// Text format used for newly created bookmark notes and Study Pad entries.
+    @State private var notesContentType =
+        AppPreferenceRegistry.stringDefault(for: .notesContentType) ?? "HTML"
 
     /// Whether the active reader window indicator should be shown.
     @State private var showActiveWindowIndicator =
@@ -237,6 +238,43 @@ public struct SettingsView: View {
         var id: String { value }
     }
 
+    /**
+     Menu-backed option for Android `ListPreference` rows rendered with native iOS menus.
+
+     - Parameters:
+       - value: Persisted Android-compatible value written through `SettingsStore`.
+       - title: Localized title shown in the chooser menu.
+     - Side effects: none; selecting an option is handled by `settingsMenuRow`.
+     - Failure modes: Empty values are allowed for Android defaults such as `locale_pref`.
+     */
+    private struct SettingsMenuOption: Identifiable {
+        /// Persisted Android-compatible value.
+        let value: String
+
+        /// Localized title shown in the menu.
+        let title: String
+
+        /// Stable identity derived from the persisted value.
+        var id: String { value }
+    }
+
+    /**
+     Picker option for Android's `notes_content_type` preference.
+     */
+    private struct NotesContentTypeOption: Identifiable {
+        /// Persisted Android value.
+        let value: String
+
+        /// Localization key for the visible option label.
+        let titleKey: String
+
+        /// English fallback title used when the localization key is missing.
+        let titleDefault: String
+
+        /// Stable identity derived from the persisted value.
+        var id: String { value }
+    }
+
     /// Locale options mirror Android arrays.xml order/value contract.
     private static let localeOptions: [LocaleOption] = [
         .init(value: "", labelKey: "lang_default", labelDefault: "Default"),
@@ -317,24 +355,105 @@ public struct SettingsView: View {
         .init(value: "SPEAK", titleKey: "speak", titleDefault: "Speak")
     ]
 
+    /// Android arrays.xml: prefs_notes_content_type_entries / _values.
+    private static let notesContentTypeOptions: [NotesContentTypeOption] = [
+        .init(value: "HTML", titleKey: "notes_content_type_html", titleDefault: "Rich text (HTML)"),
+        .init(value: "MARKDOWN", titleKey: "notes_content_type_markdown", titleDefault: "Markdown")
+    ]
+
+    /**
+     Android-backed menu options for toolbar-button action `ListPreference` rows.
+
+     These values come from Android's `prefs_toolbar_button_action_*` arrays and are persisted
+     unchanged so reader behavior and cross-device sync use the same preference contract.
+     */
+    private static let toolbarButtonActionMenuOptions: [SettingsMenuOption] = [
+        .init(
+            value: "default",
+            title: String(
+                localized: "prefs_toolbar_button_action_default",
+                defaultValue: "Press to open menu, long press for documents screen (default)"
+            )
+        ),
+        .init(
+            value: "swap-menu",
+            title: String(
+                localized: "prefs_toolbar_button_action_swap_menu",
+                defaultValue: "Press to open next document, long press to open menu"
+            )
+        ),
+        .init(
+            value: "swap-activity",
+            title: String(
+                localized: "prefs_toolbar_button_action_swap_activity",
+                defaultValue: "Press to open next document, long press for documents screen"
+            )
+        )
+    ]
+
+    /**
+     Android-backed menu options for horizontal Bible-view swipe behavior.
+
+     Values are stored exactly as Android stores `bible_view_swipe_mode`, keeping the iOS reader
+     behavior and synchronized preference payloads aligned with Android.
+     */
+    private static let bibleViewSwipeModeMenuOptions: [SettingsMenuOption] = [
+        .init(value: "CHAPTER", title: String(localized: "prefs_swipe_mode_chapter", defaultValue: "Chapter")),
+        .init(value: "PAGE", title: String(localized: "prefs_swipe_mode_page", defaultValue: "Page")),
+        .init(value: "NONE", title: String(localized: "prefs_swipe_mode_none", defaultValue: "Disabled"))
+    ]
+
+    /**
+     Android-backed menu options for night-mode switching.
+
+     The available list is resolved through `NightModeSettingsResolver`, which preserves the
+     Android values while hiding unsupported automatic mode when platform conditions require it.
+     */
+    private static var nightModeMenuOptions: [SettingsMenuOption] {
+        NightModeSettingsResolver.availableModes.map {
+            SettingsMenuOption(value: $0.rawValue, title: nightModeModeTitle($0))
+        }
+    }
+
+    /**
+     Android-backed menu options for interface-language selection.
+
+     Locale values are Android `locale_pref` values, then mapped to Apple's `AppleLanguages`
+     override only when the user selects a new value.
+     */
+    private static var localeMenuOptions: [SettingsMenuOption] {
+        localeOptions.map {
+            SettingsMenuOption(value: $0.value, title: localizedLocaleOptionLabel($0))
+        }
+    }
+
+    /**
+     Android-backed menu options for bookmark-note content format.
+
+     Values match Android's `notes_content_type` preference so created notes use the same format
+     choice across platforms.
+     */
+    private static var notesContentTypeMenuOptions: [SettingsMenuOption] {
+        notesContentTypeOptions.map {
+            SettingsMenuOption(value: $0.value, title: localizedNotesContentTypeTitle($0))
+        }
+    }
+
     /**
      Creates the top-level settings screen bound to shared reader settings.
 
      - Parameters:
-       - displaySettings: Shared text-display settings edited by nested settings views.
        - nightMode: Shared effective night-mode state used by the reader.
        - nightModeMode: Shared persisted night-mode mode string.
        - readingProgressController: Optional reader controller used by Reading Progress Settings.
        - onSettingsChanged: Optional callback invoked when changes should refresh reader content.
      */
     public init(
-        displaySettings: Binding<TextDisplaySettings>,
         nightMode: Binding<Bool>,
         nightModeMode: Binding<String>,
         readingProgressController: BibleReaderController? = nil,
         onSettingsChanged: (() -> Void)? = nil
     ) {
-        self._displaySettings = displaySettings
         self._nightMode = nightMode
         self._nightModeMode = nightModeMode
         self.readingProgressController = readingProgressController
@@ -342,7 +461,7 @@ public struct SettingsView: View {
     }
 
     /**
-     Builds the full settings form, preference hydration, alerts, and settings-side effects.
+     Builds the full settings surface, preference hydration, alerts, and settings-side effects.
      */
     public var body: some View {
         settingsFormWithPreferencePersistence
@@ -351,51 +470,58 @@ public struct SettingsView: View {
     /**
      Composes the visible settings sections without presentation modifiers or persistence observers.
 
-     Keeping this as a small builder gives SwiftUI a stable root expression and keeps search gating
-     declarative at the section level.
+     The Android preferences screen is a flat scrolling preference surface, not a grouped card form.
+     Keeping this as a small builder gives SwiftUI a stable root expression while the section gates
+     remain declarative.
      *
      - Side Effects: none directly; child controls perform their own preference writes.
      - Failure Modes: Sections omitted by search or missing data are simply not rendered.
      */
     @ViewBuilder
     private var settingsForm: some View {
-        Form {
-            if shouldShowFeaturesSection {
-                featuresSettingsSection
-            }
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                if shouldShowDictionarySection {
+                    dictionarySettingsSection
+                }
 
-            if shouldShowDictionarySection {
-                dictionarySettingsSection
-            }
+                if shouldShowBehaviorSection {
+                    behaviorSettingsSection
+                }
 
-            if shouldShowBehaviorSection {
-                behaviorSettingsSection
-            }
+                if shouldShowLookAndFeelSection {
+                    lookAndFeelSection
+                }
 
-            if shouldShowLookAndFeelSection {
-                lookAndFeelSection
-            }
+                if shouldShowSecuritySection {
+                    securitySettingsSection
+                }
 
-            if shouldShowSecuritySection {
-                securitySettingsSection
-            }
+                if shouldShowFeaturesSection {
+                    featuresSettingsSection
+                }
 
-            if shouldShowAdvancedSection {
-                advancedSettingsSection
-            }
+                if shouldShowAdvancedSection {
+                    advancedSettingsSection
+                }
 
-            if shouldShowAboutSection {
-                aboutSettingsSection
-            }
+                if shouldShowAboutSection {
+                    aboutSettingsSection
+                }
 
-            if shouldShowNoSettingsSearchResults {
-                noSettingsSearchResultsSection
+                if shouldShowNoSettingsSearchResults {
+                    noSettingsSearchResultsSection
+                }
             }
+            .padding(.vertical, 8)
         }
+        .accessibilityIdentifier("settingsForm")
+        .accessibilityValue(settingsAccessibilityValue)
+        .background(settingsScreenBackground.ignoresSafeArea())
     }
 
     /**
-     Applies navigation, alerts, sheet presentation, search, and toolbar controls to the form.
+     Applies navigation, alerts, sheet presentation, search, and toolbar controls to the settings surface.
 
      - Side Effects: `onAppear` reloads persisted state; toolbar and alerts mutate local presentation
        state and reset preferences when confirmed.
@@ -403,8 +529,6 @@ public struct SettingsView: View {
      */
     private var settingsFormWithPresentation: some View {
         settingsForm
-            .accessibilityIdentifier("settingsForm")
-            .accessibilityValue(settingsAccessibilityValue)
             .navigationTitle(settingsNavigationTitleText)
             .alert(
                 languageRestartAlertTitleText,
@@ -502,7 +626,7 @@ public struct SettingsView: View {
      */
     @ViewBuilder
     private var dictionarySettingsSection: some View {
-        Section {
+        settingsPreferenceSection(String(localized: "settings_dictionaries")) {
             if !strongsGreekDictionaries.isEmpty,
                settingsSearchMatchesIdentifier(
                    "settingsStrongsGreekDictionaryLink",
@@ -535,6 +659,7 @@ public struct SettingsView: View {
                     )
                 }
                 .accessibilityIdentifier("settingsStrongsGreekDictionaryLink")
+                .buttonStyle(.plain)
             }
 
             if !strongsHebrewDictionaries.isEmpty,
@@ -569,6 +694,7 @@ public struct SettingsView: View {
                     )
                 }
                 .accessibilityIdentifier("settingsStrongsHebrewDictionaryLink")
+                .buttonStyle(.plain)
             }
 
             if !robinsonMorphologyDictionaries.isEmpty,
@@ -603,6 +729,7 @@ public struct SettingsView: View {
                     )
                 }
                 .accessibilityIdentifier("settingsRobinsonMorphologyLink")
+                .buttonStyle(.plain)
             }
 
             if !wordLookupDictionaries.isEmpty,
@@ -637,9 +764,8 @@ public struct SettingsView: View {
                     )
                 }
                 .accessibilityIdentifier("settingsWordLookupDictionariesLink")
+                .buttonStyle(.plain)
             }
-        } header: {
-            settingsSectionHeader(String(localized: "settings_dictionaries"))
         }
     }
 
@@ -652,7 +778,9 @@ public struct SettingsView: View {
      */
     @ViewBuilder
     private var behaviorSettingsSection: some View {
-        Section {
+        settingsPreferenceSection(
+            String(localized: "prefs_behavior_customization_cat", defaultValue: "Application behavior")
+        ) {
             if settingsSearchMatchesPreference(.navigateToVersePref, in: behaviorSettingsSearchEntries) {
                 Toggle(isOn: Binding(
                     get: { navigateToVerse },
@@ -759,32 +887,22 @@ public struct SettingsView: View {
                 }
             }
             if settingsSearchMatchesPreference(.toolbarButtonActions, in: behaviorSettingsSearchEntries) {
-                Picker(selection: Binding(
-                        get: { Self.normalizedToolbarButtonActionsMode(toolbarButtonActionsMode) },
-                        set: { newValue in
-                            toolbarButtonActionsMode = Self.normalizedToolbarButtonActionsMode(newValue)
-                            let store = SettingsStore(modelContext: modelContext)
-                            store.setString(.toolbarButtonActions, value: toolbarButtonActionsMode)
-                        }
-                    )) {
-                    Text(String(localized: "prefs_toolbar_button_action_default", defaultValue: "Default"))
-                        .tag("default")
-                    Text(String(localized: "prefs_toolbar_button_action_swap_menu", defaultValue: "Swap menu"))
-                        .tag("swap-menu")
-                    Text(String(localized: "prefs_toolbar_button_action_swap_activity", defaultValue: "Swap activity"))
-                        .tag("swap-activity")
-                } label: {
-                    settingsRowLabel(
-                        preferenceKey: .toolbarButtonActions,
-                        title: String(
-                            localized: "prefs_toolbar_button_action_title",
-                            defaultValue: "Bible/commentary toolbar button action"
-                        ),
-                        summary: String(
-                            localized: "prefs_toolbar_button_action_summary",
-                            defaultValue: "Choose if one-tap of Bible/commentary toolbar buttons shows menu or activity directly."
-                        )
-                    )
+                settingsMenuRow(
+                    preferenceKey: .toolbarButtonActions,
+                    title: String(
+                        localized: "prefs_toolbar_button_action_title",
+                        defaultValue: "Action for toolbar button press"
+                    ),
+                    summary: String(
+                        localized: "prefs_toolbar_button_action_summary",
+                        defaultValue: "Action to take when pressing/long-pressing Bible or Commentary toolbar buttons"
+                    ),
+                    options: Self.toolbarButtonActionMenuOptions,
+                    selectedValue: Self.normalizedToolbarButtonActionsMode(toolbarButtonActionsMode)
+                ) { newValue in
+                    toolbarButtonActionsMode = Self.normalizedToolbarButtonActionsMode(newValue)
+                    let store = SettingsStore(modelContext: modelContext)
+                    store.setString(.toolbarButtonActions, value: toolbarButtonActionsMode)
                 }
             }
             if settingsSearchMatchesPreference(.disableTwoStepBookmarking, in: behaviorSettingsSearchEntries) {
@@ -810,22 +928,22 @@ public struct SettingsView: View {
                 }
             }
             if settingsSearchMatchesPreference(.bibleViewSwipeMode, in: behaviorSettingsSearchEntries) {
-                Picker(selection: Binding(
-                        get: { Self.normalizedBibleViewSwipeMode(bibleViewSwipeMode) },
-                        set: { newValue in
-                            bibleViewSwipeMode = Self.normalizedBibleViewSwipeMode(newValue)
-                            let store = SettingsStore(modelContext: modelContext)
-                            store.setString(.bibleViewSwipeMode, value: bibleViewSwipeMode)
-                        }
-                )) {
-                    Text(String(localized: "prefs_swipe_mode_chapter", defaultValue: "Chapter"))
-                        .tag("CHAPTER")
-                    Text(String(localized: "prefs_swipe_mode_page", defaultValue: "Page"))
-                        .tag("PAGE")
-                    Text(String(localized: "prefs_swipe_mode_none", defaultValue: "None"))
-                        .tag("NONE")
-                } label: {
-                    bibleViewSwipeModeSettingsRow
+                settingsMenuRow(
+                    preferenceKey: .bibleViewSwipeMode,
+                    title: String(
+                        localized: "prefs_bible_view_swipe_mode_title",
+                        defaultValue: "Action for swipe left / right gesture"
+                    ),
+                    summary: String(
+                        localized: "prefs_bible_view_swipe_mode_summary",
+                        defaultValue: "Swipe left / right gesture can be used to go to next page / chapter."
+                    ),
+                    options: Self.bibleViewSwipeModeMenuOptions,
+                    selectedValue: Self.normalizedBibleViewSwipeMode(bibleViewSwipeMode)
+                ) { newValue in
+                    bibleViewSwipeMode = Self.normalizedBibleViewSwipeMode(newValue)
+                    let store = SettingsStore(modelContext: modelContext)
+                    store.setString(.bibleViewSwipeMode, value: bibleViewSwipeMode)
                 }
             }
             if settingsSearchMatchesPreference(.volumeKeysScroll, in: behaviorSettingsSearchEntries) {
@@ -846,32 +964,33 @@ public struct SettingsView: View {
                         summary: String(
                             localized: "prefs_volume_keys_scroll_summary",
                             defaultValue: "Use volume up/down to scroll Bible text"
-                        ),
-                        detail: String(
-                            localized: "prefs_volume_keys_scroll_ios_note",
-                            defaultValue: "iOS does not expose volume-button presses to apps. This setting is kept for Android parity and cross-device sync."
                         )
                     )
                 }
             }
-            if settingsSearchMatchesIdentifier("settingsVerseSelection", in: behaviorSettingsSearchEntries) {
-                Toggle(isOn: Binding(
-                    get: { displaySettings.enableVerseSelection ?? true },
-                    set: {
-                        displaySettings.enableVerseSelection = $0
-                        onSettingsChanged?()
-                    }
-                )) {
-                    settingsRowLabel(
-                        preferenceKey: nil,
-                        title: String(localized: "verse_selection")
+            if settingsSearchMatchesPreference(.nightModePref3, in: behaviorSettingsSearchEntries) {
+                settingsMenuRow(
+                    preferenceKey: .nightModePref3,
+                    title: String(localized: "prefs_night_mode_title", defaultValue: "Night mode switching"),
+                    summary: String(
+                        localized: "prefs_night_mode_summary",
+                        defaultValue: "Whether to switch to night mode automatically (if device supports), manually or via system setting (Android 10+). Manual switching can be done from the 3-dot options menu on the main screen."
+                    ),
+                    options: Self.nightModeMenuOptions,
+                    selectedValue: Self.nightModePickerSelection(from: nightModeMode)
+                ) { newValue in
+                    nightModeMode = newValue
+                    let store = SettingsStore(modelContext: modelContext)
+                    store.setString(.nightModePref3, value: newValue)
+                    let manualNightMode = store.getBool("night_mode")
+                    nightMode = NightModeSettingsResolver.isNightMode(
+                        rawValue: newValue,
+                        manualNightMode: manualNightMode,
+                        systemIsDark: colorScheme == .dark
                     )
+                    onSettingsChanged?()
                 }
             }
-        } header: {
-            settingsSectionHeader(
-                String(localized: "prefs_behavior_customization_cat", defaultValue: "Application behavior")
-            )
         }
     }
 
@@ -883,7 +1002,7 @@ public struct SettingsView: View {
      */
     @ViewBuilder
     private var securitySettingsSection: some View {
-        Section {
+        settingsPreferenceSection(String(localized: "settings_security")) {
             if settingsSearchMatchesPreference(.discreteHelp, in: securitySettingsSearchEntries) {
                 Button {
                     showDiscreteHelp = true
@@ -936,8 +1055,6 @@ public struct SettingsView: View {
                         }
                 }
             }
-        } header: {
-            settingsSectionHeader(String(localized: "settings_security"))
         }
     }
 
@@ -950,7 +1067,9 @@ public struct SettingsView: View {
      */
     @ViewBuilder
     private var advancedSettingsSection: some View {
-        Section {
+        settingsPreferenceSection(
+            String(localized: "prefs_advanced_settings_cat", defaultValue: "Advanced settings")
+        ) {
             if settingsSearchMatchesPreference(.enableBluetoothPref, in: advancedSettingsSearchEntries) {
                 Toggle(isOn: Binding(
                     get: { enableBluetoothMediaButtons },
@@ -998,6 +1117,7 @@ public struct SettingsView: View {
                         detail: experimentalFeaturesSummary(selectedValues: enabledExperimentalFeatures)
                     )
                 }
+                .buttonStyle(.plain)
             }
             #if DEBUG
             if settingsSearchMatchesPreference(.showErrorBox, in: advancedSettingsSearchEntries) {
@@ -1071,10 +1191,6 @@ public struct SettingsView: View {
                 .disabled(debugCrashScheduled)
             }
             #endif
-        } header: {
-            settingsSectionHeader(
-                String(localized: "prefs_advanced_settings_cat", defaultValue: "Advanced settings")
-            )
         }
     }
 
@@ -1086,7 +1202,7 @@ public struct SettingsView: View {
      */
     @ViewBuilder
     private var aboutSettingsSection: some View {
-        Section {
+        settingsPreferenceSection(String(localized: "settings_about")) {
             HStack(alignment: .top, spacing: 12) {
                 settingsRowLabel(
                     preferenceKey: nil,
@@ -1097,8 +1213,6 @@ public struct SettingsView: View {
                     .foregroundStyle(.secondary)
                     .padding(.vertical, 8)
             }
-        } header: {
-            settingsSectionHeader(String(localized: "settings_about"))
         }
     }
 
@@ -1110,63 +1224,34 @@ public struct SettingsView: View {
      */
     @ViewBuilder
     private var noSettingsSearchResultsSection: some View {
-        Section {
-            Text(String(localized: "settings_search_no_results", defaultValue: "No settings found"))
-                .foregroundStyle(.secondary)
-        }
+        Text(String(localized: "settings_search_no_results", defaultValue: "No settings found"))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
     }
 
     /**
-     Builds the "Look & feel" section, including nested display editors and appearance toggles.
+     Builds Android's root "Look & feel" Application Preferences section.
+
+     Text display and color editors stay on the reader All Text Options route; this root section
+     mirrors the Android application-preference rows visible in production, such as language,
+     animation, window chrome, and one-tap action preferences.
      */
     @ViewBuilder
     private var lookAndFeelSection: some View {
-        Section {
-            if settingsSearchMatchesIdentifier("settingsTextDisplayLink", in: lookAndFeelSettingsSearchEntries) {
-                settingsNavigationLink(
-                    title: String(localized: "settings_text_display"),
-                    androidKey: "global_text_display_settings",
-                    accessibilityIdentifier: "settingsTextDisplayLink"
-                ) {
-                    TextDisplaySettingsView(settings: $displaySettings, onChange: onSettingsChanged)
-                }
-            }
-            if settingsSearchMatchesIdentifier("settingsColorsLink", in: lookAndFeelSettingsSearchEntries) {
-                settingsNavigationLink(
-                    title: String(localized: "settings_colors"),
-                    accessibilityIdentifier: "settingsColorsLink"
-                ) {
-                    ColorSettingsView(settings: $displaySettings, onChange: onSettingsChanged)
-                }
-            }
-            if settingsSearchMatchesPreference(.nightModePref3, in: lookAndFeelSettingsSearchEntries) {
-                Picker(selection: Binding(
-                        get: { Self.nightModePickerSelection(from: nightModeMode) },
-                        set: { newValue in
-                            nightModeMode = newValue
-                            let store = SettingsStore(modelContext: modelContext)
-                            store.setString(.nightModePref3, value: newValue)
-                            let manualNightMode = store.getBool("night_mode")
-                            nightMode = NightModeSettingsResolver.isNightMode(
-                                rawValue: newValue,
-                                manualNightMode: manualNightMode,
-                                systemIsDark: colorScheme == .dark
-                            )
-                            onSettingsChanged?()
-                        }
-                    )) {
-                    ForEach(NightModeSettingsResolver.availableModes, id: \.rawValue) { mode in
-                        Text(Self.nightModeModeTitle(mode)).tag(mode.rawValue)
-                    }
-                } label: {
-                    settingsRowLabel(
-                        preferenceKey: .nightModePref3,
-                        title: String(localized: "prefs_night_mode_title", defaultValue: "Night mode switching"),
-                        summary: String(
-                            localized: "prefs_night_mode_summary",
-                            defaultValue: "Whether to switch to night mode manually or via system setting. Manual switching can be done from the 3-dot options menu on the main screen."
-                        )
-                    )
+        settingsPreferenceSection(String(localized: "prefs_display_customization_cat", defaultValue: "Look & feel")) {
+            if settingsSearchMatchesPreference(.localePref, in: lookAndFeelSettingsSearchEntries) {
+                settingsMenuRow(
+                    preferenceKey: .localePref,
+                    title: String(localized: "prefs_interface_locale_title", defaultValue: "Application language"),
+                    summary: String(
+                        localized: "prefs_interface_locale_summary",
+                        defaultValue: "Select custom user interface language"
+                    ),
+                    options: Self.localeMenuOptions,
+                    selectedValue: Self.normalizedLocalePrefValue(selectedLanguage)
+                ) { newValue in
+                    updateSelectedLanguage(newValue)
                 }
             }
             if settingsSearchMatchesPreference(.monochromeMode, in: lookAndFeelSettingsSearchEntries) {
@@ -1232,6 +1317,27 @@ public struct SettingsView: View {
                     )
                 }
             }
+            if settingsSearchMatchesPreference(.notesContentType, in: lookAndFeelSettingsSearchEntries) {
+                settingsMenuRow(
+                    preferenceKey: .notesContentType,
+                    title: String(
+                        localized: "prefs_notes_content_type_title",
+                        defaultValue: "Format for new bookmark notes"
+                    ),
+                    summary: String(
+                        localized: "prefs_notes_content_type_summary",
+                        defaultValue: "Text format used when creating new bookmark notes and Study Pad entries"
+                    ),
+                    options: Self.notesContentTypeMenuOptions,
+                    selectedValue: Self.normalizedNotesContentType(notesContentType)
+                ) { newValue in
+                    let normalized = Self.normalizedNotesContentType(newValue)
+                    notesContentType = normalized
+                    let store = SettingsStore(modelContext: modelContext)
+                    store.setString(.notesContentType, value: normalized)
+                    onSettingsChanged?()
+                }
+            }
             if settingsSearchMatchesPreference(.fontSizeMultiplier, in: lookAndFeelSettingsSearchEntries) {
                 VStack(alignment: .leading, spacing: 8) {
                     settingsRowLabel(
@@ -1262,7 +1368,10 @@ public struct SettingsView: View {
                         in: 10...500,
                         step: 10
                     )
-                    .padding(.leading, 66)
+                    .padding(
+                        .leading,
+                        AndBibleSettingsRowLabel.iconColumnWidth + AndBibleSettingsRowLabel.contentSpacing
+                    )
                 }
             }
             if settingsSearchMatchesPreference(.fullScreenHideButtonsPref, in: lookAndFeelSettingsSearchEntries) {
@@ -1384,6 +1493,7 @@ public struct SettingsView: View {
                         )
                     )
                 }
+                .buttonStyle(.plain)
             }
             if settingsSearchMatchesPreference(.disableGenBookmarkModalButtons, in: lookAndFeelSettingsSearchEntries) {
                 NavigationLink {
@@ -1412,47 +1522,8 @@ public struct SettingsView: View {
                         )
                     )
                 }
+                .buttonStyle(.plain)
             }
-            if settingsSearchMatchesPreference(.localePref, in: lookAndFeelSettingsSearchEntries) {
-                Picker(selection: $selectedLanguage) {
-                    ForEach(Self.localeOptions) { lang in
-                        Text(Self.localizedLocaleOptionLabel(lang)).tag(lang.value)
-                    }
-                } label: {
-                    settingsRowLabel(
-                        preferenceKey: .localePref,
-                        title: String(localized: "prefs_interface_locale_title", defaultValue: "Application language"),
-                        summary: String(
-                            localized: "prefs_interface_locale_summary",
-                            defaultValue: "Select custom user interface language"
-                        ),
-                        detail: String(localized: "language_restart_required")
-                    )
-                }
-                .onChange(of: selectedLanguage) { _, newValue in
-                    guard hasLoadedPreferences else { return }
-                    let normalized = Self.localeOptions.contains(where: { $0.value == newValue }) ? newValue : ""
-                    if normalized != selectedLanguage {
-                        selectedLanguage = normalized
-                        return
-                    }
-
-                    let store = SettingsStore(modelContext: modelContext)
-                    guard shouldPersistLanguageSelection(normalized, using: store) else {
-                        return
-                    }
-                    store.setString(.localePref, value: normalized)
-
-                    if let mapped = Self.appleLanguageCode(forLocalePrefValue: normalized) {
-                        UserDefaults.standard.set([mapped], forKey: "AppleLanguages")
-                    } else {
-                        UserDefaults.standard.removeObject(forKey: "AppleLanguages")
-                    }
-                    showRestartAlert = true
-                }
-            }
-        } header: {
-            settingsSectionHeader(String(localized: "prefs_display_customization_cat", defaultValue: "Look & feel"))
         }
     }
 
@@ -1492,21 +1563,6 @@ public struct SettingsView: View {
     /// Whether the about section should render for the current search state.
     private var shouldShowAboutSection: Bool {
         settingsSearchMatchesSection(aboutSettingsSearchEntries)
-    }
-
-    /// Extracted swipe-mode picker label that keeps the main settings form type-checkable.
-    private var bibleViewSwipeModeSettingsRow: AndBibleSettingsRowLabel {
-        settingsRowLabel(
-            preferenceKey: .bibleViewSwipeMode,
-            title: String(
-                localized: "prefs_bible_view_swipe_mode_title",
-                defaultValue: "Action for swipe left / right gesture"
-            ),
-            summary: String(
-                localized: "prefs_bible_view_swipe_mode_summary",
-                defaultValue: "Swipe left / right gesture can be used to go to next page / chapter."
-            )
-        )
     }
 
     /// Localized navigation title kept outside the main SwiftUI modifier chain.
@@ -1598,7 +1654,7 @@ public struct SettingsView: View {
      */
     @ViewBuilder
     private var featuresSettingsSection: some View {
-        Section {
+        settingsPreferenceSection(String(localized: "features", defaultValue: "Features")) {
             let syncEntry = syncSettingsSearchEntry
             if settingsSearchMatchesEntry(syncEntry) {
                 settingsNavigationLink(
@@ -1623,8 +1679,6 @@ public struct SettingsView: View {
                         .accessibilityIdentifier("readingProgressSettingsScreen")
                 }
             }
-        } header: {
-            settingsSectionHeader(String(localized: "features", defaultValue: "Features"))
         }
     }
 
@@ -1787,11 +1841,11 @@ public struct SettingsView: View {
                 .toolbarButtonActions,
                 title: String(
                     localized: "prefs_toolbar_button_action_title",
-                    defaultValue: "Bible/commentary toolbar button action"
+                    defaultValue: "Action for toolbar button press"
                 ),
                 summary: String(
                     localized: "prefs_toolbar_button_action_summary",
-                    defaultValue: "Choose if one-tap of Bible/commentary toolbar buttons shows menu or activity directly."
+                    defaultValue: "Action to take when pressing/long-pressing Bible or Commentary toolbar buttons"
                 )
             ),
             preferenceSearchEntry(
@@ -1824,34 +1878,23 @@ public struct SettingsView: View {
                     defaultValue: "Use volume up/down to scroll Bible text"
                 )
             ),
-            .init(
-                identifier: "settingsVerseSelection",
-                title: String(localized: "verse_selection"),
-                keywords: ["application behavior", "selection"]
-            ),
-        ]
-    }
-
-    /// Search entries for appearance and global text-display preferences.
-    private var lookAndFeelSettingsSearchEntries: [AndBibleSettingsSearchEntry] {
-        [
-            .init(
-                identifier: "settingsTextDisplayLink",
-                title: String(localized: "settings_text_display"),
-                keywords: ["look and feel", "display", "font", "text"]
-            ),
-            .init(
-                identifier: "settingsColorsLink",
-                title: String(localized: "settings_colors"),
-                keywords: ["look and feel", "colors", "theme"]
-            ),
             preferenceSearchEntry(
                 .nightModePref3,
                 title: String(localized: "prefs_night_mode_title", defaultValue: "Night mode switching"),
                 summary: String(
                     localized: "prefs_night_mode_summary",
-                    defaultValue: "Whether to switch to night mode manually or via system setting. Manual switching can be done from the 3-dot options menu on the main screen."
+                    defaultValue: "Whether to switch to night mode automatically (if device supports), manually or via system setting (Android 10+). Manual switching can be done from the 3-dot options menu on the main screen."
                 )
+            ),
+        ]
+    }
+
+    /// Search entries for appearance preferences shown in Android's root Application Preferences.
+    private var lookAndFeelSettingsSearchEntries: [AndBibleSettingsSearchEntry] {
+        [
+            preferenceSearchEntry(
+                .localePref,
+                title: String(localized: "prefs_interface_locale_title", defaultValue: "Application language")
             ),
             preferenceSearchEntry(
                 .monochromeMode,
@@ -1878,6 +1921,17 @@ public struct SettingsView: View {
                 summary: String(
                     localized: "prefs_disable_click_to_edit_summary",
                     defaultValue: "Requires using the edit button to edit notes in the Study Pad."
+                )
+            ),
+            preferenceSearchEntry(
+                .notesContentType,
+                title: String(
+                    localized: "prefs_notes_content_type_title",
+                    defaultValue: "Format for new bookmark notes"
+                ),
+                summary: String(
+                    localized: "prefs_notes_content_type_summary",
+                    defaultValue: "Text format used when creating new bookmark notes and Study Pad entries"
                 )
             ),
             preferenceSearchEntry(
@@ -1922,10 +1976,6 @@ public struct SettingsView: View {
                     localized: "prefs_in_window_gen_bookmark_modal_buttons_title",
                     defaultValue: "One-tap actions (Other)"
                 )
-            ),
-            preferenceSearchEntry(
-                .localePref,
-                title: String(localized: "prefs_interface_locale_title", defaultValue: "Application language")
             ),
         ]
     }
@@ -2164,9 +2214,14 @@ public struct SettingsView: View {
                 androidKey: androidKey,
                 summary: summary
             )
+            .accessibilityElement(children: .combine)
+            .accessibilityAddTraits(.isButton)
+            .accessibilityLabel(title)
+            .accessibilityIdentifier(accessibilityIdentifier)
         }
-        .accessibilityLabel(title)
-        .accessibilityIdentifier(accessibilityIdentifier)
+        .buttonStyle(.plain)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
     }
 
     /**
@@ -2226,6 +2281,67 @@ public struct SettingsView: View {
     }
 
     /**
+     Builds one Android-style list-preference row backed by a native iOS menu.
+
+     Android `ListPreference` rows render as compact title/summary rows and open a chooser when
+     tapped. SwiftUI's default `Picker` style expands selected values inline inside a `ScrollView`,
+     which creates large blue standalone labels and breaks the Android settings rhythm. This helper
+     keeps the row visually stable while still using native menu affordances and checkmarks.
+
+     - Parameters:
+       - preferenceKey: Android parity key used for icon lookup and accessibility context.
+       - title: Primary row title.
+       - summary: Optional Android row summary.
+       - options: Menu options using Android-compatible persisted values.
+       - selectedValue: Current normalized persisted value.
+       - onSelect: Callback invoked with the selected persisted value.
+     - Returns: Menu-backed row matching Android `ListPreference` layout.
+     - Side effects: Invokes `onSelect`, which may write preferences and refresh reader state.
+     - Failure modes: Empty option lists render a disabled-looking row with no menu actions.
+     */
+    private func settingsMenuRow(
+        preferenceKey: AppPreferenceKey,
+        title: String,
+        summary: String? = nil,
+        options: [SettingsMenuOption],
+        selectedValue: String,
+        onSelect: @escaping (String) -> Void
+    ) -> some View {
+        Menu {
+            ForEach(options) { option in
+                Button {
+                    onSelect(option.value)
+                } label: {
+                    if option.value == selectedValue {
+                        Label(option.title, systemImage: "checkmark")
+                    } else {
+                        Text(option.title)
+                    }
+                }
+            }
+        } label: {
+            HStack(alignment: .center, spacing: 8) {
+                settingsRowLabel(
+                    preferenceKey: preferenceKey,
+                    title: title,
+                    summary: summary,
+                    isEnabled: !options.isEmpty
+                )
+
+                Spacer(minLength: 8)
+
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(options.isEmpty ? Color.secondary.opacity(0.5) : Color.accentColor)
+                    .accessibilityHidden(true)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(options.isEmpty)
+    }
+
+    /**
      Builds one Android-shaped settings row label for action rows backed by raw Android keys.
 
      - Parameters:
@@ -2266,6 +2382,48 @@ public struct SettingsView: View {
         AndBibleSettingsSectionHeader(title: title)
     }
 
+    /**
+     Builds one Android-style Application Preferences section without SwiftUI `Form` grouping.
+
+     Android renders settings as a continuous preference list with tinted section captions and
+     full-width rows. This helper keeps that surface explicit so native controls can still own
+     accessibility and persistence while the container no longer contributes iOS grouped-card chrome.
+
+     - Parameters:
+       - title: User-visible section title aligned with the row text column.
+       - content: Preference rows and controls shown under the header.
+     - Returns: A flat preference section matching the Text Display settings treatment.
+     - Side effects: none; row content owns preference writes and navigation.
+     - Failure modes: This helper cannot fail.
+     */
+    private func settingsPreferenceSection<Content: View>(
+        _ title: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            settingsSectionHeader(title)
+                .padding(.bottom, 10)
+            content()
+                .padding(.horizontal, 16)
+        }
+        .padding(.bottom, 14)
+    }
+
+    /**
+     Platform background for the flat Android-style Application Preferences surface.
+
+     - Returns: A system background color on iOS and a transparent fallback on macOS package builds.
+     - Side effects: none.
+     - Failure modes: This helper cannot fail.
+     */
+    private var settingsScreenBackground: Color {
+        #if os(iOS)
+        Color(.systemBackground)
+        #else
+        Color.clear
+        #endif
+    }
+
     private var settingsAccessibilityValue: String {
         guard UITestRuntimeConfiguration.enablesDetailedAccessibilityExports else {
             return ""
@@ -2274,10 +2432,6 @@ public struct SettingsView: View {
         if canOpenReadingProgressSettings {
             primaryLinks.append("settingsReadingProgressLink")
         }
-        primaryLinks.append(contentsOf: [
-            "settingsTextDisplayLink",
-            "settingsColorsLink",
-        ])
         let searchToken = isSettingsSearchActive ? "active" : "inactive"
         return "primaryLinks=\(primaryLinks.joined(separator: ","));adminFlows=readerActions;search=\(searchToken)"
     }
@@ -2313,6 +2467,7 @@ public struct SettingsView: View {
         monochromeMode = store.getBool(.monochromeMode)
         disableAnimations = store.getBool(.disableAnimations)
         disableClickToEdit = store.getBool(.disableClickToEdit)
+        notesContentType = Self.normalizedNotesContentType(store.getString(.notesContentType))
         showActiveWindowIndicator = store.getBool(.showActiveWindowIndicator)
         showErrorBox = store.getBool(.showErrorBox)
         enableBluetoothMediaButtons = store.getBool(.enableBluetoothPref)
@@ -2417,6 +2572,44 @@ public struct SettingsView: View {
             selectedLanguage = mapped
             store.setString(.localePref, value: mapped)
         }
+    }
+
+    /**
+     Persists an Android-parity interface language selection from the menu-backed preference row.
+
+     The visible settings row stays compact like Android's `ListPreference`, but choosing a value
+     still updates both the shared `locale_pref` value and the iOS `AppleLanguages` override that
+     actually controls native string lookup after restart.
+
+     - Parameter rawValue: Candidate Android `locale_pref` value selected from the menu.
+     - Side Effects:
+       - updates `selectedLanguage`
+       - writes `locale_pref` through `SettingsStore`
+       - writes or clears `UserDefaults.standard["AppleLanguages"]`
+       - sets `showRestartAlert` when the effective language changes
+     - Failure Modes: Unsupported values are normalized to Android's default empty locale value.
+     */
+    private func updateSelectedLanguage(_ rawValue: String) {
+        let normalized = Self.normalizedLocalePrefValue(rawValue)
+        if normalized != selectedLanguage {
+            selectedLanguage = normalized
+        }
+
+        guard hasLoadedPreferences else { return }
+
+        let store = SettingsStore(modelContext: modelContext)
+        guard shouldPersistLanguageSelection(normalized, using: store) else {
+            return
+        }
+
+        store.setString(.localePref, value: normalized)
+
+        if let mapped = Self.appleLanguageCode(forLocalePrefValue: normalized) {
+            UserDefaults.standard.set([mapped], forKey: "AppleLanguages")
+        } else {
+            UserDefaults.standard.removeObject(forKey: "AppleLanguages")
+        }
+        showRestartAlert = true
     }
 
     /**
@@ -2675,6 +2868,16 @@ public struct SettingsView: View {
         }
     }
 
+    /// Normalizes persisted notes-content format values to Android's supported list preference values.
+    private static func normalizedNotesContentType(_ rawValue: String) -> String {
+        switch rawValue {
+        case "HTML", "MARKDOWN":
+            return rawValue
+        default:
+            return "HTML"
+        }
+    }
+
     /**
      Normalizes one persisted locale string against the supported Android parity values.
 
@@ -2713,6 +2916,12 @@ public struct SettingsView: View {
 
     /// Localized title for one bookmark modal action option with English fallback behavior.
     fileprivate static func localizedBookmarkModalActionTitle(_ option: BookmarkModalActionOption) -> String {
+        let localized = String(localized: String.LocalizationValue(option.titleKey))
+        return localized == option.titleKey ? option.titleDefault : localized
+    }
+
+    /// Localized title for one notes-content format option with English fallback behavior.
+    private static func localizedNotesContentTypeTitle(_ option: NotesContentTypeOption) -> String {
         let localized = String(localized: String.LocalizationValue(option.titleKey))
         return localized == option.titleKey ? option.titleDefault : localized
     }

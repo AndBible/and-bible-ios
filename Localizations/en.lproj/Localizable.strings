@@ -570,6 +570,10 @@
 "prefs_disable_animations_title" = "Disable animations";
 "prefs_disable_click_to_edit_summary" = "Requires using the edit button to edit notes in the Study Pad.";
 "prefs_disable_click_to_edit_title" = "Disable Study Pad click-to-edit";
+"prefs_notes_content_type_title" = "Format for new bookmark notes";
+"prefs_notes_content_type_summary" = "Text format used when creating new bookmark notes and Study Pad entries";
+"notes_content_type_html" = "Rich text (HTML)";
+"notes_content_type_markdown" = "Markdown";
 "prefs_double_tap_to_fullscreen_summary" = "Enter fullscreen mode by double-tapping window";
 "prefs_double_tap_to_fullscreen_title" = "Double-tap to Fullscreen";
 "prefs_e_ink_mode_title" = "Black & white mode";

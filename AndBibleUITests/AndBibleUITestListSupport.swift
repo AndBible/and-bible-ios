@@ -1051,42 +1051,58 @@ extension AndBibleUITests {
     }
 
     /**
-     Opens Colors through Settings navigation.
+     Opens Colors through Android's All Text Options navigation.
      *
      * - Parameter app: Running application under test.
      * - Returns: The root accessibility-identified Colors screen element.
      * - Side effects:
-     *   - opens Settings and pushes the Colors screen
+     *   - opens the reader All Text Options screen
+     *   - taps the Colors preference row and pushes the Colors screen
      * - Failure modes:
      *   - fails when the Colors screen never appears
      */
     func openColorSettings(in app: XCUIApplication) -> XCUIElement {
-        openSettingsDestination(
-            linkIdentifier: "settingsColorsLink",
-            destinationIdentifier: "colorSettingsScreen",
-            readinessIdentifiers: ["colorSettingsResetButton"],
-            in: app,
-            destinationTimeout: 20
-        )
+        _ = openAllTextOptions(in: app)
+        let colorsLink = requireReachableTextDisplayButton("textDisplayColorsLink", in: app, timeout: 10)
+        tapElementReliably(colorsLink, timeout: 10)
+        return requireElement("colorSettingsScreen", in: app, timeout: 20)
     }
 
     /**
-     Opens Text Display through Settings navigation.
+     Opens Text Display through Android's All Text Options route.
      *
      * - Parameter app: Running application under test.
      * - Returns: The root accessibility-identified Text Display screen element.
      * - Side effects:
-     *   - opens Settings and pushes the Text Display screen
+     *   - opens the reader All Text Options screen
      * - Failure modes:
      *   - fails when the Text Display screen never appears
      */
     func openTextDisplaySettings(in app: XCUIApplication) -> XCUIElement {
-        openSettingsDestination(
-            linkIdentifier: "settingsTextDisplayLink",
+        openAllTextOptions(in: app)
+    }
+
+    /**
+     Opens Android's All Text Options route from the reader overflow menu.
+     *
+     * - Parameter app: Running application under test.
+     * - Returns: The root accessibility-identified Text Display screen element.
+     * - Side effects:
+     *   - opens the reader overflow menu and activates the production All Text Options action
+     *   - pushes the window-scoped Text Display screen onto the reader navigation stack
+     * - Failure modes:
+     *   - fails when the All Text Options action or Text Display screen never appears
+     */
+    func openAllTextOptions(in app: XCUIApplication) -> XCUIElement {
+        openReaderActionDestination(
+            actionIdentifier: "readerOpenTextOptionsAction",
             destinationIdentifier: "textDisplaySettingsScreen",
-            readinessIdentifiers: ["textDisplayFontFamilyButton"],
+            readinessIdentifiers: [
+                "textDisplayFontFamilyButton",
+                "textDisplayJustifyTextToggleButton",
+            ],
             in: app,
-            destinationTimeout: 20
+            timeout: 20
         )
     }
 
@@ -1139,6 +1155,10 @@ extension AndBibleUITests {
      *     reliably bring an offscreen row into the accessibility hierarchy
      * - Failure modes:
      *   - records an XCTest failure if the production row never appears
+     *
+     * Broad `otherElements.containing(staticText:)` fallbacks are intentionally avoided here:
+     * after the Android-style flat settings conversion they resolve to the full scroll surface
+     * instead of the target row and produce false-positive container taps.
      */
     func requireSettingsNavigationControl(
         _ identifier: String,
@@ -1169,7 +1189,6 @@ extension AndBibleUITests {
                     settingsForm.cells[visibleTitle].firstMatch,
                     settingsForm.otherElements[visibleTitle].firstMatch,
                     settingsForm.cells.containing(.staticText, identifier: visibleTitle).firstMatch,
-                    settingsForm.otherElements.containing(.staticText, identifier: visibleTitle).firstMatch,
                     settingsForm.staticTexts[visibleTitle].firstMatch,
                     app.links[visibleTitle].firstMatch,
                     app.buttons[visibleTitle].firstMatch,
@@ -1351,10 +1370,6 @@ extension AndBibleUITests {
             "Reading Progress Settings"
         case "settingsLabelsLink":
             "Labels"
-        case "settingsTextDisplayLink":
-            "Text Display"
-        case "settingsColorsLink":
-            "Colors"
         default:
             nil
         }

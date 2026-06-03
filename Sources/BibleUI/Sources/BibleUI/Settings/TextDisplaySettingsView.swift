@@ -8,25 +8,24 @@ import UIKit
 #endif
 
 /**
- Form-driven editor for text presentation settings used by the Bible reader.
+ Flat Android-style preference editor for text presentation settings used by the Bible reader.
 
  The view renders the user-verified Android All Text Options category and row inventory. Rows that
  already have a complete iOS model, bridge, and renderer path are interactive; Android rows in that
  target that are not yet backed on iOS remain visible in their Android position but disabled.
  Newer Android-source rows that are not part of the screenshot-backed target stay tracked in
- `TextDisplaySettingsPresentation` instead of being injected into this surface.
+ `TextDisplaySettingsPresentation` instead of being injected into this surface. Non-switch rows are
+ rendered as preference rows that open an editor, matching Android's `PreferenceFragmentCompat`
+ behavior more closely than SwiftUI's grouped `Form` rows with inline sliders.
 
  Data dependencies:
  - `settings` is the persisted display-settings model owned by the parent screen
  - SwiftData labels back the Android `BOOKMARKS_HIDELABELS` picker
- - `workspaceSettings` optionally backs Android's window-scope parent link to workspace text options
- - `globalSettings` optionally backs Android's window/workspace parent link to global text options
  - `onChange` lets the parent push updated settings into the reader after each mutation
 
  Side effects:
  - every binding write mutates `settings` and invokes `onChange`
  - hidden bookmark-label choices mutate `settings.bookmarksHideLabels`
- - workspace/global parent-link edits mutate their supplied bindings
  - on iOS, presenting the font picker bridges into `UIFontPickerViewController`
  */
 public struct TextDisplaySettingsView: View {
@@ -36,31 +35,48 @@ public struct TextDisplaySettingsView: View {
     /// Callback invoked after any user-visible settings mutation.
     var onChange: (() -> Void)?
 
-    /// Optional workspace text-display binding used by Android's window-level parent section.
-    private let workspaceSettings: Binding<TextDisplaySettings>?
-
-    /// User-visible workspace name used in Android's window-level parent link title.
-    private let workspaceName: String?
-
-    /// Callback invoked after workspace parent-link settings mutate.
-    private let onWorkspaceSettingsChanged: (() -> Void)?
-
-    /// Optional global text-display binding used by Android's workspace-level parent section.
-    private let globalSettings: Binding<TextDisplaySettings>?
-
-    /// Callback invoked after global parent-link settings mutate.
-    private let onGlobalSettingsChanged: (() -> Void)?
-
     /// Navigation title that reflects the Android settings scope currently being edited.
     private let navigationTitleText: String
 
     /// User-visible and system labels available for the hidden-bookmark-label picker.
     @Query private var allLabels: [BibleCore.Label]
 
+    /**
+     Non-switch Android preferences whose value editors are presented from the flat row list.
+
+     Android keeps these controls as rows and opens a dialog or activity when the user taps them.
+     The enum tracks the active SwiftUI editor sheet without changing the persisted settings model.
+     */
+    private enum ActivePreferenceEditor: String, Identifiable {
+        /// Android `STRONGS` single-choice editor.
+        case strongsMode
+
+        /// Android `FONTSIZE` numeric editor.
+        case fontSize
+
+        /// Android `FONTFAMILY` editor used by the macOS fallback.
+        case fontFamily
+
+        /// Android `MARGINSIZE` multi-field numeric editor.
+        case margins
+
+        /// Android `TOPMARGIN` numeric editor.
+        case topMargin
+
+        /// Android `LINE_SPACING` numeric editor.
+        case lineSpacing
+
+        /// Stable identity for SwiftUI sheet presentation.
+        var id: String { rawValue }
+    }
+
     #if os(iOS)
     /// Whether the native iOS font picker sheet is currently presented.
     @State private var showFontPicker = false
     #endif
+
+    /// Active non-switch preference editor sheet, if one is open.
+    @State private var activePreferenceEditor: ActivePreferenceEditor?
 
     /// Inclusive Android-backed slider bounds used by `LINE_SPACING`.
     private static let lineSpacingRange: ClosedRange<Int> = 10...30
@@ -70,32 +86,17 @@ public struct TextDisplaySettingsView: View {
 
      - Parameters:
        - settings: Shared display settings value to mutate from the form.
-       - workspaceSettings: Optional workspace text-display settings for the window-scope parent link.
-       - workspaceName: Workspace name used in Android's dynamic parent-link title.
-       - globalSettings: Optional global text-display settings for the Android parent link.
        - navigationTitle: Android-scope title shown by the surrounding navigation stack.
        - onChange: Optional callback invoked after current-scope setting changes.
-       - onWorkspaceSettingsChanged: Optional callback invoked after workspace parent-link changes.
-       - onGlobalSettingsChanged: Optional callback invoked after global parent-link changes.
      */
     public init(
         settings: Binding<TextDisplaySettings>,
-        workspaceSettings: Binding<TextDisplaySettings>? = nil,
-        workspaceName: String? = nil,
-        globalSettings: Binding<TextDisplaySettings>? = nil,
         navigationTitle: String = "Global text options",
-        onChange: (() -> Void)? = nil,
-        onWorkspaceSettingsChanged: (() -> Void)? = nil,
-        onGlobalSettingsChanged: (() -> Void)? = nil
+        onChange: (() -> Void)? = nil
     ) {
         self._settings = settings
-        self.workspaceSettings = workspaceSettings
-        self.workspaceName = workspaceName
-        self.globalSettings = globalSettings
         self.navigationTitleText = navigationTitle
         self.onChange = onChange
-        self.onWorkspaceSettingsChanged = onWorkspaceSettingsChanged
-        self.onGlobalSettingsChanged = onGlobalSettingsChanged
     }
 
     /// Slider binding that maps the optional stored font size to a concrete numeric control.
@@ -112,6 +113,30 @@ public struct TextDisplaySettingsView: View {
             get: { settings.fontFamily ?? "sans-serif" },
             set: { settings.fontFamily = $0; onChange?() }
         )
+    }
+
+    /// Single-choice binding for Android's `STRONGS` preference editor.
+    private var strongsModeBinding: Binding<Int> {
+        Binding(
+            get: { settings.strongsMode ?? 0 },
+            set: { settings.strongsMode = $0; onChange?() }
+        )
+    }
+
+    /**
+     User-visible Strong's mode labels in Android dialog order.
+
+     - Returns: Value/label pairs used by the flat row editor.
+     - Side effects: none.
+     - Failure modes: Missing localization keys fall back through SwiftUI localization behavior.
+     */
+    private var strongsModeOptions: [(value: Int, label: String)] {
+        [
+            (0, String(localized: "off")),
+            (1, String(localized: "inline")),
+            (2, String(localized: "links")),
+            (3, String(localized: "hidden")),
+        ]
     }
 
     /**
@@ -265,20 +290,10 @@ public struct TextDisplaySettingsView: View {
         String(format: "Top margin (%d mm)", settings.topMargin ?? 0)
     }
 
-    /// Android window-level parent link title scoped to the active workspace name.
-    private var workspaceSettingsLinkTitle: String {
-        guard let workspaceName, !workspaceName.isEmpty else {
-            return androidTitle("open_workspace_settings")
-        }
-        return "Workspace text options — \(workspaceName)"
-    }
-
-    /// Android workspace-level settings screen title scoped to the active workspace name.
-    private var workspaceSettingsTitle: String {
-        guard let workspaceName, !workspaceName.isEmpty else {
-            return "Text options"
-        }
-        return "Text options - \(workspaceName)"
+    /// Current user-visible Strong's mode value shown in the row editor.
+    private var strongsModeDetail: String {
+        let selectedValue = settings.strongsMode ?? 0
+        return strongsModeOptions.first { $0.value == selectedValue }?.label ?? String(localized: "off")
     }
 
     /// Accessibility-exported state for the currently edited justify-text preference.
@@ -293,325 +308,227 @@ public struct TextDisplaySettingsView: View {
     }
 
     /**
-     Builds the Android-ordered text-display settings form.
+     Builds the Android-ordered text-display preference list.
      */
     public var body: some View {
-        Form {
-            if workspaceSettings != nil || globalSettings != nil {
-                Section {
-                    if let workspaceSettings {
-                        NavigationLink {
-                            TextDisplaySettingsView(
-                                settings: workspaceSettings,
-                                globalSettings: globalSettings,
-                                navigationTitle: workspaceSettingsTitle,
-                                onChange: onWorkspaceSettingsChanged,
-                                onGlobalSettingsChanged: onGlobalSettingsChanged
-                            )
-                        } label: {
-                            textDisplayRowLabel(
-                                androidKey: "open_workspace_settings",
-                                title: workspaceSettingsLinkTitle,
-                                summary: androidSummary("open_workspace_settings")
-                            )
+        let footnotesBinding = boolBinding(\.showFootNotes, default: false)
+        let xrefsBinding = boolBinding(\.showXrefs, default: false)
+        let justifyTextBinding = boolBinding(\.justifyText, default: false)
+
+        ZStack(alignment: .topLeading) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    preferenceSection(.formatting) {
+                        preferenceActionRow(
+                            androidKey: "STRONGS",
+                            title: androidTitle("STRONGS"),
+                            summary: androidSummary("STRONGS"),
+                            detail: strongsModeDetail,
+                            accessibilityIdentifier: "textDisplayStrongsModeButton"
+                        ) {
+                            activePreferenceEditor = .strongsMode
                         }
-                        .accessibilityIdentifier("textDisplayWorkspaceSettingsLink")
+                        preferenceSwitchRow(
+                            androidKey: "MORPH",
+                            title: androidTitle("MORPH"),
+                            summary: androidSummary("MORPH"),
+                            isOn: boolBinding(\.showMorphology, default: false)
+                        )
+                        disabledPreferenceSwitchRow(androidKey: "NON_STRONGS_WORD_ITALIC")
+                        preferenceSwitchRow(
+                            androidKey: "FOOTNOTES",
+                            title: androidTitle("FOOTNOTES"),
+                            summary: androidSummary("FOOTNOTES"),
+                            isOn: footnotesBinding
+                        )
+                        preferenceSwitchRow(
+                            androidKey: "FOOTNOTES_INLINE",
+                            title: androidTitle("FOOTNOTES_INLINE"),
+                            summary: androidSummary("FOOTNOTES_INLINE"),
+                            isOn: boolBinding(\.showFootNotesInline, default: false),
+                            isEnabled: footnotesBinding.wrappedValue
+                        )
+                        preferenceSwitchRow(
+                            androidKey: "XREFS",
+                            title: androidTitle("XREFS"),
+                            summary: androidSummary("XREFS"),
+                            isOn: xrefsBinding
+                        )
+                        preferenceSwitchRow(
+                            androidKey: "EXPAND_XREFS",
+                            title: androidTitle("EXPAND_XREFS"),
+                            summary: androidSummary("EXPAND_XREFS"),
+                            isOn: boolBinding(\.expandXrefs, default: false),
+                            isEnabled: xrefsBinding.wrappedValue
+                        )
+                        preferenceSwitchRow(
+                            androidKey: "SECTIONTITLES",
+                            title: androidTitle("SECTIONTITLES"),
+                            summary: androidSummary("SECTIONTITLES"),
+                            isOn: boolBinding(\.showSectionTitles, default: true)
+                        )
+                        disabledPreferenceSwitchRow(androidKey: "TITLE_SCROLL_BUTTON")
+                        preferenceSwitchRow(
+                            androidKey: "VERSENUMBERS",
+                            title: androidTitle("VERSENUMBERS"),
+                            summary: androidSummary("VERSENUMBERS"),
+                            isOn: boolBinding(\.showVerseNumbers, default: true)
+                        )
                     }
 
-                    if let globalSettings {
+                    preferenceSection(.appearance) {
                         NavigationLink {
-                            TextDisplaySettingsView(
-                                settings: globalSettings,
-                                navigationTitle: "Global text options",
-                                onChange: onGlobalSettingsChanged
-                            )
+                            ColorSettingsView(settings: $settings, onChange: onChange)
                         } label: {
-                            textDisplayRowLabel(
-                                androidKey: "open_global_settings",
-                                title: androidTitle("open_global_settings"),
-                                summary: androidSummary("open_global_settings")
-                            )
+                            preferenceRowContent(
+                                androidKey: "COLORS",
+                                title: androidTitle("COLORS"),
+                                summary: androidSummary("COLORS")
+                            ) {
+                                rowChevron
+                            }
                         }
-                        .accessibilityIdentifier("textDisplayGlobalSettingsLink")
-                    }
-                } header: {
-                    textDisplaySectionHeader(TextDisplaySettingsPresentation.Section.parent.titleDefault)
-                }
-            }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("textDisplayColorsLink")
+                        preferenceDivider()
 
-            Section {
-                Picker(selection: Binding(
-                    get: { settings.strongsMode ?? 0 },
-                    set: { settings.strongsMode = $0; onChange?() }
-                )) {
-                    Text(String(localized: "off")).tag(0)
-                    Text(String(localized: "inline")).tag(1)
-                    Text(String(localized: "links")).tag(2)
-                    Text(String(localized: "hidden")).tag(3)
-                } label: {
-                    textDisplayRowLabel(
-                        androidKey: "STRONGS",
-                        title: androidTitle("STRONGS"),
-                        summary: androidSummary("STRONGS")
-                    )
-                }
-                Toggle(isOn: boolBinding(\.showMorphology, default: false)) {
-                    textDisplayRowLabel(
-                        androidKey: "MORPH",
-                        title: androidTitle("MORPH"),
-                        summary: androidSummary("MORPH")
-                    )
-                }
-                disabledAndroidToggle(androidKey: "NON_STRONGS_WORD_ITALIC")
-                let footnotesBinding = boolBinding(\.showFootNotes, default: false)
-                let xrefsBinding = boolBinding(\.showXrefs, default: false)
-                Toggle(isOn: footnotesBinding) {
-                    textDisplayRowLabel(
-                        androidKey: "FOOTNOTES",
-                        title: androidTitle("FOOTNOTES"),
-                        summary: androidSummary("FOOTNOTES")
-                    )
-                }
-                Toggle(isOn: boolBinding(\.showFootNotesInline, default: false)) {
-                    textDisplayRowLabel(
-                        androidKey: "FOOTNOTES_INLINE",
-                        title: androidTitle("FOOTNOTES_INLINE"),
-                        summary: androidSummary("FOOTNOTES_INLINE"),
-                        isEnabled: footnotesBinding.wrappedValue
-                    )
-                }
-                .disabled(!footnotesBinding.wrappedValue)
+                        preferenceActionRow(
+                            androidKey: "FONTSIZE",
+                            title: fontSizeTitle,
+                            summary: androidSummary("FONTSIZE"),
+                            accessibilityIdentifier: "textDisplayFontSizeButton"
+                        ) {
+                            activePreferenceEditor = .fontSize
+                        }
 
-                Toggle(isOn: xrefsBinding) {
-                    textDisplayRowLabel(
-                        androidKey: "XREFS",
-                        title: androidTitle("XREFS"),
-                        summary: androidSummary("XREFS")
-                    )
-                }
-                Toggle(isOn: boolBinding(\.expandXrefs, default: false)) {
-                    textDisplayRowLabel(
-                        androidKey: "EXPAND_XREFS",
-                        title: androidTitle("EXPAND_XREFS"),
-                        summary: androidSummary("EXPAND_XREFS"),
-                        isEnabled: xrefsBinding.wrappedValue
-                    )
-                }
-                .disabled(!xrefsBinding.wrappedValue)
-                Toggle(isOn: boolBinding(\.showSectionTitles, default: true)) {
-                    textDisplayRowLabel(
-                        androidKey: "SECTIONTITLES",
-                        title: androidTitle("SECTIONTITLES"),
-                        summary: androidSummary("SECTIONTITLES")
-                    )
-                }
-                disabledAndroidToggle(androidKey: "TITLE_SCROLL_BUTTON")
-                Toggle(isOn: boolBinding(\.showVerseNumbers, default: true)) {
-                    textDisplayRowLabel(
-                        androidKey: "VERSENUMBERS",
-                        title: androidTitle("VERSENUMBERS"),
-                        summary: androidSummary("VERSENUMBERS")
-                    )
-                }
-            } header: {
-                textDisplaySectionHeader(TextDisplaySettingsPresentation.Section.formatting.titleDefault)
-            }
+                        #if os(iOS)
+                        preferenceActionRow(
+                            androidKey: "FONTFAMILY",
+                            title: fontFamilyTitle,
+                            summary: androidSummary("FONTFAMILY"),
+                            accessibilityIdentifier: "textDisplayFontFamilyButton"
+                        ) {
+                            showFontPicker = true
+                        }
+                        #else
+                        preferenceActionRow(
+                            androidKey: "FONTFAMILY",
+                            title: fontFamilyTitle,
+                            summary: androidSummary("FONTFAMILY"),
+                            accessibilityIdentifier: "textDisplayFontFamilyButton"
+                        ) {
+                            activePreferenceEditor = .fontFamily
+                        }
+                        #endif
 
-            Section {
-                let justifyTextBinding = boolBinding(\.justifyText, default: false)
-                NavigationLink {
-                    ColorSettingsView(settings: $settings, onChange: onChange)
-                } label: {
-                    textDisplayRowLabel(
-                        androidKey: "COLORS",
-                        title: androidTitle("COLORS"),
-                        summary: androidSummary("COLORS")
-                    )
-                }
-                .accessibilityIdentifier("textDisplayColorsLink")
-
-                VStack(alignment: .leading, spacing: 8) {
-                    textDisplayRowLabel(
-                        androidKey: "FONTSIZE",
-                        title: fontSizeTitle,
-                        summary: androidSummary("FONTSIZE")
-                    )
-                    Slider(value: fontSizeBinding, in: 1...60, step: 1)
-                        .padding(.leading, 66)
-                }
-                #if os(iOS)
-                Button {
-                    showFontPicker = true
-                } label: {
-                    textDisplayRowLabel(
-                        androidKey: "FONTFAMILY",
-                        title: fontFamilyTitle,
-                        summary: androidSummary("FONTFAMILY")
-                    )
-                }
-                .accessibilityIdentifier("textDisplayFontFamilyButton")
-                .sheet(isPresented: $showFontPicker) {
-                    FontPickerView(selectedFamily: fontFamilyBinding)
-                }
-                #else
-                Picker(selection: fontFamilyBinding) {
-                    ForEach(Self.fontOptions, id: \.value) { option in
-                        Text(option.label)
-                            .font(.custom(option.previewFont, size: 16))
-                            .tag(option.value)
-                    }
-                } label: {
-                    textDisplayRowLabel(
-                        androidKey: "FONTFAMILY",
-                        title: fontFamilyTitle,
-                        summary: androidSummary("FONTFAMILY")
-                    )
-                }
-                #endif
-
-                VStack(alignment: .leading, spacing: 8) {
-                    textDisplayRowLabel(
-                        androidKey: "MARGINSIZE",
-                        title: marginSizeTitle,
-                        summary: androidSummary("MARGINSIZE")
-                    )
-                    VStack(alignment: .leading, spacing: 10) {
-                        marginSlider(
-                            title: String(format: "Left margin (%d mm)", settings.marginLeft ?? 2),
-                            value: settings.marginLeft ?? 2,
-                            binding: marginLeftBinding,
-                            range: 0...30,
-                            step: 1
+                        preferenceActionRow(
+                            androidKey: "MARGINSIZE",
+                            title: marginSizeTitle,
+                            summary: androidSummary("MARGINSIZE"),
+                            accessibilityIdentifier: "textDisplayMarginSizeButton"
+                        ) {
+                            activePreferenceEditor = .margins
+                        }
+                        preferenceActionRow(
+                            androidKey: "TOPMARGIN",
+                            title: topMarginTitle,
+                            summary: androidSummary("TOPMARGIN"),
+                            accessibilityIdentifier: "textDisplayTopMarginButton"
+                        ) {
+                            activePreferenceEditor = .topMargin
+                        }
+                        preferenceActionRow(
+                            androidKey: "LINE_SPACING",
+                            title: lineSpacingTitle,
+                            summary: androidSummary("LINE_SPACING"),
+                            accessibilityIdentifier: "textDisplayLineSpacingButton"
+                        ) {
+                            activePreferenceEditor = .lineSpacing
+                        }
+                        preferenceSwitchRow(
+                            androidKey: "REDLETTERS",
+                            title: androidTitle("REDLETTERS"),
+                            summary: androidSummary("REDLETTERS"),
+                            isOn: boolBinding(\.showRedLetters, default: true)
                         )
-                        marginSlider(
-                            title: String(format: "Right margin (%d mm)", settings.marginRight ?? 2),
-                            value: settings.marginRight ?? 2,
-                            binding: marginRightBinding,
-                            range: 0...30,
-                            step: 1
+                        preferenceSwitchRow(
+                            androidKey: "VERSEPERLINE",
+                            title: androidTitle("VERSEPERLINE"),
+                            summary: androidSummary("VERSEPERLINE"),
+                            isOn: boolBinding(\.showVersePerLine, default: false)
                         )
-                        marginSlider(
-                            title: String(format: "Maximum width of text (%d mm)", settings.maxWidth ?? 600),
-                            value: settings.maxWidth ?? 600,
-                            binding: maxWidthBinding,
-                            range: 0...1000,
-                            step: 10
-                        )
-                    }
-                    .padding(.leading, 66)
-                }
-
-                VStack(alignment: .leading, spacing: 8) {
-                    textDisplayRowLabel(
-                        androidKey: "TOPMARGIN",
-                        title: topMarginTitle,
-                        summary: androidSummary("TOPMARGIN")
-                    )
-                    Slider(value: topMarginBinding, in: 0...60, step: 1)
-                        .padding(.leading, 66)
-                }
-
-                VStack(alignment: .leading, spacing: 8) {
-                    textDisplayRowLabel(
-                        androidKey: "LINE_SPACING",
-                        title: lineSpacingTitle,
-                        summary: androidSummary("LINE_SPACING")
-                    )
-                    Slider(
-                        value: lineSpacingBinding,
-                        in: Double(Self.lineSpacingRange.lowerBound)...Double(Self.lineSpacingRange.upperBound),
-                        step: 1
-                    )
-                        .padding(.leading, 66)
-                }
-
-                Toggle(isOn: boolBinding(\.showRedLetters, default: true)) {
-                    textDisplayRowLabel(
-                        androidKey: "REDLETTERS",
-                        title: androidTitle("REDLETTERS"),
-                        summary: androidSummary("REDLETTERS")
-                    )
-                }
-                Toggle(isOn: boolBinding(\.showVersePerLine, default: false)) {
-                    textDisplayRowLabel(
-                        androidKey: "VERSEPERLINE",
-                        title: androidTitle("VERSEPERLINE"),
-                        summary: androidSummary("VERSEPERLINE")
-                    )
-                }
-                HStack(alignment: .top, spacing: 12) {
-                    Button {
-                        justifyTextBinding.wrappedValue.toggle()
-                    } label: {
-                        textDisplayRowLabel(
+                        preferenceSwitchRow(
                             androidKey: "JUSTIFY",
                             title: androidTitle("JUSTIFY"),
-                            summary: androidSummary("JUSTIFY")
+                            summary: androidSummary("JUSTIFY"),
+                            isOn: justifyTextBinding,
+                            rowAccessibilityIdentifier: "textDisplayJustifyTextToggleButton",
+                            switchAccessibilityIdentifier: "textDisplayJustifyTextToggle"
+                        )
+                        preferenceSwitchRow(
+                            androidKey: "HYPHENATION",
+                            title: androidTitle("HYPHENATION"),
+                            summary: androidSummary("HYPHENATION"),
+                            isOn: boolBinding(\.hyphenation, default: true)
+                        )
+                        preferenceSwitchRow(
+                            androidKey: "PAGENUMBER",
+                            title: androidTitle("PAGENUMBER"),
+                            summary: androidSummary("PAGENUMBER"),
+                            isOn: boolBinding(\.showPageNumber, default: false)
                         )
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityIdentifier("textDisplayJustifyTextToggleButton")
 
-                    Toggle("", isOn: justifyTextBinding)
-                        .labelsHidden()
-                        .accessibilityIdentifier("textDisplayJustifyTextToggle")
-                        .accessibilityValue((settings.justifyText ?? false) ? "justifyTextOn" : "justifyTextOff")
+                    preferenceSection(.textBookmarks) {
+                        preferenceSwitchRow(
+                            androidKey: "BOOKMARKS_SHOW",
+                            title: androidTitle("BOOKMARKS_SHOW"),
+                            summary: androidSummary("BOOKMARKS_SHOW"),
+                            isOn: boolBinding(\.showBookmarks, default: true)
+                        )
+                        preferenceSwitchRow(
+                            androidKey: "MYNOTES",
+                            title: androidTitle("MYNOTES"),
+                            summary: androidSummary("MYNOTES"),
+                            isOn: boolBinding(\.showMyNotes, default: true)
+                        )
+                        NavigationLink {
+                            HiddenBookmarkLabelsView(
+                                labels: userLabels,
+                                hiddenLabelIds: bookmarksHideLabelsBinding,
+                                onChange: onChange
+                            )
+                        } label: {
+                            preferenceRowContent(
+                                androidKey: "BOOKMARKS_HIDELABELS",
+                                title: androidTitle("BOOKMARKS_HIDELABELS"),
+                                summary: androidSummary("BOOKMARKS_HIDELABELS"),
+                                detail: hiddenBookmarkLabelsDetail
+                            ) {
+                                rowChevron
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("textDisplayHiddenBookmarkLabelsLink")
+                        preferenceDivider()
+                    }
                 }
-                Toggle(isOn: boolBinding(\.hyphenation, default: true)) {
-                    textDisplayRowLabel(
-                        androidKey: "HYPHENATION",
-                        title: androidTitle("HYPHENATION"),
-                        summary: androidSummary("HYPHENATION")
-                    )
-                }
-                Toggle(isOn: boolBinding(\.showPageNumber, default: false)) {
-                    textDisplayRowLabel(
-                        androidKey: "PAGENUMBER",
-                        title: androidTitle("PAGENUMBER"),
-                        summary: androidSummary("PAGENUMBER")
-                    )
-                }
-            } header: {
-                textDisplaySectionHeader(TextDisplaySettingsPresentation.Section.appearance.titleDefault)
+                .padding(.vertical, 8)
             }
+            .accessibilityIdentifier("textDisplaySettingsScrollView")
 
-            Section {
-                Toggle(isOn: boolBinding(\.showBookmarks, default: true)) {
-                    textDisplayRowLabel(
-                        androidKey: "BOOKMARKS_SHOW",
-                        title: androidTitle("BOOKMARKS_SHOW"),
-                        summary: androidSummary("BOOKMARKS_SHOW")
-                    )
-                }
-                Toggle(isOn: boolBinding(\.showMyNotes, default: true)) {
-                    textDisplayRowLabel(
-                        androidKey: "MYNOTES",
-                        title: androidTitle("MYNOTES"),
-                        summary: androidSummary("MYNOTES")
-                    )
-                }
-                NavigationLink {
-                    HiddenBookmarkLabelsView(
-                        labels: userLabels,
-                        hiddenLabelIds: bookmarksHideLabelsBinding,
-                        onChange: onChange
-                    )
-                } label: {
-                    textDisplayRowLabel(
-                        androidKey: "BOOKMARKS_HIDELABELS",
-                        title: androidTitle("BOOKMARKS_HIDELABELS"),
-                        summary: androidSummary("BOOKMARKS_HIDELABELS"),
-                        detail: hiddenBookmarkLabelsDetail
-                    )
-                }
-                .accessibilityIdentifier("textDisplayHiddenBookmarkLabelsLink")
-            } header: {
-                textDisplaySectionHeader(TextDisplaySettingsPresentation.Section.textBookmarks.titleDefault)
-            }
+            textDisplaySettingsStateExport
         }
-        .accessibilityIdentifier("textDisplaySettingsScreen")
-        .accessibilityValue(accessibilityState)
+        .background(textDisplayScreenBackground.ignoresSafeArea())
         .navigationTitle(navigationTitleText)
+        .sheet(item: $activePreferenceEditor) { editor in
+            preferenceEditorSheet(editor)
+        }
+        #if os(iOS)
+        .sheet(isPresented: $showFontPicker) {
+            FontPickerView(selectedFamily: fontFamilyBinding)
+        }
+        #endif
     }
 
     /**
@@ -640,45 +557,394 @@ public struct TextDisplaySettingsView: View {
     }
 
     /**
-     Builds a disabled Android-parity row for settings that exist in Android but are not yet backed
-     by iOS storage and renderer behavior.
+     Platform background for the flat Android-style preference surface.
 
-     - Parameter androidKey: Android preference key from `text_display_settings.xml`.
-     - Returns: A disabled preference-shaped row using Android's title, summary, and icon.
-     - Side effects: none; the row intentionally does not mutate settings.
-     - Failure modes: Unknown keys still render with the key as the title and no icon.
+     - Returns: A system background color on iOS and a transparent fallback on macOS package builds.
+     - Side effects: none.
+     - Failure modes: This helper cannot fail.
      */
-    private func disabledAndroidRow(androidKey: String) -> some View {
-        textDisplayRowLabel(
-            androidKey: androidKey,
-            title: androidTitle(androidKey),
-            summary: androidSummary(androidKey),
-            isEnabled: false
-        )
-        .accessibilityIdentifier("textDisplayDisabled-\(androidKey)")
-        .disabled(true)
+    private var textDisplayScreenBackground: Color {
+        #if os(iOS)
+        Color(.systemBackground)
+        #else
+        Color.clear
+        #endif
     }
 
     /**
-     Builds a disabled Android-style switch row for unsupported boolean settings.
+     Leading inset for Android-style row dividers.
+
+     - Returns: Horizontal inset that starts dividers at the row text column after the icon gutter.
+     - Side effects: none.
+     - Failure modes: This helper cannot fail.
+     */
+    private var preferenceDividerLeadingInset: CGFloat { 82 }
+
+    /**
+     Chevron accessory used for rows that open another editor.
+
+     - Returns: A secondary chevron image aligned to the trailing edge of a preference row.
+     - Side effects: none.
+     - Failure modes: Missing SF Symbols would render SwiftUI's symbol fallback.
+     */
+    private var rowChevron: some View {
+        Image(systemName: "chevron.right")
+            .font(.body.weight(.semibold))
+            .foregroundStyle(.tertiary)
+            .accessibilityHidden(true)
+    }
+
+    /**
+     Accessibility-only state export for UI tests and reader route assertions.
+
+     SwiftUI `ScrollView` does not reliably refresh its own accessibility value after child state
+     mutations, so the screen state lives on a tiny non-interactive element layered above the list.
+     Rows remain accessible as normal controls because this element does not contain or replace them.
+
+     - Returns: A one-point accessibility element with the stable Text Display screen identifier.
+     - Side effects: none.
+     - Failure modes: This helper cannot fail; missing state simply reflects the current bindings.
+     */
+    private var textDisplaySettingsStateExport: some View {
+        Color.clear
+            .frame(width: 1, height: 1)
+            .accessibilityElement(children: .ignore)
+            .accessibilityIdentifier("textDisplaySettingsScreen")
+            .accessibilityLabel("textDisplaySettingsScreen")
+            .accessibilityValue(accessibilityState)
+            .allowsHitTesting(false)
+    }
+
+    /**
+     Builds one Android-style preference section with a flat header and full-width rows.
+
+     - Parameters:
+       - section: Android rendered section represented by the rows.
+       - content: Rows to display below the section title.
+     - Returns: A flat preference section without SwiftUI grouped-card styling.
+     - Side effects: none; row content owns setting mutation.
+     - Failure modes: This helper cannot fail.
+     */
+    private func preferenceSection<Content: View>(
+        _ section: TextDisplaySettingsPresentation.Section,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            textDisplaySectionHeader(section.titleDefault)
+                .padding(.bottom, 18)
+            content()
+        }
+        .padding(.bottom, 18)
+    }
+
+    /**
+     Builds the shared label/accessory layout for one flat preference row.
+
+     - Parameters:
+       - androidKey: Android preference key used for icon lookup.
+       - title: Primary row title.
+       - summary: Optional secondary row text.
+       - detail: Optional tertiary state text.
+       - isEnabled: Whether text and icon should use enabled emphasis.
+       - accessory: Trailing control or navigation affordance.
+     - Returns: A single preference row content block.
+     - Side effects: Renders Android-sourced icon assets through `textDisplayRowLabel`.
+     - Failure modes: Unknown Android keys render without an icon.
+     */
+    private func preferenceRowContent<Accessory: View>(
+        androidKey: String,
+        title: String,
+        summary: String? = nil,
+        detail: String? = nil,
+        isEnabled: Bool = true,
+        @ViewBuilder accessory: () -> Accessory
+    ) -> some View {
+        HStack(alignment: .center, spacing: 12) {
+            textDisplayRowLabel(
+                androidKey: androidKey,
+                title: title,
+                summary: summary,
+                detail: detail,
+                isEnabled: isEnabled
+            )
+            .layoutPriority(1)
+
+            accessory()
+        }
+        .padding(.horizontal, 16)
+        .background(textDisplayScreenBackground)
+        .contentShape(Rectangle())
+    }
+
+    /**
+     Builds a preference row that opens an editor when tapped.
+
+     - Parameters:
+       - androidKey: Android preference key used for icon lookup.
+       - title: Primary row title.
+       - summary: Optional secondary row text.
+       - detail: Optional tertiary state text.
+       - accessibilityIdentifier: Stable UI-test identifier for the row button.
+       - action: Mutation that presents the destination editor.
+     - Returns: A tappable flat preference row with a chevron accessory.
+     - Side effects: Invokes `action` when tapped.
+     - Failure modes: This helper cannot fail; destination presentation failures are handled by
+       SwiftUI sheet/navigation state.
+     */
+    @ViewBuilder
+    private func preferenceActionRow(
+        androidKey: String,
+        title: String,
+        summary: String? = nil,
+        detail: String? = nil,
+        accessibilityIdentifier: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            preferenceRowContent(
+                androidKey: androidKey,
+                title: title,
+                summary: summary,
+                detail: detail
+            ) {
+                rowChevron
+            }
+        }
+        .buttonStyle(.plain)
+        .contentShape(Rectangle())
+        .accessibilityIdentifier(accessibilityIdentifier)
+        preferenceDivider()
+    }
+
+    /**
+     Builds a flat Android-style switch row.
+
+     - Parameters:
+       - androidKey: Android preference key used for icon lookup.
+       - title: Primary row title.
+       - summary: Optional secondary row text.
+       - isOn: Binding that stores the preference value.
+       - isEnabled: Whether the row can mutate the binding.
+       - rowAccessibilityIdentifier: Optional UI-test identifier for the row tap target.
+       - switchAccessibilityIdentifier: Optional UI-test identifier for the switch itself.
+     - Returns: A row label and native switch aligned like an Android preference row.
+     - Side effects: Tapping the row label or switch mutates `isOn`.
+     - Failure modes: Disabled rows ignore taps and keep the binding unchanged.
+     */
+    @ViewBuilder
+    private func preferenceSwitchRow(
+        androidKey: String,
+        title: String,
+        summary: String? = nil,
+        isOn: Binding<Bool>,
+        isEnabled: Bool = true,
+        rowAccessibilityIdentifier: String? = nil,
+        switchAccessibilityIdentifier: String? = nil
+    ) -> some View {
+        HStack(alignment: .center, spacing: 12) {
+            Button {
+                if isEnabled {
+                    isOn.wrappedValue.toggle()
+                }
+            } label: {
+                textDisplayRowLabel(
+                    androidKey: androidKey,
+                    title: title,
+                    summary: summary,
+                    isEnabled: isEnabled
+                )
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier(rowAccessibilityIdentifier ?? "textDisplaySwitchRow-\(androidKey)")
+            .layoutPriority(1)
+            .disabled(!isEnabled)
+
+            Toggle("", isOn: isOn)
+                .labelsHidden()
+                .disabled(!isEnabled)
+                .accessibilityIdentifier(switchAccessibilityIdentifier ?? "textDisplaySwitch-\(androidKey)")
+                .accessibilityValue(isOn.wrappedValue ? "on" : "off")
+        }
+        .padding(.horizontal, 16)
+        .background(textDisplayScreenBackground)
+        preferenceDivider()
+    }
+
+    /**
+     Builds a disabled switch row for Android parity targets that are not implemented on iOS yet.
 
      - Parameter androidKey: Android preference key from `text_display_settings.xml`.
-     - Returns: A disabled switch row that preserves Android's row shape without pretending the
-       setting is functional on iOS.
+     - Returns: Disabled flat switch row that keeps Android ordering visible.
      - Side effects: none; the constant binding cannot write.
      - Failure modes: Unknown keys still render with the key as the title and no icon.
      */
-    private func disabledAndroidToggle(androidKey: String) -> some View {
-        Toggle(isOn: .constant(false)) {
-            textDisplayRowLabel(
-                androidKey: androidKey,
-                title: androidTitle(androidKey),
-                summary: androidSummary(androidKey),
-                isEnabled: false
-            )
+    private func disabledPreferenceSwitchRow(androidKey: String) -> some View {
+        preferenceSwitchRow(
+            androidKey: androidKey,
+            title: androidTitle(androidKey),
+            summary: androidSummary(androidKey),
+            isOn: .constant(false),
+            isEnabled: false,
+            rowAccessibilityIdentifier: "textDisplayDisabled-\(androidKey)"
+        )
+    }
+
+    /**
+     Builds the flat row divider used between Android-style preference rows.
+
+     - Returns: Divider aligned after the icon gutter, matching Android preference separators.
+     - Side effects: none.
+     - Failure modes: This helper cannot fail.
+     */
+    private func preferenceDivider() -> some View {
+        Divider()
+            .padding(.leading, preferenceDividerLeadingInset)
+    }
+
+    /**
+     Presents the editor for a non-switch Android preference.
+
+     - Parameter editor: Active preference editor selected from the flat row list.
+     - Returns: Navigation-wrapped editor content suitable for a SwiftUI sheet.
+     - Side effects: Slider and picker writes mutate `settings`; Done clears presentation state.
+     - Failure modes: This helper does not throw; invalid slider input is normalized by bindings.
+     */
+    private func preferenceEditorSheet(_ editor: ActivePreferenceEditor) -> some View {
+        NavigationStack {
+            Form {
+                switch editor {
+                case .strongsMode:
+                    Picker(androidTitle("STRONGS"), selection: strongsModeBinding) {
+                        ForEach(strongsModeOptions, id: \.value) { option in
+                            Text(option.label)
+                                .tag(option.value)
+                        }
+                    }
+                    .pickerStyle(.inline)
+                case .fontSize:
+                    numericSlider(
+                        title: fontSizeTitle,
+                        value: settings.fontSize ?? 18,
+                        binding: fontSizeBinding,
+                        range: 1...60,
+                        step: 1
+                    )
+                case .fontFamily:
+                    Picker(androidTitle("FONTFAMILY"), selection: fontFamilyBinding) {
+                        ForEach(Self.fontOptions, id: \.value) { option in
+                            Text(option.label)
+                                .font(.custom(option.previewFont, size: 16))
+                                .tag(option.value)
+                        }
+                    }
+                case .margins:
+                    marginSlider(
+                        title: String(format: "Left margin (%d mm)", settings.marginLeft ?? 2),
+                        value: settings.marginLeft ?? 2,
+                        binding: marginLeftBinding,
+                        range: 0...30,
+                        step: 1
+                    )
+                    marginSlider(
+                        title: String(format: "Right margin (%d mm)", settings.marginRight ?? 2),
+                        value: settings.marginRight ?? 2,
+                        binding: marginRightBinding,
+                        range: 0...30,
+                        step: 1
+                    )
+                    marginSlider(
+                        title: String(format: "Maximum width of text (%d mm)", settings.maxWidth ?? 600),
+                        value: settings.maxWidth ?? 600,
+                        binding: maxWidthBinding,
+                        range: 0...1000,
+                        step: 10
+                    )
+                case .topMargin:
+                    numericSlider(
+                        title: topMarginTitle,
+                        value: settings.topMargin ?? 0,
+                        binding: topMarginBinding,
+                        range: 0...60,
+                        step: 1
+                    )
+                case .lineSpacing:
+                    numericSlider(
+                        title: lineSpacingTitle,
+                        value: displayedLineSpacing,
+                        binding: lineSpacingBinding,
+                        range: Double(Self.lineSpacingRange.lowerBound)...Double(Self.lineSpacingRange.upperBound),
+                        step: 1
+                    )
+                }
+            }
+            .navigationTitle(preferenceEditorTitle(editor))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(String(localized: "done", defaultValue: "Done")) {
+                        activePreferenceEditor = nil
+                    }
+                }
+            }
         }
-        .accessibilityIdentifier("textDisplayDisabled-\(androidKey)")
-        .disabled(true)
+    }
+
+    /**
+     Resolves the editor sheet title for one non-switch Android preference.
+
+     - Parameter editor: Active editor selected by the user.
+     - Returns: Android row title used as the sheet title.
+     - Side effects: none.
+     - Failure modes: This helper cannot fail.
+     */
+    private func preferenceEditorTitle(_ editor: ActivePreferenceEditor) -> String {
+        switch editor {
+        case .strongsMode:
+            return androidTitle("STRONGS")
+        case .fontSize:
+            return androidTitle("FONTSIZE")
+        case .fontFamily:
+            return androidTitle("FONTFAMILY")
+        case .margins:
+            return androidTitle("MARGINSIZE")
+        case .topMargin:
+            return androidTitle("TOPMARGIN")
+        case .lineSpacing:
+            return androidTitle("LINE_SPACING")
+        }
+    }
+
+    /**
+     Builds a generic labeled numeric slider for editor sheets.
+
+     - Parameters:
+       - title: User-visible slider title.
+       - value: Current integer value displayed beside the title.
+       - binding: Slider binding that persists value changes.
+       - range: Allowed slider range.
+       - step: Slider increment.
+     - Returns: A compact editor row for one numeric preference value.
+     - Side effects: Moving the slider mutates `binding`.
+     - Failure modes: This helper cannot fail; non-finite values are handled by the binding setter.
+     */
+    private func numericSlider(
+        title: String,
+        value: Int,
+        binding: Binding<Double>,
+        range: ClosedRange<Double>,
+        step: Double
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(title)
+                Spacer()
+                Text("\(value)")
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+            }
+            Slider(value: binding, in: range, step: step)
+        }
+        .padding(.vertical, 4)
     }
 
     /**
@@ -769,6 +1035,7 @@ public struct TextDisplaySettingsView: View {
         let previewFont: String
     }
 
+    /// MacOS fallback font-family choices used when the UIKit font picker is unavailable.
     private static let fontOptions: [FontOption] = [
         FontOption(label: "Sans Serif (Default)", value: "sans-serif", previewFont: ".AppleSystemUIFont"),
         FontOption(label: "Serif", value: "serif", previewFont: "Georgia"),

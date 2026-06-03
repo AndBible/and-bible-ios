@@ -239,9 +239,6 @@ public struct BibleReaderView: View {
     /// Window-scoped text-display state edited from Android's reader All Text Options route.
     @State private var windowDisplaySettings: TextDisplaySettings = .appDefaults
 
-    /// Workspace-scoped text-display state reached from Android's All Text Options parent link.
-    @State private var workspaceDisplaySettings: TextDisplaySettings = .appDefaults
-
     /// Effective night-mode value currently applied to pane controllers and overlays.
     @State private var nightMode = false
 
@@ -831,11 +828,10 @@ public struct BibleReaderView: View {
         switch destination {
         case .settings:
             SettingsView(
-                displaySettings: $globalDisplaySettings,
                 nightMode: $nightMode,
                 nightModeMode: $nightModeMode,
                 readingProgressController: panePresentationController,
-                onSettingsChanged: applyGlobalDisplaySettingsChange
+                onSettingsChanged: applyApplicationPreferenceChange
             )
             #if os(iOS)
             .toolbar(.visible, for: .navigationBar)
@@ -850,13 +846,8 @@ public struct BibleReaderView: View {
         case .textOptions:
             TextDisplaySettingsView(
                 settings: $windowDisplaySettings,
-                workspaceSettings: $workspaceDisplaySettings,
-                workspaceName: windowManager.activeWorkspace?.name,
-                globalSettings: $globalDisplaySettings,
                 navigationTitle: textOptionsWindowTitle,
-                onChange: applyWindowDisplaySettingsChange,
-                onWorkspaceSettingsChanged: applyWorkspaceDisplaySettingsChange,
-                onGlobalSettingsChanged: applyGlobalDisplaySettingsChange
+                onChange: applyWindowDisplaySettingsChange
             )
             #if os(iOS)
             .toolbar(.visible, for: .navigationBar)
@@ -1039,7 +1030,6 @@ public struct BibleReaderView: View {
      - Parameter windowId: Pane whose reader stack should own the pushed destination.
      - Side effects:
        - refreshes the window editor state from the current inheritance chain
-       - refreshes the workspace parent-link editor state
        - pushes the `.textOptions` reader destination
      - Failure modes: If no active window exists, the editor still opens against workspace/global
        fallback values and writes become no-ops in `applyWindowDisplaySettingsChange`.
@@ -1049,7 +1039,6 @@ public struct BibleReaderView: View {
             windowManager.allWindows.first { $0.id == id }
         } ?? windowManager.activeWindow
         windowDisplaySettings = resolvedDisplaySettings(for: targetWindow)
-        workspaceDisplaySettings = resolvedWorkspaceDisplaySettings()
         presentReaderDestination(.textOptions, from: targetWindow?.id ?? windowId)
     }
 
@@ -2458,59 +2447,6 @@ public struct BibleReaderView: View {
     }
 
     /**
-     Persists one workspace-scope settings value without copying inherited global theme colors.
-
-     - Parameters:
-       - workspaceSettings: Workspace-level overrides to persist.
-       - previousResolvedSettings: Effective workspace settings before this mutation.
-     */
-    private func persistWorkspaceDisplaySettings(
-        _ workspaceSettings: TextDisplaySettings,
-        previousResolvedSettings: TextDisplaySettings
-    ) {
-        if let workspace = windowManager.activeWorkspace {
-            let hadWorkspaceThemeColors = workspace.textDisplaySettings?.hasThemeColorOverrides ?? false
-            let changedThemeColors = Self.themeColorsDiffer(
-                workspaceSettings,
-                previousResolvedSettings
-            )
-            let shouldPersistThemeColors = hadWorkspaceThemeColors || changedThemeColors
-            var workspaceScopedSettings = workspaceSettings
-            if !shouldPersistThemeColors {
-                workspaceScopedSettings.clearThemeColors()
-            }
-            _ = workspaceScopedSettings.clearRedundantOverrides(matching: globalDisplaySettings)
-            if shouldPersistThemeColors {
-                workspaceScopedSettings.restoreThemeColors(from: workspaceSettings)
-            }
-
-            workspace.textDisplaySettings = workspaceScopedSettings
-            let resolvedSettings = TextDisplaySettings.fullyResolved(
-                window: nil,
-                workspace: workspaceScopedSettings,
-                global: globalDisplaySettings
-            )
-            for window in windowManager.allWindows {
-                guard var windowSettings = window.pageManager?.textDisplaySettings else {
-                    continue
-                }
-                if windowSettings.clearOverridesMatchingParent(
-                    resolvedSettings,
-                    changedFrom: previousResolvedSettings,
-                    to: resolvedSettings
-                ) {
-                    window.pageManager?.textDisplaySettings = windowSettings
-                }
-            }
-            try? modelContext.save()
-        }
-
-        refreshVisibleControllerDisplaySettings()
-        syncActiveDisplaySettings()
-        reloadBehaviorPreferences()
-    }
-
-    /**
      Persists one window-scope All Text Options value and refreshes that pane.
 
      This mirrors Android's `SettingsLevel.WINDOW`: the edited value is stored on the target
@@ -2567,7 +2503,6 @@ public struct BibleReaderView: View {
             displaySettings = resolvedSettings
         }
         windowDisplaySettings = resolvedSettings
-        workspaceDisplaySettings = resolvedWorkspaceDisplaySettings()
         reloadBehaviorPreferences()
     }
 
@@ -2593,45 +2528,20 @@ public struct BibleReaderView: View {
     }
 
     /**
-     Persists the workspace-scoped parent text-options editor and refreshes visible readers.
+     Refreshes reader controllers after root Application Preferences mutate app-level settings.
 
-     This is Android's parent scope reached from a window-level All Text Options screen: workspace
-     text-display settings are edited separately from global defaults and per-window overrides.
-
-     Side effects:
-     - writes `workspaceDisplaySettings` into the active workspace display settings
-     - pushes resolved display settings to every visible reader pane
-     - clears redundant child window overrides affected by the workspace change
-
-     Failure modes:
-     - if no active workspace exists, the persistence helper returns after refreshing in-memory
-       controller state
-     */
-    private func applyWorkspaceDisplaySettingsChange() {
-        let previousWorkspaceSettings = resolvedWorkspaceDisplaySettings()
-        persistWorkspaceDisplaySettings(
-            workspaceDisplaySettings,
-            previousResolvedSettings: previousWorkspaceSettings
-        )
-    }
-
-    /**
-     Persists app-level text-display defaults and refreshes reader controllers.
-
-     This mirrors Android's global text-display layer: application Settings edits the global
-     fallback, while workspace and window overrides remain separate scopes in the inheritance chain.
+     The root settings screen no longer edits global text-display defaults; it only changes
+     Android-parity application preferences such as display chrome, animation, and behavior flags.
+     Refreshing without writing `globalDisplaySettings` keeps text-display persistence scoped to the
+     dedicated Text Options screens while still pushing updated app preferences into visible panes.
 
      - Side effects:
-       - writes `globalDisplaySettings` through `SettingsStore`
-       - pushes each visible reader its own resolved display settings
-       - reloads behavior preferences so non-display settings changed from the same Settings screen
-         stay in sync
-     - Failure modes: Settings-store persistence failures are intentionally swallowed by
-       `SettingsStore`.
+       - pushes each visible reader its resolved display settings and app preference payload
+       - reloads behavior preferences mirrored by the SwiftUI reader shell
+     - Failure modes: Reader refresh failures are handled by the controller update paths; preference
+       reloads fall back through `SettingsStore` defaults.
      */
-    private func applyGlobalDisplaySettingsChange() {
-        let store = SettingsStore(modelContext: modelContext)
-        store.setGlobalTextDisplaySettings(globalDisplaySettings)
+    private func applyApplicationPreferenceChange() {
         refreshVisibleControllerDisplaySettings()
         syncActiveDisplaySettings()
         reloadBehaviorPreferences()
@@ -2646,20 +2556,10 @@ public struct BibleReaderView: View {
         )
     }
 
-    /// Resolves the workspace-scoped settings editor state without applying window overrides.
-    private func resolvedWorkspaceDisplaySettings() -> TextDisplaySettings {
-        TextDisplaySettings.fullyResolved(
-            window: nil,
-            workspace: windowManager.activeWorkspace?.textDisplaySettings,
-            global: globalDisplaySettings
-        )
-    }
-
     /// Re-syncs the focused toolbar/settings state from the current active window.
     private func syncActiveDisplaySettings() {
         displaySettings = resolvedDisplaySettings(for: windowManager.activeWindow)
         windowDisplaySettings = resolvedDisplaySettings(for: panePresentationTargetWindow ?? windowManager.activeWindow)
-        workspaceDisplaySettings = resolvedWorkspaceDisplaySettings()
     }
 
     /**
