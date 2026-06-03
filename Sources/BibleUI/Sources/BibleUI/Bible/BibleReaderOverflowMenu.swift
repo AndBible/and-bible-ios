@@ -163,7 +163,7 @@ struct BibleReaderOverflowMenu: View {
                     localizedDrawerString("all_text_options_window_menutitle", default: "All text options")
                 ),
                 assetName: "OverflowTextOptions",
-                identifier: "readerOpenSettingsAction",
+                identifier: "readerOpenTextOptionsAction",
                 action: .openTextOptions
             )
         }

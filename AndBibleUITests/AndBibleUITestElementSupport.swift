@@ -70,7 +70,7 @@ extension AndBibleUITests {
             ]
         }
 
-        if identifier.hasSuffix("Menu") {
+        if identifier.hasSuffix("Menu") || identifier.contains("Menu::") {
             return [
                 app.buttons[identifier].firstMatch,
                 app.otherElements[identifier].firstMatch,
@@ -672,9 +672,7 @@ extension AndBibleUITests {
             "settingsImportExportLink",
             "settingsSyncLink",
             "settingsReadingProgressLink",
-            "settingsLabelsLink",
-            "settingsTextDisplayLink",
-            "settingsColorsLink":
+            "settingsLabelsLink":
             return [
                 app.links[identifier].firstMatch,
                 app.buttons[identifier].firstMatch,
@@ -683,9 +681,11 @@ extension AndBibleUITests {
             ]
         case "syncSettingsState":
             return semanticStateCandidates(for: identifier, in: app)
-        case "textDisplayFontFamilyButton":
+        case "textDisplayColorsLink", "textDisplayFontFamilyButton":
             return [
+                app.links[identifier].firstMatch,
                 app.buttons[identifier].firstMatch,
+                app.cells[identifier].firstMatch,
                 app.otherElements[identifier].firstMatch,
             ]
         case "textDisplayJustifyTextToggle":
@@ -698,6 +698,11 @@ extension AndBibleUITests {
             return [
                 app.collectionViews[identifier].firstMatch,
                 app.tables[identifier].firstMatch,
+                app.scrollViews[identifier].firstMatch,
+                app.otherElements[identifier].firstMatch,
+            ]
+        case "textDisplaySettingsScrollView":
+            return [
                 app.scrollViews[identifier].firstMatch,
                 app.otherElements[identifier].firstMatch,
             ]

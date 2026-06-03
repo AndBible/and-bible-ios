@@ -21,6 +21,7 @@ import {emit, setupEventBusListener} from "@/eventbus";
 import {isEqual} from "lodash";
 import {Deferred, setupWindowEventListener} from "@/utils";
 import {BibleViewDocumentType, ReadingProgressSettings} from "@/types/documents";
+import type {TextContentType} from "@/types/client-objects";
 
 export type StrongsMode = 0 | 1 | 2 | 3
 export const strongsModes: Record<string, StrongsMode> = {off: 0, inline: 1, links: 2, hidden: 3}
@@ -93,7 +94,6 @@ export type Config = {
 export type BibleModalButtonId = "BOOKMARK"|"BOOKMARK_NOTES"|"MY_NOTES"|"SHARE"|"COMPARE"|"SPEAK"|"MEMORIZE"|"ADD_PARAGRAPH_BREAK"
 export type GenericModalButtonId = "BOOKMARK"|"BOOKMARK_NOTES"|"SPEAK"|"ADD_PARAGRAPH_BREAK"
 export type ModalButtonId = BibleModalButtonId | GenericModalButtonId
-
 export type AppSettings = {
     isBottomWindow: boolean,
     topOffset: number,
@@ -119,6 +119,7 @@ export type AppSettings = {
     monochromeMode: boolean,
     disableAnimations: boolean,
     disableClickToEdit: boolean,
+    notesContentType: TextContentType,
     fontSizeMultiplier: number,
     enabledExperimentalFeatures: Feature[],
     autoTrackReading: boolean,
@@ -210,6 +211,7 @@ export function useConfig(documentType: Ref<BibleViewDocumentType>) {
         monochromeMode: false,
         disableAnimations: false,
         disableClickToEdit: false,
+        notesContentType: "HTML",
         fontSizeMultiplier: 1.0,
         enabledExperimentalFeatures: [],
         autoTrackReading: false,

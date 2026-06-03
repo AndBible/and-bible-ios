@@ -611,7 +611,7 @@ extension AndBibleUITests {
         let app = makeApp()
         app.launch()
 
-        let textDisplayScreen = openTextDisplaySettings(in: app)
+        let textDisplayScreen = openAllTextOptions(in: app)
         XCTAssertTrue(textDisplayScreen.exists)
 
         let justifyToggleButton = app.buttons["textDisplayJustifyTextToggleButton"].firstMatch
@@ -647,21 +647,21 @@ extension AndBibleUITests {
         let app = makeApp()
         app.launch()
 
-        let textDisplayScreen = openTextDisplaySettings(in: app)
+        let textDisplayScreen = openAllTextOptions(in: app)
         XCTAssertTrue(textDisplayScreen.exists)
-        let fontFamilyButton = requireElement("textDisplayFontFamilyButton", in: app, timeout: 10)
+        let fontFamilyButton = requireReachableTextDisplayButton("textDisplayFontFamilyButton", in: app, timeout: 10)
         tapElementReliably(fontFamilyButton, timeout: 10)
         waitForElementValue("textDisplaySettingsScreen", toContain: "fontPickerPresented", in: app, timeout: 10)
     }
 
     /**
-     Verifies that the color editor can be opened from Settings.
+     Verifies that the color editor can be opened from All Text Options.
      *
      * - Side effects:
-     *   - launches the app on the reader shell and opens Settings
-     *   - opens Colors from the settings screen
+     *   - launches the app on the reader shell and opens All Text Options
+     *   - opens Colors from the text-display settings screen
      * - Failure modes:
-     *   - fails if the Settings colors link is missing or never becomes hittable
+     *   - fails if the Text Options colors link is missing or never becomes hittable
      *   - fails if the color settings screen does not render after navigation completes
      */
     func testSettingsColorsLinkOpensColorEditor() {

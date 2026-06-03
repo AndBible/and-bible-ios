@@ -708,6 +708,7 @@ extension AndBibleTests {
         let workspace = workspaceStore.createWorkspace(name: "Reader Config")
         let studyPadCursorId = try XCTUnwrap(UUID(uuidString: "11111111-1111-1111-1111-111111111111"))
         let autoAssignLabelId = try XCTUnwrap(UUID(uuidString: "22222222-2222-2222-2222-222222222222"))
+        let hiddenLabelId = try XCTUnwrap(UUID(uuidString: "33333333-3333-3333-3333-333333333333"))
         workspace.workspaceSettings = WorkspaceSettings(
             autoAssignLabels: [autoAssignLabelId],
             studyPadCursors: [studyPadCursorId: 7],
@@ -724,6 +725,7 @@ extension AndBibleTests {
         settingsStore.setBool(.disableAnimations, value: true)
         settingsStore.setBool(.disableClickToEdit, value: true)
         settingsStore.setInt(.fontSizeMultiplier, value: 125)
+        settingsStore.setString(.notesContentType, value: "PLAINTEXT")
         settingsStore.setStringSet(.disableBibleBookmarkModalButtons, values: ["speak", "bookmark"])
         settingsStore.setStringSet(.disableGenBookmarkModalButtons, values: ["generic-note"])
         settingsStore.setStringSet(
@@ -754,6 +756,7 @@ extension AndBibleTests {
         display.maxWidth = 410
         display.topMargin = 12
         display.showPageNumber = true
+        display.bookmarksHideLabels = [hiddenLabelId]
         display.dayBackground = -2
         display.dayNoise = 3
         display.nightBackground = -123_456
@@ -843,6 +846,7 @@ extension AndBibleTests {
                 "monochromeMode",
                 "disableAnimations",
                 "disableClickToEdit",
+                "notesContentType",
                 "fontSizeMultiplier",
                 "enabledExperimentalFeatures",
                 "autoTrackReading",
@@ -872,6 +876,10 @@ extension AndBibleTests {
         XCTAssertEqual(config["fontSize"] as? Int, 21)
         XCTAssertEqual(config["showBookmarks"] as? Bool, false)
         XCTAssertEqual(config["showMyNotes"] as? Bool, false)
+        XCTAssertEqual(
+            try XCTUnwrap(config["bookmarksHideLabels"] as? [String]),
+            [hiddenLabelId.uuidString]
+        )
         XCTAssertEqual(config["hyphenation"] as? Bool, false)
         XCTAssertEqual(config["lineSpacing"] as? Int, 14)
         XCTAssertEqual(config["justifyText"] as? Bool, true)
@@ -898,6 +906,7 @@ extension AndBibleTests {
         XCTAssertEqual(appSettings["monochromeMode"] as? Bool, true)
         XCTAssertEqual(appSettings["disableAnimations"] as? Bool, true)
         XCTAssertEqual(appSettings["disableClickToEdit"] as? Bool, true)
+        XCTAssertEqual(appSettings["notesContentType"] as? String, "HTML")
         XCTAssertEqual(appSettings["fontSizeMultiplier"] as? Double, 1.25)
         XCTAssertEqual(appSettings["autoTrackReading"] as? Bool, true)
         XCTAssertNotNil(appSettings["activeSince"] as? Int)

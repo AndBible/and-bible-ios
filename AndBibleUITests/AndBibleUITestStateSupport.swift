@@ -1588,16 +1588,16 @@ extension AndBibleUITests {
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
-        let toggle = app.buttons["textDisplayJustifyTextToggleButton"].firstMatch
-        XCTAssertTrue(
-            toggle.waitForExistence(timeout: timeout),
-            "Expected justify-text control to exist within \(timeout) seconds.",
-            file: file,
-            line: line
-        )
         if (screen.value as? String)?.contains(expectedScreenToken) == true {
             return
         }
+        let toggle = requireReachableTextDisplayButton(
+            "textDisplayJustifyTextToggleButton",
+            in: app,
+            timeout: timeout,
+            file: file,
+            line: line
+        )
         tapElementReliably(toggle, timeout: timeout, file: file, line: line)
 
         waitForElementValue(
@@ -1608,6 +1608,78 @@ extension AndBibleUITests {
             file: file,
             line: line
         )
+    }
+
+    /**
+     Scrolls the flat Text Display settings surface toward rows below the visible viewport.
+     *
+     * - Parameter app: Running application under test.
+     * - Side effects: Swipes the Text Display scroll view, falling back to an app-level swipe.
+     * - Failure modes: Leaves scroll position unchanged when no scrollable surface accepts the gesture.
+     */
+    func revealTextDisplaySettingsLowerContent(in app: XCUIApplication) {
+        if let textDisplayScrollView = resolvedElement("textDisplaySettingsScrollView", in: app),
+           textDisplayScrollView.exists
+        {
+            textDisplayScrollView.swipeUp()
+        } else {
+            app.swipeUp()
+        }
+    }
+
+    /**
+     Resolves a Text Display row button after scrolling the custom flat settings list into view.
+     *
+     * `TextDisplaySettingsView` uses a custom `ScrollView` to match Android's flat preference
+     * surface. Unlike `Form`, offscreen rows can still exist in the accessibility tree before they
+     * are visible, so tests must reveal the row before tapping it.
+     *
+     * - Parameters:
+     *   - identifier: Accessibility identifier of the production row button.
+     *   - app: Running application under test.
+     *   - timeout: Maximum time to keep resolving and revealing the list.
+     *   - file: Source file used for XCTest failure attribution.
+     *   - line: Source line used for XCTest failure attribution.
+     * - Returns: The row button once XCTest reports a hittable activation point.
+     * - Side effects: Scrolls Text Display lower content until the requested row is hittable.
+     * - Failure modes: Records a test failure if the row never appears or never becomes hittable.
+     */
+    func requireReachableTextDisplayButton(
+        _ identifier: String,
+        in app: XCUIApplication,
+        timeout: TimeInterval,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) -> XCUIElement {
+        let deadline = Date().addingTimeInterval(timeout)
+        var lastCandidate = app.buttons[identifier].firstMatch
+
+        repeat {
+            let button = app.buttons[identifier].firstMatch
+            if button.exists {
+                lastCandidate = button
+                if waitForElementToBecomeHittable(button, timeout: 0.5) {
+                    return button
+                }
+            }
+
+            revealTextDisplaySettingsLowerContent(in: app)
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        } while Date() < deadline
+
+        XCTAssertTrue(
+            lastCandidate.exists,
+            "Expected Text Display button '\(identifier)' to exist within \(timeout) seconds.",
+            file: file,
+            line: line
+        )
+        XCTAssertTrue(
+            waitForElementToBecomeHittable(lastCandidate, timeout: 1),
+            "Expected Text Display button '\(identifier)' to become hittable within \(timeout) seconds.",
+            file: file,
+            line: line
+        )
+        return lastCandidate
     }
 
     /**

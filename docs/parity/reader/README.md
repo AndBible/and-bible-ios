@@ -21,8 +21,10 @@ is useful, but the surrounding notes are where the intent and the remaining roug
 3. [verification-matrix.md](verification-matrix.md): current status by contract area
 4. [document-chooser-matrix.md](document-chooser-matrix.md): Android `ChooseDocument`
    alignment and known chooser gaps
-5. [regression-report.md](regression-report.md): focused validation evidence
-6. [guardrails.md](guardrails.md): maintenance rules for high-risk reader changes
+5. [text-display-options-contract.md](text-display-options-contract.md): Android All
+   Text Options inventory, iOS routing scope, and row dispositions
+6. [regression-report.md](regression-report.md): focused validation evidence
+7. [guardrails.md](guardrails.md): maintenance rules for high-risk reader changes
 
 Helpful companion docs:
 

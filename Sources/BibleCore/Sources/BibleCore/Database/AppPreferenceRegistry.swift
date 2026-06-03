@@ -32,6 +32,7 @@ public enum AppPreferenceKey: String, CaseIterable, Sendable {
     case monochromeMode = "monochrome_mode"
     case disableAnimations = "disable_animations"
     case disableClickToEdit = "disable_click_to_edit"
+    case notesContentType = "notes_content_type"
     case fontSizeMultiplier = "font_size_multiplier"
     case fullScreenHideButtonsPref = "full_screen_hide_buttons_pref"
     case hideWindowButtons = "hide_window_buttons"
@@ -80,6 +81,38 @@ public enum AppPreferenceValueType: Sendable {
     case string
     case csvStringSet
     case action
+}
+
+/**
+ * Normalizes Android's notes-content-type list preference before the value reaches UI or bridge
+ * consumers.
+ *
+ * Sync, old builds, or direct storage edits can leave unexpected strings in persistence. Android's
+ * contract only supports `HTML` and `MARKDOWN`, and the Vue reader models the value as that closed
+ * set. Centralizing the normalizer keeps Settings writes and reader payload emission consistent.
+ *
+ * - Parameter rawValue: Persisted or incoming notes-content-type value.
+ * - Returns: `HTML` or `MARKDOWN`; unknown values fall back to Android's default `HTML`.
+ * - Side effects: none.
+ * - Failure modes: This helper cannot fail.
+ */
+public enum AppPreferenceValueNormalizer {
+    /**
+     Normalizes persisted notes-content format values to Android's supported list preference values.
+     *
+     - Parameter rawValue: Raw value read from persistence or sync.
+     - Returns: `HTML` or `MARKDOWN`, falling back to `HTML` for invalid values.
+     - Side effects: none.
+     - Failure modes: This helper cannot fail.
+     */
+    public static func notesContentType(_ rawValue: String) -> String {
+        switch rawValue {
+        case "HTML", "MARKDOWN":
+            return rawValue
+        default:
+            return "HTML"
+        }
+    }
 }
 
 /**
@@ -258,14 +291,21 @@ public enum AppPreferenceRegistry {
             storage: .swiftData,
             valueType: .bool,
             defaultValue: "false",
-            androidReference: "settings.xml:141"
+            androidReference: "settings.xml:132-137"
+        ),
+        .notesContentType: .init(
+            key: .notesContentType,
+            storage: .swiftData,
+            valueType: .string,
+            defaultValue: "HTML",
+            androidReference: "settings.xml:138-145, arrays.xml:264-271"
         ),
         .fontSizeMultiplier: .init(
             key: .fontSizeMultiplier,
             storage: .swiftData,
             valueType: .int,
             defaultValue: "100",
-            androidReference: "settings.xml:147-149"
+            androidReference: "settings.xml:146-153"
         ),
         .fullScreenHideButtonsPref: .init(
             key: .fullScreenHideButtonsPref,

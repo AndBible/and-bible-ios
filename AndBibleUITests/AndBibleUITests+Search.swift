@@ -35,6 +35,93 @@ extension AndBibleUITests {
     }
 
     /**
+     Verifies Android `ListPreference` parity rows stay compact on the Settings root surface.
+     *
+     * The regression this guards against is SwiftUI's inline `Picker` presentation, which rendered
+     * selected values such as `Chapter` and `System` as oversized blue rows in the Settings list.
+     *
+     * - Side effects:
+     *   - launches the app and opens Application Preferences from the reader action surface
+     *   - types row titles into the production Settings search field to reveal each preference row
+     * - Failure modes:
+     *   - fails if the menu-backed row identifier is missing
+     *   - fails if a selected `ListPreference` value is visible as standalone root-row text
+     */
+    func testApplicationPreferencesRenderAndroidListPreferenceRowsWithoutInlineValues() {
+        let app = makeApp()
+        app.launch()
+
+        openSettings(in: app)
+
+        assertSettingsListPreferenceMenuRow(
+            identifier: "settingsListPreferenceMenu::toolbar_button_actions",
+            searchTitle: "Action for toolbar button press",
+            inlineSelectedValue: "Press to open menu, long press for documents screen (default)",
+            in: app
+        )
+        assertSettingsListPreferenceMenuRow(
+            identifier: "settingsListPreferenceMenu::bible_view_swipe_mode",
+            searchTitle: "Action for swipe left / right gesture",
+            inlineSelectedValue: "Chapter",
+            in: app
+        )
+        assertSettingsListPreferenceMenuRow(
+            identifier: "settingsListPreferenceMenu::night_mode_pref3",
+            searchTitle: "Night mode switching",
+            inlineSelectedValue: "System",
+            in: app
+        )
+        assertSettingsListPreferenceMenuRow(
+            identifier: "settingsListPreferenceMenu::locale_pref",
+            searchTitle: "Application language",
+            inlineSelectedValue: "English",
+            in: app
+        )
+        assertSettingsListPreferenceMenuRow(
+            identifier: "settingsListPreferenceMenu::notes_content_type",
+            searchTitle: "Format for new bookmark notes",
+            inlineSelectedValue: "Rich text (HTML)",
+            in: app
+        )
+    }
+
+    /**
+     Verifies that the reader overflow All Text Options action opens window text-display settings
+     instead of the left-drawer Application Preferences destination.
+     *
+     * - Side effects:
+     *   - launches the reader shell with deterministic in-memory data
+     *   - opens the real overflow menu action identified by Android's All Text Options row
+     *   - pushes the native Text Display settings destination
+     * - Failure modes:
+     *   - fails if the overflow action is routed to global Application Preferences
+     *   - fails if the Text Display settings screen never becomes ready
+     */
+    func testAllTextOptionsOpensReaderTextDisplaySurface() {
+        let app = makeApp()
+        app.launch()
+
+        openReaderActionDestination(
+            actionIdentifier: "readerOpenTextOptionsAction",
+            destinationIdentifier: "textDisplaySettingsScreen",
+            readinessIdentifiers: [
+                "textDisplayFontFamilyButton",
+                "textDisplayJustifyTextToggleButton",
+            ],
+            in: app,
+            timeout: 20
+        )
+
+        XCTAssertTrue(requireElement("textDisplaySettingsScreen", in: app, timeout: 10).exists)
+        waitForReaderRenderedContentState(containing: "readerSheet=none", in: app, timeout: 10)
+        waitForReaderRenderedContentState(containing: "readerDestination=textOptions", in: app, timeout: 10)
+        XCTAssertFalse(
+            unresolvedElement("settingsForm", in: app).exists,
+            "Expected All Text Options to open the Text Display destination, not Application Preferences."
+        )
+    }
+
+    /**
      Verifies that Search preserves a seeded initial query typed through the real UI.
      *
      * - Side effects:
@@ -70,6 +157,97 @@ extension AndBibleUITests {
         _ = openSearch(in: app)
         waitForSearchState(containing: "query=earth", in: app, timeout: 20)
         waitForSearchResultRow("searchResultRow::Genesis_1_2", in: app, shouldExist: true, timeout: 20)
+    }
+
+    /**
+     Reveals and validates one Settings `ListPreference` row after the Android-style conversion.
+     *
+     * - Parameters:
+     *   - identifier: Stable menu-row accessibility identifier exposed by production Settings.
+     *   - searchTitle: English row title used to narrow Settings search in UI tests.
+     *   - inlineSelectedValue: Value that must not be visible as standalone root-list text.
+     *   - app: Running application under test.
+     * - Side effects: rewrites the Settings search query.
+     * - Failure modes: records XCTest failures for missing rows or visible inline selected values.
+     */
+    private func assertSettingsListPreferenceMenuRow(
+        identifier: String,
+        searchTitle: String,
+        inlineSelectedValue: String,
+        in app: XCUIApplication,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let settingsForm = requireElement("settingsForm", in: app, timeout: 10, file: file, line: line)
+        let searchField = requireSettingsSearchField(in: app, settingsForm: settingsForm, file: file, line: line)
+        replaceText(in: searchField, with: searchTitle, placeholderHints: ["Search"])
+
+        let row = requireElement(identifier, in: app, timeout: 10, file: file, line: line)
+        XCTAssertTrue(row.exists, "Expected compact menu row \(identifier) to exist.", file: file, line: line)
+        XCTAssertFalse(
+            isVisibleSettingsText(inlineSelectedValue, in: app, settingsForm: settingsForm),
+            "Expected '\(inlineSelectedValue)' to be hidden until the menu opens, not rendered inline in Settings.",
+            file: file,
+            line: line
+        )
+    }
+
+    /**
+     Resolves the Settings search field used to reveal offscreen Android-parity rows.
+     *
+     * - Parameters:
+     *   - app: Running application under test.
+     *   - settingsForm: Visible Settings root surface.
+     * - Returns: The search field exposed by SwiftUI's `searchable` modifier.
+     * - Side effects: scrolls upward when the search field is not initially in the hierarchy.
+     * - Failure modes: records an XCTest failure when search cannot be reached.
+     */
+    private func requireSettingsSearchField(
+        in app: XCUIApplication,
+        settingsForm: XCUIElement,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) -> XCUIElement {
+        let deadline = Date().addingTimeInterval(10)
+        repeat {
+            if let field = firstExistingElement(
+                settingsSearchFieldCandidates(in: app, settingsForm: settingsForm),
+                timeout: 0.2
+            ) {
+                return field
+            }
+            settingsForm.swipeDown()
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        } while Date() < deadline
+
+        XCTFail("Expected Settings search field to exist.", file: file, line: line)
+        return app.searchFields["Search"].firstMatch
+    }
+
+    /**
+     Reports whether one visible Settings text/control still exposes stale inline picker content.
+     *
+     * - Parameters:
+     *   - text: Exact selected value that should only appear after opening a chooser menu.
+     *   - app: Running application under test.
+     *   - settingsForm: Settings root surface used as the visibility container.
+     * - Returns: `true` when the stale value is visible in the root Settings surface.
+     * - Side effects: none.
+     * - Failure modes: This helper cannot fail directly.
+     */
+    private func isVisibleSettingsText(
+        _ text: String,
+        in app: XCUIApplication,
+        settingsForm: XCUIElement
+    ) -> Bool {
+        [
+            settingsForm.staticTexts[text].firstMatch,
+            settingsForm.buttons[text].firstMatch,
+            settingsForm.otherElements[text].firstMatch,
+            app.staticTexts[text].firstMatch,
+            app.buttons[text].firstMatch,
+            app.otherElements[text].firstMatch,
+        ].contains { $0.exists && isElementVisible($0, within: settingsForm) }
     }
 
     /**

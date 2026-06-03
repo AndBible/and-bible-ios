@@ -138,5 +138,206 @@ extension AndBibleTests {
             AndBibleIconCatalog.settingsIcon(forAndroidKey: "JUSTIFY")?.assetName,
             "SettingsIconJustifyText"
         )
+        XCTAssertEqual(
+            AndBibleIconCatalog.settingsIcon(forAndroidKey: "MARGINSIZE")?.androidDrawableName,
+            "ic_margin_size_24dp"
+        )
+        XCTAssertEqual(
+            AndBibleIconCatalog.settingsIcon(forAndroidKey: "TOPMARGIN")?.androidDrawableName,
+            "ic_margin_top_24dp"
+        )
+        XCTAssertEqual(
+            AndBibleIconCatalog.settingsIcon(forAndroidKey: "BOOKMARKS_HIDELABELS")?.androidDrawableName,
+            "ic_labels_hide_24dp"
+        )
+        XCTAssertEqual(
+            AndBibleIconCatalog.settingsIcon(forAndroidKey: "ORDINALS")?.androidDrawableName,
+            "ic_baseline_star_24"
+        )
+    }
+
+    func testTextDisplayPresentationMatchesAndroidRenderedOrder() {
+        XCTAssertEqual(
+            TextDisplaySettingsPresentation.androidRows.map(\.androidKey),
+            [
+                "STRONGS",
+                "MORPH",
+                "NON_STRONGS_WORD_ITALIC",
+                "FOOTNOTES",
+                "FOOTNOTES_INLINE",
+                "XREFS",
+                "EXPAND_XREFS",
+                "SECTIONTITLES",
+                "TITLE_SCROLL_BUTTON",
+                "VERSENUMBERS",
+                "COLORS",
+                "FONTSIZE",
+                "FONTFAMILY",
+                "MARGINSIZE",
+                "TOPMARGIN",
+                "LINE_SPACING",
+                "REDLETTERS",
+                "VERSEPERLINE",
+                "JUSTIFY",
+                "HYPHENATION",
+                "PAGENUMBER",
+                "BOOKMARKS_SHOW",
+                "MYNOTES",
+                "BOOKMARKS_HIDELABELS",
+                "INFINITE_SCROLL",
+                "PAGE_SCROLL_AMOUNT",
+                "SCROLL_HELPER_LINES",
+                "SCROLL_HELPER_LINE_STYLE",
+                "PAGE_BUTTONS",
+                "ORDINALS",
+                "AI_DOC_MARKERS",
+                "MARK_AS_READ_BUTTON",
+                "MEMORIZATION_INDICATORS",
+                "AUTO_TRACK_READING",
+            ]
+        )
+    }
+
+    func testTextDisplaySectionTitlesMatchAndroidRenderedMenu() {
+        XCTAssertEqual(
+            TextDisplaySettingsPresentation.Section.allCases.map(\.titleDefault),
+            [
+                "Formatting",
+                "Appearance",
+                "Bookmark & My Notes settings",
+                "Page Scrolling",
+                "Reading & Memorization",
+            ]
+        )
+    }
+
+    func testTextDisplayRowTitlesMatchAndroidXml() {
+        let titlesByKey = Dictionary(
+            uniqueKeysWithValues: TextDisplaySettingsPresentation.androidRows.map {
+                ($0.androidKey, $0.titleDefault)
+            }
+        )
+
+        XCTAssertEqual(
+            titlesByKey,
+            [
+                "COLORS": "Color settings",
+                "FONTSIZE": "Font size",
+                "FONTFAMILY": "Font family",
+                "LINE_SPACING": "Line spacing",
+                "REDLETTERS": "Red Letter",
+                "MARGINSIZE": "Change margin size",
+                "TOPMARGIN": "Top margin",
+                "JUSTIFY": "Justify-align text",
+                "HYPHENATION": "Hyphenation",
+                "VERSEPERLINE": "One verse per line",
+                "STRONGS": "Strong's numbers",
+                "MORPH": "Morphological codes",
+                "NON_STRONGS_WORD_ITALIC": "Italicize added words",
+                "FOOTNOTES": "Footnotes",
+                "FOOTNOTES_INLINE": "Footnotes inline",
+                "XREFS": "Cross references",
+                "EXPAND_XREFS": "Inline cross references",
+                "VERSENUMBERS": "Chapter & verse numbers",
+                "SECTIONTITLES": "Section titles",
+                "TITLE_SCROLL_BUTTON": "Title scroll button",
+                "PAGENUMBER": "Relative page number",
+                "INFINITE_SCROLL": "Infinite scroll",
+                "PAGE_SCROLL_AMOUNT": "Page scroll amount",
+                "SCROLL_HELPER_LINES": "Scroll helper lines",
+                "SCROLL_HELPER_LINE_STYLE": "Helper line style",
+                "PAGE_BUTTONS": "Page scroll buttons",
+                "ORDINALS": "Show ordinal numbers",
+                "BOOKMARKS_SHOW": "Show bookmarks",
+                "MYNOTES": "Show My Note icons",
+                "AI_DOC_MARKERS": "Show AI document markers",
+                "BOOKMARKS_HIDELABELS": "Hide specified labels",
+                "MARK_AS_READ_BUTTON": "Mark as read button",
+                "MEMORIZATION_INDICATORS": "Memorization indicators",
+                "AUTO_TRACK_READING": "Auto-track reading",
+            ]
+        )
+    }
+
+    func testTextDisplayVisibleRowsMatchAndroidScopeVisibility() {
+        let windowVisibleRows = [
+            "STRONGS",
+            "MORPH",
+            "NON_STRONGS_WORD_ITALIC",
+            "FOOTNOTES",
+            "FOOTNOTES_INLINE",
+            "XREFS",
+            "EXPAND_XREFS",
+            "SECTIONTITLES",
+            "TITLE_SCROLL_BUTTON",
+            "VERSENUMBERS",
+            "COLORS",
+            "FONTSIZE",
+            "FONTFAMILY",
+            "MARGINSIZE",
+            "TOPMARGIN",
+            "LINE_SPACING",
+            "REDLETTERS",
+            "VERSEPERLINE",
+            "JUSTIFY",
+            "HYPHENATION",
+            "PAGENUMBER",
+            "BOOKMARKS_SHOW",
+            "MYNOTES",
+            "BOOKMARKS_HIDELABELS",
+        ]
+        let workspaceVisibleRows = windowVisibleRows
+        let globalVisibleRows = windowVisibleRows
+
+        XCTAssertEqual(TextDisplaySettingsPresentation.iosWindowVisibleAndroidKeys, windowVisibleRows)
+        XCTAssertEqual(TextDisplaySettingsPresentation.iosWorkspaceVisibleAndroidKeys, workspaceVisibleRows)
+        XCTAssertEqual(TextDisplaySettingsPresentation.iosGlobalVisibleAndroidKeys, globalVisibleRows)
+    }
+
+    func testTextDisplayImplementedRowsExposeSupportedIosConfigKeys() {
+        XCTAssertTrue(TextDisplaySettingsPresentation.implementedAndroidKeys.contains("COLORS"))
+        XCTAssertTrue(TextDisplaySettingsPresentation.implementedAndroidKeys.contains("MARGINSIZE"))
+        XCTAssertTrue(TextDisplaySettingsPresentation.implementedAndroidKeys.contains("TOPMARGIN"))
+        XCTAssertTrue(TextDisplaySettingsPresentation.implementedAndroidKeys.contains("PAGENUMBER"))
+        XCTAssertTrue(TextDisplaySettingsPresentation.implementedAndroidKeys.contains("BOOKMARKS_HIDELABELS"))
+    }
+
+    func testTextDisplaySliderIntegerRoundsSteppedFloatingPointValues() {
+        XCTAssertEqual(TextDisplaySettingsView.sliderInteger(639.999999999, fallback: 600), 640)
+        XCTAssertEqual(TextDisplaySettingsView.sliderInteger(640.000000001, fallback: 600), 640)
+        XCTAssertEqual(TextDisplaySettingsView.sliderInteger(.nan, fallback: 600), 600)
+    }
+
+    func testTextDisplayDeferredRowsAreTrackedByIssue174() {
+        let deferredRows = TextDisplaySettingsPresentation.androidRows
+            .filter { $0.disposition == .deferred }
+
+        XCTAssertEqual(
+            deferredRows.map(\.androidKey),
+            [
+                "NON_STRONGS_WORD_ITALIC",
+                "TITLE_SCROLL_BUTTON",
+                "INFINITE_SCROLL",
+                "PAGE_SCROLL_AMOUNT",
+                "ORDINALS",
+                "AI_DOC_MARKERS",
+                "MARK_AS_READ_BUTTON",
+                "MEMORIZATION_INDICATORS",
+            ]
+        )
+        XCTAssertTrue(deferredRows.allSatisfy { $0.trackingIssueNumber == 174 })
+    }
+
+    func testTextDisplayEinkRowsAreDocumentedPlatformDivergences() {
+        XCTAssertEqual(
+            TextDisplaySettingsPresentation.androidRows
+                .filter { $0.disposition == .platformDivergence }
+                .map(\.androidKey),
+            [
+                "SCROLL_HELPER_LINES",
+                "SCROLL_HELPER_LINE_STYLE",
+                "PAGE_BUTTONS",
+            ]
+        )
     }
 }

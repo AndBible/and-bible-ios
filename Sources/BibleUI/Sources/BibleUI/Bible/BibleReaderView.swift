@@ -107,6 +107,7 @@ public struct BibleReaderView: View {
     /// Reader-stack destinations opened from global reader actions.
     enum ReaderDestination: String, Identifiable, Hashable {
         case settings
+        case textOptions
 
         var id: String { rawValue }
     }
@@ -147,6 +148,7 @@ public struct BibleReaderView: View {
         case history
         case readingPlans
         case settings
+        case textOptions
         case workspaces
         case downloads
         case epubLibrary
@@ -233,6 +235,9 @@ public struct BibleReaderView: View {
 
     /// App-level text-display defaults edited from the full Application Settings flow.
     @State private var globalDisplaySettings: TextDisplaySettings = .appDefaults
+
+    /// Window-scoped text-display state edited from Android's reader All Text Options route.
+    @State private var windowDisplaySettings: TextDisplaySettings = .appDefaults
 
     /// Effective night-mode value currently applied to pane controllers and overlays.
     @State private var nightMode = false
@@ -394,6 +399,28 @@ public struct BibleReaderView: View {
     /// Captures the window that should own the next pane-scoped presentation.
     private func setPanePresentationTarget(_ windowId: UUID?) {
         panePresentationTargetWindowId = windowId ?? windowManager.activeWindow?.id
+    }
+
+    /// Window captured for the currently presented pane-scoped destination, if it is still loaded.
+    private var panePresentationTargetWindow: Window? {
+        guard let panePresentationTargetWindowId else {
+            return windowManager.activeWindow
+        }
+        return windowManager.allWindows.first { $0.id == panePresentationTargetWindowId }
+    }
+
+    /// Android-style window-level All Text Options navigation title for the captured pane.
+    private var textOptionsWindowTitle: String {
+        let titleFormat = String(
+            localized: "window_text_display_settings_title",
+            defaultValue: "Text options - Window %d"
+        )
+        guard let window = panePresentationTargetWindow else {
+            return String.localizedStringWithFormat(titleFormat, 1)
+        }
+        let position = windowManager.allWindows.firstIndex { $0.id == window.id }
+            .map { $0 + 1 } ?? (window.orderNumber + 1)
+        return String.localizedStringWithFormat(titleFormat, position)
     }
 
     /// User-visible reference string for the currently focused Bible location.
@@ -805,11 +832,10 @@ public struct BibleReaderView: View {
         switch destination {
         case .settings:
             SettingsView(
-                displaySettings: $globalDisplaySettings,
                 nightMode: $nightMode,
                 nightModeMode: $nightModeMode,
                 readingProgressController: panePresentationController,
-                onSettingsChanged: applyGlobalDisplaySettingsChange
+                onSettingsChanged: applyApplicationPreferenceChange
             )
             #if os(iOS)
             .toolbar(.visible, for: .navigationBar)
@@ -818,6 +844,20 @@ public struct BibleReaderView: View {
             // pushed, so re-emit the compact reader-state export here. This keeps reader routing
             // tokens (for example `readerSheet=none;readerDestination=settings`) observable by UI
             // tests on the pushed destination without exposing reader internals to SettingsView.
+            .overlay(alignment: .topLeading) {
+                readerRenderedContentStateExport
+            }
+        case .textOptions:
+            TextDisplaySettingsView(
+                settings: $windowDisplaySettings,
+                navigationTitle: textOptionsWindowTitle,
+                onChange: applyWindowDisplaySettingsChange
+            )
+            #if os(iOS)
+            .toolbar(.visible, for: .navigationBar)
+            #endif
+            // Mirror the Settings destination's state export so UI tests can distinguish the
+            // window-level All Text Options route from global Application Preferences.
             .overlay(alignment: .topLeading) {
                 readerRenderedContentStateExport
             }
@@ -986,6 +1026,24 @@ public struct BibleReaderView: View {
     /// Opens Application preferences as an integrated reader-stack destination.
     private func presentSettings(from windowId: UUID? = nil) {
         presentReaderDestination(.settings, from: windowId)
+    }
+
+    /**
+     Opens Android's per-window All Text Options route as window-scoped text-display settings.
+
+     - Parameter windowId: Pane whose reader stack should own the pushed destination.
+     - Side effects:
+       - refreshes the window editor state from the current inheritance chain
+       - pushes the `.textOptions` reader destination
+     - Failure modes: If no active window exists, the editor still opens against workspace/global
+       fallback values and writes become no-ops in `applyWindowDisplaySettingsChange`.
+     */
+    private func presentTextOptions(from windowId: UUID? = nil) {
+        let targetWindow = windowId.flatMap { id in
+            windowManager.allWindows.first { $0.id == id }
+        } ?? windowManager.activeWindow
+        windowDisplaySettings = resolvedDisplaySettings(for: targetWindow)
+        presentReaderDestination(.textOptions, from: targetWindow?.id ?? windowId)
     }
 
     /**
@@ -1610,6 +1668,8 @@ public struct BibleReaderView: View {
                 presentReaderSheet(.readingPlans, from: windowManager.activeWindow?.id)
             case .settings:
                 presentSettings(from: windowManager.activeWindow?.id)
+            case .textOptions:
+                presentTextOptions(from: windowManager.activeWindow?.id)
             case .workspaces:
                 presentReaderSheet(.workspaces, from: windowManager.activeWindow?.id)
             case .downloads:
@@ -1933,7 +1993,7 @@ public struct BibleReaderView: View {
         case .toggleVerseNumbers:
             toggleDisplaySetting(\.showVerseNumbers, default: true)
         case .openTextOptions:
-            dismissReaderOverflowMenuAndQueue(.settings)
+            dismissReaderOverflowMenuAndQueue(.textOptions)
         }
     }
 
@@ -2203,12 +2263,12 @@ public struct BibleReaderView: View {
         }
     }
 
-    /// Current effective Section Titles toggle after resolving workspace defaults.
+    /// Current effective Section Titles toggle after resolving window/workspace/global defaults.
     private var sectionTitlesEnabled: Bool {
         displaySettings.showSectionTitles ?? TextDisplaySettings.appDefaults.showSectionTitles ?? true
     }
 
-    /// Current effective Chapter & Verse Numbers toggle after resolving workspace defaults.
+    /// Current effective Chapter & Verse Numbers toggle after resolving window/workspace/global defaults.
     private var verseNumbersEnabled: Bool {
         displaySettings.showVerseNumbers ?? TextDisplaySettings.appDefaults.showVerseNumbers ?? true
     }
@@ -2323,46 +2383,47 @@ public struct BibleReaderView: View {
      Applies a Strong's display mode to the active window only and refreshes that pane.
 
      - Parameter mode: Raw Vue.js/config mode value (`0...3`) matching `StrongsMode`.
-     - Side effects: Persists the updated Strong's mode into the active window's page-manager
-       overrides, refreshes the active pane controller, and re-syncs the focused toolbar state.
-     - Failure modes: If no active window or page manager exists, the method only updates the
-       in-memory focused settings state. SwiftData save failures are intentionally swallowed.
+     - Side effects: Persists the updated Strong's mode through the window-scope settings helper,
+       refreshes the active pane controller, and re-syncs focused toolbar state.
+     - Failure modes: If no active window or page manager exists, the persistence helper performs
+       only in-memory refreshes. SwiftData save failures are intentionally swallowed.
      */
     private func applyStrongsMode(_ mode: Int) {
-        if let activeWindow = windowManager.activeWindow,
-           let pageManager = activeWindow.pageManager {
-            var windowSettings = pageManager.textDisplaySettings ?? TextDisplaySettings()
-            windowSettings.strongsMode = mode
-            pageManager.textDisplaySettings = windowSettings
-            try? modelContext.save()
-
-            let resolved = resolvedDisplaySettings(for: activeWindow)
-            displaySettings = resolved
-            if let ctrl = controller(for: activeWindow.id) {
-                ctrl.updateDisplaySettings(resolved, nightMode: nightMode)
-            }
-            return
-        }
-
-        displaySettings.strongsMode = mode
+        let targetWindow = windowManager.activeWindow
+        let previousWindowSettings = resolvedDisplaySettings(for: targetWindow)
+        var nextWindowSettings = previousWindowSettings
+        nextWindowSettings.strongsMode = mode
+        persistWindowDisplaySettings(
+            nextWindowSettings,
+            for: targetWindow,
+            previousResolvedSettings: previousWindowSettings
+        )
     }
 
     /**
-     Toggles one optional Boolean text-display field and pushes the updated value to all readers.
+     Toggles one optional Boolean text-display field for the active window.
 
      - Parameters:
        - keyPath: Writable `TextDisplaySettings` field to flip.
        - defaultValue: Effective fallback used when the current value is unset.
+     - Side effects: Persists the updated field through the window-scope settings helper and
+       refreshes the affected pane.
+     - Failure modes: Missing active window results in an in-memory refresh only.
      */
     private func toggleDisplaySetting(
         _ keyPath: WritableKeyPath<TextDisplaySettings, Bool?>,
         default defaultValue: Bool
     ) {
-        let previousWorkspaceSettings = resolvedWorkspaceDisplaySettings()
-        let currentValue = previousWorkspaceSettings[keyPath: keyPath] ?? defaultValue
-        var workspaceSettings = windowManager.activeWorkspace?.textDisplaySettings ?? TextDisplaySettings()
-        workspaceSettings[keyPath: keyPath] = !currentValue
-        persistWorkspaceDisplaySettings(workspaceSettings, previousResolvedSettings: previousWorkspaceSettings)
+        let targetWindow = windowManager.activeWindow
+        let previousWindowSettings = resolvedDisplaySettings(for: targetWindow)
+        let currentValue = previousWindowSettings[keyPath: keyPath] ?? defaultValue
+        var nextWindowSettings = previousWindowSettings
+        nextWindowSettings[keyPath: keyPath] = !currentValue
+        persistWindowDisplaySettings(
+            nextWindowSettings,
+            for: targetWindow,
+            previousResolvedSettings: previousWindowSettings
+        )
     }
 
     /**
@@ -2390,70 +2451,101 @@ public struct BibleReaderView: View {
     }
 
     /**
-     Persists one workspace-scope settings value without copying inherited global theme colors.
+     Persists one window-scope All Text Options value and refreshes that pane.
+
+     This mirrors Android's `SettingsLevel.WINDOW`: the edited value is stored on the target
+     `PageManager`, while matching parent values are cleared so workspace/global inheritance still
+     works. Theme colors are only stored when the window already owned color overrides or the user
+     changed a color during this edit.
 
      - Parameters:
-       - workspaceSettings: Workspace-level overrides to persist.
-       - previousResolvedSettings: Effective workspace settings before this mutation.
+       - windowSettings: Effective window-level settings from the editor.
+       - window: Target window whose page manager should receive overrides.
+       - previousResolvedSettings: Effective window settings before this mutation.
+     - Side effects:
+       - mutates `window.pageManager.textDisplaySettings`
+       - attempts a SwiftData save
+       - refreshes the target reader controller and active toolbar settings
+     - Failure modes: Missing target window or page manager causes an in-memory refresh only;
+       SwiftData save failures are swallowed to match surrounding persistence helpers.
      */
-    private func persistWorkspaceDisplaySettings(
-        _ workspaceSettings: TextDisplaySettings,
+    private func persistWindowDisplaySettings(
+        _ windowSettings: TextDisplaySettings,
+        for window: Window?,
         previousResolvedSettings: TextDisplaySettings
     ) {
-        if let workspace = windowManager.activeWorkspace {
-            let hadWorkspaceThemeColors = workspace.textDisplaySettings?.hasThemeColorOverrides ?? false
-            var workspaceScopedSettings = workspaceSettings
-            if !hadWorkspaceThemeColors {
-                workspaceScopedSettings.clearThemeColors()
-            }
-            _ = workspaceScopedSettings.clearRedundantOverrides(matching: globalDisplaySettings)
-            if hadWorkspaceThemeColors {
-                workspaceScopedSettings.restoreThemeColors(from: workspaceSettings)
-            }
-
-            workspace.textDisplaySettings = workspaceScopedSettings
-            let resolvedSettings = TextDisplaySettings.fullyResolved(
-                window: nil,
-                workspace: workspaceScopedSettings,
-                global: globalDisplaySettings
-            )
-            for window in windowManager.allWindows {
-                guard var windowSettings = window.pageManager?.textDisplaySettings else {
-                    continue
-                }
-                if windowSettings.clearOverridesMatchingParent(
-                    resolvedSettings,
-                    changedFrom: previousResolvedSettings,
-                    to: resolvedSettings
-                ) {
-                    window.pageManager?.textDisplaySettings = windowSettings
-                }
-            }
-            try? modelContext.save()
+        guard let window,
+              let pageManager = window.pageManager else {
+            syncActiveDisplaySettings()
+            reloadBehaviorPreferences()
+            return
         }
 
-        refreshVisibleControllerDisplaySettings()
-        syncActiveDisplaySettings()
+        let parentSettings = TextDisplaySettings.fullyResolved(
+            window: nil,
+            workspace: window.workspace?.textDisplaySettings ?? windowManager.activeWorkspace?.textDisplaySettings,
+            global: globalDisplaySettings
+        )
+        let hadWindowThemeColors = pageManager.textDisplaySettings?.hasThemeColorOverrides ?? false
+        let changedThemeColors = Self.themeColorsDiffer(windowSettings, previousResolvedSettings)
+        let shouldPersistThemeColors = hadWindowThemeColors || changedThemeColors
+        var windowScopedSettings = windowSettings
+        if !shouldPersistThemeColors {
+            windowScopedSettings.clearThemeColors()
+        }
+        _ = windowScopedSettings.clearRedundantOverrides(matching: parentSettings)
+        if shouldPersistThemeColors {
+            windowScopedSettings.restoreThemeColors(from: windowSettings)
+        }
+
+        pageManager.textDisplaySettings = windowScopedSettings
+        try? modelContext.save()
+
+        let resolvedSettings = resolvedDisplaySettings(for: window)
+        controller(for: window.id)?.updateDisplaySettings(resolvedSettings, nightMode: nightMode)
+        if windowManager.activeWindow?.id == window.id {
+            displaySettings = resolvedSettings
+        }
+        windowDisplaySettings = resolvedSettings
         reloadBehaviorPreferences()
     }
 
     /**
-     Persists app-level text-display defaults and refreshes reader controllers.
+     Persists the target window's All Text Options editor and refreshes visible state.
 
-     This mirrors Android's global text-display layer: application Settings edits the global
-     fallback, while workspace and window overrides remain separate scopes in the inheritance chain.
+     Side effects:
+     - writes `windowDisplaySettings` into the captured window's page-manager overrides
+     - refreshes that pane's reader controller
+     - keeps the active toolbar/display state synchronized
+
+     Failure modes:
+     - if the captured window is gone, the persistence helper performs only in-memory refreshes
+     */
+    private func applyWindowDisplaySettingsChange() {
+        let targetWindow = panePresentationTargetWindow
+        let previousWindowSettings = resolvedDisplaySettings(for: targetWindow)
+        persistWindowDisplaySettings(
+            windowDisplaySettings,
+            for: targetWindow,
+            previousResolvedSettings: previousWindowSettings
+        )
+    }
+
+    /**
+     Refreshes reader controllers after root Application Preferences mutate app-level settings.
+
+     The root settings screen no longer edits global text-display defaults; it only changes
+     Android-parity application preferences such as display chrome, animation, and behavior flags.
+     Refreshing without writing `globalDisplaySettings` keeps text-display persistence scoped to the
+     dedicated Text Options screens while still pushing updated app preferences into visible panes.
 
      - Side effects:
-       - writes `globalDisplaySettings` through `SettingsStore`
-       - pushes each visible reader its own resolved display settings
-       - reloads behavior preferences so non-display settings changed from the same Settings screen
-         stay in sync
-     - Failure modes: Settings-store persistence failures are intentionally swallowed by
-       `SettingsStore`.
+       - pushes each visible reader its resolved display settings and app preference payload
+       - reloads behavior preferences mirrored by the SwiftUI reader shell
+     - Failure modes: Reader refresh failures are handled by the controller update paths; preference
+       reloads fall back through `SettingsStore` defaults.
      */
-    private func applyGlobalDisplaySettingsChange() {
-        let store = SettingsStore(modelContext: modelContext)
-        store.setGlobalTextDisplaySettings(globalDisplaySettings)
+    private func applyApplicationPreferenceChange() {
         refreshVisibleControllerDisplaySettings()
         syncActiveDisplaySettings()
         reloadBehaviorPreferences()
@@ -2463,16 +2555,7 @@ public struct BibleReaderView: View {
     private func resolvedDisplaySettings(for window: Window?) -> TextDisplaySettings {
         TextDisplaySettings.fullyResolved(
             window: window?.pageManager?.textDisplaySettings,
-            workspace: windowManager.activeWorkspace?.textDisplaySettings,
-            global: globalDisplaySettings
-        )
-    }
-
-    /// Resolves the workspace-scoped settings editor state without applying window overrides.
-    private func resolvedWorkspaceDisplaySettings() -> TextDisplaySettings {
-        TextDisplaySettings.fullyResolved(
-            window: nil,
-            workspace: windowManager.activeWorkspace?.textDisplaySettings,
+            workspace: window?.workspace?.textDisplaySettings ?? windowManager.activeWorkspace?.textDisplaySettings,
             global: globalDisplaySettings
         )
     }
@@ -2480,6 +2563,29 @@ public struct BibleReaderView: View {
     /// Re-syncs the focused toolbar/settings state from the current active window.
     private func syncActiveDisplaySettings() {
         displaySettings = resolvedDisplaySettings(for: windowManager.activeWindow)
+        windowDisplaySettings = resolvedDisplaySettings(for: panePresentationTargetWindow ?? windowManager.activeWindow)
+    }
+
+    /**
+     Compares the day/night theme color tuple between two display settings values.
+
+     - Parameters:
+       - lhs: First display settings value.
+       - rhs: Second display settings value.
+     - Returns: `true` when any theme color or noise field differs.
+     - Side effects: none.
+     - Failure modes: This helper cannot fail.
+     */
+    private static func themeColorsDiffer(
+        _ lhs: TextDisplaySettings,
+        _ rhs: TextDisplaySettings
+    ) -> Bool {
+        lhs.dayTextColor != rhs.dayTextColor ||
+            lhs.dayBackground != rhs.dayBackground ||
+            lhs.dayNoise != rhs.dayNoise ||
+            lhs.nightTextColor != rhs.nightTextColor ||
+            lhs.nightBackground != rhs.nightBackground ||
+            lhs.nightNoise != rhs.nightNoise
     }
 
     /// Refreshes each visible reader pane using that pane's own resolved display settings.
