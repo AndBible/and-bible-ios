@@ -18,8 +18,11 @@ import SwiftUI
 
  Side effects:
  - mutates local sheet state for selected categories and modes
- - invokes `onCancel` when dismissed
+ - invokes `onCancel` from the explicit Cancel button; parent sheet dismissal cleanup handles
+   interactive dismissal when no apply is running
  - invokes `onApply` only after the user confirms selections that include Restore mode
+ - disables interactive dismissal while `isApplying` is true so staged database files cannot be
+   cleaned up while the parent is applying them
 
  Failure modes:
  - unsupported sections are disabled in the UI and cannot be emitted in `onApply`
@@ -168,6 +171,7 @@ struct AndroidDatabaseBackupImportSheet: View {
                 )
             }
         }
+        .interactiveDismissDisabled(isApplying)
     }
 
     /**

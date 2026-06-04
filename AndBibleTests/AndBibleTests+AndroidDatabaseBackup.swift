@@ -266,6 +266,53 @@ extension AndBibleTests {
     }
 
     /**
+     Verifies fail-closed ZIP parsing for malformed central-directory metadata.
+
+     Setup:
+     - builds a valid Android-style stored ZIP fixture
+     - corrupts the end-of-central-directory size so declared central-directory bounds no longer
+       contain the declared entry
+     - corrupts a central-directory filename to invalid UTF-8 while leaving the local header intact
+
+     Expected result:
+     - central-directory size mismatches fail before the reader walks into bytes outside the
+       declared directory
+     - invalid central-directory names fail as malformed ZIP data rather than being silently skipped
+
+     Failure meaning:
+     - iOS could treat corrupted Android backup archives as incomplete but valid inputs, producing
+       misleading backup errors or hiding required entries.
+     */
+    func testZipArchiveReaderRejectsMalformedCentralDirectoryBoundsAndNames() throws {
+        let archive = try makeStoredZip(entries: [
+            ("AndBibleBackupManifest.json", Data("{}".utf8)),
+        ])
+
+        var invalidSizeArchive = archive
+        let sizeRecordOffset = try endOfCentralDirectoryOffset(in: invalidSizeArchive)
+        replaceUInt32(0, at: sizeRecordOffset + 12, in: &invalidSizeArchive)
+
+        XCTAssertThrowsError(try ZipArchiveReader.entries(in: invalidSizeArchive)) { error in
+            XCTAssertEqual(
+                error as? ZipArchiveReaderError,
+                .invalidArchive("Central directory entry is truncated")
+            )
+        }
+
+        var invalidNameArchive = archive
+        let nameRecordOffset = try endOfCentralDirectoryOffset(in: invalidNameArchive)
+        let centralDirectoryOffset = Int(readUInt32(invalidNameArchive, at: nameRecordOffset + 16))
+        invalidNameArchive[centralDirectoryOffset + 46] = 0xff
+
+        XCTAssertThrowsError(try ZipArchiveReader.entries(in: invalidNameArchive)) { error in
+            XCTAssertEqual(
+                error as? ZipArchiveReaderError,
+                .invalidArchive("Central directory entry name is not UTF-8")
+            )
+        }
+    }
+
+    /**
      Verifies that newer Android database versions are visible but cannot be applied.
 
      Setup:
@@ -560,5 +607,61 @@ extension AndBibleTests {
     private func appendUInt32(_ value: UInt32, to data: inout Data) {
         var littleEndian = value.littleEndian
         withUnsafeBytes(of: &littleEndian) { data.append(contentsOf: $0) }
+    }
+
+    /**
+     Replaces one little-endian 32-bit integer inside a ZIP fixture.
+
+     - Parameters:
+       - value: Value to write.
+       - offset: Byte offset where the integer starts.
+       - data: Fixture bytes to mutate.
+     - Side effects: Mutates `data` in place.
+     - Failure modes: Callers must pass a valid four-byte range.
+     */
+    private func replaceUInt32(_ value: UInt32, at offset: Int, in data: inout Data) {
+        var littleEndian = value.littleEndian
+        withUnsafeBytes(of: &littleEndian) { bytes in
+            data.replaceSubrange(offset..<(offset + 4), with: bytes)
+        }
+    }
+
+    /**
+     Finds the end-of-central-directory signature in a ZIP fixture.
+
+     - Parameter data: Raw ZIP fixture bytes.
+     - Returns: Offset of the EOCD signature.
+     - Side effects: none.
+     - Failure modes: Throws if the fixture does not contain an EOCD record in the legal search
+       range.
+     */
+    private func endOfCentralDirectoryOffset(in data: Data) throws -> Int {
+        let minimumOffset = max(0, data.count - 65_557)
+        var offset = data.count - 22
+        while offset >= minimumOffset {
+            if readUInt32(data, at: offset) == 0x0605_4b50 {
+                return offset
+            }
+            offset -= 1
+        }
+        throw ZipArchiveReaderError.missingCentralDirectory
+    }
+
+    /**
+     Reads one little-endian 32-bit integer from a ZIP fixture.
+
+     - Parameters:
+       - data: Fixture bytes.
+       - offset: Byte offset where the integer starts.
+     - Returns: Decoded integer value.
+     - Side effects: none.
+     - Failure modes: Callers must pass a valid four-byte range.
+     */
+    private func readUInt32(_ data: Data, at offset: Int) -> UInt32 {
+        let b0 = UInt32(data[offset])
+        let b1 = UInt32(data[offset + 1]) << 8
+        let b2 = UInt32(data[offset + 2]) << 16
+        let b3 = UInt32(data[offset + 3]) << 24
+        return b0 | b1 | b2 | b3
     }
 }

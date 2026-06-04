@@ -359,7 +359,7 @@ public struct ImportExportView: View {
             isImporting = false
 
         case .failure(let error):
-            statusMessage = String(localized: "error_prefix_\(error.localizedDescription)")
+            statusMessage = localizedErrorMessage(error)
         }
     }
 
@@ -396,15 +396,21 @@ public struct ImportExportView: View {
         do {
             androidBackupArchive = try androidBackupService.loadArchive(from: data)
         } catch {
-            statusMessage = String(localized: "error_prefix_\(error.localizedDescription)")
+            statusMessage = localizedErrorMessage(error)
         }
     }
 
     /**
      Applies selected Android backup sections and reports the completed category summaries.
 
+     This method flips the applying state synchronously, then schedules the restore/import work on
+     the main actor after one yield so SwiftUI can render the disabled controls and progress state
+     before the potentially expensive SwiftData rewrite starts.
+
      - Parameter selections: Supported category/mode pairs emitted by the selection sheet.
      - Side effects:
+       - mutates `isApplyingAndroidBackup` immediately so the sheet disables controls and
+         interactive dismissal
        - mutates selected local SwiftData categories through `AndroidDatabaseBackupService`
        - disables and clears remote-sync state for every applied Android-backed category
        - removes the staged archive directory after success or failure
@@ -418,19 +424,22 @@ public struct ImportExportView: View {
 
         isApplyingAndroidBackup = true
         statusMessage = nil
-        do {
-            let report = try androidBackupService.apply(
-                archive: archive,
-                selections: selections,
-                modelContext: modelContext,
-                settingsStore: SettingsStore(modelContext: modelContext)
-            )
-            statusMessage = androidBackupStatusMessage(for: report)
-        } catch {
-            statusMessage = String(localized: "error_prefix_\(error.localizedDescription)")
+        Task { @MainActor in
+            await Task.yield()
+            do {
+                let report = try androidBackupService.apply(
+                    archive: archive,
+                    selections: selections,
+                    modelContext: modelContext,
+                    settingsStore: SettingsStore(modelContext: modelContext)
+                )
+                statusMessage = androidBackupStatusMessage(for: report)
+            } catch {
+                statusMessage = localizedErrorMessage(error)
+            }
+            isApplyingAndroidBackup = false
+            dismissAndroidBackupArchive()
         }
-        isApplyingAndroidBackup = false
-        dismissAndroidBackupArchive()
     }
 
     /**
@@ -452,6 +461,26 @@ public struct ImportExportView: View {
         return String(
             localized: "android_backup_applied_summary",
             defaultValue: "Android backup applied: \(summaries.joined(separator: "; "))"
+        )
+    }
+
+    /**
+     Formats an import/export error with the localized shared error prefix.
+
+     `String(localized:)` interpolation is easy to misuse for this shared `%@` key. This helper
+     resolves the stable `error_prefix_%@` format first, then applies the concrete error message as
+     an argument so every import/export error path uses the same localized surface.
+
+     - Parameter error: Error whose localized description should be shown to the user.
+     - Returns: Localized status text containing the shared error prefix and error message.
+     - Side effects: none.
+     - Failure modes: Falls back to the key's untranslated format if the app bundle lacks a
+       localization entry.
+     */
+    private func localizedErrorMessage(_ error: Error) -> String {
+        String(
+            format: NSLocalizedString("error_prefix_%@", comment: "Import/export error prefix"),
+            error.localizedDescription
         )
     }
 
@@ -506,13 +535,13 @@ public struct ImportExportView: View {
                 let moduleName = try repo.installFromZip(at: url)
                 statusMessage = String(localized: "installed_module_\(moduleName)")
             } catch {
-                statusMessage = String(localized: "error_prefix_\(error.localizedDescription)")
+                statusMessage = localizedErrorMessage(error)
             }
 
             isInstallingModule = false
 
         case .failure(let error):
-            statusMessage = String(localized: "error_prefix_\(error.localizedDescription)")
+            statusMessage = localizedErrorMessage(error)
         }
     }
 
@@ -539,13 +568,13 @@ public struct ImportExportView: View {
                     statusMessage = String(localized: "installed_epub_\(identifier)")
                 }
             } catch {
-                statusMessage = String(localized: "error_prefix_\(error.localizedDescription)")
+                statusMessage = localizedErrorMessage(error)
             }
 
             isInstallingEpub = false
 
         case .failure(let error):
-            statusMessage = String(localized: "error_prefix_\(error.localizedDescription)")
+            statusMessage = localizedErrorMessage(error)
         }
     }
 

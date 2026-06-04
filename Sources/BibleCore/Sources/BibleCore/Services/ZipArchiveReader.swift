@@ -93,11 +93,12 @@ public enum ZipArchiveReader {
               centralDirectoryOffset + centralDirectorySize <= data.count else {
             throw ZipArchiveReaderError.invalidArchive("Central directory points outside archive")
         }
+        let centralDirectoryEnd = centralDirectoryOffset + centralDirectorySize
 
         var entries: [ZipArchiveEntry] = []
         var offset = centralDirectoryOffset
         for _ in 0..<entryCount {
-            guard offset + 46 <= data.count else {
+            guard offset + 46 <= centralDirectoryEnd else {
                 throw ZipArchiveReaderError.invalidArchive("Central directory entry is truncated")
             }
             guard readUInt32(data, at: offset) == centralDirectoryHeaderSignature else {
@@ -120,12 +121,14 @@ public enum ZipArchiveReader {
 
             let nameStart = offset + 46
             let nameEnd = nameStart + nameLength
-            guard nameEnd <= data.count else {
+            guard nameEnd <= centralDirectoryEnd else {
                 throw ZipArchiveReaderError.invalidArchive("Central directory entry name is truncated")
             }
-            let name = String(data: data[nameStart..<nameEnd], encoding: .utf8) ?? ""
+            guard let name = String(data: data[nameStart..<nameEnd], encoding: .utf8) else {
+                throw ZipArchiveReaderError.invalidArchive("Central directory entry name is not UTF-8")
+            }
             let nextOffset = nameEnd + extraLength + commentLength
-            guard nextOffset <= data.count else {
+            guard nextOffset <= centralDirectoryEnd else {
                 throw ZipArchiveReaderError.invalidArchive("Central directory entry metadata is truncated")
             }
             offset = nextOffset
@@ -153,6 +156,9 @@ public enum ZipArchiveReader {
                 throw ZipArchiveReaderError.unsupportedCompressionMethod(method)
             }
             entries.append(ZipArchiveEntry(name: name, data: fileData))
+        }
+        guard offset == centralDirectoryEnd else {
+            throw ZipArchiveReaderError.invalidArchive("Central directory contains trailing bytes")
         }
 
         return entries
