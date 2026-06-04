@@ -598,14 +598,18 @@ public final class AndroidDatabaseBackupService {
      - Failure modes:
        - throws `AndroidDatabaseBackupError` for missing manifests, non-database backups, invalid
          SQLite files, or archives without recognizable database sections
+       - maps ZIP parser failures into user-facing archive reasons before surfacing them through
+         Settings status text
        - throws file-system errors when temporary staging cannot be created
      */
     public func loadArchive(from data: Data) throws -> AndroidDatabaseBackupArchive {
         let entries: [ZipArchiveEntry]
         do {
             entries = try ZipArchiveReader.entries(in: data)
+        } catch let error as ZipArchiveReaderError {
+            throw AndroidDatabaseBackupError.invalidArchive(Self.archiveErrorMessage(for: error))
         } catch {
-            throw AndroidDatabaseBackupError.invalidArchive(String(describing: error))
+            throw AndroidDatabaseBackupError.invalidArchive(error.localizedDescription)
         }
 
         var entriesByName: [String: Data] = [:]
@@ -774,6 +778,31 @@ public final class AndroidDatabaseBackupService {
             manifestVersion: dto.manifestVersion ?? 1,
             andBibleVersion: dto.andBibleVersion
         )
+    }
+
+    /**
+     Converts low-level ZIP parser errors into Settings-safe archive failure messages.
+
+     `ZipArchiveReaderError` is useful for tests and parser internals but its enum case names are
+     not suitable for user-facing import status text. This mapper preserves concrete malformed
+     archive reasons while replacing enum-only failures with concise explanations.
+
+     - Parameter error: ZIP parser error raised while loading an Android backup file.
+     - Returns: User-facing archive error detail used by `AndroidDatabaseBackupError.invalidArchive`.
+     - Side effects: none.
+     - Failure modes: This helper cannot fail.
+     */
+    private static func archiveErrorMessage(for error: ZipArchiveReaderError) -> String {
+        switch error {
+        case .missingCentralDirectory:
+            return "The file is not a ZIP archive or its central directory is missing."
+        case .invalidArchive(let reason):
+            return reason
+        case .unsupportedCompressionMethod(let method):
+            return "ZIP entry uses unsupported compression method \(method)."
+        case .decompressionFailed:
+            return "A compressed ZIP entry could not be decompressed."
+        }
     }
 
     /**

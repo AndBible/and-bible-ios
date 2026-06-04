@@ -269,10 +269,12 @@ extension AndBibleTests {
      Verifies Android backup loader failures for malformed archive inputs.
 
      Setup:
+     - passes bytes that are not ZIP-shaped into the Android backup loader
      - builds one ZIP without `AndBibleBackupManifest.json`
      - builds one ZIP whose bookmark entry is not a SQLite database
 
      Expected result:
+     - malformed ZIP inputs surface a clean user-facing archive reason
      - missing manifests fail as `missingManifest`
      - invalid SQLite entries fail before section selection or restore can start
 
@@ -281,6 +283,13 @@ extension AndBibleTests {
      */
     func testAndroidDatabaseBackupRejectsMissingManifestAndInvalidSQLite() throws {
         let service = AndroidDatabaseBackupService()
+        XCTAssertThrowsError(try service.loadArchive(from: Data("not zip".utf8))) { error in
+            XCTAssertEqual(
+                error as? AndroidDatabaseBackupError,
+                .invalidArchive("The file is not a ZIP archive or its central directory is missing.")
+            )
+        }
+
         let missingManifestArchive = try makeStoredZip(entries: [
             ("db/bookmarks.sqlite3", Data()),
         ])
@@ -373,6 +382,7 @@ extension AndBibleTests {
      Expected result:
      - a single entry over the per-entry cap fails as malformed archive data
      - multiple entries below the per-entry cap but above the aggregate cap also fail
+     - Android backup service error mapping preserves concrete ZIP parser reasons
 
      Failure meaning:
      - iOS could allocate excessive memory while importing a crafted Android backup archive before
@@ -383,7 +393,7 @@ extension AndBibleTests {
             ("db/bookmarks.sqlite3", Data([0x01])),
         ])
         try replaceCentralDirectorySizes(
-            compressedSize: 1,
+            compressedSize: UInt32(300 * 1024 * 1024),
             uncompressedSize: UInt32(300 * 1024 * 1024),
             for: "db/bookmarks.sqlite3",
             in: &oversizedEntryArchive
@@ -403,7 +413,7 @@ extension AndBibleTests {
         ])
         for entryName in ["db/bookmarks.sqlite3", "db/workspaces.sqlite3", "db/mydocuments.sqlite3"] {
             try replaceCentralDirectorySizes(
-                compressedSize: 1,
+                compressedSize: UInt32(200 * 1024 * 1024),
                 uncompressedSize: UInt32(200 * 1024 * 1024),
                 for: entryName,
                 in: &oversizedTotalArchive
@@ -414,6 +424,72 @@ extension AndBibleTests {
             XCTAssertEqual(
                 error as? ZipArchiveReaderError,
                 .invalidArchive("ZIP archive exceeds maximum supported size")
+            )
+        }
+
+        let service = AndroidDatabaseBackupService()
+        XCTAssertThrowsError(try service.loadArchive(from: oversizedEntryArchive)) { error in
+            XCTAssertEqual(
+                error as? AndroidDatabaseBackupError,
+                .invalidArchive("ZIP entry exceeds maximum supported size")
+            )
+        }
+    }
+
+    /**
+     Verifies fail-closed ZIP parsing when central-directory sizes do not match materialized data.
+
+     Setup:
+     - mutates a stored entry so compressed and uncompressed size declarations disagree
+     - mutates a deflated entry so inflated bytes are smaller than the central-directory declaration
+
+     Expected result:
+     - stored entries require identical compressed and uncompressed sizes
+     - deflated entries require actual inflated byte count to match declared uncompressed size
+
+     Failure meaning:
+     - ZIP bomb accounting could be bypassed, or iOS could accept truncated Android backup payloads
+       as valid import data.
+     */
+    func testZipArchiveReaderRejectsInconsistentDeclaredPayloadSizes() throws {
+        var storedMismatchArchive = try makeStoredZip(entries: [
+            ("db/bookmarks.sqlite3", Data([0x01, 0x02, 0x03])),
+        ])
+        try replaceCentralDirectorySizes(
+            compressedSize: 3,
+            uncompressedSize: 2,
+            for: "db/bookmarks.sqlite3",
+            in: &storedMismatchArchive
+        )
+
+        XCTAssertThrowsError(try ZipArchiveReader.entries(in: storedMismatchArchive)) { error in
+            XCTAssertEqual(
+                error as? ZipArchiveReaderError,
+                .invalidArchive("Stored ZIP entry size metadata is inconsistent")
+            )
+        }
+
+        let payload = Data("deflated backup payload".utf8)
+        let compressedPayload = Data([
+            75, 73, 77, 203, 73, 44, 73, 77, 81, 72, 74, 76, 206,
+            46, 45, 80, 40, 72, 172, 204, 201, 79, 76, 1, 0,
+        ])
+        var deflatedMismatchArchive = try makeDeflatedDescriptorZip(
+            name: "db/bookmarks.sqlite3",
+            compressedData: compressedPayload,
+            uncompressedData: payload
+        )
+        try replaceCentralDirectorySizes(
+            compressedSize: UInt32(compressedPayload.count),
+            uncompressedSize: UInt32(payload.count + 1),
+            for: "db/bookmarks.sqlite3",
+            in: &deflatedMismatchArchive
+        )
+
+        XCTAssertThrowsError(try ZipArchiveReader.entries(in: deflatedMismatchArchive)) { error in
+            XCTAssertEqual(
+                error as? ZipArchiveReaderError,
+                .invalidArchive("Deflated ZIP entry size metadata is inconsistent")
             )
         }
     }

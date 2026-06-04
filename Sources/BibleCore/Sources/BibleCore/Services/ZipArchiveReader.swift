@@ -74,6 +74,17 @@ public enum ZipArchiveReader {
     private static let maximumTotalUncompressedByteCount = 512 * 1024 * 1024
 
     /**
+     Central-directory metadata for one file entry that passed pre-extraction validation.
+     */
+    private struct CentralDirectoryFileEntry {
+        let name: String
+        let method: UInt16
+        let compressedSize: Int
+        let uncompressedSize: Int
+        let localHeaderOffset: Int
+    }
+
+    /**
      Extracts supported file entries from raw ZIP data.
 
      The reader is intentionally eager because Android backup restore needs materialized database
@@ -88,6 +99,8 @@ public enum ZipArchiveReader {
        - throws `ZipArchiveReaderError.invalidArchive` when a header is truncated or inconsistent
        - throws `ZipArchiveReaderError.invalidArchive` when declared entry/archive sizes exceed
          the eager extraction limits
+       - throws `ZipArchiveReaderError.invalidArchive` when materialized entry sizes do not match
+         central-directory declarations
        - throws `ZipArchiveReaderError.unsupportedCompressionMethod` for non-stored/non-deflated entries
        - throws `ZipArchiveReaderError.decompressionFailed` when the C inflater cannot decode an entry
      */
@@ -114,7 +127,7 @@ public enum ZipArchiveReader {
         }
         let centralDirectoryEnd = centralDirectoryOffset + centralDirectorySize
 
-        var entries: [ZipArchiveEntry] = []
+        var fileEntries: [CentralDirectoryFileEntry] = []
         var offset = centralDirectoryOffset
         var totalCompressedSize = 0
         var totalUncompressedSize = 0
@@ -162,34 +175,49 @@ public enum ZipArchiveReader {
             let compressedSize = Int(compressedSizeRaw)
             let uncompressedSize = Int(uncompressedSizeRaw)
             try validateEntrySize(compressedSize: compressedSize, uncompressedSize: uncompressedSize)
+            try validateCompressionMethod(method)
+            if method == 0 {
+                try validateStoredEntrySize(compressedSize: compressedSize, uncompressedSize: uncompressedSize)
+            }
             try accumulateEntrySizes(
                 compressedSize: compressedSize,
                 uncompressedSize: uncompressedSize,
                 totalCompressedSize: &totalCompressedSize,
                 totalUncompressedSize: &totalUncompressedSize
             )
-            let compressedData = try compressedEntryData(
-                archive: data,
-                localHeaderOffset: localHeaderOffset,
-                compressedSize: compressedSize
+            fileEntries.append(
+                CentralDirectoryFileEntry(
+                    name: name,
+                    method: method,
+                    compressedSize: compressedSize,
+                    uncompressedSize: uncompressedSize,
+                    localHeaderOffset: localHeaderOffset
+                )
             )
-
-            let fileData: Data
-            switch method {
-            case 0:
-                fileData = compressedData
-            case 8:
-                fileData = try inflateData(compressedData, uncompressedSize: uncompressedSize)
-            default:
-                throw ZipArchiveReaderError.unsupportedCompressionMethod(method)
-            }
-            entries.append(ZipArchiveEntry(name: name, data: fileData))
         }
         guard offset == centralDirectoryEnd else {
             throw ZipArchiveReaderError.invalidArchive("Central directory contains trailing bytes")
         }
 
-        return entries
+        return try fileEntries.map { entry in
+            let compressedData = try compressedEntryData(
+                archive: data,
+                localHeaderOffset: entry.localHeaderOffset,
+                compressedSize: entry.compressedSize
+            )
+
+            let fileData: Data
+            switch entry.method {
+            case 0:
+                fileData = compressedData
+            case 8:
+                fileData = try inflateData(compressedData, uncompressedSize: entry.uncompressedSize)
+                try validateInflatedEntrySize(fileData.count, expectedSize: entry.uncompressedSize)
+            default:
+                throw ZipArchiveReaderError.unsupportedCompressionMethod(entry.method)
+            }
+            return ZipArchiveEntry(name: entry.name, data: fileData)
+        }
     }
 
     /**
@@ -208,6 +236,19 @@ public enum ZipArchiveReader {
         guard compressedSize <= maximumEntryByteCount,
               uncompressedSize <= maximumEntryByteCount else {
             throw ZipArchiveReaderError.invalidArchive("ZIP entry exceeds maximum supported size")
+        }
+    }
+
+    /**
+     Validates that one central-directory entry uses a compression method supported by the reader.
+
+     - Parameter method: Compression method from the central-directory file header.
+     - Side effects: none.
+     - Failure modes: Throws when the entry is not stored or raw-deflated.
+     */
+    private static func validateCompressionMethod(_ method: UInt16) throws {
+        guard method == 0 || method == 8 else {
+            throw ZipArchiveReaderError.unsupportedCompressionMethod(method)
         }
     }
 
@@ -238,6 +279,43 @@ public enum ZipArchiveReader {
 
         totalCompressedSize += compressedSize
         totalUncompressedSize += uncompressedSize
+    }
+
+    /**
+     Validates central-directory size consistency for one stored ZIP entry.
+
+     Stored entries are not compressed, so ZIP metadata must declare identical compressed and
+     uncompressed sizes. Enforcing that invariant keeps aggregate size accounting honest before the
+     reader materializes the payload.
+
+     - Parameters:
+       - compressedSize: Declared compressed byte count for the stored entry.
+       - uncompressedSize: Declared uncompressed byte count for the stored entry.
+     - Side effects: none.
+     - Failure modes: Throws when stored-entry size metadata is internally inconsistent.
+     */
+    private static func validateStoredEntrySize(compressedSize: Int, uncompressedSize: Int) throws {
+        guard compressedSize == uncompressedSize else {
+            throw ZipArchiveReaderError.invalidArchive("Stored ZIP entry size metadata is inconsistent")
+        }
+    }
+
+    /**
+     Validates that an inflated ZIP entry produced the central-directory declared byte count.
+
+     The C inflater can report success for a smaller output than the declared size. The eager reader
+     rejects that mismatch so callers never receive truncated data that passed size accounting.
+
+     - Parameters:
+       - inflatedSize: Actual byte count returned by the inflater.
+       - expectedSize: Declared uncompressed byte count from the central directory.
+     - Side effects: none.
+     - Failure modes: Throws when inflated output does not match the declared uncompressed size.
+     */
+    private static func validateInflatedEntrySize(_ inflatedSize: Int, expectedSize: Int) throws {
+        guard inflatedSize == expectedSize else {
+            throw ZipArchiveReaderError.invalidArchive("Deflated ZIP entry size metadata is inconsistent")
+        }
     }
 
     /**
