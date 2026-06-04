@@ -71,6 +71,26 @@ extension AndBibleTests {
         XCTAssertTrue(script.contains("void bibleView.emit('set_config'"))
     }
 
+    /**
+     Verifies bridge test helpers extract the outer emit payload instead of stopping at wrapper-like text.
+
+     - Setup: Records a fire-and-forget bridge emission whose raw payload includes `); } catch`, the same
+       suffix used by `BibleBridge.emit` after the payload argument.
+     - Expected result: Extraction returns the complete payload text through the final wrapper suffix.
+     - Failure meaning: A failure means bridge contract tests can hallucinate malformed payloads when
+       user-facing text happens to resemble the JavaScript error wrapper.
+     */
+    @MainActor
+    func testBridgeEmissionPayloadExtractionIgnoresWrapperSuffixInsidePayloadText() throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+
+        bridge.emit(event: "sample_event", data: #"'value before "); } catch value after'"#)
+
+        let payload = try bridgeEmissionPayloadJSON(from: recordedScripts(), event: "sample_event")
+
+        XCTAssertEqual(payload, #"'value before "); } catch value after'"#)
+    }
+
     @MainActor
     func testReaderBridgeModalStateBlocksKeyNavigationAndRequestsClose() {
         let (bridge, recordedScripts) = makeRecordingBridge()

@@ -68,16 +68,151 @@ extension AndBibleTests {
         )
 
         XCTAssertEqual(payload.labelIDs, ["UNLABELED"])
-        XCTAssertEqual(payload.relationItemsJSON.count, 1)
-        XCTAssertTrue(payload.relationsJSON.contains("\"labelId\":\"UNLABELED\""))
+        XCTAssertEqual(payload.relationItems.count, 1)
+        XCTAssertEqual(payload.relationItems.first?.labelId, "UNLABELED")
+        XCTAssertEqual(payload.relationItems.first?.type, "BibleBookmarkToLabel")
         XCTAssertEqual(
-            BookmarkLabelSerializationSupport.primaryLabelIDJSON(
+            BookmarkLabelSerializationSupport.primaryLabelID(
                 primaryLabelID: bookmark.primaryLabelId,
                 validLabelIDs: payload.labelIDs
             ),
-            "null"
+            nil
         )
     }
+
+    #if os(iOS)
+    @MainActor
+    func testReaderBookmarkBridgeUpdateEmitsTypedPayloadShape() throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let container = try makeBookmarkRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        let bookmarkStore = BookmarkStore(modelContext: modelContext)
+        let bookmarkService = BookmarkService(store: bookmarkStore)
+        let controller = BibleReaderController(bridge: bridge)
+        controller.bookmarkService = bookmarkService
+
+        let bookmark = bookmarkService.addBibleBookmark(
+            bookInitials: "KJV",
+            startOrdinal: 1,
+            endOrdinal: 1,
+            wholeVerse: true
+        )
+        bookmark.book = "Genesis"
+        bookmarkService.saveBibleBookmarkNote(bookmarkId: bookmark.id, note: "Quoted \"note\"\nsecond line")
+
+        controller.refreshBookmarkInVueJS(bookmarkId: bookmark.id)
+
+        let payloadJSON = try bridgeEmissionPayloadJSON(
+            from: recordedScripts(),
+            event: "add_or_update_bookmarks"
+        )
+        assertBridgeJSONIntegerField("createdAt", in: payloadJSON)
+        assertBridgeJSONIntegerField("lastUpdatedOn", in: payloadJSON)
+
+        let payload = try XCTUnwrap(
+            bridgeEmissionPayload(from: recordedScripts(), event: "add_or_update_bookmarks") as? [[String: Any]]
+        )
+        let bookmarkObject = try XCTUnwrap(payload.first)
+        XCTAssertEqual(bookmarkObject["type"] as? String, "bookmark")
+        XCTAssertEqual(bookmarkObject["notes"] as? String, "Quoted \"note\"\nsecond line")
+        XCTAssertEqual(bookmarkObject["hasNote"] as? Bool, true)
+        XCTAssertTrue(bookmarkObject["offsetRange"] is NSNull)
+        XCTAssertTrue(bookmarkObject["primaryLabelId"] is NSNull)
+        XCTAssertTrue(bookmarkObject["customIcon"] is NSNull)
+        XCTAssertTrue(bookmarkObject["osisFragment"] is NSNull)
+        XCTAssertEqual(bookmarkObject["labels"] as? [String], [Label.unlabeledId.uuidString])
+
+        let editAction = try XCTUnwrap(bookmarkObject["editAction"] as? [String: Any])
+        XCTAssertTrue(editAction["mode"] is NSNull)
+        XCTAssertTrue(editAction["content"] is NSNull)
+
+        let relations = try XCTUnwrap(bookmarkObject["bookmarkToLabels"] as? [[String: Any]])
+        let relation = try XCTUnwrap(relations.first)
+        XCTAssertEqual(relation["type"] as? String, "BibleBookmarkToLabel")
+        XCTAssertEqual(relation["bookmarkId"] as? String, bookmark.id.uuidString)
+        XCTAssertEqual(relation["labelId"] as? String, Label.unlabeledId.uuidString)
+    }
+
+    @MainActor
+    func testReaderStudyPadDocumentBridgeEmissionUsesTypedNestedPayloads() throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let container = try makeBookmarkRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        let bookmarkStore = BookmarkStore(modelContext: modelContext)
+        let bookmarkService = BookmarkService(store: bookmarkStore)
+        let controller = BibleReaderController(bridge: bridge)
+        controller.bookmarkService = bookmarkService
+
+        let label = bookmarkService.createLabel(name: "Study \"Notes\"", color: Label.defaultColor)
+        let bookmark = bookmarkService.addBibleBookmark(
+            bookInitials: "KJV",
+            startOrdinal: 1,
+            endOrdinal: 1,
+            wholeVerse: true
+        )
+        bookmark.book = "Genesis"
+        _ = bookmarkService.toggleLabel(bookmarkId: bookmark.id, labelId: label.id)
+        let genericBookmark = bookmarkService.addGenericBookmark(
+            bookInitials: "DICT",
+            key: "entry-key",
+            startOrdinal: 2,
+            endOrdinal: 2
+        )
+        _ = bookmarkService.toggleLabel(bookmarkId: genericBookmark.id, labelId: label.id)
+        bookmarkService.saveBibleBookmarkNote(bookmarkId: genericBookmark.id, note: "Generic \"note\"")
+        let createdEntry = try XCTUnwrap(
+            bookmarkService.createStudyPadEntry(labelId: label.id, afterOrderNumber: -1)
+        ).0
+        bookmarkService.updateStudyPadTextEntryText(id: createdEntry.id, text: "Entry with \"quotes\"\nand newline")
+
+        controller.bridgeDidSetClientReady(bridge)
+        let scriptCount = recordedScripts().count
+        controller.loadStudyPadDocument(labelId: label.id, bookmarkId: bookmark.id)
+        let studyPadScripts = Array(recordedScripts().dropFirst(scriptCount))
+
+        let payloadJSON = try bridgeEmissionPayloadJSON(
+            from: studyPadScripts,
+            event: "add_documents"
+        )
+        assertBridgeJSONIntegerField("createdAt", in: payloadJSON)
+        assertBridgeJSONIntegerField("lastUpdatedOn", in: payloadJSON)
+
+        let payload = try XCTUnwrap(
+            bridgeEmissionPayload(
+                from: studyPadScripts,
+                event: "add_documents"
+            ) as? [String: Any]
+        )
+        XCTAssertEqual(payload["type"] as? String, "journal")
+
+        let labelObject = try XCTUnwrap(payload["label"] as? [String: Any])
+        XCTAssertEqual(labelObject["name"] as? String, "Study \"Notes\"")
+        let labelStyle = try XCTUnwrap(labelObject["style"] as? [String: Any])
+        XCTAssertTrue(labelStyle["customIcon"] is NSNull)
+
+        let bookmarks = try XCTUnwrap(payload["bookmarks"] as? [[String: Any]])
+        let bookmarkObject = try XCTUnwrap(bookmarks.first)
+        XCTAssertEqual(bookmarkObject["id"] as? String, bookmark.id.uuidString)
+        XCTAssertTrue(bookmarkObject["primaryLabelId"] is NSNull)
+
+        let genericBookmarks = try XCTUnwrap(payload["genericBookmarks"] as? [[String: Any]])
+        let genericBookmarkObject = try XCTUnwrap(genericBookmarks.first)
+        XCTAssertEqual(genericBookmarkObject["id"] as? String, genericBookmark.id.uuidString)
+        XCTAssertEqual(genericBookmarkObject["type"] as? String, "generic-bookmark")
+        XCTAssertEqual(genericBookmarkObject["notes"] as? String, "Generic \"note\"")
+        XCTAssertTrue(genericBookmarkObject["primaryLabelId"] is NSNull)
+
+        let relationships = try XCTUnwrap(payload["bookmarkToLabels"] as? [[String: Any]])
+        let relationship = try XCTUnwrap(relationships.first)
+        XCTAssertEqual(relationship["type"] as? String, "BibleBookmarkToLabel")
+        XCTAssertEqual(relationship["labelId"] as? String, label.id.uuidString)
+
+        let entries = try XCTUnwrap(payload["journalTextEntries"] as? [[String: Any]])
+        let entryObject = try XCTUnwrap(entries.first)
+        XCTAssertEqual(entryObject["id"] as? String, createdEntry.id.uuidString)
+        XCTAssertEqual(entryObject["text"] as? String, "Entry with \"quotes\"\nand newline")
+    }
+    #endif
 
     /**
      Verifies that deleting a label clears bookmark junction rows and primary-label references

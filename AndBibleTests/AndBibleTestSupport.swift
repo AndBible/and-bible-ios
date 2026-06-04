@@ -49,6 +49,13 @@ final class FakeSpeechSynthesizer: SpeechSynthesizing {
 
 extension AndBibleTests {
     #if os(iOS)
+    /**
+     Creates a Bible bridge that records every JavaScript evaluation instead of executing it in a web view.
+
+     - Returns: A bridge plus a closure that exposes scripts in emission order for payload assertions.
+     - Side effects: Installs `javaScriptEvaluationObserver` on the returned bridge.
+     - Failure modes: none; callers validate expected emissions with XCTest assertions.
+     */
     func makeRecordingBridge() -> (BibleBridge, () -> [String]) {
         let bridge = BibleBridge()
         var evaluatedScripts: [String] = []
@@ -58,31 +65,24 @@ extension AndBibleTests {
         return (bridge, { evaluatedScripts })
     }
 
+    /**
+     Parses the typed `set_config` bridge emission used to initialize and refresh the Vue reader.
+
+     - Parameters:
+       - scripts: Recorded JavaScript evaluations from `makeRecordingBridge`.
+       - file: XCTest source location used when reporting extraction or parse failures.
+       - line: XCTest source location used when reporting extraction or parse failures.
+     - Returns: The decoded top-level `set_config` JSON object.
+     - Side effects: none.
+     - Failure modes: Throws XCTest unwrap/JSON errors when no emission exists, the wrapper is malformed,
+       the payload is not UTF-8 JSON, or the payload is not an object.
+     */
     func setConfigPayload(
         from scripts: [String],
         file: StaticString = #filePath,
         line: UInt = #line
     ) throws -> [String: Any] {
-        let script = try XCTUnwrap(
-            scripts.first { $0.contains("bibleView.emit('set_config'") },
-            "Expected a set_config bridge emission",
-            file: file,
-            line: line
-        )
-        let prefix = "bibleView.emit('set_config', "
-        let start = try XCTUnwrap(
-            script.range(of: prefix)?.upperBound,
-            "Expected set_config payload prefix in script: \(script)",
-            file: file,
-            line: line
-        )
-        let end = try XCTUnwrap(
-            script.range(of: "); } catch", range: start..<script.endIndex)?.lowerBound,
-            "Expected set_config payload suffix in script: \(script)",
-            file: file,
-            line: line
-        )
-        let json = String(script[start..<end])
+        let json = try bridgeEmissionPayloadJSON(from: scripts, event: "set_config", file: file, line: line)
         let data = try XCTUnwrap(
             json.data(using: .utf8),
             "Expected UTF-8 JSON payload",
@@ -93,6 +93,116 @@ extension AndBibleTests {
         return try XCTUnwrap(
             object as? [String: Any],
             "Expected set_config payload to be a JSON object",
+            file: file,
+            line: line
+        )
+    }
+
+    /**
+     Decodes a recorded `bibleView.emit` payload into a JSON value for bridge contract assertions.
+
+     - Parameters:
+       - scripts: Recorded JavaScript evaluations from `makeRecordingBridge`.
+       - event: Vue event name passed to `bibleView.emit`.
+       - file: XCTest source location used when reporting extraction or parse failures.
+       - line: XCTest source location used when reporting extraction or parse failures.
+     - Returns: The decoded JSON fragment emitted for the requested event.
+     - Side effects: none.
+     - Failure modes: Throws XCTest unwrap/JSON errors when the event is missing, the bridge wrapper is
+       malformed, the payload is not UTF-8, or the payload is not valid JSON.
+     */
+    func bridgeEmissionPayload(
+        from scripts: [String],
+        event: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) throws -> Any {
+        let json = try bridgeEmissionPayloadJSON(from: scripts, event: event, file: file, line: line)
+        let data = try XCTUnwrap(
+            json.data(using: .utf8),
+            "Expected UTF-8 JSON payload",
+            file: file,
+            line: line
+        )
+        return try JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed])
+    }
+
+    /**
+     Extracts the payload argument from a recorded `try { void bibleView.emit(...) } catch` wrapper.
+
+     Production bridge emissions normally pass JSON, but this helper intentionally treats the payload as
+     raw text before callers decide whether to parse it. It finds the wrapper suffix with a backwards
+     search so payload content that resembles `); } catch` does not truncate the extracted contract.
+
+     - Parameters:
+       - scripts: Recorded JavaScript evaluations from `makeRecordingBridge`.
+       - event: Vue event name passed to `bibleView.emit`.
+       - file: XCTest source location used when reporting extraction failures.
+       - line: XCTest source location used when reporting extraction failures.
+     - Returns: The raw payload text between the emit prefix and the outer bridge suffix.
+     - Side effects: none.
+     - Failure modes: Throws XCTest unwrap errors when the event emission, prefix, or suffix is missing.
+     */
+    func bridgeEmissionPayloadJSON(
+        from scripts: [String],
+        event: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) throws -> String {
+        let prefix = "bibleView.emit('\(event)', "
+        let script = try XCTUnwrap(
+            scripts.first { $0.contains(prefix) },
+            "Expected a \(event) bridge emission",
+            file: file,
+            line: line
+        )
+        let start = try XCTUnwrap(
+            script.range(of: prefix)?.upperBound,
+            "Expected \(event) payload prefix in script: \(script)",
+            file: file,
+            line: line
+        )
+        let end = try XCTUnwrap(
+            script.range(of: "); } catch", options: .backwards, range: start..<script.endIndex)?.lowerBound,
+            "Expected \(event) payload suffix in script: \(script)",
+            file: file,
+            line: line
+        )
+        return String(script[start..<end])
+    }
+
+    /**
+     Verifies that bridge JSON encodes an integer field as an integer rather than a decimal number.
+
+     JavaScript consumers rely on timestamp-like fields retaining integer JSON shape, so this assertion
+     catches regressions where Swift numeric encoding drifts to decimal representation.
+
+     - Parameters:
+       - field: Top-level JSON field name to inspect.
+       - json: Raw bridge JSON payload.
+       - file: XCTest source location used when reporting assertion failures.
+       - line: XCTest source location used when reporting assertion failures.
+     - Side effects: Records XCTest assertions.
+     - Failure modes: Fails the test when the field is absent as an integer or appears as a decimal.
+     */
+    func assertBridgeJSONIntegerField(
+        _ field: String,
+        in json: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let escapedField = NSRegularExpression.escapedPattern(for: field)
+        let integerPattern = #"""# + escapedField + #""\s*:\s*\d+(?=[,}])"#
+        let decimalPattern = #"""# + escapedField + #""\s*:\s*\d+\.\d+"#
+        XCTAssertNotNil(
+            json.range(of: integerPattern, options: .regularExpression),
+            "Expected \(field) to be emitted as an integer JSON number in \(json)",
+            file: file,
+            line: line
+        )
+        XCTAssertNil(
+            json.range(of: decimalPattern, options: .regularExpression),
+            "Expected \(field) to avoid decimal JSON encoding in \(json)",
             file: file,
             line: line
         )
