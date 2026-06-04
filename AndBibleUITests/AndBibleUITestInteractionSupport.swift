@@ -957,6 +957,96 @@ extension AndBibleUITests {
     }
 
     /**
+     Opens a visible My Notes row editor and verifies the semantic state transition.
+
+     - Parameters:
+       - actionsLabel: Accessibility label for the row action menu button.
+       - editorLabel: Accessibility label for the row's edit action.
+       - marker: Persisted note text that also proves the gated UI-test mutation has completed.
+       - app: Running application under test.
+       - timeout: Maximum time to retry the web-view menu and edit controls.
+       - file: Source file used for XCTest failure attribution.
+       - line: Source line used for XCTest failure attribution.
+     - Side effects:
+       - taps the production My Notes action menu and edit command until the compact reader state
+         reports `myNotesEditing=true` or the expected persisted marker
+     - Failure modes:
+       - records an XCTest failure when My Notes stays visible but never opens the editor or saves
+         the expected mutation
+     */
+    func openVisibleMyNotesEditor(
+        actionsLabel: String,
+        editorLabel: String,
+        orPersistedMarker marker: String,
+        in app: XCUIApplication,
+        timeout: TimeInterval = 10,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let deadline = Date().addingTimeInterval(timeout)
+
+        func reachedEditorOrPersistedMutation(_ state: String?) -> Bool {
+            guard let state else {
+                return false
+            }
+            return state.contains("myNotesVisible=true")
+                && (state.contains("myNotesEditing=true") || state.contains(marker))
+        }
+
+        repeat {
+            if reachedEditorOrPersistedMutation(readerRenderedContentStateValue(in: app)) {
+                return
+            }
+
+            let remaining = max(0.1, deadline.timeIntervalSinceNow)
+            if let editorControl = optionalMyNotesWebControl(
+                named: editorLabel,
+                in: app,
+                timeout: min(0.5, remaining)
+            ),
+               tapElementIfPossible(editorControl, timeout: min(1, remaining))
+            {
+                if waitForReaderRenderedContentStateIfPresent(
+                    containing: "myNotesEditing=true",
+                    in: app,
+                    timeout: min(2, max(0.1, deadline.timeIntervalSinceNow))
+                ) || waitForReaderRenderedContentStateIfPresent(
+                    containing: marker,
+                    in: app,
+                    timeout: min(2, max(0.1, deadline.timeIntervalSinceNow))
+                ) {
+                    if reachedEditorOrPersistedMutation(readerRenderedContentStateValue(in: app)) {
+                        return
+                    }
+                }
+            }
+
+            if let actionsControl = optionalMyNotesWebControl(
+                named: actionsLabel,
+                in: app,
+                timeout: min(0.5, remaining)
+            ) {
+                _ = tapElementIfPossible(
+                    actionsControl,
+                    timeout: min(1, max(0.1, deadline.timeIntervalSinceNow))
+                )
+            }
+
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        } while Date() < deadline
+
+        let finalState = readerRenderedContentStateValue(in: app) ?? "nil"
+        XCTFail(
+            """
+            Expected visible My Notes editor activation or persisted marker '\(marker)' within \
+            \(timeout) seconds. Final value: '\(finalState)'.
+            """,
+            file: file,
+            line: line
+        )
+    }
+
+    /**
      Waits for the reader's compact My Notes state export to stop containing one token.
      */
     func waitForMyNotesState(

@@ -107,7 +107,8 @@ extension AndBibleUITests {
        - line: Source line used for XCTest failure attribution.
      - Returns: `true` when the prompt field reports the expected value before submission.
      - Side effects:
-       - focuses the prompt field, emits keyboard input, and clears/retries if CI drops the input
+       - focuses the prompt field, verifies or clears any existing prompt value, emits keyboard
+         input, and clears/retries if CI drops the input without appending duplicate text
      - Failure modes:
        - records an XCTest failure when the field value never matches `text`
      */
@@ -167,8 +168,10 @@ extension AndBibleUITests {
             return element
         }
 
-        func observedPromptTextValue() -> String {
-            let candidates = [resolvedPromptTextField(), element] + promptFocusedTextEntryCandidates()
+        func observedPromptTextValue(preferred preferredCandidates: [XCUIElement] = []) -> String {
+            let candidates = preferredCandidates
+                + [resolvedPromptTextField(), element]
+                + promptFocusedTextEntryCandidates()
             var fallbackValue = ""
             for candidate in candidates where candidate.exists {
                 let candidateValue = currentTextEntryValue(
@@ -186,19 +189,76 @@ extension AndBibleUITests {
             return fallbackValue
         }
 
-        func waitForObservedPromptTextValue(timeout: TimeInterval) -> Bool {
+        func waitForObservedPromptTextValue(
+            preferred preferredCandidates: [XCUIElement] = [],
+            timeout: TimeInterval
+        ) -> Bool {
             let valueDeadline = Date().addingTimeInterval(timeout)
             repeat {
-                if observedPromptTextValue() == text {
+                if observedPromptTextValue(preferred: preferredCandidates) == text {
                     return true
                 }
                 RunLoop.current.run(until: Date().addingTimeInterval(0.2))
             } while Date() < valueDeadline
-            return observedPromptTextValue() == text
+            return observedPromptTextValue(preferred: preferredCandidates) == text
+        }
+
+        func waitForObservedPromptTextValueToClear(
+            preferred preferredCandidates: [XCUIElement],
+            timeout: TimeInterval
+        ) -> Bool {
+            let clearDeadline = Date().addingTimeInterval(timeout)
+            repeat {
+                if observedPromptTextValue(preferred: preferredCandidates).isEmpty {
+                    return true
+                }
+                RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+            } while Date() < clearDeadline
+            return observedPromptTextValue(preferred: preferredCandidates).isEmpty
+        }
+
+        func clearObservedPromptTextValue(
+            preferred preferredCandidates: [XCUIElement],
+            forceKeyboardDelete: Bool = false
+        ) -> Bool {
+            let candidates = preferredCandidates
+                + [resolvedPromptTextField(), element]
+                + promptFocusedTextEntryCandidates()
+            for candidate in candidates where candidate.exists {
+                if forceKeyboardDelete {
+                    focusTextEntryElement(candidate, preferTrailingEdge: true, timeout: 1)
+                    if waitForElementKeyboardFocus(candidate, timeout: 0.3) {
+                        app.typeText(
+                            String(repeating: XCUIKeyboardKey.delete.rawValue, count: max(text.count * 2, 32))
+                        )
+                        if waitForObservedPromptTextValueToClear(
+                            preferred: preferredCandidates + [candidate],
+                            timeout: 0.5
+                        ) {
+                            return true
+                        }
+                    }
+                }
+
+                if clearTextEntryElement(
+                    candidate,
+                    app: app,
+                    placeholderHints: placeholderHints,
+                    includeElementMetadata: includeElementMetadata
+                ) && waitForObservedPromptTextValueToClear(
+                    preferred: preferredCandidates + [candidate],
+                    timeout: 0.5
+                ) {
+                    return true
+                }
+            }
+
+            return observedPromptTextValue(preferred: preferredCandidates).isEmpty
         }
 
         repeat {
             let promptTextField = resolvedPromptTextField()
+            let preferredPromptCandidates = [promptTextField]
             focusResolvedPromptTextEntryElement(
                 promptTextField,
                 in: app,
@@ -206,41 +266,52 @@ extension AndBibleUITests {
                 file: file,
                 line: line
             )
-            if observedPromptTextValue() == text {
+            let existingValue = observedPromptTextValue(preferred: preferredPromptCandidates)
+            if existingValue == text {
                 return true
+            }
+            guard clearObservedPromptTextValue(preferred: preferredPromptCandidates, forceKeyboardDelete: true) else {
+                RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+                continue
             }
 
             promptTextField.typeText(text)
-            if waitForObservedPromptTextValue(timeout: min(3, max(0.5, deadline.timeIntervalSinceNow))) {
+            if waitForObservedPromptTextValue(
+                preferred: preferredPromptCandidates,
+                timeout: min(5, max(0.5, deadline.timeIntervalSinceNow))
+            ) {
                 return true
             }
 
             if waitForElementKeyboardFocus(promptTextField, timeout: 0.5) {
-                let currentValue = observedPromptTextValue()
+                let currentValue = observedPromptTextValue(preferred: preferredPromptCandidates)
                 if currentValue == text {
                     return true
                 }
                 if !currentValue.isEmpty {
-                    _ = clearTextEntryElement(
-                        resolvedPromptTextField(),
-                        app: app,
-                        placeholderHints: placeholderHints,
-                        includeElementMetadata: includeElementMetadata
-                    )
+                    _ = clearObservedPromptTextValue(preferred: preferredPromptCandidates, forceKeyboardDelete: true)
+                    RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+                    continue
+                }
+
+                guard clearObservedPromptTextValue(
+                    preferred: preferredPromptCandidates,
+                    forceKeyboardDelete: true
+                ) else {
+                    RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+                    continue
                 }
 
                 app.typeText(text)
-                if waitForObservedPromptTextValue(timeout: min(3, max(0.5, deadline.timeIntervalSinceNow))) {
+                if waitForObservedPromptTextValue(
+                    preferred: preferredPromptCandidates,
+                    timeout: min(3, max(0.5, deadline.timeIntervalSinceNow))
+                ) {
                     return true
                 }
             }
 
-            _ = clearTextEntryElement(
-                resolvedPromptTextField(),
-                app: app,
-                placeholderHints: placeholderHints,
-                includeElementMetadata: includeElementMetadata
-            )
+            _ = clearObservedPromptTextValue(preferred: preferredPromptCandidates, forceKeyboardDelete: true)
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         } while Date() < deadline
 
