@@ -65,6 +65,7 @@ public enum ZipArchiveReader {
     private static let centralDirectoryHeaderSignature: UInt32 = 0x0201_4b50
     private static let endOfCentralDirectorySignature: UInt32 = 0x0605_4b50
     private static let zip64Sentinel: UInt32 = 0xffff_ffff
+    private static let zip64EntryCountSentinel: UInt16 = 0xffff
 
     /**
      Extracts supported file entries from raw ZIP data.
@@ -80,13 +81,19 @@ public enum ZipArchiveReader {
      */
     public static func entries(in data: Data) throws -> [ZipArchiveEntry] {
         let endRecordOffset = try endOfCentralDirectoryOffset(in: data)
-        let entryCount = Int(readUInt16(data, at: endRecordOffset + 10))
-        let centralDirectorySize = Int(readUInt32(data, at: endRecordOffset + 12))
+        let diskEntryCountRaw = readUInt16(data, at: endRecordOffset + 8)
+        let entryCountRaw = readUInt16(data, at: endRecordOffset + 10)
+        let centralDirectorySizeRaw = readUInt32(data, at: endRecordOffset + 12)
         let centralDirectoryOffsetRaw = readUInt32(data, at: endRecordOffset + 16)
 
-        guard centralDirectoryOffsetRaw != zip64Sentinel else {
+        guard diskEntryCountRaw != zip64EntryCountSentinel,
+              entryCountRaw != zip64EntryCountSentinel,
+              centralDirectorySizeRaw != zip64Sentinel,
+              centralDirectoryOffsetRaw != zip64Sentinel else {
             throw ZipArchiveReaderError.invalidArchive("ZIP64 archives are not supported")
         }
+        let entryCount = Int(entryCountRaw)
+        let centralDirectorySize = Int(centralDirectorySizeRaw)
         let centralDirectoryOffset = Int(centralDirectoryOffsetRaw)
         guard centralDirectoryOffset >= 0,
               centralDirectorySize >= 0,

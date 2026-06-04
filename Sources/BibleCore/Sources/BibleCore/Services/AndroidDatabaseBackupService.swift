@@ -505,13 +505,37 @@ public final class AndroidDatabaseBackupService {
 
      Android backup manifests have evolved with optional `contains`, `manifestVersion`, and app
      version fields. Keeping this DTO private lets `decodeManifest(from:)` preserve Android defaults
-     without making partially decoded manifests part of the public API.
+     without making partially decoded manifests part of the public API. Unknown `contains` values
+     are ignored so future Android-only categories do not block restore of known database sections.
      */
     private struct ManifestDTO: Decodable {
         let backupType: String
-        let contains: Set<AndroidDatabaseBackupCategory>?
+        let contains: Set<AndroidDatabaseBackupCategory>
         let manifestVersion: Int?
         let andBibleVersion: Int?
+
+        private enum CodingKeys: String, CodingKey {
+            case backupType
+            case contains
+            case manifestVersion
+            case andBibleVersion
+        }
+
+        /**
+         Decodes Android's manifest while preserving known categories and skipping future ones.
+
+         - Parameter decoder: JSON decoder input for `AndBibleBackupManifest.json`.
+         - Side effects: none.
+         - Failure modes: Throws when required manifest fields are missing or have invalid types.
+         */
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            backupType = try container.decode(String.self, forKey: .backupType)
+            let rawContains = try container.decodeIfPresent([String].self, forKey: .contains) ?? []
+            contains = Set(rawContains.compactMap(AndroidDatabaseBackupCategory.init(rawValue:)))
+            manifestVersion = try container.decodeIfPresent(Int.self, forKey: .manifestVersion)
+            andBibleVersion = try container.decodeIfPresent(Int.self, forKey: .andBibleVersion)
+        }
     }
 
     private let fileManager: FileManager
@@ -746,7 +770,7 @@ public final class AndroidDatabaseBackupService {
         }
         return AndroidDatabaseBackupManifest(
             backupType: dto.backupType,
-            contains: dto.contains ?? [],
+            contains: dto.contains,
             manifestVersion: dto.manifestVersion ?? 1,
             andBibleVersion: dto.andBibleVersion
         )

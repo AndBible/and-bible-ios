@@ -54,6 +54,42 @@ extension AndBibleTests {
     }
 
     /**
+     Verifies that future Android manifest categories do not block known database sections.
+
+     Setup:
+     - builds a valid bookmark database backup
+     - writes Android's manifest with one known category and one unknown future category string
+
+     Expected result:
+     - the archive still loads
+     - known categories remain available for restore/import
+     - unknown category strings are ignored rather than surfacing as invalid manifests
+
+     Failure meaning:
+     - iOS would reject otherwise restorable Android backups when Android adds a new backup
+       category before the iOS app learns how to display it.
+     */
+    func testAndroidDatabaseBackupIgnoresUnknownManifestCategories() throws {
+        let bookmarkDatabaseURL = try makeAndroidBookmarksDatabase(labels: [])
+        try setSQLiteUserVersion(12, at: bookmarkDatabaseURL)
+        let archiveData = try makeAndroidDatabaseBackupArchiveData(
+            databaseURLsByName: [
+                "bookmarks.sqlite3": bookmarkDatabaseURL,
+            ],
+            containsRawValues: [
+                AndroidDatabaseBackupCategory.bookmarks.rawValue,
+                "FUTURE_ANDROID_CATEGORY",
+            ]
+        )
+
+        let archive = try AndroidDatabaseBackupService().loadArchive(from: archiveData)
+
+        XCTAssertEqual(archive.manifest.contains, [.bookmarks])
+        XCTAssertEqual(archive.sections.map(\.category), [.bookmarks])
+        XCTAssertEqual(archive.sections.first?.support, .supported)
+    }
+
+    /**
      Verifies Android-parity restore semantics for a selected database backup section.
 
      Setup:
@@ -273,11 +309,14 @@ extension AndBibleTests {
      - corrupts the end-of-central-directory size so declared central-directory bounds no longer
        contain the declared entry
      - corrupts a central-directory filename to invalid UTF-8 while leaving the local header intact
+     - corrupts an end-of-central-directory entry count to ZIP64's sentinel value
 
      Expected result:
      - central-directory size mismatches fail before the reader walks into bytes outside the
        declared directory
      - invalid central-directory names fail as malformed ZIP data rather than being silently skipped
+     - ZIP64 sentinels fail up front because this reader intentionally supports only non-ZIP64
+       Android backup archives
 
      Failure meaning:
      - iOS could treat corrupted Android backup archives as incomplete but valid inputs, producing
@@ -310,6 +349,50 @@ extension AndBibleTests {
                 .invalidArchive("Central directory entry name is not UTF-8")
             )
         }
+
+        var zip64EntryCountArchive = archive
+        let zip64RecordOffset = try endOfCentralDirectoryOffset(in: zip64EntryCountArchive)
+        replaceUInt16(UInt16.max, at: zip64RecordOffset + 10, in: &zip64EntryCountArchive)
+
+        XCTAssertThrowsError(try ZipArchiveReader.entries(in: zip64EntryCountArchive)) { error in
+            XCTAssertEqual(
+                error as? ZipArchiveReaderError,
+                .invalidArchive("ZIP64 archives are not supported")
+            )
+        }
+    }
+
+    /**
+     Verifies Android-style deflated ZIP entries whose local headers use data descriptors.
+
+     Setup:
+     - builds one ZIP entry with compression method 8
+     - writes zero sizes in the local file header and the real sizes in the central directory
+     - appends a data descriptor after the compressed payload, matching Android `ZipOutputStream`
+       archives that cannot know sizes before compression finishes
+
+     Expected result:
+     - the reader uses central-directory metadata to locate and inflate the entry payload
+
+     Failure meaning:
+     - iOS would reject valid Android `.abdb.zip` backups that contain deflated entries with data
+       descriptors instead of local-header sizes.
+     */
+    func testZipArchiveReaderInflatesDescriptorBackedDeflatedEntries() throws {
+        let payload = Data("deflated backup payload".utf8)
+        let compressedPayload = Data([
+            75, 73, 77, 203, 73, 44, 73, 77, 81, 72, 74, 76, 206,
+            46, 45, 80, 40, 72, 172, 204, 201, 79, 76, 1, 0,
+        ])
+        let archive = try makeDeflatedDescriptorZip(
+            name: "db/bookmarks.sqlite3",
+            compressedData: compressedPayload,
+            uncompressedData: payload
+        )
+
+        let entries = try ZipArchiveReader.entries(in: archive)
+
+        XCTAssertEqual(entries, [.init(name: "db/bookmarks.sqlite3", data: payload)])
     }
 
     /**
@@ -421,7 +504,31 @@ extension AndBibleTests {
         contains: [AndroidDatabaseBackupCategory]
     ) throws -> Data {
         let databaseData = try databaseURLsByName.mapValues { try Data(contentsOf: $0) }
-        return try makeAndroidDatabaseBackupArchiveData(rawDatabaseDataByName: databaseData, contains: contains)
+        return try makeAndroidDatabaseBackupArchiveData(
+            rawDatabaseDataByName: databaseData,
+            containsRawValues: contains.map(\.rawValue)
+        )
+    }
+
+    /**
+     Builds a raw Android database backup ZIP from SQLite database files and raw manifest category names.
+
+     - Parameters:
+       - databaseURLsByName: Database filenames, such as `bookmarks.sqlite3`, mapped to local files.
+       - containsRawValues: Raw Android manifest category names to write into `contains`.
+     - Returns: Stored ZIP archive bytes.
+     - Side effects: reads the supplied SQLite database files.
+     - Failure modes: Rethrows file reads and ZIP construction failures.
+     */
+    private func makeAndroidDatabaseBackupArchiveData(
+        databaseURLsByName: [String: URL],
+        containsRawValues: [String]
+    ) throws -> Data {
+        let databaseData = try databaseURLsByName.mapValues { try Data(contentsOf: $0) }
+        return try makeAndroidDatabaseBackupArchiveData(
+            rawDatabaseDataByName: databaseData,
+            containsRawValues: containsRawValues
+        )
     }
 
     /**
@@ -438,9 +545,29 @@ extension AndBibleTests {
         rawDatabaseDataByName: [String: Data],
         contains: [AndroidDatabaseBackupCategory]
     ) throws -> Data {
+        return try makeAndroidDatabaseBackupArchiveData(
+            rawDatabaseDataByName: rawDatabaseDataByName,
+            containsRawValues: contains.map(\.rawValue)
+        )
+    }
+
+    /**
+     Builds a raw Android database backup ZIP from already-materialized payloads and raw category names.
+
+     - Parameters:
+       - rawDatabaseDataByName: Database filenames mapped to entry bytes.
+       - containsRawValues: Raw Android manifest category names to write into `contains`.
+     - Returns: Stored ZIP archive bytes.
+     - Side effects: none.
+     - Failure modes: Rethrows JSON manifest encoding or ZIP construction failures.
+     */
+    private func makeAndroidDatabaseBackupArchiveData(
+        rawDatabaseDataByName: [String: Data],
+        containsRawValues: [String]
+    ) throws -> Data {
         let manifest: [String: Any] = [
             "backupType": "DB_BACKUP",
-            "contains": contains.map(\.rawValue),
+            "contains": containsRawValues,
             "manifestVersion": 1,
             "andBibleVersion": 99_999,
         ]
@@ -594,6 +721,85 @@ extension AndBibleTests {
     }
 
     /**
+     Builds one deflated ZIP entry that uses data-descriptor sizes in the local file area.
+
+     The production reader should rely on central-directory sizes, matching Android-created ZIPs
+     whose local headers do not know the compressed size until after compression has completed.
+
+     - Parameters:
+       - name: Entry path to write into the local and central headers.
+       - compressedData: Raw deflate bytes for the entry payload.
+       - uncompressedData: Expected inflated payload, used only for central-directory sizing.
+     - Returns: Raw ZIP bytes with one deflated entry.
+     - Side effects: none.
+     - Failure modes: Throws if the entry exceeds this test helper's non-ZIP64 fixture limits.
+     */
+    private func makeDeflatedDescriptorZip(
+        name: String,
+        compressedData: Data,
+        uncompressedData: Data
+    ) throws -> Data {
+        guard let nameData = name.data(using: .utf8),
+              nameData.count <= Int(UInt16.max),
+              compressedData.count <= Int(UInt32.max),
+              uncompressedData.count <= Int(UInt32.max) else {
+            throw ZipArchiveReaderError.invalidArchive("Test ZIP entry is too large")
+        }
+
+        var archive = Data()
+        let localHeaderOffset = UInt32(archive.count)
+        appendUInt32(0x0403_4b50, to: &archive)
+        appendUInt16(20, to: &archive)
+        appendUInt16(0x0008, to: &archive)
+        appendUInt16(8, to: &archive)
+        appendUInt16(0, to: &archive)
+        appendUInt16(0, to: &archive)
+        appendUInt32(0, to: &archive)
+        appendUInt32(0, to: &archive)
+        appendUInt32(0, to: &archive)
+        appendUInt16(UInt16(nameData.count), to: &archive)
+        appendUInt16(0, to: &archive)
+        archive.append(nameData)
+        archive.append(compressedData)
+        appendUInt32(0x0807_4b50, to: &archive)
+        appendUInt32(0, to: &archive)
+        appendUInt32(UInt32(compressedData.count), to: &archive)
+        appendUInt32(UInt32(uncompressedData.count), to: &archive)
+
+        let centralDirectoryOffset = UInt32(archive.count)
+        var centralDirectory = Data()
+        appendUInt32(0x0201_4b50, to: &centralDirectory)
+        appendUInt16(20, to: &centralDirectory)
+        appendUInt16(20, to: &centralDirectory)
+        appendUInt16(0x0008, to: &centralDirectory)
+        appendUInt16(8, to: &centralDirectory)
+        appendUInt16(0, to: &centralDirectory)
+        appendUInt16(0, to: &centralDirectory)
+        appendUInt32(0, to: &centralDirectory)
+        appendUInt32(UInt32(compressedData.count), to: &centralDirectory)
+        appendUInt32(UInt32(uncompressedData.count), to: &centralDirectory)
+        appendUInt16(UInt16(nameData.count), to: &centralDirectory)
+        appendUInt16(0, to: &centralDirectory)
+        appendUInt16(0, to: &centralDirectory)
+        appendUInt16(0, to: &centralDirectory)
+        appendUInt16(0, to: &centralDirectory)
+        appendUInt32(0, to: &centralDirectory)
+        appendUInt32(localHeaderOffset, to: &centralDirectory)
+        centralDirectory.append(nameData)
+
+        archive.append(centralDirectory)
+        appendUInt32(0x0605_4b50, to: &archive)
+        appendUInt16(0, to: &archive)
+        appendUInt16(0, to: &archive)
+        appendUInt16(1, to: &archive)
+        appendUInt16(1, to: &archive)
+        appendUInt32(UInt32(centralDirectory.count), to: &archive)
+        appendUInt32(centralDirectoryOffset, to: &archive)
+        appendUInt16(0, to: &archive)
+        return archive
+    }
+
+    /**
      Appends one little-endian 16-bit integer to a ZIP fixture.
      */
     private func appendUInt16(_ value: UInt16, to data: inout Data) {
@@ -607,6 +813,23 @@ extension AndBibleTests {
     private func appendUInt32(_ value: UInt32, to data: inout Data) {
         var littleEndian = value.littleEndian
         withUnsafeBytes(of: &littleEndian) { data.append(contentsOf: $0) }
+    }
+
+    /**
+     Replaces one little-endian 16-bit integer inside a ZIP fixture.
+
+     - Parameters:
+       - value: Value to write.
+       - offset: Byte offset where the integer starts.
+       - data: Fixture bytes to mutate.
+     - Side effects: Mutates `data` in place.
+     - Failure modes: Callers must pass a valid two-byte range.
+     */
+    private func replaceUInt16(_ value: UInt16, at offset: Int, in data: inout Data) {
+        var littleEndian = value.littleEndian
+        withUnsafeBytes(of: &littleEndian) { bytes in
+            data.replaceSubrange(offset..<(offset + 2), with: bytes)
+        }
     }
 
     /**

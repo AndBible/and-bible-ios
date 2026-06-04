@@ -59,6 +59,9 @@ public struct ImportExportView: View {
     /// Android database backup archive currently staged for category selection.
     @State private var androidBackupArchive: AndroidDatabaseBackupArchive?
 
+    /// Last archive presented by the sheet, retained until dismissal cleanup runs.
+    @State private var androidBackupArchivePendingCleanup: AndroidDatabaseBackupArchive?
+
     /// Whether selected Android backup sections are currently being applied.
     @State private var isApplyingAndroidBackup = false
 
@@ -218,13 +221,16 @@ public struct ImportExportView: View {
         ) { result in
             handleImport(result)
         }
-        .sheet(item: $androidBackupArchive, onDismiss: cleanupLoadedAndroidBackupArchive) { archive in
+        .sheet(item: $androidBackupArchive, onDismiss: cleanupDismissedAndroidBackupArchive) { archive in
             AndroidDatabaseBackupImportSheet(
                 archive: archive,
                 isApplying: isApplyingAndroidBackup,
                 onCancel: dismissAndroidBackupArchive,
                 onApply: applyAndroidBackupSelections
             )
+            .onAppear {
+                androidBackupArchivePendingCleanup = archive
+            }
         }
         .fileImporter(
             isPresented: $showModuleZipPicker,
@@ -394,7 +400,9 @@ public struct ImportExportView: View {
     private func loadAndroidBackupArchive(from data: Data) {
         cleanupLoadedAndroidBackupArchive()
         do {
-            androidBackupArchive = try androidBackupService.loadArchive(from: data)
+            let archive = try androidBackupService.loadArchive(from: data)
+            androidBackupArchive = archive
+            androidBackupArchivePendingCleanup = archive
         } catch {
             statusMessage = localizedErrorMessage(error)
         }
@@ -490,9 +498,17 @@ public struct ImportExportView: View {
      Side effects:
      - deletes the staged archive directory on a best-effort basis
      - clears `androidBackupArchive`
+     - clears the dismissal cleanup fallback once the archive has been removed
+     - Failure modes: Cleanup errors are swallowed by the service because the files are temporary.
      */
     private func dismissAndroidBackupArchive() {
-        cleanupLoadedAndroidBackupArchive()
+        guard let archive = androidBackupArchive else {
+            androidBackupArchivePendingCleanup = nil
+            return
+        }
+        cleanupAndroidBackupArchive(archive)
+        androidBackupArchive = nil
+        androidBackupArchivePendingCleanup = nil
     }
 
     /**
@@ -501,13 +517,48 @@ public struct ImportExportView: View {
      Side effects:
      - deletes the temporary extracted database directory, if present
      - clears `androidBackupArchive`
+     - clears the dismissal cleanup fallback
+     - Failure modes: Cleanup errors are swallowed by the service because the files are temporary.
      */
     private func cleanupLoadedAndroidBackupArchive() {
         guard let archive = androidBackupArchive else {
+            androidBackupArchivePendingCleanup = nil
             return
         }
-        androidBackupService.cleanup(archive)
+        cleanupAndroidBackupArchive(archive)
         androidBackupArchive = nil
+        androidBackupArchivePendingCleanup = nil
+    }
+
+    /**
+     Cleans up the presented Android backup after SwiftUI dismisses the sheet.
+
+     SwiftUI may clear an item-backed sheet binding before `onDismiss` runs. The pending-cleanup
+     copy preserves the staging directory owner until this dismissal callback removes it.
+
+     Side effects:
+     - deletes the temporary extracted database directory, if present
+     - clears the active archive binding and fallback cleanup copy
+     - Failure modes: Cleanup errors are swallowed by the service because the files are temporary.
+     */
+    private func cleanupDismissedAndroidBackupArchive() {
+        let archive = androidBackupArchive ?? androidBackupArchivePendingCleanup
+        if let archive {
+            cleanupAndroidBackupArchive(archive)
+        }
+        androidBackupArchive = nil
+        androidBackupArchivePendingCleanup = nil
+    }
+
+    /**
+     Removes one staged Android backup archive without mutating presentation state.
+
+     - Parameter archive: Loaded archive whose temporary directory should be deleted.
+     - Side effects: Deletes the archive staging directory on a best-effort basis.
+     - Failure modes: Cleanup errors are swallowed by the service because the files are temporary.
+     */
+    private func cleanupAndroidBackupArchive(_ archive: AndroidDatabaseBackupArchive) {
+        androidBackupService.cleanup(archive)
     }
 
     /**

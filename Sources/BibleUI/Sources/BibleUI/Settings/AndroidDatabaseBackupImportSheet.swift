@@ -175,7 +175,7 @@ struct AndroidDatabaseBackupImportSheet: View {
     }
 
     /**
-     Current supported selections in the same order sections appear in the archive.
+     Current supported selections in the loader-provided section display order.
 
      - Returns: Selected section/mode pairs filtered to supported categories.
      - Side effects: none.
