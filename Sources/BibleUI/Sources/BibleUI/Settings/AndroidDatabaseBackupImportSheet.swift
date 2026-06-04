@@ -283,7 +283,7 @@ private struct AndroidDatabaseBackupSectionRow: View {
                         selection: $mode
                     ) {
                         ForEach(AndroidDatabaseBackupApplyMode.allCases) { mode in
-                            Text(mode.displayName).tag(mode)
+                            Text(mode.localizedBackupModeName).tag(mode)
                         }
                     }
                     .pickerStyle(.segmented)
@@ -291,7 +291,7 @@ private struct AndroidDatabaseBackupSectionRow: View {
                 }
             } else {
                 sectionLabel
-                if let explanation = section.support.explanation {
+                if let explanation = section.support.localizedBackupExplanation(for: section.category) {
                     Text(explanation)
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -306,7 +306,7 @@ private struct AndroidDatabaseBackupSectionRow: View {
      */
     private var sectionLabel: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(section.category.displayName)
+            Text(section.category.localizedBackupSectionName)
                 .font(.headline)
             Text(detailText)
                 .font(.caption)

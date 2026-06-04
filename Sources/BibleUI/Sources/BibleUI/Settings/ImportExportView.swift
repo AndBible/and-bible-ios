@@ -464,7 +464,7 @@ public struct ImportExportView: View {
             return String(localized: "android_backup_applied", defaultValue: "Android backup applied.")
         }
         let summaries = report.sections.map { section in
-            "\(section.mode.displayName) \(section.category.displayName): \(section.summary)"
+            "\(section.mode.localizedBackupModeName) \(section.category.localizedBackupSectionName): \(section.summary)"
         }
         return String(
             localized: "android_backup_applied_summary",

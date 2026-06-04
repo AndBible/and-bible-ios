@@ -650,6 +650,39 @@ extension AndBibleTests {
     }
 
     /**
+     Verifies that unsupported Android backup categories keep their unsupported-category reason even
+     when their SQLite schema version is newer than iOS recognizes.
+
+     Setup:
+     - builds an Android Settings database, which iOS intentionally cannot map yet
+     - sets its SQLite `user_version` above the known Android Settings schema version
+
+     Expected result:
+     - the archive still exposes the Settings section
+     - the section reason says iOS lacks a safe mapper rather than implying a version-only blocker
+
+     Failure meaning:
+     - the section picker would mislead users into thinking a future iOS version could restore the
+       category merely by recognizing the schema version, even though the category has no mapper.
+     */
+    func testAndroidDatabaseBackupUnsupportedCategoriesIgnoreVersionGate() throws {
+        let settingsDatabaseURL = try makeEmptySQLiteDatabase(userVersion: 99)
+        let archiveData = try makeAndroidDatabaseBackupArchiveData(
+            databaseURLsByName: [
+                "settings.sqlite3": settingsDatabaseURL,
+            ],
+            contains: [.settings]
+        )
+
+        let archive = try AndroidDatabaseBackupService().loadArchive(from: archiveData)
+
+        XCTAssertEqual(
+            archive.sections.first { $0.category == .settings }?.support,
+            .unsupportedCategory("iOS does not yet have a safe mapper for Android Settings data.")
+        )
+    }
+
+    /**
      Builds a one-section Android bookmark backup archive for restore/import tests.
 
      - Parameters:

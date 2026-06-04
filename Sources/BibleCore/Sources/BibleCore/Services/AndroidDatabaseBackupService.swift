@@ -844,11 +844,11 @@ public final class AndroidDatabaseBackupService {
         for category: AndroidDatabaseBackupCategory,
         databaseVersion: Int
     ) -> AndroidDatabaseBackupSectionSupport {
-        if databaseVersion > category.supportedDatabaseVersion {
-            return .unsupportedVersion(version: databaseVersion, supported: category.supportedDatabaseVersion)
-        }
         guard category.remoteSyncCategory != nil else {
             return .unsupportedCategory("iOS does not yet have a safe mapper for Android \(category.displayName) data.")
+        }
+        if databaseVersion > category.supportedDatabaseVersion {
+            return .unsupportedVersion(version: databaseVersion, supported: category.supportedDatabaseVersion)
         }
         return .supported
     }
