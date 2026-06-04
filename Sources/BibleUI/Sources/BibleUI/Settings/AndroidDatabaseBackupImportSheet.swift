@@ -120,6 +120,7 @@ struct AndroidDatabaseBackupImportSheet: View {
                     ForEach(archive.sections) { section in
                         AndroidDatabaseBackupSectionRow(
                             section: section,
+                            isApplying: isApplying,
                             isSelected: bindingForSelection(section.category),
                             mode: bindingForMode(section.category)
                         )
@@ -252,13 +253,18 @@ struct AndroidDatabaseBackupImportSheet: View {
 /**
  Renders one Android backup section with support status, selection state, and operation mode.
 
- Supported rows expose a toggle and segmented Restore/Import picker. Unsupported rows stay visible
- with the exact reason supplied by `AndroidDatabaseBackupService`, preserving Android backup
+ Supported rows expose a toggle and segmented Restore/Import picker until the parent begins an
+ apply operation. While applying, rows stay readable but controls are disabled so local selection
+ edits cannot diverge from the already-submitted apply snapshot. Unsupported rows stay visible with
+ the exact reason supplied by `AndroidDatabaseBackupService`, preserving Android backup
  transparency without allowing unsafe partial restores.
  */
 private struct AndroidDatabaseBackupSectionRow: View {
     /// Validated section metadata for one Android backup database.
     let section: AndroidDatabaseBackupSection
+
+    /// Whether the parent sheet is applying a submitted selection snapshot.
+    let isApplying: Bool
 
     /// Selection binding owned by the parent sheet.
     @Binding var isSelected: Bool
@@ -298,7 +304,7 @@ private struct AndroidDatabaseBackupSectionRow: View {
                 }
             }
         }
-        .disabled(!section.support.isSupported)
+        .disabled(isApplying || !section.support.isSupported)
     }
 
     /**
