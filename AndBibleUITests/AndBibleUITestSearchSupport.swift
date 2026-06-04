@@ -964,22 +964,26 @@ extension AndBibleUITests {
 
     /**
      Moves focus away from the active Search field so the lower Search option rows can surface.
+
+     This helper intentionally avoids `app.keyboards`. Hosted CI has timed out while resolving the
+     broad keyboard hierarchy after SwiftUI already dismissed the keyboard, while the Search input's
+     `hasKeyboardFocus` predicate remains bounded to one known field.
      *
      * - Parameter app: Running application under test.
      * - Side effects:
-     *   - uses one visible keyboard dismissal action when the software keyboard remains presented
+     *   - uses one visible keyboard dismissal action when the Search field still owns focus
      *     after query submission
      * - Failure modes:
      *   - silently leaves focus unchanged when no keyboard dismissal action is available
      */
     func dismissSearchFieldFocusIfNeeded(in app: XCUIApplication) {
-        let keyboard = app.keyboards.firstMatch
-        guard keyboard.exists || keyboard.waitForExistence(timeout: 0.2) else {
+        guard let searchField = resolveVisibleSearchInput(in: app, waitTimeout: 0.2),
+              waitForElementKeyboardFocus(searchField, timeout: 0.2) else {
             return
         }
 
         dismissKeyboardIfPresent(in: app)
-        guard keyboard.exists else {
+        guard waitForElementKeyboardFocus(searchField, timeout: 0.2) else {
             return
         }
         let searchScreen = unresolvedElement("searchScreen", in: app)
