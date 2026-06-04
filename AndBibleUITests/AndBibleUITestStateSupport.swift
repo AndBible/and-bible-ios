@@ -364,7 +364,7 @@ extension AndBibleUITests {
      Returns the visible native prompt container used by the create-label flow.
 
      - Parameter app: Running application under test.
-     - Returns: The title-matched alert/sheet first, then the generic modal surface fallback.
+     - Returns: The title-matched alert/sheet used by the create-label prompt.
      - Side effects: none.
      - Failure modes: returns `nil` when XCTest cannot observe a presented prompt.
      */
@@ -375,27 +375,25 @@ extension AndBibleUITests {
                 app.sheets["New Label"].firstMatch,
             ],
             timeout: 0.2
-        ) ?? resolvedModalPrompt(in: app, timeout: 0.2)
+        )
     }
 
     /**
      Returns app-scoped create-label text field candidates in stable lookup order.
 
-     Label Manager creation prompts are SwiftUI alerts. Polling `app.alerts.firstMatch` can force a
-     full hierarchy snapshot while the reader web view is still mounted, so label creation starts
-     with the production identifiers exposed by both label creation surfaces.
+     Label Manager creation prompts are SwiftUI alerts. Secure-field candidates are intentionally
+     omitted because the prompt never uses secure entry, and hosted runners can stall while proving
+     a non-existent secure field is absent.
 
      - Parameter app: Running application under test.
-     - Returns: Text-field candidates ordered from explicit identifier to localized placeholder.
+     - Returns: Text-field candidates ordered from localized placeholder to explicit identifier.
      - Side effects: none.
      - Failure modes: This helper cannot fail.
      */
     func appScopedLabelCreationPromptTextFieldCandidates(in app: XCUIApplication) -> [XCUIElement] {
         [
-            app.textFields["labelManagerNewLabelNameField"].firstMatch,
-            app.secureTextFields["labelManagerNewLabelNameField"].firstMatch,
             app.textFields["Label name"].firstMatch,
-            app.secureTextFields["Label name"].firstMatch,
+            app.textFields["labelManagerNewLabelNameField"].firstMatch,
         ]
     }
 
@@ -417,16 +415,14 @@ extension AndBibleUITests {
     /**
      Returns create-label text field candidates using stable alert names.
 
-     Hosted simulators can wedge XCTest while resolving the first ordinal `TextField` inside a
-     SwiftUI alert, so normal prompt polling avoids that query and relies on the explicit production
-     identifier/title instead.
+     Hosted simulators can wedge XCTest while resolving absent secure-field or ordinal text-entry
+     candidates inside a SwiftUI alert, so prompt polling uses only the visible title and explicit
+     production identifier.
      */
     func labelCreationPromptTextFieldCandidates(in prompt: XCUIElement) -> [XCUIElement] {
         [
-            prompt.textFields["labelManagerNewLabelNameField"].firstMatch,
-            prompt.secureTextFields["labelManagerNewLabelNameField"].firstMatch,
             prompt.textFields["Label name"].firstMatch,
-            prompt.secureTextFields["Label name"].firstMatch,
+            prompt.textFields["labelManagerNewLabelNameField"].firstMatch,
         ]
     }
 
@@ -443,36 +439,34 @@ extension AndBibleUITests {
 
     /// Resolves the create-label prompt text field by scoping queries to the visible prompt.
     func resolveLabelCreationPromptTextField(in app: XCUIApplication) -> XCUIElement? {
-        if let field = firstExistingElement(
-            appScopedLabelCreationPromptTextFieldCandidates(in: app),
-            timeout: 0.2
-        ) {
-            return field
-        }
         if let prompt = resolvedLabelCreationPrompt(in: app) {
-            return firstExistingElement(
+            if let field = firstExistingElement(
                 labelCreationPromptTextFieldCandidates(in: prompt),
                 timeout: 0.2
-            )
+            ) {
+                return field
+            }
         }
-        return nil
+        return firstExistingElement(
+            appScopedLabelCreationPromptTextFieldCandidates(in: app),
+            timeout: 0
+        )
     }
 
     /// Resolves the create-label prompt action button by scoping queries to the visible prompt.
     func resolveLabelCreationPromptCreateButton(in app: XCUIApplication) -> XCUIElement? {
-        if let button = firstExistingElement(
-            appScopedLabelCreationPromptCreateButtonCandidates(in: app),
-            timeout: 0.2
-        ) {
-            return button
-        }
         if let prompt = resolvedLabelCreationPrompt(in: app) {
-            return firstExistingElement(
+            if let button = firstExistingElement(
                 labelCreationPromptCreateButtonCandidates(in: prompt),
                 timeout: 0.2
-            )
+            ) {
+                return button
+            }
         }
-        return nil
+        return firstExistingElement(
+            appScopedLabelCreationPromptCreateButtonCandidates(in: app),
+            timeout: 0
+        )
     }
 
     /// Resolves the Search root element that owns the canonical UI-test state value.

@@ -567,10 +567,11 @@ extension AndBibleUITests {
         case "labelAssignmentCreateNewLabelButton":
             return screenScopedButtonCandidates(identifier, within: "labelAssignmentScreen", in: app)
         case "labelManagerNewLabelNameField":
-            var candidates = appScopedLabelCreationPromptTextFieldCandidates(in: app)
+            var candidates: [XCUIElement] = []
             if let prompt = resolvedLabelCreationPrompt(in: app) {
                 candidates += labelCreationPromptTextFieldCandidates(in: prompt)
             }
+            candidates += appScopedLabelCreationPromptTextFieldCandidates(in: app)
             return candidates
         case "labelEditNameField":
             return [
@@ -579,10 +580,11 @@ extension AndBibleUITests {
                 app.otherElements[identifier].firstMatch,
             ]
         case "labelManagerCreateButton":
-            var candidates = appScopedLabelCreationPromptCreateButtonCandidates(in: app)
+            var candidates: [XCUIElement] = []
             if let prompt = resolvedLabelCreationPrompt(in: app) {
                 candidates += labelCreationPromptCreateButtonCandidates(in: prompt)
             }
+            candidates += appScopedLabelCreationPromptCreateButtonCandidates(in: app)
             return candidates
         case "colorSettingsResetButton":
             return screenScopedButtonCandidates(identifier, within: "colorSettingsScreen", in: app)
