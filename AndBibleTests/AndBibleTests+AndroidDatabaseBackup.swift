@@ -311,6 +311,38 @@ extension AndBibleTests {
     }
 
     /**
+     Verifies that Android backup restore rejects duplicate ZIP member paths before selecting
+     manifest or database payloads.
+
+     Setup:
+     - builds a stored ZIP fixture with two central-directory entries named
+       `AndBibleBackupManifest.json`
+
+     Expected result:
+     - backup loading fails with a deterministic invalid-archive reason before manifest decoding or
+       SQLite staging begins
+
+     Failure meaning:
+     - iOS could accept an ambiguous Android backup where a later duplicate member silently replaces
+       the manifest or database bytes that were read earlier.
+     */
+    func testAndroidDatabaseBackupRejectsDuplicateArchiveEntries() throws {
+        let service = AndroidDatabaseBackupService()
+        let manifestData = Data(#"{"backupType":"DB_BACKUP","manifestVersion":1,"contains":[]}"#.utf8)
+        let duplicateManifestArchive = try makeStoredZip(entries: [
+            ("AndBibleBackupManifest.json", manifestData),
+            ("AndBibleBackupManifest.json", manifestData),
+        ])
+
+        XCTAssertThrowsError(try service.loadArchive(from: duplicateManifestArchive)) { error in
+            XCTAssertEqual(
+                error as? AndroidDatabaseBackupError,
+                .invalidArchive("ZIP archive contains duplicate entry AndBibleBackupManifest.json.")
+            )
+        }
+    }
+
+    /**
      Verifies fail-closed ZIP parsing for malformed central-directory metadata.
 
      Setup:
@@ -367,6 +399,48 @@ extension AndBibleTests {
             XCTAssertEqual(
                 error as? ZipArchiveReaderError,
                 .invalidArchive("ZIP64 archives are not supported")
+            )
+        }
+    }
+
+    /**
+     Verifies fail-closed ZIP parsing for spanned-archive end records.
+
+     Setup:
+     - builds a valid single-disk stored ZIP fixture
+     - mutates the end-of-central-directory disk number and per-disk entry count fields
+
+     Expected result:
+     - the reader rejects the archive before using central-directory offsets or entry counts
+
+     Failure meaning:
+     - iOS could parse a multi-disk or inconsistent ZIP as though it were the single-disk Android
+       backup shape, which would make offsets and payload selection unreliable.
+     */
+    func testZipArchiveReaderRejectsMultiDiskEndRecords() throws {
+        let archive = try makeStoredZip(entries: [
+            ("AndBibleBackupManifest.json", Data("{}".utf8)),
+        ])
+
+        var nonZeroDiskArchive = archive
+        let nonZeroDiskEndRecordOffset = try endOfCentralDirectoryOffset(in: nonZeroDiskArchive)
+        replaceUInt16(1, at: nonZeroDiskEndRecordOffset + 4, in: &nonZeroDiskArchive)
+
+        XCTAssertThrowsError(try ZipArchiveReader.entries(in: nonZeroDiskArchive)) { error in
+            XCTAssertEqual(
+                error as? ZipArchiveReaderError,
+                .invalidArchive("Multi-disk ZIP archives are not supported")
+            )
+        }
+
+        var mismatchedEntryCountArchive = archive
+        let mismatchedEntryCountEndRecordOffset = try endOfCentralDirectoryOffset(in: mismatchedEntryCountArchive)
+        replaceUInt16(0, at: mismatchedEntryCountEndRecordOffset + 8, in: &mismatchedEntryCountArchive)
+
+        XCTAssertThrowsError(try ZipArchiveReader.entries(in: mismatchedEntryCountArchive)) { error in
+            XCTAssertEqual(
+                error as? ZipArchiveReaderError,
+                .invalidArchive("Multi-disk ZIP archives are not supported")
             )
         }
     }

@@ -612,10 +612,7 @@ public final class AndroidDatabaseBackupService {
             throw AndroidDatabaseBackupError.invalidArchive(error.localizedDescription)
         }
 
-        var entriesByName: [String: Data] = [:]
-        for entry in entries {
-            entriesByName[entry.name] = entry.data
-        }
+        let entriesByName = try Self.entriesByUniqueName(entries)
         guard let manifestData = entriesByName["AndBibleBackupManifest.json"] else {
             throw AndroidDatabaseBackupError.missingManifest
         }
@@ -778,6 +775,34 @@ public final class AndroidDatabaseBackupService {
             manifestVersion: dto.manifestVersion ?? 1,
             andBibleVersion: dto.andBibleVersion
         )
+    }
+
+    /**
+     Builds a deterministic ZIP entry lookup for Android backup archives.
+
+     ZIP archives may legally contain multiple file members with the same path. Android database
+     backup restore treats paths such as `AndBibleBackupManifest.json` and `db/bookmarks.sqlite3`
+     as authoritative inputs, so duplicate names would make the selected manifest or SQLite payload
+     ambiguous. Rejecting duplicates before validation keeps restore/import fail-closed instead of
+     letting a later central-directory entry replace an earlier one.
+
+     - Parameter entries: Non-directory entries extracted from `ZipArchiveReader` in central-directory order.
+     - Returns: Entry payloads keyed by their ZIP path.
+     - Side effects: none.
+     - Failure modes: Throws `AndroidDatabaseBackupError.invalidArchive` when any entry path appears
+       more than once.
+     */
+    private static func entriesByUniqueName(_ entries: [ZipArchiveEntry]) throws -> [String: Data] {
+        var entriesByName: [String: Data] = [:]
+        for entry in entries {
+            guard entriesByName[entry.name] == nil else {
+                throw AndroidDatabaseBackupError.invalidArchive(
+                    "ZIP archive contains duplicate entry \(entry.name)."
+                )
+            }
+            entriesByName[entry.name] = entry.data
+        }
+        return entriesByName
     }
 
     /**

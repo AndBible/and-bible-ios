@@ -97,6 +97,8 @@ public enum ZipArchiveReader {
      - Failure modes:
        - throws `ZipArchiveReaderError.missingCentralDirectory` when the archive is not ZIP-shaped
        - throws `ZipArchiveReaderError.invalidArchive` when a header is truncated or inconsistent
+       - throws `ZipArchiveReaderError.invalidArchive` when the end record describes a spanned
+         archive instead of the single-disk ZIP shape Android backups use
        - throws `ZipArchiveReaderError.invalidArchive` when declared entry/archive sizes exceed
          the eager extraction limits
        - throws `ZipArchiveReaderError.invalidArchive` when materialized entry sizes do not match
@@ -106,6 +108,8 @@ public enum ZipArchiveReader {
      */
     public static func entries(in data: Data) throws -> [ZipArchiveEntry] {
         let endRecordOffset = try endOfCentralDirectoryOffset(in: data)
+        let diskNumberRaw = readUInt16(data, at: endRecordOffset + 4)
+        let centralDirectoryDiskRaw = readUInt16(data, at: endRecordOffset + 6)
         let diskEntryCountRaw = readUInt16(data, at: endRecordOffset + 8)
         let entryCountRaw = readUInt16(data, at: endRecordOffset + 10)
         let centralDirectorySizeRaw = readUInt32(data, at: endRecordOffset + 12)
@@ -116,6 +120,11 @@ public enum ZipArchiveReader {
               centralDirectorySizeRaw != zip64Sentinel,
               centralDirectoryOffsetRaw != zip64Sentinel else {
             throw ZipArchiveReaderError.invalidArchive("ZIP64 archives are not supported")
+        }
+        guard diskNumberRaw == 0,
+              centralDirectoryDiskRaw == 0,
+              diskEntryCountRaw == entryCountRaw else {
+            throw ZipArchiveReaderError.invalidArchive("Multi-disk ZIP archives are not supported")
         }
         let entryCount = Int(entryCountRaw)
         let centralDirectorySize = Int(centralDirectorySizeRaw)
