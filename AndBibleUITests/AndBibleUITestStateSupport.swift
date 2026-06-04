@@ -126,9 +126,24 @@ extension AndBibleUITests {
         let includeElementMetadata = accessibilityIdentifier == nil
         let deadline = Date().addingTimeInterval(timeout)
 
+        func promptFocusedTextEntryCandidates() -> [XCUIElement] {
+            switch accessibilityIdentifier {
+            case "labelManagerNewLabelNameField", "workspaceNamePromptTextField":
+                let focusedPredicate = NSPredicate(format: "hasKeyboardFocus == true")
+                return [app.textFields.matching(focusedPredicate).firstMatch]
+            default:
+                return focusedTextEntryCandidates(in: app)
+            }
+        }
+
         func resolvedPromptTextField() -> XCUIElement {
             if accessibilityIdentifier == "labelManagerNewLabelNameField",
                let field = resolveLabelCreationPromptTextField(in: app)
+            {
+                return field
+            }
+            if accessibilityIdentifier == "workspaceNamePromptTextField",
+               let field = firstExistingElement(workspaceNamePromptTextFieldCandidates(in: app), timeout: 0.2)
             {
                 return field
             }
@@ -145,7 +160,7 @@ extension AndBibleUITests {
                 }
             }
 
-            if let focusedField = firstExistingElement(focusedTextEntryCandidates(in: app), timeout: 0.2) {
+            if let focusedField = firstExistingElement(promptFocusedTextEntryCandidates(), timeout: 0.2) {
                 return focusedField
             }
 
@@ -153,7 +168,7 @@ extension AndBibleUITests {
         }
 
         func observedPromptTextValue() -> String {
-            let candidates = [resolvedPromptTextField(), element] + focusedTextEntryCandidates(in: app)
+            let candidates = [resolvedPromptTextField(), element] + promptFocusedTextEntryCandidates()
             var fallbackValue = ""
             for candidate in candidates where candidate.exists {
                 let candidateValue = currentTextEntryValue(
@@ -1298,10 +1313,10 @@ extension AndBibleUITests {
     /**
      Focuses a prompt-owned text-entry control without polling `isHittable`.
 
-     SwiftUI alert text fields can occasionally stall XCTest while resolving frame-based taps even
-     after the prompt-specific resolver has found the field. Prefer the alert's automatic keyboard
-     focus first, then tap the modal surface instead of the resolved field so XCTest does not rebuild
-     a slow text-field snapshot.
+     SwiftUI prompt surfaces can occasionally stall XCTest while resolving broad alert or sheet
+     snapshots after a prompt-specific resolver has already found the field. Prefer the prompt's
+     automatic keyboard focus first, then tap the resolved field coordinate or a stable app
+     coordinate instead of querying `app.alerts.firstMatch` or `app.sheets.firstMatch`.
      */
     func focusResolvedPromptTextEntryElement(
         _ element: XCUIElement,
@@ -1319,9 +1334,12 @@ extension AndBibleUITests {
         let tapOffset = CGVector(dx: preferTrailingEdge ? 0.92 : 0.5, dy: 0.5)
 
         repeat {
-            let coordinate = resolvedModalPrompt(in: app, timeout: 0.2)?
-                .coordinate(withNormalizedOffset: tapOffset)
-                ?? app.coordinate(withNormalizedOffset: tapOffset)
+            let coordinate: XCUICoordinate
+            if element.exists, !element.frame.isEmpty {
+                coordinate = element.coordinate(withNormalizedOffset: tapOffset)
+            } else {
+                coordinate = app.coordinate(withNormalizedOffset: tapOffset)
+            }
             coordinate.tap()
             if waitForElementKeyboardFocus(element, timeout: 0.75) {
                 return

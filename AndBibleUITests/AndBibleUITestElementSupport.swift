@@ -336,23 +336,20 @@ extension AndBibleUITests {
     /// Returns workspace-name prompt text-field candidates without probing arbitrary fields.
     func workspaceNamePromptTextFieldCandidates(in app: XCUIApplication) -> [XCUIElement] {
         let identifier = "workspaceNamePromptTextField"
+        let focusedPredicate = NSPredicate(format: "hasKeyboardFocus == true")
         let customSheetCandidates = ["Name", "name"].flatMap { title in
             [
                 app.textFields[title].firstMatch,
                 app.collectionViews.textFields[title].firstMatch,
                 app.tables.textFields[title].firstMatch,
                 app.scrollViews.textFields[title].firstMatch,
-                app.secureTextFields[title].firstMatch,
-                app.collectionViews.secureTextFields[title].firstMatch,
-                app.tables.secureTextFields[title].firstMatch,
-                app.scrollViews.secureTextFields[title].firstMatch,
             ]
         } + [
             app.textFields[identifier].firstMatch,
-            app.secureTextFields[identifier].firstMatch,
             app.otherElements[identifier].firstMatch,
+            app.textFields.matching(focusedPredicate).firstMatch,
         ]
-        return customSheetCandidates + focusedTextEntryCandidates(in: app)
+        return customSheetCandidates
     }
 
     /// Returns workspace-name prompt buttons without walking the custom sheet hierarchy.
