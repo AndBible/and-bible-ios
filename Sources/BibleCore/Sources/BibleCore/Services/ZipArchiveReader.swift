@@ -8,8 +8,8 @@ import Foundation
 
  The reader is intentionally small and supports the ZIP shapes AndBible consumes locally:
  central-directory based stored or deflated file entries. Unsupported compression methods and
- malformed offsets are rejected explicitly so callers can surface actionable archive errors instead
- of treating missing entries as valid empty archives.
+ malformed offsets/sizes are rejected explicitly so callers can surface actionable archive errors
+ instead of treating missing entries as valid empty archives.
  */
 public enum ZipArchiveReaderError: Error, Equatable {
     /// The archive did not contain a readable ZIP end-of-central-directory record.
@@ -66,9 +66,19 @@ public enum ZipArchiveReader {
     private static let endOfCentralDirectorySignature: UInt32 = 0x0605_4b50
     private static let zip64Sentinel: UInt32 = 0xffff_ffff
     private static let zip64EntryCountSentinel: UInt16 = 0xffff
+    /// Maximum compressed or uncompressed bytes accepted for one eagerly materialized entry.
+    private static let maximumEntryByteCount = 256 * 1024 * 1024
+    /// Maximum compressed bytes accepted across all extracted entries.
+    private static let maximumTotalCompressedByteCount = 512 * 1024 * 1024
+    /// Maximum uncompressed bytes accepted across all extracted entries.
+    private static let maximumTotalUncompressedByteCount = 512 * 1024 * 1024
 
     /**
      Extracts supported file entries from raw ZIP data.
+
+     The reader is intentionally eager because Android backup restore needs materialized database
+     bytes before staging SQLite files. Size limits are enforced before local payload extraction or
+     inflation so a malicious archive cannot force unbounded memory allocation.
 
      - Parameter data: Raw ZIP archive bytes.
      - Returns: Uncompressed non-directory entries in central-directory order.
@@ -76,6 +86,8 @@ public enum ZipArchiveReader {
      - Failure modes:
        - throws `ZipArchiveReaderError.missingCentralDirectory` when the archive is not ZIP-shaped
        - throws `ZipArchiveReaderError.invalidArchive` when a header is truncated or inconsistent
+       - throws `ZipArchiveReaderError.invalidArchive` when declared entry/archive sizes exceed
+         the eager extraction limits
        - throws `ZipArchiveReaderError.unsupportedCompressionMethod` for non-stored/non-deflated entries
        - throws `ZipArchiveReaderError.decompressionFailed` when the C inflater cannot decode an entry
      */
@@ -104,6 +116,8 @@ public enum ZipArchiveReader {
 
         var entries: [ZipArchiveEntry] = []
         var offset = centralDirectoryOffset
+        var totalCompressedSize = 0
+        var totalUncompressedSize = 0
         for _ in 0..<entryCount {
             guard offset + 46 <= centralDirectoryEnd else {
                 throw ZipArchiveReaderError.invalidArchive("Central directory entry is truncated")
@@ -147,6 +161,13 @@ public enum ZipArchiveReader {
             let localHeaderOffset = Int(localHeaderOffsetRaw)
             let compressedSize = Int(compressedSizeRaw)
             let uncompressedSize = Int(uncompressedSizeRaw)
+            try validateEntrySize(compressedSize: compressedSize, uncompressedSize: uncompressedSize)
+            try accumulateEntrySizes(
+                compressedSize: compressedSize,
+                uncompressedSize: uncompressedSize,
+                totalCompressedSize: &totalCompressedSize,
+                totalUncompressedSize: &totalUncompressedSize
+            )
             let compressedData = try compressedEntryData(
                 archive: data,
                 localHeaderOffset: localHeaderOffset,
@@ -169,6 +190,54 @@ public enum ZipArchiveReader {
         }
 
         return entries
+    }
+
+    /**
+     Validates one central-directory entry's declared compressed and uncompressed sizes.
+
+     The ZIP reader materializes each supported entry in memory, so both the compressed payload
+     slice and inflated result must stay below the per-entry cap before extraction starts.
+
+     - Parameters:
+       - compressedSize: Declared compressed byte count from the central directory.
+       - uncompressedSize: Declared uncompressed byte count from the central directory.
+     - Side effects: none.
+     - Failure modes: Throws when either declared size exceeds the eager extraction cap.
+     */
+    private static func validateEntrySize(compressedSize: Int, uncompressedSize: Int) throws {
+        guard compressedSize <= maximumEntryByteCount,
+              uncompressedSize <= maximumEntryByteCount else {
+            throw ZipArchiveReaderError.invalidArchive("ZIP entry exceeds maximum supported size")
+        }
+    }
+
+    /**
+     Adds one entry's declared sizes to aggregate extraction totals.
+
+     Aggregate caps protect against archives containing many individually acceptable entries that
+     would still exhaust memory once the eager reader materializes them together.
+
+     - Parameters:
+       - compressedSize: Declared compressed byte count for the current file entry.
+       - uncompressedSize: Declared uncompressed byte count for the current file entry.
+       - totalCompressedSize: Running compressed byte total, mutated on success.
+       - totalUncompressedSize: Running uncompressed byte total, mutated on success.
+     - Side effects: Mutates the running totals after validating the addition.
+     - Failure modes: Throws when adding the entry would exceed aggregate extraction caps.
+     */
+    private static func accumulateEntrySizes(
+        compressedSize: Int,
+        uncompressedSize: Int,
+        totalCompressedSize: inout Int,
+        totalUncompressedSize: inout Int
+    ) throws {
+        guard totalCompressedSize <= maximumTotalCompressedByteCount - compressedSize,
+              totalUncompressedSize <= maximumTotalUncompressedByteCount - uncompressedSize else {
+            throw ZipArchiveReaderError.invalidArchive("ZIP archive exceeds maximum supported size")
+        }
+
+        totalCompressedSize += compressedSize
+        totalUncompressedSize += uncompressedSize
     }
 
     /**

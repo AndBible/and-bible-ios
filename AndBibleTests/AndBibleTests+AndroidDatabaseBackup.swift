@@ -363,6 +363,62 @@ extension AndBibleTests {
     }
 
     /**
+     Verifies ZIP bomb protection before the eager reader extracts or inflates payload bytes.
+
+     Setup:
+     - builds small ZIP fixtures and rewrites central-directory size metadata to oversized values
+     - keeps local payloads tiny so the test proves rejection is based on declared size guards, not
+       actual fixture allocation
+
+     Expected result:
+     - a single entry over the per-entry cap fails as malformed archive data
+     - multiple entries below the per-entry cap but above the aggregate cap also fail
+
+     Failure meaning:
+     - iOS could allocate excessive memory while importing a crafted Android backup archive before
+       the restore path reaches SQLite validation.
+     */
+    func testZipArchiveReaderRejectsOversizedDeclaredPayloadsBeforeExtraction() throws {
+        var oversizedEntryArchive = try makeStoredZip(entries: [
+            ("db/bookmarks.sqlite3", Data([0x01])),
+        ])
+        try replaceCentralDirectorySizes(
+            compressedSize: 1,
+            uncompressedSize: UInt32(300 * 1024 * 1024),
+            for: "db/bookmarks.sqlite3",
+            in: &oversizedEntryArchive
+        )
+
+        XCTAssertThrowsError(try ZipArchiveReader.entries(in: oversizedEntryArchive)) { error in
+            XCTAssertEqual(
+                error as? ZipArchiveReaderError,
+                .invalidArchive("ZIP entry exceeds maximum supported size")
+            )
+        }
+
+        var oversizedTotalArchive = try makeStoredZip(entries: [
+            ("db/bookmarks.sqlite3", Data([0x01])),
+            ("db/workspaces.sqlite3", Data([0x02])),
+            ("db/mydocuments.sqlite3", Data([0x03])),
+        ])
+        for entryName in ["db/bookmarks.sqlite3", "db/workspaces.sqlite3", "db/mydocuments.sqlite3"] {
+            try replaceCentralDirectorySizes(
+                compressedSize: 1,
+                uncompressedSize: UInt32(200 * 1024 * 1024),
+                for: entryName,
+                in: &oversizedTotalArchive
+            )
+        }
+
+        XCTAssertThrowsError(try ZipArchiveReader.entries(in: oversizedTotalArchive)) { error in
+            XCTAssertEqual(
+                error as? ZipArchiveReaderError,
+                .invalidArchive("ZIP archive exceeds maximum supported size")
+            )
+        }
+    }
+
+    /**
      Verifies Android-style deflated ZIP entries whose local headers use data descriptors.
 
      Setup:
@@ -850,6 +906,60 @@ extension AndBibleTests {
     }
 
     /**
+     Rewrites central-directory size metadata for one ZIP fixture entry.
+
+     This helper intentionally leaves local headers and payloads unchanged so tests can model
+     malicious central-directory declarations without allocating large fixture data.
+
+     - Parameters:
+       - compressedSize: Declared compressed byte count to write.
+       - uncompressedSize: Declared uncompressed byte count to write.
+       - entryName: Central-directory entry name to mutate.
+       - data: ZIP fixture bytes to mutate in place.
+     - Side effects: Mutates central-directory size fields inside `data`.
+     - Failure modes: Throws if the fixture lacks a valid central directory or matching entry.
+     */
+    private func replaceCentralDirectorySizes(
+        compressedSize: UInt32,
+        uncompressedSize: UInt32,
+        for entryName: String,
+        in data: inout Data
+    ) throws {
+        let endRecordOffset = try endOfCentralDirectoryOffset(in: data)
+        let centralDirectoryOffset = Int(readUInt32(data, at: endRecordOffset + 16))
+        let centralDirectorySize = Int(readUInt32(data, at: endRecordOffset + 12))
+        let centralDirectoryEnd = centralDirectoryOffset + centralDirectorySize
+        var offset = centralDirectoryOffset
+
+        while offset < centralDirectoryEnd {
+            guard offset + 46 <= centralDirectoryEnd,
+                  readUInt32(data, at: offset) == 0x0201_4b50 else {
+                throw ZipArchiveReaderError.invalidArchive("Test ZIP central directory is malformed")
+            }
+
+            let nameLength = Int(readUInt16(data, at: offset + 28))
+            let extraLength = Int(readUInt16(data, at: offset + 30))
+            let commentLength = Int(readUInt16(data, at: offset + 32))
+            let nameStart = offset + 46
+            let nameEnd = nameStart + nameLength
+            guard nameEnd <= centralDirectoryEnd,
+                  let name = String(data: data[nameStart..<nameEnd], encoding: .utf8) else {
+                throw ZipArchiveReaderError.invalidArchive("Test ZIP central directory entry name is malformed")
+            }
+
+            if name == entryName {
+                replaceUInt32(compressedSize, at: offset + 20, in: &data)
+                replaceUInt32(uncompressedSize, at: offset + 24, in: &data)
+                return
+            }
+
+            offset = nameEnd + extraLength + commentLength
+        }
+
+        throw ZipArchiveReaderError.invalidArchive("Test ZIP central directory entry is missing")
+    }
+
+    /**
      Finds the end-of-central-directory signature in a ZIP fixture.
 
      - Parameter data: Raw ZIP fixture bytes.
@@ -868,6 +978,22 @@ extension AndBibleTests {
             offset -= 1
         }
         throw ZipArchiveReaderError.missingCentralDirectory
+    }
+
+    /**
+     Reads one little-endian 16-bit integer from a ZIP fixture.
+
+     - Parameters:
+       - data: Fixture bytes.
+       - offset: Byte offset where the integer starts.
+     - Returns: Decoded integer value.
+     - Side effects: none.
+     - Failure modes: Callers must pass a valid two-byte range.
+     */
+    private func readUInt16(_ data: Data, at offset: Int) -> UInt16 {
+        let b0 = UInt16(data[offset])
+        let b1 = UInt16(data[offset + 1]) << 8
+        return b0 | b1
     }
 
     /**
