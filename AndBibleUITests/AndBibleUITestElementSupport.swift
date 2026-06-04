@@ -567,19 +567,11 @@ extension AndBibleUITests {
         case "labelAssignmentCreateNewLabelButton":
             return screenScopedButtonCandidates(identifier, within: "labelAssignmentScreen", in: app)
         case "labelManagerNewLabelNameField":
-            if let prompt = resolvedModalPrompt(in: app, timeout: 0) {
-                return modalTextFieldCandidates(
-                    in: prompt,
-                    identifiers: [identifier],
-                    titles: ["Label name"]
-                )
+            var candidates = appScopedLabelCreationPromptTextFieldCandidates(in: app)
+            if let prompt = resolvedLabelCreationPrompt(in: app) {
+                candidates += labelCreationPromptTextFieldCandidates(in: prompt)
             }
-            return [
-                app.alerts.firstMatch.textFields["Label name"].firstMatch,
-                app.sheets.firstMatch.textFields["Label name"].firstMatch,
-                app.alerts.firstMatch.textFields.element(boundBy: 0),
-                app.sheets.firstMatch.textFields.element(boundBy: 0),
-            ]
+            return candidates
         case "labelEditNameField":
             return [
                 app.textFields[identifier].firstMatch,
@@ -587,17 +579,11 @@ extension AndBibleUITests {
                 app.otherElements[identifier].firstMatch,
             ]
         case "labelManagerCreateButton":
-            if let prompt = resolvedModalPrompt(in: app, timeout: 0) {
-                return modalButtonCandidates(
-                    in: prompt,
-                    identifiers: [identifier],
-                    titles: ["Create"]
-                )
+            var candidates = appScopedLabelCreationPromptCreateButtonCandidates(in: app)
+            if let prompt = resolvedLabelCreationPrompt(in: app) {
+                candidates += labelCreationPromptCreateButtonCandidates(in: prompt)
             }
-            return [
-                app.alerts.firstMatch.buttons["Create"].firstMatch,
-                app.sheets.firstMatch.buttons["Create"].firstMatch,
-            ]
+            return candidates
         case "colorSettingsResetButton":
             return screenScopedButtonCandidates(identifier, within: "colorSettingsScreen", in: app)
         case "aboutAppTitle":

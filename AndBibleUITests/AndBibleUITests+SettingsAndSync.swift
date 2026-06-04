@@ -227,9 +227,16 @@ extension AndBibleUITests {
         tapElementReliably(requireElement("labelManagerAddButton", in: app, timeout: 10), timeout: 10)
         waitForLabelManagerState(containing: "showNewLabel=true", in: app, timeout: 10)
         let newLabelNameField = requireLabelManagerNewLabelField(in: app, timeout: 10)
-        focusResolvedPromptTextEntryElement(newLabelNameField, in: app, timeout: 10)
-        app.typeText(originalName)
-        tapElementReliably(requireLabelManagerCreateButton(in: app, timeout: 10), timeout: 10)
+        guard typePromptText(
+            originalName,
+            into: newLabelNameField,
+            in: app,
+            timeout: 15,
+            accessibilityIdentifier: "labelManagerNewLabelNameField"
+        ) else {
+            return
+        }
+        tapLabelCreationPromptCreateButton(in: app, timeout: 10)
         waitForLabelManagerState(containing: labelManagerRowStateToken(originalName), in: app, timeout: 10)
 
         let createdRow = requireLabelRow(named: originalName, in: app, timeout: 10)
