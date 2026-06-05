@@ -107,7 +107,8 @@ extension AndBibleUITests {
        - line: Source line used for XCTest failure attribution.
      - Returns: `true` when the prompt field reports the expected value before submission.
      - Side effects:
-       - focuses the prompt field, emits keyboard input, and clears/retries if CI drops the input
+       - focuses the prompt field, verifies or clears any existing prompt value, emits keyboard
+         input, and clears/retries if CI drops the input without appending duplicate text
      - Failure modes:
        - records an XCTest failure when the field value never matches `text`
      */
@@ -126,32 +127,55 @@ extension AndBibleUITests {
         let includeElementMetadata = accessibilityIdentifier == nil
         let deadline = Date().addingTimeInterval(timeout)
 
+        func promptFocusedTextEntryCandidates() -> [XCUIElement] {
+            switch accessibilityIdentifier {
+            case "labelManagerNewLabelNameField", "workspaceNamePromptTextField":
+                let focusedPredicate = NSPredicate(format: "hasKeyboardFocus == true")
+                return [app.textFields.matching(focusedPredicate).firstMatch]
+            default:
+                return focusedTextEntryCandidates(in: app)
+            }
+        }
+
         func resolvedPromptTextField() -> XCUIElement {
+            switch accessibilityIdentifier {
+            case "labelManagerNewLabelNameField", "workspaceNamePromptTextField":
+                return element
+            default:
+                break
+            }
+
             if let prompt = resolvedModalPrompt(in: app, timeout: 0.2) {
                 let promptCandidates: [XCUIElement]
-                if accessibilityIdentifier == "labelManagerNewLabelNameField" {
-                    promptCandidates = labelCreationPromptTextFieldCandidates(in: prompt)
-                } else {
-                    promptCandidates = modalTextFieldCandidates(
-                        in: prompt,
-                        identifiers: accessibilityIdentifier.map { [$0] } ?? [],
-                        titles: placeholderHints
-                    )
-                }
+                promptCandidates = modalTextFieldCandidates(
+                    in: prompt,
+                    identifiers: accessibilityIdentifier.map { [$0] } ?? [],
+                    titles: placeholderHints
+                )
                 if let promptField = firstExistingElement(promptCandidates, timeout: 0.2) {
                     return promptField
                 }
             }
 
-            if let focusedField = firstExistingElement(focusedTextEntryCandidates(in: app), timeout: 0.2) {
+            if let focusedField = firstExistingElement(promptFocusedTextEntryCandidates(), timeout: 0.2) {
                 return focusedField
             }
 
             return element
         }
 
-        func observedPromptTextValue() -> String {
-            let candidates = [resolvedPromptTextField(), element] + focusedTextEntryCandidates(in: app)
+        func promptTextEntryCandidates(preferred preferredCandidates: [XCUIElement]) -> [XCUIElement] {
+            var candidates = preferredCandidates
+            if preferredCandidates.isEmpty {
+                candidates.append(resolvedPromptTextField())
+            }
+            candidates.append(element)
+            candidates += promptFocusedTextEntryCandidates()
+            return candidates
+        }
+
+        func observedPromptTextValue(preferred preferredCandidates: [XCUIElement] = []) -> String {
+            let candidates = promptTextEntryCandidates(preferred: preferredCandidates)
             var fallbackValue = ""
             for candidate in candidates where candidate.exists {
                 let candidateValue = currentTextEntryValue(
@@ -169,19 +193,74 @@ extension AndBibleUITests {
             return fallbackValue
         }
 
-        func waitForObservedPromptTextValue(timeout: TimeInterval) -> Bool {
+        func waitForObservedPromptTextValue(
+            preferred preferredCandidates: [XCUIElement] = [],
+            timeout: TimeInterval
+        ) -> Bool {
             let valueDeadline = Date().addingTimeInterval(timeout)
             repeat {
-                if observedPromptTextValue() == text {
+                if observedPromptTextValue(preferred: preferredCandidates) == text {
                     return true
                 }
                 RunLoop.current.run(until: Date().addingTimeInterval(0.2))
             } while Date() < valueDeadline
-            return observedPromptTextValue() == text
+            return observedPromptTextValue(preferred: preferredCandidates) == text
+        }
+
+        func waitForObservedPromptTextValueToClear(
+            preferred preferredCandidates: [XCUIElement],
+            timeout: TimeInterval
+        ) -> Bool {
+            let clearDeadline = Date().addingTimeInterval(timeout)
+            repeat {
+                if observedPromptTextValue(preferred: preferredCandidates).isEmpty {
+                    return true
+                }
+                RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+            } while Date() < clearDeadline
+            return observedPromptTextValue(preferred: preferredCandidates).isEmpty
+        }
+
+        func clearObservedPromptTextValue(
+            preferred preferredCandidates: [XCUIElement],
+            forceKeyboardDelete: Bool = false
+        ) -> Bool {
+            let candidates = promptTextEntryCandidates(preferred: preferredCandidates)
+            for candidate in candidates where candidate.exists {
+                if forceKeyboardDelete {
+                    focusTextEntryElement(candidate, preferTrailingEdge: true, timeout: 1)
+                    if waitForElementKeyboardFocus(candidate, timeout: 0.3) {
+                        app.typeText(
+                            String(repeating: XCUIKeyboardKey.delete.rawValue, count: max(text.count * 2, 32))
+                        )
+                        if waitForObservedPromptTextValueToClear(
+                            preferred: preferredCandidates + [candidate],
+                            timeout: 0.5
+                        ) {
+                            return true
+                        }
+                    }
+                }
+
+                if clearTextEntryElement(
+                    candidate,
+                    app: app,
+                    placeholderHints: placeholderHints,
+                    includeElementMetadata: includeElementMetadata
+                ) && waitForObservedPromptTextValueToClear(
+                    preferred: preferredCandidates + [candidate],
+                    timeout: 0.5
+                ) {
+                    return true
+                }
+            }
+
+            return observedPromptTextValue(preferred: preferredCandidates).isEmpty
         }
 
         repeat {
             let promptTextField = resolvedPromptTextField()
+            let preferredPromptCandidates = [promptTextField]
             focusResolvedPromptTextEntryElement(
                 promptTextField,
                 in: app,
@@ -189,41 +268,52 @@ extension AndBibleUITests {
                 file: file,
                 line: line
             )
-            if observedPromptTextValue() == text {
+            let existingValue = observedPromptTextValue(preferred: preferredPromptCandidates)
+            if existingValue == text {
                 return true
+            }
+            guard clearObservedPromptTextValue(preferred: preferredPromptCandidates, forceKeyboardDelete: true) else {
+                RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+                continue
             }
 
             promptTextField.typeText(text)
-            if waitForObservedPromptTextValue(timeout: min(3, max(0.5, deadline.timeIntervalSinceNow))) {
+            if waitForObservedPromptTextValue(
+                preferred: preferredPromptCandidates,
+                timeout: min(5, max(0.5, deadline.timeIntervalSinceNow))
+            ) {
                 return true
             }
 
             if waitForElementKeyboardFocus(promptTextField, timeout: 0.5) {
-                let currentValue = observedPromptTextValue()
+                let currentValue = observedPromptTextValue(preferred: preferredPromptCandidates)
                 if currentValue == text {
                     return true
                 }
                 if !currentValue.isEmpty {
-                    _ = clearTextEntryElement(
-                        resolvedPromptTextField(),
-                        app: app,
-                        placeholderHints: placeholderHints,
-                        includeElementMetadata: includeElementMetadata
-                    )
+                    _ = clearObservedPromptTextValue(preferred: preferredPromptCandidates, forceKeyboardDelete: true)
+                    RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+                    continue
+                }
+
+                guard clearObservedPromptTextValue(
+                    preferred: preferredPromptCandidates,
+                    forceKeyboardDelete: true
+                ) else {
+                    RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+                    continue
                 }
 
                 app.typeText(text)
-                if waitForObservedPromptTextValue(timeout: min(3, max(0.5, deadline.timeIntervalSinceNow))) {
+                if waitForObservedPromptTextValue(
+                    preferred: preferredPromptCandidates,
+                    timeout: min(3, max(0.5, deadline.timeIntervalSinceNow))
+                ) {
                     return true
                 }
             }
 
-            _ = clearTextEntryElement(
-                resolvedPromptTextField(),
-                app: app,
-                placeholderHints: placeholderHints,
-                includeElementMetadata: includeElementMetadata
-            )
+            _ = clearObservedPromptTextValue(preferred: preferredPromptCandidates, forceKeyboardDelete: true)
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         } while Date() < deadline
 
@@ -358,24 +448,69 @@ extension AndBibleUITests {
         )
     }
 
-    /// Returns the visible prompt container used by the create-label flow.
+    /**
+     Returns the visible native prompt container used by the create-label flow.
+
+     - Parameter app: Running application under test.
+     - Returns: The title-matched alert/sheet used by the create-label prompt.
+     - Side effects: none.
+     - Failure modes: returns `nil` when XCTest cannot observe a presented prompt.
+     */
     func resolvedLabelCreationPrompt(in app: XCUIApplication) -> XCUIElement? {
-        resolvedModalPrompt(in: app, timeout: 0.2)
+        firstExistingElement(
+            [
+                app.alerts["New Label"].firstMatch,
+                app.sheets["New Label"].firstMatch,
+            ],
+            timeout: 0.2
+        )
+    }
+
+    /**
+     Returns app-scoped create-label text field candidates in stable lookup order.
+
+     Label Manager creation prompts are SwiftUI alerts. Secure-field candidates are intentionally
+     omitted because the prompt never uses secure entry, and hosted runners can stall while proving
+     a non-existent secure field is absent.
+
+     - Parameter app: Running application under test.
+     - Returns: Text-field candidates ordered from localized placeholder to explicit identifier.
+     - Side effects: none.
+     - Failure modes: This helper cannot fail.
+     */
+    func appScopedLabelCreationPromptTextFieldCandidates(in app: XCUIApplication) -> [XCUIElement] {
+        [
+            app.textFields["Label name"].firstMatch,
+            app.textFields["labelManagerNewLabelNameField"].firstMatch,
+        ]
+    }
+
+    /**
+     Returns app-scoped create-label action candidates in stable lookup order.
+
+     - Parameter app: Running application under test.
+     - Returns: Button candidates ordered from explicit identifier to localized title.
+     - Side effects: none.
+     - Failure modes: This helper cannot fail.
+     */
+    func appScopedLabelCreationPromptCreateButtonCandidates(in app: XCUIApplication) -> [XCUIElement] {
+        [
+            app.buttons["labelManagerCreateButton"].firstMatch,
+            app.buttons["Create"].firstMatch,
+        ]
     }
 
     /**
      Returns create-label text field candidates using stable alert names.
 
-     Hosted simulators can wedge XCTest while resolving the first ordinal `TextField` inside a
-     SwiftUI alert, so normal prompt polling avoids that query and relies on the explicit production
-     identifier/title instead.
+     Hosted simulators can wedge XCTest while resolving absent secure-field or ordinal text-entry
+     candidates inside a SwiftUI alert, so prompt polling uses only the visible title and explicit
+     production identifier.
      */
     func labelCreationPromptTextFieldCandidates(in prompt: XCUIElement) -> [XCUIElement] {
         [
-            prompt.textFields["labelManagerNewLabelNameField"].firstMatch,
-            prompt.secureTextFields["labelManagerNewLabelNameField"].firstMatch,
             prompt.textFields["Label name"].firstMatch,
-            prompt.secureTextFields["Label name"].firstMatch,
+            prompt.textFields["labelManagerNewLabelNameField"].firstMatch,
         ]
     }
 
@@ -393,23 +528,33 @@ extension AndBibleUITests {
     /// Resolves the create-label prompt text field by scoping queries to the visible prompt.
     func resolveLabelCreationPromptTextField(in app: XCUIApplication) -> XCUIElement? {
         if let prompt = resolvedLabelCreationPrompt(in: app) {
-            return firstExistingElement(
+            if let field = firstExistingElement(
                 labelCreationPromptTextFieldCandidates(in: prompt),
                 timeout: 0.2
-            )
+            ) {
+                return field
+            }
         }
-        return nil
+        return firstExistingElement(
+            appScopedLabelCreationPromptTextFieldCandidates(in: app),
+            timeout: 0
+        )
     }
 
     /// Resolves the create-label prompt action button by scoping queries to the visible prompt.
     func resolveLabelCreationPromptCreateButton(in app: XCUIApplication) -> XCUIElement? {
         if let prompt = resolvedLabelCreationPrompt(in: app) {
-            return firstExistingElement(
+            if let button = firstExistingElement(
                 labelCreationPromptCreateButtonCandidates(in: prompt),
                 timeout: 0.2
-            )
+            ) {
+                return button
+            }
         }
-        return nil
+        return firstExistingElement(
+            appScopedLabelCreationPromptCreateButtonCandidates(in: app),
+            timeout: 0
+        )
     }
 
     /// Resolves the Search root element that owns the canonical UI-test state value.
@@ -1241,10 +1386,10 @@ extension AndBibleUITests {
     /**
      Focuses a prompt-owned text-entry control without polling `isHittable`.
 
-     SwiftUI alert text fields can occasionally stall XCTest while resolving frame-based taps even
-     after the prompt-specific resolver has found the field. Prefer the alert's automatic keyboard
-     focus first, then tap the modal surface instead of the resolved field so XCTest does not rebuild
-     a slow text-field snapshot.
+     SwiftUI prompt surfaces can occasionally stall XCTest while resolving broad alert or sheet
+     snapshots after a prompt-specific resolver has already found the field. Prefer the prompt's
+     automatic keyboard focus first, then tap the resolved field coordinate or a stable app
+     coordinate instead of querying `app.alerts.firstMatch` or `app.sheets.firstMatch`.
      */
     func focusResolvedPromptTextEntryElement(
         _ element: XCUIElement,
@@ -1262,9 +1407,12 @@ extension AndBibleUITests {
         let tapOffset = CGVector(dx: preferTrailingEdge ? 0.92 : 0.5, dy: 0.5)
 
         repeat {
-            let coordinate = resolvedModalPrompt(in: app, timeout: 0.2)?
-                .coordinate(withNormalizedOffset: tapOffset)
-                ?? app.coordinate(withNormalizedOffset: tapOffset)
+            let coordinate: XCUICoordinate
+            if element.exists, !element.frame.isEmpty {
+                coordinate = element.coordinate(withNormalizedOffset: tapOffset)
+            } else {
+                coordinate = app.coordinate(withNormalizedOffset: tapOffset)
+            }
             coordinate.tap()
             if waitForElementKeyboardFocus(element, timeout: 0.75) {
                 return

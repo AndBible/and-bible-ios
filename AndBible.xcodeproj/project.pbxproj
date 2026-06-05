@@ -43,6 +43,7 @@
 		DF4297E4F6F61467148CB772 /* AndBibleTests+RemoteSyncLifecycle.swift in Sources */ = {isa = PBXBuildFile; fileRef = B47ED2258F0F324029C56991 /* AndBibleTests+RemoteSyncLifecycle.swift */; };
 		4202BEFA9B7CF9C5DC42E0B9 /* AndBibleTests+Bookmarks.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE544E071979CFE6FAA43CFE /* AndBibleTests+Bookmarks.swift */; };
 		B166C0DE0000000000000002 /* AndBibleTests+SettingsIcons.swift in Sources */ = {isa = PBXBuildFile; fileRef = B166C0DE0000000000000001 /* AndBibleTests+SettingsIcons.swift */; };
+		A15000000000000000000002 /* AndBibleTests+AndroidDatabaseBackup.swift in Sources */ = {isa = PBXBuildFile; fileRef = A15000000000000000000001 /* AndBibleTests+AndroidDatabaseBackup.swift */; };
 		7878413CFC8EEC15FAD39267 /* AndBibleUITestSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90D5002E961A06DB9393E326 /* AndBibleUITestSupport.swift */; };
 		A2EEBFCC9A28E42778471552 /* AndBibleUITests+Search.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C5CED694021FF0C2B594EB6 /* AndBibleUITests+Search.swift */; };
 		8736B1F0D4ED3F4C47BD692A /* AndBibleUITests+PlansDownloadsWorkspace.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B1FF7DFF60A342B10407D17 /* AndBibleUITests+PlansDownloadsWorkspace.swift */; };
@@ -83,6 +84,7 @@
 		9B8F65108C5F5E1DAF2B3C4D /* WorkspaceSyncRestoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceSyncRestoreTests.swift; sourceTree = "<group>"; };
 		D10500000000000000000001 /* RemoteSyncMyDocumentRestoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteSyncMyDocumentRestoreTests.swift; sourceTree = "<group>"; };
 		D13300000000000000000001 /* DefaultDocumentDownloadPlannerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DefaultDocumentDownloadPlannerTests.swift; sourceTree = "<group>"; };
+		A15000000000000000000001 /* AndBibleTests+AndroidDatabaseBackup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AndBibleTests+AndroidDatabaseBackup.swift"; sourceTree = "<group>"; };
 		AB1FB2406B7E9DD316E296F7 /* AndBibleApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AndBibleApp.swift; sourceTree = "<group>"; };
 		DC344294A2096586A9E7F9C1 /* AndBibleTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AndBibleTests.swift; sourceTree = "<group>"; };
 		CA1C01A1D3E74B1F00A1C001 /* CalculatorIcon.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = CalculatorIcon.png; sourceTree = "<group>"; };
@@ -261,6 +263,7 @@
 				D10500000000000000000001 /* RemoteSyncMyDocumentRestoreTests.swift */,
 				D13300000000000000000001 /* DefaultDocumentDownloadPlannerTests.swift */,
 				A279E3BCEE4A2AEC1F495246 /* AndBibleTestSupport.swift */,
+				A15000000000000000000001 /* AndBibleTests+AndroidDatabaseBackup.swift */,
 				F7DBD78B5D4D44BEE0FC2737 /* AndBibleTests+AppAndReader.swift */,
 				753C59196517046968D24B93 /* AndBibleTests+StrongsAndDictionary.swift */,
 				E5DF9348CDC2BD0D53181B56 /* AndBibleTests+BridgeAndProgress.swift */,
@@ -497,6 +500,7 @@
 				4202BEFA9B7CF9C5DC42E0B9 /* AndBibleTests+Bookmarks.swift in Sources */,
 				D13400000000000000000002 /* AndBibleTests+Downloads.swift in Sources */,
 				B166C0DE0000000000000002 /* AndBibleTests+SettingsIcons.swift in Sources */,
+				A15000000000000000000002 /* AndBibleTests+AndroidDatabaseBackup.swift in Sources */,
 				F89C2FD58B1DFD132EEC5839 /* AndBibleTests+BridgeIOS.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

@@ -56,6 +56,18 @@ public struct ImportExportView: View {
     /// Whether an EPUB installation is currently in progress.
     @State private var isInstallingEpub = false
 
+    /// Android database backup archive currently staged for category selection.
+    @State private var androidBackupArchive: AndroidDatabaseBackupArchive?
+
+    /// Last archive presented by the sheet, retained until dismissal cleanup runs.
+    @State private var androidBackupArchivePendingCleanup: AndroidDatabaseBackupArchive?
+
+    /// Whether selected Android backup sections are currently being applied.
+    @State private var isApplyingAndroidBackup = false
+
+    /// Service used to load, apply, and clean up Android `.abdb.zip` database backups.
+    private let androidBackupService = AndroidDatabaseBackupService()
+
     /**
      Creates the import/export screen.
 
@@ -81,6 +93,9 @@ public struct ImportExportView: View {
         }
         if showEpubPicker {
             return "epubPickerPresented"
+        }
+        if androidBackupArchive != nil {
+            return "androidBackupImportPresented"
         }
         return "idle"
     }
@@ -201,10 +216,21 @@ public struct ImportExportView: View {
         }
         .fileImporter(
             isPresented: $showImportPicker,
-            allowedContentTypes: [.json, .commaSeparatedText, .data],
+            allowedContentTypes: [.json, .commaSeparatedText, .zip, .data],
             allowsMultipleSelection: false
         ) { result in
             handleImport(result)
+        }
+        .sheet(item: $androidBackupArchive, onDismiss: cleanupDismissedAndroidBackupArchive) { archive in
+            AndroidDatabaseBackupImportSheet(
+                archive: archive,
+                isApplying: isApplyingAndroidBackup,
+                onCancel: dismissAndroidBackupArchive,
+                onApply: applyAndroidBackupSelections
+            )
+            .onAppear {
+                androidBackupArchivePendingCleanup = archive
+            }
         }
         .fileImporter(
             isPresented: $showModuleZipPicker,
@@ -279,12 +305,14 @@ public struct ImportExportView: View {
      Supported formats:
      - `.json`: full backup import via `BackupService.importFullBackup`
      - `.csv`: bookmark import via `BackupService.importBookmarksCSV`
+     - `.abdb.zip`: Android database backup staging via `AndroidDatabaseBackupService`
      - `.bbl`, `.cmt`, `.dct`: MySword/MyBible hint only; no import is performed
 
      Side effects:
      - starts and stops security-scoped resource access for the chosen file
      - reads the imported file data and updates status text with success or error details
      - mutates persisted app data through `BackupService` for supported formats
+     - stages Android backup SQLite files in a temporary directory before presenting section choice
      */
     private func handleImport(_ result: Result<[URL], Error>) {
         switch result {
@@ -306,6 +334,12 @@ public struct ImportExportView: View {
             }
 
             let ext = url.pathExtension.lowercased()
+            if isAndroidDatabaseBackupFile(url) {
+                loadAndroidBackupArchive(from: data)
+                isImporting = false
+                return
+            }
+
             let service = BackupService(modelContext: modelContext)
 
             switch ext {
@@ -331,8 +365,200 @@ public struct ImportExportView: View {
             isImporting = false
 
         case .failure(let error):
-            statusMessage = String(localized: "error_prefix_\(error.localizedDescription)")
+            statusMessage = localizedErrorMessage(error)
         }
+    }
+
+    /**
+     Determines whether a selected import file should be handled as an Android database backup.
+
+     Android names manual database backups with the compound `.abdb.zip` suffix. The generic
+     import picker is intentionally narrower than the module installer, so any ZIP selected here is
+     treated as an Android backup candidate and validated by `AndroidDatabaseBackupService`.
+
+     - Parameter url: User-selected file URL.
+     - Returns: `true` when the filename has Android's backup suffix or the extension is ZIP.
+     - Side effects: none.
+     - Failure modes: Invalid ZIP contents are rejected later by the backup service.
+     */
+    private func isAndroidDatabaseBackupFile(_ url: URL) -> Bool {
+        let fileName = url.lastPathComponent.lowercased()
+        return fileName.hasSuffix(".abdb.zip") || url.pathExtension.lowercased() == "zip"
+    }
+
+    /**
+     Loads a raw Android database backup archive and presents the section-selection sheet.
+
+     - Parameter data: Raw file bytes read from the user-selected backup.
+     - Side effects:
+       - clears any previously staged Android backup archive
+       - writes validated Android SQLite files into a temporary staging directory
+       - updates `androidBackupArchive` so SwiftUI presents the selection sheet
+       - updates `statusMessage` when validation fails
+     - Failure modes: Surfaces `AndroidDatabaseBackupError` and ZIP/file-system errors as status text.
+     */
+    private func loadAndroidBackupArchive(from data: Data) {
+        cleanupLoadedAndroidBackupArchive()
+        do {
+            let archive = try androidBackupService.loadArchive(from: data)
+            androidBackupArchive = archive
+            androidBackupArchivePendingCleanup = archive
+        } catch {
+            statusMessage = localizedErrorMessage(error)
+        }
+    }
+
+    /**
+     Applies selected Android backup sections and reports the completed category summaries.
+
+     This method flips the applying state synchronously, then schedules the restore/import work on
+     the main actor after one yield so SwiftUI can render the disabled controls and progress state
+     before the potentially expensive SwiftData rewrite starts.
+
+     - Parameter selections: Supported category/mode pairs emitted by the selection sheet.
+     - Side effects:
+       - mutates `isApplyingAndroidBackup` immediately so the sheet disables controls and
+         interactive dismissal
+       - mutates selected local SwiftData categories through `AndroidDatabaseBackupService`
+       - disables and clears remote-sync state for every applied Android-backed category
+       - removes the staged archive directory after success or failure
+       - updates `statusMessage` with the apply result or error
+     - Failure modes: Catches service errors and surfaces them to the settings screen.
+     */
+    private func applyAndroidBackupSelections(_ selections: [AndroidDatabaseBackupSelection]) {
+        guard let archive = androidBackupArchive else {
+            return
+        }
+
+        isApplyingAndroidBackup = true
+        statusMessage = nil
+        Task { @MainActor in
+            await Task.yield()
+            do {
+                let report = try androidBackupService.apply(
+                    archive: archive,
+                    selections: selections,
+                    modelContext: modelContext,
+                    settingsStore: SettingsStore(modelContext: modelContext)
+                )
+                statusMessage = androidBackupStatusMessage(for: report)
+            } catch {
+                statusMessage = localizedErrorMessage(error)
+            }
+            isApplyingAndroidBackup = false
+            dismissAndroidBackupArchive()
+        }
+    }
+
+    /**
+     Builds the user-visible completion summary for an Android backup apply report.
+
+     - Parameter report: Service report containing one row per applied section.
+     - Returns: Concise status message listing category, mode, and row summary.
+     - Side effects: none.
+     - Failure modes: Empty reports return a generic success message, though the sheet normally
+       prevents empty selections.
+     */
+    private func androidBackupStatusMessage(for report: AndroidDatabaseBackupApplyReport) -> String {
+        guard !report.sections.isEmpty else {
+            return String(localized: "android_backup_applied", defaultValue: "Android backup applied.")
+        }
+        let summaries = report.sections.map { section in
+            "\(section.mode.localizedBackupModeName) \(section.category.localizedBackupSectionName): \(section.summary)"
+        }
+        return String(
+            localized: "android_backup_applied_summary",
+            defaultValue: "Android backup applied: \(summaries.joined(separator: "; "))"
+        )
+    }
+
+    /**
+     Formats an import/export error with the localized shared error prefix.
+
+     `String(localized:)` interpolation is easy to misuse for this shared `%@` key. This helper
+     resolves the stable `error_prefix_%@` format first, then applies the concrete error message as
+     an argument so every import/export error path uses the same localized surface.
+
+     - Parameter error: Error whose localized description should be shown to the user.
+     - Returns: Localized status text containing the shared error prefix and error message.
+     - Side effects: none.
+     - Failure modes: Falls back to the key's untranslated format if the app bundle lacks a
+       localization entry.
+     */
+    private func localizedErrorMessage(_ error: Error) -> String {
+        String(
+            format: NSLocalizedString("error_prefix_%@", comment: "Import/export error prefix"),
+            error.localizedDescription
+        )
+    }
+
+    /**
+     Dismisses the Android backup sheet and removes its temporary extracted files.
+
+     Side effects:
+     - deletes the staged archive directory on a best-effort basis
+     - clears `androidBackupArchive`
+     - clears the dismissal cleanup fallback once the archive has been removed
+     - Failure modes: Cleanup errors are swallowed by the service because the files are temporary.
+     */
+    private func dismissAndroidBackupArchive() {
+        guard let archive = androidBackupArchive else {
+            androidBackupArchivePendingCleanup = nil
+            return
+        }
+        cleanupAndroidBackupArchive(archive)
+        androidBackupArchive = nil
+        androidBackupArchivePendingCleanup = nil
+    }
+
+    /**
+     Removes the currently staged Android backup archive without changing user data.
+
+     Side effects:
+     - deletes the temporary extracted database directory, if present
+     - clears `androidBackupArchive`
+     - clears the dismissal cleanup fallback
+     - Failure modes: Cleanup errors are swallowed by the service because the files are temporary.
+     */
+    private func cleanupLoadedAndroidBackupArchive() {
+        guard let archive = androidBackupArchive else {
+            androidBackupArchivePendingCleanup = nil
+            return
+        }
+        cleanupAndroidBackupArchive(archive)
+        androidBackupArchive = nil
+        androidBackupArchivePendingCleanup = nil
+    }
+
+    /**
+     Cleans up the presented Android backup after SwiftUI dismisses the sheet.
+
+     SwiftUI may clear an item-backed sheet binding before `onDismiss` runs. The pending-cleanup
+     copy preserves the staging directory owner until this dismissal callback removes it.
+
+     Side effects:
+     - deletes the temporary extracted database directory, if present
+     - clears the active archive binding and fallback cleanup copy
+     - Failure modes: Cleanup errors are swallowed by the service because the files are temporary.
+     */
+    private func cleanupDismissedAndroidBackupArchive() {
+        let archive = androidBackupArchive ?? androidBackupArchivePendingCleanup
+        if let archive {
+            cleanupAndroidBackupArchive(archive)
+        }
+        androidBackupArchive = nil
+        androidBackupArchivePendingCleanup = nil
+    }
+
+    /**
+     Removes one staged Android backup archive without mutating presentation state.
+
+     - Parameter archive: Loaded archive whose temporary directory should be deleted.
+     - Side effects: Deletes the archive staging directory on a best-effort basis.
+     - Failure modes: Cleanup errors are swallowed by the service because the files are temporary.
+     */
+    private func cleanupAndroidBackupArchive(_ archive: AndroidDatabaseBackupArchive) {
+        androidBackupService.cleanup(archive)
     }
 
     /**
@@ -360,13 +586,13 @@ public struct ImportExportView: View {
                 let moduleName = try repo.installFromZip(at: url)
                 statusMessage = String(localized: "installed_module_\(moduleName)")
             } catch {
-                statusMessage = String(localized: "error_prefix_\(error.localizedDescription)")
+                statusMessage = localizedErrorMessage(error)
             }
 
             isInstallingModule = false
 
         case .failure(let error):
-            statusMessage = String(localized: "error_prefix_\(error.localizedDescription)")
+            statusMessage = localizedErrorMessage(error)
         }
     }
 
@@ -393,13 +619,13 @@ public struct ImportExportView: View {
                     statusMessage = String(localized: "installed_epub_\(identifier)")
                 }
             } catch {
-                statusMessage = String(localized: "error_prefix_\(error.localizedDescription)")
+                statusMessage = localizedErrorMessage(error)
             }
 
             isInstallingEpub = false
 
         case .failure(let error):
-            statusMessage = String(localized: "error_prefix_\(error.localizedDescription)")
+            statusMessage = localizedErrorMessage(error)
         }
     }
 

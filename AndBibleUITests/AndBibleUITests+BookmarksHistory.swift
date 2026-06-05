@@ -474,9 +474,13 @@ extension AndBibleUITests {
         waitForVisibleMyNotesState(containing: "myNotesCount=1", in: app, timeout: 20)
         waitForVisibleMyNotesState(containing: "|\(rowToken)=\(originalNote)|", in: app, timeout: 20)
 
-        tapElementReliably(requireMyNotesWebControl(named: actionsLabel, in: app, timeout: 15), timeout: 10)
-        tapElementReliably(requireMyNotesWebControl(named: openNoteEditorLabel, in: app, timeout: 15), timeout: 10)
-        waitForVisibleMyNotesEditorActivation(orPersistedMarker: updatedNoteMarker, in: app, timeout: 20)
+        openVisibleMyNotesEditor(
+            actionsLabel: actionsLabel,
+            editorLabel: openNoteEditorLabel,
+            orPersistedMarker: updatedNoteMarker,
+            in: app,
+            timeout: 20
+        )
         waitForVisibleMyNotesState(containing: updatedNoteMarker, in: app, timeout: 20)
         dismissMyNotesEditor(in: app, timeout: 15)
         waitForVisibleMyNotesState(containing: "myNotesEditing=false", in: app, timeout: 20)

@@ -1,0 +1,1804 @@
+// AndroidDatabaseBackupService.swift — Android .abdb.zip restore/import support
+
+import Foundation
+import SQLite3
+import SwiftData
+
+/**
+ Android database categories that can appear in `AndBibleDatabaseBackup.abdb.zip` archives.
+
+ The raw values match Android's `DbType` enum when a manifest declares the category. `PROGRESS`
+ is included because Android's backup writer includes `progress.sqlite3` in the archive even
+ though the current manifest enum does not list it.
+ */
+public enum AndroidDatabaseBackupCategory: String, CaseIterable, Identifiable, Sendable, Codable {
+    /// Android bookmark, label, bookmark-note, and StudyPad database.
+    case bookmarks = "BOOKMARKS"
+
+    /// Android workspace/window/page-manager database.
+    case workspaces = "WORKSPACES"
+
+    /// Android reading-plan database.
+    case readingPlans = "READINGPLANS"
+
+    /// Android app settings database.
+    case settings = "SETTINGS"
+
+    /// Android module repository metadata database.
+    case repositories = "REPOSITORIES"
+
+    /// Android module backup marker; module payload restore is outside database backup restore.
+    case modules = "MODULES"
+
+    /// Android EPUB backup marker; EPUB payload restore is outside database backup restore.
+    case epubs = "EPUBS"
+
+    /// Android My Documents database.
+    case myDocuments = "MYDOCUMENTS"
+
+    /// Android AI settings database.
+    case aiSettings = "AI_SETTINGS"
+
+    /// Android reading/memorization progress database.
+    case progress = "PROGRESS"
+
+    /// Stable SwiftUI identity for category selection rows.
+    public var id: String { rawValue }
+
+    /// Android database filename for categories stored as DB files in the backup archive.
+    public var databaseFileName: String? {
+        switch self {
+        case .bookmarks:
+            "bookmarks.sqlite3"
+        case .workspaces:
+            "workspaces.sqlite3"
+        case .readingPlans:
+            "readingplans.sqlite3"
+        case .settings:
+            "settings.sqlite3"
+        case .repositories:
+            "repositories.sqlite3"
+        case .myDocuments:
+            "mydocuments.sqlite3"
+        case .aiSettings:
+            "ai_settings.sqlite3"
+        case .progress:
+            "progress.sqlite3"
+        case .modules, .epubs:
+            nil
+        }
+    }
+
+    /// User-visible section name matching Android's backup section labels.
+    public var displayName: String {
+        switch self {
+        case .bookmarks:
+            "Bookmarks"
+        case .workspaces:
+            "Workspaces"
+        case .readingPlans:
+            "Reading Plans"
+        case .settings:
+            "Settings"
+        case .repositories:
+            "Repositories"
+        case .modules:
+            "Modules"
+        case .epubs:
+            "EPUBs"
+        case .myDocuments:
+            "My Documents"
+        case .aiSettings:
+            "AI Settings"
+        case .progress:
+            "Progress"
+        }
+    }
+
+    /// Highest Android Room database version this iOS build recognizes for archive validation.
+    public var supportedDatabaseVersion: Int {
+        switch self {
+        case .bookmarks:
+            12
+        case .workspaces:
+            22
+        case .readingPlans:
+            1
+        case .settings:
+            1
+        case .repositories:
+            1
+        case .myDocuments:
+            RemoteSyncMyDocumentRestoreService.supportedAndroidSchemaVersion
+        case .aiSettings:
+            22
+        case .progress:
+            9
+        case .modules, .epubs:
+            0
+        }
+    }
+
+    /// iOS remote-sync category used by the existing Android SQLite restore engines.
+    public var remoteSyncCategory: RemoteSyncCategory? {
+        switch self {
+        case .bookmarks:
+            .bookmarks
+        case .workspaces:
+            .workspaces
+        case .readingPlans:
+            .readingPlans
+        case .myDocuments:
+            .myDocuments
+        case .settings, .repositories, .modules, .epubs, .aiSettings, .progress:
+            nil
+        }
+    }
+
+    /// Database-backed categories Android writes under `db/` in `.abdb.zip` archives.
+    static var databaseBackedCases: [AndroidDatabaseBackupCategory] {
+        allCases.filter { $0.databaseFileName != nil }
+    }
+}
+
+/**
+ Compatibility state for one Android database backup section.
+
+ Supported sections can be restored or imported by the current iOS build. Unsupported sections are
+ still exposed to the UI so the user can see that the archive contains valid data that iOS cannot
+ yet map safely.
+ */
+public enum AndroidDatabaseBackupSectionSupport: Sendable, Equatable {
+    /// The section can be restored/imported by this iOS build.
+    case supported
+
+    /// The SQLite database version is newer than the highest version this iOS build recognizes.
+    case unsupportedVersion(version: Int, supported: Int)
+
+    /// The Android category has no iOS data mapper yet.
+    case unsupportedCategory(String)
+
+    /// Whether this support state permits restore/import.
+    public var isSupported: Bool {
+        if case .supported = self {
+            return true
+        }
+        return false
+    }
+
+    /// User-facing explanation for unsupported states.
+    public var explanation: String? {
+        switch self {
+        case .supported:
+            nil
+        case .unsupportedVersion(let version, let supported):
+            "Requires database version \(version); this app supports up to \(supported)."
+        case .unsupportedCategory(let message):
+            message
+        }
+    }
+}
+
+/**
+ One validated database section extracted from an Android backup archive.
+
+ The database file URL points at a temporary extracted SQLite file owned by
+ `AndroidDatabaseBackupArchive.temporaryDirectory`; callers should keep the archive value alive
+ until all selected restore/import operations have completed.
+ */
+public struct AndroidDatabaseBackupSection: Identifiable, Sendable, Equatable {
+    /// Stable category identity used for selection and dispatch.
+    public let category: AndroidDatabaseBackupCategory
+
+    /// Android database filename under the archive's `db/` directory.
+    public let fileName: String
+
+    /// Temporary extracted SQLite database URL.
+    public let databaseFileURL: URL
+
+    /// SQLite `PRAGMA user_version` read from the extracted database.
+    public let databaseVersion: Int
+
+    /// Whether the archive manifest declared this category.
+    public let declaredInManifest: Bool
+
+    /// Restore/import compatibility for this iOS build.
+    public let support: AndroidDatabaseBackupSectionSupport
+
+    /// Stable SwiftUI identity for section rows.
+    public var id: AndroidDatabaseBackupCategory { category }
+
+    /// Whether this section was backed by an extracted SQLite database file.
+    public var hasDatabaseFile: Bool { !fileName.isEmpty }
+
+    /**
+     Creates one extracted Android database backup section.
+
+     - Parameters:
+       - category: Logical Android category represented by the database.
+       - fileName: Android database filename under `db/`.
+       - databaseFileURL: Temporary extracted SQLite database URL.
+       - databaseVersion: SQLite `user_version`.
+       - declaredInManifest: Whether `AndBibleBackupManifest.json` listed the category.
+       - support: Restore/import compatibility for the current iOS build.
+     - Side effects: none.
+     - Failure modes: This initializer cannot fail.
+     */
+    public init(
+        category: AndroidDatabaseBackupCategory,
+        fileName: String,
+        databaseFileURL: URL,
+        databaseVersion: Int,
+        declaredInManifest: Bool,
+        support: AndroidDatabaseBackupSectionSupport
+    ) {
+        self.category = category
+        self.fileName = fileName
+        self.databaseFileURL = databaseFileURL
+        self.databaseVersion = databaseVersion
+        self.declaredInManifest = declaredInManifest
+        self.support = support
+    }
+}
+
+/**
+ Manifest payload read from `AndBibleBackupManifest.json`.
+
+ Android currently writes `backupType = DB_BACKUP`, `manifestVersion = 1`, and an optional
+ `contains` set. iOS uses the manifest to reject non-database backup archives before staging any
+ destructive restore UI.
+ */
+public struct AndroidDatabaseBackupManifest: Sendable, Equatable {
+    /// Android backup type string, expected to be `DB_BACKUP`.
+    public let backupType: String
+
+    /// Optional category set declared by Android's manifest.
+    public let contains: Set<AndroidDatabaseBackupCategory>
+
+    /// Manifest schema version.
+    public let manifestVersion: Int
+
+    /// Android application version number that created the backup.
+    public let andBibleVersion: Int?
+
+    /**
+     Creates one decoded Android database backup manifest.
+
+     - Parameters:
+       - backupType: Android backup type string.
+       - contains: Optional category set declared by Android.
+       - manifestVersion: Manifest schema version.
+       - andBibleVersion: Android application version number, when present.
+     - Side effects: none.
+     - Failure modes: This initializer cannot fail.
+     */
+    public init(
+        backupType: String,
+        contains: Set<AndroidDatabaseBackupCategory>,
+        manifestVersion: Int,
+        andBibleVersion: Int?
+    ) {
+        self.backupType = backupType
+        self.contains = contains
+        self.manifestVersion = manifestVersion
+        self.andBibleVersion = andBibleVersion
+    }
+}
+
+/**
+ Loaded Android database backup archive with staged SQLite database files.
+
+ The archive owns a temporary directory. Call `AndroidDatabaseBackupService.cleanup(_:)` after the
+ UI is dismissed or after restore/import completes.
+ */
+public struct AndroidDatabaseBackupArchive: Identifiable, Sendable {
+    /// Stable identity for SwiftUI sheet presentation.
+    public let id: UUID
+
+    /// Decoded Android backup manifest.
+    public let manifest: AndroidDatabaseBackupManifest
+
+    /// Valid database sections extracted from the archive.
+    public let sections: [AndroidDatabaseBackupSection]
+
+    /// Temporary root directory containing staged SQLite files.
+    public let temporaryDirectory: URL
+
+    /**
+     Creates one loaded Android backup archive.
+
+     - Parameters:
+       - id: Stable identity for UI presentation.
+       - manifest: Decoded Android backup manifest.
+       - sections: Valid database sections extracted from the archive.
+       - temporaryDirectory: Temporary root directory containing staged SQLite files.
+     - Side effects: none.
+     - Failure modes: This initializer cannot fail.
+     */
+    public init(
+        id: UUID = UUID(),
+        manifest: AndroidDatabaseBackupManifest,
+        sections: [AndroidDatabaseBackupSection],
+        temporaryDirectory: URL
+    ) {
+        self.id = id
+        self.manifest = manifest
+        self.sections = sections
+        self.temporaryDirectory = temporaryDirectory
+    }
+}
+
+/**
+ User-selected operation for one Android backup section.
+ */
+public enum AndroidDatabaseBackupApplyMode: String, CaseIterable, Identifiable, Sendable, Codable {
+    /// Replace local category data with the selected Android database section.
+    case restore
+
+    /// Add backup rows that do not already exist locally without overwriting existing rows.
+    case `import`
+
+    /// Stable identity for SwiftUI segmented controls.
+    public var id: String { rawValue }
+
+    /// User-visible label.
+    public var displayName: String {
+        switch self {
+        case .restore:
+            "Restore"
+        case .import:
+            "Import"
+        }
+    }
+}
+
+/**
+ One selected section and operation mode from the Android backup UI.
+ */
+public struct AndroidDatabaseBackupSelection: Sendable, Equatable {
+    /// Selected Android backup category.
+    public let category: AndroidDatabaseBackupCategory
+
+    /// Restore/import operation requested for the category.
+    public let mode: AndroidDatabaseBackupApplyMode
+
+    /**
+     Creates one restore/import selection.
+
+     - Parameters:
+       - category: Selected Android backup category.
+       - mode: Restore/import operation requested for the category.
+     - Side effects: none.
+     - Failure modes: This initializer cannot fail.
+     */
+    public init(category: AndroidDatabaseBackupCategory, mode: AndroidDatabaseBackupApplyMode) {
+        self.category = category
+        self.mode = mode
+    }
+}
+
+/**
+ Summary for one section applied from an Android database backup archive.
+ */
+public struct AndroidDatabaseBackupAppliedSectionReport: Sendable, Equatable {
+    /// Applied Android backup category.
+    public let category: AndroidDatabaseBackupCategory
+
+    /// Operation mode used for the category.
+    public let mode: AndroidDatabaseBackupApplyMode
+
+    /// Human-readable row summary for status UI and tests.
+    public let summary: String
+
+    /**
+     Creates one applied-section report.
+
+     - Parameters:
+       - category: Applied Android backup category.
+       - mode: Operation mode used for the category.
+       - summary: Human-readable row summary for status UI and tests.
+     - Side effects: none.
+     - Failure modes: This initializer cannot fail.
+     */
+    public init(category: AndroidDatabaseBackupCategory, mode: AndroidDatabaseBackupApplyMode, summary: String) {
+        self.category = category
+        self.mode = mode
+        self.summary = summary
+    }
+}
+
+/**
+ Summary for a completed Android database backup restore/import batch.
+ */
+public struct AndroidDatabaseBackupApplyReport: Sendable, Equatable {
+    /// Per-section reports in the order requested by the user.
+    public let sections: [AndroidDatabaseBackupAppliedSectionReport]
+
+    /**
+     Creates a completed batch report.
+
+     - Parameter sections: Per-section reports in the order requested by the user.
+     - Side effects: none.
+     - Failure modes: This initializer cannot fail.
+     */
+    public init(sections: [AndroidDatabaseBackupAppliedSectionReport]) {
+        self.sections = sections
+    }
+}
+
+/**
+ Errors raised while loading or applying Android database backup archives.
+ */
+public enum AndroidDatabaseBackupError: LocalizedError, Equatable {
+    /// The archive could not be parsed as ZIP.
+    case invalidArchive(String)
+
+    /// The required Android manifest file was missing.
+    case missingManifest
+
+    /// The Android manifest could not be decoded.
+    case invalidManifest
+
+    /// The manifest described a backup type other than `DB_BACKUP`.
+    case unsupportedBackupType(String)
+
+    /// The manifest version is newer than this iOS build understands.
+    case unsupportedManifestVersion(Int)
+
+    /// The archive contained no recognizable Android database backup sections.
+    case noValidDatabaseSections
+
+    /// One expected SQLite database could not be opened or did not have a SQLite header.
+    case invalidSQLiteDatabase(String)
+
+    /// The caller requested no sections.
+    case emptySelection
+
+    /// The requested category was not present in the loaded archive.
+    case missingSelectedSection(AndroidDatabaseBackupCategory)
+
+    /// The requested category is present but cannot be mapped by this iOS build.
+    case unsupportedSelectedSection(AndroidDatabaseBackupCategory, String)
+
+    /// User-visible error description.
+    public var errorDescription: String? {
+        switch self {
+        case .invalidArchive(let message):
+            "Invalid Android backup archive: \(message)"
+        case .missingManifest:
+            "The Android backup manifest is missing."
+        case .invalidManifest:
+            "The Android backup manifest could not be read."
+        case .unsupportedBackupType(let type):
+            "This archive is \(type), not an Android database backup."
+        case .unsupportedManifestVersion(let version):
+            "This Android backup manifest version (\(version)) is newer than iOS supports."
+        case .noValidDatabaseSections:
+            "No Android database backup sections were found."
+        case .invalidSQLiteDatabase(let fileName):
+            "\(fileName) is not a valid Android SQLite database."
+        case .emptySelection:
+            "Choose at least one Android backup section."
+        case .missingSelectedSection(let category):
+            "\(category.displayName) was not found in this backup."
+        case .unsupportedSelectedSection(let category, let reason):
+            "\(category.displayName) cannot be restored: \(reason)"
+        }
+    }
+}
+
+/**
+ Loads Android `.abdb.zip` archives and applies selected sections to iOS SwiftData.
+
+ Android's manual backup restore offers section selection and a per-section Restore/Import choice.
+ This service preserves those semantics for iOS:
+ - `Restore` replaces local category data from the selected Android SQLite database
+ - `Import` builds a merged Android-shaped snapshot that keeps local rows first and adds backup
+   rows only when their Android uniqueness keys are absent
+ - after each selected section is applied, Android-aligned remote-sync bookkeeping for that
+   category is disabled and cleared so manual restore/import does not masquerade as synchronized
+   remote state
+ */
+public final class AndroidDatabaseBackupService {
+    /**
+     Decodable shape of Android's manifest JSON before iOS normalizes optional fields.
+
+     Android backup manifests have evolved with optional `contains`, `manifestVersion`, and app
+     version fields. Keeping this DTO private lets `decodeManifest(from:)` preserve Android defaults
+     without making partially decoded manifests part of the public API. Unknown `contains` values
+     are ignored so future Android-only categories do not block restore of known database sections.
+     */
+    private struct ManifestDTO: Decodable {
+        let backupType: String
+        let contains: Set<AndroidDatabaseBackupCategory>
+        let manifestVersion: Int?
+        let andBibleVersion: Int?
+
+        private enum CodingKeys: String, CodingKey {
+            case backupType
+            case contains
+            case manifestVersion
+            case andBibleVersion
+        }
+
+        /**
+         Decodes Android's manifest while preserving known categories and skipping future ones.
+
+         - Parameter decoder: JSON decoder input for `AndBibleBackupManifest.json`.
+         - Side effects: none.
+         - Failure modes: Throws when required manifest fields are missing or have invalid types.
+         */
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            backupType = try container.decode(String.self, forKey: .backupType)
+            let rawContains = try container.decodeIfPresent([String].self, forKey: .contains) ?? []
+            contains = Set(rawContains.compactMap(AndroidDatabaseBackupCategory.init(rawValue:)))
+            manifestVersion = try container.decodeIfPresent(Int.self, forKey: .manifestVersion)
+            andBibleVersion = try container.decodeIfPresent(Int.self, forKey: .andBibleVersion)
+        }
+    }
+
+    private let fileManager: FileManager
+    private let temporaryDirectory: URL
+    private let bookmarkRestoreService: RemoteSyncBookmarkRestoreService
+    private let bookmarkSnapshotService: RemoteSyncBookmarkSnapshotService
+    private let readingPlanRestoreService: RemoteSyncReadingPlanRestoreService
+    private let readingPlanSnapshotService: RemoteSyncReadingPlanSnapshotService
+    private let workspaceRestoreService: RemoteSyncWorkspaceRestoreService
+    private let myDocumentRestoreService: RemoteSyncMyDocumentRestoreService
+    private let myDocumentSnapshotService: RemoteSyncMyDocumentSnapshotService
+
+    /**
+     Creates an Android database backup service.
+
+     - Parameters:
+       - fileManager: File manager used for temporary extraction and cleanup.
+       - temporaryDirectory: Root scratch directory for extracted archive contents.
+       - bookmarkRestoreService: Bookmark restore engine for Android `bookmarks.sqlite3`.
+       - bookmarkSnapshotService: Bookmark snapshot engine used for non-destructive import merges.
+       - readingPlanRestoreService: Reading-plan restore engine for Android `readingplans.sqlite3`.
+       - readingPlanSnapshotService: Reading-plan snapshot engine used for import merges.
+       - workspaceRestoreService: Workspace restore engine for Android `workspaces.sqlite3`.
+       - myDocumentRestoreService: My Documents restore engine for Android `mydocuments.sqlite3`.
+       - myDocumentSnapshotService: My Documents snapshot engine used for import merges.
+     - Side effects: none.
+     - Failure modes: This initializer cannot fail.
+     */
+    public init(
+        fileManager: FileManager = .default,
+        temporaryDirectory: URL? = nil,
+        bookmarkRestoreService: RemoteSyncBookmarkRestoreService = RemoteSyncBookmarkRestoreService(),
+        bookmarkSnapshotService: RemoteSyncBookmarkSnapshotService = RemoteSyncBookmarkSnapshotService(),
+        readingPlanRestoreService: RemoteSyncReadingPlanRestoreService = RemoteSyncReadingPlanRestoreService(),
+        readingPlanSnapshotService: RemoteSyncReadingPlanSnapshotService = RemoteSyncReadingPlanSnapshotService(),
+        workspaceRestoreService: RemoteSyncWorkspaceRestoreService = RemoteSyncWorkspaceRestoreService(),
+        myDocumentRestoreService: RemoteSyncMyDocumentRestoreService = RemoteSyncMyDocumentRestoreService(),
+        myDocumentSnapshotService: RemoteSyncMyDocumentSnapshotService = RemoteSyncMyDocumentSnapshotService()
+    ) {
+        self.fileManager = fileManager
+        self.temporaryDirectory = temporaryDirectory ?? fileManager.temporaryDirectory
+        self.bookmarkRestoreService = bookmarkRestoreService
+        self.bookmarkSnapshotService = bookmarkSnapshotService
+        self.readingPlanRestoreService = readingPlanRestoreService
+        self.readingPlanSnapshotService = readingPlanSnapshotService
+        self.workspaceRestoreService = workspaceRestoreService
+        self.myDocumentRestoreService = myDocumentRestoreService
+        self.myDocumentSnapshotService = myDocumentSnapshotService
+    }
+
+    /**
+     Loads and validates an Android `.abdb.zip` database backup archive.
+
+     - Parameter data: Raw backup archive bytes selected by the user.
+     - Returns: Loaded archive with extracted SQLite database sections.
+     - Side effects:
+       - creates one temporary directory
+       - writes recognized Android database entries into that directory
+       - opens each extracted SQLite file read-only to verify the header and `user_version`
+     - Failure modes:
+       - throws `AndroidDatabaseBackupError` for missing manifests, non-database backups, invalid
+         SQLite files, or archives without recognizable database sections
+       - maps ZIP parser failures into user-facing archive reasons before surfacing them through
+         Settings status text
+       - throws file-system errors when temporary staging cannot be created
+     */
+    public func loadArchive(from data: Data) throws -> AndroidDatabaseBackupArchive {
+        let entries: [ZipArchiveEntry]
+        do {
+            entries = try ZipArchiveReader.entries(in: data)
+        } catch let error as ZipArchiveReaderError {
+            throw AndroidDatabaseBackupError.invalidArchive(Self.archiveErrorMessage(for: error))
+        } catch {
+            throw AndroidDatabaseBackupError.invalidArchive(error.localizedDescription)
+        }
+
+        let entriesByName = try Self.entriesByUniqueName(entries)
+        guard let manifestData = entriesByName["AndBibleBackupManifest.json"] else {
+            throw AndroidDatabaseBackupError.missingManifest
+        }
+        let manifest = try decodeManifest(from: manifestData)
+        guard manifest.backupType == "DB_BACKUP" else {
+            throw AndroidDatabaseBackupError.unsupportedBackupType(manifest.backupType)
+        }
+        guard manifest.manifestVersion <= 1 else {
+            throw AndroidDatabaseBackupError.unsupportedManifestVersion(manifest.manifestVersion)
+        }
+
+        let stagingDirectory = temporaryDirectory.appendingPathComponent(
+            "android-db-backup-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        try fileManager.createDirectory(at: stagingDirectory, withIntermediateDirectories: true)
+
+        var sections: [AndroidDatabaseBackupSection] = []
+        do {
+            for category in AndroidDatabaseBackupCategory.databaseBackedCases {
+                guard let fileName = category.databaseFileName,
+                      let databaseData = entriesByName["db/\(fileName)"] else {
+                    continue
+                }
+
+                guard Self.hasSQLiteHeader(databaseData) else {
+                    throw AndroidDatabaseBackupError.invalidSQLiteDatabase(fileName)
+                }
+
+                let databaseURL = stagingDirectory.appendingPathComponent(fileName)
+                try databaseData.write(to: databaseURL, options: .atomic)
+                let databaseVersion = try sqliteUserVersion(at: databaseURL, fileName: fileName)
+                let support = supportState(for: category, databaseVersion: databaseVersion)
+                sections.append(
+                    AndroidDatabaseBackupSection(
+                        category: category,
+                        fileName: fileName,
+                        databaseFileURL: databaseURL,
+                        databaseVersion: databaseVersion,
+                        declaredInManifest: manifest.contains.contains(category),
+                        support: support
+                    )
+                )
+            }
+            for category in manifest.contains
+                where category.databaseFileName == nil {
+                sections.append(
+                    AndroidDatabaseBackupSection(
+                        category: category,
+                        fileName: "",
+                        databaseFileURL: stagingDirectory,
+                        databaseVersion: 0,
+                        declaredInManifest: true,
+                        support: supportState(for: category, databaseVersion: 0)
+                    )
+                )
+            }
+
+            guard !sections.isEmpty else {
+                throw AndroidDatabaseBackupError.noValidDatabaseSections
+            }
+            return AndroidDatabaseBackupArchive(
+                manifest: manifest,
+                sections: sections.sorted { $0.category.displayName < $1.category.displayName },
+                temporaryDirectory: stagingDirectory
+            )
+        } catch {
+            try? fileManager.removeItem(at: stagingDirectory)
+            throw error
+        }
+    }
+
+    /**
+     Applies selected Android backup sections to local SwiftData.
+
+     - Parameters:
+       - archive: Previously loaded Android backup archive.
+       - selections: User-selected category/mode pairs.
+       - modelContext: SwiftData context to mutate.
+       - settingsStore: Local-only settings store used by restore engines and sync-state reset.
+     - Returns: Per-section apply summaries.
+     - Side effects:
+       - mutates category data in `modelContext`
+       - writes or clears category-specific local-only fidelity state through `settingsStore`
+       - disables and clears Android-aligned remote-sync bookkeeping for every applied category
+     - Failure modes:
+       - throws when a selected section is missing, unsupported, malformed, or cannot be saved
+     */
+    public func apply(
+        archive: AndroidDatabaseBackupArchive,
+        selections: [AndroidDatabaseBackupSelection],
+        modelContext: ModelContext,
+        settingsStore: SettingsStore
+    ) throws -> AndroidDatabaseBackupApplyReport {
+        guard !selections.isEmpty else {
+            throw AndroidDatabaseBackupError.emptySelection
+        }
+
+        let sectionsByCategory = Dictionary(uniqueKeysWithValues: archive.sections.map { ($0.category, $0) })
+        var reports: [AndroidDatabaseBackupAppliedSectionReport] = []
+        for selection in selections {
+            guard let section = sectionsByCategory[selection.category] else {
+                throw AndroidDatabaseBackupError.missingSelectedSection(selection.category)
+            }
+            guard section.support.isSupported else {
+                throw AndroidDatabaseBackupError.unsupportedSelectedSection(
+                    selection.category,
+                    section.support.explanation ?? "Unsupported by this iOS build."
+                )
+            }
+
+            let summary = try applySupportedSection(
+                section,
+                mode: selection.mode,
+                modelContext: modelContext,
+                settingsStore: settingsStore
+            )
+            if let category = section.category.remoteSyncCategory {
+                resetManualBackupSyncState(for: category, settingsStore: settingsStore)
+            }
+            reports.append(
+                AndroidDatabaseBackupAppliedSectionReport(
+                    category: section.category,
+                    mode: selection.mode,
+                    summary: summary
+                )
+            )
+        }
+
+        return AndroidDatabaseBackupApplyReport(sections: reports)
+    }
+
+    /**
+     Removes temporary files owned by a loaded archive.
+
+     - Parameter archive: Loaded archive whose temporary directory should be deleted.
+     - Side effects: deletes the archive staging directory when present.
+     - Failure modes: Delete errors are swallowed because cleanup is best effort.
+     */
+    public func cleanup(_ archive: AndroidDatabaseBackupArchive) {
+        try? fileManager.removeItem(at: archive.temporaryDirectory)
+    }
+
+    /**
+     Decodes Android's JSON backup manifest into the normalized manifest model.
+
+     - Parameter data: Raw `AndBibleBackupManifest.json` bytes.
+     - Returns: Manifest with missing optional fields normalized to Android-compatible defaults.
+     - Side effects: none.
+     - Failure modes: throws `AndroidDatabaseBackupError.invalidManifest` when JSON does not match
+       Android's manifest shape.
+     */
+    private func decodeManifest(from data: Data) throws -> AndroidDatabaseBackupManifest {
+        guard let dto = try? JSONDecoder().decode(ManifestDTO.self, from: data) else {
+            throw AndroidDatabaseBackupError.invalidManifest
+        }
+        return AndroidDatabaseBackupManifest(
+            backupType: dto.backupType,
+            contains: dto.contains,
+            manifestVersion: dto.manifestVersion ?? 1,
+            andBibleVersion: dto.andBibleVersion
+        )
+    }
+
+    /**
+     Builds a deterministic ZIP entry lookup for Android backup archives.
+
+     ZIP archives may legally contain multiple file members with the same path. Android database
+     backup restore treats paths such as `AndBibleBackupManifest.json` and `db/bookmarks.sqlite3`
+     as authoritative inputs, so duplicate names would make the selected manifest or SQLite payload
+     ambiguous. Rejecting duplicates before validation keeps restore/import fail-closed instead of
+     letting a later central-directory entry replace an earlier one.
+
+     - Parameter entries: Non-directory entries extracted from `ZipArchiveReader` in central-directory order.
+     - Returns: Entry payloads keyed by their ZIP path.
+     - Side effects: none.
+     - Failure modes: Throws `AndroidDatabaseBackupError.invalidArchive` when any entry path appears
+       more than once.
+     */
+    private static func entriesByUniqueName(_ entries: [ZipArchiveEntry]) throws -> [String: Data] {
+        var entriesByName: [String: Data] = [:]
+        for entry in entries {
+            guard entriesByName[entry.name] == nil else {
+                throw AndroidDatabaseBackupError.invalidArchive(
+                    "ZIP archive contains duplicate entry \(entry.name)."
+                )
+            }
+            entriesByName[entry.name] = entry.data
+        }
+        return entriesByName
+    }
+
+    /**
+     Converts low-level ZIP parser errors into Settings-safe archive failure messages.
+
+     `ZipArchiveReaderError` is useful for tests and parser internals but its enum case names are
+     not suitable for user-facing import status text. This mapper preserves concrete malformed
+     archive reasons while replacing enum-only failures with concise explanations.
+
+     - Parameter error: ZIP parser error raised while loading an Android backup file.
+     - Returns: User-facing archive error detail used by `AndroidDatabaseBackupError.invalidArchive`.
+     - Side effects: none.
+     - Failure modes: This helper cannot fail.
+     */
+    private static func archiveErrorMessage(for error: ZipArchiveReaderError) -> String {
+        switch error {
+        case .missingCentralDirectory:
+            return "The file is not a ZIP archive or its central directory is missing."
+        case .invalidArchive(let reason):
+            return reason
+        case .unsupportedCompressionMethod(let method):
+            return "ZIP entry uses unsupported compression method \(method)."
+        case .decompressionFailed:
+            return "A compressed ZIP entry could not be decompressed."
+        }
+    }
+
+    /**
+     Determines whether this iOS build can safely apply one extracted Android database section.
+
+     - Parameters:
+       - category: Android backup category represented by the database.
+       - databaseVersion: SQLite `user_version` read from the extracted file.
+     - Returns: Supported state, unsupported-version state, or unsupported-category state.
+     - Side effects: none.
+     - Failure modes: This helper cannot fail.
+     */
+    private func supportState(
+        for category: AndroidDatabaseBackupCategory,
+        databaseVersion: Int
+    ) -> AndroidDatabaseBackupSectionSupport {
+        guard category.remoteSyncCategory != nil else {
+            return .unsupportedCategory("iOS does not yet have a safe mapper for Android \(category.displayName) data.")
+        }
+        if databaseVersion > category.supportedDatabaseVersion {
+            return .unsupportedVersion(version: databaseVersion, supported: category.supportedDatabaseVersion)
+        }
+        return .supported
+    }
+
+    /**
+     Reads SQLite `PRAGMA user_version` from an extracted Android database file.
+
+     - Parameters:
+       - url: Extracted SQLite database URL.
+       - fileName: Android database filename used in thrown errors.
+     - Returns: Integer user-version marker.
+     - Side effects: opens the database read-only and finalizes its statement.
+     - Failure modes: throws `AndroidDatabaseBackupError.invalidSQLiteDatabase` if SQLite cannot
+       open or read the version pragma.
+     */
+    private func sqliteUserVersion(at url: URL, fileName: String) throws -> Int {
+        var database: OpaquePointer?
+        guard sqlite3_open_v2(url.path, &database, SQLITE_OPEN_READONLY, nil) == SQLITE_OK,
+              let database else {
+            if let database {
+                sqlite3_close(database)
+            }
+            throw AndroidDatabaseBackupError.invalidSQLiteDatabase(fileName)
+        }
+        defer { sqlite3_close(database) }
+
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(database, "PRAGMA user_version;", -1, &statement, nil) == SQLITE_OK,
+              let statement else {
+            if let statement {
+                sqlite3_finalize(statement)
+            }
+            throw AndroidDatabaseBackupError.invalidSQLiteDatabase(fileName)
+        }
+        defer { sqlite3_finalize(statement) }
+
+        guard sqlite3_step(statement) == SQLITE_ROW else {
+            throw AndroidDatabaseBackupError.invalidSQLiteDatabase(fileName)
+        }
+        return Int(sqlite3_column_int(statement, 0))
+    }
+
+    /**
+     Checks the SQLite file magic before writing archive bytes to a staging path.
+
+     - Parameter data: Raw database entry bytes from the ZIP archive.
+     - Returns: `true` when the entry starts with SQLite's canonical header.
+     - Side effects: none.
+     - Failure modes: This helper cannot fail.
+     */
+    private static func hasSQLiteHeader(_ data: Data) -> Bool {
+        data.count >= 16 && Data(data.prefix(16)) == Data("SQLite format 3\u{0}".utf8)
+    }
+
+    /**
+     Dispatches a validated supported backup section to its category-specific restore/import path.
+
+     - Parameters:
+       - section: Supported section selected by the user.
+       - mode: Restore or Import operation.
+       - modelContext: SwiftData context to mutate.
+       - settingsStore: Local settings store used by fidelity stores and sync reset.
+     - Returns: User-visible row summary for the section.
+     - Side effects: mutates local category data through the selected restore engine.
+     - Failure modes: rethrows category restore/import failures; unsupported categories throw
+       `AndroidDatabaseBackupError.unsupportedSelectedSection`.
+     */
+    private func applySupportedSection(
+        _ section: AndroidDatabaseBackupSection,
+        mode: AndroidDatabaseBackupApplyMode,
+        modelContext: ModelContext,
+        settingsStore: SettingsStore
+    ) throws -> String {
+        switch section.category {
+        case .bookmarks:
+            let report = try applyBookmarks(section, mode: mode, modelContext: modelContext, settingsStore: settingsStore)
+            return "\(report.restoredBibleBookmarkCount + report.restoredGenericBookmarkCount) bookmarks, \(report.restoredLabelCount) labels"
+        case .readingPlans:
+            let report = try applyReadingPlans(section, mode: mode, modelContext: modelContext, settingsStore: settingsStore)
+            return "\(report.restoredPlanCodes.count) reading plans"
+        case .workspaces:
+            let report = try applyWorkspaces(section, mode: mode, modelContext: modelContext, settingsStore: settingsStore)
+            return "\(report.restoredWorkspaceCount) workspaces, \(report.restoredWindowCount) windows"
+        case .myDocuments:
+            let report = try applyMyDocuments(
+                section,
+                mode: mode,
+                modelContext: modelContext,
+                settingsStore: settingsStore
+            )
+            return "\(report.restoredDocumentCount) documents, \(report.restoredPageCount) pages"
+        case .settings, .repositories, .modules, .epubs, .aiSettings, .progress:
+            throw AndroidDatabaseBackupError.unsupportedSelectedSection(
+                section.category,
+                section.support.explanation ?? "Unsupported by this iOS build."
+            )
+        }
+    }
+
+    /**
+     Applies Android bookmark backup rows using restore or local-first import semantics.
+
+     - Parameters:
+       - section: Extracted `bookmarks.sqlite3` section.
+       - mode: Restore replaces local bookmarks; Import adds missing Android rows only.
+       - modelContext: SwiftData context to mutate.
+       - settingsStore: Settings store used for Android bookmark fidelity side stores.
+     - Returns: Bookmark restore report from the shared Android restore engine.
+     - Side effects: rewrites local bookmark SwiftData rows and bookmark fidelity settings.
+     - Failure modes: rethrows malformed Android database or SwiftData save failures.
+     */
+    private func applyBookmarks(
+        _ section: AndroidDatabaseBackupSection,
+        mode: AndroidDatabaseBackupApplyMode,
+        modelContext: ModelContext,
+        settingsStore: SettingsStore
+    ) throws -> RemoteSyncBookmarkRestoreReport {
+        let backupSnapshot = try bookmarkRestoreService.readSnapshot(from: section.databaseFileURL)
+        let finalSnapshot: RemoteSyncAndroidBookmarkSnapshot
+        switch mode {
+        case .restore:
+            finalSnapshot = backupSnapshot
+        case .import:
+            finalSnapshot = mergeBookmarkSnapshots(
+                local: currentBookmarkSnapshot(modelContext: modelContext, settingsStore: settingsStore),
+                imported: backupSnapshot
+            )
+        }
+        return try bookmarkRestoreService.replaceLocalBookmarks(
+            from: finalSnapshot,
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+    }
+
+    /**
+     Applies Android reading-plan backup rows using restore or local-first import semantics.
+
+     - Parameters:
+       - section: Extracted `readingplans.sqlite3` section.
+       - mode: Restore replaces local plans; Import adds missing plan/status rows only.
+       - modelContext: SwiftData context to mutate.
+       - settingsStore: Settings store used for preserved Android status payloads.
+     - Returns: Reading-plan restore report from the shared Android restore engine.
+     - Side effects: rewrites local reading-plan SwiftData rows and preserved status settings.
+     - Failure modes: rethrows unsupported plan definitions, malformed status JSON, or save failures.
+     */
+    private func applyReadingPlans(
+        _ section: AndroidDatabaseBackupSection,
+        mode: AndroidDatabaseBackupApplyMode,
+        modelContext: ModelContext,
+        settingsStore: SettingsStore
+    ) throws -> RemoteSyncReadingPlanRestoreReport {
+        let backupSnapshot = try readingPlanRestoreService.readSnapshot(from: section.databaseFileURL)
+        let finalSnapshot: RemoteSyncAndroidReadingPlanSnapshot
+        switch mode {
+        case .restore:
+            finalSnapshot = backupSnapshot
+        case .import:
+            finalSnapshot = mergeReadingPlanSnapshots(
+                local: currentReadingPlanSnapshot(modelContext: modelContext, settingsStore: settingsStore),
+                imported: backupSnapshot
+            )
+        }
+        return try readingPlanRestoreService.replaceLocalReadingPlans(
+            from: finalSnapshot,
+            modelContext: modelContext,
+            statusStore: RemoteSyncReadingPlanStatusStore(settingsStore: settingsStore)
+        )
+    }
+
+    /**
+     Applies Android workspace backup rows using restore or local-first import semantics.
+
+     - Parameters:
+       - section: Extracted `workspaces.sqlite3` section.
+       - mode: Restore replaces local workspaces; Import adds missing workspace/window/history rows.
+       - modelContext: SwiftData context to mutate.
+       - settingsStore: Settings store used for Android workspace fidelity side stores.
+     - Returns: Workspace restore report from the shared Android restore engine.
+     - Side effects: rewrites local workspace SwiftData rows and workspace fidelity settings.
+     - Failure modes: rethrows malformed serialized values, orphan references, or save failures.
+     */
+    private func applyWorkspaces(
+        _ section: AndroidDatabaseBackupSection,
+        mode: AndroidDatabaseBackupApplyMode,
+        modelContext: ModelContext,
+        settingsStore: SettingsStore
+    ) throws -> RemoteSyncWorkspaceRestoreReport {
+        let backupSnapshot = try workspaceRestoreService.readSnapshot(from: section.databaseFileURL)
+        let finalSnapshot: RemoteSyncAndroidWorkspaceSnapshot
+        switch mode {
+        case .restore:
+            finalSnapshot = backupSnapshot
+        case .import:
+            finalSnapshot = mergeWorkspaceSnapshots(
+                local: currentWorkspaceSnapshot(modelContext: modelContext, settingsStore: settingsStore),
+                imported: backupSnapshot
+            )
+        }
+        return try workspaceRestoreService.replaceLocalWorkspaces(
+            from: finalSnapshot,
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+    }
+
+    /**
+     Applies Android My Documents backup rows using restore or local-first import semantics.
+
+     - Parameters:
+       - section: Extracted `mydocuments.sqlite3` section.
+       - mode: Restore replaces local documents; Import adds missing document/page/content rows.
+       - modelContext: SwiftData context to mutate.
+       - settingsStore: Settings store required for current-state Android key projection.
+     - Returns: My Documents restore report from the shared Android restore engine.
+     - Side effects: rewrites local My Documents SwiftData rows.
+     - Failure modes: rethrows Android database validation, current local snapshot, or save failures.
+     */
+    private func applyMyDocuments(
+        _ section: AndroidDatabaseBackupSection,
+        mode: AndroidDatabaseBackupApplyMode,
+        modelContext: ModelContext,
+        settingsStore: SettingsStore
+    ) throws -> RemoteSyncMyDocumentRestoreReport {
+        let backupSnapshot = try myDocumentRestoreService.readSnapshot(from: section.databaseFileURL)
+        let finalSnapshot: RemoteSyncAndroidMyDocumentSnapshot
+        switch mode {
+        case .restore:
+            finalSnapshot = backupSnapshot
+        case .import:
+            finalSnapshot = try mergeMyDocumentSnapshots(
+                local: currentMyDocumentSnapshot(modelContext: modelContext, settingsStore: settingsStore),
+                imported: backupSnapshot
+            )
+        }
+        return try myDocumentRestoreService.replaceLocalMyDocuments(from: finalSnapshot, modelContext: modelContext)
+    }
+
+    /**
+     Clears Android-aligned remote-sync bookkeeping after a manual backup apply.
+
+     Manual Restore/Import changes local data outside the remote patch stream. Android disables and
+     clears affected sync state after such restores so later sync cannot treat the restored rows as
+     already reconciled remote state; iOS mirrors that category-scoped behavior here.
+
+     - Parameters:
+       - category: Remote-sync category affected by the manual backup operation.
+       - settingsStore: Settings store containing sync toggles and metadata rows.
+     - Side effects: disables sync and clears bootstrap, patch status, log-entry, and fingerprint
+       rows for the category.
+     - Failure modes: underlying settings-store writes are best effort.
+     */
+    private func resetManualBackupSyncState(for category: RemoteSyncCategory, settingsStore: SettingsStore) {
+        RemoteSyncSettingsStore(settingsStore: settingsStore).setSyncEnabled(false, for: category)
+        RemoteSyncStateStore(settingsStore: settingsStore).clearCategory(category)
+        RemoteSyncPatchStatusStore(settingsStore: settingsStore).clearCategory(category)
+        RemoteSyncLogEntryStore(settingsStore: settingsStore).clearCategory(category)
+        RemoteSyncRowFingerprintStore(settingsStore: settingsStore).clearCategory(category)
+    }
+
+    /**
+     Reads current local bookmarks as a direct Android restore snapshot for Import merging.
+
+     - Parameters:
+       - modelContext: SwiftData context that owns local bookmark rows.
+       - settingsStore: Settings store used for preserved Android bookmark fidelity.
+     - Returns: Android-shaped bookmark snapshot sorted deterministically.
+     - Side effects: reads SwiftData and local fidelity settings.
+     - Failure modes: underlying snapshot service treats fetch failures as an empty snapshot.
+     */
+    private func currentBookmarkSnapshot(
+        modelContext: ModelContext,
+        settingsStore: SettingsStore
+    ) -> RemoteSyncAndroidBookmarkSnapshot {
+        let current = bookmarkSnapshotService.snapshotCurrentState(modelContext: modelContext, settingsStore: settingsStore)
+        return RemoteSyncAndroidBookmarkSnapshot(
+            labels: current.labelRowsByKey.values.sorted { $0.id.uuidString < $1.id.uuidString },
+            bibleBookmarks: current.bibleBookmarkRowsByKey.values.sorted { $0.id.uuidString < $1.id.uuidString },
+            genericBookmarks: current.genericBookmarkRowsByKey.values.sorted { $0.id.uuidString < $1.id.uuidString },
+            studyPadEntries: current.studyPadEntryRowsByKey.values.sorted { $0.id.uuidString < $1.id.uuidString }
+        )
+    }
+
+    /**
+     Merges bookmark snapshots with Android Import's local-first uniqueness behavior.
+
+     - Parameters:
+       - local: Current local bookmark rows projected into Android form.
+       - imported: Backup bookmark rows read from Android's database.
+     - Returns: Snapshot containing every local row plus imported rows whose Android keys are absent.
+     - Side effects: none.
+     - Failure modes: This helper cannot fail; system-label IDs are canonicalized during merge.
+     */
+    private func mergeBookmarkSnapshots(
+        local: RemoteSyncAndroidBookmarkSnapshot,
+        imported: RemoteSyncAndroidBookmarkSnapshot
+    ) -> RemoteSyncAndroidBookmarkSnapshot {
+        let systemLabelIDByName = [
+            Label.speakLabelName: Label.speakLabelId,
+            Label.unlabeledName: Label.unlabeledId,
+            Label.paragraphBreakLabelName: Label.paragraphBreakLabelId,
+        ]
+        let importedLabelIDMap = Dictionary(
+            uniqueKeysWithValues: imported.labels.map { label in
+                (label.id, systemLabelIDByName[label.name] ?? label.id)
+            }
+        )
+
+        var labelsByID = Dictionary(uniqueKeysWithValues: local.labels.map { ($0.id, $0) })
+        for label in imported.labels {
+            let mappedID = importedLabelIDMap[label.id] ?? label.id
+            guard labelsByID[mappedID] == nil else {
+                continue
+            }
+            labelsByID[mappedID] = RemoteSyncAndroidLabel(
+                id: mappedID,
+                name: label.name,
+                color: label.color,
+                markerStyle: label.markerStyle,
+                markerStyleWholeVerse: label.markerStyleWholeVerse,
+                underlineStyle: label.underlineStyle,
+                underlineStyleWholeVerse: label.underlineStyleWholeVerse,
+                hideStyle: label.hideStyle,
+                hideStyleWholeVerse: label.hideStyleWholeVerse,
+                favourite: label.favourite,
+                type: label.type,
+                customIcon: label.customIcon
+            )
+        }
+
+        var bibleBookmarksByID = Dictionary(uniqueKeysWithValues: local.bibleBookmarks.map { ($0.id, $0) })
+        for bookmark in imported.bibleBookmarks.map({ remapBookmarkLabels($0, using: importedLabelIDMap) }) {
+            if let existing = bibleBookmarksByID[bookmark.id] {
+                bibleBookmarksByID[bookmark.id] = mergeBibleBookmark(local: existing, imported: bookmark)
+            } else {
+                bibleBookmarksByID[bookmark.id] = bookmark
+            }
+        }
+
+        var genericBookmarksByID = Dictionary(uniqueKeysWithValues: local.genericBookmarks.map { ($0.id, $0) })
+        for bookmark in imported.genericBookmarks.map({ remapBookmarkLabels($0, using: importedLabelIDMap) }) {
+            if let existing = genericBookmarksByID[bookmark.id] {
+                genericBookmarksByID[bookmark.id] = mergeGenericBookmark(local: existing, imported: bookmark)
+            } else {
+                genericBookmarksByID[bookmark.id] = bookmark
+            }
+        }
+
+        var studyPadEntriesByID = Dictionary(uniqueKeysWithValues: local.studyPadEntries.map { ($0.id, $0) })
+        for entry in imported.studyPadEntries {
+            guard studyPadEntriesByID[entry.id] == nil else {
+                continue
+            }
+            studyPadEntriesByID[entry.id] = RemoteSyncAndroidStudyPadEntry(
+                id: entry.id,
+                labelID: importedLabelIDMap[entry.labelID] ?? entry.labelID,
+                orderNumber: entry.orderNumber,
+                indentLevel: entry.indentLevel,
+                text: entry.text
+            )
+        }
+
+        return RemoteSyncAndroidBookmarkSnapshot(
+            labels: labelsByID.values.sorted { $0.id.uuidString < $1.id.uuidString },
+            bibleBookmarks: bibleBookmarksByID.values.sorted { $0.id.uuidString < $1.id.uuidString },
+            genericBookmarks: genericBookmarksByID.values.sorted { $0.id.uuidString < $1.id.uuidString },
+            studyPadEntries: studyPadEntriesByID.values.sorted { $0.id.uuidString < $1.id.uuidString }
+        )
+    }
+
+    /**
+     Rewrites imported Bible bookmark label references through canonical iOS system-label aliases.
+
+     - Parameters:
+       - bookmark: Imported Android Bible bookmark row.
+       - labelIDMap: Remote-to-local label ID map for Android system labels.
+     - Returns: Bookmark row whose primary label and label links reference local IDs.
+     - Side effects: none.
+     - Failure modes: This helper cannot fail.
+     */
+    private func remapBookmarkLabels(
+        _ bookmark: RemoteSyncAndroidBibleBookmark,
+        using labelIDMap: [UUID: UUID]
+    ) -> RemoteSyncAndroidBibleBookmark {
+        RemoteSyncAndroidBibleBookmark(
+            id: bookmark.id,
+            kjvOrdinalStart: bookmark.kjvOrdinalStart,
+            kjvOrdinalEnd: bookmark.kjvOrdinalEnd,
+            ordinalStart: bookmark.ordinalStart,
+            ordinalEnd: bookmark.ordinalEnd,
+            v11n: bookmark.v11n,
+            playbackSettingsJSON: bookmark.playbackSettingsJSON,
+            createdAt: bookmark.createdAt,
+            book: bookmark.book,
+            startOffset: bookmark.startOffset,
+            endOffset: bookmark.endOffset,
+            primaryLabelID: bookmark.primaryLabelID.map { labelIDMap[$0] ?? $0 },
+            notes: bookmark.notes,
+            lastUpdatedOn: bookmark.lastUpdatedOn,
+            wholeVerse: bookmark.wholeVerse,
+            type: bookmark.type,
+            customIcon: bookmark.customIcon,
+            editAction: bookmark.editAction,
+            labelLinks: bookmark.labelLinks.map {
+                RemoteSyncAndroidBookmarkLabelLink(
+                    labelID: labelIDMap[$0.labelID] ?? $0.labelID,
+                    orderNumber: $0.orderNumber,
+                    indentLevel: $0.indentLevel,
+                    expandContent: $0.expandContent
+                )
+            }
+        )
+    }
+
+    /**
+     Rewrites imported generic bookmark label references through canonical iOS system-label aliases.
+
+     - Parameters:
+       - bookmark: Imported Android generic bookmark row.
+       - labelIDMap: Remote-to-local label ID map for Android system labels.
+     - Returns: Bookmark row whose primary label and label links reference local IDs.
+     - Side effects: none.
+     - Failure modes: This helper cannot fail.
+     */
+    private func remapBookmarkLabels(
+        _ bookmark: RemoteSyncAndroidGenericBookmark,
+        using labelIDMap: [UUID: UUID]
+    ) -> RemoteSyncAndroidGenericBookmark {
+        RemoteSyncAndroidGenericBookmark(
+            id: bookmark.id,
+            key: bookmark.key,
+            createdAt: bookmark.createdAt,
+            bookInitials: bookmark.bookInitials,
+            ordinalStart: bookmark.ordinalStart,
+            ordinalEnd: bookmark.ordinalEnd,
+            startOffset: bookmark.startOffset,
+            endOffset: bookmark.endOffset,
+            primaryLabelID: bookmark.primaryLabelID.map { labelIDMap[$0] ?? $0 },
+            notes: bookmark.notes,
+            lastUpdatedOn: bookmark.lastUpdatedOn,
+            wholeVerse: bookmark.wholeVerse,
+            playbackSettingsJSON: bookmark.playbackSettingsJSON,
+            customIcon: bookmark.customIcon,
+            editAction: bookmark.editAction,
+            labelLinks: bookmark.labelLinks.map {
+                RemoteSyncAndroidBookmarkLabelLink(
+                    labelID: labelIDMap[$0.labelID] ?? $0.labelID,
+                    orderNumber: $0.orderNumber,
+                    indentLevel: $0.indentLevel,
+                    expandContent: $0.expandContent
+                )
+            }
+        )
+    }
+
+    /**
+     Merges a duplicate Bible bookmark using Android Import's "keep existing row" semantics.
+
+     - Parameters:
+       - local: Existing local Android-shaped bookmark row.
+       - imported: Imported row with the same Android bookmark ID.
+     - Returns: Local row with only missing optional fidelity filled from the imported row.
+     - Side effects: none.
+     - Failure modes: This helper cannot fail.
+     */
+    private func mergeBibleBookmark(
+        local: RemoteSyncAndroidBibleBookmark,
+        imported: RemoteSyncAndroidBibleBookmark
+    ) -> RemoteSyncAndroidBibleBookmark {
+        RemoteSyncAndroidBibleBookmark(
+            id: local.id,
+            kjvOrdinalStart: local.kjvOrdinalStart,
+            kjvOrdinalEnd: local.kjvOrdinalEnd,
+            ordinalStart: local.ordinalStart,
+            ordinalEnd: local.ordinalEnd,
+            v11n: local.v11n,
+            playbackSettingsJSON: local.playbackSettingsJSON ?? imported.playbackSettingsJSON,
+            createdAt: local.createdAt,
+            book: local.book,
+            startOffset: local.startOffset,
+            endOffset: local.endOffset,
+            primaryLabelID: local.primaryLabelID ?? imported.primaryLabelID,
+            notes: local.notes ?? imported.notes,
+            lastUpdatedOn: local.lastUpdatedOn,
+            wholeVerse: local.wholeVerse,
+            type: local.type,
+            customIcon: local.customIcon,
+            editAction: local.editAction,
+            labelLinks: mergeLabelLinks(local: local.labelLinks, imported: imported.labelLinks)
+        )
+    }
+
+    /**
+     Merges a duplicate generic bookmark using Android Import's "keep existing row" semantics.
+
+     - Parameters:
+       - local: Existing local Android-shaped generic bookmark row.
+       - imported: Imported row with the same Android bookmark ID.
+     - Returns: Local row with only missing optional fidelity filled from the imported row.
+     - Side effects: none.
+     - Failure modes: This helper cannot fail.
+     */
+    private func mergeGenericBookmark(
+        local: RemoteSyncAndroidGenericBookmark,
+        imported: RemoteSyncAndroidGenericBookmark
+    ) -> RemoteSyncAndroidGenericBookmark {
+        RemoteSyncAndroidGenericBookmark(
+            id: local.id,
+            key: local.key,
+            createdAt: local.createdAt,
+            bookInitials: local.bookInitials,
+            ordinalStart: local.ordinalStart,
+            ordinalEnd: local.ordinalEnd,
+            startOffset: local.startOffset,
+            endOffset: local.endOffset,
+            primaryLabelID: local.primaryLabelID ?? imported.primaryLabelID,
+            notes: local.notes ?? imported.notes,
+            lastUpdatedOn: local.lastUpdatedOn,
+            wholeVerse: local.wholeVerse,
+            playbackSettingsJSON: local.playbackSettingsJSON ?? imported.playbackSettingsJSON,
+            customIcon: local.customIcon,
+            editAction: local.editAction,
+            labelLinks: mergeLabelLinks(local: local.labelLinks, imported: imported.labelLinks)
+        )
+    }
+
+    /**
+     Unions bookmark label links without replacing existing local link metadata.
+
+     - Parameters:
+       - local: Existing label links for one bookmark.
+       - imported: Imported label links for the same bookmark.
+     - Returns: Deterministically sorted links keyed by label ID.
+     - Side effects: none.
+     - Failure modes: This helper cannot fail.
+     */
+    private func mergeLabelLinks(
+        local: [RemoteSyncAndroidBookmarkLabelLink],
+        imported: [RemoteSyncAndroidBookmarkLabelLink]
+    ) -> [RemoteSyncAndroidBookmarkLabelLink] {
+        var linksByLabelID = Dictionary(uniqueKeysWithValues: local.map { ($0.labelID, $0) })
+        for link in imported where linksByLabelID[link.labelID] == nil {
+            linksByLabelID[link.labelID] = link
+        }
+        return linksByLabelID.values.sorted { $0.labelID.uuidString < $1.labelID.uuidString }
+    }
+
+    /**
+     Reads current local reading plans as a direct Android restore snapshot for Import merging.
+
+     - Parameters:
+       - modelContext: SwiftData context that owns local reading-plan rows.
+       - settingsStore: Settings store containing preserved Android status payloads.
+     - Returns: Android-shaped reading-plan snapshot.
+     - Side effects: reads SwiftData and local status-fidelity settings.
+     - Failure modes: underlying snapshot service treats fetch failures as an empty snapshot.
+     */
+    private func currentReadingPlanSnapshot(
+        modelContext: ModelContext,
+        settingsStore: SettingsStore
+    ) -> RemoteSyncAndroidReadingPlanSnapshot {
+        let current = readingPlanSnapshotService.snapshotCurrentState(
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+        let statuses = current.statusRowsByKey.values.map {
+            RemoteSyncAndroidReadingPlanStatus(
+                id: $0.id,
+                planCode: $0.planCode,
+                dayNumber: $0.planDay,
+                readingStatusJSON: $0.readingStatusJSON
+            )
+        }
+        let statusesByPlanCode = Dictionary(grouping: statuses, by: \.planCode)
+        let plans = current.planRowsByKey.values.map { row in
+            RemoteSyncAndroidReadingPlan(
+                id: row.id,
+                planCode: row.planCode,
+                startDate: Date(timeIntervalSince1970: Double(row.planStartDateMillis) / 1000.0),
+                currentDay: row.planCurrentDay,
+                statuses: statusesByPlanCode[row.planCode, default: []]
+            )
+        }
+        return RemoteSyncAndroidReadingPlanSnapshot(plans: plans, orphanStatuses: [])
+    }
+
+    /**
+     Reads current local My Documents as a direct Android restore snapshot for Import merging.
+
+     This path uses the throwing snapshot variant because treating a failed local fetch as empty
+     would make Import behave like Restore and risk data loss.
+
+     - Parameters:
+       - modelContext: SwiftData context that owns local My Documents rows.
+       - settingsStore: Settings store used for Android log-key projection.
+     - Returns: Android-shaped My Documents snapshot.
+     - Side effects: reads SwiftData rows.
+     - Failure modes: rethrows SwiftData fetch failures from the snapshot service.
+     */
+    private func currentMyDocumentSnapshot(
+        modelContext: ModelContext,
+        settingsStore: SettingsStore
+    ) throws -> RemoteSyncAndroidMyDocumentSnapshot {
+        let current = try myDocumentSnapshotService.snapshotCurrentStateThrowing(
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+        return RemoteSyncAndroidMyDocumentSnapshot(
+            documents: current.documentRowsByKey.values.sorted { $0.id.uuidString < $1.id.uuidString },
+            pages: current.pageRowsByKey.values.sorted { $0.id.uuidString < $1.id.uuidString },
+            pageContents: current.pageContentRowsByKey.values.sorted { $0.pageId.uuidString < $1.pageId.uuidString },
+            aiPageCacheEntries: current.aiPageCacheEntryRowsByKey.values.sorted { $0.pageId.uuidString < $1.pageId.uuidString },
+            orphanReferences: []
+        )
+    }
+
+    /**
+     Merges reading-plan snapshots with Android Import's local-first uniqueness behavior.
+
+     - Parameters:
+       - local: Current local reading-plan rows projected into Android form.
+       - imported: Backup reading-plan rows read from Android's database.
+     - Returns: Snapshot preserving local plans/statuses and adding imported missing rows.
+     - Side effects: none.
+     - Failure modes: This helper cannot fail.
+     */
+    private func mergeReadingPlanSnapshots(
+        local: RemoteSyncAndroidReadingPlanSnapshot,
+        imported: RemoteSyncAndroidReadingPlanSnapshot
+    ) -> RemoteSyncAndroidReadingPlanSnapshot {
+        var plansByCode = Dictionary(uniqueKeysWithValues: local.plans.map { ($0.planCode, $0) })
+        for plan in imported.plans where plansByCode[plan.planCode] == nil {
+            plansByCode[plan.planCode] = plan
+        }
+
+        var statusesByKey: [String: RemoteSyncAndroidReadingPlanStatus] = [:]
+        for status in local.plans.flatMap(\.statuses) {
+            statusesByKey["\(status.planCode)#\(status.dayNumber)"] = status
+        }
+        for status in imported.plans.flatMap(\.statuses) where statusesByKey["\(status.planCode)#\(status.dayNumber)"] == nil {
+            statusesByKey["\(status.planCode)#\(status.dayNumber)"] = status
+        }
+        let statusesByPlanCode = Dictionary(grouping: statusesByKey.values, by: \.planCode)
+        let plans = plansByCode.values.map { plan in
+            RemoteSyncAndroidReadingPlan(
+                id: plan.id,
+                planCode: plan.planCode,
+                startDate: plan.startDate,
+                currentDay: plan.currentDay,
+                statuses: statusesByPlanCode[plan.planCode, default: []].sorted { $0.dayNumber < $1.dayNumber }
+            )
+        }
+        return RemoteSyncAndroidReadingPlanSnapshot(
+            plans: plans.sorted { $0.planCode < $1.planCode },
+            orphanStatuses: []
+        )
+    }
+
+    /**
+     Reads current local workspaces as a direct Android restore snapshot for Import merging.
+
+     The local model does not store Android history IDs directly, so the workspace fidelity store is
+     used when available and deterministic negative IDs are assigned for local-only history rows.
+
+     - Parameters:
+       - modelContext: SwiftData context that owns workspace, window, page-manager, and history rows.
+       - settingsStore: Settings store containing Android workspace fidelity aliases.
+     - Returns: Android-shaped workspace snapshot sorted in display order.
+     - Side effects: reads SwiftData and workspace fidelity settings.
+     - Failure modes: SwiftData fetch failures are treated as an empty workspace list, matching the
+       existing non-throwing outbound snapshot style.
+     */
+    private func currentWorkspaceSnapshot(
+        modelContext: ModelContext,
+        settingsStore: SettingsStore
+    ) -> RemoteSyncAndroidWorkspaceSnapshot {
+        let fidelityStore = RemoteSyncWorkspaceFidelityStore(settingsStore: settingsStore)
+        let workspaceFidelityByID = Dictionary(
+            uniqueKeysWithValues: fidelityStore.allWorkspaceEntries().map { ($0.workspaceID, $0) }
+        )
+        let pageManagerFidelityByWindowID = Dictionary(
+            uniqueKeysWithValues: fidelityStore.allPageManagerEntries().map { ($0.windowID, $0) }
+        )
+        let historyAliasByLocalID = Dictionary(
+            uniqueKeysWithValues: fidelityStore.allHistoryItemAliases().map { ($0.localHistoryItemID, $0.remoteHistoryItemID) }
+        )
+        let workspaces = ((try? modelContext.fetch(FetchDescriptor<Workspace>())) ?? [])
+            .sorted { lhs, rhs in
+                if lhs.orderNumber == rhs.orderNumber {
+                    return lhs.id.uuidString < rhs.id.uuidString
+                }
+                return lhs.orderNumber < rhs.orderNumber
+            }
+
+        var generatedRemoteHistoryID: Int64 = -1
+        let androidWorkspaces = workspaces.map { workspace in
+            let windows = (workspace.windows ?? []).sorted { lhs, rhs in
+                if lhs.orderNumber == rhs.orderNumber {
+                    return lhs.id.uuidString < rhs.id.uuidString
+                }
+                return lhs.orderNumber < rhs.orderNumber
+            }.map { window in
+                let pageManager = window.pageManager
+                let pageFidelity = pageManagerFidelityByWindowID[window.id]
+                let androidPageManager = RemoteSyncAndroidWorkspacePageManager(
+                    windowID: window.id,
+                    bibleDocument: pageManager?.bibleDocument,
+                    bibleVersification: pageManager?.bibleVersification,
+                    bibleBook: pageManager?.bibleBibleBook,
+                    bibleChapterNo: pageManager?.bibleChapterNo,
+                    bibleVerseNo: pageManager?.bibleVerseNo,
+                    commentaryDocument: pageManager?.commentaryDocument,
+                    commentaryAnchorOrdinal: pageManager?.commentaryAnchorOrdinal,
+                    commentarySourceBookAndKey: pageFidelity?.commentarySourceBookAndKey,
+                    dictionaryDocument: pageManager?.dictionaryDocument,
+                    dictionaryKey: pageManager?.dictionaryKey,
+                    dictionaryAnchorOrdinal: pageFidelity?.dictionaryAnchorOrdinal,
+                    generalBookDocument: pageManager?.generalBookDocument,
+                    generalBookKey: pageManager?.generalBookKey,
+                    generalBookAnchorOrdinal: pageFidelity?.generalBookAnchorOrdinal,
+                    mapDocument: pageManager?.mapDocument,
+                    mapKey: pageManager?.mapKey,
+                    mapAnchorOrdinal: pageFidelity?.mapAnchorOrdinal,
+                    currentCategoryName: pageFidelity?.rawCurrentCategoryName
+                        ?? (pageManager?.currentCategoryName.uppercased() ?? "BIBLE"),
+                    textDisplaySettings: pageManager?.textDisplaySettings,
+                    jsState: pageManager?.jsState
+                )
+                let historyItems = (window.historyItems ?? []).sorted { lhs, rhs in
+                    if lhs.createdAt == rhs.createdAt {
+                        return lhs.id.uuidString < rhs.id.uuidString
+                    }
+                    return lhs.createdAt < rhs.createdAt
+                }.map { item in
+                    let remoteID = historyAliasByLocalID[item.id] ?? {
+                        defer { generatedRemoteHistoryID -= 1 }
+                        return generatedRemoteHistoryID
+                    }()
+                    return RemoteSyncAndroidWorkspaceHistoryItem(
+                        remoteID: remoteID,
+                        windowID: window.id,
+                        createdAt: item.createdAt,
+                        document: item.document,
+                        key: item.key,
+                        anchorOrdinal: item.anchorOrdinal
+                    )
+                }
+                return RemoteSyncAndroidWorkspaceWindow(
+                    id: window.id,
+                    workspaceID: workspace.id,
+                    isSynchronized: window.isSynchronized,
+                    isPinMode: window.isPinMode,
+                    isLinksWindow: window.isLinksWindow,
+                    orderNumber: window.orderNumber,
+                    targetLinksWindowID: window.targetLinksWindowId,
+                    syncGroup: window.syncGroup,
+                    layoutState: window.layoutState,
+                    layoutWeight: window.layoutWeight,
+                    pageManager: androidPageManager,
+                    historyItems: historyItems
+                )
+            }
+            return RemoteSyncAndroidWorkspace(
+                id: workspace.id,
+                name: workspace.name,
+                contentsText: workspace.contentsText,
+                orderNumber: workspace.orderNumber,
+                textDisplaySettings: workspace.textDisplaySettings,
+                workspaceSettings: workspace.workspaceSettings ?? WorkspaceSettings(),
+                speakSettingsJSON: workspaceFidelityByID[workspace.id]?.speakSettingsJSON,
+                unPinnedWeight: workspace.unPinnedWeight,
+                maximizedWindowID: workspace.maximizedWindowId,
+                primaryTargetLinksWindowID: workspace.primaryTargetLinksWindowId,
+                workspaceColor: workspace.workspaceColor,
+                windows: windows
+            )
+        }
+        return RemoteSyncAndroidWorkspaceSnapshot(workspaces: androidWorkspaces)
+    }
+
+    /**
+     Merges workspace snapshots with Android Import's local-first uniqueness behavior.
+
+     - Parameters:
+       - local: Current local workspace rows projected into Android form.
+       - imported: Backup workspace rows read from Android's database.
+     - Returns: Snapshot preserving local workspaces/windows and adding imported missing children.
+     - Side effects: none.
+     - Failure modes: This helper cannot fail.
+     */
+    private func mergeWorkspaceSnapshots(
+        local: RemoteSyncAndroidWorkspaceSnapshot,
+        imported: RemoteSyncAndroidWorkspaceSnapshot
+    ) -> RemoteSyncAndroidWorkspaceSnapshot {
+        var workspacesByID = Dictionary(uniqueKeysWithValues: local.workspaces.map { ($0.id, $0) })
+        for workspace in imported.workspaces {
+            if let existing = workspacesByID[workspace.id] {
+                workspacesByID[workspace.id] = mergeWorkspace(local: existing, imported: workspace)
+            } else {
+                workspacesByID[workspace.id] = workspace
+            }
+        }
+        return RemoteSyncAndroidWorkspaceSnapshot(
+            workspaces: workspacesByID.values.sorted {
+                if $0.orderNumber == $1.orderNumber {
+                    return $0.id.uuidString < $1.id.uuidString
+                }
+                return $0.orderNumber < $1.orderNumber
+            }
+        )
+    }
+
+    /**
+     Merges one duplicate workspace while preserving local workspace-level fields.
+
+     - Parameters:
+       - local: Existing local Android-shaped workspace.
+       - imported: Imported workspace with the same ID.
+     - Returns: Workspace with local metadata and unioned windows/history.
+     - Side effects: none.
+     - Failure modes: This helper cannot fail.
+     */
+    private func mergeWorkspace(
+        local: RemoteSyncAndroidWorkspace,
+        imported: RemoteSyncAndroidWorkspace
+    ) -> RemoteSyncAndroidWorkspace {
+        var windowsByID = Dictionary(uniqueKeysWithValues: local.windows.map { ($0.id, $0) })
+        for window in imported.windows {
+            if let existing = windowsByID[window.id] {
+                windowsByID[window.id] = mergeWorkspaceWindow(local: existing, imported: window)
+            } else {
+                windowsByID[window.id] = window
+            }
+        }
+        return RemoteSyncAndroidWorkspace(
+            id: local.id,
+            name: local.name,
+            contentsText: local.contentsText,
+            orderNumber: local.orderNumber,
+            textDisplaySettings: local.textDisplaySettings,
+            workspaceSettings: local.workspaceSettings,
+            speakSettingsJSON: local.speakSettingsJSON ?? imported.speakSettingsJSON,
+            unPinnedWeight: local.unPinnedWeight,
+            maximizedWindowID: local.maximizedWindowID,
+            primaryTargetLinksWindowID: local.primaryTargetLinksWindowID,
+            workspaceColor: local.workspaceColor,
+            windows: windowsByID.values.sorted {
+                if $0.orderNumber == $1.orderNumber {
+                    return $0.id.uuidString < $1.id.uuidString
+                }
+                return $0.orderNumber < $1.orderNumber
+            }
+        )
+    }
+
+    /**
+     Merges one duplicate workspace window while preserving local page-manager state.
+
+     - Parameters:
+       - local: Existing local Android-shaped window.
+       - imported: Imported window with the same ID.
+     - Returns: Window with local fields and imported missing history rows.
+     - Side effects: none.
+     - Failure modes: This helper cannot fail.
+     */
+    private func mergeWorkspaceWindow(
+        local: RemoteSyncAndroidWorkspaceWindow,
+        imported: RemoteSyncAndroidWorkspaceWindow
+    ) -> RemoteSyncAndroidWorkspaceWindow {
+        var historyByRemoteID = Dictionary(uniqueKeysWithValues: local.historyItems.map { ($0.remoteID, $0) })
+        for history in imported.historyItems where historyByRemoteID[history.remoteID] == nil {
+            historyByRemoteID[history.remoteID] = history
+        }
+        return RemoteSyncAndroidWorkspaceWindow(
+            id: local.id,
+            workspaceID: local.workspaceID,
+            isSynchronized: local.isSynchronized,
+            isPinMode: local.isPinMode,
+            isLinksWindow: local.isLinksWindow,
+            orderNumber: local.orderNumber,
+            targetLinksWindowID: local.targetLinksWindowID,
+            syncGroup: local.syncGroup,
+            layoutState: local.layoutState,
+            layoutWeight: local.layoutWeight,
+            pageManager: local.pageManager,
+            historyItems: historyByRemoteID.values.sorted {
+                if $0.createdAt == $1.createdAt {
+                    return $0.remoteID < $1.remoteID
+                }
+                return $0.createdAt < $1.createdAt
+            }
+        )
+    }
+
+    /**
+     Merges My Documents snapshots with Android Import's local-first uniqueness behavior.
+
+     Document IDs, document initials, page IDs, page keys, content page IDs, and cache page IDs are
+     treated as Android uniqueness boundaries. Imported children whose parent rows are not present
+     after the merge are skipped to preserve Android foreign-key safety.
+
+     - Parameters:
+       - local: Current local My Documents rows projected into Android form.
+       - imported: Backup My Documents rows read from Android's database.
+     - Returns: Snapshot preserving local rows and adding imported rows whose uniqueness keys are
+       absent and whose parents exist.
+     - Side effects: none.
+     - Failure modes: This helper currently cannot fail; it is marked throwing to preserve room for
+       stricter validation without changing callers.
+     */
+    private func mergeMyDocumentSnapshots(
+        local: RemoteSyncAndroidMyDocumentSnapshot,
+        imported: RemoteSyncAndroidMyDocumentSnapshot
+    ) throws -> RemoteSyncAndroidMyDocumentSnapshot {
+        var documentsByID = Dictionary(uniqueKeysWithValues: local.documents.map { ($0.id, $0) })
+        var documentInitials = Set(local.documents.map(\.initials))
+        for document in imported.documents where documentsByID[document.id] == nil && !documentInitials.contains(document.initials) {
+            documentsByID[document.id] = document
+            documentInitials.insert(document.initials)
+        }
+
+        var pagesByID = Dictionary(uniqueKeysWithValues: local.pages.map { ($0.id, $0) })
+        var pageKeys = Set(local.pages.map { "\($0.documentId.uuidString)#\($0.pageKey)" })
+        let validDocumentIDs = Set(documentsByID.keys)
+        for page in imported.pages
+            where pagesByID[page.id] == nil
+                && validDocumentIDs.contains(page.documentId)
+                && !pageKeys.contains("\(page.documentId.uuidString)#\(page.pageKey)") {
+            pagesByID[page.id] = page
+            pageKeys.insert("\(page.documentId.uuidString)#\(page.pageKey)")
+        }
+
+        var contentsByPageID = Dictionary(uniqueKeysWithValues: local.pageContents.map { ($0.pageId, $0) })
+        let validPageIDs = Set(pagesByID.keys)
+        for content in imported.pageContents where contentsByPageID[content.pageId] == nil && validPageIDs.contains(content.pageId) {
+            contentsByPageID[content.pageId] = content
+        }
+
+        var cacheEntriesByPageID = Dictionary(uniqueKeysWithValues: local.aiPageCacheEntries.map { ($0.pageId, $0) })
+        for cacheEntry in imported.aiPageCacheEntries where cacheEntriesByPageID[cacheEntry.pageId] == nil && validPageIDs.contains(cacheEntry.pageId) {
+            cacheEntriesByPageID[cacheEntry.pageId] = cacheEntry
+        }
+
+        return RemoteSyncAndroidMyDocumentSnapshot(
+            documents: documentsByID.values.sorted { $0.id.uuidString < $1.id.uuidString },
+            pages: pagesByID.values.sorted { $0.id.uuidString < $1.id.uuidString },
+            pageContents: contentsByPageID.values.sorted { $0.pageId.uuidString < $1.pageId.uuidString },
+            aiPageCacheEntries: cacheEntriesByPageID.values.sorted { $0.pageId.uuidString < $1.pageId.uuidString },
+            orphanReferences: []
+        )
+    }
+}

@@ -336,23 +336,20 @@ extension AndBibleUITests {
     /// Returns workspace-name prompt text-field candidates without probing arbitrary fields.
     func workspaceNamePromptTextFieldCandidates(in app: XCUIApplication) -> [XCUIElement] {
         let identifier = "workspaceNamePromptTextField"
+        let focusedPredicate = NSPredicate(format: "hasKeyboardFocus == true")
         let customSheetCandidates = ["Name", "name"].flatMap { title in
             [
                 app.textFields[title].firstMatch,
                 app.collectionViews.textFields[title].firstMatch,
                 app.tables.textFields[title].firstMatch,
                 app.scrollViews.textFields[title].firstMatch,
-                app.secureTextFields[title].firstMatch,
-                app.collectionViews.secureTextFields[title].firstMatch,
-                app.tables.secureTextFields[title].firstMatch,
-                app.scrollViews.secureTextFields[title].firstMatch,
             ]
         } + [
             app.textFields[identifier].firstMatch,
-            app.secureTextFields[identifier].firstMatch,
             app.otherElements[identifier].firstMatch,
+            app.textFields.matching(focusedPredicate).firstMatch,
         ]
-        return customSheetCandidates + focusedTextEntryCandidates(in: app)
+        return customSheetCandidates
     }
 
     /// Returns workspace-name prompt buttons without walking the custom sheet hierarchy.
@@ -567,19 +564,12 @@ extension AndBibleUITests {
         case "labelAssignmentCreateNewLabelButton":
             return screenScopedButtonCandidates(identifier, within: "labelAssignmentScreen", in: app)
         case "labelManagerNewLabelNameField":
-            if let prompt = resolvedModalPrompt(in: app, timeout: 0) {
-                return modalTextFieldCandidates(
-                    in: prompt,
-                    identifiers: [identifier],
-                    titles: ["Label name"]
-                )
+            var candidates: [XCUIElement] = []
+            if let prompt = resolvedLabelCreationPrompt(in: app) {
+                candidates += labelCreationPromptTextFieldCandidates(in: prompt)
             }
-            return [
-                app.alerts.firstMatch.textFields["Label name"].firstMatch,
-                app.sheets.firstMatch.textFields["Label name"].firstMatch,
-                app.alerts.firstMatch.textFields.element(boundBy: 0),
-                app.sheets.firstMatch.textFields.element(boundBy: 0),
-            ]
+            candidates += appScopedLabelCreationPromptTextFieldCandidates(in: app)
+            return candidates
         case "labelEditNameField":
             return [
                 app.textFields[identifier].firstMatch,
@@ -587,17 +577,12 @@ extension AndBibleUITests {
                 app.otherElements[identifier].firstMatch,
             ]
         case "labelManagerCreateButton":
-            if let prompt = resolvedModalPrompt(in: app, timeout: 0) {
-                return modalButtonCandidates(
-                    in: prompt,
-                    identifiers: [identifier],
-                    titles: ["Create"]
-                )
+            var candidates: [XCUIElement] = []
+            if let prompt = resolvedLabelCreationPrompt(in: app) {
+                candidates += labelCreationPromptCreateButtonCandidates(in: prompt)
             }
-            return [
-                app.alerts.firstMatch.buttons["Create"].firstMatch,
-                app.sheets.firstMatch.buttons["Create"].firstMatch,
-            ]
+            candidates += appScopedLabelCreationPromptCreateButtonCandidates(in: app)
+            return candidates
         case "colorSettingsResetButton":
             return screenScopedButtonCandidates(identifier, within: "colorSettingsScreen", in: app)
         case "aboutAppTitle":
