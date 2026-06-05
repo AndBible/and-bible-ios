@@ -228,15 +228,17 @@ describe("reader parity controls", () => {
      * Protects manual chapter navigation edge-state wiring.
      *
      * The setup mounts the shared Android-parity navigation cluster at both reader edges. A passing
-     * test proves the top and bottom load-more controls disable from their matching infinite-scroll
-     * sentinel instead of allowing repeated bridge calls after content exhaustion.
+     * test proves both toolbar instances can receive both sentinels: previous-chapter controls disable
+     * at the start edge, next-chapter controls disable at the end edge, and load-more disables only for
+     * the edge represented by that toolbar.
      */
-    it("disables manual load more at the matching reached edge", () => {
+    it("disables manual navigation controls at reached edges", () => {
         const topWrapper = mount(ChapterNavigationButtons, {
             props: {
                 position: "top",
                 loading: false,
                 reachedStart: true,
+                reachedEnd: true,
             },
             global: {
                 provide: commonProvides(),
@@ -246,6 +248,7 @@ describe("reader parity controls", () => {
             props: {
                 position: "bottom",
                 loading: false,
+                reachedStart: true,
                 reachedEnd: true,
             },
             global: {
@@ -253,8 +256,15 @@ describe("reader parity controls", () => {
             },
         });
 
-        expect(topWrapper.findAll("button")[1].attributes("disabled")).toBeDefined();
-        expect(bottomWrapper.findAll("button")[1].attributes("disabled")).toBeDefined();
+        const topButtons = topWrapper.findAll("button");
+        expect(topButtons[0].attributes("disabled")).toBeDefined();
+        expect(topButtons[1].attributes("disabled")).toBeDefined();
+        expect(topButtons[2].attributes("disabled")).toBeDefined();
+
+        const bottomButtons = bottomWrapper.findAll("button");
+        expect(bottomButtons[0].attributes("disabled")).toBeDefined();
+        expect(bottomButtons[1].attributes("disabled")).toBeDefined();
+        expect(bottomButtons[2].attributes("disabled")).toBeDefined();
     });
 
     /**

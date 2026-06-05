@@ -20,6 +20,7 @@
     <button
       type="button"
       @click="$emit('navigatePrev')"
+      :disabled="reachedStart"
       class="nav-btn"
       :aria-label="strings.previousChapter"
       :title="strings.previousChapter"
@@ -42,7 +43,7 @@
     <button
       type="button"
       @click="$emit('navigateNext')"
-      :disabled="position === 'bottom' && reachedEnd"
+      :disabled="reachedEnd"
       class="nav-btn"
       :aria-label="strings.nextChapter"
       :title="strings.nextChapter"
