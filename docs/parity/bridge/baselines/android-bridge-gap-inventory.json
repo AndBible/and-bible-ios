@@ -1,12 +1,12 @@
 {
   "schemaVersion": 1,
-  "updated": "2026-05-23",
+  "updated": "2026-06-05",
   "purpose": "Track Android bridge surface that is not true iOS parity yet, plus resolved iOS bridge dispositions.",
   "references": {
     "androidInterfaceRelativePath": "app/bibleview-js/src/composables/android.ts",
     "androidMethodCount": 89,
     "iosInterfacePath": "bibleview-js/src/composables/android.ts",
-    "iosBundledMethodCount": 81
+    "iosBundledMethodCount": 83
   },
   "statusLegend": {
     "missing_needs_triage": "Android exposes the method and iOS does not. Treat as a parity gap until implemented or explicitly recorded as an iOS divergence.",
@@ -23,20 +23,6 @@
       "domain": "bookmarks",
       "status": "missing_needs_triage",
       "nextStep": "Implement whole-page bookmark behavior or record a product divergence."
-    },
-    {
-      "method": "goToNextChapter",
-      "androidSignature": "() => void",
-      "domain": "reader_navigation",
-      "status": "missing_needs_triage",
-      "nextStep": "Implement bridge-driven chapter navigation or confirm native iOS navigation is an intentional divergence."
-    },
-    {
-      "method": "goToPreviousChapter",
-      "androidSignature": "() => void",
-      "domain": "reader_navigation",
-      "status": "missing_needs_triage",
-      "nextStep": "Implement bridge-driven chapter navigation or confirm native iOS navigation is an intentional divergence."
     },
     {
       "method": "llmAction",
@@ -102,6 +88,20 @@
       "domain": "bookmarks",
       "status": "implemented",
       "nextStep": "Implemented by creating a Bible bookmark with the reserved paragraph-break label."
+    },
+    {
+      "method": "goToNextChapter",
+      "iosSignature": "() => void",
+      "domain": "reader_navigation",
+      "status": "implemented",
+      "nextStep": "Implemented by forwarding the shared Vue manual chapter navigation bridge request to native reader next-chapter navigation."
+    },
+    {
+      "method": "goToPreviousChapter",
+      "iosSignature": "() => void",
+      "domain": "reader_navigation",
+      "status": "implemented",
+      "nextStep": "Implemented by forwarding the shared Vue manual chapter navigation bridge request to native reader previous-chapter navigation."
     },
     {
       "method": "memorize",
