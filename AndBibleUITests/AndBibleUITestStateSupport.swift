@@ -96,6 +96,10 @@ extension AndBibleUITests {
     /**
      Types text into a prompt field and waits for XCTest to observe the committed value.
 
+     Prompt-specific callers pass a field that was already resolved from a known modal/sheet.
+     Those flows intentionally avoid app-wide focused-field probes because hosted XCTest can hang
+     while proving unrelated text fields do not exist.
+
      - Parameters:
        - text: Final text expected in the prompt-owned field.
        - element: Prompt text field resolved by a modal-specific helper.
@@ -127,22 +131,18 @@ extension AndBibleUITests {
         let includeElementMetadata = accessibilityIdentifier == nil
         let deadline = Date().addingTimeInterval(timeout)
 
+        let usesPromptScopedResolvedField = [
+            "labelManagerNewLabelNameField",
+            "workspaceNamePromptTextField",
+        ].contains(resolvedIdentifier)
+
         func promptFocusedTextEntryCandidates() -> [XCUIElement] {
-            switch accessibilityIdentifier {
-            case "labelManagerNewLabelNameField", "workspaceNamePromptTextField":
-                let focusedPredicate = NSPredicate(format: "hasKeyboardFocus == true")
-                return [app.textFields.matching(focusedPredicate).firstMatch]
-            default:
-                return focusedTextEntryCandidates(in: app)
-            }
+            usesPromptScopedResolvedField ? [] : focusedTextEntryCandidates(in: app)
         }
 
         func resolvedPromptTextField() -> XCUIElement {
-            switch accessibilityIdentifier {
-            case "labelManagerNewLabelNameField", "workspaceNamePromptTextField":
+            if usesPromptScopedResolvedField {
                 return element
-            default:
-                break
             }
 
             if let prompt = resolvedModalPrompt(in: app, timeout: 0.2) {
@@ -165,6 +165,10 @@ extension AndBibleUITests {
         }
 
         func promptTextEntryCandidates(preferred preferredCandidates: [XCUIElement]) -> [XCUIElement] {
+            if usesPromptScopedResolvedField {
+                return preferredCandidates.isEmpty ? [element] : preferredCandidates
+            }
+
             var candidates = preferredCandidates
             if preferredCandidates.isEmpty {
                 candidates.append(resolvedPromptTextField())
@@ -177,7 +181,7 @@ extension AndBibleUITests {
         func observedPromptTextValue(preferred preferredCandidates: [XCUIElement] = []) -> String {
             let candidates = promptTextEntryCandidates(preferred: preferredCandidates)
             var fallbackValue = ""
-            for candidate in candidates where candidate.exists {
+            for candidate in candidates where usesPromptScopedResolvedField || candidate.exists {
                 let candidateValue = currentTextEntryValue(
                     in: candidate,
                     placeholderHints: placeholderHints,
@@ -225,10 +229,25 @@ extension AndBibleUITests {
             preferred preferredCandidates: [XCUIElement],
             forceKeyboardDelete: Bool = false
         ) -> Bool {
-            let candidates = promptTextEntryCandidates(preferred: preferredCandidates)
-            for candidate in candidates where candidate.exists {
-                if forceKeyboardDelete {
+            func focusCandidateForKeyboardDelete(_ candidate: XCUIElement) {
+                if usesPromptScopedResolvedField {
+                    focusResolvedPromptTextEntryElement(
+                        candidate,
+                        in: app,
+                        preferTrailingEdge: true,
+                        timeout: 1,
+                        file: file,
+                        line: line
+                    )
+                } else {
                     focusTextEntryElement(candidate, preferTrailingEdge: true, timeout: 1)
+                }
+            }
+
+            let candidates = promptTextEntryCandidates(preferred: preferredCandidates)
+            for candidate in candidates where usesPromptScopedResolvedField || candidate.exists {
+                if forceKeyboardDelete {
+                    focusCandidateForKeyboardDelete(candidate)
                     if waitForElementKeyboardFocus(candidate, timeout: 0.3) {
                         app.typeText(
                             String(repeating: XCUIKeyboardKey.delete.rawValue, count: max(text.count * 2, 32))

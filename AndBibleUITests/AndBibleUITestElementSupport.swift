@@ -333,23 +333,29 @@ extension AndBibleUITests {
         ]
     }
 
-    /// Returns workspace-name prompt text-field candidates without probing arbitrary fields.
+    /**
+     Returns workspace-name prompt text-field candidates without probing arbitrary fields.
+
+     The production workspace prompt exports a text-field identifier. The candidate list therefore
+     stays bounded to that identifier and localized field-title fallbacks; it deliberately avoids
+     prompt-root descendant scans and app-wide focused-field queries because those can wedge XCTest
+     snapshot resolution on hosted simulators.
+     */
     func workspaceNamePromptTextFieldCandidates(in app: XCUIApplication) -> [XCUIElement] {
         let identifier = "workspaceNamePromptTextField"
-        let focusedPredicate = NSPredicate(format: "hasKeyboardFocus == true")
-        let customSheetCandidates = ["Name", "name"].flatMap { title in
+        let identifierCandidates = [
+            app.textFields[identifier].firstMatch,
+            app.otherElements[identifier].firstMatch,
+        ]
+        let titledCandidates = ["Name", "name"].flatMap { title in
             [
                 app.textFields[title].firstMatch,
                 app.collectionViews.textFields[title].firstMatch,
                 app.tables.textFields[title].firstMatch,
                 app.scrollViews.textFields[title].firstMatch,
             ]
-        } + [
-            app.textFields[identifier].firstMatch,
-            app.otherElements[identifier].firstMatch,
-            app.textFields.matching(focusedPredicate).firstMatch,
-        ]
-        return customSheetCandidates
+        }
+        return identifierCandidates + titledCandidates
     }
 
     /// Returns workspace-name prompt buttons without walking the custom sheet hierarchy.
