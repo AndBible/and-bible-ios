@@ -317,8 +317,8 @@ extension AndBibleUITests {
 
         repeat {
             let button = unresolvedElement("readerMoreMenuButton", in: app)
-            tapReaderMoreMenuChromeCoordinate(in: app)
-            if waitForReaderOverflowMenu(in: app, timeout: min(2, max(1, deadline.timeIntervalSinceNow))) {
+            if tapReaderMoreMenuChromeCoordinate(in: app),
+               waitForReaderOverflowMenu(in: app, timeout: min(2, max(1, deadline.timeIntervalSinceNow))) {
                 return true
             }
             if elementHasUsableFrame(button) {
@@ -509,11 +509,11 @@ extension AndBibleUITests {
 
         repeat {
             let button = unresolvedElement("readerNavigationDrawerButton", in: app)
-            tapReaderNavigationDrawerChromeCoordinate(in: app)
-            if waitForReaderNavigationDrawer(
-                in: app,
-                timeout: min(2, max(1, deadline.timeIntervalSinceNow))
-            ) {
+            if tapReaderNavigationDrawerChromeCoordinate(in: app),
+               waitForReaderNavigationDrawer(
+                   in: app,
+                   timeout: min(2, max(1, deadline.timeIntervalSinceNow))
+               ) {
                 return true
             }
             if elementHasUsableFrame(button) {
@@ -533,14 +533,48 @@ extension AndBibleUITests {
         return false
     }
 
-    /// Taps the reader drawer affordance without forcing XCTest to snapshot its frame first.
-    func tapReaderNavigationDrawerChromeCoordinate(in app: XCUIApplication) {
+    /**
+     Attempts the reader drawer chrome-coordinate tap only when the app frame is safe to sample.
+
+     The coordinate tap preserves coverage for hosted reader chrome that may not expose a stable
+     accessibility button immediately after launch. Hosted XCTest can briefly expose an application
+     frame with infinite coordinates while the reader shell is settling, and creating a coordinate
+     from that frame raises an XCTest exception before the explicit button fallback can run.
+     This helper leaves the app untouched when the sampled frame is unusable so callers can retry
+     through the button path.
+
+     - Parameter app: The launched AndBible application under test.
+     - Returns: `true` when the chrome coordinate was tapped, or `false` when callers should use the
+       explicit drawer button fallback.
+     */
+    @discardableResult
+    func tapReaderNavigationDrawerChromeCoordinate(in app: XCUIApplication) -> Bool {
+        guard elementHasUsableFrame(app) else {
+            return false
+        }
         app.coordinate(withNormalizedOffset: CGVector(dx: 0.06, dy: 0.06)).tap()
+        return true
     }
 
-    /// Taps the reader overflow affordance without forcing XCTest to snapshot its frame first.
-    func tapReaderMoreMenuChromeCoordinate(in app: XCUIApplication) {
+    /**
+     Attempts the reader overflow chrome-coordinate tap only when the app frame is safe to sample.
+
+     The coordinate tap avoids forcing an early snapshot of hosted reader chrome before the overflow
+     button has stabilized. If XCTest reports a non-finite application frame, the helper does not tap
+     and lets the caller fall back to the explicit toolbar button, preventing the infinite-coordinate
+     exception seen in sharded CI.
+
+     - Parameter app: The launched AndBible application under test.
+     - Returns: `true` when the chrome coordinate was tapped, or `false` when callers should use the
+       explicit overflow button fallback.
+     */
+    @discardableResult
+    func tapReaderMoreMenuChromeCoordinate(in app: XCUIApplication) -> Bool {
+        guard elementHasUsableFrame(app) else {
+            return false
+        }
         app.coordinate(withNormalizedOffset: CGVector(dx: 0.94, dy: 0.06)).tap()
+        return true
     }
 
     /**
