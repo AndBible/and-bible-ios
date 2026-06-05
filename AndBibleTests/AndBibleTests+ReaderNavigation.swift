@@ -381,6 +381,27 @@ extension AndBibleTests {
         )
     }
 
+    /**
+     Protects the Swift-to-Vue bridge payload key contract for plain OSIS fragments.
+
+     Plain Bible fragments often omit an explicit `features` argument because no Strong's or
+     morphology metadata is available. A passing test proves those fragments still emit the
+     TypeScript-required `features` object as `{}` rather than omitting the key from bridge JSON.
+     */
+    func testBridgePayloadIncludesEmptyFeaturesObjectByDefault() throws {
+        let fragment = OsisFragment(
+            xml: "<div>In the beginning...</div>",
+            key: "Gen.1",
+            keyName: "Genesis 1",
+            bookInitials: "KJV"
+        )
+
+        let fragmentObject = try bridgeJSONObject(fragment)
+
+        let features = try XCTUnwrap(fragmentObject["features"] as? [String: Any])
+        XCTAssertTrue(features.isEmpty)
+    }
+
     #if os(iOS)
     func testDownloadLinkInitialsAreParsedForDownloadsSearch() {
         XCTAssertEqual(

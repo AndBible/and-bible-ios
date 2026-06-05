@@ -4,6 +4,27 @@ import XCTest
 @testable import BibleView
 
 final class BridgeTypesTests: XCTestCase {
+    /**
+     Protects the default OSIS fragment bridge shape when no module features are available.
+
+     The Swift initializer is commonly used without an explicit `features` argument for plain Bible
+     fragments. A passing test proves those callers still emit the TypeScript-required `features`
+     object as `{}` instead of omitting the key, which would break the shared client object contract.
+     */
+    func testOsisFragmentDefaultFeaturesEncodeAsEmptyObject() throws {
+        let fragment = OsisFragment(
+            xml: "<div>In the beginning...</div>",
+            key: "Gen.1.1",
+            keyName: "Genesis 1:1",
+            bookInitials: "KJV"
+        )
+
+        let object = try bridgeJSONObject(fragment)
+
+        let features = try XCTUnwrap(object["features"] as? [String: Any])
+        XCTAssertTrue(features.isEmpty)
+    }
+
     func testOsisFragmentCodable() throws {
         let fragment = OsisFragment(
             xml: "<div>In the beginning...</div>",
@@ -27,6 +48,8 @@ final class BridgeTypesTests: XCTestCase {
         XCTAssertEqual(decoded.bookInitials, "KJV")
         XCTAssertEqual(decoded.direction, "ltr")
         XCTAssertEqual(decoded.ordinalRange, [0, 10])
+        XCTAssertNil(decoded.features.type)
+        XCTAssertNil(decoded.features.keyName)
     }
 
     /**
