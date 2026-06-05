@@ -322,7 +322,8 @@ export function useConfig(documentType: Ref<BibleViewDocumentType>) {
             "showAnnotations", "showVerseNumbers", "strongsMode", "showMorphology",
             "showRedLetters", "showVersePerLine", "showNonCanonical", "showSectionTitles",
             "showStrongsSeparately", "showFootNotes", "showFootNotesInline", "showXrefs", "showBookmarks", "showMyNotes",
-            "showAiDocMarkers", "showOrdinals", "showTitleScrollButton",
+            "showAiDocMarkers", "showOrdinals", "showTitleScrollButton", "showMarkAsReadButton",
+            "infiniteScroll",
             "fontSize", "fontFamily", "hyphenation", "justifyText", "marginSize", "topMargin", "pageScrollAmount"
         ];
         return compareConfig(newConfig, keys);

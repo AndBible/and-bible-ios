@@ -22,6 +22,7 @@ import {afterEach, beforeEach, describe, expect, it, vi} from "vitest";
 import ChapterNavigationButtons from "@/components/ChapterNavigationButtons.vue";
 import BibleDocument from "@/components/documents/BibleDocument.vue";
 import Title from "@/components/OSIS/Title.vue";
+import {useConfig} from "@/composables/config";
 import {useInfiniteScroll} from "@/composables/infinite-scroll";
 import {useMemorization} from "@/composables/memorization";
 import {useReadingTracker} from "@/composables/reading-tracker";
@@ -528,6 +529,51 @@ describe("infinite scroll edge state", () => {
 
         expect(requestNextChapter).toHaveBeenCalledTimes(1);
         expect(controls.loadingAtEnd.value).toBe(false);
+        wrapper.unmount();
+    });
+});
+
+describe("reader config refresh", () => {
+    afterEach(() => {
+        eventBus.all.clear();
+    });
+
+    /**
+     * Protects scroll restoration after layout-affecting reader control toggles.
+     *
+     * The setup mounts the production config composable for a Bible document and drives its native
+     * `set_config` event path. A passing test proves toggling manual chapter navigation or the
+     * mark-as-read footer emits `config_changed`, which the reader uses to restore the current verse
+     * after DOM height changes.
+     */
+    it("emits config_changed for reader controls that alter layout", async () => {
+        const configChanged = vi.fn();
+        const Harness = defineComponent({
+            template: "<div></div>",
+            setup() {
+                useConfig(ref("bible"));
+                return {};
+            },
+        });
+        const wrapper = mount(Harness);
+        eventBus.on("config_changed", configChanged);
+        await nextTick();
+
+        eventBus.emit("set_config", [{
+            config: {infiniteScroll: false},
+            appSettings: {},
+            initial: false,
+        }]);
+        await flushPromises();
+
+        eventBus.emit("set_config", [{
+            config: {showMarkAsReadButton: false},
+            appSettings: {},
+            initial: false,
+        }]);
+        await flushPromises();
+
+        expect(configChanged).toHaveBeenCalledTimes(2);
         wrapper.unmount();
     });
 });
