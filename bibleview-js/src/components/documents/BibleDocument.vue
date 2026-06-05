@@ -216,7 +216,6 @@ function onCheckClick(event: Event) {
 
     &.read {
         color: #4CAF50;
-        cursor: default;
 
         .night & {
             color: #66BB6A;
