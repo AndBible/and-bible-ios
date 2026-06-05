@@ -35,6 +35,37 @@ extension AndBibleTests {
     }
 
     /**
+     Verifies that archive entry paths are normalized before duplicate detection.
+
+     Setup:
+     - builds an Android module backup containing the same SWORD config path with `\` and `./`
+       spelling variants
+     - includes a valid module data file so the archive would otherwise be restorable
+
+     Expected result:
+     - inspection rejects the normalized duplicate before any restore file writes can occur
+     - the duplicate path reported to users and logs is the normalized archive path
+
+     Failure meaning:
+     - iOS could accept an archive that overwrites one restored file with another spelling of the
+       same path, drifting from Android's collision-safe restore expectations.
+     */
+    func testAndroidModuleBackupRejectsNormalizedDuplicateEntryPaths() throws {
+        let moduleRoot = try makeTemporaryAndroidModuleBackupRoot()
+        let service = AndroidModuleBackupService(moduleDirectory: moduleRoot)
+        let archiveData = try makeAndroidModuleBackupArchiveData(entries: [
+            ("mods.d\\kjv.conf", makeAndroidModuleBackupConf(moduleName: "KJV")),
+            ("./mods.d/kjv.conf", makeAndroidModuleBackupConf(moduleName: "KJV")),
+            ("modules/texts/rawtext/kjv/ot", Data("Genesis content".utf8)),
+        ])
+
+        XCTAssertThrowsError(try service.inspectArchive(from: archiveData)) { error in
+            XCTAssertEqual(error as? AndroidModuleBackupError, .duplicateEntry("mods.d/kjv.conf"))
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: moduleRoot.appendingPathComponent("mods.d/kjv.conf").path))
+    }
+
+    /**
      Verifies that iOS restores the shared SWORD portion of Android module backups and reports
      Android-only manual module payloads as skipped.
 
@@ -202,6 +233,35 @@ extension AndBibleTests {
     }
 
     /**
+     Verifies that Android-compatible ZIP exports mark entry names as UTF-8.
+
+     Setup:
+     - writes a minimal stored ZIP archive through `ZipArchiveWriter`
+     - reads the general-purpose bit flag from both local and central-directory headers
+
+     Expected result:
+     - both headers set the ZIP EFS/UTF-8 flag that Android's Java ZIP readers use for path
+       decoding
+
+     Failure meaning:
+     - Android restore could reinterpret iOS-exported module paths with a platform-default
+       encoding, especially for localized module filenames.
+     */
+    func testZipArchiveWriterMarksEntryNamesAsUTF8ForAndroidReaders() throws {
+        let archiveData = try ZipArchiveWriter.storedArchive(entries: [
+            ZipArchiveWriterEntry(name: "mods.d/kjv.conf", data: Data("payload".utf8)),
+        ])
+        let expectedFlag: UInt16 = 0x0800
+        let endOfCentralDirectoryOffset = archiveData.count - 22
+        let centralDirectoryOffset = Int(try readZipUInt32(archiveData, at: endOfCentralDirectoryOffset + 16))
+
+        XCTAssertEqual(try readZipUInt32(archiveData, at: endOfCentralDirectoryOffset), 0x0605_4b50)
+        XCTAssertEqual(try readZipUInt32(archiveData, at: centralDirectoryOffset), 0x0201_4b50)
+        XCTAssertEqual(try readZipUInt16(archiveData, at: 6), expectedFlag)
+        XCTAssertEqual(try readZipUInt16(archiveData, at: centralDirectoryOffset + 8), expectedFlag)
+    }
+
+    /**
      Verifies that Android-compatible module export honors the selected-module list.
 
      Setup:
@@ -327,5 +387,51 @@ extension AndBibleTests {
             withIntermediateDirectories: true
         )
         try data.write(to: dataURL)
+    }
+
+    /**
+     Reads a little-endian UInt16 from a ZIP fixture at an exact byte offset.
+
+     - Parameters:
+       - data: ZIP fixture bytes.
+       - offset: Zero-based byte offset of the two-byte integer.
+     - Returns: Decoded UInt16 value.
+     - Side effects: none.
+     - Failure modes: Throws a test-fixture error if the offset is outside the fixture.
+     */
+    private func readZipUInt16(_ data: Data, at offset: Int) throws -> UInt16 {
+        let bytes = [UInt8](data)
+        guard offset >= 0, offset + 1 < bytes.count else {
+            throw AndroidModuleBackupTestFixtureError.invalidZipOffset
+        }
+        return UInt16(bytes[offset]) | UInt16(bytes[offset + 1]) << 8
+    }
+
+    /**
+     Reads a little-endian UInt32 from a ZIP fixture at an exact byte offset.
+
+     - Parameters:
+       - data: ZIP fixture bytes.
+       - offset: Zero-based byte offset of the four-byte integer.
+     - Returns: Decoded UInt32 value.
+     - Side effects: none.
+     - Failure modes: Throws a test-fixture error if the offset is outside the fixture.
+     */
+    private func readZipUInt32(_ data: Data, at offset: Int) throws -> UInt32 {
+        let bytes = [UInt8](data)
+        guard offset >= 0, offset + 3 < bytes.count else {
+            throw AndroidModuleBackupTestFixtureError.invalidZipOffset
+        }
+        return UInt32(bytes[offset])
+            | UInt32(bytes[offset + 1]) << 8
+            | UInt32(bytes[offset + 2]) << 16
+            | UInt32(bytes[offset + 3]) << 24
+    }
+
+    /**
+     Reports malformed local ZIP fixtures as XCTest failures instead of runtime traps.
+     */
+    private enum AndroidModuleBackupTestFixtureError: Error {
+        case invalidZipOffset
     }
 }

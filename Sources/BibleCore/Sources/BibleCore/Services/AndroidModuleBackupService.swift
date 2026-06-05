@@ -448,14 +448,20 @@ public final class AndroidModuleBackupService {
             throw AndroidModuleBackupError.invalidArchive(error.localizedDescription)
         }
 
-        var names: Set<String> = []
-        for entry in entries {
-            guard names.insert(entry.name).inserted else {
+        let normalizedEntries = try entries.map { entry in
+            ZipArchiveEntry(name: try normalizedArchivePath(entry.name), data: entry.data)
+        }
+
+        var normalizedNames: Set<String> = []
+        for entry in normalizedEntries {
+            let collisionKey = entry.name.lowercased()
+            guard normalizedNames.insert(collisionKey).inserted else {
                 throw AndroidModuleBackupError.duplicateEntry(entry.name)
             }
         }
 
-        guard let manifestEntry = entries.first(where: { $0.name == Self.manifestFileName }) else {
+        let manifestName = Self.manifestFileName.lowercased()
+        guard let manifestEntry = normalizedEntries.first(where: { $0.name.lowercased() == manifestName }) else {
             throw AndroidModuleBackupError.missingManifest
         }
         let manifest = try decodeManifest(from: manifestEntry.data)
@@ -468,8 +474,8 @@ public final class AndroidModuleBackupService {
 
         var supportedEntries: [ZipArchiveEntry] = []
         var unsupportedEntryPaths: [String] = []
-        for entry in entries where entry.name != Self.manifestFileName {
-            let normalizedPath = try normalizedArchivePath(entry.name)
+        for entry in normalizedEntries where entry.name.lowercased() != manifestName {
+            let normalizedPath = entry.name
             let lowercasedPath = normalizedPath.lowercased()
             if isSupportedSwordEntry(lowercasedPath) {
                 supportedEntries.append(ZipArchiveEntry(name: normalizedPath, data: entry.data))

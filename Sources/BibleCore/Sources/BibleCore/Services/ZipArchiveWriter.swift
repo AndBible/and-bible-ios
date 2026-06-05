@@ -62,6 +62,9 @@ public struct ZipArchiveWriterEntry: Sendable, Equatable {
  exported iOS module backups can be restored by Android and re-read by `ZipArchiveReader`.
  */
 public enum ZipArchiveWriter {
+    /// ZIP general-purpose EFS flag that tells Android/Java readers file names are UTF-8.
+    private static let utf8FileNameFlag: UInt16 = 0x0800
+
     /**
      Builds a ZIP archive containing the supplied entries without compression.
 
@@ -71,7 +74,9 @@ public enum ZipArchiveWriter {
      - Throws: `ZipArchiveWriterError` when the entry count, path length, payload size, or central
        directory exceeds the non-ZIP64 ZIP limits supported by Android-compatible backup export.
      - Note: The output is deterministic for the same ordered entries; timestamps are written as
-       zero because Android's module backup contract does not depend on ZIP entry dates.
+       zero because Android's module backup contract does not depend on ZIP entry dates. File-name
+       headers set the ZIP UTF-8 flag so Android's Java ZIP readers do not reinterpret paths with
+       platform-default encodings.
      */
     public static func storedArchive(entries: [ZipArchiveWriterEntry]) throws -> Data {
         guard entries.count <= Int(UInt16.max) else {
@@ -85,17 +90,21 @@ public enum ZipArchiveWriter {
 
         for entry in entries {
             guard let nameData = entry.name.data(using: .utf8),
-                  nameData.count <= Int(UInt16.max),
-                  entry.data.count <= Int(UInt32.max),
-                  archive.count <= Int(UInt32.max) else {
+                  nameData.count <= Int(UInt16.max) else {
                 throw ZipArchiveWriterError.entryTooLarge(entry.name)
+            }
+            guard entry.data.count <= Int(UInt32.max) else {
+                throw ZipArchiveWriterError.entryTooLarge(entry.name)
+            }
+            guard archive.count <= Int(UInt32.max) else {
+                throw ZipArchiveWriterError.archiveTooLarge
             }
 
             localHeaderOffsets.append(UInt32(archive.count))
             let checksum = crc32(entry.data)
             appendUInt32(0x0403_4b50, to: &archive)
             appendUInt16(20, to: &archive)
-            appendUInt16(0, to: &archive)
+            appendUInt16(Self.utf8FileNameFlag, to: &archive)
             appendUInt16(0, to: &archive)
             appendUInt16(0, to: &archive)
             appendUInt16(0, to: &archive)
@@ -122,7 +131,7 @@ public enum ZipArchiveWriter {
             appendUInt32(0x0201_4b50, to: &centralDirectory)
             appendUInt16(20, to: &centralDirectory)
             appendUInt16(20, to: &centralDirectory)
-            appendUInt16(0, to: &centralDirectory)
+            appendUInt16(Self.utf8FileNameFlag, to: &centralDirectory)
             appendUInt16(0, to: &centralDirectory)
             appendUInt16(0, to: &centralDirectory)
             appendUInt16(0, to: &centralDirectory)

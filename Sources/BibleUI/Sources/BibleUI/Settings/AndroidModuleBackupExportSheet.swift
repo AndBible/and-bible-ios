@@ -91,7 +91,7 @@ struct AndroidModuleBackupExportSheet: View {
                             }
                         }
                         .disabled(isExporting)
-                        .accessibilityIdentifier("androidModuleBackupExportRow")
+                        .accessibilityIdentifier("androidModuleBackupExportRow::\(module.name)")
                     }
                 } header: {
                     Text(String(localized: "android_module_backup_export_modules", defaultValue: "Select modules"))
