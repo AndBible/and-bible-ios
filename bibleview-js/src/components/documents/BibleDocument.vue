@@ -27,22 +27,29 @@
     <OsisFragment :fragment="document.osisFragment"/>
     <div v-if="config.showMarkAsReadButton" class="mark-as-read-container">
       <div class="mark-as-read-wrapper">
-        <FontAwesomeIcon
-            class="mark-as-read-icon"
+        <button
+            type="button"
+            class="mark-as-read-button"
             :class="{read: chapterReadCount > 0}"
-            :icon="faCheck"
+            :aria-label="strings.markChapterAsRead"
+            :title="strings.markChapterAsRead"
             @click="onCheckClick"
             @touchstart.passive="onCheckPressStart"
             @touchend="onCheckPressEnd"
             @touchmove="onCheckPressEnd"
             @touchcancel="onCheckPressEnd"
             @contextmenu.prevent="onOpenReadHistory"
-        />
-        <span
+        >
+          <FontAwesomeIcon class="mark-as-read-icon" :icon="faCheck" aria-hidden="true"/>
+        </button>
+        <button
             v-if="chapterReadCount > 0"
+            type="button"
             class="read-count"
+            :aria-label="strings.openChapterReadHistory"
+            :title="strings.openChapterReadHistory"
             @click="onOpenReadHistory"
-        >×{{ chapterReadCount }}</span>
+        >×{{ chapterReadCount }}</button>
       </div>
     </div>
   </div>
@@ -88,7 +95,7 @@ if (memorization && props.document.memorizedOrdinals) {
 }
 memorization?.setupIndicatorRendering(containerRef, id);
 
-const {config, appSettings, ...common} = useCommon();
+const {config, appSettings, strings, ...common} = useCommon();
 
 useBookmarks(id, ordinalRange, globalBookmarks, bookInitials,  null, true, ref(true), common, config, appSettings);
 
@@ -183,12 +190,15 @@ function onCheckClick(event: Event) {
     -webkit-touch-callout: none;
 }
 
-.mark-as-read-icon {
+.mark-as-read-button {
     cursor: pointer;
     font-size: 18px;
     color: rgba(0, 0, 0, 0.3);
     padding: 6px;
     border-radius: 50%;
+    background: transparent;
+    border: none;
+    line-height: 1;
 
     .night & {
         color: rgba(255, 255, 255, 0.3);
@@ -224,12 +234,20 @@ function onCheckClick(event: Event) {
     }
 }
 
+.mark-as-read-icon {
+    pointer-events: none;
+}
+
 .read-count {
     cursor: pointer;
     font-size: 12px;
     font-weight: bold;
     margin-left: 2px;
     color: #4CAF50;
+    background: transparent;
+    border: none;
+    padding: 0;
+    line-height: 1;
 
     .night & {
         color: #66BB6A;

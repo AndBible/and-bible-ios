@@ -155,6 +155,8 @@ type TranslatedStrings = {
     nextChapter: string
     loadMore: string
     scrollToTitle: string
+    markChapterAsRead: string
+    openChapterReadHistory: string
 }
 
 type Strings = TranslatedStrings & UntranslatedStrings

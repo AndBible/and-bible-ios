@@ -111,3 +111,5 @@ previousChapter: Previous chapter
 nextChapter: Next chapter
 loadMore: Load more
 scrollToTitle: Scroll to title
+markChapterAsRead: Mark chapter as read
+openChapterReadHistory: Open chapter read history

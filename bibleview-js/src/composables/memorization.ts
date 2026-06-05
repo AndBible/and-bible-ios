@@ -68,6 +68,25 @@ function getFirstLineTop(elem: Element): number {
 }
 
 /**
+ * Looks up a rendered ordinal inside the active document container.
+ *
+ * @param container - Document root or a parent containing the document root.
+ * @param documentId - Current Bible document id used when the container is a parent element.
+ * @param ordinal - KJV-normalized ordinal rendered as `#o-${ordinal}`.
+ * @returns The matching ordinal element, or `null` when the verse is not rendered.
+ * @remarks `BibleDocument.vue` passes the `#doc-${documentId}` root as `container`, so selector logic
+ * must not require the document root to be a descendant of itself. The fallback keeps the helper safe
+ * if a future caller passes a parent container.
+ */
+function findOrdinalElement(container: HTMLElement, documentId: string, ordinal: number): HTMLElement | null {
+    const ordinalSelector = `#o-${ordinal}`;
+    if (container.id === `doc-${documentId}`) {
+        return container.querySelector(ordinalSelector) as HTMLElement | null;
+    }
+    return container.querySelector(`#doc-${documentId} ${ordinalSelector}`) as HTMLElement | null;
+}
+
+/**
  * Computes the visible bottom for the final line in a memorization range.
  *
  * @param lastElem - Last verse element in the rendered memorization range.
@@ -83,7 +102,7 @@ function getEffectiveBottom(lastElem: Element, nextOrdinal: number, container: H
     if (rects.length === 0) return lastElem.getBoundingClientRect().bottom;
     if (rects.length === 1) return rects[0].bottom;
 
-    const nextElem = container.querySelector(`#doc-${documentId} #o-${nextOrdinal}`);
+    const nextElem = findOrdinalElement(container, documentId, nextOrdinal);
     if (nextElem) {
         const nextRects = nextElem.getClientRects();
         if (nextRects.length > 0) {
@@ -115,8 +134,8 @@ function createIndicatorElement(
     type: IndicatorType,
     documentId: string,
 ): HTMLElement | null {
-    const firstElem = container.querySelector(`#doc-${documentId} #o-${firstOrdinal}`) as HTMLElement | null;
-    const lastElem = container.querySelector(`#doc-${documentId} #o-${lastOrdinal}`) as HTMLElement | null;
+    const firstElem = findOrdinalElement(container, documentId, firstOrdinal);
+    const lastElem = findOrdinalElement(container, documentId, lastOrdinal);
     if (!firstElem || !lastElem) return null;
 
     const containerRect = container.getBoundingClientRect();
