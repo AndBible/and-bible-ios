@@ -50,6 +50,30 @@ public struct ImportExportView: View {
     /// Whether a SWORD module installation is currently in progress.
     @State private var isInstallingModule = false
 
+    /// Controls presentation of the Android module backup picker.
+    @State private var showAndroidModuleBackupPicker = false
+
+    /// Whether an Android module backup restore is currently in progress.
+    @State private var isRestoringAndroidModuleBackup = false
+
+    /// Whether an Android module backup export is currently in progress.
+    @State private var isExportingAndroidModuleBackup = false
+
+    /// Controls presentation of Android module backup export module selection.
+    @State private var showAndroidModuleBackupExportSheet = false
+
+    /// Installed SWORD modules shown in the Android module backup export selection sheet.
+    @State private var androidModuleBackupExportModules: [ModuleInfo] = []
+
+    /// Selected Android module backup bytes retained while the overwrite confirmation is visible.
+    @State private var pendingAndroidModuleBackupData: Data?
+
+    /// Existing module file paths reported for the pending Android module backup confirmation.
+    @State private var pendingAndroidModuleBackupExistingFiles: [String] = []
+
+    /// Controls the Android module backup overwrite confirmation prompt.
+    @State private var showAndroidModuleBackupOverwriteAlert = false
+
     /// Controls presentation of the EPUB picker.
     @State private var showEpubPicker = false
 
@@ -67,6 +91,9 @@ public struct ImportExportView: View {
 
     /// Service used to load, apply, and clean up Android `.abdb.zip` database backups.
     private let androidBackupService = AndroidDatabaseBackupService()
+
+    /// Service used to inspect, restore, and export Android `.abmd.zip` module backups.
+    private let androidModuleBackupService = AndroidModuleBackupService()
 
     /**
      Creates the import/export screen.
@@ -90,6 +117,12 @@ public struct ImportExportView: View {
         }
         if showModuleZipPicker {
             return "moduleZipPickerPresented"
+        }
+        if showAndroidModuleBackupPicker {
+            return "androidModuleBackupPickerPresented"
+        }
+        if showAndroidModuleBackupExportSheet {
+            return "androidModuleBackupExportPresented"
         }
         if showEpubPicker {
             return "epubPickerPresented"
@@ -168,6 +201,38 @@ public struct ImportExportView: View {
                     }
                 }
                 .disabled(isInstallingModule)
+
+                Button {
+                    showAndroidModuleBackupPicker = true
+                } label: {
+                    HStack {
+                        SwiftUI.Label(
+                            String(localized: "restore_android_module_backup", defaultValue: "Restore Android Module Backup"),
+                            systemImage: "archivebox"
+                        )
+                        Spacer()
+                        if isRestoringAndroidModuleBackup {
+                            ProgressView()
+                        }
+                    }
+                }
+                .disabled(isRestoringAndroidModuleBackup)
+
+                Button {
+                    presentAndroidModuleBackupExportSelection()
+                } label: {
+                    HStack {
+                        SwiftUI.Label(
+                            String(localized: "export_android_module_backup", defaultValue: "Export Android Module Backup"),
+                            systemImage: "archivebox.fill"
+                        )
+                        Spacer()
+                        if isExportingAndroidModuleBackup {
+                            ProgressView()
+                        }
+                    }
+                }
+                .disabled(isExportingAndroidModuleBackup)
             } header: {
                 Text(String(localized: "modules"))
             } footer: {
@@ -240,11 +305,39 @@ public struct ImportExportView: View {
             handleModuleZipImport(result)
         }
         .fileImporter(
+            isPresented: $showAndroidModuleBackupPicker,
+            allowedContentTypes: [.zip, .data],
+            allowsMultipleSelection: false
+        ) { result in
+            handleAndroidModuleBackupImport(result)
+        }
+        .sheet(isPresented: $showAndroidModuleBackupExportSheet) {
+            AndroidModuleBackupExportSheet(
+                modules: androidModuleBackupExportModules,
+                isExporting: isExportingAndroidModuleBackup,
+                onCancel: dismissAndroidModuleBackupExportSelection,
+                onExport: exportAndroidModuleBackup(moduleNames:)
+            )
+        }
+        .fileImporter(
             isPresented: $showEpubPicker,
             allowedContentTypes: [.epub, .data],
             allowsMultipleSelection: false
         ) { result in
             handleEpubImport(result)
+        }
+        .alert(
+            String(localized: "android_module_backup_overwrite_title", defaultValue: "Overwrite existing module files?"),
+            isPresented: $showAndroidModuleBackupOverwriteAlert
+        ) {
+            Button(String(localized: "cancel"), role: .cancel) {
+                clearPendingAndroidModuleBackup()
+            }
+            Button(String(localized: "overwrite", defaultValue: "Overwrite"), role: .destructive) {
+                restorePendingAndroidModuleBackup()
+            }
+        } message: {
+            Text(androidModuleBackupOverwriteMessage())
         }
     }
 
@@ -306,6 +399,7 @@ public struct ImportExportView: View {
      - `.json`: full backup import via `BackupService.importFullBackup`
      - `.csv`: bookmark import via `BackupService.importBookmarksCSV`
      - `.abdb.zip`: Android database backup staging via `AndroidDatabaseBackupService`
+     - `.abmd.zip`: Android module backup restore via `AndroidModuleBackupService`
      - `.bbl`, `.cmt`, `.dct`: MySword/MyBible hint only; no import is performed
 
      Side effects:
@@ -336,6 +430,11 @@ public struct ImportExportView: View {
             let ext = url.pathExtension.lowercased()
             if isAndroidDatabaseBackupFile(url) {
                 loadAndroidBackupArchive(from: data)
+                isImporting = false
+                return
+            }
+            if AndroidModuleBackupService.isAndroidModuleBackupFileName(url.lastPathComponent) {
+                prepareAndroidModuleBackupRestore(from: data)
                 isImporting = false
                 return
             }
@@ -373,17 +472,18 @@ public struct ImportExportView: View {
      Determines whether a selected import file should be handled as an Android database backup.
 
      Android names manual database backups with the compound `.abdb.zip` suffix. The generic
-     import picker is intentionally narrower than the module installer, so any ZIP selected here is
-     treated as an Android backup candidate and validated by `AndroidDatabaseBackupService`.
+     import picker no longer treats arbitrary ZIP files as database backups because Android module
+     backups use the sibling `.abmd.zip` suffix and ordinary SWORD ZIP packages are handled by the
+     module installer.
 
      - Parameter url: User-selected file URL.
-     - Returns: `true` when the filename has Android's backup suffix or the extension is ZIP.
+     - Returns: `true` when the filename has Android's database-backup suffix.
      - Side effects: none.
      - Failure modes: Invalid ZIP contents are rejected later by the backup service.
      */
     private func isAndroidDatabaseBackupFile(_ url: URL) -> Bool {
         let fileName = url.lastPathComponent.lowercased()
-        return fileName.hasSuffix(".abdb.zip") || url.pathExtension.lowercased() == "zip"
+        return fileName.hasSuffix(".abdb.zip")
     }
 
     /**
@@ -594,6 +694,243 @@ public struct ImportExportView: View {
         case .failure(let error):
             statusMessage = localizedErrorMessage(error)
         }
+    }
+
+    /**
+     Presents installed SWORD modules for Android-compatible backup export selection.
+
+     Android asks the user which installed documents/modules to include before writing
+     `AndBibleModulesBackup.abmd.zip`. iOS mirrors that behavior for SWORD-backed modules by
+     collecting the current installed-module list from `SwordManager`, sorting it in Android's
+     language-first order, and presenting a multiselect sheet before export.
+
+     Side effects:
+     - reads installed modules through `SwordManager`
+     - updates `androidModuleBackupExportModules`
+     - presents the export selection sheet or surfaces a no-modules error
+     */
+    private func presentAndroidModuleBackupExportSelection() {
+        statusMessage = nil
+        guard let manager = SwordManager() else {
+            statusMessage = localizedErrorMessage(AndroidModuleBackupError.noExportableModules)
+            return
+        }
+        let modules = manager.installedModules().sorted { lhs, rhs in
+            let languageOrder = lhs.language.localizedCaseInsensitiveCompare(rhs.language)
+            if languageOrder != .orderedSame {
+                return languageOrder == .orderedAscending
+            }
+            let descriptionOrder = lhs.description.localizedCaseInsensitiveCompare(rhs.description)
+            if descriptionOrder != .orderedSame {
+                return descriptionOrder == .orderedAscending
+            }
+            return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+        }
+        guard !modules.isEmpty else {
+            statusMessage = localizedErrorMessage(AndroidModuleBackupError.noExportableModules)
+            return
+        }
+        androidModuleBackupExportModules = modules
+        showAndroidModuleBackupExportSheet = true
+    }
+
+    /**
+     Dismisses Android module backup export selection without writing files.
+
+     Side effects:
+     - clears export selection state
+     - dismisses the export selection sheet
+     */
+    private func dismissAndroidModuleBackupExportSelection() {
+        showAndroidModuleBackupExportSheet = false
+        androidModuleBackupExportModules = []
+        isExportingAndroidModuleBackup = false
+    }
+
+    /**
+     Exports selected SWORD modules as Android's `.abmd.zip` module backup archive.
+
+     - Parameter moduleNames: Selected module initials emitted by the export selection sheet.
+     - Side effects:
+       - reads local SWORD module config and data files
+       - writes the generated backup to a temporary file
+       - dismisses the selection sheet and schedules the share sheet after SwiftUI processes
+         dismissal, avoiding two active sheet presentations at once
+       - updates status text with export success or failure details
+     */
+    private func exportAndroidModuleBackup(moduleNames: [String]) {
+        guard !moduleNames.isEmpty else {
+            statusMessage = localizedErrorMessage(AndroidModuleBackupError.noExportableModules)
+            return
+        }
+        isExportingAndroidModuleBackup = true
+        statusMessage = nil
+        do {
+            let export = try androidModuleBackupService.exportArchive(moduleNames: Set(moduleNames))
+            if let url = saveToTempFile(data: export.data, fileName: export.fileName) {
+                exportedFileURL = url
+                showAndroidModuleBackupExportSheet = false
+                androidModuleBackupExportModules = []
+                Task { @MainActor in
+                    await Task.yield()
+                    showExportSheet = true
+                }
+                statusMessage = String(
+                    localized: "android_module_backup_exported_summary",
+                    defaultValue: "Exported Android module backup: \(export.moduleNames.joined(separator: ", "))"
+                )
+            }
+        } catch {
+            statusMessage = localizedErrorMessage(error)
+        }
+        isExportingAndroidModuleBackup = false
+    }
+
+    /**
+     Handles Android module backup import results from the module-backup file picker.
+
+     Side effects:
+     - starts and stops security-scoped resource access for the chosen archive
+     - inspects the archive before writing files
+     - either restores immediately or shows an overwrite confirmation for existing module files
+     - updates status text with success or failure details
+     */
+    private func handleAndroidModuleBackupImport(_ result: Result<[URL], Error>) {
+        switch result {
+        case .success(let urls):
+            guard let url = urls.first else { return }
+            isRestoringAndroidModuleBackup = true
+            statusMessage = nil
+
+            let accessing = url.startAccessingSecurityScopedResource()
+            defer {
+                if accessing { url.stopAccessingSecurityScopedResource() }
+            }
+
+            do {
+                let data = try Data(contentsOf: url)
+                prepareAndroidModuleBackupRestore(from: data)
+            } catch {
+                statusMessage = localizedErrorMessage(error)
+            }
+            if !showAndroidModuleBackupOverwriteAlert {
+                isRestoringAndroidModuleBackup = false
+            }
+
+        case .failure(let error):
+            statusMessage = localizedErrorMessage(error)
+        }
+    }
+
+    /**
+     Inspects an Android module backup and either restores it or queues overwrite confirmation.
+
+     - Parameter data: Raw `.abmd.zip` archive bytes selected by the user.
+     - Side effects:
+     - may write supported module files when no overwrite confirmation is required
+     - may retain `data` and existing paths in state for a later confirmation action
+     - updates status text with restore success or failure details
+     - Failure modes: Catches service errors and surfaces them to the settings screen.
+     */
+    private func prepareAndroidModuleBackupRestore(from data: Data) {
+        do {
+            let inspection = try androidModuleBackupService.inspectArchive(from: data)
+            guard inspection.existingEntryPaths.isEmpty else {
+                pendingAndroidModuleBackupData = data
+                pendingAndroidModuleBackupExistingFiles = inspection.existingEntryPaths
+                showAndroidModuleBackupOverwriteAlert = true
+                return
+            }
+            let report = try androidModuleBackupService.restoreArchive(
+                from: data,
+                allowOverwritingExistingFiles: true
+            )
+            statusMessage = androidModuleBackupRestoreStatusMessage(for: report)
+        } catch {
+            statusMessage = localizedErrorMessage(error)
+        }
+    }
+
+    /**
+     Restores the pending Android module backup after the user confirms overwriting files.
+
+     Side effects:
+     - writes supported SWORD module files into the local module directory
+     - clears pending confirmation state
+     - updates status text with success or failure details
+     */
+    private func restorePendingAndroidModuleBackup() {
+        guard let data = pendingAndroidModuleBackupData else {
+            clearPendingAndroidModuleBackup()
+            return
+        }
+        do {
+            let report = try androidModuleBackupService.restoreArchive(
+                from: data,
+                allowOverwritingExistingFiles: true
+            )
+            statusMessage = androidModuleBackupRestoreStatusMessage(for: report)
+        } catch {
+            statusMessage = localizedErrorMessage(error)
+        }
+        clearPendingAndroidModuleBackup()
+        isRestoringAndroidModuleBackup = false
+    }
+
+    /**
+     Clears retained Android module backup confirmation state without mutating user files.
+     */
+    private func clearPendingAndroidModuleBackup() {
+        pendingAndroidModuleBackupData = nil
+        pendingAndroidModuleBackupExistingFiles = []
+        showAndroidModuleBackupOverwriteAlert = false
+        isRestoringAndroidModuleBackup = false
+    }
+
+    /**
+     Builds the overwrite-confirmation message for Android module backup restore.
+
+     - Returns: User-visible explanation listing the first few paths that would be overwritten.
+     - Side effects: none.
+     - Failure modes: Empty pending state returns a generic overwrite warning.
+     */
+    private func androidModuleBackupOverwriteMessage() -> String {
+        guard !pendingAndroidModuleBackupExistingFiles.isEmpty else {
+            return String(
+                localized: "android_module_backup_overwrite_generic",
+                defaultValue: "This backup will replace existing module files."
+            )
+        }
+        let preview = pendingAndroidModuleBackupExistingFiles.prefix(5).joined(separator: "\n")
+        return String(
+            localized: "android_module_backup_overwrite_message",
+            defaultValue: "This backup will replace existing module files:\n\(preview)"
+        )
+    }
+
+    /**
+     Builds the user-visible completion summary for Android module backup restore.
+
+     - Parameter report: Restore report from `AndroidModuleBackupService`.
+     - Returns: Concise status message listing installed modules and skipped unsupported content.
+     - Side effects: none.
+     - Failure modes: Empty module names produce a generic success message, though the service
+       normally rejects archives without supported SWORD modules.
+     */
+    private func androidModuleBackupRestoreStatusMessage(for report: AndroidModuleBackupRestoreReport) -> String {
+        let modules = report.installedModuleNames.isEmpty
+            ? String(localized: "android_module_backup_modules_unknown", defaultValue: "modules")
+            : report.installedModuleNames.joined(separator: ", ")
+        if report.skippedUnsupportedEntryPaths.isEmpty {
+            return String(
+                localized: "android_module_backup_restored_summary",
+                defaultValue: "Restored Android module backup: \(modules)"
+            )
+        }
+        return String(
+            localized: "android_module_backup_restored_with_skips_summary",
+            defaultValue: "Restored Android module backup: \(modules). Skipped \(report.skippedUnsupportedEntryPaths.count) Android-only files."
+        )
     }
 
     /**
