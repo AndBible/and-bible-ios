@@ -44,6 +44,7 @@
       v-if="showChapterNavButtons"
       position="top"
       :loading="loadingAtTop"
+      :reached-start="reachedStart"
       @load-more="loadTextAtTop"
       @navigate-prev="android.goToPreviousChapter"
       @navigate-next="android.goToNextChapter"
@@ -214,6 +215,7 @@ const {
     loadTextAtEnd,
     documentSupportsChapterNavigation,
     infiniteScrollIsEnabled,
+    reachedStart,
     reachedEnd
 } = useInfiniteScroll(android, scroll, documents, config);
 const showChapterNavButtons = computed(() => {

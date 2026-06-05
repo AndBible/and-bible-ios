@@ -30,7 +30,7 @@
     <button
       type="button"
       @click="$emit('loadMore')"
-      :disabled="loading || (position === 'bottom' && reachedEnd)"
+      :disabled="loading || (position === 'top' && reachedStart) || (position === 'bottom' && reachedEnd)"
       class="nav-btn"
       :aria-label="strings.loadMore"
       :title="strings.loadMore"
@@ -57,10 +57,10 @@
  * Renders Android's manual chapter navigation controls when infinite scroll is disabled.
  *
  * @remarks
- * Inputs are the current edge position, loading state, and reached-end state from the infinite
- * scroll composable. The component emits `loadMore`, `navigatePrev`, and `navigateNext`; it does
- * not mutate document state directly. Missing shared strings fall back through the reader strings
- * object and type-checking catches untranslated keys.
+ * Inputs are the current edge position, loading state, and start/end edge sentinels from the
+ * infinite scroll composable. The component emits `loadMore`, `navigatePrev`, and `navigateNext`;
+ * it does not mutate document state directly. Missing shared strings fall back through the reader
+ * strings object and type-checking catches untranslated keys.
  */
 import { PropType } from "vue";
 import { FontAwesomeIcon } from "@fortawesome/vue-fontawesome";
@@ -73,6 +73,10 @@ defineProps({
     required: true
   },
   loading: {
+    type: Boolean,
+    default: false
+  },
+  reachedStart: {
     type: Boolean,
     default: false
   },

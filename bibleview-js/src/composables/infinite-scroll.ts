@@ -45,7 +45,7 @@ export function useInfiniteScroll(
     let touchDown = false;
     let textToBeInsertedAtTop: Nullable<AnyDocument[]> = null;
     let isProcessing = false;
-    let reachedStart = false;
+    const reachedStart = ref(false);
     const addChaptersToTop: Promise<Nullable<AnyDocument>>[] = [];
     const addChaptersToEnd: Promise<Nullable<AnyDocument>>[] = [];
     const reachedEnd = ref(false);
@@ -61,7 +61,7 @@ export function useInfiniteScroll(
         clearDocumentCount++;
         reachedEnd.value = false;
         consecutiveEmptyLoads = 0;
-        reachedStart = false;
+        reachedStart.value = false;
     }
 
     function needsMoreContent(): boolean {
@@ -121,7 +121,7 @@ export function useInfiniteScroll(
                         contentAdded = true;
                         await nextTick();
                     } else {
-                        reachedStart = true;
+                        reachedStart.value = true;
                         console.log("inf: Reached start of content")
                     }
                 }
@@ -136,7 +136,7 @@ export function useInfiniteScroll(
                             reachedEnd.value = true;
                         }
                         if (requestedTop) {
-                            reachedStart = true;
+                            reachedStart.value = true;
                         }
                         break;
                     }
@@ -154,13 +154,34 @@ export function useInfiniteScroll(
     const loadingAtEnd = ref(false);
     const loadingAtTop = ref(false);
 
+    /**
+     * Requests and queues the previous chapter for top-edge manual loading.
+     *
+     * @returns Nothing; queue processing continues asynchronously through `processQueues`.
+     * @remarks The function mutates the top loading flag and native request queue, then schedules the
+     * shared queue processor. Once the native bridge has returned the start-of-content `null` sentinel,
+     * the request is ignored so manual controls cannot repeatedly show spinners or issue no-op bridge
+     * calls at the start of a document.
+     */
     function loadTextAtTop() {
+        if (reachedStart.value) return;
         loadingAtTop.value = true;
         addChaptersToTop.push(requestPreviousChapter().finally(() => { loadingAtTop.value = false; }))
         processQueues();
     }
 
+    /**
+     * Requests and queues the next chapter for bottom-edge manual and automatic loading.
+     *
+     * @returns A promise that resolves after queued content is processed and any follow-up fill request
+     * has completed.
+     * @remarks The function mutates the bottom loading flag and native request queue. It respects the
+     * bottom edge sentinel before making native bridge calls, then preserves the existing auto-fill
+     * behavior that keeps requesting content when infinite scrolling is enabled and the viewport remains
+     * under-filled.
+     */
     async function loadTextAtEnd() {
+        if (reachedEnd.value) return;
         loadingAtEnd.value = true;
         addChaptersToEnd.push(requestNextChapter().finally(() => { loadingAtEnd.value = false; }))
         await processQueues();
@@ -197,7 +218,7 @@ export function useInfiniteScroll(
             loadTextAtEnd();
         },
         addMoreAtTop = () => {
-            if (!isEnabled.value || isProcessing || reachedStart) return;
+            if (!isEnabled.value || isProcessing || reachedStart.value) return;
             if (touchDown) {
                 // adding at top is tricky and if the user is still holding there seems no way to set the scroll position after insert
                 addMoreAtTopOnTouchUp = true;
@@ -278,6 +299,7 @@ export function useInfiniteScroll(
         loadTextAtEnd,
         documentSupportsChapterNavigation,
         infiniteScrollIsEnabled: isEnabled,
+        reachedStart,
         reachedEnd,
     };
 }

@@ -225,6 +225,39 @@ describe("reader parity controls", () => {
     });
 
     /**
+     * Protects manual chapter navigation edge-state wiring.
+     *
+     * The setup mounts the shared Android-parity navigation cluster at both reader edges. A passing
+     * test proves the top and bottom load-more controls disable from their matching infinite-scroll
+     * sentinel instead of allowing repeated bridge calls after content exhaustion.
+     */
+    it("disables manual load more at the matching reached edge", () => {
+        const topWrapper = mount(ChapterNavigationButtons, {
+            props: {
+                position: "top",
+                loading: false,
+                reachedStart: true,
+            },
+            global: {
+                provide: commonProvides(),
+            },
+        });
+        const bottomWrapper = mount(ChapterNavigationButtons, {
+            props: {
+                position: "bottom",
+                loading: false,
+                reachedEnd: true,
+            },
+            global: {
+                provide: commonProvides(),
+            },
+        });
+
+        expect(topWrapper.findAll("button")[1].attributes("disabled")).toBeDefined();
+        expect(bottomWrapper.findAll("button")[1].attributes("disabled")).toBeDefined();
+    });
+
+    /**
      * Protects the Android mark-as-read affordance while making it accessible in the WebView.
      *
      * The setup mounts a Bible document with OSIS children stubbed out and auto-tracking disabled. A
@@ -435,16 +468,16 @@ describe("reading tracker", () => {
 
 describe("infinite scroll edge state", () => {
     /**
-     * Protects manual navigation state when the previous chapter does not exist.
+     * Protects manual navigation state when a chapter edge does not exist.
      *
-     * The setup requests content at the top and receives Android's `null` sentinel for start-of-book.
-     * A passing test proves the top/start edge does not incorrectly set `reachedEnd`, which would
-     * disable bottom navigation and block valid forward movement.
+     * The setup requests content at the top and bottom and receives Android's `null` sentinel for each
+     * missing edge. A passing test proves the top/start edge does not incorrectly set `reachedEnd`,
+     * and that both edge sentinels prevent repeated manual bridge calls and loading indicators.
      */
-    it("does not mark the bottom reached when only the top has no more content", async () => {
+    it("does not re-request chapters after edge sentinels are reached", async () => {
         let controls;
         const requestPreviousChapter = vi.fn().mockResolvedValue(null);
-        const requestNextChapter = vi.fn().mockResolvedValue({type: "bible"});
+        const requestNextChapter = vi.fn().mockResolvedValue(null);
         const Harness = defineComponent({
             template: "<div id=\"bottom\"></div>",
             setup() {
@@ -465,7 +498,26 @@ describe("infinite scroll edge state", () => {
         await flushPromises();
 
         expect(requestPreviousChapter).toHaveBeenCalledTimes(1);
+        expect(controls.reachedStart.value).toBe(true);
         expect(controls.reachedEnd.value).toBe(false);
+
+        controls.loadTextAtTop();
+        await flushPromises();
+
+        expect(requestPreviousChapter).toHaveBeenCalledTimes(1);
+        expect(controls.loadingAtTop.value).toBe(false);
+
+        await controls.loadTextAtEnd();
+        await flushPromises();
+
+        expect(requestNextChapter).toHaveBeenCalledTimes(1);
+        expect(controls.reachedEnd.value).toBe(true);
+
+        await controls.loadTextAtEnd();
+        await flushPromises();
+
+        expect(requestNextChapter).toHaveBeenCalledTimes(1);
+        expect(controls.loadingAtEnd.value).toBe(false);
         wrapper.unmount();
     });
 });
