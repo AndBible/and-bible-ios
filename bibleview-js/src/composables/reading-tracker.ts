@@ -33,9 +33,10 @@ const COVERAGE_THRESHOLD = 0.9;
  * @returns Reactive read count plus handlers for toggling read state and opening history.
  * @remarks iOS stores `autoTrackReading` in `appSettings` rather than `config`; otherwise this follows
  * Android's bibleview-js behavior. The composable creates an IntersectionObserver only while automatic
- * tracking is enabled, disconnects it on completion/unmount, and records a chapter read once 90 percent
- * of verse ordinal elements have intersected. Native bridge failures are not caught here because the
- * Android bridge contract treats these calls as fire-and-forget commands.
+ * tracking is enabled, disconnects it on completion, manual reads, native read-state updates, and
+ * unmount, and records a chapter read once 90 percent of verse ordinal elements have intersected.
+ * Native bridge failures are not caught here because the Android bridge contract treats these calls as
+ * fire-and-forget commands.
  */
 export function useReadingTracker(
     containerRef: Ref<HTMLElement | null>,
@@ -64,9 +65,8 @@ export function useReadingTracker(
         if (autoTrackDone || totalVerses <= 0) return;
         const coverage = seenOrdinals.size / totalVerses;
         if (coverage >= COVERAGE_THRESHOLD) {
-            autoTrackDone = true;
+            completeAutoTracking();
             android.recordChapterRead(bookInitials, ordinalRange[0], chapterNumber, "AUTO_SCROLL");
-            cleanup();
         }
     }
 
@@ -77,7 +77,7 @@ export function useReadingTracker(
      * threshold to match Android and only records ordinals exposed by the renderer.
      */
     function setupObserver() {
-        if (!containerRef.value || autoTrackDone) return;
+        if (!containerRef.value || autoTrackDone || observer) return;
 
         observer = new IntersectionObserver(
             (entries) => {
@@ -113,12 +113,24 @@ export function useReadingTracker(
     }
 
     /**
+     * Marks automatic tracking as complete and disconnects observation.
+     *
+     * @remarks Manual reads, native progress updates, and automatic threshold completion all mean this
+     * rendered chapter should not emit an additional auto-read row until native state reports zero reads.
+     */
+    function completeAutoTracking() {
+        autoTrackDone = true;
+        cleanup();
+    }
+
+    /**
      * Records a manual chapter read and increments the displayed count optimistically.
      *
      * @remarks Android uses repeated taps as additional read history rows. Removing rows is handled
      * through the read-history dialog opened by long press/context menu.
      */
     function toggleChapterRead() {
+        completeAutoTracking();
         android.recordChapterRead(bookInitials, ordinalRange[0], chapterNumber, "MANUAL");
         chapterReadCount.value++;
     }
@@ -136,6 +148,12 @@ export function useReadingTracker(
     setupEventBusListener("update_chapter_read_status", (data: {chapter: number, count: number}) => {
         if (data.chapter === chapterNumber) {
             chapterReadCount.value = data.count;
+            autoTrackDone = data.count > 0;
+            if (autoTrackDone) {
+                cleanup();
+            } else if (appSettings.autoTrackReading) {
+                setupObserver();
+            }
         }
     });
 

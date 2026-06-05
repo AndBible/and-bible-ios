@@ -98,6 +98,8 @@ export function useInfiniteScroll(
                     return;
                 }
                 
+                const requestedEnd = endChaps.length > 0;
+                const requestedTop = topChaps.length > 0;
                 let contentAdded = false;
                 if(endChaps.length > 0) {
                     const validEndChaps = filterNotNull(endChaps);
@@ -130,7 +132,12 @@ export function useInfiniteScroll(
                     const limit = config.infiniteScroll ? maxConsecutiveEmptyLoads : 1;
                     if (consecutiveEmptyLoads >= limit) {
                         console.log("inf: No more content available, stopping");
-                        reachedEnd.value = true;
+                        if (requestedEnd) {
+                            reachedEnd.value = true;
+                        }
+                        if (requestedTop) {
+                            reachedStart = true;
+                        }
                         break;
                     }
                 } else {

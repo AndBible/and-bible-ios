@@ -18,17 +18,21 @@
 <template>
   <div class="chapter-nav" :class="position">
     <button
+      type="button"
       @click="$emit('navigatePrev')"
       class="nav-btn"
+      :aria-label="strings.previousChapter"
       :title="strings.previousChapter"
     >
       <FontAwesomeIcon :icon="faChevronLeft" />
     </button>
 
     <button
+      type="button"
       @click="$emit('loadMore')"
       :disabled="loading || (position === 'bottom' && reachedEnd)"
       class="nav-btn"
+      :aria-label="strings.loadMore"
       :title="strings.loadMore"
     >
       <FontAwesomeIcon v-if="loading" :icon="faSpinner" spin />
@@ -36,9 +40,11 @@
     </button>
 
     <button
+      type="button"
       @click="$emit('navigateNext')"
       :disabled="position === 'bottom' && reachedEnd"
       class="nav-btn"
+      :aria-label="strings.nextChapter"
       :title="strings.nextChapter"
     >
       <FontAwesomeIcon :icon="faChevronRight" />

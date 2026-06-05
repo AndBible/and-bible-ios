@@ -59,7 +59,7 @@
  * behavior. Bridge calls are fire-and-forget and native state reconciliation arrives through event-bus
  * updates. Direct unit-test mounts without the root provider skip only memorization overlays.
  */
-import {inject, provide, ref} from "vue";
+import {inject, onUnmounted, provide, ref} from "vue";
 import {useBookmarks} from "@/composables/bookmarks";
 import OsisFragment from "@/components/documents/OsisFragment.vue";
 import {useCommon} from "@/composables";
@@ -141,6 +141,10 @@ function onCheckPressEnd() {
         longPressTimer = null;
     }
 }
+
+onUnmounted(() => {
+    onCheckPressEnd();
+});
 
 /**
  * Handles a tap on the chapter read indicator.

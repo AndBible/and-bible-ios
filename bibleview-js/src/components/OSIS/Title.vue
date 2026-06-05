@@ -20,7 +20,14 @@
     <h3 ref="titleEl" class="titleStyle" :class="{'skip-offset': isBibleDoc && !isCanonical, isSubTitle}">
       <slot/>
     </h3>
-    <button v-if="config.showTitleScrollButton" class="title-scroll-btn" @click.stop="scrollToTitle">↑</button>
+    <button
+        v-if="config.showTitleScrollButton"
+        type="button"
+        class="title-scroll-btn"
+        :aria-label="strings.scrollToTitle"
+        :title="strings.scrollToTitle"
+        @click.stop="scrollToTitle"
+    >↑</button>
   </div>
 </template>
 
@@ -40,12 +47,12 @@ const props = withDefaults(
     }
 );
 
-const isBibleDoc = inject(bibleDocumentInfoKey) != undefined
+const isBibleDoc = inject(bibleDocumentInfoKey, undefined) != undefined
 
 checkUnsupportedProps(props, "type", ["sub", "x-gen", "x-psalm-book", "main", "chapter", "section"]);
 checkUnsupportedProps(props, "subType", ["x-Chapter", "x-preverse"]);
 checkUnsupportedProps(props, "canonical", ["true", "false"]);
-const {config, appSettings, calculatedConfig} = useCommon();
+const {config, appSettings, calculatedConfig, strings} = useCommon();
 const hideTitles = inject(hideTitlesKey, false);
 
 const isCanonical = computed(() => props.canonical === "true");
@@ -62,12 +69,19 @@ const isSubTitle = computed(() => props.type === "sub");
 
 const titleEl = ref<HTMLElement | null>(null);
 
+/**
+ * Scrolls the current title to Android's configured reader top offset.
+ *
+ * @remarks The button is a renderer-only affordance. It mutates browser scroll position and honors
+ * the disable-animation setting by using the WebView's non-animated `auto` behavior instead of smooth
+ * scrolling.
+ */
 function scrollToTitle() {
     if (titleEl.value && calculatedConfig) {
         const rect = titleEl.value.getBoundingClientRect();
         window.scrollTo({
             top: window.scrollY + rect.top - calculatedConfig.value.topOffset,
-            behavior: appSettings.disableAnimations ? 'instant' : 'smooth'
+            behavior: appSettings.disableAnimations ? 'auto' : 'smooth'
         });
     }
 }
