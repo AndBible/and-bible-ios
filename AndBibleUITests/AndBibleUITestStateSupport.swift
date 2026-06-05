@@ -138,15 +138,11 @@ extension AndBibleUITests {
         }
 
         func resolvedPromptTextField() -> XCUIElement {
-            if accessibilityIdentifier == "labelManagerNewLabelNameField",
-               let field = resolveLabelCreationPromptTextField(in: app)
-            {
-                return field
-            }
-            if accessibilityIdentifier == "workspaceNamePromptTextField",
-               let field = firstExistingElement(workspaceNamePromptTextFieldCandidates(in: app), timeout: 0.2)
-            {
-                return field
+            switch accessibilityIdentifier {
+            case "labelManagerNewLabelNameField", "workspaceNamePromptTextField":
+                return element
+            default:
+                break
             }
 
             if let prompt = resolvedModalPrompt(in: app, timeout: 0.2) {
@@ -168,10 +164,18 @@ extension AndBibleUITests {
             return element
         }
 
+        func promptTextEntryCandidates(preferred preferredCandidates: [XCUIElement]) -> [XCUIElement] {
+            var candidates = preferredCandidates
+            if preferredCandidates.isEmpty {
+                candidates.append(resolvedPromptTextField())
+            }
+            candidates.append(element)
+            candidates += promptFocusedTextEntryCandidates()
+            return candidates
+        }
+
         func observedPromptTextValue(preferred preferredCandidates: [XCUIElement] = []) -> String {
-            let candidates = preferredCandidates
-                + [resolvedPromptTextField(), element]
-                + promptFocusedTextEntryCandidates()
+            let candidates = promptTextEntryCandidates(preferred: preferredCandidates)
             var fallbackValue = ""
             for candidate in candidates where candidate.exists {
                 let candidateValue = currentTextEntryValue(
@@ -221,9 +225,7 @@ extension AndBibleUITests {
             preferred preferredCandidates: [XCUIElement],
             forceKeyboardDelete: Bool = false
         ) -> Bool {
-            let candidates = preferredCandidates
-                + [resolvedPromptTextField(), element]
-                + promptFocusedTextEntryCandidates()
+            let candidates = promptTextEntryCandidates(preferred: preferredCandidates)
             for candidate in candidates where candidate.exists {
                 if forceKeyboardDelete {
                     focusTextEntryElement(candidate, preferTrailingEdge: true, timeout: 1)
