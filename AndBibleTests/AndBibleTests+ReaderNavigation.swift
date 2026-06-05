@@ -715,12 +715,14 @@ extension AndBibleTests {
         XCTAssertFalse(recordedScripts().contains { $0.contains(#""type":"multi""#) })
     }
 
-    /// Validates the native-to-WebView reader configuration contract for Android parity fields.
-    ///
-    /// The setup writes pane text-display settings, app settings, workspace state, and reading
-    /// progress settings before the client-ready handshake. The expected result is a `set_config`
-    /// payload whose `config` object includes every renderer field consumed by bibleview-js; a failure
-    /// means the native settings model can drift from the shared Android renderer contract.
+    /**
+     Validates the native-to-WebView reader configuration contract for Android parity fields.
+
+     The setup writes pane text-display settings, app settings, workspace state, and reading
+     progress settings before the client-ready handshake. The expected result is a `set_config`
+     payload whose `config` object includes every renderer field consumed by bibleview-js; a failure
+     means the native settings model can drift from the shared Android renderer contract.
+     */
     @MainActor
     func testReaderConfigPayloadIncludesDisplaySettingsAndActiveWindowState() throws {
         let (bridge, recordedScripts) = makeRecordingBridge()
