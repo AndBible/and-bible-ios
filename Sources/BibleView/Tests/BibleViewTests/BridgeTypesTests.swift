@@ -29,6 +29,13 @@ final class BridgeTypesTests: XCTestCase {
         XCTAssertEqual(decoded.ordinalRange, [0, 10])
     }
 
+    /**
+     Protects the package-level `OsisFragment` payload contract consumed by the Vue reader.
+
+     The expected key set tracks `bibleview-js/src/types/client-objects.ts`; a failure means
+     Swift bridge serialization drifted from the shared client object shape used by Android
+     and iOS renderer code.
+     */
     func testOsisFragmentPayloadKeysMatchClientObjectContract() throws {
         let fragment = OsisFragment(
             xml: "<div>In the beginning...</div>",
@@ -41,6 +48,7 @@ final class BridgeTypesTests: XCTestCase {
             osisRef: "Gen.1",
             isNewTestament: false,
             features: OsisFeatures(type: "hebrew", keyName: "H00430"),
+            hasStrongs: true,
             ordinalRange: [1, 31],
             language: "en",
             direction: "ltr"
@@ -61,6 +69,7 @@ final class BridgeTypesTests: XCTestCase {
                 "osisRef",
                 "isNewTestament",
                 "features",
+                "hasStrongs",
                 "ordinalRange",
                 "language",
                 "direction",
@@ -71,6 +80,7 @@ final class BridgeTypesTests: XCTestCase {
         XCTAssertEqual(object["bookAbbreviation"] as? String, "Gen")
         XCTAssertEqual(object["osisRef"] as? String, "Gen.1")
         XCTAssertEqual(object["direction"] as? String, "ltr")
+        XCTAssertEqual(object["hasStrongs"] as? Bool, true)
 
         let features = try XCTUnwrap(object["features"] as? [String: Any])
         XCTAssertJSONKeys(features, ["type", "keyName"])

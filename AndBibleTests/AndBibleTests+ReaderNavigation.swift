@@ -270,6 +270,13 @@ extension AndBibleTests {
         )
     }
 
+    /**
+     Protects the Swift-to-Vue bridge payload key contract for core client objects.
+
+     The OSIS fragment fixture mirrors `bibleview-js/src/types/client-objects.ts` so
+     regressions in required web-client fields, including Strong's-capability metadata,
+     fail in unit tests before malformed bridge JSON reaches the reader.
+     */
     func testBridgePayloadKeysMatchWebClientContracts() throws {
         let fragment = OsisFragment(
             xml: "<div>In the beginning...</div>",
@@ -282,6 +289,7 @@ extension AndBibleTests {
             osisRef: "Gen.1",
             isNewTestament: false,
             features: OsisFeatures(type: "hebrew", keyName: "H00430"),
+            hasStrongs: true,
             ordinalRange: [1, 31],
             language: "en",
             direction: "ltr"
@@ -300,11 +308,13 @@ extension AndBibleTests {
                 "osisRef",
                 "isNewTestament",
                 "features",
+                "hasStrongs",
                 "ordinalRange",
                 "language",
                 "direction",
             ]
         )
+        XCTAssertEqual(fragmentObject["hasStrongs"] as? Bool, true)
         let features = try XCTUnwrap(fragmentObject["features"] as? [String: Any])
         assertJSONKeys(features, ["type", "keyName"])
 
