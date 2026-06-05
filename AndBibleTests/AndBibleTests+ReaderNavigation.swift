@@ -715,6 +715,12 @@ extension AndBibleTests {
         XCTAssertFalse(recordedScripts().contains { $0.contains(#""type":"multi""#) })
     }
 
+    /// Validates the native-to-WebView reader configuration contract for Android parity fields.
+    ///
+    /// The setup writes pane text-display settings, app settings, workspace state, and reading
+    /// progress settings before the client-ready handshake. The expected result is a `set_config`
+    /// payload whose `config` object includes every renderer field consumed by bibleview-js; a failure
+    /// means the native settings model can drift from the shared Android renderer contract.
     @MainActor
     func testReaderConfigPayloadIncludesDisplaySettingsAndActiveWindowState() throws {
         let (bridge, recordedScripts) = makeRecordingBridge()
@@ -774,6 +780,14 @@ extension AndBibleTests {
         display.maxWidth = 410
         display.topMargin = 12
         display.showPageNumber = true
+        display.infiniteScroll = false
+        display.nonStrongsWordItalic = true
+        display.showMarkAsReadButton = false
+        display.showTitleScrollButton = true
+        display.showMemorizationIndicators = true
+        display.showAiDocMarkers = false
+        display.pageScrollAmount = 66
+        display.showOrdinals = true
         display.bookmarksHideLabels = [hiddenLabelId]
         display.dayBackground = -2
         display.dayNoise = 3
@@ -840,6 +854,14 @@ extension AndBibleTests {
                 "marginSize",
                 "topMargin",
                 "showPageNumber",
+                "infiniteScroll",
+                "nonStrongsWordItalic",
+                "showMarkAsReadButton",
+                "showTitleScrollButton",
+                "showMemorizationIndicators",
+                "showAiDocMarkers",
+                "pageScrollAmount",
+                "showOrdinals",
             ]
         )
         assertJSONKeys(
@@ -903,6 +925,14 @@ extension AndBibleTests {
         XCTAssertEqual(config["justifyText"] as? Bool, true)
         XCTAssertEqual(config["topMargin"] as? Int, 12)
         XCTAssertEqual(config["showPageNumber"] as? Bool, true)
+        XCTAssertEqual(config["infiniteScroll"] as? Bool, false)
+        XCTAssertEqual(config["nonStrongsWordItalic"] as? Bool, true)
+        XCTAssertEqual(config["showMarkAsReadButton"] as? Bool, false)
+        XCTAssertEqual(config["showTitleScrollButton"] as? Bool, true)
+        XCTAssertEqual(config["showMemorizationIndicators"] as? Bool, true)
+        XCTAssertEqual(config["showAiDocMarkers"] as? Bool, false)
+        XCTAssertEqual(config["pageScrollAmount"] as? Int, 66)
+        XCTAssertEqual(config["showOrdinals"] as? Bool, true)
         XCTAssertEqual(colors["dayBackground"] as? Int, -2)
         XCTAssertEqual(colors["dayNoise"] as? Int, 3)
         XCTAssertEqual(colors["nightBackground"] as? Int, -123_456)

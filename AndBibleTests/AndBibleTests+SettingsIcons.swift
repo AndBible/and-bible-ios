@@ -282,9 +282,15 @@ extension AndBibleTests {
             "JUSTIFY",
             "HYPHENATION",
             "PAGENUMBER",
+            "INFINITE_SCROLL",
+            "PAGE_SCROLL_AMOUNT",
+            "ORDINALS",
             "BOOKMARKS_SHOW",
             "MYNOTES",
+            "AI_DOC_MARKERS",
             "BOOKMARKS_HIDELABELS",
+            "MARK_AS_READ_BUTTON",
+            "MEMORIZATION_INDICATORS",
         ]
         let workspaceVisibleRows = windowVisibleRows
         let globalVisibleRows = windowVisibleRows
@@ -300,6 +306,14 @@ extension AndBibleTests {
         XCTAssertTrue(TextDisplaySettingsPresentation.implementedAndroidKeys.contains("TOPMARGIN"))
         XCTAssertTrue(TextDisplaySettingsPresentation.implementedAndroidKeys.contains("PAGENUMBER"))
         XCTAssertTrue(TextDisplaySettingsPresentation.implementedAndroidKeys.contains("BOOKMARKS_HIDELABELS"))
+        XCTAssertTrue(TextDisplaySettingsPresentation.implementedAndroidKeys.contains("NON_STRONGS_WORD_ITALIC"))
+        XCTAssertTrue(TextDisplaySettingsPresentation.implementedAndroidKeys.contains("TITLE_SCROLL_BUTTON"))
+        XCTAssertTrue(TextDisplaySettingsPresentation.implementedAndroidKeys.contains("INFINITE_SCROLL"))
+        XCTAssertTrue(TextDisplaySettingsPresentation.implementedAndroidKeys.contains("PAGE_SCROLL_AMOUNT"))
+        XCTAssertTrue(TextDisplaySettingsPresentation.implementedAndroidKeys.contains("ORDINALS"))
+        XCTAssertTrue(TextDisplaySettingsPresentation.implementedAndroidKeys.contains("AI_DOC_MARKERS"))
+        XCTAssertTrue(TextDisplaySettingsPresentation.implementedAndroidKeys.contains("MARK_AS_READ_BUTTON"))
+        XCTAssertTrue(TextDisplaySettingsPresentation.implementedAndroidKeys.contains("MEMORIZATION_INDICATORS"))
     }
 
     func testTextDisplaySliderIntegerRoundsSteppedFloatingPointValues() {
@@ -308,24 +322,16 @@ extension AndBibleTests {
         XCTAssertEqual(TextDisplaySettingsView.sliderInteger(.nan, fallback: 600), 600)
     }
 
-    func testTextDisplayDeferredRowsAreTrackedByIssue174() {
+    /// Verifies issue #174 moved Android reader-renderer rows out of the deferred bucket.
+    ///
+    /// The visible settings rows are only useful when Swift settings, the bridge payload, and
+    /// bibleview-js renderer consumers all exist. A failure here means iOS is either showing stale
+    /// deferred metadata or has accidentally reclassified implemented Android fields as future work.
+    func testTextDisplayDeferredRowsExcludeIssue174ImplementedRendererFields() {
         let deferredRows = TextDisplaySettingsPresentation.androidRows
             .filter { $0.disposition == .deferred }
 
-        XCTAssertEqual(
-            deferredRows.map(\.androidKey),
-            [
-                "NON_STRONGS_WORD_ITALIC",
-                "TITLE_SCROLL_BUTTON",
-                "INFINITE_SCROLL",
-                "PAGE_SCROLL_AMOUNT",
-                "ORDINALS",
-                "AI_DOC_MARKERS",
-                "MARK_AS_READ_BUTTON",
-                "MEMORIZATION_INDICATORS",
-            ]
-        )
-        XCTAssertTrue(deferredRows.allSatisfy { $0.trackingIssueNumber == 174 })
+        XCTAssertEqual(deferredRows.map(\.androidKey), [])
     }
 
     func testTextDisplayEinkRowsAreDocumentedPlatformDivergences() {

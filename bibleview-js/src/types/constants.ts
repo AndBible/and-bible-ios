@@ -29,6 +29,7 @@ import {useStrings} from "@/composables/strings";
 import {useCustomFeatures} from "@/composables/features";
 import {useReferenceCollector} from "@/composables";
 import {useKeyboard} from "@/composables/keyboard";
+import {useMemorization} from "@/composables/memorization";
 import {useStudyPad} from "@/composables/journal";
 
 export const osisFragmentKey: InjectionKey<OsisFragment> = Symbol("osisFragment");
@@ -55,3 +56,4 @@ export const activeTabKey: InjectionKey<Ref<string>> = Symbol("activeTab");
 export const setActiveTabKey: InjectionKey<(tabId: string) => void> = Symbol("setActiveTab");
 export const journalKey: InjectionKey<ReturnType<typeof useStudyPad>> = Symbol("journal");
 export const hideTitlesKey: InjectionKey<boolean> = Symbol("hideTitles");
+export const memorizationKey: InjectionKey<ReturnType<typeof useMemorization>> = Symbol("memorization");

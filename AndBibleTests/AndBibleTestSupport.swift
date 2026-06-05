@@ -305,6 +305,8 @@ extension AndBibleTests {
             ("setReadingProgressSettings", [["autoMarkMemorized": true]]),
             ("unmarkChapterRead", ["KJV", 1]),
             ("unmarkChapterRead", ["KJV", 1, "1"]),
+            ("goToNextChapter", [1]),
+            ("goToPreviousChapter", [1]),
             ("addParagraphBreakBookmark", ["KJV", 1]),
             ("addGenericParagraphBreakBookmark", ["KJV", "Gen.1.1", 1]),
             ("openStudyPad", ["label-id"]),

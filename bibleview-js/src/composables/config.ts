@@ -67,6 +67,7 @@ export type Config = {
 
     showBookmarks: boolean,
     showMyNotes: boolean,
+    showAiDocMarkers: boolean,
     bookmarksHideLabels: IdType[],
     bookmarksAssignLabels: IdType[],
 
@@ -89,6 +90,13 @@ export type Config = {
     },
     topMargin: number,
     showPageNumber: boolean,
+    infiniteScroll: boolean,
+    nonStrongsWordItalic: boolean,
+    showMarkAsReadButton: boolean,
+    showTitleScrollButton: boolean,
+    showMemorizationIndicators: boolean,
+    pageScrollAmount: number,
+    showOrdinals: boolean,
 }
 
 export type BibleModalButtonId = "BOOKMARK"|"BOOKMARK_NOTES"|"MY_NOTES"|"SHARE"|"COMPARE"|"SPEAK"|"MEMORIZE"|"ADD_PARAGRAPH_BREAK"
@@ -161,6 +169,7 @@ export function useConfig(documentType: Ref<BibleViewDocumentType>) {
 
         showBookmarks: true,
         showMyNotes: true,
+        showAiDocMarkers: true,
         bookmarksHideLabels: [],
         bookmarksAssignLabels: [],
 
@@ -183,6 +192,13 @@ export function useConfig(documentType: Ref<BibleViewDocumentType>) {
         },
         topMargin: 0,
         showPageNumber: false,
+        infiniteScroll: true,
+        nonStrongsWordItalic: false,
+        showMarkAsReadButton: true,
+        showTitleScrollButton: false,
+        showMemorizationIndicators: false,
+        pageScrollAmount: 100,
+        showOrdinals: false,
     });
     const rtl = new URLSearchParams(window.location.search).get("rtl") === "true";
     const nightMode = new URLSearchParams(window.location.search).get("night") === "true";
@@ -293,7 +309,9 @@ export function useConfig(documentType: Ref<BibleViewDocumentType>) {
         const keys: (keyof Config)[] = [
             "showAnnotations", "showVerseNumbers", "strongsMode", "showMorphology",
             "showRedLetters", "showVersePerLine", "showNonCanonical", "makeNonCanonicalItalic", "showSectionTitles",
-            "showStrongsSeparately", "showFootNotes", "showFootNotesInline", "showXrefs", "showBookmarks", "showMyNotes", "bookmarksHideLabels"
+            "showStrongsSeparately", "showFootNotes", "showFootNotesInline", "showXrefs", "showBookmarks", "showMyNotes", "showAiDocMarkers", "bookmarksHideLabels",
+            "nonStrongsWordItalic",
+            "showTitleScrollButton"
         ];
         return compareConfig(newConfig, keys);
     }
@@ -304,7 +322,8 @@ export function useConfig(documentType: Ref<BibleViewDocumentType>) {
             "showAnnotations", "showVerseNumbers", "strongsMode", "showMorphology",
             "showRedLetters", "showVersePerLine", "showNonCanonical", "showSectionTitles",
             "showStrongsSeparately", "showFootNotes", "showFootNotesInline", "showXrefs", "showBookmarks", "showMyNotes",
-            "fontSize", "fontFamily", "hyphenation", "justifyText", "marginSize", "topMargin"
+            "showAiDocMarkers", "showOrdinals", "showTitleScrollButton",
+            "fontSize", "fontFamily", "hyphenation", "justifyText", "marginSize", "topMargin", "pageScrollAmount"
         ];
         return compareConfig(newConfig, keys);
     }

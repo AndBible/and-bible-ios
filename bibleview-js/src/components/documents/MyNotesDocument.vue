@@ -59,11 +59,11 @@ const notes = computed<BibleBookmark[]>(() => {
     let bs1 = globalBookmarks.bookmarks.value;
 
     const hideLabels = new Set(config.bookmarksHideLabels);
-    let bs = bs1.filter(v =>
+    let bs = bs1.filter((v): v is BibleBookmark =>
         isBibleBookmark(v) &&
         rangesOverlap(v.ordinalRange, ordinalRange, {addRange: true, inclusive: true}) &&
         intersection(new Set(v.labels), hideLabels).size === 0
-    ) as BibleBookmark[]
+    )
 
     if (!config.showBookmarks) {
         bs = bs.filter(v => v.hasNote)

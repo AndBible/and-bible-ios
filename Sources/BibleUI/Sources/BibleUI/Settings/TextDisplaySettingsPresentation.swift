@@ -229,9 +229,7 @@ enum TextDisplaySettingsPresentation {
         Row(
             androidKey: "NON_STRONGS_WORD_ITALIC",
             section: .formatting,
-            disposition: .deferred,
-            trackingIssueNumber: 174,
-            note: "iOS shared client has no config/rendering field yet."
+            disposition: .implemented
         ),
         Row(androidKey: "FOOTNOTES", section: .formatting, disposition: .implemented),
         Row(androidKey: "FOOTNOTES_INLINE", section: .formatting, disposition: .implemented),
@@ -241,9 +239,7 @@ enum TextDisplaySettingsPresentation {
         Row(
             androidKey: "TITLE_SCROLL_BUTTON",
             section: .formatting,
-            disposition: .deferred,
-            trackingIssueNumber: 174,
-            note: "iOS shared client has no title-scroll-button field yet."
+            disposition: .implemented
         ),
         Row(androidKey: "VERSENUMBERS", section: .formatting, disposition: .implemented),
         Row(androidKey: "COLORS", section: .appearance, disposition: .implemented),
@@ -263,16 +259,12 @@ enum TextDisplaySettingsPresentation {
         Row(
             androidKey: "INFINITE_SCROLL",
             section: .pageScrolling,
-            disposition: .deferred,
-            trackingIssueNumber: 174,
-            note: "iOS reader paging/scroll config is not wired to this Android field yet."
+            disposition: .implemented
         ),
         Row(
             androidKey: "PAGE_SCROLL_AMOUNT",
             section: .pageScrolling,
-            disposition: .deferred,
-            trackingIssueNumber: 174,
-            note: "iOS shared client has no page-scroll-amount field yet."
+            disposition: .implemented
         ),
         Row(
             androidKey: "SCROLL_HELPER_LINES",
@@ -295,30 +287,22 @@ enum TextDisplaySettingsPresentation {
         Row(
             androidKey: "ORDINALS",
             section: .pageScrolling,
-            disposition: .deferred,
-            trackingIssueNumber: 174,
-            note: "iOS shared client has no ordinals visibility field yet."
+            disposition: .implemented
         ),
         Row(
             androidKey: "AI_DOC_MARKERS",
             section: .textBookmarks,
-            disposition: .deferred,
-            trackingIssueNumber: 174,
-            note: "iOS AI document marker rendering is not implemented yet."
+            disposition: .implemented
         ),
         Row(
             androidKey: "MARK_AS_READ_BUTTON",
             section: .readingAndMemorization,
-            disposition: .deferred,
-            trackingIssueNumber: 174,
-            note: "iOS shared client has no mark-as-read button config field yet."
+            disposition: .implemented
         ),
         Row(
             androidKey: "MEMORIZATION_INDICATORS",
             section: .readingAndMemorization,
-            disposition: .deferred,
-            trackingIssueNumber: 174,
-            note: "iOS shared client has no memorization indicator config field yet."
+            disposition: .implemented
         ),
         Row(
             androidKey: "AUTO_TRACK_READING",
@@ -351,10 +335,8 @@ enum TextDisplaySettingsPresentation {
      Android rows visible in the normal iOS window-level All Text Options screen.
 
      This list follows the Android rendered menu from the screenshot-backed target:
-     broad `Formatting`, `Appearance`, and `Bookmark & My Notes settings` groups. Rows introduced
-     in newer Android source buckets remain documented in `androidRows` as deferred work, but they
-     are not inserted into this visible iOS surface until a scoped parity issue confirms that they
-     belong in the rendered target.
+     broad `Formatting`, `Appearance`, and `Bookmark & My Notes settings` groups, with the reader
+     renderer fields from issue #174 included once Swift, bridge, and bibleview-js consumers exist.
      */
     static var iosWindowVisibleAndroidKeys: [String] {
         [
@@ -379,9 +361,15 @@ enum TextDisplaySettingsPresentation {
             "JUSTIFY",
             "HYPHENATION",
             "PAGENUMBER",
+            "INFINITE_SCROLL",
+            "PAGE_SCROLL_AMOUNT",
+            "ORDINALS",
             "BOOKMARKS_SHOW",
             "MYNOTES",
+            "AI_DOC_MARKERS",
             "BOOKMARKS_HIDELABELS",
+            "MARK_AS_READ_BUTTON",
+            "MEMORIZATION_INDICATORS",
         ]
     }
 

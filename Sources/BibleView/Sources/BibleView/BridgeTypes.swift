@@ -55,6 +55,8 @@ public struct OsisFragment: Codable, Sendable {
     public var isNewTestament: Bool
     /// Optional feature flags describing Strong's and morphology availability.
     public var features: OsisFeatures?
+    /// Whether this fragment was produced from a Strong's-capable module.
+    public var hasStrongs: Bool
     /// Inclusive ordinal range rendered in this fragment.
     public var ordinalRange: [Int]
     /// BCP-47 language tag used for typography and language-sensitive client behavior.
@@ -74,6 +76,7 @@ public struct OsisFragment: Codable, Sendable {
         osisRef: String = "",
         isNewTestament: Bool = false,
         features: OsisFeatures? = nil,
+        hasStrongs: Bool = false,
         ordinalRange: [Int] = [],
         language: String = "en",
         direction: String = "ltr"
@@ -88,6 +91,7 @@ public struct OsisFragment: Codable, Sendable {
         self.osisRef = osisRef
         self.isNewTestament = isNewTestament
         self.features = features
+        self.hasStrongs = hasStrongs
         self.ordinalRange = ordinalRange
         self.language = language
         self.direction = direction

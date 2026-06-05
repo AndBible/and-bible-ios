@@ -50,6 +50,7 @@ export type OsisFragment = {
     readonly osisRef: string,
     readonly isNewTestament: boolean,
     readonly features: Features,
+    readonly hasStrongs: boolean,
     readonly ordinalRange: number[],
     readonly language: string,
     readonly direction: "rtl" | "ltr",
@@ -84,9 +85,9 @@ export type GenericBookmarkToLabel = BaseBookmarkToLabel & {
 
 export type BaseBookmark = {
     readonly id: IdType
-    readonly type: "bookmark" | "generic-bookmark"
+    readonly type: "bookmark" | "generic-bookmark" | "ai-doc-marker"
     readonly hashCode: number
-    readonly ordinalRange: OrdinalRange
+    readonly ordinalRange: Nullable<OrdinalRange>
     readonly offsetRange: Nullable<OffsetRange>
     readonly labels: IdType[]
     readonly bookInitials: string
@@ -107,6 +108,7 @@ export type BaseBookmark = {
 
 export type BibleBookmark = BaseBookmark & {
     readonly type: "bookmark"
+    readonly ordinalRange: OrdinalRange
     readonly osisRef: string
     readonly originalOrdinalRange: OrdinalRange
     readonly verseRange: string
@@ -119,10 +121,30 @@ export type BibleBookmark = BaseBookmark & {
 
 export type GenericBookmark = BaseBookmark & {
     readonly type: "generic-bookmark"
+    readonly ordinalRange: Nullable<OrdinalRange>
     readonly key: string
     readonly keyName: string
     readonly bookmarkToLabels: GenericBookmarkToLabel[]
     readonly highlightedText: string
+}
+
+/**
+ * AI document page reference shown as a marker icon in Bible view.
+ *
+ * @remarks
+ * Android sends these marker records through the same bookmark rendering pipeline as normal
+ * bookmark markers. They intentionally do not participate in highlight ranges, but they do need
+ * ordinal filtering and visibility control through `config.showAiDocMarkers`.
+ */
+export type AiDocMarker = BaseBookmark & {
+    readonly type: "ai-doc-marker"
+    readonly ordinalRange: Nullable<OrdinalRange>
+    readonly verseRangeAbbreviated: string
+    readonly title: string
+    readonly documentInitials: string
+    readonly pageKey: string
+    readonly sourceBookInitials: Nullable<string>
+    readonly sourceBookKey: Nullable<string>
 }
 
 export type StudyPadTextItem = {
@@ -136,7 +158,7 @@ export type StudyPadTextItem = {
     new?: boolean
 }
 
-export type BaseStudyPadBookmarkItem = BaseBookmark & {
+export type BaseStudyPadBookmarkItem = (BibleBookmark | GenericBookmark) & {
     orderNumber: number
     indentLevel: number
     expandContent: boolean
@@ -152,9 +174,9 @@ export type StudyPadGenericBookmarkItem = BaseStudyPadBookmarkItem & GenericBook
     bookmarkToLabel: GenericBookmarkToLabel
 }
 
-export type StudyPadItem = BaseStudyPadBookmarkItem | StudyPadTextItem
+export type StudyPadItem = StudyPadBibleBookmarkItem | StudyPadGenericBookmarkItem | StudyPadTextItem
 
-export function isStudyPadBookmark(item: StudyPadItem): item is BaseStudyPadBookmarkItem {
+export function isStudyPadBookmark(item: StudyPadItem): item is StudyPadBibleBookmarkItem | StudyPadGenericBookmarkItem {
     return item.type === "bookmark" || item.type === "generic-bookmark"
 }
 
