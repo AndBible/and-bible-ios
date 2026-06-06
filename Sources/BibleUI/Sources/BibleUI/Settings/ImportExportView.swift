@@ -362,6 +362,8 @@ public struct ImportExportView: View {
 
      - Side effects:
        - toggles export state and clears prior status messages
+       - schedules archive generation after one main-actor yield so SwiftUI can render the busy
+         state before the expensive SQLite/ZIP work starts
        - reads SwiftData through `AndroidDatabaseBackupService`
        - writes the generated archive to a temporary file and presents the share sheet on success
        - updates status text with the categories included in the backup
@@ -371,27 +373,30 @@ public struct ImportExportView: View {
         isExporting = true
         statusMessage = nil
 
-        do {
-            let export = try androidBackupService.exportArchive(
-                modelContext: modelContext,
-                settingsStore: SettingsStore(modelContext: modelContext)
-            )
-            if let url = saveToTempFile(data: export.data, fileName: export.fileName) {
-                exportedFileURL = url
-                showExportSheet = true
-                let categorySummary = export.categories
-                    .map(\.localizedBackupSectionName)
-                    .joined(separator: ", ")
-                statusMessage = String(
-                    localized: "android_database_backup_exported_summary",
-                    defaultValue: "Exported Android database backup: \(categorySummary)"
-                )
-            }
-        } catch {
-            statusMessage = localizedErrorMessage(error)
-        }
+        Task { @MainActor in
+            await Task.yield()
+            defer { isExporting = false }
 
-        isExporting = false
+            do {
+                let export = try androidBackupService.exportArchive(
+                    modelContext: modelContext,
+                    settingsStore: SettingsStore(modelContext: modelContext)
+                )
+                if let url = saveToTempFile(data: export.data, fileName: export.fileName) {
+                    exportedFileURL = url
+                    showExportSheet = true
+                    let categorySummary = export.categories
+                        .map(\.localizedBackupSectionName)
+                        .joined(separator: ", ")
+                    statusMessage = String(
+                        localized: "android_database_backup_exported_summary",
+                        defaultValue: "Exported Android database backup: \(categorySummary)"
+                    )
+                }
+            } catch {
+                statusMessage = localizedErrorMessage(error)
+            }
+        }
     }
 
     /**
