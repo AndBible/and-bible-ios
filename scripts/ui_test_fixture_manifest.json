@@ -32,7 +32,7 @@
   "AndBibleUITests/AndBibleUITests/testSearchScopeChangeRerunsQueryAndUpdatesResults": "search-indexed",
   "AndBibleUITests/AndBibleUITests/testSearchWordModeChangeRerunsQueryAndUpdatesResults": "search-indexed",
   "AndBibleUITests/AndBibleUITests/testSettingsColorsLinkOpensColorEditor": "baseline",
-  "AndBibleUITests/AndBibleUITests/testSettingsImportExportFullBackupPresentsShareSheet": "baseline",
+  "AndBibleUITests/AndBibleUITests/testSettingsImportExportAndroidDatabaseBackupPresentsShareSheet": "baseline",
   "AndBibleUITests/AndBibleUITests/testSettingsImportExportImportPresentsFilePickerState": "baseline",
   "AndBibleUITests/AndBibleUITests/testSettingsReadingProgressLinkOpensReadingProgressSettings": "baseline",
   "AndBibleUITests/AndBibleUITests/testApplicationPreferencesRenderAndroidListPreferenceRowsWithoutInlineValues": "baseline",

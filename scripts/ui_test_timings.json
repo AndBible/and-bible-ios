@@ -26,7 +26,7 @@
   "AndBibleUITests/AndBibleUITests/testSearchScopeChangeRerunsQueryAndUpdatesResults": 36.40324306488037,
   "AndBibleUITests/AndBibleUITests/testSearchWordModeChangeRerunsQueryAndUpdatesResults": 34.39950406551361,
   "AndBibleUITests/AndBibleUITests/testSettingsColorsLinkOpensColorEditor": 18.54922103881836,
-  "AndBibleUITests/AndBibleUITests/testSettingsImportExportFullBackupPresentsShareSheet": 18.399284958839417,
+  "AndBibleUITests/AndBibleUITests/testSettingsImportExportAndroidDatabaseBackupPresentsShareSheet": 18.399284958839417,
   "AndBibleUITests/AndBibleUITests/testSettingsImportExportImportPresentsFilePickerState": 17.958650946617126,
   "AndBibleUITests/AndBibleUITests/testSettingsReadingProgressLinkOpensReadingProgressSettings": 16.167,
   "AndBibleUITests/AndBibleUITests/testSettingsScreenShowsApplicationPreferenceShortcuts": 14.295,
