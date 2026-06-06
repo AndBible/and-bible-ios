@@ -1221,6 +1221,8 @@ public struct ImportExportView: View {
 
      - Parameter category: Reset category selected from the Reset Databases section.
      - Side effects:
+       - marks the reset category row as active before scheduling work so SwiftUI can render the
+         destructive-alert dismissal and disabled controls before the reset starts
        - mutates SwiftData/settings/file-backed repository state through `AndroidBackupResetService`
        - clears category-scoped remote-sync bookkeeping for sync-backed categories
        - updates `statusMessage` with success or failure text
@@ -1232,19 +1234,23 @@ public struct ImportExportView: View {
         }
         isResettingBackupCategory = true
         statusMessage = nil
-        defer {
-            isResettingBackupCategory = false
-        }
 
-        do {
-            _ = try androidResetService.reset(
-                category,
-                modelContext: modelContext,
-                settingsStore: SettingsStore(modelContext: modelContext)
-            )
-            statusMessage = category.localizedBackupResetSuccessMessage
-        } catch {
-            statusMessage = localizedErrorMessage(error)
+        Task { @MainActor in
+            await Task.yield()
+            defer {
+                isResettingBackupCategory = false
+            }
+
+            do {
+                _ = try androidResetService.reset(
+                    category,
+                    modelContext: modelContext,
+                    settingsStore: SettingsStore(modelContext: modelContext)
+                )
+                statusMessage = category.localizedBackupResetSuccessMessage
+            } catch {
+                statusMessage = localizedErrorMessage(error)
+            }
         }
     }
 
