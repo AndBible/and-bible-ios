@@ -131,6 +131,18 @@ public struct ImportExportView: View {
     private let androidResetService = AndroidBackupResetService()
 
     /**
+     Lightweight sentinel for file read failures that should preserve the existing generic copy.
+
+     The background database-backup loader uses this instead of passing through Foundation's
+     low-level file errors so the user still sees the established `error_read_file` message for
+     unreadable picker selections.
+     */
+    private enum ImportExportFileReadError: Error {
+        /// Selected file bytes could not be loaded from disk.
+        case unreadable
+    }
+
+    /**
      Creates the import/export screen.
 
      - Note: This initializer has no inputs and performs no side effects.
@@ -644,8 +656,8 @@ public struct ImportExportView: View {
 
      - Parameter result: File picker result for the Database Restore or Import target.
      - Side effects:
-       - reads the selected file through security-scoped access
-       - stages a validated Android database backup archive for section selection
+       - validates the selected filename before scheduling background file read and archive staging
+       - keeps import controls disabled until background validation and staging finish
        - updates status text on invalid selection or read failure
      - Failure modes: Picker, read, and archive validation failures are surfaced through
        `statusMessage`.
@@ -657,11 +669,6 @@ public struct ImportExportView: View {
             isImporting = true
             statusMessage = nil
 
-            let accessing = url.startAccessingSecurityScopedResource()
-            defer {
-                if accessing { url.stopAccessingSecurityScopedResource() }
-            }
-
             guard isAndroidDatabaseBackupFile(url) else {
                 statusMessage = String(
                     localized: "android_database_backup_required",
@@ -671,14 +678,7 @@ public struct ImportExportView: View {
                 return
             }
 
-            guard let data = try? Data(contentsOf: url) else {
-                statusMessage = String(localized: "error_read_file")
-                isImporting = false
-                return
-            }
-
-            loadAndroidBackupArchive(from: data)
-            isImporting = false
+            loadAndroidBackupArchive(from: url)
 
         case .failure(let error):
             statusMessage = localizedErrorMessage(error)
@@ -789,22 +789,51 @@ public struct ImportExportView: View {
     /**
      Loads a raw Android database backup archive and presents the section-selection sheet.
 
-     - Parameter data: Raw file bytes read from the user-selected backup.
+     The picker handler validates the Android backup filename and sets `isImporting` before calling
+     this method. This method then owns the rest of the lifecycle: it yields once so SwiftUI can
+     render disabled controls, reads and validates the archive off the main actor, and clears
+     `isImporting` only after success or failure is published.
+
+     - Parameter url: Security-scoped URL selected from the Android Database restore/import picker.
      - Side effects:
        - clears any previously staged Android backup archive
-       - writes validated Android SQLite files into a temporary staging directory
+       - reads the selected file through security-scoped access in a detached task
+       - writes validated Android SQLite files into a temporary staging directory off the main actor
        - updates `androidBackupArchive` so SwiftUI presents the selection sheet
+       - clears `isImporting` after background work finishes
        - updates `statusMessage` when validation fails
-     - Failure modes: Surfaces `AndroidDatabaseBackupError` and ZIP/file-system errors as status text.
+     - Failure modes: Surfaces unreadable files with the existing generic read error, and surfaces
+       `AndroidDatabaseBackupError` plus ZIP/file-system errors as status text.
      */
-    private func loadAndroidBackupArchive(from data: Data) {
+    private func loadAndroidBackupArchive(from url: URL) {
         cleanupLoadedAndroidBackupArchive()
-        do {
-            let archive = try androidBackupService.loadArchive(from: data)
-            androidBackupArchive = archive
-            androidBackupArchivePendingCleanup = archive
-        } catch {
-            statusMessage = localizedErrorMessage(error)
+
+        Task { @MainActor in
+            await Task.yield()
+            defer {
+                isImporting = false
+            }
+
+            do {
+                let archive = try await Task.detached(priority: .userInitiated) {
+                    let accessing = url.startAccessingSecurityScopedResource()
+                    defer {
+                        if accessing {
+                            url.stopAccessingSecurityScopedResource()
+                        }
+                    }
+                    guard let data = try? Data(contentsOf: url) else {
+                        throw ImportExportFileReadError.unreadable
+                    }
+                    return try AndroidDatabaseBackupService().loadArchive(from: data)
+                }.value
+                androidBackupArchive = archive
+                androidBackupArchivePendingCleanup = archive
+            } catch ImportExportFileReadError.unreadable {
+                statusMessage = String(localized: "error_read_file")
+            } catch {
+                statusMessage = localizedErrorMessage(error)
+            }
         }
     }
 
@@ -1040,7 +1069,8 @@ public struct ImportExportView: View {
 
      - Parameter moduleNames: Selected module initials emitted by the export selection sheet.
      - Side effects:
-       - reads local SWORD module config and data files
+       - marks the module export as active before scheduling work so SwiftUI can disable the sheet
+       - reads local SWORD module config and data files off the main actor
        - dismisses the selection sheet and schedules Android's backup destination choice after
          SwiftUI processes dismissal, avoiding two active sheet presentations at once
        - updates status text with export success or failure details
@@ -1052,26 +1082,34 @@ public struct ImportExportView: View {
         }
         isExportingAndroidModuleBackup = true
         statusMessage = nil
-        do {
-            let export = try androidModuleBackupService.exportArchive(moduleNames: Set(moduleNames))
-            showAndroidModuleBackupExportSheet = false
-            androidModuleBackupExportModules = []
-            let payload = BackupExportPayload(
-                data: export.data,
-                fileName: export.fileName,
-                statusMessage: String(
-                    localized: "android_module_backup_exported_summary",
-                    defaultValue: "Exported Android module backup: \(export.moduleNames.joined(separator: ", "))"
+
+        let selectedModuleNames = Set(moduleNames)
+        Task { @MainActor in
+            await Task.yield()
+            defer {
+                isExportingAndroidModuleBackup = false
+            }
+
+            do {
+                let export = try await Task.detached(priority: .userInitiated) {
+                    try AndroidModuleBackupService().exportArchive(moduleNames: selectedModuleNames)
+                }.value
+                showAndroidModuleBackupExportSheet = false
+                androidModuleBackupExportModules = []
+                let payload = BackupExportPayload(
+                    data: export.data,
+                    fileName: export.fileName,
+                    statusMessage: String(
+                        localized: "android_module_backup_exported_summary",
+                        defaultValue: "Exported Android module backup: \(export.moduleNames.joined(separator: ", "))"
+                    )
                 )
-            )
-            Task { @MainActor in
                 await Task.yield()
                 presentBackupDestination(payload)
+            } catch {
+                statusMessage = localizedErrorMessage(error)
             }
-        } catch {
-            statusMessage = localizedErrorMessage(error)
         }
-        isExportingAndroidModuleBackup = false
     }
 
     /**
