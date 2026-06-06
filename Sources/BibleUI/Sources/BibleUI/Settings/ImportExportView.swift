@@ -23,6 +23,30 @@ import UniformTypeIdentifiers
  - status text reflects the latest success or failure message across all operations
  */
 public struct ImportExportView: View {
+    /**
+     Identifies the currently running export action so row-level progress feedback stays attached
+     to the command the user actually started.
+
+     The value is stored only for the lifetime of one export operation. It prevents concurrent
+     export taps through the derived `isExporting` state and lets each export row decide whether
+     to render a spinner without sharing misleading UI feedback with sibling rows.
+
+     - Side effects: Mutating this state re-renders the export section and changes button
+       disabled/progress state.
+     - Failure modes: Export routines must clear the value on every success and failure path so
+       the export section cannot remain disabled after an error.
+     */
+    private enum ExportAction {
+        /// Android-compatible database backup archive export.
+        case androidDatabaseBackup
+
+        /// Legacy iOS JSON backup export retained for local compatibility.
+        case legacyFullBackup
+
+        /// Bookmark CSV export.
+        case bookmarksCSV
+    }
+
     /// SwiftData context used by backup import/export services.
     @Environment(\.modelContext) private var modelContext
 
@@ -38,8 +62,13 @@ public struct ImportExportView: View {
     /// Latest user-visible success or error message across import/export actions.
     @State private var statusMessage: String?
 
-    /// Whether a backup export is currently in progress.
-    @State private var isExporting = false
+    /// Currently running export action, if any.
+    @State private var activeExportAction: ExportAction?
+
+    /// Whether any export action is currently in progress.
+    private var isExporting: Bool {
+        activeExportAction != nil
+    }
 
     /// Whether a backup import is currently in progress.
     @State private var isImporting = false
@@ -148,7 +177,7 @@ public struct ImportExportView: View {
                             systemImage: "archivebox.fill"
                         )
                         Spacer()
-                        if isExporting {
+                        if activeExportAction == .androidDatabaseBackup {
                             ProgressView()
                         }
                     }
@@ -159,10 +188,16 @@ public struct ImportExportView: View {
                 Button {
                     exportLegacyFullBackup()
                 } label: {
-                    SwiftUI.Label(
-                        String(localized: "legacy_full_backup_json", defaultValue: "Legacy Backup (JSON)"),
-                        systemImage: "arrow.up.doc"
-                    )
+                    HStack {
+                        SwiftUI.Label(
+                            String(localized: "legacy_full_backup_json", defaultValue: "Legacy Backup (JSON)"),
+                            systemImage: "arrow.up.doc"
+                        )
+                        Spacer()
+                        if activeExportAction == .legacyFullBackup {
+                            ProgressView()
+                        }
+                    }
                 }
                 .accessibilityIdentifier("importExportLegacyFullBackupButton")
                 .disabled(isExporting)
@@ -170,7 +205,13 @@ public struct ImportExportView: View {
                 Button {
                     exportBookmarksCSV()
                 } label: {
-                    SwiftUI.Label(String(localized: "bookmarks_csv"), systemImage: "tablecells")
+                    HStack {
+                        SwiftUI.Label(String(localized: "bookmarks_csv"), systemImage: "tablecells")
+                        Spacer()
+                        if activeExportAction == .bookmarksCSV {
+                            ProgressView()
+                        }
+                    }
                 }
                 .disabled(isExporting)
             } header: {
@@ -361,7 +402,7 @@ public struct ImportExportView: View {
      `AndBibleBackupManifest.json` and supported category SQLite databases under `db/`.
 
      - Side effects:
-       - toggles export state and clears prior status messages
+       - marks the Android database export row as active and clears prior status messages
        - schedules archive generation after one main-actor yield so SwiftUI can render the busy state
        - exports from a background SwiftData context so SQLite and ZIP work do not block the UI actor
        - writes the generated archive to a temporary file and presents the share sheet on success
@@ -369,13 +410,13 @@ public struct ImportExportView: View {
      - Failure modes: Catches backup export and file-write failures and surfaces them as status text.
      */
     private func exportAndroidDatabaseBackup() {
-        isExporting = true
+        activeExportAction = .androidDatabaseBackup
         statusMessage = nil
         let modelContainer = modelContext.container
 
         Task { @MainActor in
             await Task.yield()
-            defer { isExporting = false }
+            defer { activeExportAction = nil }
 
             do {
                 let export = try await Task.detached(priority: .userInitiated) {
@@ -407,19 +448,19 @@ public struct ImportExportView: View {
      manual backup format and should not be treated as the parity backup path.
 
      - Side effects:
-       - toggles export state and clears prior status messages
+       - marks the legacy JSON export row as active and clears prior status messages
        - queries `BackupService` for a full JSON backup payload
        - writes the payload to a temporary file and presents the share sheet on success
      - Failure modes: Surfaces missing backup data through status text.
      */
     private func exportLegacyFullBackup() {
-        isExporting = true
+        activeExportAction = .legacyFullBackup
         statusMessage = nil
 
         let service = BackupService(modelContext: modelContext)
         guard let data = service.exportFullBackup() else {
             statusMessage = String(localized: "error_create_backup")
-            isExporting = false
+            activeExportAction = nil
             return
         }
 
@@ -429,20 +470,26 @@ public struct ImportExportView: View {
             showExportSheet = true
         }
 
-        isExporting = false
+        activeExportAction = nil
     }
 
     /**
      Exports bookmarks as CSV, writes the file to a temporary location, and presents the share sheet.
+
+     - Side effects:
+       - marks the bookmark CSV export row as active and clears prior status messages
+       - queries `BackupService` for bookmark CSV payload data
+       - writes the payload to a temporary file and presents the share sheet on success
+     - Failure modes: Surfaces missing bookmark export data through status text.
      */
     private func exportBookmarksCSV() {
-        isExporting = true
+        activeExportAction = .bookmarksCSV
         statusMessage = nil
 
         let service = BackupService(modelContext: modelContext)
         guard let data = service.exportBookmarksCSV() else {
             statusMessage = String(localized: "error_export_bookmarks")
-            isExporting = false
+            activeExportAction = nil
             return
         }
 
@@ -452,7 +499,7 @@ public struct ImportExportView: View {
             showExportSheet = true
         }
 
-        isExporting = false
+        activeExportAction = nil
     }
 
     /**
