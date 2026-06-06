@@ -26,7 +26,7 @@ import UniformTypeIdentifiers
  - restore/import actions read user-selected files through `fileImporter` and mutate app data
    through backup/import/install services
  - reset actions mutate category data through `AndroidBackupResetService`
- - status text reflects the latest success or failure message across all operations
+ - feedback alerts report success, failure, and guidance after operations complete
  */
 public struct ImportExportView: View {
     /// SwiftData context used by backup import/export services.
@@ -65,8 +65,14 @@ public struct ImportExportView: View {
     /// URL of the most recently exported file shared through the share sheet.
     @State private var exportedFileURL: URL?
 
-    /// Latest user-visible success, failure, or guidance message across import/export actions.
+    /// Pending user-visible success, failure, or guidance message for the feedback alert.
     @State private var statusMessage: String?
+
+    /// Controls presentation of the Android-style operation feedback alert.
+    @State private var showStatusAlert = false
+
+    /// Completion message to show after the iOS share sheet returns control to Backup & Restore.
+    @State private var pendingShareCompletionMessage: String?
 
     /// Whether Android-compatible database backup export is currently preparing an archive.
     @State private var isExportingAndroidDatabaseBackup = false
@@ -343,12 +349,6 @@ public struct ImportExportView: View {
                 Text(String(localized: "reset_databases_title", defaultValue: "Reset Databases"))
             }
 
-            if let statusMessage {
-                Section {
-                    Text(statusMessage)
-                        .font(.callout)
-                }
-            }
         }
         .accessibilityIdentifier("importExportScreen")
         .accessibilityValue(accessibilityState)
@@ -387,7 +387,7 @@ public struct ImportExportView: View {
         ) { result in
             handleBackupFileExport(result)
         }
-        .sheet(isPresented: $showExportSheet, onDismiss: clearPendingBackupExport) {
+        .sheet(isPresented: $showExportSheet, onDismiss: handleShareSheetDismiss) {
             if let url = exportedFileURL {
                 ShareSheet(items: [url])
             }
@@ -454,6 +454,19 @@ public struct ImportExportView: View {
         } message: {
             Text(androidModuleBackupOverwriteMessage())
         }
+        .onChange(of: statusMessage) { _, newValue in
+            showStatusAlert = newValue != nil
+        }
+        .alert(
+            String(localized: "backup_and_restore", defaultValue: "Backup & Restore"),
+            isPresented: $showStatusAlert
+        ) {
+            Button(String(localized: "ok"), role: .cancel) {
+                statusMessage = nil
+            }
+        } message: {
+            Text(statusMessage ?? "")
+        }
     }
 
     /**
@@ -463,9 +476,9 @@ public struct ImportExportView: View {
      destination choice. Android's Application/APK target is omitted from iOS because apps cannot
      export their installed bundle as an IPA/APK equivalent at runtime.
 
-     - Side effects: Mutates export/progress/status state and may present backup destination or
+     - Side effects: Mutates export/progress/feedback state and may present backup destination or
        module-selection UI.
-     - Failure modes: Category-specific export failures are surfaced through `statusMessage`.
+     - Failure modes: Category-specific export failures are surfaced through the feedback alert.
      */
     private func beginBackup() {
         switch backupTarget.wrappedValue {
@@ -498,12 +511,12 @@ public struct ImportExportView: View {
      `AndBibleBackupManifest.json` and supported category SQLite databases under `db/`.
 
      - Side effects:
-       - marks the Android database export row as active and clears prior status messages
+       - marks the Android database export row as active and clears prior feedback messages
        - schedules archive generation after one main-actor yield so SwiftUI can render the busy
          state before the expensive SQLite/ZIP work starts
        - exports from a background SwiftData context so SQLite and ZIP work do not block the UI actor
        - stores the generated archive file until the user chooses Phone storage or Share
-     - Failure modes: Catches backup export and file-write failures and surfaces them as status text.
+     - Failure modes: Catches backup export and file-write failures and surfaces them as feedback.
      */
     private func exportAndroidDatabaseBackup() {
         isExportingAndroidDatabaseBackup = true
@@ -564,9 +577,9 @@ public struct ImportExportView: View {
      - Side effects:
        - mutates exporter or share-sheet presentation state
        - may write a temporary file for data-backed Share payloads
-       - updates status text after the selected destination accepts the payload
-     - Failure modes: Missing pending payload is ignored; file-read/write failures set
-       `statusMessage`.
+       - queues feedback after the selected destination accepts the payload
+     - Failure modes: Missing pending payload is ignored; file-read/write failures are surfaced
+       through the feedback alert.
      */
     private func finishPendingBackupExport(to destination: BackupExportDestination) {
         guard let payload = pendingBackupExport else {
@@ -582,16 +595,16 @@ public struct ImportExportView: View {
             if let url = payload.temporaryFileURL {
                 exportedFileURL = url
                 showExportSheet = true
-                statusMessage = payload.statusMessage
+                pendingShareCompletionMessage = payload.statusMessage
                 return
             }
 
             do {
                 if let url = saveToTempFile(data: try payload.loadData(), fileName: payload.fileName) {
                     exportedFileURL = url
+                    pendingShareCompletionMessage = payload.statusMessage
                     clearPendingBackupExport()
                     showExportSheet = true
-                    statusMessage = payload.statusMessage
                 }
             } catch {
                 clearPendingBackupExport()
@@ -606,8 +619,8 @@ public struct ImportExportView: View {
      - Parameter result: Export result emitted by the system document picker.
      - Side effects:
        - clears the pending export once the exporter finishes
-       - publishes the prepared completion message only after successful export
-       - updates visible error state on failure
+       - publishes the prepared feedback message only after successful export
+       - updates visible feedback state on failure
      - Failure modes: Export errors are formatted with the shared import/export error prefix.
      */
     private func handleBackupFileExport(_ result: Result<URL, Error>) {
@@ -623,13 +636,36 @@ public struct ImportExportView: View {
     }
 
     /**
+     Handles return from the iOS share sheet.
+
+     Android's share/save chooser reports success after the external destination flow returns.
+     iOS's `ShareSheet` does not expose an equivalent result callback here, so this method mirrors
+     Android's timing by showing the prepared completion feedback only after the sheet dismisses.
+
+     - Side effects:
+       - releases the pending temporary export payload
+       - clears the queued share completion message
+       - presents the feedback alert when a completion message is available
+     - Failure modes: none; share result errors are not exposed by this sheet wrapper.
+     */
+    private func handleShareSheetDismiss() {
+        let completionMessage = pendingShareCompletionMessage
+        pendingShareCompletionMessage = nil
+        clearPendingBackupExport()
+        if let completionMessage {
+            statusMessage = completionMessage
+        }
+    }
+
+    /**
      Cancels a prepared backup destination choice without writing or sharing the archive.
      *
      - Side effects: Releases generated archive bytes or temporary files and dismisses any pending
-       status from the abandoned export.
+       feedback from the abandoned export.
      - Failure modes: none.
      */
     private func cancelPendingBackupExport() {
+        pendingShareCompletionMessage = nil
         clearPendingBackupExport()
     }
 
@@ -657,9 +693,9 @@ public struct ImportExportView: View {
      - Side effects:
        - validates the selected filename before scheduling background file read and archive staging
        - keeps import controls disabled until background validation and staging finish
-       - updates status text on invalid selection or read failure
+       - presents feedback on invalid selection or read failure
      - Failure modes: Picker, read, and archive validation failures are surfaced through
-       `statusMessage`.
+       the feedback alert.
      */
     private func handleDatabaseRestoreImport(_ result: Result<[URL], Error>) {
         switch result {
@@ -695,9 +731,9 @@ public struct ImportExportView: View {
      - Side effects:
        - reads Android module backup archives when selected
        - installs SWORD ZIP modules or EPUB files through their existing native services
-       - updates status text with success or failure messages
+       - presents feedback with success, failure, or guidance messages
      - Failure modes: Unsupported document formats and importer errors are surfaced through
-       `statusMessage`.
+       the feedback alert.
      */
     private func handleDocumentsRestoreImport(_ result: Result<[URL], Error>) {
         switch result {
@@ -800,9 +836,9 @@ public struct ImportExportView: View {
        - writes validated Android SQLite files into a temporary staging directory off the main actor
        - updates `androidBackupArchive` so SwiftUI presents the selection sheet
        - clears `isImporting` after background work finishes
-       - updates `statusMessage` when validation fails
+       - presents feedback when validation fails
      - Failure modes: Surfaces unreadable files with the existing generic read error, and surfaces
-       `AndroidDatabaseBackupError` plus ZIP/file-system errors as status text.
+       `AndroidDatabaseBackupError` plus ZIP/file-system errors as feedback.
      */
     private func loadAndroidBackupArchive(from url: URL) {
         cleanupLoadedAndroidBackupArchive()
@@ -850,7 +886,7 @@ public struct ImportExportView: View {
        - mutates selected local SwiftData categories through `AndroidDatabaseBackupService`
        - disables and clears remote-sync state for every applied Android-backed category
        - removes the staged archive directory after success or failure
-       - updates `statusMessage` with the apply result or error
+       - presents feedback with the apply result or error after the sheet dismisses
      - Failure modes: Catches service errors and surfaces them to the settings screen.
      */
     private func applyAndroidBackupSelections(_ selections: [AndroidDatabaseBackupSelection]) {
@@ -862,6 +898,7 @@ public struct ImportExportView: View {
         statusMessage = nil
         Task { @MainActor in
             await Task.yield()
+            let feedbackMessage: String
             do {
                 let report = try androidBackupService.apply(
                     archive: archive,
@@ -869,12 +906,14 @@ public struct ImportExportView: View {
                     modelContext: modelContext,
                     settingsStore: SettingsStore(modelContext: modelContext)
                 )
-                statusMessage = androidBackupStatusMessage(for: report)
+                feedbackMessage = androidBackupStatusMessage(for: report)
             } catch {
-                statusMessage = localizedErrorMessage(error)
+                feedbackMessage = localizedErrorMessage(error)
             }
             isApplyingAndroidBackup = false
             dismissAndroidBackupArchive()
+            await Task.yield()
+            statusMessage = feedbackMessage
         }
     }
 
@@ -908,7 +947,7 @@ public struct ImportExportView: View {
      an argument so every import/export error path uses the same localized surface.
 
      - Parameter error: Error whose localized description should be shown to the user.
-     - Returns: Localized status text containing the shared error prefix and error message.
+     - Returns: Localized feedback text containing the shared error prefix and error message.
      - Side effects: none.
      - Failure modes: Falls back to the key's untranslated format if the app bundle lacks a
        localization entry.
@@ -993,8 +1032,8 @@ public struct ImportExportView: View {
      Installs one SWORD ZIP through the shared module repository.
 
      - Parameter url: Security-scoped URL for a user-selected ZIP file.
-     - Side effects: Imports module files into local SWORD storage and updates `statusMessage`.
-     - Failure modes: `ModuleRepository.installFromZip(at:)` errors are surfaced as status text.
+     - Side effects: Imports module files into local SWORD storage and presents feedback.
+     - Failure modes: `ModuleRepository.installFromZip(at:)` errors are surfaced as feedback.
      */
     private func installModule(from url: URL) {
         isInstallingModule = true
@@ -1072,7 +1111,7 @@ public struct ImportExportView: View {
        - reads local SWORD module config and data files off the main actor
        - dismisses the selection sheet and schedules Android's backup destination choice after
          SwiftUI processes dismissal, avoiding two active sheet presentations at once
-       - updates status text with export success or failure details
+       - presents feedback with export failure details after dismissing the selection sheet
      */
     private func exportAndroidModuleBackup(moduleNames: [String]) {
         guard !moduleNames.isEmpty else {
@@ -1106,6 +1145,9 @@ public struct ImportExportView: View {
                 await Task.yield()
                 presentBackupDestination(payload)
             } catch {
+                showAndroidModuleBackupExportSheet = false
+                androidModuleBackupExportModules = []
+                await Task.yield()
                 statusMessage = localizedErrorMessage(error)
             }
         }
@@ -1118,7 +1160,7 @@ public struct ImportExportView: View {
      - Side effects:
      - may write supported module files when no overwrite confirmation is required
      - may retain `data` and existing paths in state for a later confirmation action
-     - updates status text with restore success or failure details
+     - presents feedback with restore success or failure details
      - Failure modes: Catches service errors and surfaces them to the settings screen.
      */
     private func prepareAndroidModuleBackupRestore(from data: Data) {
@@ -1146,24 +1188,28 @@ public struct ImportExportView: View {
      Side effects:
      - writes supported SWORD module files into the local module directory
      - clears pending confirmation state
-     - updates status text with success or failure details
+     - presents feedback with success or failure details after the overwrite alert closes
      */
     private func restorePendingAndroidModuleBackup() {
         guard let data = pendingAndroidModuleBackupData else {
             clearPendingAndroidModuleBackup()
             return
         }
+        let feedbackMessage: String
         do {
             let report = try androidModuleBackupService.restoreArchive(
                 from: data,
                 allowOverwritingExistingFiles: true
             )
-            statusMessage = androidModuleBackupRestoreStatusMessage(for: report)
+            feedbackMessage = androidModuleBackupRestoreStatusMessage(for: report)
         } catch {
-            statusMessage = localizedErrorMessage(error)
+            feedbackMessage = localizedErrorMessage(error)
         }
         clearPendingAndroidModuleBackup()
-        isRestoringAndroidModuleBackup = false
+        Task { @MainActor in
+            await Task.yield()
+            statusMessage = feedbackMessage
+        }
     }
 
     /**
@@ -1226,8 +1272,8 @@ public struct ImportExportView: View {
      Installs one EPUB document through the local EPUB reader store.
 
      - Parameter url: Security-scoped URL for a user-selected EPUB file.
-     - Side effects: Copies/processes EPUB content into app storage and updates `statusMessage`.
-     - Failure modes: `EpubReader.install(epubURL:)` errors are surfaced as status text.
+     - Side effects: Copies/processes EPUB content into app storage and presents feedback.
+     - Failure modes: `EpubReader.install(epubURL:)` errors are surfaced as feedback.
      */
     private func installEpub(from url: URL) {
         isInstallingEpub = true
@@ -1262,7 +1308,7 @@ public struct ImportExportView: View {
          destructive-alert dismissal and disabled controls before the reset starts
        - mutates SwiftData/settings/file-backed repository state through `AndroidBackupResetService`
        - clears category-scoped remote-sync bookkeeping for sync-backed categories
-       - updates `statusMessage` with success or failure text
+       - presents feedback with success or failure text after the reset confirmation closes
      - Failure modes: Reset service errors are caught and surfaced with the shared error prefix.
      */
     private func resetDatabase(_ category: AndroidBackupResetCategory) {
@@ -1330,7 +1376,7 @@ public struct ImportExportView: View {
      - Parameters:
        - data: File contents to write.
        - fileName: Target filename appended within the temporary directory.
-     - Returns: Temporary file URL on success, or `nil` after updating `statusMessage` on failure.
+     - Returns: Temporary file URL on success, or `nil` after queuing failure feedback.
      */
     private func saveToTempFile(data: Data, fileName: String) -> URL? {
         let tempDir = FileManager.default.temporaryDirectory
