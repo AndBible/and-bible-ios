@@ -1,5 +1,6 @@
 import XCTest
 @testable import BibleCore
+@testable import SwordKit
 import SwiftData
 import SQLite3
 
@@ -321,6 +322,185 @@ extension AndBibleTests {
         XCTAssertEqual(syncStateStore.bootstrapState(for: .bookmarks), RemoteSyncBootstrapState())
         XCTAssertEqual(syncStateStore.progressState(for: .bookmarks), RemoteSyncProgressState())
         XCTAssertTrue(patchStatusStore.statuses(for: .bookmarks).isEmpty)
+    }
+
+    /**
+     Verifies that Android BackupActivity bookmark reset uses the same storage boundary as restore.
+
+     Setup:
+     - seeds local bookmark and label rows that should be removed
+     - seeds every category-scoped remote-sync side store that can make a later sync think deleted
+       rows are already reconciled
+
+     Expected result:
+     - the bookmark category is reset through an empty Android-shaped snapshot
+     - user-created bookmark rows disappear while required system label rows may be recreated
+     - sync toggle, bootstrap/progress state, patch status, log entries, and row fingerprints are
+       cleared for bookmarks
+
+     Failure meaning:
+     - iOS would treat Android's Reset Databases action as a narrow row-delete shortcut instead of
+       the same category replacement boundary used by Android backup restore.
+     */
+    func testAndroidBackupResetBookmarksClearsLocalDataAndSyncBookkeeping() throws {
+        let container = try makeBookmarkRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        let settingsStore = SettingsStore(modelContext: modelContext)
+        let remoteSettingsStore = RemoteSyncSettingsStore(settingsStore: settingsStore)
+        let syncStateStore = RemoteSyncStateStore(settingsStore: settingsStore)
+        let patchStatusStore = RemoteSyncPatchStatusStore(settingsStore: settingsStore)
+        let logEntryStore = RemoteSyncLogEntryStore(settingsStore: settingsStore)
+        let fingerprintStore = RemoteSyncRowFingerprintStore(settingsStore: settingsStore)
+
+        let legacyLabel = Label(name: "Legacy")
+        modelContext.insert(legacyLabel)
+        let legacyBookmark = BibleBookmark(kjvOrdinalStart: 1, kjvOrdinalEnd: 1)
+        legacyBookmark.book = "Genesis"
+        modelContext.insert(legacyBookmark)
+        try modelContext.save()
+
+        let bookmarkIDValue = RemoteSyncSQLiteValue.blob(
+            RemoteSyncBookmarkSnapshotService.uuidBlob(legacyBookmark.id)
+        )
+        remoteSettingsStore.setSyncEnabled(true, for: .bookmarks)
+        syncStateStore.setBootstrapState(
+            RemoteSyncBootstrapState(
+                syncFolderID: "/sync/bookmarks",
+                deviceFolderID: "/sync/bookmarks/ios",
+                secretFileName: "device-known-ios"
+            ),
+            for: .bookmarks
+        )
+        syncStateStore.setProgressState(
+            RemoteSyncProgressState(lastPatchWritten: 100, lastSynchronized: 200, disabledForVersion: 1),
+            for: .bookmarks
+        )
+        patchStatusStore.addStatus(
+            RemoteSyncPatchStatus(sourceDevice: "android", patchNumber: 1, sizeBytes: 50, appliedDate: 300),
+            for: .bookmarks
+        )
+        logEntryStore.addEntry(
+            RemoteSyncLogEntry(
+                tableName: "BibleBookmark",
+                entityID1: bookmarkIDValue,
+                entityID2: .null(),
+                type: .upsert,
+                lastUpdated: 400,
+                sourceDevice: "ios"
+            ),
+            for: .bookmarks
+        )
+        fingerprintStore.setFingerprint(
+            "legacy-hash",
+            for: .bookmarks,
+            tableName: "BibleBookmark",
+            entityID1: bookmarkIDValue,
+            entityID2: .null()
+        )
+
+        let report = try AndroidBackupResetService().reset(
+            .bookmarks,
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+
+        XCTAssertEqual(report, AndroidBackupResetReport(category: .bookmarks))
+        XCTAssertTrue(try modelContext.fetch(FetchDescriptor<BibleBookmark>()).isEmpty)
+        XCTAssertNil(try modelContext.fetch(FetchDescriptor<Label>()).first { $0.name == "Legacy" })
+        XCTAssertFalse(remoteSettingsStore.isSyncEnabled(for: .bookmarks))
+        XCTAssertEqual(syncStateStore.bootstrapState(for: .bookmarks), RemoteSyncBootstrapState())
+        XCTAssertEqual(syncStateStore.progressState(for: .bookmarks), RemoteSyncProgressState())
+        XCTAssertTrue(patchStatusStore.statuses(for: .bookmarks).isEmpty)
+        XCTAssertTrue(logEntryStore.entries(for: .bookmarks).isEmpty)
+        XCTAssertNil(
+            fingerprintStore.fingerprint(
+                for: .bookmarks,
+                tableName: "BibleBookmark",
+                entityID1: bookmarkIDValue,
+                entityID2: .null()
+            )
+        )
+    }
+
+    /**
+     Verifies Android BackupActivity progress reset clears iOS's local progress stores.
+
+     Setup:
+     - seeds chapter-reading and memorization progress settings in the local settings table
+
+     Expected result:
+     - reset reports the Progress category and removes both local progress payloads
+     - unrelated settings are not required for this local-only category
+
+     Failure meaning:
+     - iOS would expose Android's Progress reset category while leaving native progress data
+       untouched, making the user-visible reset action misleading.
+     */
+    func testAndroidBackupResetProgressClearsLocalProgressStores() throws {
+        let container = try makeReadingPlanRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        let settingsStore = SettingsStore(modelContext: modelContext)
+        settingsStore.setString(ReadingProgressStore.settingsKey, value: #"{"history":[1]}"#)
+        settingsStore.setString(MemorizationProgressStore.settingsKey, value: #"{"targets":[1]}"#)
+
+        let report = try AndroidBackupResetService().reset(
+            .progress,
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+
+        XCTAssertEqual(report, AndroidBackupResetReport(category: .progress))
+        XCTAssertNil(settingsStore.getString(ReadingProgressStore.settingsKey))
+        XCTAssertNil(settingsStore.getString(MemorizationProgressStore.settingsKey))
+    }
+
+    /**
+     Verifies Android BackupActivity repository reset clears legacy rows and recreates defaults.
+
+     Setup:
+     - seeds one local SwiftData repository row
+     - points `RepositorySourceManager` at a temporary install-manager directory
+
+     Expected result:
+     - SwiftData repository rows are deleted
+     - `InstallMgr.conf` exists after reset because the manager recreated packaged defaults
+
+     Failure meaning:
+     - iOS would expose Android's repository reset category but leave either legacy repository
+       metadata or SWORD source configuration in the pre-reset state.
+     */
+    func testAndroidBackupResetRepositoriesClearsRowsAndRecreatesDefaultSources() throws {
+        let schema = Schema([
+            Repository.self,
+            Setting.self,
+        ])
+        let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: schema, configurations: [configuration])
+        let modelContext = ModelContext(container)
+        let settingsStore = SettingsStore(modelContext: modelContext)
+        modelContext.insert(Repository(name: "Legacy", url: "https://example.test/repo"))
+        try modelContext.save()
+
+        let baseURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("android-backup-reset-repositories-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: baseURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: baseURL) }
+
+        let report = try AndroidBackupResetService(
+            repositorySourceManager: RepositorySourceManager(basePath: baseURL.path)
+        ).reset(
+            .repositories,
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+
+        XCTAssertEqual(report, AndroidBackupResetReport(category: .repositories))
+        XCTAssertTrue(try modelContext.fetch(FetchDescriptor<Repository>()).isEmpty)
+        XCTAssertTrue(
+            FileManager.default.fileExists(
+                atPath: baseURL.appendingPathComponent("InstallMgr.conf").path
+            )
+        )
     }
 
     /**

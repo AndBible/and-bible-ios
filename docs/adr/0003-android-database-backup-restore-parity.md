@@ -7,7 +7,10 @@ Date: 2026-06-04
 ## Context
 
 #150 adds iOS support for Android manual database backup archives
-(`AndBibleDatabaseBackup.abdb.zip`).
+(`AndBibleDatabaseBackup.abdb.zip`). #153 aligns the surrounding iOS Backup &
+Restore settings workflow with Android's `BackupActivity` so the user-facing
+semantics are shared across platforms instead of preserving iOS-specific backup
+categories as the primary path.
 
 Android's manual backup flow is user-facing behavior, not just an internal
 storage detail. It lets users load a database backup archive, see the contained
@@ -31,6 +34,13 @@ Some Android backup categories do not yet have safe iOS mappers. Hiding those
 sections would make valid Android backup contents appear absent. Enabling them
 without source-backed mappers would risk corrupt or partial restores.
 
+Android's top-level Backup & Restore screen also has behavior outside database
+archive apply: the user chooses Database, Documents, or Application for backup;
+chooses Database or Documents for Restore or Import; then chooses Phone storage
+or Share as the backup destination. The screen also contains Reset Databases
+actions. iOS must preserve those visible decisions even when the platform APIs
+behind them are different.
+
 ## Decision
 
 iOS Android database backup support targets Android behavioral parity, not raw
@@ -44,6 +54,21 @@ For manual Android database backups, iOS will:
 - allow Restore or Import only for sections that have safe iOS mappers
 - preserve Android's selected-section apply model
 - reset affected remote-sync bookkeeping after a manual apply
+
+For the top-level Backup & Restore workflow, iOS will:
+
+- expose Android's Backup choices in order: Database, Documents, Application
+- expose Android's Restore or Import choices in order: Database, Documents
+- route Database backup to `AndBibleDatabaseBackup.abdb.zip`
+- route Documents backup to `AndBibleModulesBackup.abmd.zip`
+- present Android's backup destination decision, "Phone storage" or "Share"
+- route Database Restore or Import only to `.abdb.zip` archives and the
+  section-selection sheet
+- route Documents Restore or Import through module/document import plumbing for
+  `.abmd.zip`, SWORD ZIP modules, and EPUB files
+- move legacy iOS JSON/CSV tools out of the primary workflow
+- expose Reset Databases actions only for categories with a real iOS storage
+  equivalent
 
 Supported sections are limited to categories with safe Android-to-iOS mappers
 and supported schema versions:
@@ -84,6 +109,20 @@ choice, and destructive confirmation for Restore. This native setting-sheet
 decision is not a precedent for reader document surfaces, which are governed by
 ADR 0002.
 
+The top-level workflow may use native iOS plumbing:
+
+- Android "Phone storage" maps to the iOS Files exporter.
+- Android "Share" maps to the iOS share sheet.
+- Android application backup exports an APK. iOS apps cannot export their
+  installed bundle as an IPA/APK equivalent at runtime, so Application remains
+  visible for parity but reports that the operation is unavailable on iOS.
+- Android AI Settings reset is not shown until iOS has a durable
+  Android-equivalent AI settings store. Adding that row requires a real mapper
+  or store first.
+- Android crash-info export and local backup listing are platform-adjacent
+  features that require dedicated iOS storage/logging contracts before they can
+  be surfaced without inventing iOS-only semantics.
+
 ZIP extraction should remain explicit and fail-closed. The reader supports the
 stored and deflated central-directory ZIP shapes produced by Android backup
 archives. Unsupported ZIP shapes must fail with an error instead of silently
@@ -104,6 +143,11 @@ skipping entries or treating a partial archive as a valid empty backup.
 - Restore tests must prove selected-category replacement and sync-state reset.
 - Future mapper additions should update this ADR if they change the supported
   category set or the accepted parity boundary.
+- Future UI additions must extend the Android BackupActivity semantics rather
+  than restoring iOS-specific backup categories to the primary path.
+- JSON and CSV import/export are legacy iOS tools. They may remain available
+  under a clearly separated legacy section, but they must not be presented as
+  the shared cross-platform backup model.
 - Native presentation here is acceptable only for this settings/file-import
   workflow. Reader/document modal decisions still prefer the shared
   Vue/document pipeline unless a separate ADR records a real platform
@@ -115,5 +159,7 @@ skipping entries or treating a partial archive as a valid empty backup.
 - [ADR 0002: Route Reader Document Modals Through The Shared Document Pipeline](0002-route-reader-document-modals-through-shared-document-pipeline.md)
 - [Android database backup service](../../Sources/BibleCore/Sources/BibleCore/Services/AndroidDatabaseBackupService.swift)
 - [Android database backup import sheet](../../Sources/BibleUI/Sources/BibleUI/Settings/AndroidDatabaseBackupImportSheet.swift)
+- [Android Backup & Restore workflow](../../Sources/BibleUI/Sources/BibleUI/Settings/ImportExportView.swift)
 - [Android database backup tests](../../AndBibleTests/AndBibleTests+AndroidDatabaseBackup.swift)
 - #150
+- #153
