@@ -9,11 +9,13 @@ import UniformTypeIdentifiers
 /**
  Android-aligned Backup & Restore settings screen.
 
- The user-facing workflow follows Android's `BackupActivity`: users first choose Database,
- Documents, or Application for backup, choose Database or Documents for Restore or Import, and use
- the reset controls from the same screen. iOS keeps platform-specific plumbing behind those choices:
- Files export and share sheets replace Android intents, SwiftData restore engines replace raw
- Android database-file swaps, and document/module importers replace Android's `InstallZip` activity.
+ The user-facing workflow follows Android's `BackupActivity` where the capability is implementable
+ on iOS: users first choose Database or Documents for backup, choose Database or Documents for
+ Restore or Import, and use the reset controls from the same screen. Android's Application/APK row
+ is omitted because iOS apps cannot export their installed bundle as an APK/IPA equivalent at
+ runtime. iOS keeps platform-specific plumbing behind those choices: Files export and share sheets
+ replace Android intents, SwiftData restore engines replace raw Android database-file swaps, and
+ document/module importers replace Android's `InstallZip` activity.
 
  Data dependencies:
 - `modelContext` provides the SwiftData container used by Android-compatible database backup
@@ -972,7 +974,10 @@ public struct ImportExportView: View {
         do {
             let repo = ModuleRepository()
             let moduleName = try repo.installFromZip(at: url)
-            statusMessage = String(localized: "installed_module_\(moduleName)")
+            statusMessage = String(
+                format: String(localized: "installed_module_%@"),
+                moduleName
+            )
         } catch {
             statusMessage = localizedErrorMessage(error)
         }
@@ -1194,9 +1199,15 @@ public struct ImportExportView: View {
         do {
             let identifier = try EpubReader.install(epubURL: url)
             if let reader = EpubReader(identifier: identifier) {
-                statusMessage = String(localized: "installed_epub_\(reader.title)")
+                statusMessage = String(
+                    format: String(localized: "installed_epub_%@"),
+                    reader.title
+                )
             } else {
-                statusMessage = String(localized: "installed_epub_\(identifier)")
+                statusMessage = String(
+                    format: String(localized: "installed_epub_%@"),
+                    identifier
+                )
             }
         } catch {
             statusMessage = localizedErrorMessage(error)

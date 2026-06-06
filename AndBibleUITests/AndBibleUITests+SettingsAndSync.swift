@@ -73,7 +73,27 @@ extension AndBibleUITests {
         tapElementReliably(databaseBackupButton, timeout: 10)
         waitForElementValue("importExportScreen", toEqual: "backupDestinationPresented", in: app, timeout: 20)
 
-        let cancelButton = requireElement("backupDestinationCancelButton", in: app, timeout: 10)
+        let cancelDeadline = Date().addingTimeInterval(10)
+        var cancelButton: XCUIElement?
+        repeat {
+            cancelButton = firstExistingElement(
+                [
+                    app.buttons["backupDestinationCancelButton"].firstMatch,
+                    app.sheets.buttons["Cancel"].firstMatch,
+                    app.alerts.buttons["Cancel"].firstMatch,
+                    app.buttons["Cancel"].firstMatch,
+                ],
+                timeout: 0
+            )
+            if cancelButton != nil {
+                break
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        } while Date() < cancelDeadline
+        XCTAssertNotNil(cancelButton, "Expected Backup destination dialog to expose a cancel action.")
+        guard let cancelButton else {
+            return
+        }
         tapElementReliably(cancelButton, timeout: 10)
         waitForElementValue("importExportScreen", toEqual: "idle", in: app, timeout: 10)
     }

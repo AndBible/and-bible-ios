@@ -526,6 +526,60 @@ extension AndBibleTests {
     }
 
     /**
+     Verifies repository reset preserves legacy rows when source configuration reset fails.
+
+     Setup:
+     - seeds one local SwiftData repository row
+     - points `RepositorySourceManager` at a missing install-manager directory that cannot recreate
+       `InstallMgr.conf`
+
+     Expected result:
+     - reset throws the repository-source failure before deleting SwiftData rows
+     - the legacy repository row is still present after the failed reset
+
+     Failure meaning:
+     - iOS could partially reset repositories by deleting legacy metadata before failing to restore
+       Android-compatible SWORD source configuration.
+     */
+    func testAndroidBackupResetRepositoriesPreservesRowsWhenSourceResetFails() throws {
+        let schema = Schema([
+            Repository.self,
+            Setting.self,
+        ])
+        let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: schema, configurations: [configuration])
+        let modelContext = ModelContext(container)
+        let settingsStore = SettingsStore(modelContext: modelContext)
+        modelContext.insert(Repository(name: "Legacy", url: "https://example.test/repo"))
+        try modelContext.save()
+
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("android-backup-reset-repositories-failure-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let missingBasePath = tempDir.appendingPathComponent("missing", isDirectory: true)
+        let service = AndroidBackupResetService(
+            repositorySourceManager: RepositorySourceManager(basePath: missingBasePath.path)
+        )
+
+        XCTAssertThrowsError(
+            try service.reset(
+                .repositories,
+                modelContext: modelContext,
+                settingsStore: settingsStore
+            )
+        ) { error in
+            XCTAssertEqual(
+                error as? RepositorySourceManagementError,
+                .configWriteFailed("default configuration was not recreated")
+            )
+        }
+        let repositories = try modelContext.fetch(FetchDescriptor<Repository>())
+        XCTAssertEqual(repositories.map(\.name), ["Legacy"])
+    }
+
+    /**
      Verifies Android-parity Import mode for Android bookmark database backups.
 
      Setup:

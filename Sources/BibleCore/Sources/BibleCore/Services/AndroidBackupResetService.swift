@@ -209,18 +209,18 @@ public final class AndroidBackupResetService {
 
      - Parameter modelContext: Context containing any legacy SwiftData `Repository` rows.
      - Side effects:
+       - rewrites `InstallMgr.conf` through `RepositorySourceManager.resetToDefaults()`
        - deletes local `Repository` rows
        - saves `modelContext`
-       - rewrites `InstallMgr.conf` through `RepositorySourceManager.resetToDefaults()`
      - Throws: SwiftData fetch/save errors or repository source reset errors.
      */
     private func resetRepositories(modelContext: ModelContext) throws {
+        try repositorySourceManager.resetToDefaults()
         let repositories = try modelContext.fetch(FetchDescriptor<Repository>())
         for repository in repositories {
             modelContext.delete(repository)
         }
         try modelContext.save()
-        try repositorySourceManager.resetToDefaults()
     }
 
     /**

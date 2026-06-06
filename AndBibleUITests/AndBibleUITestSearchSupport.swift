@@ -466,8 +466,8 @@ extension AndBibleUITests {
      *   - reveals Search options when needed and taps the translation picker button
      *   - retries the tap when SwiftUI does not publish the picker-open state under CI load
      * - Failure modes:
-     *   - fails when the translation picker affordance does not publish an open state or expose
-     *     picker descendants within the timeout
+     *   - fails when the translation picker affordance does not publish an open state within the
+     *     timeout
      */
     func tapSearchTranslationPicker(
         in app: XCUIApplication,
@@ -476,7 +476,7 @@ extension AndBibleUITests {
         let deadline = Date().addingTimeInterval(timeout)
 
         repeat {
-            if searchTranslationPickerIsOpen(in: app, timeout: 0) {
+            if searchTranslationPickerStateIsOpen(in: app, timeout: 0) {
                 return
             }
 
@@ -502,10 +502,7 @@ extension AndBibleUITests {
 
                 let remaining = deadline.timeIntervalSinceNow
                 if remaining > 0,
-                   searchTranslationPickerStateIsOpen(in: app, timeout: min(1.5, max(0.5, remaining))) {
-                    return
-                }
-                if firstExistingElement(searchTranslationPickerOpenCandidates(in: app), timeout: 0) != nil {
+                   searchTranslationPickerStateIsOpen(in: app, timeout: min(2, max(0.5, remaining))) {
                     return
                 }
             }
