@@ -96,6 +96,8 @@ export type BibleJavascriptInterface = {
     markChapterRead: (bookInitials: string, startOrdinal: number, chapter: number, source: ReadingProgressSource) => void,
     unmarkChapterRead: (bookInitials: string, startOrdinal: number, chapter: number) => void,
     openChapterReadHistory: (bookInitials: string, startOrdinal: number, chapter: number) => void,
+    goToNextChapter: () => void,
+    goToPreviousChapter: () => void,
     openStudyPad: (labelId: IdType, bookmarkId: IdType) => void,
     openMyNotes: (v11n: string, ordinal: number) => void,
     speak: (bookInitials: string, v11n: string, startOrdinal: number, endOrdinal: number) => void,
@@ -262,6 +264,9 @@ export function useAndroid({bookmarks}: { bookmarks: Ref<BaseBookmark[]> }, conf
         }
 
         function bookmarkRange(b: BaseBookmark): CombinedRange {
+            if (!b.ordinalRange) {
+                throw new Error("Cannot calculate selection overlap for bookmark without ordinal range");
+            }
             const offsetRange = b.offsetRange || [0, null]
             if (b.bookInitials !== bookInitials) {
                 offsetRange[0] = 0;
@@ -270,8 +275,11 @@ export function useAndroid({bookmarks}: { bookmarks: Ref<BaseBookmark[]> }, conf
             return [[b.ordinalRange[0], offsetRange[0]], [b.ordinalRange[1], offsetRange[1]]]
         }
 
-        const filteredBookmarks = bookmarks.value.filter(b => rangeInside(
-            bookmarkRange(b), [[startOrdinal, startOffset], [endOrdinal, endOffset]])
+        const filteredBookmarks = bookmarks.value.filter(b =>
+            b.ordinalRange && rangeInside(
+                bookmarkRange(b),
+                [[startOrdinal, startOffset], [endOrdinal, endOffset]]
+            )
         );
 
         const deleteBookmarks = union(filteredBookmarks.map(b => b.id));
@@ -656,6 +664,20 @@ export function useAndroid({bookmarks}: { bookmarks: Ref<BaseBookmark[]> }, conf
         android.setReadingProgressSettings(JSON.stringify(settings));
     }
 
+    /**
+     * Requests native chapter navigation when Android-style manual chapter controls are visible.
+     */
+    function goToNextChapter() {
+        android.goToNextChapter();
+    }
+
+    /**
+     * Requests native previous-chapter navigation when Android-style manual controls are visible.
+     */
+    function goToPreviousChapter() {
+        android.goToPreviousChapter();
+    }
+
     const exposed = {
         shareHtml,
         helpBookmarks,
@@ -725,6 +747,8 @@ export function useAndroid({bookmarks}: { bookmarks: Ref<BaseBookmark[]> }, conf
         parseRef,
         saveState,
         setReadingProgressSettings,
+        goToNextChapter,
+        goToPreviousChapter,
     }
 
     if (config.developmentMode) return {

@@ -30,6 +30,7 @@ import {highlightRange} from "@/lib/highlight-range";
 import {Icon} from "@fortawesome/fontawesome-svg-core";
 import {AppSettings, Config, testMode} from "@/composables/config";
 import {
+    AiDocMarker,
     BaseBookmark,
     BibleBookmark,
     BookmarkOrdinalKey,
@@ -92,6 +93,10 @@ export function isBibleBookmark(bookmark: BaseBookmark): bookmark is BibleBookma
 
 export function isGenericBookmark(bookmark: BaseBookmark): bookmark is GenericBookmark {
     return bookmark.type === "generic-bookmark"
+}
+
+export function isAiDocMarker(bookmark: BaseBookmark): bookmark is AiDocMarker {
+    return bookmark.type === "ai-doc-marker"
 }
 
 export function verseHighlighting(
@@ -171,12 +176,49 @@ export function verseHighlighting(
     return `linear-gradient(to bottom, ${gradientCSS})`;
 }
 
+// Fixed pseudo-label ID for AI document markers, matching Android's AI_DOC_LABEL_ID.
+const AI_DOC_LABEL_ID = "00000000-0000-ab1e-0000-a1d0c00001a1";
+
+/** Android AI document marker color used by the shared bookmark marker pipeline. */
+export const AI_DOC_COLOR = 0xFF6464FF;
+
+const AI_DOC_LABEL_STYLE: LabelAndStyle = {
+    id: AI_DOC_LABEL_ID,
+    name: "AI Documents",
+    isRealLabel: false,
+    style: {
+        color: AI_DOC_COLOR,
+        isSpeak: false,
+        isParagraphBreak: false,
+        underline: false,
+        underlineWholeVerse: false,
+        markerStyle: true,
+        markerStyleWholeVerse: true,
+        hideStyle: false,
+        hideStyleWholeVerse: false,
+        customIcon: "robot",
+    },
+    color: AI_DOC_COLOR,
+    isSpeak: false,
+    isParagraphBreak: false,
+    underline: false,
+    underlineWholeVerse: false,
+    markerStyle: true,
+    markerStyleWholeVerse: true,
+    hideStyle: false,
+    hideStyleWholeVerse: false,
+    customIcon: "robot",
+};
+
 export function useGlobalBookmarks(config: Config) {
     const bookmarkLabels = reactive<Map<IdType, LabelAndStyle>>(new Map());
     const bookmarks = reactive<Map<IdType, BaseBookmark>>(new Map());
     const bookmarkIdsByOrdinal: Map<BookmarkOrdinalKey, Set<IdType>> = reactive(new Map());
 
+    bookmarkLabels.set(AI_DOC_LABEL_ID, AI_DOC_LABEL_STYLE);
+
     function addBookmarkToOrdinalMap(b: BaseBookmark) {
+        if (!b.ordinalRange) return;
         for (let o = b.ordinalRange[0]; o <= b.ordinalRange[1]; o++) {
             const key = getBookmarkOrdinalKey(b, o);
             let bSet: Set<IdType> | undefined = bookmarkIdsByOrdinal.get(key);
@@ -189,6 +231,7 @@ export function useGlobalBookmarks(config: Config) {
     }
 
     function removeBookmarkFromOrdinalMap(b: BaseBookmark) {
+        if (!b.ordinalRange) return;
         for (let o = b.ordinalRange[0]; o <= b.ordinalRange[1]; o++) {
             const bSet = bookmarkIdsByOrdinal.get(getBookmarkOrdinalKey(b, o))
             if (bSet) {
@@ -244,6 +287,20 @@ export function useGlobalBookmarks(config: Config) {
 
     setupEventBusListener("add_or_update_bookmarks", function addOrUpdateBookmarks(bookmarks: BaseBookmark[]) {
         updateBookmarks(bookmarks)
+    });
+
+    setupEventBusListener("add_or_update_ai_doc_markers", function onAiDocMarkers(markers: AiDocMarker[]) {
+        updateBookmarks(markers);
+    });
+
+    setupEventBusListener("delete_ai_doc_markers", function onDeleteAiDocMarkers(ids: IdType[]) {
+        for (const id of ids) {
+            const bookmark = bookmarks.get(id);
+            if (bookmark) {
+                removeBookmarkFromOrdinalMap(bookmark);
+                bookmarks.delete(id);
+            }
+        }
     });
 
     setupEventBusListener("bookmark_note_modified",
@@ -306,31 +363,34 @@ export function useBookmarks(
     onMounted(() => isMounted.value++);
     onUnmounted(() => isMounted.value--);
 
-    const noOrdinalNeeded = (b: BaseBookmark) => b.ordinalRange === null && ordinalRange === null
     const checkOrdinal = (b: BaseBookmark) => {
-        return b.ordinalRange !== null && ordinalRange !== null
+        return b.ordinalRange != null
             && rangesOverlap(b.ordinalRange, ordinalRange, {addRange: true, inclusive: true})
     };
 
     const checkOrdinalEnd = (b: BaseBookmark) => {
-        if (b.ordinalRange == null && ordinalRange == null) return false
+        if (b.ordinalRange == null) return false
         const bOrdinalRange: OrdinalRange = [b.ordinalRange[1], b.ordinalRange[1]]
         return rangesOverlap(bOrdinalRange, ordinalRange, {addRange: true, inclusive: true})
     };
 
     function getBookmarkStyleLabel(bookmark: BaseBookmark) {
+        if (isAiDocMarker(bookmark)) return bookmarkLabels.get(AI_DOC_LABEL_ID)!;
         return bookmarkLabels.get(bookmark.primaryLabelId || bookmark.labels[0])!;
     }
 
     function hasSpeakLabel(bookmark: BaseBookmark) {
+        if (isAiDocMarker(bookmark)) return false;
         return bookmark.labels.some(l => bookmarkLabels.get(l)!.isSpeak);
     }
 
     const documentBookmarks = computed(() => {
         if (!documentReady.value) return [];
         return bookmarks.value.filter(b => {
-            if(isBibleDocument) {
-                return isBibleBookmark(b) && (noOrdinalNeeded(b) || checkOrdinal(b));
+            if (isAiDocMarker(b)) {
+                return isBibleDocument && checkOrdinal(b);
+            } else if(isBibleDocument) {
+                return isBibleBookmark(b) && checkOrdinal(b);
             } else {
                 return isGenericBookmark(b) && bookInitials === b.bookInitials && key == b.key;
             }
@@ -338,16 +398,19 @@ export function useBookmarks(
     });
 
     function truncateToOrdinalRange(bookmark: BaseBookmark): OrdinalAndOffsetRange {
-        const b = {
-            ordinalRange: bookmark.ordinalRange && bookmark.ordinalRange.slice() as OrdinalRange,
-            offsetRange: bookmark.offsetRange && bookmark.offsetRange.slice() as OffsetRange,
+        const b: { ordinalRange: OrdinalRange | null; offsetRange: OffsetRange | null } = {
+            ordinalRange: bookmark.ordinalRange ? bookmark.ordinalRange.slice() as OrdinalRange : null,
+            offsetRange: bookmark.offsetRange ? bookmark.offsetRange.slice() as OffsetRange : null,
         };
         b.offsetRange = b.offsetRange || [0, null]
-        if (b.ordinalRange[0] < ordinalRange[0]) {
+        if (!b.ordinalRange) {
+            b.ordinalRange = ordinalRange ? ordinalRange.slice() as OrdinalRange : [0, 0];
+        }
+        if (ordinalRange && b.ordinalRange[0] < ordinalRange[0]) {
             b.ordinalRange[0] = ordinalRange[0];
             b.offsetRange[0] = 0;
         }
-        if (b.ordinalRange[1] > ordinalRange[1]) {
+        if (ordinalRange && b.ordinalRange[1] > ordinalRange[1]) {
             b.ordinalRange[1] = ordinalRange[1];
             b.offsetRange[1] = null;
         }
@@ -440,17 +503,18 @@ export function useBookmarks(
         return b.offsetRange == null || b.bookInitials === bookInitials;
     }
 
-    const highlightBookmarks = computed<BaseBookmark[]>(() => documentBookmarks.value.filter(b => showHighlight(b)))
+    const highlightBookmarks = computed<BaseBookmark[]>(() => documentBookmarks.value.filter(b => !isAiDocMarker(b) && showHighlight(b)))
 
     const markerBookmarks = computed(
         () => {
             isMounted.value;
             return documentBookmarks.value
-                .filter(b =>
-                    !showHighlight(b) &&
-                    checkOrdinalEnd(b) &&
-                    ((b.hasNote && config.showMyNotes) || config.showBookmarks)
-                )
+                .filter(b => {
+                    if (isAiDocMarker(b)) return config.showAiDocMarkers && checkOrdinal(b);
+                    return !showHighlight(b) &&
+                        checkOrdinalEnd(b) &&
+                        ((b.hasNote && config.showMyNotes) || config.showBookmarks);
+                })
         }
     )
 
@@ -806,6 +870,7 @@ export function useBookmarks(
         const hideLabels = new Set(config.bookmarksHideLabels);
 
         for (const b of markerBookmarks.value) {
+            if (!b.ordinalRange) continue;
             // Add event listener to all verses within bookmark range
             for (let ordinal = b.ordinalRange[0]; ordinal <= b.ordinalRange[1]; ordinal++) {
                 const elem = document.querySelector(`#doc-${documentId} #o-${ordinal}`) as HTMLElement;
@@ -822,7 +887,9 @@ export function useBookmarks(
             }
 
             // Marker will be put to the last verse, collect those to a map.
-            const key = b.ordinalRange[1];
+            const key = isAiDocMarker(b) && ordinalRange
+                ? Math.min(b.ordinalRange[1], ordinalRange[1])
+                : b.ordinalRange[1];
             const bookmarkLabel = getBookmarkStyleLabel(b);
             if (!isHiddenBookmark(b, bookmarkLabel) && intersection(new Set(b.labels), hideLabels).size === 0) {
                 const value = bookmarkMap.get(key) || [];

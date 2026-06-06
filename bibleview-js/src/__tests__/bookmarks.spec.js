@@ -15,14 +15,34 @@
  * If not, see http://www.gnu.org/licenses/.
  */
 
-import {useBookmarks, useGlobalBookmarks, verseHighlighting} from "@/composables/bookmarks";
+import {resolveIcon, useBookmarks, useGlobalBookmarks, verseHighlighting} from "@/composables/bookmarks";
 import {ref} from "vue";
 import Color from "color";
 import {useConfig} from "@/composables/config";
 import {abbreviated} from "@/utils";
+import {customIconMap} from "@/composables/fontawesome";
 import { describe, it, expect, beforeEach } from 'vitest'
 
 window.bibleViewDebug = {}
+
+describe("bookmark icon resolution", () => {
+    /**
+     * Protects AI document markers from falling back to the default bookmark icon.
+     *
+     * The setup mirrors the fixed Android AI document label style emitted by the reader bridge:
+     * the marker label requests the shared `robot` custom icon while the bookmark itself has no
+     * override. A passing test proves the icon key is registered and `resolveIcon` returns that
+     * exact icon.
+     */
+    it("resolves the Android AI document robot marker icon", () => {
+        const robotIcon = customIconMap.get("robot");
+        const bookmark = {customIcon: null};
+        const label = {customIcon: "robot"};
+
+        expect(robotIcon).toBeDefined();
+        expect(resolveIcon(bookmark, label)).toBe(robotIcon);
+    });
+});
 
 describe("verseHighlight tests", () => {
     function test(highlightColors, underlineColors, result) {
@@ -117,6 +137,18 @@ describe("useBookmark tests", () => {
     function addBookmark(ordinalRange, offsetRange) {
         addBookmarkId(1, ordinalRange, offsetRange)
     }
+
+    /**
+     * Protects Bible document filtering when a bookmark payload has no ordinal range.
+     *
+     * `useBookmarks` is always called with a document ordinal range for Bible documents, while
+     * `BaseBookmark.ordinalRange` can be null for generic or malformed bridge payloads. A passing
+     * test proves such bookmarks are ignored instead of being treated as document-wide matches.
+     */
+    it("does not match Bible bookmarks that lack an ordinal range", () => {
+        addBookmarkId(1, null);
+        expect(b.styleRanges.value).toEqual([]);
+    });
 
     it("stylerange 1", () => {
         addBookmark([10, 10]);

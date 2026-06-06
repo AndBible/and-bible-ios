@@ -270,6 +270,13 @@ extension AndBibleTests {
         )
     }
 
+    /**
+     Protects the Swift-to-Vue bridge payload key contract for core client objects.
+
+     The OSIS fragment fixture mirrors `bibleview-js/src/types/client-objects.ts` so
+     regressions in required web-client fields, including Strong's-capability metadata,
+     fail in unit tests before malformed bridge JSON reaches the reader.
+     */
     func testBridgePayloadKeysMatchWebClientContracts() throws {
         let fragment = OsisFragment(
             xml: "<div>In the beginning...</div>",
@@ -282,6 +289,7 @@ extension AndBibleTests {
             osisRef: "Gen.1",
             isNewTestament: false,
             features: OsisFeatures(type: "hebrew", keyName: "H00430"),
+            hasStrongs: true,
             ordinalRange: [1, 31],
             language: "en",
             direction: "ltr"
@@ -300,11 +308,13 @@ extension AndBibleTests {
                 "osisRef",
                 "isNewTestament",
                 "features",
+                "hasStrongs",
                 "ordinalRange",
                 "language",
                 "direction",
             ]
         )
+        XCTAssertEqual(fragmentObject["hasStrongs"] as? Bool, true)
         let features = try XCTUnwrap(fragmentObject["features"] as? [String: Any])
         assertJSONKeys(features, ["type", "keyName"])
 
@@ -369,6 +379,27 @@ extension AndBibleTests {
                 "text",
             ]
         )
+    }
+
+    /**
+     Protects the Swift-to-Vue bridge payload key contract for plain OSIS fragments.
+
+     Plain Bible fragments often omit an explicit `features` argument because no Strong's or
+     morphology metadata is available. A passing test proves those fragments still emit the
+     TypeScript-required `features` object as `{}` rather than omitting the key from bridge JSON.
+     */
+    func testBridgePayloadIncludesEmptyFeaturesObjectByDefault() throws {
+        let fragment = OsisFragment(
+            xml: "<div>In the beginning...</div>",
+            key: "Gen.1",
+            keyName: "Genesis 1",
+            bookInitials: "KJV"
+        )
+
+        let fragmentObject = try bridgeJSONObject(fragment)
+
+        let features = try XCTUnwrap(fragmentObject["features"] as? [String: Any])
+        XCTAssertTrue(features.isEmpty)
     }
 
     #if os(iOS)
@@ -715,6 +746,14 @@ extension AndBibleTests {
         XCTAssertFalse(recordedScripts().contains { $0.contains(#""type":"multi""#) })
     }
 
+    /**
+     Validates the native-to-WebView reader configuration contract for Android parity fields.
+
+     The setup writes pane text-display settings, app settings, workspace state, and reading
+     progress settings before the client-ready handshake. The expected result is a `set_config`
+     payload whose `config` object includes every renderer field consumed by bibleview-js; a failure
+     means the native settings model can drift from the shared Android renderer contract.
+     */
     @MainActor
     func testReaderConfigPayloadIncludesDisplaySettingsAndActiveWindowState() throws {
         let (bridge, recordedScripts) = makeRecordingBridge()
@@ -774,6 +813,14 @@ extension AndBibleTests {
         display.maxWidth = 410
         display.topMargin = 12
         display.showPageNumber = true
+        display.infiniteScroll = false
+        display.nonStrongsWordItalic = true
+        display.showMarkAsReadButton = false
+        display.showTitleScrollButton = true
+        display.showMemorizationIndicators = true
+        display.showAiDocMarkers = false
+        display.pageScrollAmount = 66
+        display.showOrdinals = true
         display.bookmarksHideLabels = [hiddenLabelId]
         display.dayBackground = -2
         display.dayNoise = 3
@@ -840,6 +887,14 @@ extension AndBibleTests {
                 "marginSize",
                 "topMargin",
                 "showPageNumber",
+                "infiniteScroll",
+                "nonStrongsWordItalic",
+                "showMarkAsReadButton",
+                "showTitleScrollButton",
+                "showMemorizationIndicators",
+                "showAiDocMarkers",
+                "pageScrollAmount",
+                "showOrdinals",
             ]
         )
         assertJSONKeys(
@@ -903,6 +958,14 @@ extension AndBibleTests {
         XCTAssertEqual(config["justifyText"] as? Bool, true)
         XCTAssertEqual(config["topMargin"] as? Int, 12)
         XCTAssertEqual(config["showPageNumber"] as? Bool, true)
+        XCTAssertEqual(config["infiniteScroll"] as? Bool, false)
+        XCTAssertEqual(config["nonStrongsWordItalic"] as? Bool, true)
+        XCTAssertEqual(config["showMarkAsReadButton"] as? Bool, false)
+        XCTAssertEqual(config["showTitleScrollButton"] as? Bool, true)
+        XCTAssertEqual(config["showMemorizationIndicators"] as? Bool, true)
+        XCTAssertEqual(config["showAiDocMarkers"] as? Bool, false)
+        XCTAssertEqual(config["pageScrollAmount"] as? Int, 66)
+        XCTAssertEqual(config["showOrdinals"] as? Bool, true)
         XCTAssertEqual(colors["dayBackground"] as? Int, -2)
         XCTAssertEqual(colors["dayNoise"] as? Int, 3)
         XCTAssertEqual(colors["nightBackground"] as? Int, -123_456)
@@ -967,6 +1030,29 @@ extension AndBibleTests {
             Set(try XCTUnwrap(appSettings["enabledExperimentalFeatures"] as? [String])),
             ["add_paragraph_break", "bookmark_edit_actions"]
         )
+    }
+
+    /**
+     Protects the WebView paging contract from invalid synced or migrated `PAGE_SCROLL_AMOUNT` data.
+
+     Android's `PageScrollAmountPreference` only accepts six discrete percentages and falls back to
+     `100%` for unknown stored values. This test drives the native client-ready path and verifies the
+     emitted Vue `set_config` payload receives that normalized value, not the raw invalid setting.
+     */
+    @MainActor
+    func testReaderConfigPayloadNormalizesInvalidPageScrollAmount() throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        var display = TextDisplaySettings()
+        display.pageScrollAmount = 150
+
+        let controller = BibleReaderController(bridge: bridge)
+        controller.displaySettings = display
+
+        controller.bridgeDidSetClientReady(bridge)
+
+        let payload = try setConfigPayload(from: recordedScripts())
+        let config = try XCTUnwrap(payload["config"] as? [String: Any])
+        XCTAssertEqual(config["pageScrollAmount"] as? Int, 100)
     }
 
     @MainActor

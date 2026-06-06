@@ -1642,6 +1642,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
                 "osisRef": "epub",
                 "isNewTestament": false,
                 "features": [String: Any](),
+                "hasStrongs": false,
                 "ordinalRange": [0, 0],
                 "language": "en",
                 "direction": "ltr"
@@ -3439,6 +3440,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             "osisRef": page.pageKey,
             "isNewTestament": false,
             "features": [String: Any](),
+            "hasStrongs": false,
             "ordinalRange": [0, 0],
             "language": page.languageCode ?? Locale.current.languageCode ?? "en",
             "direction": "ltr",
@@ -3799,6 +3801,26 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     }
 
     // MARK: - BibleBridgeDelegate — Navigation Actions
+
+    /**
+     Handles Android-style manual next-chapter navigation from bibleview-js.
+
+     Used when the shared renderer disables infinite scroll and shows chapter navigation buttons
+     instead of appending the next chapter into the current WebView document.
+     */
+    public func bridgeDidRequestGoToNextChapter(_ bridge: BibleBridge) {
+        navigateNext()
+    }
+
+    /**
+     Handles Android-style manual previous-chapter navigation from bibleview-js.
+
+     Used when the shared renderer disables infinite scroll and shows chapter navigation buttons
+     instead of prepending the previous chapter into the current WebView document.
+     */
+    public func bridgeDidRequestGoToPreviousChapter(_ bridge: BibleBridge) {
+        navigatePrevious()
+    }
 
     /**
      Opens a label-backed StudyPad journal document in the current pane.
@@ -4731,6 +4753,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
                 osisRef: frag.keyName,
                 isNewTestament: false,
                 features: frag.features,
+                hasStrongs: frag.features.type != nil,
                 ordinalRange: [0, 0],
                 language: "en",
                 direction: "ltr"
@@ -4994,6 +5017,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             "osisRef": osisRef,
             "isNewTestament": isNewTestament,
             "features": [String: Any](),
+            "hasStrongs": moduleInfo.features.contains(.strongsNumbers),
             "ordinalRange": [ordinalStart, ordinalEnd],
             "language": moduleInfo.language.isEmpty ? "en" : moduleInfo.language,
             "direction": moduleInfo.isRightToLeft ? "rtl" : "ltr",
@@ -5069,6 +5093,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
                 "osisRef": osisRef,
                 "isNewTestament": isNewTestament(ref.book),
                 "features": [String: Any](),
+                "hasStrongs": activeModule?.info.features.contains(.strongsNumbers) ?? false,
                 "ordinalRange": [ordinal, ordinal],
                 "language": "en",
                 "direction": "ltr",
@@ -7540,6 +7565,14 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         let marginSize: ReaderDisplayMarginSize
         let topMargin: Int
         let showPageNumber: Bool
+        let infiniteScroll: Bool
+        let nonStrongsWordItalic: Bool
+        let showMarkAsReadButton: Bool
+        let showTitleScrollButton: Bool
+        let showMemorizationIndicators: Bool
+        let showAiDocMarkers: Bool
+        let pageScrollAmount: Int
+        let showOrdinals: Bool
 
         init(settings s: TextDisplaySettings, defaults d: TextDisplaySettings) {
             self.developmentMode = false
@@ -7573,6 +7606,14 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             self.marginSize = ReaderDisplayMarginSize(settings: s, defaults: d)
             self.topMargin = s.topMargin ?? d.topMargin ?? 0
             self.showPageNumber = s.showPageNumber ?? d.showPageNumber ?? false
+            self.infiniteScroll = s.infiniteScroll ?? d.infiniteScroll ?? true
+            self.nonStrongsWordItalic = s.nonStrongsWordItalic ?? d.nonStrongsWordItalic ?? false
+            self.showMarkAsReadButton = s.showMarkAsReadButton ?? d.showMarkAsReadButton ?? true
+            self.showTitleScrollButton = s.showTitleScrollButton ?? d.showTitleScrollButton ?? false
+            self.showMemorizationIndicators = s.showMemorizationIndicators ?? d.showMemorizationIndicators ?? false
+            self.showAiDocMarkers = s.showAiDocMarkers ?? d.showAiDocMarkers ?? true
+            self.pageScrollAmount = TextDisplaySettings.normalizedPageScrollAmount(s.pageScrollAmount ?? d.pageScrollAmount)
+            self.showOrdinals = s.showOrdinals ?? d.showOrdinals ?? false
         }
     }
 
@@ -7836,6 +7877,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
                 "osisRef": key,
                 "isNewTestament": isNT,
                 "features": [String: Any](),
+                "hasStrongs": hasStrongs,
                 "ordinalRange": ordinalRange,
                 "language": "en",
                 "direction": "ltr",

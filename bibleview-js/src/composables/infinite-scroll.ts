@@ -21,20 +21,36 @@
  * @author Martin Denham [mjdenham at gmail dot com]
  */
 
-import {computed, nextTick, onMounted, watch} from "vue";
+import {computed, nextTick, onMounted, ref, watch} from "vue";
 import {filterNotNull, setupWindowEventListener, waitNextAnimationFrame} from "@/utils";
 import {UseAndroid} from "@/composables/android";
 import {AnyDocument, isOsisDocument} from "@/types/documents";
 import {Nullable} from "@/types/common";
 import {BookCategory} from "@/types/client-objects";
 import {UseScroll} from "@/composables/scroll";
+import {Config} from "@/composables/config";
 
 const maxConsecutiveEmptyLoads = 3; // Safety limit
 
+/**
+ * Coordinates automatic and manual loading of adjacent chapter-like reader content.
+ *
+ * @param requestPreviousChapter - Native bridge request for content before the current reader page.
+ * @param requestNextChapter - Native bridge request for content after the current reader page.
+ * @param scrollYAtStart - Shared scroll anchor that is adjusted when content is inserted above the viewport.
+ * @param bibleViewDocuments - Reactive reader document list mutated when adjacent content is inserted.
+ * @param config - Reader configuration controlling whether automatic infinite scroll is enabled.
+ * @returns Reactive loading, edge, and capability state plus manual load actions used by `BibleView`.
+ * @remarks The composable mutates `bibleViewDocuments`, installs window scroll/touch listeners, and calls
+ * the native bridge only through the supplied request functions. AI OSIS documents are intentionally
+ * excluded from chapter navigation because Android treats them as single-page generated content; if
+ * Android changes that contract, this predicate must be updated in both shared Vue sources.
+ */
 export function useInfiniteScroll(
     {requestPreviousChapter, requestNextChapter}: UseAndroid,
     {scrollYAtStart}: UseScroll,
     bibleViewDocuments: AnyDocument[],
+    config: Config,
 ) {
     const enabledCategories: Set<BookCategory> = new Set(["BIBLE", "GENERAL_BOOK"]);
     let currentPos: number;
@@ -43,8 +59,11 @@ export function useInfiniteScroll(
     let touchDown = false;
     let textToBeInsertedAtTop: Nullable<AnyDocument[]> = null;
     let isProcessing = false;
+    const reachedStart = ref(false);
     const addChaptersToTop: Promise<Nullable<AnyDocument>>[] = [];
     const addChaptersToEnd: Promise<Nullable<AnyDocument>>[] = [];
+    const reachedEnd = ref(false);
+    let consecutiveEmptyLoads = 0;
 
     console.log("inf: Queues", {addChaptersToTop, addChaptersToEnd});
 
@@ -54,6 +73,9 @@ export function useInfiniteScroll(
         addChaptersToTop.splice(0);
         addChaptersToEnd.splice(0);
         clearDocumentCount++;
+        reachedEnd.value = false;
+        consecutiveEmptyLoads = 0;
+        reachedStart.value = false;
     }
 
     function needsMoreContent(): boolean {
@@ -74,7 +96,6 @@ export function useInfiniteScroll(
         console.log("inf: processQueues")
         isProcessing = true;
         const clearCountStart = clearDocumentCount;
-        let consecutiveEmptyLoads = 0;
 
         try {
             do {
@@ -91,6 +112,8 @@ export function useInfiniteScroll(
                     return;
                 }
                 
+                const requestedEnd = endChaps.length > 0;
+                const requestedTop = topChaps.length > 0;
                 let contentAdded = false;
                 if(endChaps.length > 0) {
                     const validEndChaps = filterNotNull(endChaps);
@@ -99,6 +122,9 @@ export function useInfiniteScroll(
                         insertThisTextAtEnd(...validEndChaps);
                         contentAdded = true;
                         await nextTick();
+                    } else {
+                        reachedEnd.value = true;
+                        console.log("inf: Reached end of content")
                     }
                 }
                 if(topChaps.length > 0) {
@@ -108,14 +134,24 @@ export function useInfiniteScroll(
                         await insertThisTextAtTop(validTopChaps);
                         contentAdded = true;
                         await nextTick();
+                    } else {
+                        reachedStart.value = true;
+                        console.log("inf: Reached start of content")
                     }
                 }
                 
                 // Track consecutive empty loads to prevent infinite loops
                 if (!contentAdded) {
                     consecutiveEmptyLoads++;
-                    if (consecutiveEmptyLoads >= maxConsecutiveEmptyLoads) {
-                        console.log("inf: Too many consecutive empty loads, stopping");
+                    const limit = config.infiniteScroll ? maxConsecutiveEmptyLoads : 1;
+                    if (consecutiveEmptyLoads >= limit) {
+                        console.log("inf: No more content available, stopping");
+                        if (requestedEnd) {
+                            reachedEnd.value = true;
+                        }
+                        if (requestedTop) {
+                            reachedStart.value = true;
+                        }
                         break;
                     }
                 } else {
@@ -129,30 +165,63 @@ export function useInfiniteScroll(
         }
     }
 
+    const loadingAtEnd = ref(false);
+    const loadingAtTop = ref(false);
+
+    /**
+     * Requests and queues the previous chapter for top-edge manual loading.
+     *
+     * @returns Nothing; queue processing continues asynchronously through `processQueues`.
+     * @remarks The function mutates the top loading flag and native request queue, then schedules the
+     * shared queue processor. Once the native bridge has returned the start-of-content `null` sentinel,
+     * the request is ignored so manual controls cannot repeatedly show spinners or issue no-op bridge
+     * calls at the start of a document.
+     */
     function loadTextAtTop() {
-        addChaptersToTop.push(requestPreviousChapter())
+        if (reachedStart.value) return;
+        loadingAtTop.value = true;
+        addChaptersToTop.push(requestPreviousChapter().finally(() => { loadingAtTop.value = false; }))
         processQueues();
     }
 
+    /**
+     * Requests and queues the next chapter for bottom-edge manual and automatic loading.
+     *
+     * @returns A promise that resolves after queued content is processed and any follow-up fill request
+     * has completed.
+     * @remarks The function mutates the bottom loading flag and native request queue. It respects the
+     * bottom edge sentinel before making native bridge calls, then preserves the existing auto-fill
+     * behavior that keeps requesting content when infinite scrolling is enabled and the viewport remains
+     * under-filled.
+     */
     async function loadTextAtEnd() {
-        addChaptersToEnd.push(requestNextChapter())
+        if (reachedEnd.value) return;
+        loadingAtEnd.value = true;
+        addChaptersToEnd.push(requestNextChapter().finally(() => { loadingAtEnd.value = false; }))
         await processQueues();
         await waitNextAnimationFrame();
 
-        if (isEnabled.value && needsMoreContent() && !isProcessing) {
+        if (isEnabled.value && needsMoreContent() && !isProcessing && !reachedEnd.value) {
             await loadTextAtEnd();
         }
     }
 
     const
-        isEnabled = computed(() => {
+        // Whether the current document type supports chapter navigation (Bible or GenBook).
+        // AI documents are generated single-page content, so they cannot expose adjacent-chapter controls.
+        documentSupportsChapterNavigation = computed(() => {
            if(bibleViewDocuments.length === 0) return false;
            const doc = bibleViewDocuments[0];
            if(isOsisDocument(doc)) {
-                return enabledCategories.has(doc.bookCategory)
+                return !doc.isAiDocument && enabledCategories.has(doc.bookCategory)
            } else {
                return doc.type === "bible";
            }
+        }),
+        // Whether infinite scroll is currently active for the supported document and reader settings.
+        isEnabled = computed(() => {
+            if(!config.infiniteScroll || !documentSupportsChapterNavigation.value) return false;
+            return true;
         }),
         UP_MARGIN = 2,
         DOWN_MARGIN = 200,
@@ -160,11 +229,11 @@ export function useInfiniteScroll(
         scrollPosition = () => window.pageYOffset,
         setScrollPosition = (offset: number) => window.scrollTo(0, offset),
         addMoreAtEnd = () => {
-            if (!isEnabled.value || isProcessing) return;
+            if (!isEnabled.value || isProcessing || reachedEnd.value) return;
             loadTextAtEnd();
         },
         addMoreAtTop = () => {
-            if (!isEnabled.value || isProcessing) return;
+            if (!isEnabled.value || isProcessing || reachedStart.value) return;
             if (touchDown) {
                 // adding at top is tricky and if the user is still holding there seems no way to set the scroll position after insert
                 addMoreAtTopOnTouchUp = true;
@@ -237,5 +306,15 @@ export function useInfiniteScroll(
         bottomElem = document.getElementById("bottom")!;
     });
 
-    return {documentsCleared};
+    return {
+        documentsCleared,
+        loadingAtEnd,
+        loadingAtTop,
+        loadTextAtTop,
+        loadTextAtEnd,
+        documentSupportsChapterNavigation,
+        infiniteScrollIsEnabled: isEnabled,
+        reachedStart,
+        reachedEnd,
+    };
 }

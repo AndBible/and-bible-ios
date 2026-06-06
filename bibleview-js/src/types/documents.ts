@@ -16,6 +16,7 @@
  */
 
 import {
+    AiDocMarker,
     BookCategory,
     BibleBookmark,
     Label,
@@ -74,7 +75,7 @@ export interface OsisDocument extends BaseOsisDocument {
     sourcePromptId?: Nullable<string>
     sourcePromptName?: Nullable<string>
     sourceModelName?: Nullable<string>
-    aiDocMarkers?: GenericBookmark[]
+    aiDocMarkers?: AiDocMarker[]
 }
 
 export interface ErrorDocument extends BaseDocument {
@@ -86,6 +87,7 @@ export interface ErrorDocument extends BaseDocument {
 export interface BibleDocumentType extends BaseOsisDocument {
     type: "bible"
     bookmarks: BibleBookmark[]
+    aiDocMarkers?: AiDocMarker[]
     bibleBookName: string
     addChapter: boolean
     chapterNumber: number

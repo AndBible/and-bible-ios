@@ -108,6 +108,7 @@ import {androidKey, exportModeKey, globalBookmarksKey, scrollKey, journalKey} fr
 import {FontAwesomeIcon} from "@fortawesome/vue-fontawesome";
 import {adjustedColorOrig} from "@/utils";
 import {useStudyPad} from "@/composables/journal";
+import {isBibleBookmark, isGenericBookmark} from "@/composables/bookmarks";
 import {StudyPadDocument} from "@/types/documents";
 import {
     BaseBookmarkToLabel,
@@ -180,14 +181,27 @@ const journalEntries: Ref<StudyPadItem[]> = computed({
     get:
         () => {
             let entries: StudyPadItem[] = [];
-            entries.push(...globalBookmarks.bookmarks.value.filter(b => b.labels.includes(label.id)).map(b => {
-                const bookmarkToLabel = bookmarkToLabels.get(b.id)!;
-                return {
-                    ...b,
-                    orderNumber: bookmarkToLabel.orderNumber,
-                    indentLevel: bookmarkToLabel.indentLevel,
-                    expandContent: bookmarkToLabel.expandContent,
-                    bookmarkToLabel
+            entries.push(...globalBookmarks.bookmarks.value.filter(b =>
+                (isBibleBookmark(b) || isGenericBookmark(b)) && b.labels.includes(label.id)
+            ).map(b => {
+                if (isBibleBookmark(b)) {
+                    const bookmarkToLabel = bookmarkToLabels.get(b.id)! as BibleBookmarkToLabel;
+                    return {
+                        ...b,
+                        orderNumber: bookmarkToLabel.orderNumber,
+                        indentLevel: bookmarkToLabel.indentLevel,
+                        expandContent: bookmarkToLabel.expandContent,
+                        bookmarkToLabel
+                    } as StudyPadBibleBookmarkItem;
+                } else {
+                    const bookmarkToLabel = bookmarkToLabels.get(b.id)! as GenericBookmarkToLabel;
+                    return {
+                        ...b,
+                        orderNumber: bookmarkToLabel.orderNumber,
+                        indentLevel: bookmarkToLabel.indentLevel,
+                        expandContent: bookmarkToLabel.expandContent,
+                        bookmarkToLabel
+                    } as StudyPadGenericBookmarkItem;
                 }
             }))
             entries.push(...journalTextEntries.values())

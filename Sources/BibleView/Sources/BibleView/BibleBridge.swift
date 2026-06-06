@@ -145,6 +145,10 @@ public protocol BibleBridgeDelegate: AnyObject {
      `sendResponse(callId:value:)` once more content has been loaded.
      */
     func bridge(_ bridge: BibleBridge, requestMoreToEnd callId: Int)
+    /// Navigates to the next chapter without appending content to the current rendered document.
+    func bridgeDidRequestGoToNextChapter(_ bridge: BibleBridge)
+    /// Navigates to the previous chapter without prepending content to the current rendered document.
+    func bridgeDidRequestGoToPreviousChapter(_ bridge: BibleBridge)
 
     // MARK: - Bookmarks
     /**
@@ -339,6 +343,12 @@ public extension BibleBridgeDelegate {
 
     /// Default no-op to preserve source compatibility for clients that do not handle reading progress.
     func bridge(_ bridge: BibleBridge, unmarkChapterRead bookInitials: String, startOrdinal: Int, chapter: Int) {}
+
+    /// Default no-op to preserve source compatibility for clients that do not handle manual chapter navigation.
+    func bridgeDidRequestGoToNextChapter(_ bridge: BibleBridge) {}
+
+    /// Default no-op to preserve source compatibility for clients that do not handle manual chapter navigation.
+    func bridgeDidRequestGoToPreviousChapter(_ bridge: BibleBridge) {}
 
     /// Default null response to preserve source compatibility for clients without My Documents storage.
     func bridge(_ bridge: BibleBridge, getMyDocumentPageRawContent callId: Int, bookInitials: String, pageKey: String) {
@@ -744,6 +754,14 @@ public final class BibleBridge: NSObject, WKScriptMessageHandler {
                   let start = arguments.int(1),
                   let chapter = arguments.int(2) else { return .malformed }
             delegate?.bridge(self, unmarkChapterRead: initials, startOrdinal: start, chapter: chapter)
+            return .handled
+        case "goToNextChapter":
+            guard arguments.isEmpty else { return .malformed }
+            delegate?.bridgeDidRequestGoToNextChapter(self)
+            return .handled
+        case "goToPreviousChapter":
+            guard arguments.isEmpty else { return .malformed }
+            delegate?.bridgeDidRequestGoToPreviousChapter(self)
             return .handled
         case "addParagraphBreakBookmark":
             guard let initials = arguments.string(0),

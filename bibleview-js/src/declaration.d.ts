@@ -151,6 +151,12 @@ type TranslatedStrings = {
     wordBlur: string
     wordScramble: string
     more: string
+    previousChapter: string
+    nextChapter: string
+    loadMore: string
+    scrollToTitle: string
+    markChapterAsRead: string
+    openChapterReadHistory: string
 }
 
 type Strings = TranslatedStrings & UntranslatedStrings

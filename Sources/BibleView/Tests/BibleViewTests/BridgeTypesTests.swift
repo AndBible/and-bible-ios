@@ -4,6 +4,27 @@ import XCTest
 @testable import BibleView
 
 final class BridgeTypesTests: XCTestCase {
+    /**
+     Protects the default OSIS fragment bridge shape when no module features are available.
+
+     The Swift initializer is commonly used without an explicit `features` argument for plain Bible
+     fragments. A passing test proves those callers still emit the TypeScript-required `features`
+     object as `{}` instead of omitting the key, which would break the shared client object contract.
+     */
+    func testOsisFragmentDefaultFeaturesEncodeAsEmptyObject() throws {
+        let fragment = OsisFragment(
+            xml: "<div>In the beginning...</div>",
+            key: "Gen.1.1",
+            keyName: "Genesis 1:1",
+            bookInitials: "KJV"
+        )
+
+        let object = try bridgeJSONObject(fragment)
+
+        let features = try XCTUnwrap(object["features"] as? [String: Any])
+        XCTAssertTrue(features.isEmpty)
+    }
+
     func testOsisFragmentCodable() throws {
         let fragment = OsisFragment(
             xml: "<div>In the beginning...</div>",
@@ -27,8 +48,17 @@ final class BridgeTypesTests: XCTestCase {
         XCTAssertEqual(decoded.bookInitials, "KJV")
         XCTAssertEqual(decoded.direction, "ltr")
         XCTAssertEqual(decoded.ordinalRange, [0, 10])
+        XCTAssertNil(decoded.features.type)
+        XCTAssertNil(decoded.features.keyName)
     }
 
+    /**
+     Protects the package-level `OsisFragment` payload contract consumed by the Vue reader.
+
+     The expected key set tracks `bibleview-js/src/types/client-objects.ts`; a failure means
+     Swift bridge serialization drifted from the shared client object shape used by Android
+     and iOS renderer code.
+     */
     func testOsisFragmentPayloadKeysMatchClientObjectContract() throws {
         let fragment = OsisFragment(
             xml: "<div>In the beginning...</div>",
@@ -41,6 +71,7 @@ final class BridgeTypesTests: XCTestCase {
             osisRef: "Gen.1",
             isNewTestament: false,
             features: OsisFeatures(type: "hebrew", keyName: "H00430"),
+            hasStrongs: true,
             ordinalRange: [1, 31],
             language: "en",
             direction: "ltr"
@@ -61,6 +92,7 @@ final class BridgeTypesTests: XCTestCase {
                 "osisRef",
                 "isNewTestament",
                 "features",
+                "hasStrongs",
                 "ordinalRange",
                 "language",
                 "direction",
@@ -71,6 +103,7 @@ final class BridgeTypesTests: XCTestCase {
         XCTAssertEqual(object["bookAbbreviation"] as? String, "Gen")
         XCTAssertEqual(object["osisRef"] as? String, "Gen.1")
         XCTAssertEqual(object["direction"] as? String, "ltr")
+        XCTAssertEqual(object["hasStrongs"] as? Bool, true)
 
         let features = try XCTUnwrap(object["features"] as? [String: Any])
         XCTAssertJSONKeys(features, ["type", "keyName"])

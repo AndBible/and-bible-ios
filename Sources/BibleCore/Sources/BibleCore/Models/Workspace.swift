@@ -173,6 +173,15 @@ public struct RecentLabel: Codable, Sendable {
  the resolved values are pushed into native/web readers.
  */
 public struct TextDisplaySettings: Codable, Sendable, Equatable {
+    /**
+     Android `PAGE_SCROLL_AMOUNT` choices in dialog order.
+
+     The values are sourced from Android's `pageScrollAmountValues` array and
+     `PageScrollAmountPreference`, so iOS settings rows and reader config serialization use the
+     same discrete percentage contract as Android.
+     */
+    public static let pageScrollAmountValues = [25, 33, 50, 66, 75, 100]
+
     /// Font size in points for the rendered document text.
     public var fontSize: Int?
 
@@ -239,6 +248,30 @@ public struct TextDisplaySettings: Codable, Sendable, Equatable {
     /// Whether page numbers are shown in paged reading modes.
     public var showPageNumber: Bool?
 
+    /// Whether the reader automatically loads adjacent chapters while scrolling.
+    public var infiniteScroll: Bool?
+
+    /// Whether added words without Strong's numbers are italicized in Strong's-capable documents.
+    public var nonStrongsWordItalic: Bool?
+
+    /// Whether the end-of-chapter mark-as-read affordance is shown.
+    public var showMarkAsReadButton: Bool?
+
+    /// Whether section titles show Android's scroll-to-title button.
+    public var showTitleScrollButton: Bool?
+
+    /// Whether memorized and target verse margin indicators are rendered.
+    public var showMemorizationIndicators: Bool?
+
+    /// Whether AI-document verse marker icons are rendered in the bookmark layer.
+    public var showAiDocMarkers: Bool?
+
+    /// Percentage of the page height used by page-up and page-down reader actions.
+    public var pageScrollAmount: Int?
+
+    /// Whether ordinal markers are rendered beside ordinal-bearing text anchors.
+    public var showOrdinals: Bool?
+
     /// Signed ARGB text color used in day mode.
     public var dayTextColor: Int?
 
@@ -265,6 +298,23 @@ public struct TextDisplaySettings: Codable, Sendable, Equatable {
 
     /// Creates an empty override set where every value inherits from a parent/default source.
     public init() {}
+
+    /**
+     Normalizes `PAGE_SCROLL_AMOUNT` to Android's fixed dialog values.
+
+     Android's `PageScrollAmountPreference` selects the final `100%` entry when storage contains an
+     unknown value. iOS uses the same fallback before displaying picker state, resolving inherited
+     settings, or serializing the value into WebView paging config.
+
+     - Parameter value: Optional persisted or inherited page-scroll percentage.
+     - Returns: A supported percentage in Android dialog order, or `100` for nil/unknown values.
+     - Note: This method is deterministic and side-effect free; it does not rewrite persisted
+       settings by itself.
+     */
+    public static func normalizedPageScrollAmount(_ value: Int?) -> Int {
+        guard let value, pageScrollAmountValues.contains(value) else { return 100 }
+        return value
+    }
 
     /**
      Resolves one optional setting through the inheritance chain.
@@ -319,6 +369,14 @@ public struct TextDisplaySettings: Codable, Sendable, Equatable {
         s.justifyText = false
         s.hyphenation = true
         s.showPageNumber = false
+        s.infiniteScroll = true
+        s.nonStrongsWordItalic = false
+        s.showMarkAsReadButton = true
+        s.showTitleScrollButton = false
+        s.showMemorizationIndicators = false
+        s.showAiDocMarkers = true
+        s.pageScrollAmount = 100
+        s.showOrdinals = false
         // Colors use signed ARGB Int32 values shared with the Vue.js renderer.
         s.dayTextColor = -16777216
         s.dayBackground = -1
@@ -378,6 +436,14 @@ public struct TextDisplaySettings: Codable, Sendable, Equatable {
         field(\.justifyText),
         field(\.hyphenation),
         field(\.showPageNumber),
+        field(\.infiniteScroll),
+        field(\.nonStrongsWordItalic),
+        field(\.showMarkAsReadButton),
+        field(\.showTitleScrollButton),
+        field(\.showMemorizationIndicators),
+        field(\.showAiDocMarkers),
+        field(\.pageScrollAmount),
+        field(\.showOrdinals),
         field(\.dayTextColor),
         field(\.dayBackground),
         field(\.dayNoise),
@@ -472,6 +538,16 @@ public struct TextDisplaySettings: Codable, Sendable, Equatable {
         r.justifyText = window?.justifyText ?? workspace?.justifyText ?? global?.justifyText ?? d.justifyText
         r.hyphenation = window?.hyphenation ?? workspace?.hyphenation ?? global?.hyphenation ?? d.hyphenation
         r.showPageNumber = window?.showPageNumber ?? workspace?.showPageNumber ?? global?.showPageNumber ?? d.showPageNumber
+        r.infiniteScroll = window?.infiniteScroll ?? workspace?.infiniteScroll ?? global?.infiniteScroll ?? d.infiniteScroll
+        r.nonStrongsWordItalic = window?.nonStrongsWordItalic ?? workspace?.nonStrongsWordItalic ?? global?.nonStrongsWordItalic ?? d.nonStrongsWordItalic
+        r.showMarkAsReadButton = window?.showMarkAsReadButton ?? workspace?.showMarkAsReadButton ?? global?.showMarkAsReadButton ?? d.showMarkAsReadButton
+        r.showTitleScrollButton = window?.showTitleScrollButton ?? workspace?.showTitleScrollButton ?? global?.showTitleScrollButton ?? d.showTitleScrollButton
+        r.showMemorizationIndicators = window?.showMemorizationIndicators ?? workspace?.showMemorizationIndicators ?? global?.showMemorizationIndicators ?? d.showMemorizationIndicators
+        r.showAiDocMarkers = window?.showAiDocMarkers ?? workspace?.showAiDocMarkers ?? global?.showAiDocMarkers ?? d.showAiDocMarkers
+        r.pageScrollAmount = normalizedPageScrollAmount(
+            window?.pageScrollAmount ?? workspace?.pageScrollAmount ?? global?.pageScrollAmount ?? d.pageScrollAmount
+        )
+        r.showOrdinals = window?.showOrdinals ?? workspace?.showOrdinals ?? global?.showOrdinals ?? d.showOrdinals
         r.dayTextColor = window?.dayTextColor ?? workspace?.dayTextColor ?? global?.dayTextColor ?? d.dayTextColor
         r.dayBackground = window?.dayBackground ?? workspace?.dayBackground ?? global?.dayBackground ?? d.dayBackground
         r.dayNoise = window?.dayNoise ?? workspace?.dayNoise ?? global?.dayNoise ?? d.dayNoise

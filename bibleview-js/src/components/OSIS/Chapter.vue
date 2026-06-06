@@ -44,7 +44,7 @@ const startTag = computed(() => !props.eID);
 const chapterNum = computed(() => {
     return (props.n || props.osisID!.split(".")[1]).trim()
 });
-const {config, sprintf, strings} = useCommon();
+const {sprintf, strings} = useCommon();
 
 </script>
 

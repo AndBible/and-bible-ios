@@ -18,6 +18,7 @@
 import {mount} from "@vue/test-utils";
 import OsisSegment from "@/components/documents/OsisSegment.vue";
 import BibleDocument from "@/components/documents/BibleDocument.vue";
+import OsisFragment from "@/components/documents/OsisFragment.vue";
 
 import test1Xml from "./testdata/eph.2-kjva.xml?raw";
 import test1Result from "./testdata/eph.2-kjva-result.html?raw";
@@ -253,6 +254,66 @@ describe("OsisSegment.vue", () => {
         const strongsWord = wrapper.find("span.link-style");
         expect(strongsWord.exists()).toBe(true);
         expect(strongsWord.text()).toContain("God");
+    });
+
+    /**
+     * Protects dictionary and Strong's lookup documents from Bible-only added-word styling.
+     *
+     * The setup mounts shared OSIS fragments with `nonStrongsWordItalic` enabled through the same
+     * injected config object used by the reader and stubs child rendering to isolate the wrapper
+     * class. A passing test proves dictionary fragments that expose Strong's features do not receive
+     * the class, while Bible fragments with Strong's data still do.
+     */
+    it("only applies non-Strong's italic styling to Bible fragments", () => {
+        const config = {nonStrongsWordItalic: true};
+        const fragment = {
+            xml: "<div>content</div>",
+            key: "H00430",
+            keyName: "H00430",
+            v11n: "KJVA",
+            bookCategory: "DICTIONARY",
+            bookInitials: "StrongsHebrew",
+            bookAbbreviation: "Dict",
+            osisRef: "H00430",
+            isNewTestament: false,
+            features: {type: "hebrew"},
+            hasStrongs: true,
+            ordinalRange: [0, 0],
+            language: "en",
+            direction: "ltr",
+        };
+        const global = {
+            provide: {
+                [configKey]: config,
+                [appSettingsKey]: {},
+                [calculatedConfigKey]: ref({topOffset: 0}),
+                [androidKey]: {},
+                [stringsKey]: {},
+                [customCssKey]: useCustomCss(),
+            },
+            stubs: {
+                OsisSegment: true,
+            },
+        };
+
+        const dictionaryWrapper = mount(OsisFragment, {
+            props: {fragment},
+            global,
+        });
+        const bibleWrapper = mount(OsisFragment, {
+            props: {
+                fragment: {
+                    ...fragment,
+                    bookCategory: "BIBLE",
+                    bookInitials: "KJV",
+                    osisRef: "Gen.1",
+                },
+            },
+            global,
+        });
+
+        expect(dictionaryWrapper.classes()).not.toContain("italic-non-strongs");
+        expect(bibleWrapper.classes()).toContain("italic-non-strongs");
     });
 
     it("renders TEI sense markers without placeholder dot-only wrappers", () => {

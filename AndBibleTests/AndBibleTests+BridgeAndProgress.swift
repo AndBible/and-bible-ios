@@ -114,6 +114,8 @@ extension AndBibleTests {
             .handled
         )
         XCTAssertEqual(bridge.dispatchMessage(method: "unmarkChapterRead", args: ["KJV", 1, 1]), .handled)
+        XCTAssertEqual(bridge.dispatchMessage(method: "goToNextChapter", args: []), .handled)
+        XCTAssertEqual(bridge.dispatchMessage(method: "goToPreviousChapter", args: []), .handled)
         XCTAssertEqual(bridge.dispatchMessage(method: "addParagraphBreakBookmark", args: ["KJV", 1, -1]), .handled)
         XCTAssertEqual(
             bridge.dispatchMessage(method: "addGenericParagraphBreakBookmark", args: ["KJV", "Gen.1.1", 1, -1]),

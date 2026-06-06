@@ -130,7 +130,7 @@ const editMode = computed<boolean>({
     }
 });
 
-function isBookmark(item: StudyPadItem): item is BaseStudyPadBookmarkItem {
+function isBookmark(item: StudyPadItem): item is StudyPadBibleBookmarkItem | StudyPadGenericBookmarkItem {
     return ["bookmark", "generic-bookmark"].includes(item.type)
 }
 
@@ -225,10 +225,12 @@ const genericUrl = computed(
         const bookmarkItem = props.journalEntry as StudyPadGenericBookmarkItem
         const doc = bookmarkItem.bookInitials;
         const osis = bookmarkItem.key;
-        const ordinal = bookmarkItem.ordinalRange[0];
+        const ordinal = bookmarkItem.ordinalRange?.[0];
 
         if(exportMode.value) {
             return ""
+        } else if(ordinal == null) {
+            return `osis://?osis=${osis}&doc=${doc}`;
         } else {
             return `osis://?osis=${osis}&doc=${doc}&ordinal=${ordinal}`;
         }

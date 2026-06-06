@@ -66,6 +66,9 @@ public struct TextDisplaySettingsView: View {
         /// Android `LINE_SPACING` numeric editor.
         case lineSpacing
 
+        /// Android `PAGE_SCROLL_AMOUNT` single-choice editor.
+        case pageScrollAmount
+
         /// Stable identity for SwiftUI sheet presentation.
         var id: String { rawValue }
     }
@@ -127,6 +130,17 @@ public struct TextDisplaySettingsView: View {
         )
     }
 
+    /// Single-choice binding for Android's `PAGE_SCROLL_AMOUNT` preference editor.
+    private var pageScrollAmountBinding: Binding<Int> {
+        Binding(
+            get: { TextDisplaySettings.normalizedPageScrollAmount(settings.pageScrollAmount) },
+            set: {
+                settings.pageScrollAmount = TextDisplaySettings.normalizedPageScrollAmount($0)
+                onChange?()
+            }
+        )
+    }
+
     /**
      User-visible Strong's mode labels in Android dialog order.
 
@@ -141,6 +155,20 @@ public struct TextDisplaySettingsView: View {
             (2, String(localized: "links")),
             (3, String(localized: "hidden")),
         ]
+    }
+
+    /**
+     Android page-scroll amount choices from `arrays.xml`.
+
+     - Returns: Discrete percentage values accepted by Android's
+       `PageScrollAmountPreference`.
+     - Side effects: none.
+     - Failure modes: none; this list is intentionally fixed to the Android source values.
+     */
+    private var pageScrollAmountOptions: [(value: Int, label: String)] {
+        TextDisplaySettings.pageScrollAmountValues.map { value in
+            (value, "\(value)%")
+        }
     }
 
     /**
@@ -321,6 +349,17 @@ public struct TextDisplaySettingsView: View {
         )
     }
 
+    /// Android dynamic `PAGE_SCROLL_AMOUNT` row title containing the current percentage.
+    private var pageScrollAmountTitle: String {
+        String.localizedStringWithFormat(
+            String(
+                localized: "text_display_page_scroll_amount_title_format",
+                defaultValue: "Page scroll amount (%d%%)"
+            ),
+            TextDisplaySettings.normalizedPageScrollAmount(settings.pageScrollAmount)
+        )
+    }
+
     /// Current user-visible Strong's mode value shown in the row editor.
     private var strongsModeDetail: String {
         let selectedValue = settings.strongsMode ?? 0
@@ -365,7 +404,12 @@ public struct TextDisplaySettingsView: View {
                             summary: androidSummary("MORPH"),
                             isOn: boolBinding(\.showMorphology, default: false)
                         )
-                        disabledPreferenceSwitchRow(androidKey: "NON_STRONGS_WORD_ITALIC")
+                        preferenceSwitchRow(
+                            androidKey: "NON_STRONGS_WORD_ITALIC",
+                            title: androidTitle("NON_STRONGS_WORD_ITALIC"),
+                            summary: androidSummary("NON_STRONGS_WORD_ITALIC"),
+                            isOn: boolBinding(\.nonStrongsWordItalic, default: false)
+                        )
                         preferenceSwitchRow(
                             androidKey: "FOOTNOTES",
                             title: androidTitle("FOOTNOTES"),
@@ -398,7 +442,12 @@ public struct TextDisplaySettingsView: View {
                             summary: androidSummary("SECTIONTITLES"),
                             isOn: boolBinding(\.showSectionTitles, default: true)
                         )
-                        disabledPreferenceSwitchRow(androidKey: "TITLE_SCROLL_BUTTON")
+                        preferenceSwitchRow(
+                            androidKey: "TITLE_SCROLL_BUTTON",
+                            title: androidTitle("TITLE_SCROLL_BUTTON"),
+                            summary: androidSummary("TITLE_SCROLL_BUTTON"),
+                            isOn: boolBinding(\.showTitleScrollButton, default: false)
+                        )
                         preferenceSwitchRow(
                             androidKey: "VERSENUMBERS",
                             title: androidTitle("VERSENUMBERS"),
@@ -510,6 +559,29 @@ public struct TextDisplaySettingsView: View {
                         )
                     }
 
+                    preferenceSection(.pageScrolling) {
+                        preferenceSwitchRow(
+                            androidKey: "INFINITE_SCROLL",
+                            title: androidTitle("INFINITE_SCROLL"),
+                            summary: androidSummary("INFINITE_SCROLL"),
+                            isOn: boolBinding(\.infiniteScroll, default: true)
+                        )
+                        preferenceActionRow(
+                            androidKey: "PAGE_SCROLL_AMOUNT",
+                            title: pageScrollAmountTitle,
+                            summary: androidSummary("PAGE_SCROLL_AMOUNT"),
+                            accessibilityIdentifier: "textDisplayPageScrollAmountButton"
+                        ) {
+                            activePreferenceEditor = .pageScrollAmount
+                        }
+                        preferenceSwitchRow(
+                            androidKey: "ORDINALS",
+                            title: androidTitle("ORDINALS"),
+                            summary: androidSummary("ORDINALS"),
+                            isOn: boolBinding(\.showOrdinals, default: false)
+                        )
+                    }
+
                     preferenceSection(.textBookmarks) {
                         preferenceSwitchRow(
                             androidKey: "BOOKMARKS_SHOW",
@@ -522,6 +594,12 @@ public struct TextDisplaySettingsView: View {
                             title: androidTitle("MYNOTES"),
                             summary: androidSummary("MYNOTES"),
                             isOn: boolBinding(\.showMyNotes, default: true)
+                        )
+                        preferenceSwitchRow(
+                            androidKey: "AI_DOC_MARKERS",
+                            title: androidTitle("AI_DOC_MARKERS"),
+                            summary: androidSummary("AI_DOC_MARKERS"),
+                            isOn: boolBinding(\.showAiDocMarkers, default: true)
                         )
                         NavigationLink {
                             HiddenBookmarkLabelsView(
@@ -542,6 +620,21 @@ public struct TextDisplaySettingsView: View {
                         .buttonStyle(.plain)
                         .accessibilityIdentifier("textDisplayHiddenBookmarkLabelsLink")
                         preferenceDivider()
+                    }
+
+                    preferenceSection(.readingAndMemorization) {
+                        preferenceSwitchRow(
+                            androidKey: "MARK_AS_READ_BUTTON",
+                            title: androidTitle("MARK_AS_READ_BUTTON"),
+                            summary: androidSummary("MARK_AS_READ_BUTTON"),
+                            isOn: boolBinding(\.showMarkAsReadButton, default: true)
+                        )
+                        preferenceSwitchRow(
+                            androidKey: "MEMORIZATION_INDICATORS",
+                            title: androidTitle("MEMORIZATION_INDICATORS"),
+                            summary: androidSummary("MEMORIZATION_INDICATORS"),
+                            isOn: boolBinding(\.showMemorizationIndicators, default: false)
+                        )
                     }
                 }
                 .padding(.vertical, 8)
@@ -926,6 +1019,14 @@ public struct TextDisplaySettingsView: View {
                         range: Double(Self.lineSpacingRange.lowerBound)...Double(Self.lineSpacingRange.upperBound),
                         step: 1
                     )
+                case .pageScrollAmount:
+                    Picker(androidTitle("PAGE_SCROLL_AMOUNT"), selection: pageScrollAmountBinding) {
+                        ForEach(pageScrollAmountOptions, id: \.value) { option in
+                            Text(option.label)
+                                .tag(option.value)
+                        }
+                    }
+                    .pickerStyle(.inline)
                 }
             }
             .navigationTitle(preferenceEditorTitle(editor))
@@ -962,6 +1063,8 @@ public struct TextDisplaySettingsView: View {
             return androidTitle("TOPMARGIN")
         case .lineSpacing:
             return androidTitle("LINE_SPACING")
+        case .pageScrollAmount:
+            return androidTitle("PAGE_SCROLL_AMOUNT")
         }
     }
 

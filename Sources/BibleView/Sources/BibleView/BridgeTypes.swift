@@ -53,8 +53,10 @@ public struct OsisFragment: Codable, Sendable {
     public var osisRef: String
     /// Whether the fragment belongs to the New Testament for UI styling and feature toggles.
     public var isNewTestament: Bool
-    /// Optional feature flags describing Strong's and morphology availability.
-    public var features: OsisFeatures?
+    /// Feature flags describing Strong's and morphology availability; always encoded as an object.
+    public var features: OsisFeatures
+    /// Whether this fragment was produced from a Strong's-capable module.
+    public var hasStrongs: Bool
     /// Inclusive ordinal range rendered in this fragment.
     public var ordinalRange: [Int]
     /// BCP-47 language tag used for typography and language-sensitive client behavior.
@@ -73,7 +75,8 @@ public struct OsisFragment: Codable, Sendable {
         bookAbbreviation: String = "",
         osisRef: String = "",
         isNewTestament: Bool = false,
-        features: OsisFeatures? = nil,
+        features: OsisFeatures = OsisFeatures(),
+        hasStrongs: Bool = false,
         ordinalRange: [Int] = [],
         language: String = "en",
         direction: String = "ltr"
@@ -88,13 +91,14 @@ public struct OsisFragment: Codable, Sendable {
         self.osisRef = osisRef
         self.isNewTestament = isNewTestament
         self.features = features
+        self.hasStrongs = hasStrongs
         self.ordinalRange = ordinalRange
         self.language = language
         self.direction = direction
     }
 }
 
-/// Optional features of an OSIS fragment.
+/// Optional fields carried by the required OSIS fragment `features` bridge object.
 public struct OsisFeatures: Codable, Sendable {
     /// Feature family identifier such as `hebrew-and-greek`, `hebrew`, or `greek`.
     public var type: String? // "hebrew-and-greek", "hebrew", "greek"

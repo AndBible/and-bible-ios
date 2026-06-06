@@ -537,6 +537,7 @@
 "text_display_line_spacing_title_format" = "Line spacing (%1.1fx)";
 "text_display_margin_size_title_format" = "Margin size (%d/%d/%d mm)";
 "text_display_top_margin_title_format" = "Top margin (%d mm)";
+"text_display_page_scroll_amount_title_format" = "Page scroll amount (%d%%)";
 "text_display_left_margin_title_format" = "Left margin (%d mm)";
 "text_display_right_margin_title_format" = "Right margin (%d mm)";
 "text_display_max_width_title_format" = "Maximum width of text (%d mm)";

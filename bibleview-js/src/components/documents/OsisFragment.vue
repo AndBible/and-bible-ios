@@ -16,7 +16,7 @@
   -->
 
 <template>
-  <div :id="`frag-${uniqueId}`" :class="`sword-${fragment.bookInitials}`" :lang="fragment.language"
+  <div :id="`frag-${uniqueId}`" :class="[`sword-${fragment.bookInitials}`, {'italic-non-strongs': italicNonStrongs}]" :lang="fragment.language"
        :dir="fragment.direction">
     <OsisSegment :is-native-html="isNativeHtml" :osis-template="template"/>
   </div>
@@ -76,7 +76,21 @@ const template = computed(() => {
 });
 
 watch(props, () => refreshHighlight());
-useCommon();
+const {config} = useCommon();
+
+/**
+ * Controls the Bible-only styling that italicizes words without Strong's links.
+ *
+ * @returns Whether the fragment should receive the `italic-non-strongs` wrapper class.
+ * @remarks Dictionary and Strong's multi-document fragments also report `hasStrongs` through their
+ * feature metadata, but the display option describes added words in Bible text. Restricting the class
+ * here keeps shared dictionary and lookup renderers from inheriting Bible-only typography.
+ */
+const italicNonStrongs = computed(() => (
+    props.fragment.bookCategory === "BIBLE"
+    && props.fragment.hasStrongs
+    && config.nonStrongsWordItalic
+));
 </script>
 
 <style scoped>
@@ -104,5 +118,16 @@ useCommon();
 
 .night .mydoc-markdown {
     @include md.markdown-content-night;
+}
+
+.italic-non-strongs {
+  font-style: italic;
+
+  .has-strongs,
+  .w-base,
+  .verseNumber,
+  .titleStyle {
+    font-style: normal;
+  }
 }
 </style>
