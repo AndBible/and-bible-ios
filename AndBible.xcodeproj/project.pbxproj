@@ -685,7 +685,7 @@
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
 				DEVELOPMENT_ASSET_PATHS = "\"AndBible/Preview Content\"";
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = "$(inherited)";
 				ENABLE_PREVIEWS = YES;
 				GOOGLE_DRIVE_CLIENT_ID = "";
 				GOOGLE_DRIVE_REVERSED_CLIENT_ID = "";
@@ -777,7 +777,7 @@
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
 				DEVELOPMENT_ASSET_PATHS = "\"AndBible/Preview Content\"";
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = "$(inherited)";
 				ENABLE_PREVIEWS = YES;
 				GOOGLE_DRIVE_CLIENT_ID = "";
 				GOOGLE_DRIVE_REVERSED_CLIENT_ID = "";
