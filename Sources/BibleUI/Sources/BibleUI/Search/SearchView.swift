@@ -342,7 +342,7 @@ public struct SearchView: View {
         case .creatingIndex: "creatingIndex"
         case .ready: "ready"
         }
-        let baseState = "state=\(stateToken);query=\(query);searching=\(isSearching);results=\(results.count);scope=\(searchScopeToken(for: scopeOption));wordMode=\(searchWordModeToken(for: wordMode))"
+        let baseState = "state=\(stateToken);query=\(query);searching=\(isSearching);results=\(results.count);scope=\(searchScopeToken(for: scopeOption));wordMode=\(searchWordModeToken(for: wordMode));\(searchAccessibilityTranslationPickerToken)"
         guard UITestRuntimeConfiguration.enablesDetailedAccessibilityExports else {
             return baseState
         }
@@ -352,6 +352,18 @@ public struct SearchView: View {
     /// Stable selected-translation token exported for UI automation.
     private var searchAccessibilitySelectionToken: String {
         "selectedModules=\(selectedModules.sorted().joined(separator: ","))"
+    }
+
+    /**
+     Stable translation-picker presentation token exported for UI automation.
+     *
+     - Returns: `translationPicker=open` while SwiftUI is presenting the picker sheet, otherwise
+       `translationPicker=closed`.
+     - Side effects: none.
+     - Failure modes: This computed token does not fail.
+     */
+    private var searchAccessibilityTranslationPickerToken: String {
+        "translationPicker=\(showTranslationPicker ? "open" : "closed")"
     }
 
     /// Stable grouped-result totals exported for UI automation.
@@ -588,6 +600,7 @@ public struct SearchView: View {
 
             if installedBibleModules.count > 1 {
                 Button {
+                    isSearchFieldFocused = false
                     showTranslationPicker = true
                 } label: {
                     HStack {
@@ -608,7 +621,7 @@ public struct SearchView: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("searchTranslationPickerButton")
-                .accessibilityValue(searchAccessibilitySelectionToken)
+                .accessibilityValue("\(searchAccessibilitySelectionToken);\(searchAccessibilityTranslationPickerToken)")
             }
         }
         .padding(.horizontal)
