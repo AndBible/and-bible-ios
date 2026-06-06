@@ -1049,19 +1049,26 @@ public struct ImportExportView: View {
      - Side effects:
        - deletes any previous temporary export with the same canonical filename
        - moves the generated archive into the share-sheet location
+       - removes the generated archive if the canonical move fails
      - Failure modes: Rethrows file-system errors when the previous export cannot be removed or the
-       generated archive cannot be moved.
+       generated archive cannot be moved after attempting to clean up the source archive.
      */
     private func moveExportFileToShareDirectory(_ export: AndroidDatabaseBackupFileExport) throws -> URL {
-        let fileURL = FileManager.default.temporaryDirectory.appendingPathComponent(export.fileName)
+        let fileManager = FileManager.default
+        let fileURL = fileManager.temporaryDirectory.appendingPathComponent(export.fileName)
         if fileURL == export.fileURL {
             return fileURL
         }
-        if FileManager.default.fileExists(atPath: fileURL.path) {
-            try FileManager.default.removeItem(at: fileURL)
+        do {
+            if fileManager.fileExists(atPath: fileURL.path) {
+                try fileManager.removeItem(at: fileURL)
+            }
+            try fileManager.moveItem(at: export.fileURL, to: fileURL)
+            return fileURL
+        } catch {
+            try? fileManager.removeItem(at: export.fileURL)
+            throw error
         }
-        try FileManager.default.moveItem(at: export.fileURL, to: fileURL)
-        return fileURL
     }
 
     /**
