@@ -114,8 +114,8 @@ The top-level workflow may use native iOS plumbing:
 - Android "Phone storage" maps to the iOS Files exporter.
 - Android "Share" maps to the iOS share sheet.
 - Android application backup exports an APK. iOS apps cannot export their
-  installed bundle as an IPA/APK equivalent at runtime, so Application remains
-  visible for parity but reports that the operation is unavailable on iOS.
+  installed bundle as an IPA/APK equivalent at runtime, so iOS omits the
+  Application/APK backup row instead of presenting an inert choice.
 - Android AI Settings reset is not shown until iOS has a durable
   Android-equivalent AI settings store. Adding that row requires a real mapper
   or store first.

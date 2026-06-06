@@ -15,11 +15,9 @@ import UniformTypeIdentifiers
  Files export and share sheets replace Android intents, SwiftData restore engines replace raw
  Android database-file swaps, and document/module importers replace Android's `InstallZip` activity.
 
- Legacy JSON/CSV utilities are intentionally demoted out of the primary backup path because they do
- not represent Android backup semantics.
-
  Data dependencies:
- - `modelContext` is passed into `BackupService` for backup import/export operations
+- `modelContext` provides the SwiftData container used by Android-compatible database backup
+  import/export operations
 
  Side effects:
  - backup actions generate Android-compatible archives and then present Files export or share UI
@@ -29,30 +27,6 @@ import UniformTypeIdentifiers
  - status text reflects the latest success or failure message across all operations
  */
 public struct ImportExportView: View {
-    /**
-     Identifies the currently running export action so row-level progress feedback stays attached
-     to the command the user actually started.
-
-     The value is stored only for the lifetime of one export operation. It prevents concurrent
-     export taps through the derived `isExporting` state and lets each export row decide whether
-     to render a spinner without sharing misleading UI feedback with sibling rows.
-
-     - Side effects: Mutating this state re-renders the export section and changes button
-       disabled/progress state.
-     - Failure modes: Export routines must clear the value on every success and failure path so
-       the export section cannot remain disabled after an error.
-     */
-    private enum ExportAction {
-        /// Android-compatible database backup archive export.
-        case androidDatabaseBackup
-
-        /// Legacy iOS JSON backup export retained for local compatibility.
-        case legacyFullBackup
-
-        /// Bookmark CSV export.
-        case bookmarksCSV
-    }
-
     /// SwiftData context used by backup import/export services.
     @Environment(\.modelContext) private var modelContext
 
@@ -86,21 +60,18 @@ public struct ImportExportView: View {
     /// Controls presentation of the Android documents restore/import picker.
     @State private var showDocumentsRestorePicker = false
 
-    /// Controls presentation of the legacy JSON/CSV import picker.
-    @State private var showLegacyImportPicker = false
-
     /// URL of the most recently exported file shared through the share sheet.
     @State private var exportedFileURL: URL?
 
     /// Latest user-visible success or error message across import/export actions.
     @State private var statusMessage: String?
 
-    /// Currently running export action, if any.
-    @State private var activeExportAction: ExportAction?
+    /// Whether Android-compatible database backup export is currently preparing an archive.
+    @State private var isExportingAndroidDatabaseBackup = false
 
     /// Whether any export action is currently in progress.
     private var isExporting: Bool {
-        activeExportAction != nil
+        isExportingAndroidDatabaseBackup
     }
 
     /// Whether a backup import is currently in progress.
@@ -185,9 +156,6 @@ public struct ImportExportView: View {
         }
         if showDocumentsRestorePicker {
             return "documentsRestorePickerPresented"
-        }
-        if showLegacyImportPicker {
-            return "legacyImportPickerPresented"
         }
         if showAndroidModuleBackupExportSheet {
             return "androidModuleBackupExportPresented"
@@ -361,56 +329,6 @@ public struct ImportExportView: View {
                 Text(String(localized: "reset_databases_title", defaultValue: "Reset Databases"))
             }
 
-            Section {
-                Button {
-                    exportLegacyFullBackup()
-                } label: {
-                    HStack {
-                        SwiftUI.Label(
-                            String(localized: "legacy_full_backup_json", defaultValue: "Legacy Backup (JSON)"),
-                            systemImage: "arrow.up.doc"
-                        )
-                        Spacer()
-                        if activeExportAction == .legacyFullBackup {
-                            ProgressView()
-                        }
-                    }
-                }
-                .accessibilityIdentifier("importExportLegacyFullBackupButton")
-                .disabled(isBackupWorkflowBusy)
-
-                Button {
-                    exportBookmarksCSV()
-                } label: {
-                    HStack {
-                        SwiftUI.Label(String(localized: "bookmarks_csv"), systemImage: "tablecells")
-                        Spacer()
-                        if activeExportAction == .bookmarksCSV {
-                            ProgressView()
-                        }
-                    }
-                }
-                .disabled(isBackupWorkflowBusy)
-
-                Button {
-                    showLegacyImportPicker = true
-                } label: {
-                    SwiftUI.Label(
-                        String(localized: "legacy_import_json_csv", defaultValue: "Import Legacy JSON/CSV"),
-                        systemImage: "arrow.down.doc"
-                    )
-                }
-                .accessibilityIdentifier("backupWorkflowLegacyImportButton")
-                .disabled(isBackupWorkflowBusy)
-            } header: {
-                Text(String(localized: "legacy_import_export_tools", defaultValue: "Legacy Import/Export Tools"))
-            } footer: {
-                Text(String(
-                    localized: "legacy_import_export_tools_footer",
-                    defaultValue: "These tools are retained for old iOS JSON/CSV files. Android-compatible backup and restore uses the Database and Documents choices above."
-                ))
-            }
-
             if let statusMessage {
                 Section {
                     Text(statusMessage)
@@ -494,13 +412,6 @@ public struct ImportExportView: View {
                 onExport: exportAndroidModuleBackup(moduleNames:)
             )
         }
-        .fileImporter(
-            isPresented: $showLegacyImportPicker,
-            allowedContentTypes: [.json, .commaSeparatedText, .data],
-            allowsMultipleSelection: false
-        ) { result in
-            handleLegacyImport(result)
-        }
         .alert(item: $pendingResetCategory) { category in
             Alert(
                 title: Text(category.localizedBackupResetButtonTitle),
@@ -536,8 +447,8 @@ public struct ImportExportView: View {
      Starts the selected Android BackupActivity backup flow.
 
      Database and Documents prepare Android-compatible archives before presenting Android's
-     destination choice. Application backup is unavailable on iOS because apps cannot export their
-     installed bundle as an IPA/APK equivalent at runtime.
+     destination choice. Android's Application/APK target is omitted from iOS because apps cannot
+     export their installed bundle as an IPA/APK equivalent at runtime.
 
      - Side effects: Mutates export/progress/status state and may present backup destination or
        module-selection UI.
@@ -549,11 +460,6 @@ public struct ImportExportView: View {
             exportAndroidDatabaseBackup()
         case .documents:
             presentAndroidModuleBackupExportSelection()
-        case .application:
-            statusMessage = String(
-                localized: "ios_application_backup_unavailable",
-                defaultValue: "Application backup is not available on iOS because installed app bundles cannot be exported from within the app."
-            )
         }
     }
 
@@ -587,13 +493,13 @@ public struct ImportExportView: View {
      - Failure modes: Catches backup export and file-write failures and surfaces them as status text.
      */
     private func exportAndroidDatabaseBackup() {
-        activeExportAction = .androidDatabaseBackup
+        isExportingAndroidDatabaseBackup = true
         statusMessage = nil
         let modelContainer = modelContext.container
 
         Task { @MainActor in
             await Task.yield()
-            defer { activeExportAction = nil }
+            defer { isExportingAndroidDatabaseBackup = false }
 
             do {
                 let export = try await Task.detached(priority: .userInitiated) {
@@ -727,67 +633,6 @@ public struct ImportExportView: View {
     }
 
     /**
-     Exports the legacy iOS JSON backup, writes it to a temporary file, and presents the share sheet.
-
-     The JSON payload is retained for local/developer compatibility, but it is not Android's
-     manual backup format and should not be treated as the parity backup path.
-
-     - Side effects:
-       - marks the legacy JSON export row as active and clears prior status messages
-       - queries `BackupService` for a full JSON backup payload
-       - writes the payload to a temporary file and presents the share sheet on success
-     - Failure modes: Surfaces missing backup data through status text.
-     */
-    private func exportLegacyFullBackup() {
-        activeExportAction = .legacyFullBackup
-        statusMessage = nil
-
-        let service = BackupService(modelContext: modelContext)
-        guard let data = service.exportFullBackup() else {
-            statusMessage = String(localized: "error_create_backup")
-            activeExportAction = nil
-            return
-        }
-
-        let fileName = "andbible-backup-\(dateString()).json"
-        if let url = saveToTempFile(data: data, fileName: fileName) {
-            exportedFileURL = url
-            showExportSheet = true
-        }
-
-        activeExportAction = nil
-    }
-
-    /**
-     Exports bookmarks as CSV, writes the file to a temporary location, and presents the share sheet.
-
-     - Side effects:
-       - marks the bookmark CSV export row as active and clears prior status messages
-       - queries `BackupService` for bookmark CSV payload data
-       - writes the payload to a temporary file and presents the share sheet on success
-     - Failure modes: Surfaces missing bookmark export data through status text.
-     */
-    private func exportBookmarksCSV() {
-        activeExportAction = .bookmarksCSV
-        statusMessage = nil
-
-        let service = BackupService(modelContext: modelContext)
-        guard let data = service.exportBookmarksCSV() else {
-            statusMessage = String(localized: "error_export_bookmarks")
-            activeExportAction = nil
-            return
-        }
-
-        let fileName = "andbible-bookmarks-\(dateString()).csv"
-        if let url = saveToTempFile(data: data, fileName: fileName) {
-            exportedFileURL = url
-            showExportSheet = true
-        }
-
-        activeExportAction = nil
-    }
-
-    /**
      Handles Android database backup restore/import file selection.
 
      Android's Database restore path accepts `.abdb.zip` manual backup archives and then asks the
@@ -896,61 +741,6 @@ public struct ImportExportView: View {
             default:
                 statusMessage = unsupportedFormatMessage(forExtension: ext)
             }
-
-        case .failure(let error):
-            statusMessage = localizedErrorMessage(error)
-        }
-    }
-
-    /**
-     Handles legacy iOS JSON/CSV file selection.
-
-     This path is deliberately separate from Android Backup & Restore semantics. It exists only for
-     existing iOS JSON backups and bookmark CSV files and does not accept Android archive formats.
-
-     - Parameter result: File picker result from the Legacy Import/Export section.
-     - Side effects: Imports JSON or CSV data through `BackupService` and updates `statusMessage`.
-     - Failure modes: Picker, read, parse, and unsupported-format failures are surfaced through
-       status text.
-     */
-    private func handleLegacyImport(_ result: Result<[URL], Error>) {
-        switch result {
-        case .success(let urls):
-            guard let url = urls.first else { return }
-            isImporting = true
-            statusMessage = nil
-
-            let accessing = url.startAccessingSecurityScopedResource()
-            defer {
-                if accessing { url.stopAccessingSecurityScopedResource() }
-            }
-
-            guard let data = try? Data(contentsOf: url) else {
-                statusMessage = String(localized: "error_read_file")
-                isImporting = false
-                return
-            }
-
-            let service = BackupService(modelContext: modelContext)
-            switch url.pathExtension.lowercased() {
-            case "json":
-                let count = service.importFullBackup(data)
-                statusMessage = count > 0
-                    ? String(localized: "imported_items_\(count)")
-                    : String(localized: "error_parse_backup")
-            case "csv":
-                let count = service.importBookmarksCSV(data)
-                statusMessage = count > 0
-                    ? String(localized: "imported_bookmarks_\(count)")
-                    : String(localized: "error_parse_csv")
-            default:
-                statusMessage = String(
-                    localized: "legacy_import_format_required",
-                    defaultValue: "Select a legacy JSON backup or bookmark CSV file."
-                )
-            }
-
-            isImporting = false
 
         case .failure(let error):
             statusMessage = localizedErrorMessage(error)
@@ -1445,15 +1235,6 @@ public struct ImportExportView: View {
         } catch {
             statusMessage = localizedErrorMessage(error)
         }
-    }
-
-    /**
-     Returns the current date formatted for exported backup file names.
-     */
-    private func dateString() -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd"
-        return formatter.string(from: Date())
     }
 
     /**

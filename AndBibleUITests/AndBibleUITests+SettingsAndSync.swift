@@ -20,9 +20,11 @@ extension AndBibleUITests {
      *   - launches the app and opens the reader administration Backup & Restore route
      *   - reads Android-derived radio rows and reset actions through accessibility identifiers
      * - Failure modes:
-     *   - fails if iOS regresses to platform-specific JSON/CSV-first import/export semantics
-     *   - fails if Android's Database, Documents, Application, Restore/Import, or reset sections
+     *   - fails if iOS exposes platform-specific JSON/CSV import/export semantics
+     *   - fails if actionable Database/Documents backup, Restore/Import, or reset sections
      *     disappear from the user-visible workflow
+     *   - fails if iOS exposes Android's Application/APK backup row even though that target cannot
+     *     be implemented on iOS
      */
     func testSettingsBackupRestoreShowsAndroidBackupActivityWorkflow() {
         let app = makeApp()
@@ -33,12 +35,14 @@ extension AndBibleUITests {
 
         XCTAssertTrue(requireElement("backupWorkflowTarget.databaseButton", in: app, timeout: 10).exists)
         XCTAssertTrue(requireElement("backupWorkflowTarget.documentsButton", in: app, timeout: 10).exists)
-        XCTAssertTrue(requireElement("backupWorkflowTarget.applicationButton", in: app, timeout: 10).exists)
+        XCTAssertFalse(app.buttons["backupWorkflowTarget.applicationButton"].exists)
         XCTAssertTrue(requireElement("restoreWorkflowTarget.databaseButton", in: app, timeout: 10).exists)
         XCTAssertTrue(requireElement("restoreWorkflowTarget.documentsButton", in: app, timeout: 10).exists)
         XCTAssertTrue(requireElement("backupWorkflowBackupButton", in: app, timeout: 10).exists)
         XCTAssertTrue(requireElement("backupWorkflowRestoreButton", in: app, timeout: 10).exists)
         XCTAssertTrue(requireReachableBackupRestoreButton("backupWorkflowReset.bookmarksButton", in: app, timeout: 10).exists)
+        XCTAssertFalse(app.buttons["importExportLegacyFullBackupButton"].exists)
+        XCTAssertFalse(app.buttons["backupWorkflowLegacyImportButton"].exists)
     }
 
     /**

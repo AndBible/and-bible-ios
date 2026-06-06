@@ -6,11 +6,11 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 /**
- Backup targets shown by Android's BackupActivity.
+ Actionable backup targets shown in iOS's Android-aligned Backup & Restore workflow.
 
- The cases intentionally mirror Android's radio group order: Database, Documents, Application.
- iOS can only implement application backup as a documented platform deviation because installed
- iOS app bundles cannot be exported by the app at runtime the way Android exports an APK.
+ Android's BackupActivity also offers Application/APK backup. iOS omits that row instead of
+ showing an inert option because the platform cannot export an installed app bundle as an APK/IPA
+ equivalent from inside the app.
  */
 enum BackupWorkflowTarget: String, CaseIterable, Identifiable {
     /// Bookmarks, labels, notes, StudyPads, reading plans, workspaces, and related databases.
@@ -18,9 +18,6 @@ enum BackupWorkflowTarget: String, CaseIterable, Identifiable {
 
     /// Installed Bible/commentary/dictionary/map modules and EPUB-like document content.
     case documents
-
-    /// Android APK backup target; unavailable as a real iOS export target.
-    case application
 
     /// Stable SwiftUI identifier.
     var id: String { rawValue }
@@ -32,8 +29,6 @@ enum BackupWorkflowTarget: String, CaseIterable, Identifiable {
             return String(localized: "backup_database", defaultValue: "Database")
         case .documents:
             return String(localized: "backup_documents", defaultValue: "Documents")
-        case .application:
-            return String(localized: "backup_application", defaultValue: "Application")
         }
     }
 
@@ -50,8 +45,6 @@ enum BackupWorkflowTarget: String, CaseIterable, Identifiable {
                 localized: "backup_document_info",
                 defaultValue: "Bibles, commentaries, dictionaries, maps etc."
             )
-        case .application:
-            return String(localized: "backup_application_info", defaultValue: "Application file (.APK)")
         }
     }
 }
