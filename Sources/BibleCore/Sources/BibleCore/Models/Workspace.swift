@@ -173,6 +173,15 @@ public struct RecentLabel: Codable, Sendable {
  the resolved values are pushed into native/web readers.
  */
 public struct TextDisplaySettings: Codable, Sendable, Equatable {
+    /**
+     Android `PAGE_SCROLL_AMOUNT` choices in dialog order.
+
+     The values are sourced from Android's `pageScrollAmountValues` array and
+     `PageScrollAmountPreference`, so iOS settings rows and reader config serialization use the
+     same discrete percentage contract as Android.
+     */
+    public static let pageScrollAmountValues = [25, 33, 50, 66, 75, 100]
+
     /// Font size in points for the rendered document text.
     public var fontSize: Int?
 
@@ -289,6 +298,23 @@ public struct TextDisplaySettings: Codable, Sendable, Equatable {
 
     /// Creates an empty override set where every value inherits from a parent/default source.
     public init() {}
+
+    /**
+     Normalizes `PAGE_SCROLL_AMOUNT` to Android's fixed dialog values.
+
+     Android's `PageScrollAmountPreference` selects the final `100%` entry when storage contains an
+     unknown value. iOS uses the same fallback before displaying picker state, resolving inherited
+     settings, or serializing the value into WebView paging config.
+
+     - Parameter value: Optional persisted or inherited page-scroll percentage.
+     - Returns: A supported percentage in Android dialog order, or `100` for nil/unknown values.
+     - Note: This method is deterministic and side-effect free; it does not rewrite persisted
+       settings by itself.
+     */
+    public static func normalizedPageScrollAmount(_ value: Int?) -> Int {
+        guard let value, pageScrollAmountValues.contains(value) else { return 100 }
+        return value
+    }
 
     /**
      Resolves one optional setting through the inheritance chain.
@@ -518,7 +544,9 @@ public struct TextDisplaySettings: Codable, Sendable, Equatable {
         r.showTitleScrollButton = window?.showTitleScrollButton ?? workspace?.showTitleScrollButton ?? global?.showTitleScrollButton ?? d.showTitleScrollButton
         r.showMemorizationIndicators = window?.showMemorizationIndicators ?? workspace?.showMemorizationIndicators ?? global?.showMemorizationIndicators ?? d.showMemorizationIndicators
         r.showAiDocMarkers = window?.showAiDocMarkers ?? workspace?.showAiDocMarkers ?? global?.showAiDocMarkers ?? d.showAiDocMarkers
-        r.pageScrollAmount = window?.pageScrollAmount ?? workspace?.pageScrollAmount ?? global?.pageScrollAmount ?? d.pageScrollAmount
+        r.pageScrollAmount = normalizedPageScrollAmount(
+            window?.pageScrollAmount ?? workspace?.pageScrollAmount ?? global?.pageScrollAmount ?? d.pageScrollAmount
+        )
         r.showOrdinals = window?.showOrdinals ?? workspace?.showOrdinals ?? global?.showOrdinals ?? d.showOrdinals
         r.dayTextColor = window?.dayTextColor ?? workspace?.dayTextColor ?? global?.dayTextColor ?? d.dayTextColor
         r.dayBackground = window?.dayBackground ?? workspace?.dayBackground ?? global?.dayBackground ?? d.dayBackground

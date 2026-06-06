@@ -138,6 +138,18 @@ describe("useBookmark tests", () => {
         addBookmarkId(1, ordinalRange, offsetRange)
     }
 
+    /**
+     * Protects Bible document filtering when a bookmark payload has no ordinal range.
+     *
+     * `useBookmarks` is always called with a document ordinal range for Bible documents, while
+     * `BaseBookmark.ordinalRange` can be null for generic or malformed bridge payloads. A passing
+     * test proves such bookmarks are ignored instead of being treated as document-wide matches.
+     */
+    it("does not match Bible bookmarks that lack an ordinal range", () => {
+        addBookmarkId(1, null);
+        expect(b.styleRanges.value).toEqual([]);
+    });
+
     it("stylerange 1", () => {
         addBookmark([10, 10]);
         const rs = b.styleRanges.value;

@@ -133,8 +133,11 @@ public struct TextDisplaySettingsView: View {
     /// Single-choice binding for Android's `PAGE_SCROLL_AMOUNT` preference editor.
     private var pageScrollAmountBinding: Binding<Int> {
         Binding(
-            get: { settings.pageScrollAmount ?? 100 },
-            set: { settings.pageScrollAmount = $0; onChange?() }
+            get: { TextDisplaySettings.normalizedPageScrollAmount(settings.pageScrollAmount) },
+            set: {
+                settings.pageScrollAmount = TextDisplaySettings.normalizedPageScrollAmount($0)
+                onChange?()
+            }
         )
     }
 
@@ -163,7 +166,7 @@ public struct TextDisplaySettingsView: View {
      - Failure modes: none; this list is intentionally fixed to the Android source values.
      */
     private var pageScrollAmountOptions: [(value: Int, label: String)] {
-        [25, 33, 50, 66, 75, 100].map { value in
+        TextDisplaySettings.pageScrollAmountValues.map { value in
             (value, "\(value)%")
         }
     }
@@ -353,7 +356,7 @@ public struct TextDisplaySettingsView: View {
                 localized: "text_display_page_scroll_amount_title_format",
                 defaultValue: "Page scroll amount (%d%%)"
             ),
-            settings.pageScrollAmount ?? 100
+            TextDisplaySettings.normalizedPageScrollAmount(settings.pageScrollAmount)
         )
     }
 

@@ -1,4 +1,5 @@
 import XCTest
+@testable import BibleCore
 @testable import BibleUI
 
 extension AndBibleTests {
@@ -320,6 +321,30 @@ extension AndBibleTests {
         XCTAssertEqual(TextDisplaySettingsView.sliderInteger(639.999999999, fallback: 600), 640)
         XCTAssertEqual(TextDisplaySettingsView.sliderInteger(640.000000001, fallback: 600), 640)
         XCTAssertEqual(TextDisplaySettingsView.sliderInteger(.nan, fallback: 600), 600)
+    }
+
+    /**
+     Verifies page-scroll amount normalization matches Android's `PageScrollAmountPreference`.
+
+     Android accepts only the values from `pageScrollAmountValues` and falls back to the final
+     `100%` option when storage contains an unknown value. A failure here means migrated or synced
+     iOS settings could surface untagged picker selections or feed invalid percentages into the
+     WebView paging contract.
+     */
+    func testTextDisplayPageScrollAmountNormalizesToAndroidValues() {
+        XCTAssertEqual(TextDisplaySettings.pageScrollAmountValues, [25, 33, 50, 66, 75, 100])
+        XCTAssertEqual(TextDisplaySettings.normalizedPageScrollAmount(nil), 100)
+        XCTAssertEqual(TextDisplaySettings.normalizedPageScrollAmount(25), 25)
+        XCTAssertEqual(TextDisplaySettings.normalizedPageScrollAmount(66), 66)
+        XCTAssertEqual(TextDisplaySettings.normalizedPageScrollAmount(100), 100)
+        XCTAssertEqual(TextDisplaySettings.normalizedPageScrollAmount(0), 100)
+        XCTAssertEqual(TextDisplaySettings.normalizedPageScrollAmount(150), 100)
+
+        var windowSettings = TextDisplaySettings()
+        windowSettings.pageScrollAmount = 150
+
+        let resolved = TextDisplaySettings.fullyResolved(window: windowSettings, workspace: nil)
+        XCTAssertEqual(resolved.pageScrollAmount, 100)
     }
 
     /**

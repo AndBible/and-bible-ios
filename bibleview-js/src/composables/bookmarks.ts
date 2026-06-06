@@ -363,14 +363,13 @@ export function useBookmarks(
     onMounted(() => isMounted.value++);
     onUnmounted(() => isMounted.value--);
 
-    const noOrdinalNeeded = (b: BaseBookmark) => b.ordinalRange === null && ordinalRange === null
     const checkOrdinal = (b: BaseBookmark) => {
-        return b.ordinalRange !== null && ordinalRange !== null
+        return b.ordinalRange != null
             && rangesOverlap(b.ordinalRange, ordinalRange, {addRange: true, inclusive: true})
     };
 
     const checkOrdinalEnd = (b: BaseBookmark) => {
-        if (b.ordinalRange == null || ordinalRange == null) return false
+        if (b.ordinalRange == null) return false
         const bOrdinalRange: OrdinalRange = [b.ordinalRange[1], b.ordinalRange[1]]
         return rangesOverlap(bOrdinalRange, ordinalRange, {addRange: true, inclusive: true})
     };
@@ -391,7 +390,7 @@ export function useBookmarks(
             if (isAiDocMarker(b)) {
                 return isBibleDocument && checkOrdinal(b);
             } else if(isBibleDocument) {
-                return isBibleBookmark(b) && (noOrdinalNeeded(b) || checkOrdinal(b));
+                return isBibleBookmark(b) && checkOrdinal(b);
             } else {
                 return isGenericBookmark(b) && bookInitials === b.bookInitials && key == b.key;
             }

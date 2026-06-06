@@ -7612,7 +7612,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             self.showTitleScrollButton = s.showTitleScrollButton ?? d.showTitleScrollButton ?? false
             self.showMemorizationIndicators = s.showMemorizationIndicators ?? d.showMemorizationIndicators ?? false
             self.showAiDocMarkers = s.showAiDocMarkers ?? d.showAiDocMarkers ?? true
-            self.pageScrollAmount = s.pageScrollAmount ?? d.pageScrollAmount ?? 100
+            self.pageScrollAmount = TextDisplaySettings.normalizedPageScrollAmount(s.pageScrollAmount ?? d.pageScrollAmount)
             self.showOrdinals = s.showOrdinals ?? d.showOrdinals ?? false
         }
     }

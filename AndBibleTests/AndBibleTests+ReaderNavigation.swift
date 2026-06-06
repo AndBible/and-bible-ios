@@ -1032,6 +1032,29 @@ extension AndBibleTests {
         )
     }
 
+    /**
+     Protects the WebView paging contract from invalid synced or migrated `PAGE_SCROLL_AMOUNT` data.
+
+     Android's `PageScrollAmountPreference` only accepts six discrete percentages and falls back to
+     `100%` for unknown stored values. This test drives the native client-ready path and verifies the
+     emitted Vue `set_config` payload receives that normalized value, not the raw invalid setting.
+     */
+    @MainActor
+    func testReaderConfigPayloadNormalizesInvalidPageScrollAmount() throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        var display = TextDisplaySettings()
+        display.pageScrollAmount = 150
+
+        let controller = BibleReaderController(bridge: bridge)
+        controller.displaySettings = display
+
+        controller.bridgeDidSetClientReady(bridge)
+
+        let payload = try setConfigPayload(from: recordedScripts())
+        let config = try XCTUnwrap(payload["config"] as? [String: Any])
+        XCTAssertEqual(config["pageScrollAmount"] as? Int, 100)
+    }
+
     @MainActor
     func testToggleCompareDocumentPersistsWorkspaceHiddenStateAndReemitsConfig() throws {
         let (bridge, recordedScripts) = makeRecordingBridge()
