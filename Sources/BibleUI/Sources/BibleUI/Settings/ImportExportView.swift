@@ -116,6 +116,9 @@ public struct ImportExportView: View {
     /// Reset category waiting for Android-style destructive confirmation.
     @State private var pendingResetCategory: AndroidBackupResetCategory?
 
+    /// Whether an Android BackupActivity reset category is currently mutating local stores.
+    @State private var isResettingBackupCategory = false
+
     /// Service used to export, load, apply, and clean up Android `.abdb.zip` database backups.
     private let androidBackupService = AndroidDatabaseBackupService()
 
@@ -162,6 +165,9 @@ public struct ImportExportView: View {
         }
         if androidBackupArchive != nil {
             return "androidBackupImportPresented"
+        }
+        if isResettingBackupCategory {
+            return "resetInProgress"
         }
         if pendingBackupExport != nil {
             return "backupPayloadPending"
@@ -230,6 +236,17 @@ public struct ImportExportView: View {
     }
 
     /**
+     Whether any Backup & Restore operation is reading or mutating shared app storage.
+
+     - Returns: `true` during backup/export, restore/import/install, or reset work.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    private var isBackupWorkflowBusy: Bool {
+        isBackingUp || isRestoringOrImporting || isResettingBackupCategory
+    }
+
+    /**
      Builds Android's BackupActivity sections using native iOS file plumbing.
      */
     public var body: some View {
@@ -259,7 +276,7 @@ public struct ImportExportView: View {
                 .buttonStyle(.borderedProminent)
                 .frame(maxWidth: .infinity)
                 .accessibilityIdentifier("backupWorkflowBackupButton")
-                .disabled(isBackingUp)
+                .disabled(isBackupWorkflowBusy)
             } header: {
                 Text(String(localized: "backup_and_restore", defaultValue: "Backup & Restore"))
             }
@@ -289,7 +306,7 @@ public struct ImportExportView: View {
                 .buttonStyle(.borderedProminent)
                 .frame(maxWidth: .infinity)
                 .accessibilityIdentifier("backupWorkflowRestoreButton")
-                .disabled(isRestoringOrImporting)
+                .disabled(isBackupWorkflowBusy)
             } header: {
                 Text(String(localized: "backup_restore2", defaultValue: "Restore or Import"))
             }
@@ -309,6 +326,7 @@ public struct ImportExportView: View {
                         Text(category.localizedBackupResetButtonTitle)
                     }
                     .accessibilityIdentifier(category.backupResetAccessibilityIdentifier)
+                    .disabled(isBackupWorkflowBusy)
                 }
             } header: {
                 Text(String(localized: "reset_databases_title", defaultValue: "Reset Databases"))
@@ -324,14 +342,14 @@ public struct ImportExportView: View {
                     )
                 }
                 .accessibilityIdentifier("importExportLegacyFullBackupButton")
-                .disabled(isExporting)
+                .disabled(isBackupWorkflowBusy)
 
                 Button {
                     exportBookmarksCSV()
                 } label: {
                     SwiftUI.Label(String(localized: "bookmarks_csv"), systemImage: "tablecells")
                 }
-                .disabled(isExporting)
+                .disabled(isBackupWorkflowBusy)
 
                 Button {
                     showLegacyImportPicker = true
@@ -342,7 +360,7 @@ public struct ImportExportView: View {
                     )
                 }
                 .accessibilityIdentifier("backupWorkflowLegacyImportButton")
-                .disabled(isImporting)
+                .disabled(isBackupWorkflowBusy)
             } header: {
                 Text(String(localized: "legacy_import_export_tools", defaultValue: "Legacy Import/Export Tools"))
             } footer: {
@@ -590,6 +608,7 @@ public struct ImportExportView: View {
         case .share:
             if let url = saveToTempFile(data: payload.data, fileName: payload.fileName) {
                 exportedFileURL = url
+                pendingBackupExport = nil
                 showExportSheet = true
                 statusMessage = payload.statusMessage
             }
@@ -762,6 +781,13 @@ public struct ImportExportView: View {
             }
 
             let ext = url.pathExtension.lowercased()
+            if isAndroidDatabaseBackupFile(url) {
+                statusMessage = String(
+                    localized: "android_database_backup_wrong_restore_target",
+                    defaultValue: "Android database backups must be restored or imported from the Database target."
+                )
+                return
+            }
             if AndroidModuleBackupService.isAndroidModuleBackupFileName(url.lastPathComponent) {
                 isRestoringAndroidModuleBackup = true
                 guard let data = try? Data(contentsOf: url) else {
@@ -784,7 +810,7 @@ public struct ImportExportView: View {
             case "bbl", "cmt", "dct", "mybible", "sqlite3", "bbli", "bblx":
                 statusMessage = String(localized: "mysword_file_hint")
             default:
-                statusMessage = String(localized: "error_unsupported_format_\(ext)")
+                statusMessage = unsupportedFormatMessage(forExtension: ext)
             }
 
         case .failure(let error):
@@ -863,6 +889,25 @@ public struct ImportExportView: View {
     private func isAndroidDatabaseBackupFile(_ url: URL) -> Bool {
         let fileName = url.lastPathComponent.lowercased()
         return fileName.hasSuffix(AndroidDatabaseBackupService.databaseBackupSuffix)
+    }
+
+    /**
+     Formats the existing localized unsupported-format message.
+
+     - Parameter fileExtension: Extension from the selected file URL.
+     - Returns: Localized unsupported-format message with the extension interpolated.
+     - Side effects: none.
+     - Failure modes: Empty extensions are reported with an empty format placeholder, matching the
+       existing generic unsupported-file contract.
+     */
+    private func unsupportedFormatMessage(forExtension fileExtension: String) -> String {
+        String(
+            format: String(
+                localized: "error_unsupported_format_%@",
+                defaultValue: "Error: Unsupported file format (%@)"
+            ),
+            fileExtension
+        )
     }
 
     /**
@@ -1297,7 +1342,15 @@ public struct ImportExportView: View {
      - Failure modes: Reset service errors are caught and surfaced with the shared error prefix.
      */
     private func resetDatabase(_ category: AndroidBackupResetCategory) {
+        guard !isBackupWorkflowBusy else {
+            return
+        }
+        isResettingBackupCategory = true
         statusMessage = nil
+        defer {
+            isResettingBackupCategory = false
+        }
+
         do {
             _ = try androidResetService.reset(
                 category,
