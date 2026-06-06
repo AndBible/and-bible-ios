@@ -464,8 +464,10 @@ extension AndBibleUITests {
      *   - timeout: Maximum time to wait for the picker affordance.
      * - Side effects:
      *   - reveals Search options when needed and taps the translation picker button
+     *   - retries the tap when SwiftUI does not publish the picker-open state under CI load
      * - Failure modes:
-     *   - fails when the translation picker affordance does not open the picker
+     *   - fails when the translation picker affordance does not publish an open state or expose
+     *     picker descendants within the timeout
      */
     func tapSearchTranslationPicker(
         in app: XCUIApplication,
@@ -474,7 +476,7 @@ extension AndBibleUITests {
         let deadline = Date().addingTimeInterval(timeout)
 
         repeat {
-            if searchTranslationPickerIsOpen(in: app, timeout: 0.2) {
+            if searchTranslationPickerIsOpen(in: app, timeout: 0) {
                 return
             }
 
@@ -492,8 +494,18 @@ extension AndBibleUITests {
                 ($0.exists || $0.waitForExistence(timeout: 0.2))
                     && waitForElementToBecomeHittable($0, timeout: 0.5)
             }) {
-                tapElementReliably(picker, timeout: 2)
-                if searchTranslationPickerIsOpen(in: app, timeout: 3) {
+                if elementHasUsableFrame(picker) {
+                    picker.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+                } else {
+                    tapElementReliably(picker, timeout: min(2, max(0.5, deadline.timeIntervalSinceNow)))
+                }
+
+                let remaining = deadline.timeIntervalSinceNow
+                if remaining > 0,
+                   searchTranslationPickerStateIsOpen(in: app, timeout: min(1.5, max(0.5, remaining))) {
+                    return
+                }
+                if firstExistingElement(searchTranslationPickerOpenCandidates(in: app), timeout: 0) != nil {
                     return
                 }
             }
@@ -512,7 +524,8 @@ extension AndBibleUITests {
      *   - timeout: Total time budget for polling the candidate set.
      * - Returns: `true` when a picker-specific Done button or picker list exists.
      * - Side effects:
-     *   - polls the live accessibility hierarchy while SwiftUI presents or dismisses the picker
+     *   - polls the live Search state export and picker accessibility hierarchy while SwiftUI
+     *     presents or dismisses the picker
      * - Failure modes: This helper does not fail directly.
      */
     func searchTranslationPickerIsOpen(
@@ -522,6 +535,9 @@ extension AndBibleUITests {
         let deadline = Date().addingTimeInterval(max(0, timeout))
 
         repeat {
+            if searchTranslationPickerStateIsOpen(in: app, timeout: 0) {
+                return true
+            }
             if firstExistingElement(searchTranslationPickerOpenCandidates(in: app), timeout: 0) != nil {
                 return true
             }
@@ -531,7 +547,41 @@ extension AndBibleUITests {
             RunLoop.current.run(until: Date().addingTimeInterval(0.1))
         } while Date() < deadline
 
-        return firstExistingElement(searchTranslationPickerOpenCandidates(in: app), timeout: 0) != nil
+        return searchTranslationPickerStateIsOpen(in: app, timeout: 0)
+            || firstExistingElement(searchTranslationPickerOpenCandidates(in: app), timeout: 0) != nil
+    }
+
+    /**
+     Returns whether Search has published the translation-picker presentation state.
+     *
+     * The Search screen exports this state separately from sheet descendants so UI tests can
+     * distinguish "the button action has toggled presentation" from "SwiftUI has finished exposing
+     * the sheet hierarchy." That keeps picker-opening retries focused on missed actions instead of
+     * treating slow accessibility snapshots as proof that the tap failed.
+     *
+     * - Parameters:
+     *   - app: Running application under test.
+     *   - timeout: Maximum time to poll the Search state export.
+     * - Returns: `true` when the Search state export contains `translationPicker=open`.
+     * - Side effects: none.
+     * - Failure modes: This helper does not fail directly.
+     */
+    func searchTranslationPickerStateIsOpen(
+        in app: XCUIApplication,
+        timeout: TimeInterval
+    ) -> Bool {
+        let deadline = Date().addingTimeInterval(max(0, timeout))
+        repeat {
+            if searchStateCandidateValues(in: app).contains(where: { $0.contains("translationPicker=open") }) {
+                return true
+            }
+            if timeout <= 0 {
+                return false
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        } while Date() < deadline
+
+        return searchStateCandidateValues(in: app).contains { $0.contains("translationPicker=open") }
     }
 
     /// Returns stable picker descendants that prove the Search translation picker sheet is open.
