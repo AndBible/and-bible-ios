@@ -372,6 +372,49 @@ public struct AndroidDatabaseBackupExport: Sendable, Equatable {
 }
 
 /**
+ File-backed Android database backup export.
+
+ This result is the production share-sheet path for manual backup export. It points at a complete
+ `.abdb.zip` file so callers can share or move the archive without keeping the whole ZIP in memory.
+ */
+public struct AndroidDatabaseBackupFileExport: Sendable, Equatable {
+    /// Android-compatible filename used by the share sheet.
+    public let fileName: String
+
+    /// Complete `.abdb.zip` archive file. The caller owns cleanup after sharing or moving it.
+    public let fileURL: URL
+
+    /// Categories materialized into SQLite entries under `db/`.
+    public let categories: [AndroidDatabaseBackupCategory]
+
+    /// Number of ZIP file entries, including the manifest.
+    public let entryCount: Int
+
+    /**
+     Creates one file-backed Android database backup export summary.
+
+     - Parameters:
+       - fileName: Android-compatible filename used by the share sheet.
+       - fileURL: Complete `.abdb.zip` archive file.
+       - categories: Categories materialized into SQLite entries under `db/`.
+       - entryCount: Number of ZIP file entries, including the manifest.
+     - Side effects: none.
+     - Failure modes: This initializer cannot fail.
+     */
+    public init(
+        fileName: String,
+        fileURL: URL,
+        categories: [AndroidDatabaseBackupCategory],
+        entryCount: Int
+    ) {
+        self.fileName = fileName
+        self.fileURL = fileURL
+        self.categories = categories
+        self.entryCount = entryCount
+    }
+}
+
+/**
  User-selected operation for one Android backup section.
  */
 public enum AndroidDatabaseBackupApplyMode: String, CaseIterable, Identifiable, Sendable, Codable {
@@ -678,14 +721,47 @@ public final class AndroidDatabaseBackupService {
         modelContext: ModelContext,
         settingsStore: SettingsStore
     ) throws -> AndroidDatabaseBackupExport {
+        let fileExport = try exportArchiveFile(modelContext: modelContext, settingsStore: settingsStore)
+        defer { try? fileManager.removeItem(at: fileExport.fileURL) }
+        let archiveData = try Data(contentsOf: fileExport.fileURL)
+        return AndroidDatabaseBackupExport(
+            fileName: fileExport.fileName,
+            data: archiveData,
+            categories: fileExport.categories,
+            entryCount: fileExport.entryCount
+        )
+    }
+
+    /**
+     Exports local data as an Android `.abdb.zip` file without buffering the whole archive.
+
+     - Parameters:
+       - modelContext: SwiftData context that owns the local category rows.
+       - settingsStore: Local-only settings store that backs Android fidelity metadata.
+     - Returns: File-backed Android-compatible backup archive and exported category summary.
+     - Side effects:
+       - reads supported local categories from SwiftData and fidelity settings
+       - writes temporary Android-shaped SQLite databases beneath the configured temporary directory
+       - writes a complete `.abdb.zip` archive file beneath the configured temporary directory
+       - removes intermediate SQLite databases after the ZIP archive is materialized
+     - Failure modes:
+       - rethrows category snapshot, SQLite, JSON manifest, file read/write, and ZIP writer failures
+       - unsupported categories are intentionally omitted rather than emitted as empty databases
+     - Note: The returned archive file remains on disk for the caller to share or move; the caller owns
+       cleanup of `fileURL`.
+     */
+    public func exportArchiveFile(
+        modelContext: ModelContext,
+        settingsStore: SettingsStore
+    ) throws -> AndroidDatabaseBackupFileExport {
         let manifest = ExportManifestDTO(
             backupType: "DB_BACKUP",
             contains: Self.exportableDatabaseCategories,
             manifestVersion: 1
         )
         let manifestData = try JSONEncoder().encode(manifest)
-        var entries: [ZipArchiveWriterEntry] = [
-            ZipArchiveWriterEntry(name: Self.manifestFileName, data: manifestData),
+        var entries: [ZipArchiveWriterFileEntry] = [
+            ZipArchiveWriterFileEntry(name: Self.manifestFileName, data: manifestData),
         ]
         var temporaryDatabaseURLs: [URL] = []
         defer {
@@ -709,17 +785,24 @@ public final class AndroidDatabaseBackupService {
             )
             temporaryDatabaseURLs.append(databaseURL)
             entries.append(
-                ZipArchiveWriterEntry(
+                ZipArchiveWriterFileEntry(
                     name: "db/\(databaseFileName)",
-                    data: try Data(contentsOf: databaseURL)
+                    fileURL: databaseURL
                 )
             )
         }
 
-        let archiveData = try ZipArchiveWriter.storedArchive(entries: entries)
-        return AndroidDatabaseBackupExport(
+        let archiveURL = temporaryURL(prefix: "android-database-backup-export-", suffix: ".abdb.zip")
+        do {
+            try ZipArchiveWriter.writeStoredArchive(entries: entries, to: archiveURL, fileManager: fileManager)
+        } catch {
+            try? fileManager.removeItem(at: archiveURL)
+            throw error
+        }
+
+        return AndroidDatabaseBackupFileExport(
             fileName: Self.databaseBackupFileName,
-            data: archiveData,
+            fileURL: archiveURL,
             categories: Self.exportableDatabaseCategories,
             entryCount: entries.count
         )
@@ -1247,6 +1330,20 @@ public final class AndroidDatabaseBackupService {
         RemoteSyncPatchStatusStore(settingsStore: settingsStore).clearCategory(category)
         RemoteSyncLogEntryStore(settingsStore: settingsStore).clearCategory(category)
         RemoteSyncRowFingerprintStore(settingsStore: settingsStore).clearCategory(category)
+    }
+
+    /**
+     Creates a unique temporary file URL for Android database backup staging.
+
+     - Parameters:
+       - prefix: Filename prefix describing the staging purpose.
+       - suffix: Filename extension or suffix required by the staged file type.
+     - Returns: URL beneath the service's configured temporary directory.
+     - Side effects: none.
+     - Failure modes: This helper cannot fail; file creation happens at the call site.
+     */
+    private func temporaryURL(prefix: String, suffix: String) -> URL {
+        temporaryDirectory.appendingPathComponent("\(prefix)\(UUID().uuidString)\(suffix)")
     }
 
     /**

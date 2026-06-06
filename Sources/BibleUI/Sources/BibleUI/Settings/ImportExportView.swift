@@ -362,9 +362,8 @@ public struct ImportExportView: View {
 
      - Side effects:
        - toggles export state and clears prior status messages
-       - schedules archive generation after one main-actor yield so SwiftUI can render the busy
-         state before the expensive SQLite/ZIP work starts
-       - reads SwiftData through `AndroidDatabaseBackupService`
+       - schedules archive generation after one main-actor yield so SwiftUI can render the busy state
+       - exports from a background SwiftData context so SQLite and ZIP work do not block the UI actor
        - writes the generated archive to a temporary file and presents the share sheet on success
        - updates status text with the categories included in the backup
      - Failure modes: Catches backup export and file-write failures and surfaces them as status text.
@@ -372,27 +371,29 @@ public struct ImportExportView: View {
     private func exportAndroidDatabaseBackup() {
         isExporting = true
         statusMessage = nil
+        let modelContainer = modelContext.container
 
         Task { @MainActor in
             await Task.yield()
             defer { isExporting = false }
 
             do {
-                let export = try androidBackupService.exportArchive(
-                    modelContext: modelContext,
-                    settingsStore: SettingsStore(modelContext: modelContext)
-                )
-                if let url = saveToTempFile(data: export.data, fileName: export.fileName) {
-                    exportedFileURL = url
-                    showExportSheet = true
-                    let categorySummary = export.categories
-                        .map(\.localizedBackupSectionName)
-                        .joined(separator: ", ")
-                    statusMessage = String(
-                        localized: "android_database_backup_exported_summary",
-                        defaultValue: "Exported Android database backup: \(categorySummary)"
+                let export = try await Task.detached(priority: .userInitiated) {
+                    let exportContext = ModelContext(modelContainer)
+                    return try AndroidDatabaseBackupService().exportArchiveFile(
+                        modelContext: exportContext,
+                        settingsStore: SettingsStore(modelContext: exportContext)
                     )
-                }
+                }.value
+                exportedFileURL = try moveExportFileToShareDirectory(export)
+                showExportSheet = true
+                let categorySummary = export.categories
+                    .map(\.localizedBackupSectionName)
+                    .joined(separator: ", ")
+                statusMessage = String(
+                    localized: "android_database_backup_exported_summary",
+                    defaultValue: "Exported Android database backup: \(categorySummary)"
+                )
             } catch {
                 statusMessage = localizedErrorMessage(error)
             }
@@ -1035,6 +1036,32 @@ public struct ImportExportView: View {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd"
         return formatter.string(from: Date())
+    }
+
+    /**
+     Moves a file-backed Android database backup export to the canonical share-sheet filename.
+
+     Android parity depends on presenting `AndBibleDatabaseBackup.abdb.zip`, while the background
+     export service creates a unique temporary filename to avoid collisions during archive generation.
+
+     - Parameter export: Completed file-backed database backup export.
+     - Returns: Temporary file URL with Android's canonical backup filename.
+     - Side effects:
+       - deletes any previous temporary export with the same canonical filename
+       - moves the generated archive into the share-sheet location
+     - Failure modes: Rethrows file-system errors when the previous export cannot be removed or the
+       generated archive cannot be moved.
+     */
+    private func moveExportFileToShareDirectory(_ export: AndroidDatabaseBackupFileExport) throws -> URL {
+        let fileURL = FileManager.default.temporaryDirectory.appendingPathComponent(export.fileName)
+        if fileURL == export.fileURL {
+            return fileURL
+        }
+        if FileManager.default.fileExists(atPath: fileURL.path) {
+            try FileManager.default.removeItem(at: fileURL)
+        }
+        try FileManager.default.moveItem(at: export.fileURL, to: fileURL)
+        return fileURL
     }
 
     /**
