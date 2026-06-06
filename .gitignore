@@ -63,6 +63,10 @@ libsword/libsword.xcframework/
 .env.local
 *.xcconfig.local
 
+# Signing secrets — plaintext App Store Connect API keys must never be committed
+# (encrypted *.p8.gpg blobs are kept outside the repo entirely).
+*.p8
+
 # Archives
 *.zip
 *.tar.gz
