@@ -163,6 +163,9 @@ public struct ImportExportView: View {
         if androidBackupArchive != nil {
             return "androidBackupImportPresented"
         }
+        if pendingBackupExport != nil {
+            return "backupPayloadPending"
+        }
         return "idle"
     }
 
@@ -371,10 +374,15 @@ public struct ImportExportView: View {
             Button(String(localized: "backup_phone_storage", defaultValue: "Phone storage")) {
                 finishPendingBackupExport(to: .phoneStorage)
             }
+            .accessibilityIdentifier("backupDestinationPhoneStorageButton")
             Button(String(localized: "share", defaultValue: "Share")) {
                 finishPendingBackupExport(to: .share)
             }
-            Button(String(localized: "cancel"), role: .cancel) {}
+            .accessibilityIdentifier("backupDestinationShareButton")
+            Button(String(localized: "cancel"), role: .cancel) {
+                cancelPendingBackupExport()
+            }
+            .accessibilityIdentifier("backupDestinationCancelButton")
         } message: {
             Text(String(
                 localized: "backup_backup_message",
@@ -566,7 +574,7 @@ public struct ImportExportView: View {
      - Side effects:
        - mutates exporter or share-sheet presentation state
        - writes a temporary file for Share
-       - updates status text with the prepared payload's completion message
+       - updates status text after the selected destination accepts the payload
      - Failure modes: Missing pending payload is ignored; file-write failures set `statusMessage`.
      */
     private func finishPendingBackupExport(to destination: BackupExportDestination) {
@@ -579,7 +587,6 @@ public struct ImportExportView: View {
             backupExportDocument = BackupExportDocument(data: payload.data)
             backupExportFileName = payload.fileName
             showBackupFileExporter = true
-            statusMessage = payload.statusMessage
         case .share:
             if let url = saveToTempFile(data: payload.data, fileName: payload.fileName) {
                 exportedFileURL = url
@@ -593,16 +600,33 @@ public struct ImportExportView: View {
      Handles completion of SwiftUI's Files exporter.
 
      - Parameter result: Export result emitted by the system document picker.
-     - Side effects: Clears the pending export on success and updates visible error state on failure.
+     - Side effects:
+       - clears the pending export once the exporter finishes
+       - publishes the prepared completion message only after successful export
+       - updates visible error state on failure
      - Failure modes: Export errors are formatted with the shared import/export error prefix.
      */
     private func handleBackupFileExport(_ result: Result<URL, Error>) {
+        let completionMessage = pendingBackupExport?.statusMessage
+        pendingBackupExport = nil
+
         switch result {
         case .success:
-            pendingBackupExport = nil
+            statusMessage = completionMessage
         case .failure(let error):
             statusMessage = localizedErrorMessage(error)
         }
+    }
+
+    /**
+     Cancels a prepared backup destination choice without writing or sharing the archive.
+     *
+     - Side effects: Releases the generated archive bytes and dismisses any pending status from
+       the abandoned export.
+     - Failure modes: none.
+     */
+    private func cancelPendingBackupExport() {
+        pendingBackupExport = nil
     }
 
     /**
@@ -1280,10 +1304,7 @@ public struct ImportExportView: View {
                 modelContext: modelContext,
                 settingsStore: SettingsStore(modelContext: modelContext)
             )
-            statusMessage = String(
-                localized: "reset_database_success",
-                defaultValue: "Database has been reset successfully"
-            )
+            statusMessage = category.localizedBackupResetSuccessMessage
         } catch {
             statusMessage = localizedErrorMessage(error)
         }

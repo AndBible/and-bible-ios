@@ -1,5 +1,6 @@
 import XCTest
 @testable import BibleCore
+@testable import BibleUI
 @testable import SwordKit
 import SwiftData
 import SQLite3
@@ -88,6 +89,27 @@ extension AndBibleTests {
         XCTAssertEqual(archive.manifest.contains, [.bookmarks])
         XCTAssertEqual(archive.sections.map(\.category), [.bookmarks])
         XCTAssertEqual(archive.sections.first?.support, .supported)
+    }
+
+    /**
+     Verifies Backup & Restore reset success copy names the category that was reset.
+     *
+     Setup:
+     - reads the BibleUI presentation labels for Android reset categories
+
+     Expected result:
+     - repository reset feedback includes repository wording
+     - repository reset feedback does not claim that only "Database" was reset
+
+     Failure meaning:
+     - the user-visible reset result would be misleading for non-database categories such as
+       Repositories, Application Preferences, My Documents, or Progress.
+     */
+    func testAndroidBackupResetSuccessMessageNamesSelectedCategory() {
+        let message = AndroidBackupResetCategory.repositories.localizedBackupResetSuccessMessage
+
+        XCTAssertTrue(message.localizedCaseInsensitiveContains("repositories"))
+        XCTAssertFalse(message.localizedCaseInsensitiveContains("database has been reset"))
     }
 
     /**

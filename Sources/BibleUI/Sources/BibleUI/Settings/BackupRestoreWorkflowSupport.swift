@@ -274,6 +274,24 @@ extension AndroidBackupResetCategory {
         )
     }
 
+    /**
+     Category-aware success message for Android BackupActivity reset actions.
+     *
+     - Returns: User-visible confirmation that names the category just reset instead of always
+       saying "Database".
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    var localizedBackupResetSuccessMessage: String {
+        String(
+            format: String(
+                localized: "reset_category_success",
+                defaultValue: "%@ has been reset successfully"
+            ),
+            localizedBackupResetTitle
+        )
+    }
+
     /// Stable accessibility identifier for UI tests.
     var backupResetAccessibilityIdentifier: String {
         "backupWorkflowReset.\(rawValue)Button"

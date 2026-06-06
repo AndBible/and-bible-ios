@@ -49,9 +49,11 @@ extension AndBibleUITests {
      *   - triggers Android-compatible `.abdb.zip` database backup generation
      *   - presents the Android-derived "Backup to where?" decision instead of jumping directly to
      *     the iOS share sheet
+     *   - cancels the destination choice and verifies the prepared payload is released
      * - Failure modes:
      *   - fails if the Database backup target is missing
      *   - fails if iOS bypasses Android's destination choice and restores the old share-first flow
+     *   - fails if cancel leaves a stale generated archive pending in the screen state
      */
     func testSettingsBackupRestoreDatabaseBackupPresentsDestinationChoice() {
         let app = makeApp()
@@ -66,6 +68,10 @@ extension AndBibleUITests {
         let databaseBackupButton = requireElement("backupWorkflowBackupButton", in: app, timeout: 10)
         tapElementReliably(databaseBackupButton, timeout: 10)
         waitForElementValue("importExportScreen", toEqual: "backupDestinationPresented", in: app, timeout: 20)
+
+        let cancelButton = requireElement("backupDestinationCancelButton", in: app, timeout: 10)
+        tapElementReliably(cancelButton, timeout: 10)
+        waitForElementValue("importExportScreen", toEqual: "idle", in: app, timeout: 10)
     }
 
     /**
