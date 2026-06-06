@@ -89,7 +89,7 @@ public struct ImportExportView: View {
     /// Whether selected Android backup sections are currently being applied.
     @State private var isApplyingAndroidBackup = false
 
-    /// Service used to load, apply, and clean up Android `.abdb.zip` database backups.
+    /// Service used to export, load, apply, and clean up Android `.abdb.zip` database backups.
     private let androidBackupService = AndroidDatabaseBackupService()
 
     /// Service used to inspect, restore, and export Android `.abmd.zip` module backups.
@@ -138,20 +138,33 @@ public struct ImportExportView: View {
      */
     public var body: some View {
         List {
-            // Export section
             Section {
                 Button {
-                    exportFullBackup()
+                    exportAndroidDatabaseBackup()
                 } label: {
                     HStack {
-                        SwiftUI.Label(String(localized: "full_backup_json"), systemImage: "arrow.up.doc")
+                        SwiftUI.Label(
+                            String(localized: "android_database_backup", defaultValue: "Android Database Backup"),
+                            systemImage: "archivebox.fill"
+                        )
                         Spacer()
                         if isExporting {
                             ProgressView()
                         }
                     }
                 }
-                .accessibilityIdentifier("importExportFullBackupButton")
+                .accessibilityIdentifier("importExportAndroidDatabaseBackupButton")
+                .disabled(isExporting)
+
+                Button {
+                    exportLegacyFullBackup()
+                } label: {
+                    SwiftUI.Label(
+                        String(localized: "legacy_full_backup_json", defaultValue: "Legacy Backup (JSON)"),
+                        systemImage: "arrow.up.doc"
+                    )
+                }
+                .accessibilityIdentifier("importExportLegacyFullBackupButton")
                 .disabled(isExporting)
 
                 Button {
@@ -342,14 +355,58 @@ public struct ImportExportView: View {
     }
 
     /**
-     Exports a full JSON backup, writes it to a temporary file, and presents the share sheet.
+     Exports an Android-compatible database backup and presents the share sheet.
 
-     Side effects:
-     - toggles export state and clears prior status messages
-     - queries `BackupService` for a full backup payload
-     - writes the payload to a temporary file and presents the share sheet on success
+     This is the parity backup path: Android expects `AndBibleDatabaseBackup.abdb.zip` containing
+     `AndBibleBackupManifest.json` and supported category SQLite databases under `db/`.
+
+     - Side effects:
+       - toggles export state and clears prior status messages
+       - reads SwiftData through `AndroidDatabaseBackupService`
+       - writes the generated archive to a temporary file and presents the share sheet on success
+       - updates status text with the categories included in the backup
+     - Failure modes: Catches backup export and file-write failures and surfaces them as status text.
      */
-    private func exportFullBackup() {
+    private func exportAndroidDatabaseBackup() {
+        isExporting = true
+        statusMessage = nil
+
+        do {
+            let export = try androidBackupService.exportArchive(
+                modelContext: modelContext,
+                settingsStore: SettingsStore(modelContext: modelContext)
+            )
+            if let url = saveToTempFile(data: export.data, fileName: export.fileName) {
+                exportedFileURL = url
+                showExportSheet = true
+                let categorySummary = export.categories
+                    .map(\.localizedBackupSectionName)
+                    .joined(separator: ", ")
+                statusMessage = String(
+                    localized: "android_database_backup_exported_summary",
+                    defaultValue: "Exported Android database backup: \(categorySummary)"
+                )
+            }
+        } catch {
+            statusMessage = localizedErrorMessage(error)
+        }
+
+        isExporting = false
+    }
+
+    /**
+     Exports the legacy iOS JSON backup, writes it to a temporary file, and presents the share sheet.
+
+     The JSON payload is retained for local/developer compatibility, but it is not Android's
+     manual backup format and should not be treated as the parity backup path.
+
+     - Side effects:
+       - toggles export state and clears prior status messages
+       - queries `BackupService` for a full JSON backup payload
+       - writes the payload to a temporary file and presents the share sheet on success
+     - Failure modes: Surfaces missing backup data through status text.
+     */
+    private func exportLegacyFullBackup() {
         isExporting = true
         statusMessage = nil
 
@@ -483,7 +540,7 @@ public struct ImportExportView: View {
      */
     private func isAndroidDatabaseBackupFile(_ url: URL) -> Bool {
         let fileName = url.lastPathComponent.lowercased()
-        return fileName.hasSuffix(".abdb.zip")
+        return fileName.hasSuffix(AndroidDatabaseBackupService.databaseBackupSuffix)
     }
 
     /**

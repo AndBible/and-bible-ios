@@ -14,26 +14,26 @@ extension AndBibleUITests {
     }
 
     /**
-     Verifies that the full-backup export action drives Import and Export into share-sheet presentation.
+     Verifies that the Android database backup export action presents the share sheet.
      *
      * - Side effects:
      *   - launches the app directly into Import and Export
-     *   - triggers a full-backup export, which writes a temporary file and requests share-sheet
-     *     presentation
+     *   - triggers Android-compatible `.abdb.zip` database backup export, which writes a temporary
+     *     archive and requests share-sheet presentation
      * - Failure modes:
-     *   - fails if the full-backup action is missing from the Import and Export screen
+     *   - fails if the Android database backup action is missing from the Import and Export screen
      *   - fails if the Import and Export screen never reports the share-sheet-presented state after
      *     export completes
      */
-    func testSettingsImportExportFullBackupPresentsShareSheet() {
+    func testSettingsImportExportAndroidDatabaseBackupPresentsShareSheet() {
         let app = makeApp()
         app.launch()
 
         let importExportScreen = openImportExport(in: app)
         XCTAssertTrue(importExportScreen.exists)
 
-        let fullBackupButton = requireElement("importExportFullBackupButton", in: app, timeout: 10)
-        tapElementReliably(fullBackupButton, timeout: 10)
+        let databaseBackupButton = requireElement("importExportAndroidDatabaseBackupButton", in: app, timeout: 10)
+        tapElementReliably(databaseBackupButton, timeout: 10)
         waitForElementValue("importExportScreen", toEqual: "shareSheetPresented", in: app, timeout: 20)
     }
 

@@ -801,7 +801,7 @@ extension AndBibleUITests {
         openReaderActionDestination(
             actionIdentifier: "readerOpenImportExportAction",
             destinationIdentifier: "importExportScreen",
-            readinessIdentifiers: ["importExportImportButton", "importExportFullBackupButton"],
+            readinessIdentifiers: ["importExportImportButton", "importExportAndroidDatabaseBackupButton"],
             in: app,
             timeout: 20
         )

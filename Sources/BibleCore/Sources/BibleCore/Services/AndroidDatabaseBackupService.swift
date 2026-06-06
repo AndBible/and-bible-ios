@@ -1,4 +1,4 @@
-// AndroidDatabaseBackupService.swift — Android .abdb.zip restore/import support
+// AndroidDatabaseBackupService.swift — Android .abdb.zip import/export support
 
 import Foundation
 import SQLite3
@@ -329,6 +329,49 @@ public struct AndroidDatabaseBackupArchive: Identifiable, Sendable {
 }
 
 /**
+ Exported Android database backup archive.
+
+ The archive uses Android's manual database backup shape: `AndBibleBackupManifest.json` at the
+ archive root and one SQLite database per supported category beneath `db/`.
+ */
+public struct AndroidDatabaseBackupExport: Sendable, Equatable {
+    /// Android-compatible filename used by the share sheet.
+    public let fileName: String
+
+    /// Raw `.abdb.zip` archive bytes.
+    public let data: Data
+
+    /// Categories materialized into SQLite entries under `db/`.
+    public let categories: [AndroidDatabaseBackupCategory]
+
+    /// Number of ZIP file entries, including the manifest.
+    public let entryCount: Int
+
+    /**
+     Creates one Android database backup export summary.
+
+     - Parameters:
+       - fileName: Android-compatible filename used by the share sheet.
+       - data: Raw `.abdb.zip` archive bytes.
+       - categories: Categories materialized into SQLite entries under `db/`.
+       - entryCount: Number of ZIP file entries, including the manifest.
+     - Side effects: none.
+     - Failure modes: This initializer cannot fail.
+     */
+    public init(
+        fileName: String,
+        data: Data,
+        categories: [AndroidDatabaseBackupCategory],
+        entryCount: Int
+    ) {
+        self.fileName = fileName
+        self.data = data
+        self.categories = categories
+        self.entryCount = entryCount
+    }
+}
+
+/**
  User-selected operation for one Android backup section.
  */
 public enum AndroidDatabaseBackupApplyMode: String, CaseIterable, Identifiable, Sendable, Codable {
@@ -500,6 +543,23 @@ public enum AndroidDatabaseBackupError: LocalizedError, Equatable {
    remote state
  */
 public final class AndroidDatabaseBackupService {
+    /// Android file suffix for manual database backups.
+    public static let databaseBackupSuffix = ".abdb.zip"
+
+    /// Android's canonical manual database backup filename.
+    public static let databaseBackupFileName = "AndBibleDatabaseBackup.abdb.zip"
+
+    /// Manifest filename used by Android database and module backup archives.
+    private static let manifestFileName = "AndBibleBackupManifest.json"
+
+    /// Supported category databases iOS can currently materialize into Android-compatible backups.
+    private static let exportableDatabaseCategories: [AndroidDatabaseBackupCategory] = [
+        .bookmarks,
+        .readingPlans,
+        .workspaces,
+        .myDocuments,
+    ]
+
     /**
      Decodable shape of Android's manifest JSON before iOS normalizes optional fields.
 
@@ -536,6 +596,19 @@ public final class AndroidDatabaseBackupService {
             manifestVersion = try container.decodeIfPresent(Int.self, forKey: .manifestVersion)
             andBibleVersion = try container.decodeIfPresent(Int.self, forKey: .andBibleVersion)
         }
+    }
+
+    /**
+     Encodable manifest shape emitted by Android database backup export.
+
+     iOS only declares categories it can currently materialize into Android-shaped SQLite files.
+     Android restore validates database files from the `db/` directory, so this manifest remains
+     honest while allowing unsupported Android-only categories to stay absent.
+     */
+    private struct ExportManifestDTO: Encodable {
+        let backupType: String
+        let contains: [AndroidDatabaseBackupCategory]
+        let manifestVersion: Int
     }
 
     private let fileManager: FileManager
@@ -587,6 +660,72 @@ public final class AndroidDatabaseBackupService {
     }
 
     /**
+     Exports local data as Android's `.abdb.zip` manual database backup format.
+
+     - Parameters:
+       - modelContext: SwiftData context that owns the local category rows.
+       - settingsStore: Local-only settings store that backs Android fidelity metadata.
+     - Returns: Android-compatible database backup archive bytes and exported category summary.
+     - Side effects:
+       - reads supported local categories from SwiftData and fidelity settings
+       - writes temporary Android-shaped SQLite databases beneath the configured temporary directory
+       - removes the temporary SQLite databases after the ZIP archive is materialized
+     - Failure modes:
+       - rethrows category snapshot, SQLite, JSON manifest, file read, and ZIP writer failures
+       - unsupported categories are intentionally omitted rather than emitted as empty databases
+     */
+    public func exportArchive(
+        modelContext: ModelContext,
+        settingsStore: SettingsStore
+    ) throws -> AndroidDatabaseBackupExport {
+        let manifest = ExportManifestDTO(
+            backupType: "DB_BACKUP",
+            contains: Self.exportableDatabaseCategories,
+            manifestVersion: 1
+        )
+        let manifestData = try JSONEncoder().encode(manifest)
+        var entries: [ZipArchiveWriterEntry] = [
+            ZipArchiveWriterEntry(name: Self.manifestFileName, data: manifestData),
+        ]
+        var temporaryDatabaseURLs: [URL] = []
+        defer {
+            for databaseURL in temporaryDatabaseURLs {
+                try? fileManager.removeItem(at: databaseURL)
+            }
+        }
+
+        for category in Self.exportableDatabaseCategories {
+            guard let remoteSyncCategory = category.remoteSyncCategory,
+                  let databaseFileName = category.databaseFileName else {
+                continue
+            }
+            let databaseURL = try RemoteSyncInitialBackupUploadService.buildAndroidDatabaseBackupDatabase(
+                for: remoteSyncCategory,
+                modelContext: modelContext,
+                settingsStore: settingsStore,
+                schemaVersion: category.supportedDatabaseVersion,
+                fileManager: fileManager,
+                temporaryDirectory: temporaryDirectory
+            )
+            temporaryDatabaseURLs.append(databaseURL)
+            entries.append(
+                ZipArchiveWriterEntry(
+                    name: "db/\(databaseFileName)",
+                    data: try Data(contentsOf: databaseURL)
+                )
+            )
+        }
+
+        let archiveData = try ZipArchiveWriter.storedArchive(entries: entries)
+        return AndroidDatabaseBackupExport(
+            fileName: Self.databaseBackupFileName,
+            data: archiveData,
+            categories: Self.exportableDatabaseCategories,
+            entryCount: entries.count
+        )
+    }
+
+    /**
      Loads and validates an Android `.abdb.zip` database backup archive.
 
      - Parameter data: Raw backup archive bytes selected by the user.
@@ -613,7 +752,7 @@ public final class AndroidDatabaseBackupService {
         }
 
         let entriesByName = try Self.entriesByUniqueName(entries)
-        guard let manifestData = entriesByName["AndBibleBackupManifest.json"] else {
+        guard let manifestData = entriesByName[Self.manifestFileName] else {
             throw AndroidDatabaseBackupError.missingManifest
         }
         let manifest = try decodeManifest(from: manifestData)

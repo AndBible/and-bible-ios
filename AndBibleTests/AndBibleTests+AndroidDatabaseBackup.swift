@@ -90,6 +90,125 @@ extension AndBibleTests {
     }
 
     /**
+     Verifies that iOS exports Android-compatible manual database backup archives.
+
+     Setup:
+     - creates local rows across the supported export model graph
+     - exports through `AndroidDatabaseBackupService`
+     - re-reads the generated ZIP through the existing Android backup loader
+
+     Expected result:
+     - the export uses Android's canonical `.abdb.zip` filename and manifest
+     - supported category databases are written under `db/`
+     - each SQLite database declares the Android-compatible `user_version`
+     - at least one real bookmark label row is present in `bookmarks.sqlite3`
+
+     Failure meaning:
+     - iOS would still be exporting a custom JSON backup or an archive Android cannot validate as
+       a manual database backup.
+     */
+    func testAndroidDatabaseBackupExportCreatesAndroidCompatibleArchive() throws {
+        let container = try makeAndroidDatabaseBackupExportModelContainer()
+        let modelContext = ModelContext(container)
+        let settingsStore = SettingsStore(modelContext: modelContext)
+        let labelID = UUID(uuidString: "15000000-0000-0000-0000-000000000301")!
+        let readingPlanID = UUID(uuidString: "15000000-0000-0000-0000-000000000302")!
+        let workspaceID = UUID(uuidString: "15000000-0000-0000-0000-000000000303")!
+        let documentID = UUID(uuidString: "15000000-0000-0000-0000-000000000304")!
+        let pageID = UUID(uuidString: "15000000-0000-0000-0000-000000000305")!
+
+        modelContext.insert(Label(id: labelID, name: "Prayer", color: 7, favourite: true))
+        modelContext.insert(
+            ReadingPlan(
+                id: readingPlanID,
+                planCode: "ios-test-plan",
+                planName: "iOS Test Plan",
+                startDate: Date(timeIntervalSince1970: 1_700_000_000),
+                currentDay: 1,
+                totalDays: 1
+            )
+        )
+        modelContext.insert(Workspace(id: workspaceID, name: "Study", orderNumber: 0))
+        let document = MyDocument(
+            id: documentID,
+            name: "Sermon Notes",
+            initials: "IOSDOC",
+            createdAt: Date(timeIntervalSince1970: 1_700_000_000),
+            updatedAt: Date(timeIntervalSince1970: 1_700_000_100)
+        )
+        let page = MyDocumentPage(
+            id: pageID,
+            title: "Outline",
+            pageKey: "outline",
+            createdAt: Date(timeIntervalSince1970: 1_700_000_000),
+            updatedAt: Date(timeIntervalSince1970: 1_700_000_100)
+        )
+        let content = MyDocumentPageContent(pageId: pageID, content: "# Outline")
+        page.document = document
+        page.pageContent = content
+        document.pages = [page]
+        modelContext.insert(document)
+        modelContext.insert(page)
+        modelContext.insert(content)
+        try modelContext.save()
+
+        let service = AndroidDatabaseBackupService()
+        let export = try service.exportArchive(modelContext: modelContext, settingsStore: settingsStore)
+        let entriesByName = Dictionary(uniqueKeysWithValues: try ZipArchiveReader.entries(in: export.data).map { ($0.name, $0.data) })
+        let expectedCategories: [AndroidDatabaseBackupCategory] = [
+            .bookmarks,
+            .readingPlans,
+            .workspaces,
+            .myDocuments,
+        ]
+        let expectedEntryNames: Set<String> = [
+            "AndBibleBackupManifest.json",
+            "db/bookmarks.sqlite3",
+            "db/readingplans.sqlite3",
+            "db/workspaces.sqlite3",
+            "db/mydocuments.sqlite3",
+        ]
+
+        XCTAssertEqual(export.fileName, AndroidDatabaseBackupService.databaseBackupFileName)
+        XCTAssertEqual(export.categories, expectedCategories)
+        XCTAssertEqual(export.entryCount, expectedEntryNames.count)
+        XCTAssertEqual(Set(entriesByName.keys), expectedEntryNames)
+
+        let manifestData = try XCTUnwrap(entriesByName["AndBibleBackupManifest.json"])
+        let manifest = try XCTUnwrap(JSONSerialization.jsonObject(with: manifestData) as? [String: Any])
+        XCTAssertEqual(manifest["backupType"] as? String, "DB_BACKUP")
+        XCTAssertEqual(manifest["manifestVersion"] as? Int, 1)
+        XCTAssertEqual(manifest["contains"] as? [String], expectedCategories.map(\.rawValue))
+
+        let loadedArchive = try service.loadArchive(from: export.data)
+        defer { service.cleanup(loadedArchive) }
+        XCTAssertEqual(loadedArchive.manifest.backupType, "DB_BACKUP")
+        XCTAssertEqual(loadedArchive.sections.map(\.category), [.bookmarks, .myDocuments, .readingPlans, .workspaces])
+        XCTAssertTrue(loadedArchive.sections.allSatisfy { $0.support == .supported })
+
+        let materializedDatabases = try materializeExportedDatabases(entriesByName: entriesByName)
+        defer {
+            for databaseURL in materializedDatabases.values {
+                try? FileManager.default.removeItem(at: databaseURL)
+            }
+        }
+        XCTAssertEqual(try readSQLiteUserVersion(at: materializedDatabases["bookmarks.sqlite3"]!), 12)
+        XCTAssertEqual(try readSQLiteUserVersion(at: materializedDatabases["readingplans.sqlite3"]!), 1)
+        XCTAssertEqual(try readSQLiteUserVersion(at: materializedDatabases["workspaces.sqlite3"]!), 22)
+        XCTAssertEqual(
+            try readSQLiteUserVersion(at: materializedDatabases["mydocuments.sqlite3"]!),
+            RemoteSyncMyDocumentRestoreService.supportedAndroidSchemaVersion
+        )
+        XCTAssertEqual(
+            try readSQLiteInteger(
+                "SELECT COUNT(*) FROM Label WHERE name = 'Prayer';",
+                at: materializedDatabases["bookmarks.sqlite3"]!
+            ),
+            1
+        )
+    }
+
+    /**
      Verifies Android-parity restore semantics for a selected database backup section.
 
      Setup:
@@ -815,6 +934,111 @@ extension AndBibleTests {
             .sorted { $0.key < $1.key }
             .map { ("db/\($0.key)", $0.value) }
         return try makeStoredZip(entries: [("AndBibleBackupManifest.json", manifestData)] + databaseEntries)
+    }
+
+    /**
+     Builds an in-memory model container containing every model needed by supported backup export categories.
+
+     Android database backup export reads bookmarks, reading plans, workspaces, My Documents, and
+     local fidelity settings in one pass. This fixture keeps that graph in one container so the
+     export test exercises the same `ModelContext` shape the Settings screen supplies.
+
+     - Returns: In-memory SwiftData container for supported Android database backup export models.
+     - Side effects: none.
+     - Failure modes: Rethrows SwiftData container initialization failures.
+     */
+    private func makeAndroidDatabaseBackupExportModelContainer() throws -> ModelContainer {
+        let schema = Schema([
+            BibleBookmark.self,
+            BibleBookmarkNotes.self,
+            BibleBookmarkToLabel.self,
+            GenericBookmark.self,
+            GenericBookmarkNotes.self,
+            GenericBookmarkToLabel.self,
+            Label.self,
+            StudyPadTextEntry.self,
+            StudyPadTextEntryText.self,
+            ReadingPlan.self,
+            ReadingPlanDay.self,
+            Workspace.self,
+            Window.self,
+            PageManager.self,
+            HistoryItem.self,
+            MyDocument.self,
+            MyDocumentPage.self,
+            MyDocumentPageContent.self,
+            AiPageCacheEntry.self,
+            Setting.self,
+        ])
+        let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
+        return try ModelContainer(for: schema, configurations: [configuration])
+    }
+
+    /**
+     Writes exported ZIP database entries to temporary files for SQLite assertions.
+
+     - Parameter entriesByName: Exported ZIP entries keyed by archive path.
+     - Returns: Temporary SQLite file URLs keyed by Android database filename.
+     - Side effects: writes temporary SQLite files under the process temporary directory.
+     - Failure modes: Throws when an expected database entry is absent or cannot be written.
+     */
+    private func materializeExportedDatabases(entriesByName: [String: Data]) throws -> [String: URL] {
+        let databaseNames = [
+            "bookmarks.sqlite3",
+            "readingplans.sqlite3",
+            "workspaces.sqlite3",
+            "mydocuments.sqlite3",
+        ]
+        var urlsByName: [String: URL] = [:]
+        for databaseName in databaseNames {
+            let data = try XCTUnwrap(entriesByName["db/\(databaseName)"])
+            let url = FileManager.default.temporaryDirectory
+                .appendingPathComponent("android-backup-export-\(UUID().uuidString)-\(databaseName)")
+            try data.write(to: url, options: .atomic)
+            urlsByName[databaseName] = url
+        }
+        return urlsByName
+    }
+
+    /**
+     Reads one integer value from a materialized SQLite database.
+
+     The export test uses this to prove generated databases contain real Android-shaped table
+     content, not only valid SQLite headers and `user_version` pragmas.
+
+     - Parameters:
+       - sql: Single-row, single-column SQL statement returning an integer.
+       - url: SQLite database URL to inspect.
+     - Returns: First column from the first result row as an integer.
+     - Side effects: opens the database read-only and finalizes the prepared statement.
+     - Failure modes: Throws `AndroidDatabaseBackupError.invalidSQLiteDatabase` when SQLite cannot
+       open, prepare, or step the statement.
+     */
+    private func readSQLiteInteger(_ sql: String, at url: URL) throws -> Int {
+        var database: OpaquePointer?
+        guard sqlite3_open_v2(url.path, &database, SQLITE_OPEN_READONLY, nil) == SQLITE_OK,
+              let database else {
+            if let database {
+                sqlite3_close(database)
+            }
+            throw AndroidDatabaseBackupError.invalidSQLiteDatabase(url.lastPathComponent)
+        }
+        defer { sqlite3_close(database) }
+
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK,
+              let statement else {
+            if let statement {
+                sqlite3_finalize(statement)
+            }
+            throw AndroidDatabaseBackupError.invalidSQLiteDatabase(url.lastPathComponent)
+        }
+        defer { sqlite3_finalize(statement) }
+
+        guard sqlite3_step(statement) == SQLITE_ROW else {
+            throw AndroidDatabaseBackupError.invalidSQLiteDatabase(url.lastPathComponent)
+        }
+        return Int(sqlite3_column_int(statement, 0))
     }
 
     /**

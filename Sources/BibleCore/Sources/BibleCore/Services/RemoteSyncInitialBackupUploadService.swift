@@ -19,6 +19,9 @@ public enum RemoteSyncInitialBackupUploadError: Error, Equatable {
     /// The temporary SQLite database could not be opened or written safely.
     case invalidSQLiteDatabase
 
+    /// Upload was requested from a builder-only service that has no remote backend.
+    case missingRemoteAdapter
+
     /// The requested category does not yet have an initial-backup export pipeline.
     case unsupportedCategory(RemoteSyncCategory)
 }
@@ -104,7 +107,7 @@ public final class RemoteSyncInitialBackupUploadService {
         let workspaceHistoryAliases: [RemoteSyncWorkspaceFidelityStore.HistoryItemAlias]
     }
 
-    private let adapter: any RemoteSyncAdapting
+    private let adapter: (any RemoteSyncAdapting)?
     private let deviceIdentifier: String
     private let fileManager: FileManager
     private let temporaryDirectory: URL
@@ -139,6 +142,66 @@ public final class RemoteSyncInitialBackupUploadService {
     }
 
     /**
+     Creates a builder-only service for local Android-compatible database export.
+
+     Manual Android database backup export reuses the same category SQLite writers as remote sync,
+     but it must not upload, record patch-zero state, or persist workspace history aliases. This
+     initializer keeps that export path local while sharing the schema and row projection logic.
+
+     - Parameters:
+       - fileManager: File manager used for temporary SQLite output.
+       - temporaryDirectory: Optional staging directory override.
+     - Side effects: none.
+     - Failure modes: This initializer cannot fail.
+     */
+    private init(
+        fileManager: FileManager,
+        temporaryDirectory: URL?
+    ) {
+        adapter = nil
+        deviceIdentifier = "manual-database-backup-export"
+        self.fileManager = fileManager
+        self.temporaryDirectory = temporaryDirectory ?? fileManager.temporaryDirectory
+        nowProvider = {
+            Int64(Date().timeIntervalSince1970 * 1000.0)
+        }
+    }
+
+    /**
+     Builds one local Android-shaped SQLite database without remote-sync side effects.
+
+     - Parameters:
+       - category: Logical category whose current local state should be exported.
+       - modelContext: SwiftData context that owns the current local category graph.
+       - settingsStore: Local-only settings store backing Android fidelity metadata.
+       - schemaVersion: SQLite `user_version` written into the exported Android database.
+       - fileManager: File manager used for temporary SQLite output.
+       - temporaryDirectory: Optional staging directory override.
+     - Returns: Temporary SQLite database URL; the caller owns cleanup.
+     - Side effects: writes one temporary SQLite database beneath the configured temporary directory.
+     - Failure modes: Rethrows SQLite and JSON-encoding failures from the category-specific writers.
+     */
+    static func buildAndroidDatabaseBackupDatabase(
+        for category: RemoteSyncCategory,
+        modelContext: ModelContext,
+        settingsStore: SettingsStore,
+        schemaVersion: Int,
+        fileManager: FileManager = .default,
+        temporaryDirectory: URL? = nil
+    ) throws -> URL {
+        let service = RemoteSyncInitialBackupUploadService(
+            fileManager: fileManager,
+            temporaryDirectory: temporaryDirectory
+        )
+        return try service.buildInitialBackup(
+            for: category,
+            modelContext: modelContext,
+            settingsStore: settingsStore,
+            schemaVersion: schemaVersion
+        ).databaseURL
+    }
+
+    /**
      Builds and uploads one category's full Android-style initial backup.
 
      - Parameters:
@@ -168,6 +231,9 @@ public final class RemoteSyncInitialBackupUploadService {
         guard let syncFolderID = bootstrapState.syncFolderID?.trimmingCharacters(in: .whitespacesAndNewlines),
               !syncFolderID.isEmpty else {
             throw RemoteSyncInitialBackupUploadError.missingSyncFolderID
+        }
+        guard let adapter else {
+            throw RemoteSyncInitialBackupUploadError.missingRemoteAdapter
         }
 
         let builtBackup = try buildInitialBackup(
