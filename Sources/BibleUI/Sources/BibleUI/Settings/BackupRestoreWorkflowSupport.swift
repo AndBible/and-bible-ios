@@ -284,8 +284,8 @@ struct BackupExportDocument: FileDocument {
 
      - Parameter configuration: SwiftUI write configuration.
      - Returns: A regular file wrapper containing the generated backup content.
-     - Side effects: Reads from the temporary file for file-backed payloads; SwiftUI performs the
-       actual destination write.
+     - Side effects: Creates a lazy file wrapper for file-backed payloads; SwiftUI performs the
+       actual destination read and write.
      - Failure modes: Rethrows file-wrapper creation failures for missing or unreadable temporary
        files.
      */
@@ -294,7 +294,7 @@ struct BackupExportDocument: FileDocument {
         case .data(let data):
             return FileWrapper(regularFileWithContents: data)
         case .file(let fileURL):
-            return try FileWrapper(url: fileURL, options: .immediate)
+            return try FileWrapper(url: fileURL, options: [])
         }
     }
 }

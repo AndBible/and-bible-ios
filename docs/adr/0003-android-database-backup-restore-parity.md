@@ -57,7 +57,7 @@ For manual Android database backups, iOS will:
 
 For the top-level Backup & Restore workflow, iOS will:
 
-- expose Android's Backup choices in order: Database, Documents, Application
+- expose the iOS-supported Android Backup choices in order: Database, Documents
 - expose Android's Restore or Import choices in order: Database, Documents
 - route Database backup to `AndBibleDatabaseBackup.abdb.zip`
 - route Documents backup to `AndBibleModulesBackup.abmd.zip`
