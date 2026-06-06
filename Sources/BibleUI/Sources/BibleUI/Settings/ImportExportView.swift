@@ -356,10 +356,9 @@ public struct ImportExportView: View {
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
-        .confirmationDialog(
+        .alert(
             String(localized: "backup_backup_title", defaultValue: "Backup to where?"),
             isPresented: $showBackupDestinationDialog,
-            titleVisibility: .visible
         ) {
             Button(String(localized: "backup_phone_storage", defaultValue: "Phone storage")) {
                 finishPendingBackupExport(to: .phoneStorage)
@@ -556,11 +555,11 @@ public struct ImportExportView: View {
     }
 
     /**
-     Stores a generated backup payload and presents Android's Backup to where? choice.
+     Stores a generated backup payload and presents Android's Backup to where? alert choice.
 
      - Parameter payload: Valid archive content plus default file name and completion status.
      - Side effects: Replaces any previous pending payload, mutates pending export state, and
-       presents the confirmation dialog.
+       presents the destination alert.
      - Failure modes: none; backup generation has already succeeded before this method is called.
      */
     private func presentBackupDestination(_ payload: BackupExportPayload) {
