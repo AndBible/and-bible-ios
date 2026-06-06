@@ -46,3 +46,4 @@ Use these sections:
 - [0001: Gradually Convert Parity Decisions To ADRs](0001-gradually-convert-parity-decisions-to-adrs.md)
 - [0002: Route Reader Document Modals Through The Shared Document Pipeline](0002-route-reader-document-modals-through-shared-document-pipeline.md)
 - [0003: Android Database Backup Restore Parity](0003-android-database-backup-restore-parity.md)
+- [0004: Reader Pointer Affordances And Upstream Bug Handling](0004-reader-pointer-affordances-and-upstream-bug-handling.md)
