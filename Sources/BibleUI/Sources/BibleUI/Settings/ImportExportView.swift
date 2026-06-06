@@ -29,6 +29,30 @@ import UniformTypeIdentifiers
  - status text reflects the latest success or failure message across all operations
  */
 public struct ImportExportView: View {
+    /**
+     Identifies the currently running export action so row-level progress feedback stays attached
+     to the command the user actually started.
+
+     The value is stored only for the lifetime of one export operation. It prevents concurrent
+     export taps through the derived `isExporting` state and lets each export row decide whether
+     to render a spinner without sharing misleading UI feedback with sibling rows.
+
+     - Side effects: Mutating this state re-renders the export section and changes button
+       disabled/progress state.
+     - Failure modes: Export routines must clear the value on every success and failure path so
+       the export section cannot remain disabled after an error.
+     */
+    private enum ExportAction {
+        /// Android-compatible database backup archive export.
+        case androidDatabaseBackup
+
+        /// Legacy iOS JSON backup export retained for local compatibility.
+        case legacyFullBackup
+
+        /// Bookmark CSV export.
+        case bookmarksCSV
+    }
+
     /// SwiftData context used by backup import/export services.
     @Environment(\.modelContext) private var modelContext
 
@@ -71,8 +95,13 @@ public struct ImportExportView: View {
     /// Latest user-visible success or error message across import/export actions.
     @State private var statusMessage: String?
 
-    /// Whether a backup export is currently in progress.
-    @State private var isExporting = false
+    /// Currently running export action, if any.
+    @State private var activeExportAction: ExportAction?
+
+    /// Whether any export action is currently in progress.
+    private var isExporting: Bool {
+        activeExportAction != nil
+    }
 
     /// Whether a backup import is currently in progress.
     @State private var isImporting = false
@@ -336,10 +365,16 @@ public struct ImportExportView: View {
                 Button {
                     exportLegacyFullBackup()
                 } label: {
-                    SwiftUI.Label(
-                        String(localized: "legacy_full_backup_json", defaultValue: "Legacy Backup (JSON)"),
-                        systemImage: "arrow.up.doc"
-                    )
+                    HStack {
+                        SwiftUI.Label(
+                            String(localized: "legacy_full_backup_json", defaultValue: "Legacy Backup (JSON)"),
+                            systemImage: "arrow.up.doc"
+                        )
+                        Spacer()
+                        if activeExportAction == .legacyFullBackup {
+                            ProgressView()
+                        }
+                    }
                 }
                 .accessibilityIdentifier("importExportLegacyFullBackupButton")
                 .disabled(isBackupWorkflowBusy)
@@ -347,7 +382,13 @@ public struct ImportExportView: View {
                 Button {
                     exportBookmarksCSV()
                 } label: {
-                    SwiftUI.Label(String(localized: "bookmarks_csv"), systemImage: "tablecells")
+                    HStack {
+                        SwiftUI.Label(String(localized: "bookmarks_csv"), systemImage: "tablecells")
+                        Spacer()
+                        if activeExportAction == .bookmarksCSV {
+                            ProgressView()
+                        }
+                    }
                 }
                 .disabled(isBackupWorkflowBusy)
 
@@ -415,7 +456,7 @@ public struct ImportExportView: View {
         ) { result in
             handleBackupFileExport(result)
         }
-        .sheet(isPresented: $showExportSheet, onDismiss: { pendingBackupExport = nil }) {
+        .sheet(isPresented: $showExportSheet, onDismiss: clearPendingBackupExport) {
             if let url = exportedFileURL {
                 ShareSheet(items: [url])
             }
@@ -538,32 +579,37 @@ public struct ImportExportView: View {
      `AndBibleBackupManifest.json` and supported category SQLite databases under `db/`.
 
      - Side effects:
-       - toggles export state and clears prior status messages
+       - marks the Android database export row as active and clears prior status messages
        - schedules archive generation after one main-actor yield so SwiftUI can render the busy
          state before the expensive SQLite/ZIP work starts
-       - reads SwiftData through `AndroidDatabaseBackupService`
-       - stores the generated archive until the user chooses Phone storage or Share
+       - exports from a background SwiftData context so SQLite and ZIP work do not block the UI actor
+       - stores the generated archive file until the user chooses Phone storage or Share
      - Failure modes: Catches backup export and file-write failures and surfaces them as status text.
      */
     private func exportAndroidDatabaseBackup() {
-        isExporting = true
+        activeExportAction = .androidDatabaseBackup
         statusMessage = nil
+        let modelContainer = modelContext.container
 
         Task { @MainActor in
             await Task.yield()
-            defer { isExporting = false }
+            defer { activeExportAction = nil }
 
             do {
-                let export = try androidBackupService.exportArchive(
-                    modelContext: modelContext,
-                    settingsStore: SettingsStore(modelContext: modelContext)
-                )
+                let export = try await Task.detached(priority: .userInitiated) {
+                    let exportContext = ModelContext(modelContainer)
+                    return try AndroidDatabaseBackupService().exportArchiveFile(
+                        modelContext: exportContext,
+                        settingsStore: SettingsStore(modelContext: exportContext)
+                    )
+                }.value
+                let exportURL = try moveExportFileToShareDirectory(export)
                 let categorySummary = export.categories
                     .map(\.localizedBackupSectionName)
                     .joined(separator: ", ")
                 presentBackupDestination(
                     BackupExportPayload(
-                        data: export.data,
+                        temporaryFileURL: exportURL,
                         fileName: export.fileName,
                         statusMessage: String(
                             localized: "android_database_backup_exported_summary",
@@ -580,11 +626,13 @@ public struct ImportExportView: View {
     /**
      Stores a generated backup payload and presents Android's Backup to where? choice.
 
-     - Parameter payload: Valid archive bytes plus default file name and completion status.
-     - Side effects: Mutates pending export state and presents the confirmation dialog.
+     - Parameter payload: Valid archive content plus default file name and completion status.
+     - Side effects: Replaces any previous pending payload, mutates pending export state, and
+       presents the confirmation dialog.
      - Failure modes: none; backup generation has already succeeded before this method is called.
      */
     private func presentBackupDestination(_ payload: BackupExportPayload) {
+        clearPendingBackupExport()
         pendingBackupExport = payload
         showBackupDestinationDialog = true
     }
@@ -592,13 +640,14 @@ public struct ImportExportView: View {
     /**
      Completes the pending backup using the selected Android destination.
 
-     - Parameter destination: Phone storage uses Files export; Share writes a temporary file and
-       opens the share sheet.
+     - Parameter destination: Phone storage uses Files export; Share opens the share sheet with an
+       existing file-backed archive or writes data-backed payloads to a temporary file first.
      - Side effects:
        - mutates exporter or share-sheet presentation state
-       - writes a temporary file for Share
+       - may write a temporary file for data-backed Share payloads
        - updates status text after the selected destination accepts the payload
-     - Failure modes: Missing pending payload is ignored; file-write failures set `statusMessage`.
+     - Failure modes: Missing pending payload is ignored; file-read/write failures set
+       `statusMessage`.
      */
     private func finishPendingBackupExport(to destination: BackupExportDestination) {
         guard let payload = pendingBackupExport else {
@@ -607,15 +656,27 @@ public struct ImportExportView: View {
 
         switch destination {
         case .phoneStorage:
-            backupExportDocument = BackupExportDocument(data: payload.data)
+            backupExportDocument = payload.fileDocument()
             backupExportFileName = payload.fileName
             showBackupFileExporter = true
         case .share:
-            if let url = saveToTempFile(data: payload.data, fileName: payload.fileName) {
+            if let url = payload.temporaryFileURL {
                 exportedFileURL = url
-                pendingBackupExport = nil
                 showExportSheet = true
                 statusMessage = payload.statusMessage
+                return
+            }
+
+            do {
+                if let url = saveToTempFile(data: try payload.loadData(), fileName: payload.fileName) {
+                    exportedFileURL = url
+                    clearPendingBackupExport()
+                    showExportSheet = true
+                    statusMessage = payload.statusMessage
+                }
+            } catch {
+                clearPendingBackupExport()
+                statusMessage = localizedErrorMessage(error)
             }
         }
     }
@@ -632,7 +693,7 @@ public struct ImportExportView: View {
      */
     private func handleBackupFileExport(_ result: Result<URL, Error>) {
         let completionMessage = pendingBackupExport?.statusMessage
-        pendingBackupExport = nil
+        clearPendingBackupExport()
 
         switch result {
         case .success:
@@ -645,11 +706,23 @@ public struct ImportExportView: View {
     /**
      Cancels a prepared backup destination choice without writing or sharing the archive.
      *
-     - Side effects: Releases the generated archive bytes and dismisses any pending status from
-       the abandoned export.
+     - Side effects: Releases generated archive bytes or temporary files and dismisses any pending
+       status from the abandoned export.
      - Failure modes: none.
      */
     private func cancelPendingBackupExport() {
+        clearPendingBackupExport()
+    }
+
+    /**
+     Releases the prepared backup payload and removes any temporary archive it owns.
+
+     - Side effects: Deletes file-backed temporary exports and clears pending export state.
+     - Failure modes: Temporary-file cleanup failures are intentionally ignored by
+       `BackupExportPayload`.
+     */
+    private func clearPendingBackupExport() {
+        pendingBackupExport?.cleanupTemporaryFile()
         pendingBackupExport = nil
     }
 
@@ -660,19 +733,19 @@ public struct ImportExportView: View {
      manual backup format and should not be treated as the parity backup path.
 
      - Side effects:
-       - toggles export state and clears prior status messages
+       - marks the legacy JSON export row as active and clears prior status messages
        - queries `BackupService` for a full JSON backup payload
        - writes the payload to a temporary file and presents the share sheet on success
      - Failure modes: Surfaces missing backup data through status text.
      */
     private func exportLegacyFullBackup() {
-        isExporting = true
+        activeExportAction = .legacyFullBackup
         statusMessage = nil
 
         let service = BackupService(modelContext: modelContext)
         guard let data = service.exportFullBackup() else {
             statusMessage = String(localized: "error_create_backup")
-            isExporting = false
+            activeExportAction = nil
             return
         }
 
@@ -682,20 +755,26 @@ public struct ImportExportView: View {
             showExportSheet = true
         }
 
-        isExporting = false
+        activeExportAction = nil
     }
 
     /**
      Exports bookmarks as CSV, writes the file to a temporary location, and presents the share sheet.
+
+     - Side effects:
+       - marks the bookmark CSV export row as active and clears prior status messages
+       - queries `BackupService` for bookmark CSV payload data
+       - writes the payload to a temporary file and presents the share sheet on success
+     - Failure modes: Surfaces missing bookmark export data through status text.
      */
     private func exportBookmarksCSV() {
-        isExporting = true
+        activeExportAction = .bookmarksCSV
         statusMessage = nil
 
         let service = BackupService(modelContext: modelContext)
         guard let data = service.exportBookmarksCSV() else {
             statusMessage = String(localized: "error_export_bookmarks")
-            isExporting = false
+            activeExportAction = nil
             return
         }
 
@@ -705,7 +784,7 @@ public struct ImportExportView: View {
             showExportSheet = true
         }
 
-        isExporting = false
+        activeExportAction = nil
     }
 
     /**
@@ -1375,6 +1454,39 @@ public struct ImportExportView: View {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd"
         return formatter.string(from: Date())
+    }
+
+    /**
+     Moves a file-backed Android database backup export to the canonical share-sheet filename.
+
+     Android parity depends on presenting `AndBibleDatabaseBackup.abdb.zip`, while the background
+     export service creates a unique temporary filename to avoid collisions during archive generation.
+
+     - Parameter export: Completed file-backed database backup export.
+     - Returns: Temporary file URL with Android's canonical backup filename.
+     - Side effects:
+       - deletes any previous temporary export with the same canonical filename
+       - moves the generated archive into the share-sheet location
+       - removes the generated archive if the canonical move fails
+     - Failure modes: Rethrows file-system errors when the previous export cannot be removed or the
+       generated archive cannot be moved after attempting to clean up the source archive.
+     */
+    private func moveExportFileToShareDirectory(_ export: AndroidDatabaseBackupFileExport) throws -> URL {
+        let fileManager = FileManager.default
+        let fileURL = fileManager.temporaryDirectory.appendingPathComponent(export.fileName)
+        if fileURL == export.fileURL {
+            return fileURL
+        }
+        do {
+            if fileManager.fileExists(atPath: fileURL.path) {
+                try fileManager.removeItem(at: fileURL)
+            }
+            try fileManager.moveItem(at: export.fileURL, to: fileURL)
+            return fileURL
+        } catch {
+            try? fileManager.removeItem(at: export.fileURL)
+            throw error
+        }
     }
 
     /**

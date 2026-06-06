@@ -116,14 +116,116 @@ enum BackupExportDestination {
    there is a valid archive to save or share.
  */
 struct BackupExportPayload {
-    /// Raw backup archive bytes.
-    let data: Data
+    /// Generated backup content, either in memory or already staged as a temporary file.
+    enum Content {
+        /// Raw backup archive bytes.
+        case data(Data)
+
+        /// Temporary archive file owned by this payload until the destination flow completes.
+        case temporaryFile(URL)
+    }
+
+    /// Generated backup content prepared for Files export or Share.
+    let content: Content
 
     /// Android-compatible default file name.
     let fileName: String
 
     /// Completion message to show after a destination is selected.
     let statusMessage: String
+
+    /**
+     Creates an in-memory payload for smaller backup archive producers.
+
+     - Parameters:
+       - data: Archive bytes to export.
+       - fileName: Android-compatible default file name.
+       - statusMessage: Completion message shown after the selected destination accepts the backup.
+     - Side effects: none.
+     - Failure modes: This initializer cannot fail.
+     */
+    init(data: Data, fileName: String, statusMessage: String) {
+        self.content = .data(data)
+        self.fileName = fileName
+        self.statusMessage = statusMessage
+    }
+
+    /**
+     Creates a temporary file-backed payload for large backup archive producers.
+
+     - Parameters:
+       - temporaryFileURL: Temporary archive file owned by the destination workflow.
+       - fileName: Android-compatible default file name.
+       - statusMessage: Completion message shown after the selected destination accepts the backup.
+     - Side effects: none.
+     - Failure modes: This initializer cannot fail.
+     */
+    init(temporaryFileURL: URL, fileName: String, statusMessage: String) {
+        self.content = .temporaryFile(temporaryFileURL)
+        self.fileName = fileName
+        self.statusMessage = statusMessage
+    }
+
+    /**
+     Builds the SwiftUI document used by Phone storage export.
+
+     - Returns: A `BackupExportDocument` backed by the payload's existing storage.
+     - Side effects: none.
+     - Failure modes: File-backed documents may throw later if SwiftUI writes after the temporary file
+       has been removed.
+     */
+    func fileDocument() -> BackupExportDocument {
+        switch content {
+        case .data(let data):
+            return BackupExportDocument(data: data)
+        case .temporaryFile(let fileURL):
+            return BackupExportDocument(fileURL: fileURL)
+        }
+    }
+
+    /**
+     Returns a ready-to-share temporary file when the payload is already file-backed.
+
+     - Returns: Temporary file URL for file-backed payloads, otherwise `nil`.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    var temporaryFileURL: URL? {
+        if case .temporaryFile(let fileURL) = content {
+            return fileURL
+        }
+        return nil
+    }
+
+    /**
+     Reads the payload bytes for APIs that still require `Data`.
+
+     - Returns: Archive bytes from memory or from the temporary file.
+     - Side effects: Reads file-backed payload contents from disk.
+     - Failure modes: Rethrows file read failures for temporary file-backed payloads.
+     */
+    func loadData() throws -> Data {
+        switch content {
+        case .data(let data):
+            return data
+        case .temporaryFile(let fileURL):
+            return try Data(contentsOf: fileURL)
+        }
+    }
+
+    /**
+     Removes the temporary file owned by this payload.
+
+     - Side effects: Deletes the file-backed archive if present.
+     - Failure modes: Cleanup failures are intentionally ignored because the destination flow has
+       already ended and the file lives in the temporary directory.
+     */
+    func cleanupTemporaryFile() {
+        guard case .temporaryFile(let fileURL) = content else {
+            return
+        }
+        try? FileManager.default.removeItem(at: fileURL)
+    }
 }
 
 /**
@@ -134,11 +236,20 @@ struct BackupExportPayload {
  type from user-selected files.
  */
 struct BackupExportDocument: FileDocument {
+    /// Source used when SwiftUI writes the exported file.
+    private enum Content {
+        /// Raw bytes for smaller generated backups.
+        case data(Data)
+
+        /// Existing temporary archive file for larger generated backups.
+        case file(URL)
+    }
+
     /// The exporter writes ZIP archives, including Android's compound `.abdb.zip` and `.abmd.zip` names.
     static var readableContentTypes: [UTType] { [.zip, .data] }
 
-    /// Raw file bytes written by `fileWrapper(configuration:)`.
-    var data: Data
+    /// File contents written by `fileWrapper(configuration:)`.
+    private var content: Content
 
     /**
      Creates a document from generated backup bytes.
@@ -148,7 +259,19 @@ struct BackupExportDocument: FileDocument {
      - Failure modes: This initializer cannot fail.
      */
     init(data: Data = Data()) {
-        self.data = data
+        self.content = .data(data)
+    }
+
+    /**
+     Creates a document from an existing temporary backup file.
+
+     - Parameter fileURL: Archive file to stream through SwiftUI's document exporter.
+     - Side effects: none.
+     - Failure modes: This initializer cannot fail; `fileWrapper(configuration:)` reports missing
+       or unreadable files when SwiftUI writes the document.
+     */
+    init(fileURL: URL) {
+        self.content = .file(fileURL)
     }
 
     /**
@@ -160,19 +283,26 @@ struct BackupExportDocument: FileDocument {
        not use `BackupExportDocument` for importing.
      */
     init(configuration: ReadConfiguration) throws {
-        data = configuration.file.regularFileContents ?? Data()
+        content = .data(configuration.file.regularFileContents ?? Data())
     }
 
     /**
      Produces the file wrapper written by SwiftUI's exporter.
 
      - Parameter configuration: SwiftUI write configuration.
-     - Returns: A regular file wrapper containing `data`.
-     - Side effects: none; SwiftUI performs the actual file-system write.
-     - Failure modes: This implementation does not throw.
+     - Returns: A regular file wrapper containing the generated backup content.
+     - Side effects: Reads from the temporary file for file-backed payloads; SwiftUI performs the
+       actual destination write.
+     - Failure modes: Rethrows file-wrapper creation failures for missing or unreadable temporary
+       files.
      */
     func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
-        FileWrapper(regularFileWithContents: data)
+        switch content {
+        case .data(let data):
+            return FileWrapper(regularFileWithContents: data)
+        case .file(let fileURL):
+            return try FileWrapper(url: fileURL, options: .immediate)
+        }
     }
 }
 
