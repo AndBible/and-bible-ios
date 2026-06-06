@@ -65,7 +65,7 @@ public struct ImportExportView: View {
     /// URL of the most recently exported file shared through the share sheet.
     @State private var exportedFileURL: URL?
 
-    /// Latest user-visible success or error message across import/export actions.
+    /// Latest user-visible success, failure, or guidance message across import/export actions.
     @State private var statusMessage: String?
 
     /// Whether Android-compatible database backup export is currently preparing an archive.
@@ -347,7 +347,6 @@ public struct ImportExportView: View {
                 Section {
                     Text(statusMessage)
                         .font(.callout)
-                        .foregroundStyle(statusMessage.contains("Error") ? .red : .green)
                 }
             }
         }
