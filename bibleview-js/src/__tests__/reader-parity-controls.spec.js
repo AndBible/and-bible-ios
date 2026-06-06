@@ -479,6 +479,43 @@ describe("reading tracker", () => {
 
 describe("infinite scroll edge state", () => {
     /**
+     * Protects the single-page AI document navigation contract.
+     *
+     * The setup mirrors the shared Vue reader path used by Android and iOS with an AI OSIS document whose
+     * book category would otherwise support chapter navigation. A passing test proves AI pages are not
+     * exposed as chapter-navigable content, preventing manual previous/next controls from invoking native
+     * chapter navigation on generated single-page documents.
+     */
+    it("does not treat AI documents as chapter-navigable content", async () => {
+        let controls;
+        const requestPreviousChapter = vi.fn();
+        const requestNextChapter = vi.fn();
+        const documents = reactive([bibleDocument({
+            type: "osis",
+            isAiDocument: true,
+        })]);
+        const Harness = defineComponent({
+            template: "<div id=\"bottom\"></div>",
+            setup() {
+                controls = useInfiniteScroll(
+                    {requestPreviousChapter, requestNextChapter},
+                    {scrollYAtStart: ref(0)},
+                    documents,
+                    {infiniteScroll: false},
+                );
+                return {};
+            },
+        });
+
+        const wrapper = mount(Harness);
+        await nextTick();
+
+        expect(controls.documentSupportsChapterNavigation.value).toBe(false);
+        expect(controls.infiniteScrollIsEnabled.value).toBe(false);
+        wrapper.unmount();
+    });
+
+    /**
      * Protects manual navigation state when a chapter edge does not exist.
      *
      * The setup requests content at the top and bottom and receives Android's `null` sentinel for each

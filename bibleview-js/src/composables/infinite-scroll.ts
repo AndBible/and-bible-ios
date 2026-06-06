@@ -32,6 +32,20 @@ import {Config} from "@/composables/config";
 
 const maxConsecutiveEmptyLoads = 3; // Safety limit
 
+/**
+ * Coordinates automatic and manual loading of adjacent chapter-like reader content.
+ *
+ * @param requestPreviousChapter - Native bridge request for content before the current reader page.
+ * @param requestNextChapter - Native bridge request for content after the current reader page.
+ * @param scrollYAtStart - Shared scroll anchor that is adjusted when content is inserted above the viewport.
+ * @param bibleViewDocuments - Reactive reader document list mutated when adjacent content is inserted.
+ * @param config - Reader configuration controlling whether automatic infinite scroll is enabled.
+ * @returns Reactive loading, edge, and capability state plus manual load actions used by `BibleView`.
+ * @remarks The composable mutates `bibleViewDocuments`, installs window scroll/touch listeners, and calls
+ * the native bridge only through the supplied request functions. AI OSIS documents are intentionally
+ * excluded from chapter navigation because Android treats them as single-page generated content; if
+ * Android changes that contract, this predicate must be updated in both shared Vue sources.
+ */
 export function useInfiniteScroll(
     {requestPreviousChapter, requestNextChapter}: UseAndroid,
     {scrollYAtStart}: UseScroll,
@@ -193,19 +207,20 @@ export function useInfiniteScroll(
     }
 
     const
+        // Whether the current document type supports chapter navigation (Bible or GenBook).
+        // AI documents are generated single-page content, so they cannot expose adjacent-chapter controls.
         documentSupportsChapterNavigation = computed(() => {
            if(bibleViewDocuments.length === 0) return false;
            const doc = bibleViewDocuments[0];
            if(isOsisDocument(doc)) {
-                return enabledCategories.has(doc.bookCategory)
+                return !doc.isAiDocument && enabledCategories.has(doc.bookCategory)
            } else {
                return doc.type === "bible";
            }
         }),
+        // Whether infinite scroll is currently active for the supported document and reader settings.
         isEnabled = computed(() => {
             if(!config.infiniteScroll || !documentSupportsChapterNavigation.value) return false;
-            const doc = bibleViewDocuments[0];
-            if(isOsisDocument(doc) && doc.isAiDocument) return false;
             return true;
         }),
         UP_MARGIN = 2,
