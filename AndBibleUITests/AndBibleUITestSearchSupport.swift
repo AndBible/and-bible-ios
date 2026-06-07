@@ -465,10 +465,10 @@ extension AndBibleUITests {
      * - Side effects:
      *   - reveals Search options when needed and taps the translation picker button through the
      *     shared reliable button-tap path
-     *   - retries the tap when SwiftUI does not publish the picker-open state under CI load
+     *   - retries the tap when Search does not publish the canonical picker-open state under CI load
      * - Failure modes:
-     *   - fails when neither the state export nor picker descendants show the picker opened within
-     *     the timeout
+     *   - fails when the Search state export never reports that the picker button action toggled
+     *     presentation within the timeout
      */
     func tapSearchTranslationPicker(
         in app: XCUIApplication,
@@ -477,7 +477,7 @@ extension AndBibleUITests {
         let deadline = Date().addingTimeInterval(timeout)
 
         repeat {
-            if searchTranslationPickerIsOpen(in: app, timeout: 0) {
+            if searchTranslationPickerStateIsOpen(in: app, timeout: 0) {
                 return
             }
 
@@ -499,7 +499,13 @@ extension AndBibleUITests {
 
                 let remaining = deadline.timeIntervalSinceNow
                 if remaining > 0,
-                   searchTranslationPickerIsOpen(in: app, timeout: min(2, max(0.5, remaining))) {
+                   searchTranslationPickerStateIsOpen(in: app, timeout: min(1.5, max(0.25, remaining))) {
+                    return
+                }
+
+                let descendantWait = min(0.5, max(0, deadline.timeIntervalSinceNow))
+                if descendantWait > 0,
+                   firstExistingElement(searchTranslationPickerOpenCandidates(in: app), timeout: descendantWait) != nil {
                     return
                 }
             }
@@ -507,7 +513,8 @@ extension AndBibleUITests {
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         } while Date() < deadline
 
-        XCTFail("Expected Search translation picker to open within \(timeout) seconds.")
+        let finalState = resolvedSearchStateValue(in: app) ?? "nil"
+        XCTFail("Expected Search translation picker to open within \(timeout) seconds. Final Search state: '\(finalState)'.")
     }
 
     /**
