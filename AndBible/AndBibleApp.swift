@@ -536,7 +536,7 @@ struct AndBibleApp: App {
     private func performExternalDocumentImport(_ request: ExternalDocumentImportRequest) {
         isImportingExternalDocument = true
         externalDocumentImportMessage = nil
-        Task {
+        Task { @MainActor in
             let result = await Task.detached(priority: .userInitiated) {
                 ExternalDocumentImportService().importDocument(request)
             }.value

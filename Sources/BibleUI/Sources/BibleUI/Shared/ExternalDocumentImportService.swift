@@ -227,14 +227,15 @@ public struct ExternalDocumentImportService: Sendable {
       - Failure modes: Installer errors are captured in the returned failure result.
       */
     private func installArchive(at url: URL) -> ExternalDocumentImportResult {
-        if epubArchiveDetector(url) {
+        let isEpubArchive = epubArchiveDetector(url)
+        if isEpubArchive {
             return installEpub(at: url)
         }
         do {
             let moduleName = try moduleInstaller(url)
             return .installedModule(name: moduleName)
         } catch {
-            if epubArchiveDetector(url) {
+            if isEpubArchive {
                 return installEpub(at: url)
             }
             return .failed(message: error.localizedDescription)

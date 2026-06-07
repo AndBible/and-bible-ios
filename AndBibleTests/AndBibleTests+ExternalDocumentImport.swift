@@ -22,6 +22,9 @@ private final class ExternalDocumentImportProbe: @unchecked Sendable {
     /// URLs passed to the TTF font installer.
     private var fontURLs: [(url: URL, displayName: String?)] = []
 
+    /// Number of ZIP archive detector calls.
+    private var epubArchiveDetectionCount = 0
+
     /**
      Records a SWORD module installer call and returns a deterministic module name.
 
@@ -70,16 +73,37 @@ private final class ExternalDocumentImportProbe: @unchecked Sendable {
     }
 
     /**
+     Records an EPUB archive detection pass and classifies the archive as a SWORD ZIP.
+
+     - Parameter url: URL inspected by the ZIP classifier.
+     - Returns: `false` so the service continues to the module installer branch.
+     - Side effects: Increments the archive-detection count under a lock.
+     - Failure modes: This test double cannot fail.
+     */
+    func detectNonEpubArchive(_ url: URL) -> Bool {
+        _ = url
+        lock.lock()
+        epubArchiveDetectionCount += 1
+        lock.unlock()
+        return false
+    }
+
+    /**
      Returns the recorded installer calls.
 
      - Returns: Module and EPUB URL arrays captured so far.
      - Side effects: Reads test-double state under a lock.
      - Failure modes: This helper cannot fail.
      */
-    func snapshot() -> (moduleURLs: [URL], epubURLs: [URL], fontURLs: [(url: URL, displayName: String?)]) {
+    func snapshot() -> (
+        moduleURLs: [URL],
+        epubURLs: [URL],
+        fontURLs: [(url: URL, displayName: String?)],
+        epubArchiveDetectionCount: Int
+    ) {
         lock.lock()
         defer { lock.unlock() }
-        return (moduleURLs, epubURLs, fontURLs)
+        return (moduleURLs, epubURLs, fontURLs, epubArchiveDetectionCount)
     }
 }
 
@@ -227,6 +251,28 @@ extension AndBibleTests {
     }
 
     /**
+     ZIP archive classification is cached during a single module-install attempt.
+
+     The default detector reads archive metadata from disk. A failed SWORD install must not trigger a
+     second identical ZIP scan before returning the module installer error.
+     */
+    func testExternalDocumentImportZipModuleFailureDoesNotReinspectArchive() {
+        let probe = ExternalDocumentImportProbe()
+        let service = ExternalDocumentImportService(
+            moduleInstaller: { _ in throw ExternalDocumentImportTestError.rejected },
+            epubInstaller: { url in try probe.installEpub(from: url) },
+            fontInstaller: { url, displayName in try probe.installFont(from: url, displayName: displayName) },
+            epubArchiveDetector: { url in probe.detectNonEpubArchive(url) }
+        )
+
+        let result = service.importDocument(at: URL(fileURLWithPath: "/tmp/FinRK.zip"))
+
+        XCTAssertEqual(result, .failed(message: "installer rejected file"))
+        XCTAssertEqual(probe.snapshot().epubArchiveDetectionCount, 1)
+        XCTAssertEqual(probe.snapshot().epubURLs, [])
+    }
+
+    /**
      Multiple import requests are processed in Android `ACTION_SEND_MULTIPLE` order.
 
      Failure indicates that a multi-file share/open flow could reorder side effects or stop after
@@ -297,5 +343,29 @@ extension AndBibleTests {
         XCTAssertTrue(config.contains("[TTF_Gentium]"))
         XCTAssertTrue(config.contains("Category=And Bible"))
         XCTAssertTrue(config.contains("AndBibleProvidesFont=Gentium;Gentium.ttf"))
+    }
+
+    /**
+     TTF copy failures from unreadable sources surface as read errors.
+
+     This protects the import feedback contract: a missing or inaccessible provider file should not be
+     reported as a destination write problem.
+     */
+    func testTtfFontRepositoryReportsUnreadableSourceWhenCopyFails() throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+        let missingSourceURL = tempDir.appendingPathComponent("Missing.ttf")
+        let repository = TtfFontRepository(swordPath: tempDir.path)
+
+        do {
+            _ = try repository.installFont(from: missingSourceURL)
+            XCTFail("Expected unreadable TTF source to fail")
+        } catch TtfFontRepositoryError.cantRead(let fileName) {
+            XCTAssertEqual(fileName, "Missing.ttf")
+        } catch {
+            XCTFail("Expected cantRead, got \(error)")
+        }
     }
 }

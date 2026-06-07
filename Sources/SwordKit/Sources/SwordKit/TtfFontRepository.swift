@@ -43,7 +43,7 @@ public struct InstalledTtfFont: Equatable, Sendable {
  detail for localized import feedback and tests.
  */
 public enum TtfFontRepositoryError: LocalizedError, Sendable {
-    /// The selected file is not a readable `.ttf` file.
+    /// The selected file name does not identify a `.ttf` font.
     case invalidFont(String)
 
     /// The source file could not be read.
@@ -130,6 +130,9 @@ public struct TtfFontRepository: Sendable {
             do {
                 try fileManager.copyItem(at: url, to: destination)
             } catch {
+                if !sourceIsReadable(url) {
+                    throw TtfFontRepositoryError.cantRead(fileName)
+                }
                 throw TtfFontRepositoryError.cantWrite(fileName)
             }
         }
@@ -252,6 +255,27 @@ public struct TtfFontRepository: Sendable {
     private func invalidateModuleCache() {
         let cacheURL = modsDirectory.appendingPathComponent("modules-conf.cache", isDirectory: false)
         try? fileManager.removeItem(at: cacheURL)
+    }
+
+    /**
+     Checks whether a source font URL is readable after copy failure.
+
+     The preflight resource-value check can be inconclusive for security-scoped or provider-backed
+     URLs. Rechecking with `FileManager` after `copyItem` fails lets import feedback distinguish
+     unreadable sources from destination write errors without changing the installer contract.
+
+     - Parameter url: Source URL passed to `installFont(from:displayName:)`.
+     - Returns: `true` when the current process can still read the source path.
+     - Side effects: none.
+     - Failure modes: Inconclusive resource values fall back to `FileManager.isReadableFile`.
+     */
+    private func sourceIsReadable(_ url: URL) -> Bool {
+        if let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .isReadableKey]) {
+            if values.isRegularFile == false || values.isReadable == false {
+                return false
+            }
+        }
+        return fileManager.isReadableFile(atPath: url.path)
     }
 
     /**

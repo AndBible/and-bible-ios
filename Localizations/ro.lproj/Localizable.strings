@@ -187,6 +187,8 @@
 "error_prefix_%@" = "Error: %@";
 "installed_module_%@" = "Installed module: %@";
 "installed_epub_%@" = "Installed EPUB: %@";
+"installed_font_%@" = "Installed font: %@";
+"install_do_you_want" = "Do you want to install %@?";
 "no_sources_configured" = "No repository sources configured.";
 "remote_sources" = "Remote Sources";
 "sources_count_%lld_%lld" = "%lld sources configured, %lld enabled";
