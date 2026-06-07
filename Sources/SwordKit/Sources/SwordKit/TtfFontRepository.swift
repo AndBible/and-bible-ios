@@ -152,7 +152,8 @@ public struct TtfFontRepository: Sendable {
      - Returns: Installed-font metadata for each readable `.ttf` file found under `ttf/`.
      - Side effects: creates missing directories, rewrites addon config files, and invalidates the
        SWORD module cache when at least one font is registered.
-     - Throws: filesystem errors while creating directories or writing config files.
+     - Throws: filesystem errors while creating directories or writing config files. Directory
+       listing failures are treated as no readable TTF files, matching Android startup registration.
      */
     @discardableResult
     public func registerInstalledFonts() throws -> [InstalledTtfFont] {
@@ -283,7 +284,8 @@ public struct TtfFontRepository: Sendable {
      Normalizes an external filename so it cannot escape the `ttf` directory.
 
      - Parameter rawName: Provider-supplied filename.
-     - Returns: Non-empty basename ending in `.ttf` when the source name did.
+     - Returns: Non-empty basename with unsafe path and filename characters replaced. Blank provider
+       names fall back to a UUID `.ttf` filename, matching Android's generated display-name path.
      */
     private func sanitizedFileName(_ rawName: String) -> String {
         let lastComponent = (rawName as NSString).lastPathComponent
