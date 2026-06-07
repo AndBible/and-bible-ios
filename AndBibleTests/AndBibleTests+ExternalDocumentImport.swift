@@ -1,6 +1,7 @@
 import XCTest
 @testable import BibleUI
 import SwordKit
+import UniformTypeIdentifiers
 
 /**
  Thread-safe probe for the injectable external document installers.
@@ -211,6 +212,29 @@ extension AndBibleTests {
     }
 
     /**
+     Provider display names are normalized once before confirmation and TTF installation.
+
+     Failure means iOS document-provider metadata could show whitespace in the Android-style
+     confirmation prompt or create drift between the displayed name and installed font metadata.
+     */
+    func testExternalDocumentImportTrimsProviderDisplayNameForFontInstaller() {
+        let probe = ExternalDocumentImportProbe()
+        let service = makeExternalDocumentImportService(probe: probe)
+        let url = URL(fileURLWithPath: "/tmp/provider-source.ttf")
+        let request = ExternalDocumentImportRequest(
+            url: url,
+            suggestedFileName: "  Folder/Gentium.ttf  \n"
+        )
+
+        let result = service.importDocument(request)
+
+        XCTAssertEqual(result, .installedFont(name: "Gentium"))
+        XCTAssertEqual(request.displayFileName, "Gentium.ttf")
+        XCTAssertEqual(probe.snapshot().fontURLs.map(\.url), [url])
+        XCTAssertEqual(probe.snapshot().fontURLs.map(\.displayName), ["Gentium.ttf"])
+    }
+
+    /**
      Unsupported extensions return feedback without invoking any installer.
 
      Failure means the importer could claim a document type it cannot actually install.
@@ -223,6 +247,49 @@ extension AndBibleTests {
 
         XCTAssertEqual(result, .unsupportedFormat(fileExtension: "txt"))
         XCTAssertEqual(result.feedbackMessage, "Error: Unsupported file format (txt)")
+        XCTAssertEqual(probe.snapshot().moduleURLs, [])
+        XCTAssertEqual(probe.snapshot().epubURLs, [])
+        XCTAssertEqual(probe.snapshot().fontURLs.map(\.url), [])
+    }
+
+    /**
+     Non-file URLs are not importable documents, even when their path looks like a handled type.
+
+     SwiftUI `.onOpenURL` can receive unrelated app links. The shared service must keep the import
+     contract file-only so those links do not mutate SWORD, EPUB, or font storage.
+     */
+    func testExternalDocumentImportNonFileURLDoesNotCallInstallers() throws {
+        let probe = ExternalDocumentImportProbe()
+        let service = makeExternalDocumentImportService(probe: probe)
+        let url = try XCTUnwrap(URL(string: "https://example.invalid/custom.ttf"))
+
+        let result = service.importDocument(at: url)
+
+        XCTAssertEqual(result, .unsupportedFormat(fileExtension: "ttf"))
+        XCTAssertEqual(probe.snapshot().moduleURLs, [])
+        XCTAssertEqual(probe.snapshot().epubURLs, [])
+        XCTAssertEqual(probe.snapshot().fontURLs.map(\.url), [])
+    }
+
+    /**
+     Generic `public.data` metadata is accepted by the picker but must not identify a font.
+
+     The Settings importer includes `.data` so provider-backed files remain selectable. Routing must
+     still rely on specific document types, filename extensions, or archive inspection before
+     invoking an installer.
+     */
+    func testExternalDocumentImportGenericDataContentTypeDoesNotRouteToFontInstaller() {
+        let probe = ExternalDocumentImportProbe()
+        let service = makeExternalDocumentImportService(probe: probe)
+        let url = URL(fileURLWithPath: "/tmp/provider-data.bin")
+        let request = ExternalDocumentImportRequest(
+            url: url,
+            contentTypeIdentifier: UTType.data.identifier
+        )
+
+        let result = service.importDocument(request)
+
+        XCTAssertEqual(result, .unsupportedFormat(fileExtension: "bin"))
         XCTAssertEqual(probe.snapshot().moduleURLs, [])
         XCTAssertEqual(probe.snapshot().epubURLs, [])
         XCTAssertEqual(probe.snapshot().fontURLs.map(\.url), [])

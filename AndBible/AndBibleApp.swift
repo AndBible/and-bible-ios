@@ -504,6 +504,7 @@ struct AndBibleApp: App {
 
      - Parameter url: External file URL delivered by SwiftUI for the active scene.
      - Side effects:
+       - ignores non-file URLs delivered by unrelated URL-opening mechanisms
        - queues the request when another external import prompt or result is active
        - presents Android-style confirmation before installation
        - later performs module/EPUB/TTF installation in a user-initiated task
@@ -512,6 +513,9 @@ struct AndBibleApp: App {
      */
     @MainActor
     private func handleExternalDocumentURL(_ url: URL) {
+        guard url.isFileURL else {
+            return
+        }
         let request = ExternalDocumentImportRequest(url: url)
         if pendingExternalDocumentImport == nil,
            externalDocumentImportMessage == nil,
@@ -570,10 +574,7 @@ struct AndBibleApp: App {
      - Side effects: none.
      */
     private func externalDocumentImportConfirmationMessage(for request: ExternalDocumentImportRequest) -> String {
-        let fileName = request.suggestedFileName
-            ?? request.url.lastPathComponent
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        let displayName = fileName.isEmpty ? "?" : fileName
+        let displayName = request.displayFileName ?? "?"
         return String(
             format: String(
                 localized: "install_do_you_want",

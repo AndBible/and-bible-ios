@@ -23,6 +23,22 @@ public struct ExternalDocumentImportRequest: Equatable, Sendable {
     public let suggestedFileName: String?
 
     /**
+     Normalized display filename used by confirmation prompts and font installation metadata.
+
+     Provider metadata can arrive with leading/trailing whitespace or path-like separators. The
+     importer treats that metadata as a display filename, not an arbitrary path, and falls back to
+     the URL basename when the provider value is missing or blank.
+
+     - Returns: Non-empty basename from provider metadata or the URL, or `nil` when both are empty.
+     - Side effects: none.
+     - Failure modes: This normalization cannot fail.
+     */
+    public var displayFileName: String? {
+        Self.normalizedFileDisplayName(suggestedFileName)
+            ?? Self.normalizedFileDisplayName(url.lastPathComponent)
+    }
+
+    /**
      Creates an import request from a document URL and optional provider metadata.
 
      - Parameters:
@@ -36,6 +52,23 @@ public struct ExternalDocumentImportRequest: Equatable, Sendable {
         self.url = url
         self.contentTypeIdentifier = contentTypeIdentifier
         self.suggestedFileName = suggestedFileName
+    }
+
+    /**
+     Converts an external provider filename into a stable non-empty basename.
+
+     - Parameter value: Optional provider or URL-derived filename.
+     - Returns: Trimmed basename, or `nil` when the candidate is absent or blank.
+     - Side effects: none.
+     - Failure modes: This helper cannot fail.
+     */
+    private static func normalizedFileDisplayName(_ value: String?) -> String? {
+        guard let value else {
+            return nil
+        }
+        let baseName = (value as NSString).lastPathComponent
+        let trimmed = baseName.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 }
 
@@ -74,9 +107,11 @@ public struct ExternalDocumentImportService: Sendable {
         [.zip, .epub, trueTypeFontType, .data]
     }
 
-    /// Dynamic UTType for TrueType fonts, with `.data` as a conservative fallback.
+    /// Dynamic UTType for TrueType fonts, with a non-generic fallback to avoid matching `.data`.
     private static var trueTypeFontType: UTType {
-        UTType("public.truetype-ttf-font") ?? UTType(filenameExtension: "ttf") ?? .data
+        UTType("public.truetype-ttf-font")
+            ?? UTType(filenameExtension: "ttf")
+            ?? UTType(exportedAs: "org.andbible.truetype-font", conformingTo: .data)
     }
 
     /// SWORD module installer called for `.zip` files.
@@ -165,14 +200,17 @@ public struct ExternalDocumentImportService: Sendable {
      - Failure modes: Unsupported types and installer failures are represented in the return value.
      */
     public func importDocument(_ request: ExternalDocumentImportRequest) -> ExternalDocumentImportResult {
-        withSecurityScopedAccess(to: request.url) {
+        guard request.url.isFileURL else {
+            return .unsupportedFormat(fileExtension: request.url.pathExtension.lowercased())
+        }
+        return withSecurityScopedAccess(to: request.url) {
             switch documentKind(for: request) {
             case .archive:
                 return installArchive(at: request.url)
             case .epub:
                 return installEpub(at: request.url)
             case .font:
-                return installFont(at: request.url, displayName: request.suggestedFileName)
+                return installFont(at: request.url, displayName: request.displayFileName)
             case .unsupported:
                 return .unsupportedFormat(fileExtension: request.url.pathExtension.lowercased())
             }
