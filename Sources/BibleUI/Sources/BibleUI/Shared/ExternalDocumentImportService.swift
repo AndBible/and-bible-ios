@@ -4,20 +4,22 @@ import Foundation
 import BibleCore
 import SwordKit
 
-/// Installs user-selected documents that Android exposes through its external document intents.
-///
-/// Android routes shared/opened module packages through `InstallZip`; iOS uses this shared service
-/// from both the Backup & Restore document picker and the SwiftUI scene `.onOpenURL` entry point so
-/// the same ZIP/EPUB semantics are applied regardless of where the file came from.
-///
-/// Side effects:
-/// - reads security-scoped file URLs while access is active
-/// - installs SWORD ZIP modules through `ModuleRepository`
-/// - installs EPUB archives through `EpubReader`
-///
-/// Failure modes:
-/// - unsupported extensions return `.unsupportedFormat` without touching installers
-/// - installer errors are converted to `.failed` so callers can show the existing localized feedback
+/**
+ Installs user-selected documents that Android exposes through its external document intents.
+
+ Android routes shared/opened module packages through `InstallZip`; iOS uses this shared service
+ from both the Backup & Restore document picker and the SwiftUI scene `.onOpenURL` entry point so
+ the same ZIP/EPUB semantics are applied regardless of where the file came from.
+
+ Side effects:
+ - reads security-scoped file URLs while access is active
+ - installs SWORD ZIP modules through `ModuleRepository`
+ - installs EPUB archives through `EpubReader`
+
+ Failure modes:
+ - unsupported extensions return `.unsupportedFormat` without touching installers
+ - installer errors are converted to `.failed` so callers can show the existing localized feedback
+ */
 public struct ExternalDocumentImportService: Sendable {
     /// Closure used to install SWORD ZIP modules; injectable for focused tests.
     public typealias ModuleInstaller = @Sendable (URL) throws -> String
@@ -144,10 +146,12 @@ public struct ExternalDocumentImportService: Sendable {
     }
 }
 
-/// Structured outcome for an external document import attempt.
-///
-/// The enum keeps import semantics separate from presentation so Settings, app-scene open handling,
-/// and tests can reason about the branch taken while still sharing the same localized feedback text.
+/**
+ Structured outcome for an external document import attempt.
+
+ The enum keeps import semantics separate from presentation so Settings, app-scene open handling,
+ and tests can reason about the branch taken while still sharing the same localized feedback text.
+ */
 public enum ExternalDocumentImportResult: Equatable, Sendable {
     /// A SWORD module ZIP installed successfully; associated value is the installed module name.
     case installedModule(name: String)
