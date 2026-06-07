@@ -1023,21 +1023,32 @@ public struct ImportExportView: View {
     }
 
     /**
-     Installs one externally supplied document through the shared document import service.
+     Installs one externally supplied document through the shared document import service without
+     blocking the Settings UI.
 
      Settings and app-scene document opens both call `ExternalDocumentImportService` so Android's
-     ZIP/EPUB document-install contract stays centralized instead of drifting between entry points.
+     ZIP/EPUB/TTF document-install contract stays centralized instead of drifting between entry
+     points. The file I/O and archive work run off the main actor so the install progress state can
+     render before import work starts.
 
-     - Parameter url: Security-scoped URL for a user-selected ZIP or EPUB file.
-     - Side effects: Imports module or EPUB files into local app storage and presents feedback.
+     - Parameter url: Security-scoped URL for a user-selected ZIP, EPUB, or TTF file.
+     - Side effects: Mutates install progress state on the main actor, imports module, EPUB, or TTF
+       files into local app storage from a detached task, and presents feedback.
      - Failure modes: Unsupported formats and installer errors are surfaced as feedback.
      */
     private func installSupportedDocument(from url: URL) {
         isInstallingDocument = true
         statusMessage = nil
-        let result = ExternalDocumentImportService().importDocument(at: url)
-        statusMessage = result.feedbackMessage
-        isInstallingDocument = false
+        Task { @MainActor in
+            defer {
+                isInstallingDocument = false
+            }
+            await Task.yield()
+            let result = await Task.detached(priority: .userInitiated) {
+                ExternalDocumentImportService().importDocument(at: url)
+            }.value
+            statusMessage = result.feedbackMessage
+        }
     }
 
     /**
