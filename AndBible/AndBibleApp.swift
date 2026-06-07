@@ -148,6 +148,8 @@ struct AndBibleApp: App {
     @State private var queuedRemoteAdoptions: [RemoteSyncBootstrapCandidate] = []
     @State private var pendingRemoteConfirmation: PendingRemoteSyncConfirmation?
     @State private var remoteSyncErrorMessage: String?
+    /// Pending app-level feedback for a document opened from Files, Mail, or another app.
+    @State private var externalDocumentImportMessage: String?
     private let remoteSyncNetworkMonitor: RemoteSyncNetworkMonitor
     #if os(iOS)
     private let remoteSyncBackgroundRefreshCoordinator: RemoteSyncBackgroundRefreshCoordinator
@@ -357,6 +359,9 @@ struct AndBibleApp: App {
                     isUnlocked = false
                 }
             }
+            .onOpenURL { url in
+                handleExternalDocumentURL(url)
+            }
             .alert(
                 String(localized: "cloud_sync_title"),
                 isPresented: Binding(
@@ -436,8 +441,52 @@ struct AndBibleApp: App {
             } message: {
                 Text(remoteSyncErrorMessage ?? String(localized: "sync_error"))
             }
+            .alert(
+                String(localized: "import_from_file", defaultValue: "Import from File"),
+                isPresented: Binding(
+                    get: { externalDocumentImportMessage != nil },
+                    set: { newValue in
+                        if !newValue {
+                            externalDocumentImportMessage = nil
+                        }
+                    }
+                )
+            ) {
+                Button(String(localized: "ok")) {
+                    externalDocumentImportMessage = nil
+                }
+            } message: {
+                Text(externalDocumentImportMessage ?? "")
+            }
         }
         .modelContainer(modelContainer)
+    }
+
+    /**
+     Handles files opened into AndBible from iOS document interaction surfaces.
+
+     The app advertises ZIP and EPUB document types to mirror Android's implemented `InstallZip`
+     behavior. This scene-level handler sends those URLs through the same shared service used by
+     Backup & Restore so a Files/Mail open and an in-app document import produce the same storage
+     mutations and feedback.
+
+     - Parameter url: External file URL delivered by SwiftUI for the active scene.
+     - Side effects:
+       - clears any prior document-import feedback before starting
+       - performs module/EPUB installation in a user-initiated detached task
+       - publishes the result message to app-level alert state on the main actor
+     - Failure modes: Unsupported files and installer failures are converted to localized feedback
+       by `ExternalDocumentImportService`.
+     */
+    @MainActor
+    private func handleExternalDocumentURL(_ url: URL) {
+        externalDocumentImportMessage = nil
+        Task {
+            let result = await Task.detached(priority: .userInitiated) {
+                ExternalDocumentImportService().importDocument(at: url)
+            }.value
+            externalDocumentImportMessage = result.feedbackMessage
+        }
     }
 
     private func updateAppIcon(discrete: Bool, retryCount: Int = 0) {

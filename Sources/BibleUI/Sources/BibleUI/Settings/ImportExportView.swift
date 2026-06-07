@@ -85,8 +85,8 @@ public struct ImportExportView: View {
     /// Whether a backup import is currently in progress.
     @State private var isImporting = false
 
-    /// Whether a SWORD module installation is currently in progress.
-    @State private var isInstallingModule = false
+    /// Whether a SWORD module or EPUB document installation is currently in progress.
+    @State private var isInstallingDocument = false
 
     /// Whether an Android module backup restore is currently in progress.
     @State private var isRestoringAndroidModuleBackup = false
@@ -108,9 +108,6 @@ public struct ImportExportView: View {
 
     /// Controls the Android module backup overwrite confirmation prompt.
     @State private var showAndroidModuleBackupOverwriteAlert = false
-
-    /// Whether an EPUB installation is currently in progress.
-    @State private var isInstallingEpub = false
 
     /// Android database backup archive currently staged for category selection.
     @State private var androidBackupArchive: AndroidDatabaseBackupArchive?
@@ -249,7 +246,7 @@ public struct ImportExportView: View {
      Whether any restore/import/install operation is active.
      */
     private var isRestoringOrImporting: Bool {
-        isImporting || isRestoringAndroidModuleBackup || isInstallingModule || isInstallingEpub
+        isImporting || isRestoringAndroidModuleBackup || isInstallingDocument
     }
 
     /**
@@ -768,10 +765,8 @@ public struct ImportExportView: View {
             }
 
             switch ext {
-            case "zip":
-                installModule(from: url)
-            case "epub":
-                installEpub(from: url)
+            case "zip", "epub":
+                installSupportedDocument(from: url)
             case "bbl", "cmt", "dct", "mybible", "sqlite3", "bbli", "bblx":
                 statusMessage = String(localized: "mysword_file_hint")
             default:
@@ -1028,26 +1023,21 @@ public struct ImportExportView: View {
     }
 
     /**
-     Installs one SWORD ZIP through the shared module repository.
+     Installs one externally supplied document through the shared document import service.
 
-     - Parameter url: Security-scoped URL for a user-selected ZIP file.
-     - Side effects: Imports module files into local SWORD storage and presents feedback.
-     - Failure modes: `ModuleRepository.installFromZip(at:)` errors are surfaced as feedback.
+     Settings and app-scene document opens both call `ExternalDocumentImportService` so Android's
+     ZIP/EPUB document-install contract stays centralized instead of drifting between entry points.
+
+     - Parameter url: Security-scoped URL for a user-selected ZIP or EPUB file.
+     - Side effects: Imports module or EPUB files into local app storage and presents feedback.
+     - Failure modes: Unsupported formats and installer errors are surfaced as feedback.
      */
-    private func installModule(from url: URL) {
-        isInstallingModule = true
+    private func installSupportedDocument(from url: URL) {
+        isInstallingDocument = true
         statusMessage = nil
-        do {
-            let repo = ModuleRepository()
-            let moduleName = try repo.installFromZip(at: url)
-            statusMessage = String(
-                format: String(localized: "installed_module_%@"),
-                moduleName
-            )
-        } catch {
-            statusMessage = localizedErrorMessage(error)
-        }
-        isInstallingModule = false
+        let result = ExternalDocumentImportService().importDocument(at: url)
+        statusMessage = result.feedbackMessage
+        isInstallingDocument = false
     }
 
     /**
@@ -1265,37 +1255,6 @@ public struct ImportExportView: View {
             localized: "android_module_backup_restored_with_skips_summary",
             defaultValue: "Restored Android module backup: \(modules). Skipped \(report.skippedUnsupportedEntryPaths.count) Android-only files."
         )
-    }
-
-    /**
-     Installs one EPUB document through the local EPUB reader store.
-
-     - Parameter url: Security-scoped URL for a user-selected EPUB file.
-     - Side effects: Copies/processes EPUB content into app storage and presents feedback.
-     - Failure modes: `EpubReader.install(epubURL:)` errors are surfaced as feedback.
-     */
-    private func installEpub(from url: URL) {
-        isInstallingEpub = true
-        statusMessage = nil
-
-        do {
-            let identifier = try EpubReader.install(epubURL: url)
-            if let reader = EpubReader(identifier: identifier) {
-                statusMessage = String(
-                    format: String(localized: "installed_epub_%@"),
-                    reader.title
-                )
-            } else {
-                statusMessage = String(
-                    format: String(localized: "installed_epub_%@"),
-                    identifier
-                )
-            }
-        } catch {
-            statusMessage = localizedErrorMessage(error)
-        }
-
-        isInstallingEpub = false
     }
 
     /**
