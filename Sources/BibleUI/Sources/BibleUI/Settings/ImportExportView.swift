@@ -408,7 +408,7 @@ public struct ImportExportView: View {
         }
         .fileImporter(
             isPresented: $showDocumentsRestorePicker,
-            allowedContentTypes: [.zip, .epub, .data],
+            allowedContentTypes: ExternalDocumentImportService.supportedContentTypes,
             allowsMultipleSelection: false
         ) { result in
             handleDocumentsRestoreImport(result)
@@ -765,7 +765,7 @@ public struct ImportExportView: View {
             }
 
             switch ext {
-            case "zip", "epub":
+            case "zip", "epub", "ttf":
                 installSupportedDocument(from: url)
             case "bbl", "cmt", "dct", "mybible", "sqlite3", "bbli", "bblx":
                 statusMessage = String(localized: "mysword_file_hint")
