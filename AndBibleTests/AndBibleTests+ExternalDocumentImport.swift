@@ -1,4 +1,5 @@
 import XCTest
+import BibleCore
 @testable import BibleUI
 import SwordKit
 import UniformTypeIdentifiers
@@ -308,6 +309,43 @@ extension AndBibleTests {
             epubArchiveDetector: { _ in true }
         )
         let url = URL(fileURLWithPath: "/tmp/StudyNotes.zip")
+
+        let result = service.importDocument(at: url)
+
+        XCTAssertEqual(result, .installedEpub(title: "Study Notes"))
+        XCTAssertEqual(probe.snapshot().moduleURLs, [])
+        XCTAssertEqual(probe.snapshot().epubURLs, [url])
+        XCTAssertEqual(probe.snapshot().fontURLs.map(\.url), [])
+    }
+
+    /**
+     The production ZIP classifier reroutes ZIP-looking EPUB archives without an injected detector.
+
+     Setup:
+     - writes a real stored ZIP with EPUB's `META-INF/container.xml` marker
+     - imports it through the `.zip` path using the default archive classifier
+
+     Expected result:
+     - the EPUB installer receives the URL
+     - the SWORD module installer is not called
+
+     Failure meaning:
+     - iOS no longer mirrors Android's `installZip` fallback that detects EPUB structure from ZIP
+       entries before attempting a module install.
+     */
+    func testExternalDocumentImportZipEpubFallbackUsesProductionZipClassifier() throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+        let url = tempDir.appendingPathComponent("StudyNotes.zip")
+        let archiveData = try ZipArchiveWriter.storedArchive(entries: [
+            ZipArchiveWriterEntry(name: "mimetype", data: Data("application/epub+zip".utf8)),
+            ZipArchiveWriterEntry(name: "META-INF/container.xml", data: Data("<container/>".utf8)),
+        ])
+        try archiveData.write(to: url)
+        let probe = ExternalDocumentImportProbe()
+        let service = makeExternalDocumentImportService(probe: probe)
 
         let result = service.importDocument(at: url)
 

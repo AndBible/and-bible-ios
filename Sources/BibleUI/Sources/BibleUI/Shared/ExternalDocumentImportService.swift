@@ -411,125 +411,18 @@ private struct ZipArchiveDocumentClassifier: Sendable {
      Tests whether a ZIP archive has EPUB structure.
 
      - Parameter url: ZIP-like archive URL.
-     - Returns: `true` when central-directory or local-header metadata identifies EPUB content.
+     - Returns: `true` when central-directory metadata identifies EPUB content.
      - Side effects: Reads ZIP metadata from `url`.
      - Failure modes: Malformed or unreadable archives return `false`.
      */
     func isEpubArchive(_ url: URL) -> Bool {
-        guard let data = try? Data(contentsOf: url, options: [.mappedIfSafe]) else {
+        guard let entryNames = try? ZipArchiveReader.entryNames(inArchiveAt: url) else {
             return false
         }
-        let names = centralDirectoryEntryNames(in: data)
-        let entryNames = names.isEmpty ? localHeaderEntryNames(in: data) : names
-        return entryNames.contains { $0 == "mimetype" }
-            || entryNames.contains { $0 == "meta-inf/container.xml" }
-    }
-
-    /**
-     Reads ZIP central-directory entry names.
-
-     - Parameter data: Complete ZIP file bytes.
-     - Returns: Lowercased, normalized entry names or an empty list when no central directory is
-       available.
-     */
-    private func centralDirectoryEntryNames(in data: Data) -> [String] {
-        guard let endRecordOffset = endOfCentralDirectoryOffset(in: data) else {
-            return []
+        return entryNames.contains { name in
+            let normalized = normalizedEntryName(name)
+            return normalized == "mimetype" || normalized == "meta-inf/container.xml"
         }
-        let centralDirectorySize = Int(readUInt32(data, at: endRecordOffset + 12))
-        let centralDirectoryOffset = Int(readUInt32(data, at: endRecordOffset + 16))
-        guard centralDirectoryOffset >= 0,
-              centralDirectorySize >= 0,
-              centralDirectoryOffset + centralDirectorySize <= data.count else {
-            return []
-        }
-
-        var names: [String] = []
-        var offset = centralDirectoryOffset
-        let endOffset = centralDirectoryOffset + centralDirectorySize
-        while offset + 46 <= endOffset {
-            guard data[offset] == 0x50,
-                  data[offset + 1] == 0x4b,
-                  data[offset + 2] == 0x01,
-                  data[offset + 3] == 0x02 else {
-                break
-            }
-            let nameLength = Int(readUInt16(data, at: offset + 28))
-            let extraLength = Int(readUInt16(data, at: offset + 30))
-            let commentLength = Int(readUInt16(data, at: offset + 32))
-            let nameStart = offset + 46
-            let nextOffset = nameStart + nameLength + extraLength + commentLength
-            guard nameStart + nameLength <= data.count, nextOffset <= data.count else {
-                break
-            }
-            if let name = String(data: data[nameStart..<(nameStart + nameLength)], encoding: .utf8) {
-                names.append(normalizedEntryName(name))
-            }
-            offset = nextOffset
-        }
-        return names
-    }
-
-    /**
-     Reads local ZIP-header entry names when no central directory can be used.
-
-     - Parameter data: Complete ZIP file bytes.
-     - Returns: Lowercased, normalized entry names from local headers.
-     */
-    private func localHeaderEntryNames(in data: Data) -> [String] {
-        var names: [String] = []
-        var offset = 0
-        while offset + 30 <= data.count {
-            guard data[offset] == 0x50,
-                  data[offset + 1] == 0x4b,
-                  data[offset + 2] == 0x03,
-                  data[offset + 3] == 0x04 else {
-                break
-            }
-            let flags = readUInt16(data, at: offset + 6)
-            let compressedSize = Int(readUInt32(data, at: offset + 18))
-            let nameLength = Int(readUInt16(data, at: offset + 26))
-            let extraLength = Int(readUInt16(data, at: offset + 28))
-            let nameStart = offset + 30
-            let dataStart = nameStart + nameLength + extraLength
-            guard nameStart + nameLength <= data.count, dataStart <= data.count else {
-                break
-            }
-            if let name = String(data: data[nameStart..<(nameStart + nameLength)], encoding: .utf8) {
-                names.append(normalizedEntryName(name))
-            }
-            if flags & 0x08 != 0 {
-                break
-            }
-            let nextOffset = dataStart + compressedSize
-            guard nextOffset > offset, nextOffset <= data.count else {
-                break
-            }
-            offset = nextOffset
-        }
-        return names
-    }
-
-    /**
-     Finds the ZIP end-of-central-directory record.
-
-     - Parameter data: Complete ZIP file bytes.
-     - Returns: Offset of the EOCD record, or `nil` when absent.
-     */
-    private func endOfCentralDirectoryOffset(in data: Data) -> Int? {
-        guard data.count >= 22 else {
-            return nil
-        }
-        let lowerBound = max(0, data.count - 22 - 65_535)
-        for offset in stride(from: data.count - 22, through: lowerBound, by: -1) {
-            if data[offset] == 0x50,
-               data[offset + 1] == 0x4b,
-               data[offset + 2] == 0x05,
-               data[offset + 3] == 0x06 {
-                return offset
-            }
-        }
-        return nil
     }
 
     /**
@@ -544,25 +437,6 @@ private struct ZipArchiveDocumentClassifier: Sendable {
             normalized.removeFirst(2)
         }
         return normalized
-    }
-
-    /// Reads a little-endian `UInt16` without assuming pointer alignment.
-    private func readUInt16(_ data: Data, at offset: Int) -> UInt16 {
-        guard offset + 1 < data.count else {
-            return 0
-        }
-        return UInt16(data[offset]) | (UInt16(data[offset + 1]) << 8)
-    }
-
-    /// Reads a little-endian `UInt32` without assuming pointer alignment.
-    private func readUInt32(_ data: Data, at offset: Int) -> UInt32 {
-        guard offset + 3 < data.count else {
-            return 0
-        }
-        return UInt32(data[offset])
-            | (UInt32(data[offset + 1]) << 8)
-            | (UInt32(data[offset + 2]) << 16)
-            | (UInt32(data[offset + 3]) << 24)
     }
 }
 
