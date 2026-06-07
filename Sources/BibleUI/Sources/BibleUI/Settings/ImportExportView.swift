@@ -85,7 +85,7 @@ public struct ImportExportView: View {
     /// Whether a backup import is currently in progress.
     @State private var isImporting = false
 
-    /// Whether a SWORD module or EPUB document installation is currently in progress.
+    /// Whether a ZIP, EPUB, or TTF document installation is currently in progress.
     @State private var isInstallingDocument = false
 
     /// Whether an Android module backup restore is currently in progress.
