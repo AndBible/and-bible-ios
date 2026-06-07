@@ -465,8 +465,7 @@ struct AndBibleApp: App {
                     performExternalDocumentImport(request)
                 }
                 Button(String(localized: "cancel"), role: .cancel) {
-                    pendingExternalDocumentImport = nil
-                    showNextPendingExternalDocumentImportIfNeeded()
+                    // The dismissal binding owns cancel queue advancement.
                 }
             } message: { request in
                 Text(externalDocumentImportConfirmationMessage(for: request))
