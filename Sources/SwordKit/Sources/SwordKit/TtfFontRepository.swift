@@ -222,7 +222,8 @@ public struct TtfFontRepository: Sendable {
 
      - Parameter font: Installed-font metadata to serialize.
      - Side effects: writes or replaces one `.conf` file under `mods.d`.
-     - Throws: filesystem errors from `String.write`.
+     - Throws: `TtfFontRepositoryError.cantWrite` with the selected TTF filename when config
+       serialization fails.
      */
     private func writeAddonConfig(for font: InstalledTtfFont) throws {
         let config = """
@@ -242,7 +243,7 @@ public struct TtfFontRepository: Sendable {
         do {
             try config.write(to: configURL, atomically: true, encoding: .utf8)
         } catch {
-            throw TtfFontRepositoryError.cantWrite(configURL.lastPathComponent)
+            throw TtfFontRepositoryError.cantWrite(font.fileName)
         }
     }
 

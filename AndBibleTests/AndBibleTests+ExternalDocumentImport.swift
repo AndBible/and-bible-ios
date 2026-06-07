@@ -451,6 +451,38 @@ extension AndBibleTests {
     }
 
     /**
+     TTF addon-config write failures keep import feedback anchored to the selected font filename.
+
+     Android's TTF installer only exposes the imported TTF filename to the user; iOS persists an
+     extra SWORD `.conf` file as platform plumbing. Failure means an internal config filename can leak
+     through `ExternalDocumentImportService` as a misleading font-write error.
+     */
+    func testTtfFontRepositoryReportsFontNameWhenAddonConfigWriteFails() throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+        let sourceURL = tempDir.appendingPathComponent("SourceGentium.ttf")
+        try Data([0x00, 0x01, 0x00, 0x00]).write(to: sourceURL)
+        let modsDirectory = tempDir.appendingPathComponent("mods.d", isDirectory: true)
+        try FileManager.default.createDirectory(at: modsDirectory, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: modsDirectory.appendingPathComponent("ttf_gentium.conf", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        let repository = TtfFontRepository(swordPath: tempDir.path)
+
+        do {
+            _ = try repository.installFont(from: sourceURL, displayName: "Gentium.ttf")
+            XCTFail("Expected TTF config write to fail")
+        } catch TtfFontRepositoryError.cantWrite(let fileName) {
+            XCTAssertEqual(fileName, "Gentium.ttf")
+        } catch {
+            XCTFail("Expected cantWrite for selected TTF file, got \(error)")
+        }
+    }
+
+    /**
      TTF copy failures from unreadable sources surface as read errors.
 
      This protects the import feedback contract: a missing or inaccessible provider file should not be
