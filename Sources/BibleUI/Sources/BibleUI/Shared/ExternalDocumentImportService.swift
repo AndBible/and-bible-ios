@@ -273,9 +273,6 @@ public struct ExternalDocumentImportService: Sendable {
             let moduleName = try moduleInstaller(url)
             return .installedModule(name: moduleName)
         } catch {
-            if isEpubArchive {
-                return installEpub(at: url)
-            }
             return .failed(message: error.localizedDescription)
         }
     }
