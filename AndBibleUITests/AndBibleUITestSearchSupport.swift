@@ -463,11 +463,12 @@ extension AndBibleUITests {
      *   - app: Running application under test.
      *   - timeout: Maximum time to wait for the picker affordance.
      * - Side effects:
-     *   - reveals Search options when needed and taps the translation picker button
-     *   - retries the tap when SwiftUI does not publish the picker-open state under CI load
+     *   - reveals Search options when needed and taps the translation picker button through the
+     *     shared reliable button-tap path
+     *   - retries the tap when Search does not publish the canonical picker-open state under CI load
      * - Failure modes:
-     *   - fails when the translation picker affordance does not publish an open state or expose
-     *     picker descendants within the timeout
+     *   - fails when the Search state export never reports that the picker button action toggled
+     *     presentation within the timeout
      */
     func tapSearchTranslationPicker(
         in app: XCUIApplication,
@@ -476,7 +477,7 @@ extension AndBibleUITests {
         let deadline = Date().addingTimeInterval(timeout)
 
         repeat {
-            if searchTranslationPickerIsOpen(in: app, timeout: 0) {
+            if searchTranslationPickerStateIsOpen(in: app, timeout: 0) {
                 return
             }
 
@@ -494,18 +495,17 @@ extension AndBibleUITests {
                 ($0.exists || $0.waitForExistence(timeout: 0.2))
                     && waitForElementToBecomeHittable($0, timeout: 0.5)
             }) {
-                if elementHasUsableFrame(picker) {
-                    picker.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
-                } else {
-                    tapElementReliably(picker, timeout: min(2, max(0.5, deadline.timeIntervalSinceNow)))
-                }
+                tapElementReliably(picker, timeout: min(2, max(0.5, deadline.timeIntervalSinceNow)))
 
                 let remaining = deadline.timeIntervalSinceNow
                 if remaining > 0,
-                   searchTranslationPickerStateIsOpen(in: app, timeout: min(1.5, max(0.5, remaining))) {
+                   searchTranslationPickerStateIsOpen(in: app, timeout: min(1.5, max(0.25, remaining))) {
                     return
                 }
-                if firstExistingElement(searchTranslationPickerOpenCandidates(in: app), timeout: 0) != nil {
+
+                let descendantWait = min(0.5, max(0, deadline.timeIntervalSinceNow))
+                if descendantWait > 0,
+                   firstExistingElement(searchTranslationPickerOpenCandidates(in: app), timeout: descendantWait) != nil {
                     return
                 }
             }
@@ -513,7 +513,8 @@ extension AndBibleUITests {
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         } while Date() < deadline
 
-        XCTFail("Expected Search translation picker to open within \(timeout) seconds.")
+        let finalState = resolvedSearchStateValue(in: app) ?? "nil"
+        XCTFail("Expected Search translation picker to open within \(timeout) seconds. Final Search state: '\(finalState)'.")
     }
 
     /**

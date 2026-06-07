@@ -292,7 +292,6 @@
    ======================================== */
 "export" = "Export";
 "full_backup_json" = "Full Backup (JSON)";
-"bookmarks_csv" = "Bookmarks (CSV)";
 "export_footer" = "Export your data for backup or transfer to another device.";
 "import" = "Import";
 "import_from_file" = "Import from File";
@@ -303,15 +302,9 @@
 "epub" = "EPUB";
 "install_epub_book" = "Install EPUB Book";
 "epub_footer" = "Import an EPUB file for offline reading and study.";
-"error_create_backup" = "Error: Failed to create backup";
-"error_export_bookmarks" = "Error: Failed to export bookmarks";
 "error_read_file" = "Error: Could not read file";
-"error_parse_backup" = "Error: Could not parse backup file";
-"error_parse_csv" = "Error: Could not parse CSV file";
 "error_save_file" = "Error: Could not save file";
 "mysword_file_hint" = "MySword file detected. Use Downloads to install Bible modules.";
-"imported_items_%lld" = "Imported %lld items from backup";
-"imported_bookmarks_%lld" = "Imported %lld bookmarks";
 "error_unsupported_format_%@" = "Error: Unsupported file format (%@)";
 "error_prefix_%@" = "Error: %@";
 "installed_module_%@" = "Installed module: %@";

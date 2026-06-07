@@ -37,7 +37,8 @@ Services contain business logic and coordinate between stores and SwordKit:
 - `SearchService`: Full-text search via SwordKit, result formatting
 - `DownloadService`: Module download/install orchestration
 - `SpeakService`: TTS integration via AVSpeechSynthesizer
-- `BackupService`: Export/import app data
+- `AndroidDatabaseBackupService`: Android-compatible manual database backup import/export
+- `AndroidModuleBackupService`: Android-compatible module backup import/export
 - `SyncService`: iCloud/CloudKit sync
 
 ### Format Readers

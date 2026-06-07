@@ -788,20 +788,20 @@ extension AndBibleUITests {
     }
 
     /**
-     Opens Import and Export through the reader drawer administration route.
+     Opens Backup & Restore through the reader drawer administration route.
      *
      * - Parameter app: Running application under test.
-     * - Returns: The root accessibility-identified Import and Export screen element.
+     * - Returns: The root accessibility-identified Backup & Restore screen element.
      * - Side effects:
-     *   - opens the reader drawer and presents the Import and Export screen
+     *   - opens the reader drawer and presents the Android-aligned Backup & Restore screen
      * - Failure modes:
-     *   - fails when the Import and Export screen never appears
+     *   - fails when the Backup & Restore screen never appears
      */
     func openImportExport(in app: XCUIApplication) -> XCUIElement {
         openReaderActionDestination(
             actionIdentifier: "readerOpenImportExportAction",
             destinationIdentifier: "importExportScreen",
-            readinessIdentifiers: ["importExportImportButton", "importExportAndroidDatabaseBackupButton"],
+            readinessIdentifiers: ["backupWorkflowBackupButton", "backupWorkflowRestoreButton"],
             in: app,
             timeout: 20
         )

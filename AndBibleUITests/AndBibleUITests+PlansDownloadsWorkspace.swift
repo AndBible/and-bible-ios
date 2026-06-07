@@ -23,9 +23,7 @@ extension AndBibleUITests {
             timeout: 10
         )
 
-        let advancedDayPredicate = NSPredicate(format: "value == %@", "2")
-        expectation(for: advancedDayPredicate, evaluatedWith: currentDay)
-        waitForExpectations(timeout: 20)
+        waitForElementValue("dailyReadingCurrentDayLabel", toEqual: "2", in: app, timeout: 20)
     }
 
     /**
