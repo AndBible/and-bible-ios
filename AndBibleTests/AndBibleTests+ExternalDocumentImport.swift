@@ -451,6 +451,35 @@ extension AndBibleTests {
     }
 
     /**
+     TTF import rejects special path components before constructing an install destination.
+
+     Android routes TTF imports through display names that end in `.ttf`; iOS mirrors that extension
+     gate after reducing provider names to one basename. Failure means `.` or `..` could reach
+     destination URL construction and weaken the `ttf/` containment contract.
+     */
+    func testTtfFontRepositoryRejectsSpecialPathComponentDisplayNames() throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+        let sourceURL = tempDir.appendingPathComponent("SourceGentium.ttf")
+        try Data([0x00, 0x01, 0x00, 0x00]).write(to: sourceURL)
+        let repository = TtfFontRepository(swordPath: tempDir.path)
+
+        for displayName in [".", ".."] {
+            do {
+                _ = try repository.installFont(from: sourceURL, displayName: displayName)
+                XCTFail("Expected special path component \(displayName) to be rejected")
+            } catch TtfFontRepositoryError.invalidFont(let fileName) {
+                XCTAssertEqual(fileName, displayName)
+            } catch {
+                XCTFail("Expected invalidFont for special path component \(displayName), got \(error)")
+            }
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: tempDir.appendingPathComponent("ttf").path))
+    }
+
+    /**
      TTF addon-config write failures keep import feedback anchored to the selected font filename.
 
      Android's TTF installer only exposes the imported TTF filename to the user; iOS persists an

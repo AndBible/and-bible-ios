@@ -281,11 +281,13 @@ public struct TtfFontRepository: Sendable {
     }
 
     /**
-     Normalizes an external filename so it cannot escape the `ttf` directory.
+     Normalizes an external filename to one basename before TTF validation.
 
      - Parameter rawName: Provider-supplied filename.
      - Returns: Non-empty basename with unsafe path and filename characters replaced. Blank provider
        names fall back to a UUID `.ttf` filename, matching Android's generated display-name path.
+     - Important: `installFont(from:displayName:)` rejects sanitized names that do not end in `.ttf`
+       before appending them under `ttf/`; this rejects special path components such as `.` and `..`.
      */
     private func sanitizedFileName(_ rawName: String) -> String {
         let lastComponent = (rawName as NSString).lastPathComponent
