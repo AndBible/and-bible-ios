@@ -72,6 +72,14 @@ extension AndBibleUITests {
         let databaseBackupButton = requireElement("backupWorkflowBackupButton", in: app, timeout: 10)
         tapElementReliably(databaseBackupButton, timeout: 10)
         waitForElementValue("importExportScreen", toEqual: "backupDestinationPresented", in: app, timeout: 20)
+        XCTAssertTrue(
+            app.staticTexts["Backup to phone or elsewhere via Share function (email, iCloud Drive etc.)?"].waitForExistence(timeout: 10),
+            "Backup destination copy should describe iCloud Drive, not Android's Google Drive wording."
+        )
+        XCTAssertFalse(
+            app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Google Drive")).firstMatch.exists,
+            "iOS backup destination copy must not advertise Google Drive as the native backup target."
+        )
 
         let cancelDeadline = Date().addingTimeInterval(10)
         var cancelButton: XCUIElement?

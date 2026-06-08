@@ -56,11 +56,11 @@ public struct ImportExportView: View {
     /// Controls presentation of the Files exporter for "Phone storage".
     @State private var showBackupFileExporter = false
 
-    /// Controls presentation of the Android database restore/import picker.
-    @State private var showDatabaseRestorePicker = false
+    /// Controls presentation of the shared restore/import file picker.
+    @State private var showRestoreImportPicker = false
 
-    /// Controls presentation of the Android documents restore/import picker.
-    @State private var showDocumentsRestorePicker = false
+    /// Restore/import target whose content types and result handler are active for the file picker.
+    @State private var restoreImportPickerTarget: RestoreWorkflowTarget?
 
     /// URL of the most recently exported file shared through the share sheet.
     @State private var exportedFileURL: URL?
@@ -168,11 +168,13 @@ public struct ImportExportView: View {
         if showExportSheet {
             return "shareSheetPresented"
         }
-        if showDatabaseRestorePicker {
-            return "databaseRestorePickerPresented"
-        }
-        if showDocumentsRestorePicker {
-            return "documentsRestorePickerPresented"
+        if showRestoreImportPicker {
+            switch restoreImportPickerTarget ?? restoreTarget.wrappedValue {
+            case .database:
+                return "databaseRestorePickerPresented"
+            case .documents:
+                return "documentsRestorePickerPresented"
+            }
         }
         if showAndroidModuleBackupExportSheet {
             return "androidModuleBackupExportPresented"
@@ -258,6 +260,27 @@ public struct ImportExportView: View {
      */
     private var isBackupWorkflowBusy: Bool {
         isBackingUp || isRestoringOrImporting || isResettingBackupCategory
+    }
+
+    /**
+     Allowed content types for the currently active restore/import picker.
+
+     Android keeps Database backup archives and Documents/module imports as distinct visible
+     restore targets. iOS uses one SwiftUI file importer for reliability, then selects the allowed
+     UTTypes from the active target so the platform picker still opens the correct category.
+
+     - Returns: Database archive types for Database, or module/document types for Documents.
+     - Side effects: none.
+     - Failure modes: Falls back to the persisted restore target if the picker target was cleared by
+       the platform before the result callback arrives.
+     */
+    private var restoreImportPickerContentTypes: [UTType] {
+        switch restoreImportPickerTarget ?? restoreTarget.wrappedValue {
+        case .database:
+            return [.zip, .data]
+        case .documents:
+            return ExternalDocumentImportService.supportedContentTypes
+        }
     }
 
     /**
@@ -372,7 +395,7 @@ public struct ImportExportView: View {
         } message: {
             Text(String(
                 localized: "backup_backup_message",
-                defaultValue: "Backup to phone or elsewhere via Share function (email, Google Drive etc.)?"
+                defaultValue: "Backup to phone or elsewhere via Share function (email, iCloud Drive etc.)?"
             ))
         }
         .fileExporter(
@@ -388,13 +411,6 @@ public struct ImportExportView: View {
                 ShareSheet(items: [url])
             }
         }
-        .fileImporter(
-            isPresented: $showDatabaseRestorePicker,
-            allowedContentTypes: [.zip, .data],
-            allowsMultipleSelection: false
-        ) { result in
-            handleDatabaseRestoreImport(result)
-        }
         .sheet(item: $androidBackupArchive, onDismiss: cleanupDismissedAndroidBackupArchive) { archive in
             AndroidDatabaseBackupImportSheet(
                 archive: archive,
@@ -407,11 +423,11 @@ public struct ImportExportView: View {
             }
         }
         .fileImporter(
-            isPresented: $showDocumentsRestorePicker,
-            allowedContentTypes: ExternalDocumentImportService.supportedContentTypes,
+            isPresented: $showRestoreImportPicker,
+            allowedContentTypes: restoreImportPickerContentTypes,
             allowsMultipleSelection: false
         ) { result in
-            handleDocumentsRestoreImport(result)
+            handleRestoreImportPickerResult(result)
         }
         .sheet(isPresented: $showAndroidModuleBackupExportSheet) {
             AndroidModuleBackupExportSheet(
@@ -492,11 +508,31 @@ public struct ImportExportView: View {
      - Failure modes: Picker failures are handled by the selected result handler.
      */
     private func beginRestoreOrImport() {
-        switch restoreTarget.wrappedValue {
+        restoreImportPickerTarget = restoreTarget.wrappedValue
+        showRestoreImportPicker = true
+    }
+
+    /**
+     Routes the shared restore/import picker result to the target-specific workflow.
+
+     SwiftUI presentation modifiers are more reliable when one file importer owns the picker
+     lifecycle. This method preserves Android's Database/Documents split by dispatching the selected
+     file to the result handler captured when the user tapped Restore or Import.
+
+     - Parameter result: File picker result returned by SwiftUI.
+     - Side effects: Clears the transient picker target, then may mutate restore/import state
+       through the target-specific handler.
+     - Failure modes: Picker and importer failures are forwarded to the selected target handler.
+     */
+    private func handleRestoreImportPickerResult(_ result: Result<[URL], Error>) {
+        let target = restoreImportPickerTarget ?? restoreTarget.wrappedValue
+        restoreImportPickerTarget = nil
+
+        switch target {
         case .database:
-            showDatabaseRestorePicker = true
+            handleDatabaseRestoreImport(result)
         case .documents:
-            showDocumentsRestorePicker = true
+            handleDocumentsRestoreImport(result)
         }
     }
 
