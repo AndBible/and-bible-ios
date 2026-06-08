@@ -71,7 +71,7 @@ public struct ImportExportView: View {
     /// Controls presentation of the Android-style operation feedback alert.
     @State private var showStatusAlert = false
 
-    /// Completion message to show after the iOS share sheet returns control to Backup & Restore.
+    /// Completion message to show only after the iOS share sheet reports a completed destination.
     @State private var pendingShareCompletionMessage: String?
 
     /// Whether Android-compatible database backup export is currently preparing an archive.
@@ -408,7 +408,7 @@ public struct ImportExportView: View {
         }
         .sheet(isPresented: $showExportSheet, onDismiss: handleShareSheetDismiss) {
             if let url = exportedFileURL {
-                ShareSheet(items: [url])
+                ShareSheet(items: [url], onCompletion: handleBackupShareCompletion)
             }
         }
         .sheet(item: $androidBackupArchive, onDismiss: cleanupDismissedAndroidBackupArchive) { archive in
@@ -670,23 +670,50 @@ public struct ImportExportView: View {
     /**
      Handles return from the iOS share sheet.
 
-     Android's share/save chooser reports success after the external destination flow returns.
-     iOS's `ShareSheet` does not expose an equivalent result callback here, so this method mirrors
-     Android's timing by showing the prepared completion feedback only after the sheet dismisses.
+     UIKit reports whether the user completed a share destination, cancelled, or hit an activity
+     error. Backup & Restore uses that stronger platform result to preserve Android's visible
+     destination workflow without treating a cancelled iOS share sheet as a successful backup.
 
+     - Parameter completion: Platform-neutral result emitted by `ShareSheet`.
      - Side effects:
-       - releases the pending temporary export payload
+       - releases the pending temporary export payload after the share controller finishes
        - clears the queued share completion message
-       - presents the feedback alert when a completion message is available
-     - Failure modes: none; share result errors are not exposed by this sheet wrapper.
+       - presents success feedback only when `completion.completed` is true
+       - presents error feedback when the platform reports an activity error
+     - Failure modes: Share activity errors are surfaced through the shared import/export error
+       formatter.
      */
-    private func handleShareSheetDismiss() {
+    private func handleBackupShareCompletion(_ completion: ShareSheetCompletion) {
         let completionMessage = pendingShareCompletionMessage
         pendingShareCompletionMessage = nil
         clearPendingBackupExport()
-        if let completionMessage {
+
+        if let error = completion.error {
+            statusMessage = localizedErrorMessage(error)
+            return
+        }
+
+        if completion.completed, let completionMessage {
             statusMessage = completionMessage
         }
+    }
+
+    /**
+     Cleans up any share export state left after the share sheet leaves the screen.
+
+     UIKit normally calls `completionWithItemsHandler` for both completion and cancellation. The
+     dismissal hook remains a defensive cleanup boundary for platform dismissals that do not provide a
+     completion callback, but it intentionally does not publish success feedback because dismissal is
+     not proof that a backup destination accepted the archive.
+
+     - Side effects: Clears queued share feedback and releases any still-pending temporary export file.
+     - Failure modes: Temporary-file cleanup failures are intentionally ignored by
+       `BackupExportPayload`.
+     */
+    private func handleShareSheetDismiss() {
+        pendingShareCompletionMessage = nil
+        clearPendingBackupExport()
+        exportedFileURL = nil
     }
 
     /**

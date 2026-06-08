@@ -28,6 +28,7 @@
   "AndBibleUITests/AndBibleUITests/testSettingsColorsLinkOpensColorEditor": 18.54922103881836,
   "AndBibleUITests/AndBibleUITests/testSettingsBackupRestoreDatabaseBackupPresentsDestinationChoice": 18.399284958839417,
   "AndBibleUITests/AndBibleUITests/testSettingsBackupRestoreRestoreImportPresentsTargetSpecificPickers": 35.91730189323425,
+  "AndBibleUITests/AndBibleUITests/testSettingsBackupRestoreShareCancelDoesNotReportBackupSuccess": 22.122,
   "AndBibleUITests/AndBibleUITests/testSettingsBackupRestoreShowsAndroidBackupActivityWorkflow": 17.958650946617126,
   "AndBibleUITests/AndBibleUITests/testSettingsReadingProgressLinkOpensReadingProgressSettings": 16.167,
   "AndBibleUITests/AndBibleUITests/testSettingsScreenShowsApplicationPreferenceShortcuts": 14.295,

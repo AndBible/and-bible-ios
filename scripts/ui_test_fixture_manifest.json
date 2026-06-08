@@ -34,6 +34,7 @@
   "AndBibleUITests/AndBibleUITests/testSettingsColorsLinkOpensColorEditor": "baseline",
   "AndBibleUITests/AndBibleUITests/testSettingsBackupRestoreDatabaseBackupPresentsDestinationChoice": "baseline",
   "AndBibleUITests/AndBibleUITests/testSettingsBackupRestoreRestoreImportPresentsTargetSpecificPickers": "baseline",
+  "AndBibleUITests/AndBibleUITests/testSettingsBackupRestoreShareCancelDoesNotReportBackupSuccess": "baseline",
   "AndBibleUITests/AndBibleUITests/testSettingsBackupRestoreShowsAndroidBackupActivityWorkflow": "baseline",
   "AndBibleUITests/AndBibleUITests/testSettingsReadingProgressLinkOpensReadingProgressSettings": "baseline",
   "AndBibleUITests/AndBibleUITests/testApplicationPreferencesRenderAndroidListPreferenceRowsWithoutInlineValues": "baseline",

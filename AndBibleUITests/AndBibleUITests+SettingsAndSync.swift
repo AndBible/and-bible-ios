@@ -107,6 +107,63 @@ extension AndBibleUITests {
     }
 
     /**
+     Verifies that cancelling iOS's Share destination does not report a completed backup.
+     *
+     * Android's BackupActivity first asks whether the user wants Phone storage or Share. iOS mirrors
+     * that visible decision, but the native share sheet exposes a stronger completion contract than
+     * Android intents: closing the sheet means the user did not choose a destination. This regression
+     * protects the user-facing result message so Backup & Restore only reports success after the share
+     * destination actually accepts the archive.
+     *
+     * - Side effects:
+     *   - launches the app, opens Backup & Restore, and generates a temporary Android database backup
+     *   - presents the system share sheet and dismisses it without choosing a destination
+     * - Failure modes:
+     *   - fails if dismissing the share sheet surfaces the Android database export success message
+     *   - fails if the share sheet cannot be dismissed by one of the system close/cancel controls
+     */
+    func testSettingsBackupRestoreShareCancelDoesNotReportBackupSuccess() {
+        let app = makeApp()
+        app.launch()
+
+        let importExportScreen = openImportExport(in: app)
+        XCTAssertTrue(importExportScreen.exists)
+
+        let databaseTarget = requireElement("backupWorkflowTarget.databaseButton", in: app, timeout: 10)
+        tapElementReliably(databaseTarget, timeout: 10)
+
+        let databaseBackupButton = requireElement("backupWorkflowBackupButton", in: app, timeout: 10)
+        tapElementReliably(databaseBackupButton, timeout: 10)
+        waitForElementValue("importExportScreen", toEqual: "backupDestinationPresented", in: app, timeout: 20)
+
+        let shareButton = requireElement("backupDestinationShareButton", in: app, timeout: 10)
+        tapElementReliably(shareButton, timeout: 10)
+        waitForElementValue("importExportScreen", toEqual: "shareSheetPresented", in: app, timeout: 20)
+
+        let closeButton = firstExistingElement(
+            [
+                app.buttons["Close"].firstMatch,
+                app.navigationBars.buttons["Close"].firstMatch,
+                app.buttons["Cancel"].firstMatch,
+                app.navigationBars.buttons["Cancel"].firstMatch,
+            ],
+            timeout: 10
+        )
+        XCTAssertNotNil(closeButton, "Expected the system share sheet to expose a Close or Cancel control.")
+        guard let closeButton else {
+            return
+        }
+
+        tapElementReliably(closeButton, timeout: 10)
+        waitForElementValue("importExportScreen", toEqual: "idle", in: app, timeout: 10)
+        XCTAssertFalse(
+            app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Exported Android database backup")).firstMatch
+                .waitForExistence(timeout: 3),
+            "Closing the Share destination must not report that the backup was saved."
+        )
+    }
+
+    /**
      Verifies that Android Restore or Import keeps Database and Documents as distinct targets.
      *
      * - Side effects:
