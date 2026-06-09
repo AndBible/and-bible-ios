@@ -56,11 +56,11 @@ public struct ImportExportView: View {
     /// Controls presentation of the Files exporter for "Phone storage".
     @State private var showBackupFileExporter = false
 
-    /// Controls presentation of the Android database restore/import picker.
-    @State private var showDatabaseRestorePicker = false
+    /// Controls presentation of the shared restore/import file picker.
+    @State private var showRestoreImportPicker = false
 
-    /// Controls presentation of the Android documents restore/import picker.
-    @State private var showDocumentsRestorePicker = false
+    /// Restore/import target whose content types and result handler are active for the file picker.
+    @State private var restoreImportPickerTarget: RestoreWorkflowTarget?
 
     /// URL of the most recently exported file shared through the share sheet.
     @State private var exportedFileURL: URL?
@@ -71,7 +71,7 @@ public struct ImportExportView: View {
     /// Controls presentation of the Android-style operation feedback alert.
     @State private var showStatusAlert = false
 
-    /// Completion message to show after the iOS share sheet returns control to Backup & Restore.
+    /// Completion message to show only after the iOS share sheet reports a completed destination.
     @State private var pendingShareCompletionMessage: String?
 
     /// Whether Android-compatible database backup export is currently preparing an archive.
@@ -85,8 +85,8 @@ public struct ImportExportView: View {
     /// Whether a backup import is currently in progress.
     @State private var isImporting = false
 
-    /// Whether a SWORD module installation is currently in progress.
-    @State private var isInstallingModule = false
+    /// Whether a ZIP, EPUB, or TTF document installation is currently in progress.
+    @State private var isInstallingDocument = false
 
     /// Whether an Android module backup restore is currently in progress.
     @State private var isRestoringAndroidModuleBackup = false
@@ -108,9 +108,6 @@ public struct ImportExportView: View {
 
     /// Controls the Android module backup overwrite confirmation prompt.
     @State private var showAndroidModuleBackupOverwriteAlert = false
-
-    /// Whether an EPUB installation is currently in progress.
-    @State private var isInstallingEpub = false
 
     /// Android database backup archive currently staged for category selection.
     @State private var androidBackupArchive: AndroidDatabaseBackupArchive?
@@ -171,11 +168,13 @@ public struct ImportExportView: View {
         if showExportSheet {
             return "shareSheetPresented"
         }
-        if showDatabaseRestorePicker {
-            return "databaseRestorePickerPresented"
-        }
-        if showDocumentsRestorePicker {
-            return "documentsRestorePickerPresented"
+        if showRestoreImportPicker {
+            switch restoreImportPickerTarget ?? restoreTarget.wrappedValue {
+            case .database:
+                return "databaseRestorePickerPresented"
+            case .documents:
+                return "documentsRestorePickerPresented"
+            }
         }
         if showAndroidModuleBackupExportSheet {
             return "androidModuleBackupExportPresented"
@@ -249,7 +248,7 @@ public struct ImportExportView: View {
      Whether any restore/import/install operation is active.
      */
     private var isRestoringOrImporting: Bool {
-        isImporting || isRestoringAndroidModuleBackup || isInstallingModule || isInstallingEpub
+        isImporting || isRestoringAndroidModuleBackup || isInstallingDocument
     }
 
     /**
@@ -261,6 +260,27 @@ public struct ImportExportView: View {
      */
     private var isBackupWorkflowBusy: Bool {
         isBackingUp || isRestoringOrImporting || isResettingBackupCategory
+    }
+
+    /**
+     Allowed content types for the currently active restore/import picker.
+
+     Android keeps Database backup archives and Documents/module imports as distinct visible
+     restore targets. iOS uses one SwiftUI file importer for reliability, then selects the allowed
+     UTTypes from the active target so the platform picker still opens the correct category.
+
+     - Returns: Database archive types for Database, or module/document types for Documents.
+     - Side effects: none.
+     - Failure modes: Falls back to the persisted restore target if the picker target was cleared by
+       the platform before the result callback arrives.
+     */
+    private var restoreImportPickerContentTypes: [UTType] {
+        switch restoreImportPickerTarget ?? restoreTarget.wrappedValue {
+        case .database:
+            return [.zip, .data]
+        case .documents:
+            return ExternalDocumentImportService.supportedContentTypes
+        }
     }
 
     /**
@@ -375,7 +395,7 @@ public struct ImportExportView: View {
         } message: {
             Text(String(
                 localized: "backup_backup_message",
-                defaultValue: "Backup to phone or elsewhere via Share function (email, Google Drive etc.)?"
+                defaultValue: "Backup to phone or elsewhere via Share function (email, iCloud Drive etc.)?"
             ))
         }
         .fileExporter(
@@ -388,15 +408,8 @@ public struct ImportExportView: View {
         }
         .sheet(isPresented: $showExportSheet, onDismiss: handleShareSheetDismiss) {
             if let url = exportedFileURL {
-                ShareSheet(items: [url])
+                ShareSheet(items: [url], onCompletion: handleBackupShareCompletion)
             }
-        }
-        .fileImporter(
-            isPresented: $showDatabaseRestorePicker,
-            allowedContentTypes: [.zip, .data],
-            allowsMultipleSelection: false
-        ) { result in
-            handleDatabaseRestoreImport(result)
         }
         .sheet(item: $androidBackupArchive, onDismiss: cleanupDismissedAndroidBackupArchive) { archive in
             AndroidDatabaseBackupImportSheet(
@@ -410,11 +423,11 @@ public struct ImportExportView: View {
             }
         }
         .fileImporter(
-            isPresented: $showDocumentsRestorePicker,
-            allowedContentTypes: [.zip, .epub, .data],
+            isPresented: $showRestoreImportPicker,
+            allowedContentTypes: restoreImportPickerContentTypes,
             allowsMultipleSelection: false
         ) { result in
-            handleDocumentsRestoreImport(result)
+            handleRestoreImportPickerResult(result)
         }
         .sheet(isPresented: $showAndroidModuleBackupExportSheet) {
             AndroidModuleBackupExportSheet(
@@ -495,11 +508,31 @@ public struct ImportExportView: View {
      - Failure modes: Picker failures are handled by the selected result handler.
      */
     private func beginRestoreOrImport() {
-        switch restoreTarget.wrappedValue {
+        restoreImportPickerTarget = restoreTarget.wrappedValue
+        showRestoreImportPicker = true
+    }
+
+    /**
+     Routes the shared restore/import picker result to the target-specific workflow.
+
+     SwiftUI presentation modifiers are more reliable when one file importer owns the picker
+     lifecycle. This method preserves Android's Database/Documents split by dispatching the selected
+     file to the result handler captured when the user tapped Restore or Import.
+
+     - Parameter result: File picker result returned by SwiftUI.
+     - Side effects: Clears the transient picker target, then may mutate restore/import state
+       through the target-specific handler.
+     - Failure modes: Picker and importer failures are forwarded to the selected target handler.
+     */
+    private func handleRestoreImportPickerResult(_ result: Result<[URL], Error>) {
+        let target = restoreImportPickerTarget ?? restoreTarget.wrappedValue
+        restoreImportPickerTarget = nil
+
+        switch target {
         case .database:
-            showDatabaseRestorePicker = true
+            handleDatabaseRestoreImport(result)
         case .documents:
-            showDocumentsRestorePicker = true
+            handleDocumentsRestoreImport(result)
         }
     }
 
@@ -637,23 +670,50 @@ public struct ImportExportView: View {
     /**
      Handles return from the iOS share sheet.
 
-     Android's share/save chooser reports success after the external destination flow returns.
-     iOS's `ShareSheet` does not expose an equivalent result callback here, so this method mirrors
-     Android's timing by showing the prepared completion feedback only after the sheet dismisses.
+     UIKit reports whether the user completed a share destination, cancelled, or hit an activity
+     error. Backup & Restore uses that stronger platform result to preserve Android's visible
+     destination workflow without treating a cancelled iOS share sheet as a successful backup.
 
+     - Parameter completion: Platform-neutral result emitted by `ShareSheet`.
      - Side effects:
-       - releases the pending temporary export payload
+       - releases the pending temporary export payload after the share controller finishes
        - clears the queued share completion message
-       - presents the feedback alert when a completion message is available
-     - Failure modes: none; share result errors are not exposed by this sheet wrapper.
+       - presents success feedback only when `completion.completed` is true
+       - presents error feedback when the platform reports an activity error
+     - Failure modes: Share activity errors are surfaced through the shared import/export error
+       formatter.
      */
-    private func handleShareSheetDismiss() {
+    private func handleBackupShareCompletion(_ completion: ShareSheetCompletion) {
         let completionMessage = pendingShareCompletionMessage
         pendingShareCompletionMessage = nil
         clearPendingBackupExport()
-        if let completionMessage {
+
+        if let error = completion.error {
+            statusMessage = localizedErrorMessage(error)
+            return
+        }
+
+        if completion.completed, let completionMessage {
             statusMessage = completionMessage
         }
+    }
+
+    /**
+     Cleans up any share export state left after the share sheet leaves the screen.
+
+     UIKit normally calls `completionWithItemsHandler` for both completion and cancellation. The
+     dismissal hook remains a defensive cleanup boundary for platform dismissals that do not provide a
+     completion callback, but it intentionally does not publish success feedback because dismissal is
+     not proof that a backup destination accepted the archive.
+
+     - Side effects: Clears queued share feedback and releases any still-pending temporary export file.
+     - Failure modes: Temporary-file cleanup failures are intentionally ignored by
+       `BackupExportPayload`.
+     */
+    private func handleShareSheetDismiss() {
+        pendingShareCompletionMessage = nil
+        clearPendingBackupExport()
+        exportedFileURL = nil
     }
 
     /**
@@ -768,10 +828,8 @@ public struct ImportExportView: View {
             }
 
             switch ext {
-            case "zip":
-                installModule(from: url)
-            case "epub":
-                installEpub(from: url)
+            case "zip", "epub", "ttf":
+                installSupportedDocument(from: url)
             case "bbl", "cmt", "dct", "mybible", "sqlite3", "bbli", "bblx":
                 statusMessage = String(localized: "mysword_file_hint")
             default:
@@ -1028,26 +1086,32 @@ public struct ImportExportView: View {
     }
 
     /**
-     Installs one SWORD ZIP through the shared module repository.
+     Installs one externally supplied document through the shared document import service without
+     blocking the Settings UI.
 
-     - Parameter url: Security-scoped URL for a user-selected ZIP file.
-     - Side effects: Imports module files into local SWORD storage and presents feedback.
-     - Failure modes: `ModuleRepository.installFromZip(at:)` errors are surfaced as feedback.
+     Settings and app-scene document opens both call `ExternalDocumentImportService` so Android's
+     ZIP/EPUB/TTF document-install contract stays centralized instead of drifting between entry
+     points. The file I/O and archive work run off the main actor so the install progress state can
+     render before import work starts.
+
+     - Parameter url: Security-scoped URL for a user-selected ZIP, EPUB, or TTF file.
+     - Side effects: Mutates install progress state on the main actor, imports module, EPUB, or TTF
+       files into local app storage from a detached task, and presents feedback.
+     - Failure modes: Unsupported formats and installer errors are surfaced as feedback.
      */
-    private func installModule(from url: URL) {
-        isInstallingModule = true
+    private func installSupportedDocument(from url: URL) {
+        isInstallingDocument = true
         statusMessage = nil
-        do {
-            let repo = ModuleRepository()
-            let moduleName = try repo.installFromZip(at: url)
-            statusMessage = String(
-                format: String(localized: "installed_module_%@"),
-                moduleName
-            )
-        } catch {
-            statusMessage = localizedErrorMessage(error)
+        Task { @MainActor in
+            defer {
+                isInstallingDocument = false
+            }
+            await Task.yield()
+            let result = await Task.detached(priority: .userInitiated) {
+                ExternalDocumentImportService().importDocument(at: url)
+            }.value
+            statusMessage = result.feedbackMessage
         }
-        isInstallingModule = false
     }
 
     /**
@@ -1265,37 +1329,6 @@ public struct ImportExportView: View {
             localized: "android_module_backup_restored_with_skips_summary",
             defaultValue: "Restored Android module backup: \(modules). Skipped \(report.skippedUnsupportedEntryPaths.count) Android-only files."
         )
-    }
-
-    /**
-     Installs one EPUB document through the local EPUB reader store.
-
-     - Parameter url: Security-scoped URL for a user-selected EPUB file.
-     - Side effects: Copies/processes EPUB content into app storage and presents feedback.
-     - Failure modes: `EpubReader.install(epubURL:)` errors are surfaced as feedback.
-     */
-    private func installEpub(from url: URL) {
-        isInstallingEpub = true
-        statusMessage = nil
-
-        do {
-            let identifier = try EpubReader.install(epubURL: url)
-            if let reader = EpubReader(identifier: identifier) {
-                statusMessage = String(
-                    format: String(localized: "installed_epub_%@"),
-                    reader.title
-                )
-            } else {
-                statusMessage = String(
-                    format: String(localized: "installed_epub_%@"),
-                    identifier
-                )
-            }
-        } catch {
-            statusMessage = localizedErrorMessage(error)
-        }
-
-        isInstallingEpub = false
     }
 
     /**

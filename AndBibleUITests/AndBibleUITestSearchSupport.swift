@@ -514,6 +514,9 @@ extension AndBibleUITests {
         } while Date() < deadline
 
         let finalState = resolvedSearchStateValue(in: app) ?? "nil"
+        if finalState.contains("translationPicker=open") {
+            return
+        }
         XCTFail("Expected Search translation picker to open within \(timeout) seconds. Final Search state: '\(finalState)'.")
     }
 

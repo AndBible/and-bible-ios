@@ -66,6 +66,9 @@ public enum ZipArchiveReader {
     private static let endOfCentralDirectorySignature: UInt32 = 0x0605_4b50
     private static let zip64Sentinel: UInt32 = 0xffff_ffff
     private static let zip64EntryCountSentinel: UInt16 = 0xffff
+    private static let endOfCentralDirectoryMinimumByteCount = 22
+    private static let maximumZipCommentByteCount = 0xffff
+    private static let centralDirectoryHeaderByteCount = 46
     /// Maximum compressed or uncompressed bytes accepted for one eagerly materialized entry.
     private static let maximumEntryByteCount = 256 * 1024 * 1024
     /// Maximum compressed bytes accepted across all extracted entries.
@@ -82,6 +85,42 @@ public enum ZipArchiveReader {
         let compressedSize: Int
         let uncompressedSize: Int
         let localHeaderOffset: Int
+    }
+
+    /**
+     File-backed central-directory location parsed from a ZIP end record.
+     */
+    private struct FileBackedCentralDirectory {
+        let offset: UInt64
+        let size: UInt64
+        let entryCount: Int
+    }
+
+    /**
+     Reads ZIP entry names from central-directory metadata without materializing payload bytes.
+
+     This is intended for routing decisions that only need archive structure, such as detecting an
+     EPUB that arrived through a ZIP-looking document provider. It opens the archive, scans only the
+     legal end-of-central-directory search window, then reads one central-directory header/name at a
+     time so large module payloads are never mapped or copied into memory.
+
+     - Parameter url: File URL for a ZIP archive.
+     - Returns: Entry names in central-directory order.
+     - Side effects: Opens, seeks, and reads `url`.
+     - Throws:
+       - `ZipArchiveReaderError.missingCentralDirectory` when no ZIP end record is present
+       - `ZipArchiveReaderError.invalidArchive` when central-directory metadata is malformed,
+         truncated, multi-disk, ZIP64-only, or contains a non-UTF-8 entry name
+       - file-system errors from opening, seeking, or reading the archive
+     */
+    public static func entryNames(inArchiveAt url: URL) throws -> [String] {
+        let handle = try FileHandle(forReadingFrom: url)
+        defer {
+            try? handle.close()
+        }
+        let fileSize = try handle.seekToEnd()
+        let centralDirectory = try fileBackedCentralDirectory(from: handle, fileSize: fileSize)
+        return try fileBackedEntryNames(from: handle, centralDirectory: centralDirectory)
     }
 
     /**
@@ -230,6 +269,134 @@ public enum ZipArchiveReader {
     }
 
     /**
+     Parses the central-directory range from a file-backed ZIP end record.
+
+     - Parameters:
+       - handle: Open ZIP file handle, owned by the caller.
+       - fileSize: Total archive byte count.
+     - Returns: Central-directory byte range and entry count.
+     - Side effects: Seeks and reads from `handle`.
+     - Failure modes: Throws when the end record is missing or describes unsupported/malformed ZIP
+       metadata.
+     */
+    private static func fileBackedCentralDirectory(
+        from handle: FileHandle,
+        fileSize: UInt64
+    ) throws -> FileBackedCentralDirectory {
+        guard fileSize >= UInt64(endOfCentralDirectoryMinimumByteCount) else {
+            throw ZipArchiveReaderError.missingCentralDirectory
+        }
+
+        let searchLength = min(
+            fileSize,
+            UInt64(endOfCentralDirectoryMinimumByteCount + maximumZipCommentByteCount)
+        )
+        let tail = try readZipBytes(
+            from: handle,
+            offset: fileSize - searchLength,
+            count: Int(searchLength)
+        )
+        let endRecordOffset = try endOfCentralDirectoryOffset(inTail: tail)
+
+        let diskNumberRaw = readUInt16(tail, at: endRecordOffset + 4)
+        let centralDirectoryDiskRaw = readUInt16(tail, at: endRecordOffset + 6)
+        let diskEntryCountRaw = readUInt16(tail, at: endRecordOffset + 8)
+        let entryCountRaw = readUInt16(tail, at: endRecordOffset + 10)
+        let centralDirectorySizeRaw = readUInt32(tail, at: endRecordOffset + 12)
+        let centralDirectoryOffsetRaw = readUInt32(tail, at: endRecordOffset + 16)
+
+        guard diskEntryCountRaw != zip64EntryCountSentinel,
+              entryCountRaw != zip64EntryCountSentinel,
+              centralDirectorySizeRaw != zip64Sentinel,
+              centralDirectoryOffsetRaw != zip64Sentinel else {
+            throw ZipArchiveReaderError.invalidArchive("ZIP64 archives are not supported")
+        }
+        guard diskNumberRaw == 0,
+              centralDirectoryDiskRaw == 0,
+              diskEntryCountRaw == entryCountRaw else {
+            throw ZipArchiveReaderError.invalidArchive("Multi-disk ZIP archives are not supported")
+        }
+
+        let entryCount = Int(entryCountRaw)
+        let centralDirectorySize = UInt64(centralDirectorySizeRaw)
+        let centralDirectoryOffset = UInt64(centralDirectoryOffsetRaw)
+        guard centralDirectoryOffset <= fileSize,
+              centralDirectorySize <= fileSize - centralDirectoryOffset else {
+            throw ZipArchiveReaderError.invalidArchive("Central directory points outside archive")
+        }
+        guard centralDirectorySize > 0 || entryCount == 0 else {
+            throw ZipArchiveReaderError.invalidArchive("Central directory entry count mismatch")
+        }
+        return FileBackedCentralDirectory(
+            offset: centralDirectoryOffset,
+            size: centralDirectorySize,
+            entryCount: entryCount
+        )
+    }
+
+    /**
+     Reads central-directory entry names one header at a time from an open archive.
+
+     - Parameters:
+       - handle: Open ZIP file handle, owned by the caller.
+       - centralDirectory: Central-directory range parsed from the end record.
+     - Returns: UTF-8 entry names in central-directory order.
+     - Side effects: Seeks and reads from `handle`.
+     - Failure modes: Throws when the central directory is truncated, malformed, or contains a
+       non-UTF-8 name.
+     */
+    private static func fileBackedEntryNames(
+        from handle: FileHandle,
+        centralDirectory: FileBackedCentralDirectory
+    ) throws -> [String] {
+        guard centralDirectory.size > 0 else {
+            return []
+        }
+
+        var names: [String] = []
+        names.reserveCapacity(centralDirectory.entryCount)
+        var offset = centralDirectory.offset
+        let directoryEnd = centralDirectory.offset + centralDirectory.size
+        for _ in 0..<centralDirectory.entryCount {
+            guard UInt64(centralDirectoryHeaderByteCount) <= directoryEnd - offset else {
+                throw ZipArchiveReaderError.invalidArchive("Central directory entry is truncated")
+            }
+            let header = try readZipBytes(
+                from: handle,
+                offset: offset,
+                count: centralDirectoryHeaderByteCount
+            )
+            guard readUInt32(header, at: 0) == centralDirectoryHeaderSignature else {
+                throw ZipArchiveReaderError.invalidArchive("Central directory entry has an invalid signature")
+            }
+
+            let nameLength = UInt64(readUInt16(header, at: 28))
+            let extraLength = UInt64(readUInt16(header, at: 30))
+            let commentLength = UInt64(readUInt16(header, at: 32))
+            let metadataLength = UInt64(centralDirectoryHeaderByteCount) + nameLength + extraLength + commentLength
+            guard metadataLength <= directoryEnd - offset else {
+                throw ZipArchiveReaderError.invalidArchive("Central directory entry metadata is truncated")
+            }
+
+            let nameData = try readZipBytes(
+                from: handle,
+                offset: offset + UInt64(centralDirectoryHeaderByteCount),
+                count: Int(nameLength)
+            )
+            guard let name = String(data: nameData, encoding: .utf8) else {
+                throw ZipArchiveReaderError.invalidArchive("Central directory entry name is not UTF-8")
+            }
+            names.append(name)
+            offset += metadataLength
+        }
+
+        guard offset == directoryEnd else {
+            throw ZipArchiveReaderError.invalidArchive("Central directory contains trailing bytes")
+        }
+        return names
+    }
+
+    /**
      Validates one central-directory entry's declared compressed and uncompressed sizes.
 
      The ZIP reader materializes each supported entry in memory, so both the compressed payload
@@ -336,14 +503,42 @@ public enum ZipArchiveReader {
      - Failure modes: throws when the signature cannot be found inside the legal ZIP comment range.
      */
     private static func endOfCentralDirectoryOffset(in data: Data) throws -> Int {
-        guard data.count >= 22 else {
+        guard data.count >= endOfCentralDirectoryMinimumByteCount else {
             throw ZipArchiveReaderError.missingCentralDirectory
         }
-        let minimumOffset = max(0, data.count - 65_557)
-        var offset = data.count - 22
+        let minimumOffset = max(0, data.count - endOfCentralDirectoryMinimumByteCount - maximumZipCommentByteCount)
+        var offset = data.count - endOfCentralDirectoryMinimumByteCount
         while offset >= minimumOffset {
             if readUInt32(data, at: offset) == endOfCentralDirectorySignature {
                 return offset
+            }
+            offset -= 1
+        }
+        throw ZipArchiveReaderError.missingCentralDirectory
+    }
+
+    /**
+     Finds the ZIP end-of-central-directory record in a bounded file tail.
+
+     - Parameter tail: Last bytes of a ZIP archive, limited to the legal EOCD comment range.
+     - Returns: Byte offset of the EOCD signature within `tail`.
+     - Side effects: none.
+     - Failure modes: Throws when the signature cannot be found at a valid tail position.
+     */
+    private static func endOfCentralDirectoryOffset(inTail tail: Data) throws -> Int {
+        guard tail.count >= endOfCentralDirectoryMinimumByteCount else {
+            throw ZipArchiveReaderError.missingCentralDirectory
+        }
+        var offset = tail.count - endOfCentralDirectoryMinimumByteCount
+        while offset >= 0 {
+            if readUInt32(tail, at: offset) == endOfCentralDirectorySignature {
+                let commentLength = Int(readUInt16(tail, at: offset + 20))
+                if offset + endOfCentralDirectoryMinimumByteCount + commentLength == tail.count {
+                    return offset
+                }
+            }
+            if offset == 0 {
+                break
             }
             offset -= 1
         }
@@ -380,6 +575,29 @@ public enum ZipArchiveReader {
         }
 
         return Data(archive[dataStart..<dataStart + compressedSize])
+    }
+
+    /**
+     Reads an exact byte range from a file-backed ZIP archive.
+
+     - Parameters:
+       - handle: Open ZIP file handle, owned by the caller.
+       - offset: Absolute byte offset to read from.
+       - count: Number of bytes required.
+     - Returns: Data containing exactly `count` bytes.
+     - Side effects: Seeks and reads from `handle`.
+     - Failure modes: Throws when the requested range cannot be read fully.
+     */
+    private static func readZipBytes(from handle: FileHandle, offset: UInt64, count: Int) throws -> Data {
+        try handle.seek(toOffset: offset)
+        guard count > 0 else {
+            return Data()
+        }
+        guard let data = try handle.read(upToCount: count),
+              data.count == count else {
+            throw ZipArchiveReaderError.invalidArchive("Truncated ZIP structure")
+        }
+        return data
     }
 
     /**
