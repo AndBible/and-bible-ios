@@ -1940,8 +1940,8 @@ extension AndBibleUITests {
      *   - line: Source line used for XCTest failure attribution.
      * - Returns: The resolved button once XCTest reports a hittable activation point.
      * - Side effects:
-     *   - scrolls Sync Settings lower content until the requested button materializes and becomes
-     *     hittable
+     *   - scrolls Sync Settings lower content until the requested button materializes as a native
+     *     button and becomes hittable
      * - Failure modes:
      *   - records an XCTest failure if the button never appears or never becomes hittable
      */
@@ -1953,10 +1953,11 @@ extension AndBibleUITests {
         line: UInt = #line
     ) -> XCUIElement {
         let deadline = Date().addingTimeInterval(timeout)
-        var lastCandidate = unresolvedElement(identifier, in: app)
+        var lastCandidate = app.buttons[identifier].firstMatch
 
         repeat {
-            if let button = resolvedElement(identifier, in: app) {
+            let button = app.buttons[identifier].firstMatch
+            if button.exists {
                 lastCandidate = button
                 if waitForElementToBecomeHittable(button, timeout: 0.5) {
                     return button
