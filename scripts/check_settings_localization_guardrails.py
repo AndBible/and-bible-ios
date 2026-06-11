@@ -6,6 +6,7 @@ Checks:
 1. AndBible and Localizations trees must match for tracked settings keys.
 2. No iOS locale can remain English for a key when Android has a non-English translation.
 3. Per-key English-placeholder count may not exceed committed baseline (plus optional allowance).
+4. The iOS locale_pref picker must match Android arrays.xml values that have iOS resources.
 
 Usage:
   python3 scripts/check_settings_localization_guardrails.py
@@ -137,6 +138,24 @@ LOCALE_TO_ANDROID_VALUES = {
 
 
 LINE_RE = re.compile(r'^"(?P<key>[^"]+)"\s*=\s*"(?P<val>(?:[^"\\]|\\.)*)";\s*$')
+LOCALE_OPTIONS_BLOCK_RE = re.compile(
+    r"private static let localeOptions:\s*\[LocaleOption\]\s*=\s*\[(?P<body>.*?)\n\s*\]",
+    re.DOTALL,
+)
+SWIFT_LOCALE_OPTION_RE = re.compile(
+    r'\.init\(\s*value:\s*"(?P<value>[^"]*)",\s*'
+    r'labelKey:\s*"(?P<label_key>[^"]+)",\s*'
+    r'labelDefault:\s*"(?P<label_default>[^"]*)"\s*\)',
+    re.DOTALL,
+)
+
+
+LOCALE_PREF_RESOURCE_OVERRIDES = {
+    "iw": "he",
+    "in": "id",
+    "zh-Hant-TW": "zh-Hant",
+    "zh-Hans-CN": "zh-Hans",
+}
 
 
 def default_repo_root() -> Path:
@@ -176,6 +195,161 @@ def parse_android_strings(path: Path) -> dict[str, str]:
     return values
 
 
+@dataclass(frozen=True)
+class LocalePrefOption:
+    value: str
+    label_key: str
+
+
+@dataclass
+class LocalePrefAudit:
+    supported_values: list[str]
+    unsupported_values: list[str]
+    extra_ios_locales: list[str]
+    failures: list[str]
+
+
+def parse_android_array_items(arrays_path: Path, array_name: str) -> list[str]:
+    root = ET.parse(arrays_path).getroot()
+    node = root.find(f"string-array[@name='{array_name}']")
+    if node is None:
+        raise ValueError(f"Android array not found: {array_name}")
+    return ["".join(item.itertext()).strip() for item in node.findall("item")]
+
+
+def build_android_locale_pref_options(android_root: Path) -> list[LocalePrefOption]:
+    arrays_path = android_root / "values" / "arrays.xml"
+    descriptions = parse_android_array_items(arrays_path, "prefs_interface_locale_descriptions")
+    values = parse_android_array_items(arrays_path, "prefs_interface_locale_values")
+    if len(descriptions) != len(values):
+        raise ValueError(
+            "Android locale_pref array length mismatch: "
+            f"descriptions={len(descriptions)}, values={len(values)}"
+        )
+
+    options: list[LocalePrefOption] = []
+    for description, value in zip(descriptions, values):
+        if not description.startswith("@string/"):
+            raise ValueError(f"Android locale_pref description is not a string ref: {description}")
+        options.append(LocalePrefOption(value=value, label_key=description.removeprefix("@string/")))
+    return options
+
+
+def load_android_locale_pref_options_from_snapshot(path: Path) -> list[LocalePrefOption]:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    raw_options = payload.get("locale_pref_options")
+    if not isinstance(raw_options, list):
+        raise ValueError(f"Snapshot missing locale_pref_options: {path}")
+
+    options: list[LocalePrefOption] = []
+    for index, raw in enumerate(raw_options):
+        if not isinstance(raw, dict):
+            raise ValueError(f"Invalid locale_pref_options[{index}] in {path}")
+        options.append(
+            LocalePrefOption(
+                value=str(raw.get("value", "")),
+                label_key=str(raw.get("label_key", "")),
+            )
+        )
+    return options
+
+
+def parse_swift_locale_options(settings_view_path: Path) -> list[LocalePrefOption]:
+    text = settings_view_path.read_text(encoding="utf-8")
+    block = LOCALE_OPTIONS_BLOCK_RE.search(text)
+    if block is None:
+        raise ValueError(f"Could not find SettingsView.localeOptions in {settings_view_path}")
+
+    options = [
+        LocalePrefOption(value=match.group("value"), label_key=match.group("label_key"))
+        for match in SWIFT_LOCALE_OPTION_RE.finditer(block.group("body"))
+    ]
+    if not options:
+        raise ValueError(f"Could not parse SettingsView.localeOptions in {settings_view_path}")
+    return options
+
+
+def ios_resource_locale_for_locale_pref(value: str) -> str:
+    return LOCALE_PREF_RESOURCE_OVERRIDES.get(value, value)
+
+
+def ios_localization_locales(repo_root: Path) -> set[str]:
+    ios_a_root = repo_root / "AndBible"
+    ios_b_root = repo_root / "Localizations"
+    locales_a = {
+        p.name.removesuffix(".lproj")
+        for p in ios_a_root.glob("*.lproj")
+        if p.name.endswith(".lproj")
+    }
+    locales_b = {
+        p.name.removesuffix(".lproj")
+        for p in ios_b_root.glob("*.lproj")
+        if p.name.endswith(".lproj")
+    }
+    return locales_a & locales_b
+
+
+def audit_locale_pref_contract(
+    repo_root: Path,
+    android_options: list[LocalePrefOption],
+) -> LocalePrefAudit:
+    swift_options = parse_swift_locale_options(
+        repo_root / "Sources" / "BibleUI" / "Sources" / "BibleUI" / "Settings" / "SettingsView.swift"
+    )
+    ios_locales = ios_localization_locales(repo_root)
+    android_values = [option.value for option in android_options]
+    swift_values = [option.value for option in swift_options]
+    supported_options = [
+        option
+        for option in android_options
+        if option.value == "" or ios_resource_locale_for_locale_pref(option.value) in ios_locales
+    ]
+    supported_values = [option.value for option in supported_options]
+    unsupported_values = [
+        option.value
+        for option in android_options
+        if option.value and option.value not in supported_values
+    ]
+    android_label_by_value = {option.value: option.label_key for option in android_options}
+    ios_resource_values = {
+        ios_resource_locale_for_locale_pref(value)
+        for value in android_values
+        if value
+    }
+    extra_ios_locales = sorted(locale for locale in ios_locales if locale not in ios_resource_values)
+
+    failures: list[str] = []
+    if swift_values != supported_values:
+        missing = [value for value in supported_values if value not in swift_values]
+        unsupported = [value for value in swift_values if value not in supported_values]
+        if missing:
+            failures.append(f"locale_pref missing supported Android values: {', '.join(missing)}")
+        if unsupported:
+            failures.append(f"locale_pref shows unsupported Android values: {', '.join(unsupported)}")
+        if not missing and not unsupported:
+            failures.append(
+                "locale_pref order drift: Swift options must preserve Android arrays.xml order "
+                "after unsupported iOS locales are removed"
+            )
+
+    for option in swift_options:
+        expected_label = android_label_by_value.get(option.value)
+        if expected_label is None:
+            continue
+        if option.label_key != expected_label:
+            failures.append(
+                "locale_pref label key mismatch for "
+                f"{option.value or '<default>'}: android={expected_label}, swift={option.label_key}"
+            )
+
+    return LocalePrefAudit(
+        supported_values=supported_values,
+        unsupported_values=unsupported_values,
+        extra_ios_locales=extra_ios_locales,
+        failures=failures,
+    )
+
+
 def build_android_non_english_by_key(android_root: Path) -> dict[str, list[str]]:
     android_base = parse_android_strings(android_root / "values" / "strings.xml")
     android_base.update(parse_android_strings(android_root / "values" / "untranslated_strings.xml"))
@@ -210,12 +384,17 @@ def write_android_non_english_snapshot(
     path: Path,
     android_root: Path,
     non_english_by_key: dict[str, list[str]],
+    locale_pref_options: list[LocalePrefOption],
 ) -> None:
     payload = {
         "generated_on": date.today().isoformat(),
         "source_android_res": str(android_root),
         "parity_keys": PARITY_KEYS,
         "locale_to_android_values": LOCALE_TO_ANDROID_VALUES,
+        "locale_pref_options": [
+            {"value": option.value, "label_key": option.label_key}
+            for option in locale_pref_options
+        ],
         "android_non_english_by_key": non_english_by_key,
     }
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -357,15 +536,27 @@ def main() -> int:
             print(f"Android root not found: {args.android_root}", file=sys.stderr)
             return 2
         non_english_by_key = build_android_non_english_by_key(args.android_root)
-        write_android_non_english_snapshot(args.android_snapshot, args.android_root, non_english_by_key)
+        locale_pref_options = build_android_locale_pref_options(args.android_root)
+        write_android_non_english_snapshot(
+            args.android_snapshot,
+            args.android_root,
+            non_english_by_key,
+            locale_pref_options,
+        )
         print(f"Wrote Android snapshot: {args.android_snapshot}")
         return 0
 
     if args.android_root.exists():
         non_english_by_key = build_android_non_english_by_key(args.android_root)
+        locale_pref_options = build_android_locale_pref_options(args.android_root)
         android_source = f"live:{args.android_root}"
     elif args.android_snapshot.exists():
         non_english_by_key = load_android_non_english_snapshot(args.android_snapshot)
+        try:
+            locale_pref_options = load_android_locale_pref_options_from_snapshot(args.android_snapshot)
+        except ValueError as exc:
+            print(str(exc), file=sys.stderr)
+            return 2
         android_source = f"snapshot:{args.android_snapshot}"
     else:
         print(
@@ -377,6 +568,7 @@ def main() -> int:
         return 2
 
     audit = run_audit(args.repo_root, non_english_by_key, android_source)
+    locale_pref_audit = audit_locale_pref_contract(args.repo_root, locale_pref_options)
 
     if args.write_baseline:
         write_baseline(args.baseline, audit)
@@ -418,12 +610,19 @@ def main() -> int:
                 f"allowed_increase={args.allow_count_increase}"
             )
 
+    if locale_pref_audit.failures:
+        failures.append("locale_pref option contract failures:")
+        failures.extend(f"  - {item}" for item in locale_pref_audit.failures)
+
     print("SETPAR-603 guardrail summary")
     print(f"- tree mismatches: {len(audit.tree_mismatches)}")
     print(f"- ios_gap count: {ios_gap_count}")
     print(f"- android source: {audit.android_source}")
     print(f"- keys checked: {len(PARITY_KEYS)}")
     print(f"- locales checked: {len(audit.locales)}")
+    print(f"- locale_pref supported values: {len(locale_pref_audit.supported_values)}")
+    print(f"- locale_pref unavailable Android values: {len(locale_pref_audit.unsupported_values)}")
+    print(f"- locale_pref extra iOS-only resource locales: {len(locale_pref_audit.extra_ios_locales)}")
 
     if failures:
         print("\nFAILURES:")
