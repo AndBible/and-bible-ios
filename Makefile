@@ -3,7 +3,7 @@
 # Local-only config (App Store Connect identifiers) is read from outside the repo
 # if present, so this file stays free of secrets and identifiers.
 -include $(HOME)/.appstoreconnect/asc-api.env
-export ASC_ISSUER_ID ASC_KEY_ID
+export ASC_ISSUER_ID ASC_KEY_ID ASC_KEY_GPG ASC_TEAM_ID
 
 .DEFAULT_GOAL := help
 

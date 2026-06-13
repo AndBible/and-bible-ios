@@ -9,11 +9,16 @@ make testflight
 
 That runs `scripts/upload-testflight.sh`, which:
 
-1. Decrypts the App Store Connect API key onto a RAM-backed volume (the plaintext
-   `.p8` never touches the SSD; the volume is ejected on exit).
-2. Stamps a unique build number (UTC `YYYY.MMDD.HHMM`, restored afterward so the
+1. Decrypts the App Store Connect API key onto a RAM-backed volume, avoiding
+   writing the plaintext `.p8` to the normal filesystem (the volume is ejected on
+   exit). This is best-effort, not an absolute guarantee — macOS can still page
+   memory to swap or capture it in a crash dump.
+2. Generates export options with the team resolved from local-only config
+   (`ASC_TEAM_ID`, else `DEVELOPMENT_TEAM` from `Config/Secrets.xcconfig.local`),
+   so no team identifier is committed.
+3. Stamps a unique build number (UTC `YYYY.MMDD.HHMM`, restored afterward so the
    working tree stays clean).
-3. Archives the app for iOS (no Mac Catalyst) and uploads it via Xcode automatic
+4. Archives the app for iOS (no Mac Catalyst) and uploads it via Xcode automatic
    (cloud) signing.
 
 ## One-time setup
@@ -32,8 +37,12 @@ That runs `scripts/upload-testflight.sh`, which:
    gpg --encrypt --recipient you@example.com \
        --output ~/.appstoreconnect/private_keys/AuthKey_<KEYID>.p8.gpg \
        ~/Downloads/AuthKey_<KEYID>.p8
-   rm -P ~/Downloads/AuthKey_<KEYID>.p8     # shred the plaintext
+   rm -P ~/Downloads/AuthKey_<KEYID>.p8     # best-effort overwrite of the plaintext
    ```
+
+   Note that `rm -P` (and secure deletion in general) is only best-effort on
+   modern SSD/APFS systems — copy-on-write and wear-leveling mean the original
+   bytes may survive. Treat it as cleanup, not a guarantee.
 
    Back the encrypted blob up somewhere safe — App Store Connect only lets you
    download the `.p8` once.
@@ -52,7 +61,8 @@ That runs `scripts/upload-testflight.sh`, which:
 
 - `REUSE_ARCHIVE=1 make testflight` — skip archiving and re-export an existing
   `build/AndBible.xcarchive` (useful when iterating on the upload step).
-- Override `ASC_ISSUER_ID`, `ASC_KEY_ID`, or `ASC_KEY_GPG` via the environment.
+- Override `ASC_ISSUER_ID`, `ASC_KEY_ID`, `ASC_KEY_GPG`, or `ASC_TEAM_ID` via the
+  environment. `ASC_KEY_ID` and `ASC_ISSUER_ID` are required (no defaults).
 
 ## Notes
 
