@@ -14,49 +14,194 @@ extension AndBibleUITests {
     }
 
     /**
-     Verifies that the full-backup export action drives Import and Export into share-sheet presentation.
+     Verifies that Backup & Restore exposes Android BackupActivity's primary workflow choices.
      *
      * - Side effects:
-     *   - launches the app directly into Import and Export
-     *   - triggers a full-backup export, which writes a temporary file and requests share-sheet
-     *     presentation
+     *   - launches the app and opens the reader administration Backup & Restore route
+     *   - reads Android-derived radio rows and reset actions through accessibility identifiers
      * - Failure modes:
-     *   - fails if the full-backup action is missing from the Import and Export screen
-     *   - fails if the Import and Export screen never reports the share-sheet-presented state after
-     *     export completes
+     *   - fails if iOS exposes platform-specific JSON/CSV import/export semantics
+     *   - fails if actionable Database/Documents backup, Restore/Import, or reset sections
+     *     disappear from the user-visible workflow
+     *   - fails if iOS exposes Android's Application/APK backup row even though that target cannot
+     *     be implemented on iOS
      */
-    func testSettingsImportExportFullBackupPresentsShareSheet() {
+    func testSettingsBackupRestoreShowsAndroidBackupActivityWorkflow() {
         let app = makeApp()
         app.launch()
 
         let importExportScreen = openImportExport(in: app)
         XCTAssertTrue(importExportScreen.exists)
 
-        let fullBackupButton = requireElement("importExportFullBackupButton", in: app, timeout: 10)
-        tapElementReliably(fullBackupButton, timeout: 10)
-        waitForElementValue("importExportScreen", toEqual: "shareSheetPresented", in: app, timeout: 20)
+        XCTAssertTrue(requireElement("backupWorkflowTarget.databaseButton", in: app, timeout: 10).exists)
+        XCTAssertTrue(requireElement("backupWorkflowTarget.documentsButton", in: app, timeout: 10).exists)
+        XCTAssertFalse(app.buttons["backupWorkflowTarget.applicationButton"].exists)
+        XCTAssertTrue(requireElement("restoreWorkflowTarget.databaseButton", in: app, timeout: 10).exists)
+        XCTAssertTrue(requireElement("restoreWorkflowTarget.documentsButton", in: app, timeout: 10).exists)
+        XCTAssertTrue(requireElement("backupWorkflowBackupButton", in: app, timeout: 10).exists)
+        XCTAssertTrue(requireElement("backupWorkflowRestoreButton", in: app, timeout: 10).exists)
+        XCTAssertTrue(requireReachableBackupRestoreButton("backupWorkflowReset.bookmarksButton", in: app, timeout: 10).exists)
+        XCTAssertFalse(app.buttons["importExportLegacyFullBackupButton"].exists)
+        XCTAssertFalse(app.buttons["backupWorkflowLegacyImportButton"].exists)
     }
 
     /**
-     Verifies that the import action drives Import and Export into file-picker presentation.
+     Verifies that Android Database backup presents the backup destination choice before export.
      *
      * - Side effects:
-     *   - launches the app directly into Import and Export
-     *   - triggers the backup import action, which requests document-picker presentation
+     *   - launches the app and opens Backup & Restore
+     *   - triggers Android-compatible `.abdb.zip` database backup generation
+     *   - presents the Android-derived "Backup to where?" decision instead of jumping directly to
+     *     the iOS share sheet
+     *   - cancels the destination choice and verifies the prepared payload is released
      * - Failure modes:
-     *   - fails if the import action is missing from the Import and Export screen
-     *   - fails if the Import and Export screen never reports the import-picker-presented state
+     *   - fails if the Database backup target is missing
+     *   - fails if iOS bypasses Android's destination choice and restores the old share-first flow
+     *   - fails if cancel leaves a stale generated archive pending in the screen state
      */
-    func testSettingsImportExportImportPresentsFilePickerState() {
+    func testSettingsBackupRestoreDatabaseBackupPresentsDestinationChoice() {
         let app = makeApp()
         app.launch()
 
         let importExportScreen = openImportExport(in: app)
         XCTAssertTrue(importExportScreen.exists)
 
-        let importButton = requireElement("importExportImportButton", in: app, timeout: 10)
-        tapElementReliably(importButton, timeout: 10)
-        waitForElementValue("importExportScreen", toEqual: "importPickerPresented", in: app, timeout: 20)
+        let databaseTarget = requireElement("backupWorkflowTarget.databaseButton", in: app, timeout: 10)
+        tapElementReliably(databaseTarget, timeout: 10)
+
+        let databaseBackupButton = requireElement("backupWorkflowBackupButton", in: app, timeout: 10)
+        tapElementReliably(databaseBackupButton, timeout: 10)
+        waitForElementValue("importExportScreen", toEqual: "backupDestinationPresented", in: app, timeout: 20)
+        XCTAssertTrue(
+            app.staticTexts["Backup to phone or elsewhere via Share function (email, iCloud Drive etc.)?"].waitForExistence(timeout: 10),
+            "Backup destination copy should describe iCloud Drive, not Android's Google Drive wording."
+        )
+        XCTAssertFalse(
+            app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Google Drive")).firstMatch.exists,
+            "iOS backup destination copy must not advertise Google Drive as the native backup target."
+        )
+
+        let cancelDeadline = Date().addingTimeInterval(10)
+        var cancelButton: XCUIElement?
+        repeat {
+            cancelButton = firstExistingElement(
+                [
+                    app.buttons["backupDestinationCancelButton"].firstMatch,
+                    app.sheets.buttons["Cancel"].firstMatch,
+                    app.alerts.buttons["Cancel"].firstMatch,
+                    app.buttons["Cancel"].firstMatch,
+                ],
+                timeout: 0
+            )
+            if cancelButton != nil {
+                break
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        } while Date() < cancelDeadline
+        XCTAssertNotNil(cancelButton, "Expected Backup destination dialog to expose a cancel action.")
+        guard let cancelButton else {
+            return
+        }
+        tapElementReliably(cancelButton, timeout: 10)
+        waitForElementValue("importExportScreen", toEqual: "idle", in: app, timeout: 10)
+    }
+
+    /**
+     Verifies that cancelling iOS's Share destination does not report a completed backup.
+     *
+     * Android's BackupActivity first asks whether the user wants Phone storage or Share. iOS mirrors
+     * that visible decision, but the native share sheet exposes a stronger completion contract than
+     * Android intents: closing the sheet means the user did not choose a destination. This regression
+     * protects the user-facing result message so Backup & Restore only reports success after the share
+     * destination actually accepts the archive.
+     *
+     * - Side effects:
+     *   - launches the app, opens Backup & Restore, and generates a temporary Android database backup
+     *   - presents the system share sheet and dismisses it without choosing a destination
+     * - Failure modes:
+     *   - fails if dismissing the share sheet surfaces the Android database export success message
+     *   - fails if the share sheet cannot be dismissed by one of the system close/cancel controls
+     */
+    func testSettingsBackupRestoreShareCancelDoesNotReportBackupSuccess() {
+        let app = makeApp()
+        app.launch()
+
+        let importExportScreen = openImportExport(in: app)
+        XCTAssertTrue(importExportScreen.exists)
+
+        let databaseTarget = requireElement("backupWorkflowTarget.databaseButton", in: app, timeout: 10)
+        tapElementReliably(databaseTarget, timeout: 10)
+
+        let databaseBackupButton = requireElement("backupWorkflowBackupButton", in: app, timeout: 10)
+        tapElementReliably(databaseBackupButton, timeout: 10)
+        waitForElementValue("importExportScreen", toEqual: "backupDestinationPresented", in: app, timeout: 20)
+
+        let shareButton = requireElement("backupDestinationShareButton", in: app, timeout: 10)
+        tapElementReliably(shareButton, timeout: 10)
+        waitForElementValue("importExportScreen", toEqual: "shareSheetPresented", in: app, timeout: 20)
+
+        let closeButton = firstExistingElement(
+            [
+                app.buttons["Close"].firstMatch,
+                app.navigationBars.buttons["Close"].firstMatch,
+                app.buttons["Cancel"].firstMatch,
+                app.navigationBars.buttons["Cancel"].firstMatch,
+            ],
+            timeout: 10
+        )
+        XCTAssertNotNil(closeButton, "Expected the system share sheet to expose a Close or Cancel control.")
+        guard let closeButton else {
+            return
+        }
+
+        tapElementReliably(closeButton, timeout: 10)
+        waitForElementValue("importExportScreen", toEqual: "idle", in: app, timeout: 10)
+        XCTAssertFalse(
+            app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Exported Android database backup")).firstMatch
+                .waitForExistence(timeout: 3),
+            "Closing the Share destination must not report that the backup was saved."
+        )
+    }
+
+    /**
+     Verifies that Android Restore or Import keeps Database and Documents as distinct targets.
+     *
+     * - Side effects:
+     *   - launches the app and opens Backup & Restore
+     *   - triggers the default Database Restore/Import picker
+     *   - relaunches a fresh app instance, selects Documents, and triggers the document/module picker
+     * - Failure modes:
+     *   - fails if the default Database target no longer opens the `.abdb.zip` restore/import path
+     *   - fails if Documents restore/import is collapsed into the database picker or legacy iOS
+     *     JSON/CSV importer
+     */
+    func testSettingsBackupRestoreRestoreImportPresentsTargetSpecificPickers() {
+        let databaseApp = makeApp()
+        databaseApp.launch()
+
+        let databaseScreen = openImportExport(in: databaseApp)
+        XCTAssertTrue(databaseScreen.exists)
+
+        let databaseTarget = requireElement("restoreWorkflowTarget.databaseButton", in: databaseApp, timeout: 10)
+        tapElementReliably(databaseTarget, timeout: 10)
+
+        let databaseRestoreButton = requireElement("backupWorkflowRestoreButton", in: databaseApp, timeout: 10)
+        tapElementReliably(databaseRestoreButton, timeout: 10)
+        waitForElementValue("importExportScreen", toEqual: "databaseRestorePickerPresented", in: databaseApp, timeout: 20)
+        databaseApp.terminate()
+
+        let documentsApp = makeApp()
+        documentsApp.launch()
+
+        let documentsScreen = openImportExport(in: documentsApp)
+        XCTAssertTrue(documentsScreen.exists)
+
+        let documentsTarget = requireElement("restoreWorkflowTarget.documentsButton", in: documentsApp, timeout: 10)
+        tapElementReliably(documentsTarget, timeout: 10)
+
+        let documentsRestoreButton = requireElement("backupWorkflowRestoreButton", in: documentsApp, timeout: 10)
+        tapElementReliably(documentsRestoreButton, timeout: 10)
+        waitForElementValue("importExportScreen", toEqual: "documentsRestorePickerPresented", in: documentsApp, timeout: 20)
     }
 
     /**
@@ -701,5 +846,64 @@ extension AndBibleUITests {
 
         tapElementReliably(requireElement("colorSettingsResetButton", in: app, timeout: 10), timeout: 10)
         waitForElementValue("colorSettingsScreen", toEqual: "colorDefaults", in: app, timeout: 10)
+    }
+
+    /**
+     Resolves a Backup & Restore action that may live below the first visible viewport.
+     *
+     * - Parameters:
+     *   - identifier: Accessibility identifier of the production Backup & Restore button.
+     *   - app: Running application under test.
+     *   - timeout: Maximum time to keep resolving and revealing the screen.
+     *   - file: Source file used for XCTest failure attribution.
+     *   - line: Source line used for XCTest failure attribution.
+     * - Returns: The resolved button once it is exposed in the Backup & Restore scroll surface.
+     * - Side effects:
+     *   - scrolls the Backup & Restore screen downward until the requested control is visible
+     * - Failure modes:
+     *   - records an XCTest failure if the control never appears or remains outside the screen viewport
+     */
+    func requireReachableBackupRestoreButton(
+        _ identifier: String,
+        in app: XCUIApplication,
+        timeout: TimeInterval,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) -> XCUIElement {
+        let screen = requireElement("importExportScreen", in: app, timeout: timeout, file: file, line: line)
+        let deadline = Date().addingTimeInterval(timeout)
+        var lastCandidate = unresolvedElement(identifier, in: app)
+
+        repeat {
+            if let button = resolvedElement(identifier, in: app) {
+                lastCandidate = button
+                if waitForElementToBecomeHittable(button, timeout: 0.5) ||
+                    isElementVisible(button, within: screen)
+                {
+                    return button
+                }
+            }
+
+            if screen.exists, !screen.frame.isEmpty {
+                screen.swipeUp()
+            } else {
+                app.swipeUp()
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        } while Date() < deadline
+
+        XCTAssertTrue(
+            lastCandidate.exists,
+            "Expected Backup & Restore button '\(identifier)' to exist within \(timeout) seconds.",
+            file: file,
+            line: line
+        )
+        XCTAssertTrue(
+            isElementVisible(lastCandidate, within: screen),
+            "Expected Backup & Restore button '\(identifier)' to become visible within \(timeout) seconds.",
+            file: file,
+            line: line
+        )
+        return lastCandidate
     }
 }

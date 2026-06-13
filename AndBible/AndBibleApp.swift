@@ -148,6 +148,14 @@ struct AndBibleApp: App {
     @State private var queuedRemoteAdoptions: [RemoteSyncBootstrapCandidate] = []
     @State private var pendingRemoteConfirmation: PendingRemoteSyncConfirmation?
     @State private var remoteSyncErrorMessage: String?
+    /// External document waiting for Android-style install confirmation.
+    @State private var pendingExternalDocumentImport: ExternalDocumentImportRequest?
+    /// Additional external documents delivered while another import prompt/result is active.
+    @State private var queuedExternalDocumentImports: [ExternalDocumentImportRequest] = []
+    /// Whether an external document import task is currently mutating storage.
+    @State private var isImportingExternalDocument = false
+    /// Pending app-level feedback for a document opened from Files, Mail, or another app.
+    @State private var externalDocumentImportMessage: String?
     private let remoteSyncNetworkMonitor: RemoteSyncNetworkMonitor
     #if os(iOS)
     private let remoteSyncBackgroundRefreshCoordinator: RemoteSyncBackgroundRefreshCoordinator
@@ -357,6 +365,9 @@ struct AndBibleApp: App {
                     isUnlocked = false
                 }
             }
+            .onOpenURL { url in
+                handleExternalDocumentURL(url)
+            }
             .alert(
                 String(localized: "cloud_sync_title"),
                 isPresented: Binding(
@@ -436,8 +447,140 @@ struct AndBibleApp: App {
             } message: {
                 Text(remoteSyncErrorMessage ?? String(localized: "sync_error"))
             }
+            .alert(
+                String(localized: "import_from_file", defaultValue: "Import from File"),
+                isPresented: Binding(
+                    get: { pendingExternalDocumentImport != nil },
+                    set: { newValue in
+                        if !newValue {
+                            pendingExternalDocumentImport = nil
+                            showNextPendingExternalDocumentImportIfNeeded()
+                        }
+                    }
+                ),
+                presenting: pendingExternalDocumentImport
+            ) { request in
+                Button(String(localized: "ok")) {
+                    pendingExternalDocumentImport = nil
+                    performExternalDocumentImport(request)
+                }
+                Button(String(localized: "cancel"), role: .cancel) {
+                    // The dismissal binding owns cancel queue advancement.
+                }
+            } message: { request in
+                Text(externalDocumentImportConfirmationMessage(for: request))
+            }
+            .alert(
+                String(localized: "import_from_file", defaultValue: "Import from File"),
+                isPresented: Binding(
+                    get: { externalDocumentImportMessage != nil },
+                    set: { newValue in
+                        if !newValue {
+                            externalDocumentImportMessage = nil
+                            showNextPendingExternalDocumentImportIfNeeded()
+                        }
+                    }
+                )
+            ) {
+                Button(String(localized: "ok")) {
+                    externalDocumentImportMessage = nil
+                    showNextPendingExternalDocumentImportIfNeeded()
+                }
+            } message: {
+                Text(externalDocumentImportMessage ?? "")
+            }
         }
         .modelContainer(modelContainer)
+    }
+
+    /**
+     Handles files opened into AndBible from iOS document interaction surfaces.
+
+     The app advertises ZIP, EPUB, and TTF document types to mirror Android's implemented
+     `InstallZip` entry points. External opens match Android `ACTION_VIEW`: the user confirms the
+     install before storage is mutated, while the confirmed request still flows through the same
+     shared service used by Backup & Restore.
+
+     - Parameter url: External file URL delivered by SwiftUI for the active scene.
+     - Side effects:
+       - ignores non-file URLs delivered by unrelated URL-opening mechanisms
+       - queues the request when another external import prompt or result is active
+       - presents Android-style confirmation before installation
+       - later performs module/EPUB/TTF installation in a user-initiated task
+     - Failure modes: Unsupported files and installer failures are converted to localized feedback
+       by `ExternalDocumentImportService`.
+     */
+    @MainActor
+    private func handleExternalDocumentURL(_ url: URL) {
+        guard url.isFileURL else {
+            return
+        }
+        let request = ExternalDocumentImportRequest(url: url)
+        if pendingExternalDocumentImport == nil,
+           externalDocumentImportMessage == nil,
+           !isImportingExternalDocument {
+            pendingExternalDocumentImport = request
+        } else {
+            queuedExternalDocumentImports.append(request)
+        }
+    }
+
+    /**
+     Performs a confirmed external document import.
+
+     - Parameter request: External document request previously confirmed by the user.
+     - Side effects:
+       - marks the app-level import as active
+       - runs the shared import service off the main actor
+       - publishes localized result feedback to SwiftUI alert state
+     - Failure modes: Service-level failures are surfaced as result feedback instead of thrown.
+     */
+    @MainActor
+    private func performExternalDocumentImport(_ request: ExternalDocumentImportRequest) {
+        isImportingExternalDocument = true
+        externalDocumentImportMessage = nil
+        Task { @MainActor in
+            let result = await Task.detached(priority: .userInitiated) {
+                ExternalDocumentImportService().importDocument(request)
+            }.value
+            isImportingExternalDocument = false
+            externalDocumentImportMessage = result.feedbackMessage
+        }
+    }
+
+    /**
+     Presents the next queued external import when no prompt, task, or result alert is active.
+
+     - Side effects: Mutates the external import queue and pending prompt state.
+     - Failure modes: none.
+     */
+    @MainActor
+    private func showNextPendingExternalDocumentImportIfNeeded() {
+        guard pendingExternalDocumentImport == nil,
+              externalDocumentImportMessage == nil,
+              !isImportingExternalDocument,
+              !queuedExternalDocumentImports.isEmpty else {
+            return
+        }
+        pendingExternalDocumentImport = queuedExternalDocumentImports.removeFirst()
+    }
+
+    /**
+     Builds Android's external-open install confirmation message.
+
+     - Parameter request: Pending external document request.
+     - Returns: Localized confirmation text naming the selected file.
+     - Side effects: none.
+     */
+    private func externalDocumentImportConfirmationMessage(for request: ExternalDocumentImportRequest) -> String {
+        let displayName = request.displayFileName ?? "?"
+        return String(
+            format: String(
+                localized: "install_do_you_want",
+                defaultValue: "Do you want to install %@?"
+            ),
+            displayName
+        )
     }
 
     private func updateAppIcon(discrete: Bool, retryCount: Int = 0) {

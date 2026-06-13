@@ -1,5 +1,7 @@
 import XCTest
 @testable import BibleCore
+@testable import BibleUI
+@testable import SwordKit
 import SwiftData
 import SQLite3
 
@@ -87,6 +89,146 @@ extension AndBibleTests {
         XCTAssertEqual(archive.manifest.contains, [.bookmarks])
         XCTAssertEqual(archive.sections.map(\.category), [.bookmarks])
         XCTAssertEqual(archive.sections.first?.support, .supported)
+    }
+
+    /**
+     Verifies Backup & Restore reset success copy names the category that was reset.
+     *
+     Setup:
+     - reads the BibleUI presentation labels for Android reset categories
+
+     Expected result:
+     - repository reset feedback includes repository wording
+     - repository reset feedback does not claim that only "Database" was reset
+
+     Failure meaning:
+     - the user-visible reset result would be misleading for non-database categories such as
+       Repositories, Application Preferences, My Documents, or Progress.
+     */
+    func testAndroidBackupResetSuccessMessageNamesSelectedCategory() {
+        let message = AndroidBackupResetCategory.repositories.localizedBackupResetSuccessMessage
+
+        XCTAssertTrue(message.localizedCaseInsensitiveContains("repositories"))
+        XCTAssertFalse(message.localizedCaseInsensitiveContains("database has been reset"))
+    }
+
+    /**
+     Verifies that iOS exports Android-compatible manual database backup archives.
+
+     Setup:
+     - creates local rows across the supported export model graph
+     - exports through `AndroidDatabaseBackupService`
+     - re-reads the generated ZIP through the existing Android backup loader
+
+     Expected result:
+     - the export uses Android's canonical `.abdb.zip` filename and manifest
+     - supported category databases are written under `db/`
+     - each SQLite database declares the Android-compatible `user_version`
+     - at least one real bookmark label row is present in `bookmarks.sqlite3`
+
+     Failure meaning:
+     - iOS would still be exporting a custom JSON backup or an archive Android cannot validate as
+       a manual database backup.
+     */
+    func testAndroidDatabaseBackupExportCreatesAndroidCompatibleArchive() throws {
+        let container = try makeAndroidDatabaseBackupExportModelContainer()
+        let modelContext = ModelContext(container)
+        let settingsStore = SettingsStore(modelContext: modelContext)
+        let labelID = UUID(uuidString: "15000000-0000-0000-0000-000000000301")!
+        let readingPlanID = UUID(uuidString: "15000000-0000-0000-0000-000000000302")!
+        let workspaceID = UUID(uuidString: "15000000-0000-0000-0000-000000000303")!
+        let documentID = UUID(uuidString: "15000000-0000-0000-0000-000000000304")!
+        let pageID = UUID(uuidString: "15000000-0000-0000-0000-000000000305")!
+
+        modelContext.insert(Label(id: labelID, name: "Prayer", color: 7, favourite: true))
+        modelContext.insert(
+            ReadingPlan(
+                id: readingPlanID,
+                planCode: "ios-test-plan",
+                planName: "iOS Test Plan",
+                startDate: Date(timeIntervalSince1970: 1_700_000_000),
+                currentDay: 1,
+                totalDays: 1
+            )
+        )
+        modelContext.insert(Workspace(id: workspaceID, name: "Study", orderNumber: 0))
+        let document = MyDocument(
+            id: documentID,
+            name: "Sermon Notes",
+            initials: "IOSDOC",
+            createdAt: Date(timeIntervalSince1970: 1_700_000_000),
+            updatedAt: Date(timeIntervalSince1970: 1_700_000_100)
+        )
+        let page = MyDocumentPage(
+            id: pageID,
+            title: "Outline",
+            pageKey: "outline",
+            createdAt: Date(timeIntervalSince1970: 1_700_000_000),
+            updatedAt: Date(timeIntervalSince1970: 1_700_000_100)
+        )
+        let content = MyDocumentPageContent(pageId: pageID, content: "# Outline")
+        page.document = document
+        page.pageContent = content
+        document.pages = [page]
+        modelContext.insert(document)
+        modelContext.insert(page)
+        modelContext.insert(content)
+        try modelContext.save()
+
+        let service = AndroidDatabaseBackupService()
+        let export = try service.exportArchive(modelContext: modelContext, settingsStore: settingsStore)
+        let entriesByName = Dictionary(uniqueKeysWithValues: try ZipArchiveReader.entries(in: export.data).map { ($0.name, $0.data) })
+        let expectedCategories: [AndroidDatabaseBackupCategory] = [
+            .bookmarks,
+            .readingPlans,
+            .workspaces,
+            .myDocuments,
+        ]
+        let expectedEntryNames: Set<String> = [
+            "AndBibleBackupManifest.json",
+            "db/bookmarks.sqlite3",
+            "db/readingplans.sqlite3",
+            "db/workspaces.sqlite3",
+            "db/mydocuments.sqlite3",
+        ]
+
+        XCTAssertEqual(export.fileName, AndroidDatabaseBackupService.databaseBackupFileName)
+        XCTAssertEqual(export.categories, expectedCategories)
+        XCTAssertEqual(export.entryCount, expectedEntryNames.count)
+        XCTAssertEqual(Set(entriesByName.keys), expectedEntryNames)
+
+        let manifestData = try XCTUnwrap(entriesByName["AndBibleBackupManifest.json"])
+        let manifest = try XCTUnwrap(JSONSerialization.jsonObject(with: manifestData) as? [String: Any])
+        XCTAssertEqual(manifest["backupType"] as? String, "DB_BACKUP")
+        XCTAssertEqual(manifest["manifestVersion"] as? Int, 1)
+        XCTAssertEqual(manifest["contains"] as? [String], expectedCategories.map(\.rawValue))
+
+        let loadedArchive = try service.loadArchive(from: export.data)
+        defer { service.cleanup(loadedArchive) }
+        XCTAssertEqual(loadedArchive.manifest.backupType, "DB_BACKUP")
+        XCTAssertEqual(loadedArchive.sections.map(\.category), [.bookmarks, .myDocuments, .readingPlans, .workspaces])
+        XCTAssertTrue(loadedArchive.sections.allSatisfy { $0.support == .supported })
+
+        let materializedDatabases = try materializeExportedDatabases(entriesByName: entriesByName)
+        defer {
+            for databaseURL in materializedDatabases.values {
+                try? FileManager.default.removeItem(at: databaseURL)
+            }
+        }
+        XCTAssertEqual(try readSQLiteUserVersion(at: materializedDatabases["bookmarks.sqlite3"]!), 12)
+        XCTAssertEqual(try readSQLiteUserVersion(at: materializedDatabases["readingplans.sqlite3"]!), 1)
+        XCTAssertEqual(try readSQLiteUserVersion(at: materializedDatabases["workspaces.sqlite3"]!), 22)
+        XCTAssertEqual(
+            try readSQLiteUserVersion(at: materializedDatabases["mydocuments.sqlite3"]!),
+            RemoteSyncMyDocumentRestoreService.supportedAndroidSchemaVersion
+        )
+        XCTAssertEqual(
+            try readSQLiteInteger(
+                "SELECT COUNT(*) FROM Label WHERE name = 'Prayer';",
+                at: materializedDatabases["bookmarks.sqlite3"]!
+            ),
+            1
+        )
     }
 
     /**
@@ -202,6 +344,239 @@ extension AndBibleTests {
         XCTAssertEqual(syncStateStore.bootstrapState(for: .bookmarks), RemoteSyncBootstrapState())
         XCTAssertEqual(syncStateStore.progressState(for: .bookmarks), RemoteSyncProgressState())
         XCTAssertTrue(patchStatusStore.statuses(for: .bookmarks).isEmpty)
+    }
+
+    /**
+     Verifies that Android BackupActivity bookmark reset uses the same storage boundary as restore.
+
+     Setup:
+     - seeds local bookmark and label rows that should be removed
+     - seeds every category-scoped remote-sync side store that can make a later sync think deleted
+       rows are already reconciled
+
+     Expected result:
+     - the bookmark category is reset through an empty Android-shaped snapshot
+     - user-created bookmark rows disappear while required system label rows may be recreated
+     - sync toggle, bootstrap/progress state, patch status, log entries, and row fingerprints are
+       cleared for bookmarks
+
+     Failure meaning:
+     - iOS would treat Android's Reset Databases action as a narrow row-delete shortcut instead of
+       the same category replacement boundary used by Android backup restore.
+     */
+    func testAndroidBackupResetBookmarksClearsLocalDataAndSyncBookkeeping() throws {
+        let container = try makeBookmarkRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        let settingsStore = SettingsStore(modelContext: modelContext)
+        let remoteSettingsStore = RemoteSyncSettingsStore(settingsStore: settingsStore)
+        let syncStateStore = RemoteSyncStateStore(settingsStore: settingsStore)
+        let patchStatusStore = RemoteSyncPatchStatusStore(settingsStore: settingsStore)
+        let logEntryStore = RemoteSyncLogEntryStore(settingsStore: settingsStore)
+        let fingerprintStore = RemoteSyncRowFingerprintStore(settingsStore: settingsStore)
+
+        let legacyLabel = Label(name: "Legacy")
+        modelContext.insert(legacyLabel)
+        let legacyBookmark = BibleBookmark(kjvOrdinalStart: 1, kjvOrdinalEnd: 1)
+        legacyBookmark.book = "Genesis"
+        modelContext.insert(legacyBookmark)
+        try modelContext.save()
+
+        let bookmarkIDValue = RemoteSyncSQLiteValue.blob(
+            RemoteSyncBookmarkSnapshotService.uuidBlob(legacyBookmark.id)
+        )
+        remoteSettingsStore.setSyncEnabled(true, for: .bookmarks)
+        syncStateStore.setBootstrapState(
+            RemoteSyncBootstrapState(
+                syncFolderID: "/sync/bookmarks",
+                deviceFolderID: "/sync/bookmarks/ios",
+                secretFileName: "device-known-ios"
+            ),
+            for: .bookmarks
+        )
+        syncStateStore.setProgressState(
+            RemoteSyncProgressState(lastPatchWritten: 100, lastSynchronized: 200, disabledForVersion: 1),
+            for: .bookmarks
+        )
+        patchStatusStore.addStatus(
+            RemoteSyncPatchStatus(sourceDevice: "android", patchNumber: 1, sizeBytes: 50, appliedDate: 300),
+            for: .bookmarks
+        )
+        logEntryStore.addEntry(
+            RemoteSyncLogEntry(
+                tableName: "BibleBookmark",
+                entityID1: bookmarkIDValue,
+                entityID2: .null(),
+                type: .upsert,
+                lastUpdated: 400,
+                sourceDevice: "ios"
+            ),
+            for: .bookmarks
+        )
+        fingerprintStore.setFingerprint(
+            "legacy-hash",
+            for: .bookmarks,
+            tableName: "BibleBookmark",
+            entityID1: bookmarkIDValue,
+            entityID2: .null()
+        )
+
+        let report = try AndroidBackupResetService().reset(
+            .bookmarks,
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+
+        XCTAssertEqual(report, AndroidBackupResetReport(category: .bookmarks))
+        XCTAssertTrue(try modelContext.fetch(FetchDescriptor<BibleBookmark>()).isEmpty)
+        XCTAssertNil(try modelContext.fetch(FetchDescriptor<Label>()).first { $0.name == "Legacy" })
+        XCTAssertFalse(remoteSettingsStore.isSyncEnabled(for: .bookmarks))
+        XCTAssertEqual(syncStateStore.bootstrapState(for: .bookmarks), RemoteSyncBootstrapState())
+        XCTAssertEqual(syncStateStore.progressState(for: .bookmarks), RemoteSyncProgressState())
+        XCTAssertTrue(patchStatusStore.statuses(for: .bookmarks).isEmpty)
+        XCTAssertTrue(logEntryStore.entries(for: .bookmarks).isEmpty)
+        XCTAssertNil(
+            fingerprintStore.fingerprint(
+                for: .bookmarks,
+                tableName: "BibleBookmark",
+                entityID1: bookmarkIDValue,
+                entityID2: .null()
+            )
+        )
+    }
+
+    /**
+     Verifies Android BackupActivity progress reset clears iOS's local progress stores.
+
+     Setup:
+     - seeds chapter-reading and memorization progress settings in the local settings table
+
+     Expected result:
+     - reset reports the Progress category and removes both local progress payloads
+     - unrelated settings are not required for this local-only category
+
+     Failure meaning:
+     - iOS would expose Android's Progress reset category while leaving native progress data
+       untouched, making the user-visible reset action misleading.
+     */
+    func testAndroidBackupResetProgressClearsLocalProgressStores() throws {
+        let container = try makeReadingPlanRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        let settingsStore = SettingsStore(modelContext: modelContext)
+        settingsStore.setString(ReadingProgressStore.settingsKey, value: #"{"history":[1]}"#)
+        settingsStore.setString(MemorizationProgressStore.settingsKey, value: #"{"targets":[1]}"#)
+
+        let report = try AndroidBackupResetService().reset(
+            .progress,
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+
+        XCTAssertEqual(report, AndroidBackupResetReport(category: .progress))
+        XCTAssertNil(settingsStore.getString(ReadingProgressStore.settingsKey))
+        XCTAssertNil(settingsStore.getString(MemorizationProgressStore.settingsKey))
+    }
+
+    /**
+     Verifies Android BackupActivity repository reset clears legacy rows and recreates defaults.
+
+     Setup:
+     - seeds one local SwiftData repository row
+     - points `RepositorySourceManager` at a temporary install-manager directory
+
+     Expected result:
+     - SwiftData repository rows are deleted
+     - `InstallMgr.conf` exists after reset because the manager recreated packaged defaults
+
+     Failure meaning:
+     - iOS would expose Android's repository reset category but leave either legacy repository
+       metadata or SWORD source configuration in the pre-reset state.
+     */
+    func testAndroidBackupResetRepositoriesClearsRowsAndRecreatesDefaultSources() throws {
+        let schema = Schema([
+            Repository.self,
+            Setting.self,
+        ])
+        let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: schema, configurations: [configuration])
+        let modelContext = ModelContext(container)
+        let settingsStore = SettingsStore(modelContext: modelContext)
+        modelContext.insert(Repository(name: "Legacy", url: "https://example.test/repo"))
+        try modelContext.save()
+
+        let baseURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("android-backup-reset-repositories-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: baseURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: baseURL) }
+
+        let report = try AndroidBackupResetService(
+            repositorySourceManager: RepositorySourceManager(basePath: baseURL.path)
+        ).reset(
+            .repositories,
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+
+        XCTAssertEqual(report, AndroidBackupResetReport(category: .repositories))
+        XCTAssertTrue(try modelContext.fetch(FetchDescriptor<Repository>()).isEmpty)
+        XCTAssertTrue(
+            FileManager.default.fileExists(
+                atPath: baseURL.appendingPathComponent("InstallMgr.conf").path
+            )
+        )
+    }
+
+    /**
+     Verifies repository reset preserves legacy rows when source configuration reset fails.
+
+     Setup:
+     - seeds one local SwiftData repository row
+     - points `RepositorySourceManager` at a missing install-manager directory that cannot recreate
+       `InstallMgr.conf`
+
+     Expected result:
+     - reset throws the repository-source failure before deleting SwiftData rows
+     - the legacy repository row is still present after the failed reset
+
+     Failure meaning:
+     - iOS could partially reset repositories by deleting legacy metadata before failing to restore
+       Android-compatible SWORD source configuration.
+     */
+    func testAndroidBackupResetRepositoriesPreservesRowsWhenSourceResetFails() throws {
+        let schema = Schema([
+            Repository.self,
+            Setting.self,
+        ])
+        let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: schema, configurations: [configuration])
+        let modelContext = ModelContext(container)
+        let settingsStore = SettingsStore(modelContext: modelContext)
+        modelContext.insert(Repository(name: "Legacy", url: "https://example.test/repo"))
+        try modelContext.save()
+
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("android-backup-reset-repositories-failure-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let missingBasePath = tempDir.appendingPathComponent("missing", isDirectory: true)
+        let service = AndroidBackupResetService(
+            repositorySourceManager: RepositorySourceManager(basePath: missingBasePath.path)
+        )
+
+        XCTAssertThrowsError(
+            try service.reset(
+                .repositories,
+                modelContext: modelContext,
+                settingsStore: settingsStore
+            )
+        ) { error in
+            XCTAssertEqual(
+                error as? RepositorySourceManagementError,
+                .configWriteFailed("default configuration was not recreated")
+            )
+        }
+        let repositories = try modelContext.fetch(FetchDescriptor<Repository>())
+        XCTAssertEqual(repositories.map(\.name), ["Legacy"])
     }
 
     /**
@@ -815,6 +1190,111 @@ extension AndBibleTests {
             .sorted { $0.key < $1.key }
             .map { ("db/\($0.key)", $0.value) }
         return try makeStoredZip(entries: [("AndBibleBackupManifest.json", manifestData)] + databaseEntries)
+    }
+
+    /**
+     Builds an in-memory model container containing every model needed by supported backup export categories.
+
+     Android database backup export reads bookmarks, reading plans, workspaces, My Documents, and
+     local fidelity settings in one pass. This fixture keeps that graph in one container so the
+     export test exercises the same `ModelContext` shape the Settings screen supplies.
+
+     - Returns: In-memory SwiftData container for supported Android database backup export models.
+     - Side effects: none.
+     - Failure modes: Rethrows SwiftData container initialization failures.
+     */
+    private func makeAndroidDatabaseBackupExportModelContainer() throws -> ModelContainer {
+        let schema = Schema([
+            BibleBookmark.self,
+            BibleBookmarkNotes.self,
+            BibleBookmarkToLabel.self,
+            GenericBookmark.self,
+            GenericBookmarkNotes.self,
+            GenericBookmarkToLabel.self,
+            Label.self,
+            StudyPadTextEntry.self,
+            StudyPadTextEntryText.self,
+            ReadingPlan.self,
+            ReadingPlanDay.self,
+            Workspace.self,
+            Window.self,
+            PageManager.self,
+            HistoryItem.self,
+            MyDocument.self,
+            MyDocumentPage.self,
+            MyDocumentPageContent.self,
+            AiPageCacheEntry.self,
+            Setting.self,
+        ])
+        let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
+        return try ModelContainer(for: schema, configurations: [configuration])
+    }
+
+    /**
+     Writes exported ZIP database entries to temporary files for SQLite assertions.
+
+     - Parameter entriesByName: Exported ZIP entries keyed by archive path.
+     - Returns: Temporary SQLite file URLs keyed by Android database filename.
+     - Side effects: writes temporary SQLite files under the process temporary directory.
+     - Failure modes: Throws when an expected database entry is absent or cannot be written.
+     */
+    private func materializeExportedDatabases(entriesByName: [String: Data]) throws -> [String: URL] {
+        let databaseNames = [
+            "bookmarks.sqlite3",
+            "readingplans.sqlite3",
+            "workspaces.sqlite3",
+            "mydocuments.sqlite3",
+        ]
+        var urlsByName: [String: URL] = [:]
+        for databaseName in databaseNames {
+            let data = try XCTUnwrap(entriesByName["db/\(databaseName)"])
+            let url = FileManager.default.temporaryDirectory
+                .appendingPathComponent("android-backup-export-\(UUID().uuidString)-\(databaseName)")
+            try data.write(to: url, options: .atomic)
+            urlsByName[databaseName] = url
+        }
+        return urlsByName
+    }
+
+    /**
+     Reads one integer value from a materialized SQLite database.
+
+     The export test uses this to prove generated databases contain real Android-shaped table
+     content, not only valid SQLite headers and `user_version` pragmas.
+
+     - Parameters:
+       - sql: Single-row, single-column SQL statement returning an integer.
+       - url: SQLite database URL to inspect.
+     - Returns: First column from the first result row as an integer.
+     - Side effects: opens the database read-only and finalizes the prepared statement.
+     - Failure modes: Throws `AndroidDatabaseBackupError.invalidSQLiteDatabase` when SQLite cannot
+       open, prepare, or step the statement.
+     */
+    private func readSQLiteInteger(_ sql: String, at url: URL) throws -> Int {
+        var database: OpaquePointer?
+        guard sqlite3_open_v2(url.path, &database, SQLITE_OPEN_READONLY, nil) == SQLITE_OK,
+              let database else {
+            if let database {
+                sqlite3_close(database)
+            }
+            throw AndroidDatabaseBackupError.invalidSQLiteDatabase(url.lastPathComponent)
+        }
+        defer { sqlite3_close(database) }
+
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK,
+              let statement else {
+            if let statement {
+                sqlite3_finalize(statement)
+            }
+            throw AndroidDatabaseBackupError.invalidSQLiteDatabase(url.lastPathComponent)
+        }
+        defer { sqlite3_finalize(statement) }
+
+        guard sqlite3_step(statement) == SQLITE_ROW else {
+            throw AndroidDatabaseBackupError.invalidSQLiteDatabase(url.lastPathComponent)
+        }
+        return Int(sqlite3_column_int(statement, 0))
     }
 
     /**

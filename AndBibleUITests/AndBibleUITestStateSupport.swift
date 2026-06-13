@@ -97,8 +97,9 @@ extension AndBibleUITests {
      Types text into a prompt field and waits for XCTest to observe the committed value.
 
      Prompt-specific callers pass a field that was already resolved from a known modal/sheet.
-     Those flows intentionally avoid app-wide focused-field probes because hosted XCTest can hang
-     while proving unrelated text fields do not exist.
+     Those flows intentionally avoid app-wide focused-field probes and focus-predicate gates because
+     hosted XCTest can hang while proving unrelated text fields do not exist or while rebuilding a
+     native prompt snapshot.
 
      - Parameters:
        - text: Final text expected in the prompt-owned field.
@@ -111,8 +112,8 @@ extension AndBibleUITests {
        - line: Source line used for XCTest failure attribution.
      - Returns: `true` when the prompt field reports the expected value before submission.
      - Side effects:
-       - focuses the prompt field, verifies or clears any existing prompt value, emits keyboard
-         input, and clears/retries if CI drops the input without appending duplicate text
+       - taps the resolved prompt field, verifies or clears any existing prompt value, emits
+         keyboard input, and clears/retries if CI drops the input without appending duplicate text
      - Failure modes:
        - records an XCTest failure when the field value never matches `text`
      */
@@ -178,6 +179,32 @@ extension AndBibleUITests {
             return candidates
         }
 
+        func promptOwnedTextEntryTapCoordinate() -> XCUICoordinate? {
+            switch resolvedIdentifier {
+            case "labelManagerNewLabelNameField":
+                guard let prompt = resolvedLabelCreationPrompt(in: app),
+                      elementFrameIsUsable(prompt.frame) else {
+                    return nil
+                }
+                return prompt.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.52))
+            case "workspaceNamePromptTextField":
+                guard let prompt = firstExistingElement(
+                    [
+                        app.collectionViews["workspaceNamePromptScreen"].firstMatch,
+                        app.scrollViews["workspaceNamePromptScreen"].firstMatch,
+                        app.otherElements["workspaceNamePromptScreen"].firstMatch,
+                    ],
+                    timeout: 0.2
+                ),
+                    elementFrameIsUsable(prompt.frame) else {
+                    return nil
+                }
+                return prompt.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.18))
+            default:
+                return nil
+            }
+        }
+
         func observedPromptTextValue(preferred preferredCandidates: [XCUIElement] = []) -> String {
             let candidates = promptTextEntryCandidates(preferred: preferredCandidates)
             var fallbackValue = ""
@@ -235,6 +262,7 @@ extension AndBibleUITests {
                         candidate,
                         in: app,
                         preferTrailingEdge: true,
+                        promptTapCoordinate: promptOwnedTextEntryTapCoordinate,
                         timeout: 1,
                         file: file,
                         line: line
@@ -246,19 +274,39 @@ extension AndBibleUITests {
 
             let candidates = promptTextEntryCandidates(preferred: preferredCandidates)
             for candidate in candidates where usesPromptScopedResolvedField || candidate.exists {
+                let scopedPreferredCandidates = preferredCandidates + [candidate]
+                if usesPromptScopedResolvedField,
+                   observedPromptTextValue(preferred: scopedPreferredCandidates).isEmpty {
+                    return true
+                }
+
                 if forceKeyboardDelete {
                     focusCandidateForKeyboardDelete(candidate)
-                    if waitForElementKeyboardFocus(candidate, timeout: 0.3) {
+                    if usesPromptScopedResolvedField {
                         app.typeText(
                             String(repeating: XCUIKeyboardKey.delete.rawValue, count: max(text.count * 2, 32))
                         )
                         if waitForObservedPromptTextValueToClear(
-                            preferred: preferredCandidates + [candidate],
+                            preferred: scopedPreferredCandidates,
+                            timeout: 0.5
+                        ) {
+                            return true
+                        }
+                    } else if waitForElementKeyboardFocus(candidate, timeout: 0.3) {
+                        app.typeText(
+                            String(repeating: XCUIKeyboardKey.delete.rawValue, count: max(text.count * 2, 32))
+                        )
+                        if waitForObservedPromptTextValueToClear(
+                            preferred: scopedPreferredCandidates,
                             timeout: 0.5
                         ) {
                             return true
                         }
                     }
+                }
+
+                if usesPromptScopedResolvedField {
+                    continue
                 }
 
                 if clearTextEntryElement(
@@ -267,7 +315,7 @@ extension AndBibleUITests {
                     placeholderHints: placeholderHints,
                     includeElementMetadata: includeElementMetadata
                 ) && waitForObservedPromptTextValueToClear(
-                    preferred: preferredCandidates + [candidate],
+                    preferred: scopedPreferredCandidates,
                     timeout: 0.5
                 ) {
                     return true
@@ -283,6 +331,7 @@ extension AndBibleUITests {
             focusResolvedPromptTextEntryElement(
                 promptTextField,
                 in: app,
+                promptTapCoordinate: promptOwnedTextEntryTapCoordinate,
                 timeout: min(5, max(1, deadline.timeIntervalSinceNow)),
                 file: file,
                 line: line
@@ -296,7 +345,11 @@ extension AndBibleUITests {
                 continue
             }
 
-            promptTextField.typeText(text)
+            if usesPromptScopedResolvedField {
+                app.typeText(text)
+            } else {
+                promptTextField.typeText(text)
+            }
             if waitForObservedPromptTextValue(
                 preferred: preferredPromptCandidates,
                 timeout: min(5, max(0.5, deadline.timeIntervalSinceNow))
@@ -304,7 +357,8 @@ extension AndBibleUITests {
                 return true
             }
 
-            if waitForElementKeyboardFocus(promptTextField, timeout: 0.5) {
+            if !usesPromptScopedResolvedField,
+               waitForElementKeyboardFocus(promptTextField, timeout: 0.5) {
                 let currentValue = observedPromptTextValue(preferred: preferredPromptCandidates)
                 if currentValue == text {
                     return true
@@ -1403,29 +1457,35 @@ extension AndBibleUITests {
     }
 
     /**
-     Focuses a prompt-owned text-entry control without polling `isHittable`.
+     Focuses a prompt-owned text-entry control without polling `isHittable` or keyboard focus.
 
      SwiftUI prompt surfaces can occasionally stall XCTest while resolving broad alert or sheet
-     snapshots after a prompt-specific resolver has already found the field. Prefer the prompt's
-     automatic keyboard focus first, then tap the resolved field coordinate or a stable app
-     coordinate instead of querying `app.alerts.firstMatch` or `app.sheets.firstMatch`.
+     snapshots after a prompt-specific resolver has already found the field. Native prompts can also
+     time out while evaluating `hasKeyboardFocus`, so this helper only delivers focused-field taps;
+     callers prove success by observing the committed prompt value.
+
+     For prompt-owned fields that can stall while re-sampling the field itself, callers can provide
+     a prompt-surface coordinate. That path intentionally avoids `exists` and `frame` checks on the
+     text field after resolution.
      */
     func focusResolvedPromptTextEntryElement(
         _ element: XCUIElement,
         in app: XCUIApplication,
         preferTrailingEdge: Bool = false,
+        promptTapCoordinate: (() -> XCUICoordinate?)? = nil,
         timeout: TimeInterval = 10,
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
-        if waitForElementKeyboardFocus(element, timeout: 1) {
-            return
-        }
-
         let deadline = Date().addingTimeInterval(timeout)
         let tapOffset = CGVector(dx: preferTrailingEdge ? 0.92 : 0.5, dy: 0.5)
 
         repeat {
+            if let coordinate = promptTapCoordinate?() {
+                coordinate.tap()
+                return
+            }
+
             let coordinate: XCUICoordinate
             if element.exists, !element.frame.isEmpty {
                 coordinate = element.coordinate(withNormalizedOffset: tapOffset)
@@ -1433,15 +1493,15 @@ extension AndBibleUITests {
                 coordinate = app.coordinate(withNormalizedOffset: tapOffset)
             }
             coordinate.tap()
-            if waitForElementKeyboardFocus(element, timeout: 0.75) {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+            if element.exists, !element.frame.isEmpty {
                 return
             }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         } while Date() < deadline
 
         XCTAssertTrue(
-            waitForElementKeyboardFocus(element, timeout: 0.5),
-            "Expected prompt text input '\(element.identifier)' to gain keyboard focus within \(timeout) seconds.",
+            element.exists && !element.frame.isEmpty,
+            "Expected prompt text input '\(element.identifier)' to expose a tappable frame within \(timeout) seconds.",
             file: file,
             line: line
         )
@@ -1880,8 +1940,8 @@ extension AndBibleUITests {
      *   - line: Source line used for XCTest failure attribution.
      * - Returns: The resolved button once XCTest reports a hittable activation point.
      * - Side effects:
-     *   - scrolls Sync Settings lower content until the requested button materializes and becomes
-     *     hittable
+     *   - scrolls Sync Settings lower content until the requested button materializes as a native
+     *     button and becomes hittable
      * - Failure modes:
      *   - records an XCTest failure if the button never appears or never becomes hittable
      */
@@ -1893,10 +1953,11 @@ extension AndBibleUITests {
         line: UInt = #line
     ) -> XCUIElement {
         let deadline = Date().addingTimeInterval(timeout)
-        var lastCandidate = unresolvedElement(identifier, in: app)
+        var lastCandidate = app.buttons[identifier].firstMatch
 
         repeat {
-            if let button = resolvedElement(identifier, in: app) {
+            let button = app.buttons[identifier].firstMatch
+            if button.exists {
                 lastCandidate = button
                 if waitForElementToBecomeHittable(button, timeout: 0.5) {
                     return button

@@ -1,4 +1,4 @@
-// ImportExportView.swift — Import/Export settings screen
+// ImportExportView.swift -- Android-aligned Backup & Restore settings screen
 
 import SwiftUI
 import SwiftData
@@ -7,20 +7,26 @@ import SwordKit
 import UniformTypeIdentifiers
 
 /**
- Settings screen for exporting backups, importing backups, installing SWORD modules, and importing EPUB books.
+ Android-aligned Backup & Restore settings screen.
 
- The view coordinates file export to temporary files, file-importer presentation, security-scoped
- resource access, and dispatch to the relevant backup or installer service.
+ The user-facing workflow follows Android's `BackupActivity` where the capability is implementable
+ on iOS: users first choose Database or Documents for backup, choose Database or Documents for
+ Restore or Import, and use the reset controls from the same screen. Android's Application/APK row
+ is omitted because iOS apps cannot export their installed bundle as an APK/IPA equivalent at
+ runtime. iOS keeps platform-specific plumbing behind those choices: Files export and share sheets
+ replace Android intents, SwiftData restore engines replace raw Android database-file swaps, and
+ document/module importers replace Android's `InstallZip` activity.
 
  Data dependencies:
- - `modelContext` is passed into `BackupService` for backup import/export operations
+- `modelContext` provides the SwiftData container used by Android-compatible database backup
+  import/export operations
 
  Side effects:
- - export actions write temporary files and present a share sheet
- - import actions read user-selected files through `fileImporter` and mutate app data through
-   backup/import services
- - module and EPUB install actions import external content into the app's storage locations
- - status text reflects the latest success or failure message across all operations
+ - backup actions generate Android-compatible archives and then present Files export or share UI
+ - restore/import actions read user-selected files through `fileImporter` and mutate app data
+   through backup/import/install services
+ - reset actions mutate category data through `AndroidBackupResetService`
+ - feedback alerts report success, failure, and guidance after operations complete
  */
 public struct ImportExportView: View {
     /// SwiftData context used by backup import/export services.
@@ -29,29 +35,58 @@ public struct ImportExportView: View {
     /// Controls presentation of the share sheet after a successful export.
     @State private var showExportSheet = false
 
-    /// Controls presentation of the backup import file picker.
-    @State private var showImportPicker = false
+    /// Persisted Android-style backup radio selection.
+    @AppStorage("backup_workflow_backup_target") private var backupTargetRawValue = BackupWorkflowTarget.database.rawValue
+
+    /// Persisted Android-style restore/import radio selection.
+    @AppStorage("backup_workflow_restore_target") private var restoreTargetRawValue = RestoreWorkflowTarget.database.rawValue
+
+    /// Controls Android's backup destination choice dialog.
+    @State private var showBackupDestinationDialog = false
+
+    /// Prepared archive waiting for the user's Files/Share destination choice.
+    @State private var pendingBackupExport: BackupExportPayload?
+
+    /// File document used by SwiftUI's Files exporter.
+    @State private var backupExportDocument = BackupExportDocument()
+
+    /// Default file name used by SwiftUI's Files exporter.
+    @State private var backupExportFileName = AndroidDatabaseBackupService.databaseBackupFileName
+
+    /// Controls presentation of the Files exporter for "Phone storage".
+    @State private var showBackupFileExporter = false
+
+    /// Controls presentation of the shared restore/import file picker.
+    @State private var showRestoreImportPicker = false
+
+    /// Restore/import target whose content types and result handler are active for the file picker.
+    @State private var restoreImportPickerTarget: RestoreWorkflowTarget?
 
     /// URL of the most recently exported file shared through the share sheet.
     @State private var exportedFileURL: URL?
 
-    /// Latest user-visible success or error message across import/export actions.
+    /// Pending user-visible success, failure, or guidance message for the feedback alert.
     @State private var statusMessage: String?
 
-    /// Whether a backup export is currently in progress.
-    @State private var isExporting = false
+    /// Controls presentation of the Android-style operation feedback alert.
+    @State private var showStatusAlert = false
+
+    /// Completion message to show only after the iOS share sheet reports a completed destination.
+    @State private var pendingShareCompletionMessage: String?
+
+    /// Whether Android-compatible database backup export is currently preparing an archive.
+    @State private var isExportingAndroidDatabaseBackup = false
+
+    /// Whether any export action is currently in progress.
+    private var isExporting: Bool {
+        isExportingAndroidDatabaseBackup
+    }
 
     /// Whether a backup import is currently in progress.
     @State private var isImporting = false
 
-    /// Controls presentation of the SWORD module ZIP picker.
-    @State private var showModuleZipPicker = false
-
-    /// Whether a SWORD module installation is currently in progress.
-    @State private var isInstallingModule = false
-
-    /// Controls presentation of the Android module backup picker.
-    @State private var showAndroidModuleBackupPicker = false
+    /// Whether a ZIP, EPUB, or TTF document installation is currently in progress.
+    @State private var isInstallingDocument = false
 
     /// Whether an Android module backup restore is currently in progress.
     @State private var isRestoringAndroidModuleBackup = false
@@ -74,12 +109,6 @@ public struct ImportExportView: View {
     /// Controls the Android module backup overwrite confirmation prompt.
     @State private var showAndroidModuleBackupOverwriteAlert = false
 
-    /// Controls presentation of the EPUB picker.
-    @State private var showEpubPicker = false
-
-    /// Whether an EPUB installation is currently in progress.
-    @State private var isInstallingEpub = false
-
     /// Android database backup archive currently staged for category selection.
     @State private var androidBackupArchive: AndroidDatabaseBackupArchive?
 
@@ -89,11 +118,32 @@ public struct ImportExportView: View {
     /// Whether selected Android backup sections are currently being applied.
     @State private var isApplyingAndroidBackup = false
 
-    /// Service used to load, apply, and clean up Android `.abdb.zip` database backups.
+    /// Reset category waiting for Android-style destructive confirmation.
+    @State private var pendingResetCategory: AndroidBackupResetCategory?
+
+    /// Whether an Android BackupActivity reset category is currently mutating local stores.
+    @State private var isResettingBackupCategory = false
+
+    /// Service used to export, load, apply, and clean up Android `.abdb.zip` database backups.
     private let androidBackupService = AndroidDatabaseBackupService()
 
     /// Service used to inspect, restore, and export Android `.abmd.zip` module backups.
     private let androidModuleBackupService = AndroidModuleBackupService()
+
+    /// Service used to reset Android BackupActivity categories through iOS storage engines.
+    private let androidResetService = AndroidBackupResetService()
+
+    /**
+     Lightweight sentinel for file read failures that should preserve the existing generic copy.
+
+     The background database-backup loader uses this instead of passing through Foundation's
+     low-level file errors so the user still sees the established `error_read_file` message for
+     unreadable picker selections.
+     */
+    private enum ImportExportFileReadError: Error {
+        /// Selected file bytes could not be loaded from disk.
+        case unreadable
+    }
 
     /**
      Creates the import/export screen.
@@ -109,182 +159,257 @@ public struct ImportExportView: View {
      workflow transitions without depending on private UIKit or SwiftUI picker hierarchy details.
      */
     private var accessibilityState: String {
+        if showBackupDestinationDialog {
+            return "backupDestinationPresented"
+        }
+        if showBackupFileExporter {
+            return "fileExporterPresented"
+        }
         if showExportSheet {
             return "shareSheetPresented"
         }
-        if showImportPicker {
-            return "importPickerPresented"
-        }
-        if showModuleZipPicker {
-            return "moduleZipPickerPresented"
-        }
-        if showAndroidModuleBackupPicker {
-            return "androidModuleBackupPickerPresented"
+        if showRestoreImportPicker {
+            switch restoreImportPickerTarget ?? restoreTarget.wrappedValue {
+            case .database:
+                return "databaseRestorePickerPresented"
+            case .documents:
+                return "documentsRestorePickerPresented"
+            }
         }
         if showAndroidModuleBackupExportSheet {
             return "androidModuleBackupExportPresented"
         }
-        if showEpubPicker {
-            return "epubPickerPresented"
-        }
         if androidBackupArchive != nil {
             return "androidBackupImportPresented"
+        }
+        if isResettingBackupCategory {
+            return "resetInProgress"
+        }
+        if pendingBackupExport != nil {
+            return "backupPayloadPending"
         }
         return "idle"
     }
 
     /**
-     Builds the export, import, module-install, EPUB-install, and status sections.
+     Type-safe binding around the persisted backup target raw value.
+
+     - Side effects: writes `UserDefaults` through `@AppStorage` when the user changes the radio row.
+     - Failure modes: Unknown persisted values fall back to Android's Database default.
+     */
+    private var backupTarget: Binding<BackupWorkflowTarget> {
+        Binding(
+            get: { BackupWorkflowTarget(rawValue: backupTargetRawValue) ?? .database },
+            set: { backupTargetRawValue = $0.rawValue }
+        )
+    }
+
+    /**
+     Type-safe binding around the persisted restore/import target raw value.
+
+     - Side effects: writes `UserDefaults` through `@AppStorage` when the user changes the radio row.
+     - Failure modes: Unknown persisted values fall back to Android's Database default.
+     */
+    private var restoreTarget: Binding<RestoreWorkflowTarget> {
+        Binding(
+            get: { RestoreWorkflowTarget(rawValue: restoreTargetRawValue) ?? .database },
+            set: { restoreTargetRawValue = $0.rawValue }
+        )
+    }
+
+    /**
+     Android reset categories with safe iOS storage equivalents.
+
+     - Returns: Reset buttons in Android's BackupActivity order, omitting AI Settings until iOS has
+       a real durable AI settings store.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    private var resetCategories: [AndroidBackupResetCategory] {
+        [
+            .bookmarks,
+            .workspaces,
+            .readingPlans,
+            .repositories,
+            .applicationPreferences,
+            .myDocuments,
+            .progress,
+        ]
+    }
+
+    /**
+     Whether any backup/archive export operation is active.
+     */
+    private var isBackingUp: Bool {
+        isExporting || isExportingAndroidModuleBackup
+    }
+
+    /**
+     Whether any restore/import/install operation is active.
+     */
+    private var isRestoringOrImporting: Bool {
+        isImporting || isRestoringAndroidModuleBackup || isInstallingDocument
+    }
+
+    /**
+     Whether any Backup & Restore operation is reading or mutating shared app storage.
+
+     - Returns: `true` during backup/export, restore/import/install, or reset work.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    private var isBackupWorkflowBusy: Bool {
+        isBackingUp || isRestoringOrImporting || isResettingBackupCategory
+    }
+
+    /**
+     Allowed content types for the currently active restore/import picker.
+
+     Android keeps Database backup archives and Documents/module imports as distinct visible
+     restore targets. iOS uses one SwiftUI file importer for reliability, then selects the allowed
+     UTTypes from the active target so the platform picker still opens the correct category.
+
+     - Returns: Database archive types for Database, or module/document types for Documents.
+     - Side effects: none.
+     - Failure modes: Falls back to the persisted restore target if the picker target was cleared by
+       the platform before the result callback arrives.
+     */
+    private var restoreImportPickerContentTypes: [UTType] {
+        switch restoreImportPickerTarget ?? restoreTarget.wrappedValue {
+        case .database:
+            return [.zip, .data]
+        case .documents:
+            return ExternalDocumentImportService.supportedContentTypes
+        }
+    }
+
+    /**
+     Builds Android's BackupActivity sections using native iOS file plumbing.
      */
     public var body: some View {
         List {
-            // Export section
             Section {
+                ForEach(BackupWorkflowTarget.allCases) { target in
+                    BackupWorkflowOptionRow(
+                        title: target.localizedTitle,
+                        description: target.localizedDescription,
+                        value: target,
+                        selection: backupTarget,
+                        accessibilityIdentifier: "backupWorkflowTarget.\(target.rawValue)Button"
+                    )
+                }
+
                 Button {
-                    exportFullBackup()
+                    beginBackup()
                 } label: {
                     HStack {
-                        SwiftUI.Label(String(localized: "full_backup_json"), systemImage: "arrow.up.doc")
+                        Text(String(localized: "backup_to", defaultValue: "Backup to..."))
                         Spacer()
-                        if isExporting {
+                        if isBackingUp {
                             ProgressView()
                         }
                     }
                 }
-                .accessibilityIdentifier("importExportFullBackupButton")
-                .disabled(isExporting)
-
-                Button {
-                    exportBookmarksCSV()
-                } label: {
-                    SwiftUI.Label(String(localized: "bookmarks_csv"), systemImage: "tablecells")
-                }
-                .disabled(isExporting)
+                .buttonStyle(.borderedProminent)
+                .frame(maxWidth: .infinity)
+                .accessibilityIdentifier("backupWorkflowBackupButton")
+                .disabled(isBackupWorkflowBusy)
             } header: {
-                Text(String(localized: "export"))
-            } footer: {
-                Text(String(localized: "export_footer"))
+                Text(String(localized: "backup_and_restore", defaultValue: "Backup & Restore"))
             }
 
-            // Import section
             Section {
+                ForEach(RestoreWorkflowTarget.allCases) { target in
+                    BackupWorkflowOptionRow(
+                        title: target.localizedTitle,
+                        description: target.localizedDescription,
+                        value: target,
+                        selection: restoreTarget,
+                        accessibilityIdentifier: "restoreWorkflowTarget.\(target.rawValue)Button"
+                    )
+                }
+
                 Button {
-                    showImportPicker = true
+                    beginRestoreOrImport()
                 } label: {
                     HStack {
-                        SwiftUI.Label(String(localized: "import_from_file"), systemImage: "arrow.down.doc")
+                        Text(String(localized: "backup_restore_from2", defaultValue: "Restore or Import from..."))
                         Spacer()
-                        if isImporting {
+                        if isRestoringOrImporting {
                             ProgressView()
                         }
                     }
                 }
-                .accessibilityIdentifier("importExportImportButton")
-                .disabled(isImporting)
+                .buttonStyle(.borderedProminent)
+                .frame(maxWidth: .infinity)
+                .accessibilityIdentifier("backupWorkflowRestoreButton")
+                .disabled(isBackupWorkflowBusy)
             } header: {
-                Text(String(localized: "import"))
-            } footer: {
-                Text(String(localized: "import_footer"))
+                Text(String(localized: "backup_restore2", defaultValue: "Restore or Import"))
             }
 
-            // SWORD module install section
             Section {
-                Button {
-                    showModuleZipPicker = true
-                } label: {
-                    HStack {
-                        SwiftUI.Label(String(localized: "install_sword_module"), systemImage: "shippingbox")
-                        Spacer()
-                        if isInstallingModule {
-                            ProgressView()
-                        }
-                    }
-                }
-                .disabled(isInstallingModule)
+                Text(String(
+                    localized: "reset_databases_description",
+                    defaultValue: "Reset individual databases to their initial empty state. This cannot be undone."
+                ))
+                .font(.callout)
+                .foregroundStyle(.secondary)
 
-                Button {
-                    showAndroidModuleBackupPicker = true
-                } label: {
-                    HStack {
-                        SwiftUI.Label(
-                            String(localized: "restore_android_module_backup", defaultValue: "Restore Android Module Backup"),
-                            systemImage: "archivebox"
-                        )
-                        Spacer()
-                        if isRestoringAndroidModuleBackup {
-                            ProgressView()
-                        }
+                ForEach(resetCategories) { category in
+                    Button(role: .destructive) {
+                        pendingResetCategory = category
+                    } label: {
+                        Text(category.localizedBackupResetButtonTitle)
                     }
+                    .accessibilityIdentifier(category.backupResetAccessibilityIdentifier)
+                    .disabled(isBackupWorkflowBusy)
                 }
-                .disabled(isRestoringAndroidModuleBackup)
-
-                Button {
-                    presentAndroidModuleBackupExportSelection()
-                } label: {
-                    HStack {
-                        SwiftUI.Label(
-                            String(localized: "export_android_module_backup", defaultValue: "Export Android Module Backup"),
-                            systemImage: "archivebox.fill"
-                        )
-                        Spacer()
-                        if isExportingAndroidModuleBackup {
-                            ProgressView()
-                        }
-                    }
-                }
-                .disabled(isExportingAndroidModuleBackup)
             } header: {
-                Text(String(localized: "modules"))
-            } footer: {
-                Text(String(localized: "modules_footer"))
+                Text(String(localized: "reset_databases_title", defaultValue: "Reset Databases"))
             }
 
-            // EPUB import section
-            Section {
-                Button {
-                    showEpubPicker = true
-                } label: {
-                    HStack {
-                        SwiftUI.Label(String(localized: "install_epub_book"), systemImage: "book")
-                        Spacer()
-                        if isInstallingEpub {
-                            ProgressView()
-                        }
-                    }
-                }
-                .disabled(isInstallingEpub)
-            } header: {
-                Text(String(localized: "epub"))
-            } footer: {
-                Text(String(localized: "epub_footer"))
-            }
-
-            // Status
-            if let statusMessage {
-                Section {
-                    Text(statusMessage)
-                        .font(.callout)
-                        .foregroundStyle(statusMessage.contains("Error") ? .red : .green)
-                }
-            }
         }
         .accessibilityIdentifier("importExportScreen")
         .accessibilityValue(accessibilityState)
-        .navigationTitle(String(localized: "import_export"))
+        .navigationTitle(String(localized: "backup_and_restore", defaultValue: "Backup & Restore"))
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
-        .sheet(isPresented: $showExportSheet) {
-            if let url = exportedFileURL {
-                ShareSheet(items: [url])
+        .alert(
+            String(localized: "backup_backup_title", defaultValue: "Backup to where?"),
+            isPresented: $showBackupDestinationDialog,
+        ) {
+            Button(String(localized: "backup_phone_storage", defaultValue: "Phone storage")) {
+                finishPendingBackupExport(to: .phoneStorage)
             }
+            .accessibilityIdentifier("backupDestinationPhoneStorageButton")
+            Button(String(localized: "share", defaultValue: "Share")) {
+                finishPendingBackupExport(to: .share)
+            }
+            .accessibilityIdentifier("backupDestinationShareButton")
+            Button(String(localized: "cancel"), role: .cancel) {
+                cancelPendingBackupExport()
+            }
+            .accessibilityIdentifier("backupDestinationCancelButton")
+        } message: {
+            Text(String(
+                localized: "backup_backup_message",
+                defaultValue: "Backup to phone or elsewhere via Share function (email, iCloud Drive etc.)?"
+            ))
         }
-        .fileImporter(
-            isPresented: $showImportPicker,
-            allowedContentTypes: [.json, .commaSeparatedText, .zip, .data],
-            allowsMultipleSelection: false
+        .fileExporter(
+            isPresented: $showBackupFileExporter,
+            document: backupExportDocument,
+            contentType: .zip,
+            defaultFilename: backupExportFileName
         ) { result in
-            handleImport(result)
+            handleBackupFileExport(result)
+        }
+        .sheet(isPresented: $showExportSheet, onDismiss: handleShareSheetDismiss) {
+            if let url = exportedFileURL {
+                ShareSheet(items: [url], onCompletion: handleBackupShareCompletion)
+            }
         }
         .sheet(item: $androidBackupArchive, onDismiss: cleanupDismissedAndroidBackupArchive) { archive in
             AndroidDatabaseBackupImportSheet(
@@ -298,18 +423,11 @@ public struct ImportExportView: View {
             }
         }
         .fileImporter(
-            isPresented: $showModuleZipPicker,
-            allowedContentTypes: [.zip, .data],
+            isPresented: $showRestoreImportPicker,
+            allowedContentTypes: restoreImportPickerContentTypes,
             allowsMultipleSelection: false
         ) { result in
-            handleModuleZipImport(result)
-        }
-        .fileImporter(
-            isPresented: $showAndroidModuleBackupPicker,
-            allowedContentTypes: [.zip, .data],
-            allowsMultipleSelection: false
-        ) { result in
-            handleAndroidModuleBackupImport(result)
+            handleRestoreImportPickerResult(result)
         }
         .sheet(isPresented: $showAndroidModuleBackupExportSheet) {
             AndroidModuleBackupExportSheet(
@@ -319,12 +437,21 @@ public struct ImportExportView: View {
                 onExport: exportAndroidModuleBackup(moduleNames:)
             )
         }
-        .fileImporter(
-            isPresented: $showEpubPicker,
-            allowedContentTypes: [.epub, .data],
-            allowsMultipleSelection: false
-        ) { result in
-            handleEpubImport(result)
+        .alert(item: $pendingResetCategory) { category in
+            Alert(
+                title: Text(category.localizedBackupResetButtonTitle),
+                message: Text(String(
+                    format: String(
+                        localized: "reset_database_confirm",
+                        defaultValue: "This will permanently delete all data in \"%@\" and reset it to the initial state. This cannot be undone.\n\nAre you sure?"
+                    ),
+                    category.localizedBackupResetTitle
+                )),
+                primaryButton: .destructive(Text(String(localized: "reset", defaultValue: "Reset"))) {
+                    resetDatabase(category)
+                },
+                secondaryButton: .cancel(Text(String(localized: "cancel")))
+            )
         }
         .alert(
             String(localized: "android_module_backup_overwrite_title", defaultValue: "Overwrite existing module files?"),
@@ -339,129 +466,375 @@ public struct ImportExportView: View {
         } message: {
             Text(androidModuleBackupOverwriteMessage())
         }
+        .onChange(of: statusMessage) { _, newValue in
+            showStatusAlert = newValue != nil
+        }
+        .alert(
+            String(localized: "backup_and_restore", defaultValue: "Backup & Restore"),
+            isPresented: $showStatusAlert
+        ) {
+            Button(String(localized: "ok"), role: .cancel) {
+                statusMessage = nil
+            }
+        } message: {
+            Text(statusMessage ?? "")
+        }
     }
 
     /**
-     Exports a full JSON backup, writes it to a temporary file, and presents the share sheet.
+     Starts the selected Android BackupActivity backup flow.
 
-     Side effects:
-     - toggles export state and clears prior status messages
-     - queries `BackupService` for a full backup payload
-     - writes the payload to a temporary file and presents the share sheet on success
+     Database and Documents prepare Android-compatible archives before presenting Android's
+     destination choice. Android's Application/APK target is omitted from iOS because apps cannot
+     export their installed bundle as an IPA/APK equivalent at runtime.
+
+     - Side effects: Mutates export/progress/feedback state and may present backup destination or
+       module-selection UI.
+     - Failure modes: Category-specific export failures are surfaced through the feedback alert.
      */
-    private func exportFullBackup() {
-        isExporting = true
-        statusMessage = nil
+    private func beginBackup() {
+        switch backupTarget.wrappedValue {
+        case .database:
+            exportAndroidDatabaseBackup()
+        case .documents:
+            presentAndroidModuleBackupExportSelection()
+        }
+    }
 
-        let service = BackupService(modelContext: modelContext)
-        guard let data = service.exportFullBackup() else {
-            statusMessage = String(localized: "error_create_backup")
-            isExporting = false
+    /**
+     Starts the selected Android BackupActivity Restore or Import flow.
+
+     - Side effects: Presents either the database backup picker or the document/module picker.
+     - Failure modes: Picker failures are handled by the selected result handler.
+     */
+    private func beginRestoreOrImport() {
+        restoreImportPickerTarget = restoreTarget.wrappedValue
+        showRestoreImportPicker = true
+    }
+
+    /**
+     Routes the shared restore/import picker result to the target-specific workflow.
+
+     SwiftUI presentation modifiers are more reliable when one file importer owns the picker
+     lifecycle. This method preserves Android's Database/Documents split by dispatching the selected
+     file to the result handler captured when the user tapped Restore or Import.
+
+     - Parameter result: File picker result returned by SwiftUI.
+     - Side effects: Clears the transient picker target, then may mutate restore/import state
+       through the target-specific handler.
+     - Failure modes: Picker and importer failures are forwarded to the selected target handler.
+     */
+    private func handleRestoreImportPickerResult(_ result: Result<[URL], Error>) {
+        let target = restoreImportPickerTarget ?? restoreTarget.wrappedValue
+        restoreImportPickerTarget = nil
+
+        switch target {
+        case .database:
+            handleDatabaseRestoreImport(result)
+        case .documents:
+            handleDocumentsRestoreImport(result)
+        }
+    }
+
+    /**
+     Exports an Android-compatible database backup and presents Android's destination choice.
+
+     This is the parity backup path: Android expects `AndBibleDatabaseBackup.abdb.zip` containing
+     `AndBibleBackupManifest.json` and supported category SQLite databases under `db/`.
+
+     - Side effects:
+       - marks the Android database export row as active and clears prior feedback messages
+       - schedules archive generation after one main-actor yield so SwiftUI can render the busy
+         state before the expensive SQLite/ZIP work starts
+       - exports from a background SwiftData context so SQLite and ZIP work do not block the UI actor
+       - stores the generated archive file until the user chooses Phone storage or Share
+     - Failure modes: Catches backup export and file-write failures and surfaces them as feedback.
+     */
+    private func exportAndroidDatabaseBackup() {
+        isExportingAndroidDatabaseBackup = true
+        statusMessage = nil
+        let modelContainer = modelContext.container
+
+        Task { @MainActor in
+            await Task.yield()
+            defer { isExportingAndroidDatabaseBackup = false }
+
+            do {
+                let export = try await Task.detached(priority: .userInitiated) {
+                    let exportContext = ModelContext(modelContainer)
+                    return try AndroidDatabaseBackupService().exportArchiveFile(
+                        modelContext: exportContext,
+                        settingsStore: SettingsStore(modelContext: exportContext)
+                    )
+                }.value
+                let exportURL = try moveExportFileToShareDirectory(export)
+                let categorySummary = export.categories
+                    .map(\.localizedBackupSectionName)
+                    .joined(separator: ", ")
+                presentBackupDestination(
+                    BackupExportPayload(
+                        temporaryFileURL: exportURL,
+                        fileName: export.fileName,
+                        statusMessage: String(
+                            localized: "android_database_backup_exported_summary",
+                            defaultValue: "Exported Android database backup: \(categorySummary)"
+                        )
+                    )
+                )
+            } catch {
+                statusMessage = localizedErrorMessage(error)
+            }
+        }
+    }
+
+    /**
+     Stores a generated backup payload and presents Android's Backup to where? alert choice.
+
+     - Parameter payload: Valid archive content plus default file name and completion status.
+     - Side effects: Replaces any previous pending payload, mutates pending export state, and
+       presents the destination alert.
+     - Failure modes: none; backup generation has already succeeded before this method is called.
+     */
+    private func presentBackupDestination(_ payload: BackupExportPayload) {
+        clearPendingBackupExport()
+        pendingBackupExport = payload
+        showBackupDestinationDialog = true
+    }
+
+    /**
+     Completes the pending backup using the selected Android destination.
+
+     - Parameter destination: Phone storage uses Files export; Share opens the share sheet with an
+       existing file-backed archive or writes data-backed payloads to a temporary file first.
+     - Side effects:
+       - mutates exporter or share-sheet presentation state
+       - may write a temporary file for data-backed Share payloads
+       - queues feedback after the selected destination accepts the payload
+     - Failure modes: Missing pending payload is ignored; file-read/write failures are surfaced
+       through the feedback alert.
+     */
+    private func finishPendingBackupExport(to destination: BackupExportDestination) {
+        guard let payload = pendingBackupExport else {
             return
         }
 
-        let fileName = "andbible-backup-\(dateString()).json"
-        if let url = saveToTempFile(data: data, fileName: fileName) {
-            exportedFileURL = url
-            showExportSheet = true
-        }
+        switch destination {
+        case .phoneStorage:
+            backupExportDocument = payload.fileDocument()
+            backupExportFileName = payload.fileName
+            showBackupFileExporter = true
+        case .share:
+            if let url = payload.temporaryFileURL {
+                exportedFileURL = url
+                showExportSheet = true
+                pendingShareCompletionMessage = payload.statusMessage
+                return
+            }
 
-        isExporting = false
+            do {
+                if let url = saveToTempFile(data: try payload.loadData(), fileName: payload.fileName) {
+                    exportedFileURL = url
+                    pendingShareCompletionMessage = payload.statusMessage
+                    clearPendingBackupExport()
+                    showExportSheet = true
+                }
+            } catch {
+                clearPendingBackupExport()
+                statusMessage = localizedErrorMessage(error)
+            }
+        }
     }
 
     /**
-     Exports bookmarks as CSV, writes the file to a temporary location, and presents the share sheet.
-     */
-    private func exportBookmarksCSV() {
-        isExporting = true
-        statusMessage = nil
+     Handles completion of SwiftUI's Files exporter.
 
-        let service = BackupService(modelContext: modelContext)
-        guard let data = service.exportBookmarksCSV() else {
-            statusMessage = String(localized: "error_export_bookmarks")
-            isExporting = false
+     - Parameter result: Export result emitted by the system document picker.
+     - Side effects:
+       - clears the pending export once the exporter finishes
+       - publishes the prepared feedback message only after successful export
+       - updates visible feedback state on failure
+     - Failure modes: Export errors are formatted with the shared import/export error prefix.
+     */
+    private func handleBackupFileExport(_ result: Result<URL, Error>) {
+        let completionMessage = pendingBackupExport?.statusMessage
+        clearPendingBackupExport()
+
+        switch result {
+        case .success:
+            statusMessage = completionMessage
+        case .failure(let error):
+            statusMessage = localizedErrorMessage(error)
+        }
+    }
+
+    /**
+     Handles return from the iOS share sheet.
+
+     UIKit reports whether the user completed a share destination, cancelled, or hit an activity
+     error. Backup & Restore uses that stronger platform result to preserve Android's visible
+     destination workflow without treating a cancelled iOS share sheet as a successful backup.
+
+     - Parameter completion: Platform-neutral result emitted by `ShareSheet`.
+     - Side effects:
+       - releases the pending temporary export payload after the share controller finishes
+       - clears the queued share completion message
+       - presents success feedback only when `completion.completed` is true
+       - presents error feedback when the platform reports an activity error
+     - Failure modes: Share activity errors are surfaced through the shared import/export error
+       formatter.
+     */
+    private func handleBackupShareCompletion(_ completion: ShareSheetCompletion) {
+        let completionMessage = pendingShareCompletionMessage
+        pendingShareCompletionMessage = nil
+        clearPendingBackupExport()
+
+        if let error = completion.error {
+            statusMessage = localizedErrorMessage(error)
             return
         }
 
-        let fileName = "andbible-bookmarks-\(dateString()).csv"
-        if let url = saveToTempFile(data: data, fileName: fileName) {
-            exportedFileURL = url
-            showExportSheet = true
+        if completion.completed, let completionMessage {
+            statusMessage = completionMessage
         }
-
-        isExporting = false
     }
 
     /**
-     Handles backup/bookmark import results from the generic file importer.
+     Cleans up any share export state left after the share sheet leaves the screen.
 
-     Supported formats:
-     - `.json`: full backup import via `BackupService.importFullBackup`
-     - `.csv`: bookmark import via `BackupService.importBookmarksCSV`
-     - `.abdb.zip`: Android database backup staging via `AndroidDatabaseBackupService`
-     - `.abmd.zip`: Android module backup restore via `AndroidModuleBackupService`
-     - `.bbl`, `.cmt`, `.dct`: MySword/MyBible hint only; no import is performed
+     UIKit normally calls `completionWithItemsHandler` for both completion and cancellation. The
+     dismissal hook remains a defensive cleanup boundary for platform dismissals that do not provide a
+     completion callback, but it intentionally does not publish success feedback because dismissal is
+     not proof that a backup destination accepted the archive.
 
-     Side effects:
-     - starts and stops security-scoped resource access for the chosen file
-     - reads the imported file data and updates status text with success or error details
-     - mutates persisted app data through `BackupService` for supported formats
-     - stages Android backup SQLite files in a temporary directory before presenting section choice
+     - Side effects: Clears queued share feedback and releases any still-pending temporary export file.
+     - Failure modes: Temporary-file cleanup failures are intentionally ignored by
+       `BackupExportPayload`.
      */
-    private func handleImport(_ result: Result<[URL], Error>) {
+    private func handleShareSheetDismiss() {
+        pendingShareCompletionMessage = nil
+        clearPendingBackupExport()
+        exportedFileURL = nil
+    }
+
+    /**
+     Cancels a prepared backup destination choice without writing or sharing the archive.
+     *
+     - Side effects: Releases generated archive bytes or temporary files and dismisses any pending
+       feedback from the abandoned export.
+     - Failure modes: none.
+     */
+    private func cancelPendingBackupExport() {
+        pendingShareCompletionMessage = nil
+        clearPendingBackupExport()
+    }
+
+    /**
+     Releases the prepared backup payload and removes any temporary archive it owns.
+
+     - Side effects: Deletes file-backed temporary exports and clears pending export state.
+     - Failure modes: Temporary-file cleanup failures are intentionally ignored by
+       `BackupExportPayload`.
+     */
+    private func clearPendingBackupExport() {
+        pendingBackupExport?.cleanupTemporaryFile()
+        pendingBackupExport = nil
+    }
+
+    /**
+     Handles Android database backup restore/import file selection.
+
+     Android's Database restore path accepts `.abdb.zip` manual backup archives and then asks the
+     user which sections to Restore or Import. iOS mirrors that contract by rejecting document,
+     module, and legacy files from this target instead of routing every format through one generic
+     importer.
+
+     - Parameter result: File picker result for the Database Restore or Import target.
+     - Side effects:
+       - validates the selected filename before scheduling background file read and archive staging
+       - keeps import controls disabled until background validation and staging finish
+       - presents feedback on invalid selection or read failure
+     - Failure modes: Picker, read, and archive validation failures are surfaced through
+       the feedback alert.
+     */
+    private func handleDatabaseRestoreImport(_ result: Result<[URL], Error>) {
         switch result {
         case .success(let urls):
             guard let url = urls.first else { return }
             isImporting = true
             statusMessage = nil
 
-            // Start accessing security-scoped resource
+            guard isAndroidDatabaseBackupFile(url) else {
+                statusMessage = String(
+                    localized: "android_database_backup_required",
+                    defaultValue: "Select an Android database backup file (.abdb.zip)."
+                )
+                isImporting = false
+                return
+            }
+
+            loadAndroidBackupArchive(from: url)
+
+        case .failure(let error):
+            statusMessage = localizedErrorMessage(error)
+        }
+    }
+
+    /**
+     Handles Android Documents restore/import file selection.
+
+     Android routes document restore/import through its document loader. iOS maps that visible target
+     to the existing native importers for Android module backups, SWORD module ZIPs, and EPUB
+     documents while keeping those formats out of the top-level backup UI.
+
+     - Parameter result: File picker result for the Documents Restore or Import target.
+     - Side effects:
+       - reads Android module backup archives when selected
+       - installs SWORD ZIP modules or EPUB files through their existing native services
+       - presents feedback with success, failure, or guidance messages
+     - Failure modes: Unsupported document formats and importer errors are surfaced through
+       the feedback alert.
+     */
+    private func handleDocumentsRestoreImport(_ result: Result<[URL], Error>) {
+        switch result {
+        case .success(let urls):
+            guard let url = urls.first else { return }
+            statusMessage = nil
+
             let accessing = url.startAccessingSecurityScopedResource()
             defer {
                 if accessing { url.stopAccessingSecurityScopedResource() }
             }
 
-            guard let data = try? Data(contentsOf: url) else {
-                statusMessage = String(localized: "error_read_file")
-                isImporting = false
-                return
-            }
-
             let ext = url.pathExtension.lowercased()
             if isAndroidDatabaseBackupFile(url) {
-                loadAndroidBackupArchive(from: data)
-                isImporting = false
+                statusMessage = String(
+                    localized: "android_database_backup_wrong_restore_target",
+                    defaultValue: "Android database backups must be restored or imported from the Database target."
+                )
                 return
             }
             if AndroidModuleBackupService.isAndroidModuleBackupFileName(url.lastPathComponent) {
+                isRestoringAndroidModuleBackup = true
+                guard let data = try? Data(contentsOf: url) else {
+                    statusMessage = String(localized: "error_read_file")
+                    isRestoringAndroidModuleBackup = false
+                    return
+                }
                 prepareAndroidModuleBackupRestore(from: data)
-                isImporting = false
+                if !showAndroidModuleBackupOverwriteAlert {
+                    isRestoringAndroidModuleBackup = false
+                }
                 return
             }
 
-            let service = BackupService(modelContext: modelContext)
-
             switch ext {
-            case "json":
-                let count = service.importFullBackup(data)
-                statusMessage = count > 0
-                    ? String(localized: "imported_items_\(count)")
-                    : String(localized: "error_parse_backup")
-
-            case "csv":
-                let count = service.importBookmarksCSV(data)
-                statusMessage = count > 0
-                    ? String(localized: "imported_bookmarks_\(count)")
-                    : String(localized: "error_parse_csv")
-
-            case "bbl", "cmt", "dct":
+            case "zip", "epub", "ttf":
+                installSupportedDocument(from: url)
+            case "bbl", "cmt", "dct", "mybible", "sqlite3", "bbli", "bblx":
                 statusMessage = String(localized: "mysword_file_hint")
-
             default:
-                statusMessage = String(localized: "error_unsupported_format_\(ext)")
+                statusMessage = unsupportedFormatMessage(forExtension: ext)
             }
-
-            isImporting = false
 
         case .failure(let error):
             statusMessage = localizedErrorMessage(error)
@@ -483,28 +856,76 @@ public struct ImportExportView: View {
      */
     private func isAndroidDatabaseBackupFile(_ url: URL) -> Bool {
         let fileName = url.lastPathComponent.lowercased()
-        return fileName.hasSuffix(".abdb.zip")
+        return fileName.hasSuffix(AndroidDatabaseBackupService.databaseBackupSuffix)
+    }
+
+    /**
+     Formats the existing localized unsupported-format message.
+
+     - Parameter fileExtension: Extension from the selected file URL.
+     - Returns: Localized unsupported-format message with the extension interpolated.
+     - Side effects: none.
+     - Failure modes: Empty extensions are reported with an empty format placeholder, matching the
+       existing generic unsupported-file contract.
+     */
+    private func unsupportedFormatMessage(forExtension fileExtension: String) -> String {
+        String(
+            format: String(
+                localized: "error_unsupported_format_%@",
+                defaultValue: "Error: Unsupported file format (%@)"
+            ),
+            fileExtension
+        )
     }
 
     /**
      Loads a raw Android database backup archive and presents the section-selection sheet.
 
-     - Parameter data: Raw file bytes read from the user-selected backup.
+     The picker handler validates the Android backup filename and sets `isImporting` before calling
+     this method. This method then owns the rest of the lifecycle: it yields once so SwiftUI can
+     render disabled controls, reads and validates the archive off the main actor, and clears
+     `isImporting` only after success or failure is published.
+
+     - Parameter url: Security-scoped URL selected from the Android Database restore/import picker.
      - Side effects:
        - clears any previously staged Android backup archive
-       - writes validated Android SQLite files into a temporary staging directory
+       - reads the selected file through security-scoped access in a detached task
+       - writes validated Android SQLite files into a temporary staging directory off the main actor
        - updates `androidBackupArchive` so SwiftUI presents the selection sheet
-       - updates `statusMessage` when validation fails
-     - Failure modes: Surfaces `AndroidDatabaseBackupError` and ZIP/file-system errors as status text.
+       - clears `isImporting` after background work finishes
+       - presents feedback when validation fails
+     - Failure modes: Surfaces unreadable files with the existing generic read error, and surfaces
+       `AndroidDatabaseBackupError` plus ZIP/file-system errors as feedback.
      */
-    private func loadAndroidBackupArchive(from data: Data) {
+    private func loadAndroidBackupArchive(from url: URL) {
         cleanupLoadedAndroidBackupArchive()
-        do {
-            let archive = try androidBackupService.loadArchive(from: data)
-            androidBackupArchive = archive
-            androidBackupArchivePendingCleanup = archive
-        } catch {
-            statusMessage = localizedErrorMessage(error)
+
+        Task { @MainActor in
+            await Task.yield()
+            defer {
+                isImporting = false
+            }
+
+            do {
+                let archive = try await Task.detached(priority: .userInitiated) {
+                    let accessing = url.startAccessingSecurityScopedResource()
+                    defer {
+                        if accessing {
+                            url.stopAccessingSecurityScopedResource()
+                        }
+                    }
+                    guard let data = try? Data(contentsOf: url) else {
+                        throw ImportExportFileReadError.unreadable
+                    }
+                    return try AndroidDatabaseBackupService().loadArchive(from: data)
+                }.value
+                androidBackupArchive = archive
+                androidBackupArchivePendingCleanup = archive
+            } catch ImportExportFileReadError.unreadable {
+                statusMessage = String(localized: "error_read_file")
+            } catch {
+                statusMessage = localizedErrorMessage(error)
+            }
         }
     }
 
@@ -522,7 +943,7 @@ public struct ImportExportView: View {
        - mutates selected local SwiftData categories through `AndroidDatabaseBackupService`
        - disables and clears remote-sync state for every applied Android-backed category
        - removes the staged archive directory after success or failure
-       - updates `statusMessage` with the apply result or error
+       - presents feedback with the apply result or error after the sheet dismisses
      - Failure modes: Catches service errors and surfaces them to the settings screen.
      */
     private func applyAndroidBackupSelections(_ selections: [AndroidDatabaseBackupSelection]) {
@@ -534,6 +955,7 @@ public struct ImportExportView: View {
         statusMessage = nil
         Task { @MainActor in
             await Task.yield()
+            let feedbackMessage: String
             do {
                 let report = try androidBackupService.apply(
                     archive: archive,
@@ -541,12 +963,14 @@ public struct ImportExportView: View {
                     modelContext: modelContext,
                     settingsStore: SettingsStore(modelContext: modelContext)
                 )
-                statusMessage = androidBackupStatusMessage(for: report)
+                feedbackMessage = androidBackupStatusMessage(for: report)
             } catch {
-                statusMessage = localizedErrorMessage(error)
+                feedbackMessage = localizedErrorMessage(error)
             }
             isApplyingAndroidBackup = false
             dismissAndroidBackupArchive()
+            await Task.yield()
+            statusMessage = feedbackMessage
         }
     }
 
@@ -580,7 +1004,7 @@ public struct ImportExportView: View {
      an argument so every import/export error path uses the same localized surface.
 
      - Parameter error: Error whose localized description should be shown to the user.
-     - Returns: Localized status text containing the shared error prefix and error message.
+     - Returns: Localized feedback text containing the shared error prefix and error message.
      - Side effects: none.
      - Failure modes: Falls back to the key's untranslated format if the app bundle lacks a
        localization entry.
@@ -662,37 +1086,31 @@ public struct ImportExportView: View {
     }
 
     /**
-     Handles SWORD module ZIP import results from the file importer.
+     Installs one externally supplied document through the shared document import service without
+     blocking the Settings UI.
 
-     Side effects:
-     - starts and stops security-scoped resource access for the chosen ZIP file
-     - installs the module through `ModuleRepository`
-     - updates status text with the installed module name or any failure message
+     Settings and app-scene document opens both call `ExternalDocumentImportService` so Android's
+     ZIP/EPUB/TTF document-install contract stays centralized instead of drifting between entry
+     points. The file I/O and archive work run off the main actor so the install progress state can
+     render before import work starts.
+
+     - Parameter url: Security-scoped URL for a user-selected ZIP, EPUB, or TTF file.
+     - Side effects: Mutates install progress state on the main actor, imports module, EPUB, or TTF
+       files into local app storage from a detached task, and presents feedback.
+     - Failure modes: Unsupported formats and installer errors are surfaced as feedback.
      */
-    private func handleModuleZipImport(_ result: Result<[URL], Error>) {
-        switch result {
-        case .success(let urls):
-            guard let url = urls.first else { return }
-            isInstallingModule = true
-            statusMessage = nil
-
-            let accessing = url.startAccessingSecurityScopedResource()
+    private func installSupportedDocument(from url: URL) {
+        isInstallingDocument = true
+        statusMessage = nil
+        Task { @MainActor in
             defer {
-                if accessing { url.stopAccessingSecurityScopedResource() }
+                isInstallingDocument = false
             }
-
-            do {
-                let repo = ModuleRepository()
-                let moduleName = try repo.installFromZip(at: url)
-                statusMessage = String(localized: "installed_module_\(moduleName)")
-            } catch {
-                statusMessage = localizedErrorMessage(error)
-            }
-
-            isInstallingModule = false
-
-        case .failure(let error):
-            statusMessage = localizedErrorMessage(error)
+            await Task.yield()
+            let result = await Task.detached(priority: .userInitiated) {
+                ExternalDocumentImportService().importDocument(at: url)
+            }.value
+            statusMessage = result.feedbackMessage
         }
     }
 
@@ -752,11 +1170,11 @@ public struct ImportExportView: View {
 
      - Parameter moduleNames: Selected module initials emitted by the export selection sheet.
      - Side effects:
-       - reads local SWORD module config and data files
-       - writes the generated backup to a temporary file
-       - dismisses the selection sheet and schedules the share sheet after SwiftUI processes
-         dismissal, avoiding two active sheet presentations at once
-       - updates status text with export success or failure details
+       - marks the module export as active before scheduling work so SwiftUI can disable the sheet
+       - reads local SWORD module config and data files off the main actor
+       - dismisses the selection sheet and schedules Android's backup destination choice after
+         SwiftUI processes dismissal, avoiding two active sheet presentations at once
+       - presents feedback with export failure details after dismissing the selection sheet
      */
     private func exportAndroidModuleBackup(moduleNames: [String]) {
         guard !moduleNames.isEmpty else {
@@ -765,60 +1183,36 @@ public struct ImportExportView: View {
         }
         isExportingAndroidModuleBackup = true
         statusMessage = nil
-        do {
-            let export = try androidModuleBackupService.exportArchive(moduleNames: Set(moduleNames))
-            if let url = saveToTempFile(data: export.data, fileName: export.fileName) {
-                exportedFileURL = url
-                showAndroidModuleBackupExportSheet = false
-                androidModuleBackupExportModules = []
-                Task { @MainActor in
-                    await Task.yield()
-                    showExportSheet = true
-                }
-                statusMessage = String(
-                    localized: "android_module_backup_exported_summary",
-                    defaultValue: "Exported Android module backup: \(export.moduleNames.joined(separator: ", "))"
-                )
-            }
-        } catch {
-            statusMessage = localizedErrorMessage(error)
-        }
-        isExportingAndroidModuleBackup = false
-    }
 
-    /**
-     Handles Android module backup import results from the module-backup file picker.
-
-     Side effects:
-     - starts and stops security-scoped resource access for the chosen archive
-     - inspects the archive before writing files
-     - either restores immediately or shows an overwrite confirmation for existing module files
-     - updates status text with success or failure details
-     */
-    private func handleAndroidModuleBackupImport(_ result: Result<[URL], Error>) {
-        switch result {
-        case .success(let urls):
-            guard let url = urls.first else { return }
-            isRestoringAndroidModuleBackup = true
-            statusMessage = nil
-
-            let accessing = url.startAccessingSecurityScopedResource()
+        let selectedModuleNames = Set(moduleNames)
+        Task { @MainActor in
+            await Task.yield()
             defer {
-                if accessing { url.stopAccessingSecurityScopedResource() }
+                isExportingAndroidModuleBackup = false
             }
 
             do {
-                let data = try Data(contentsOf: url)
-                prepareAndroidModuleBackupRestore(from: data)
+                let export = try await Task.detached(priority: .userInitiated) {
+                    try AndroidModuleBackupService().exportArchive(moduleNames: selectedModuleNames)
+                }.value
+                showAndroidModuleBackupExportSheet = false
+                androidModuleBackupExportModules = []
+                let payload = BackupExportPayload(
+                    data: export.data,
+                    fileName: export.fileName,
+                    statusMessage: String(
+                        localized: "android_module_backup_exported_summary",
+                        defaultValue: "Exported Android module backup: \(export.moduleNames.joined(separator: ", "))"
+                    )
+                )
+                await Task.yield()
+                presentBackupDestination(payload)
             } catch {
+                showAndroidModuleBackupExportSheet = false
+                androidModuleBackupExportModules = []
+                await Task.yield()
                 statusMessage = localizedErrorMessage(error)
             }
-            if !showAndroidModuleBackupOverwriteAlert {
-                isRestoringAndroidModuleBackup = false
-            }
-
-        case .failure(let error):
-            statusMessage = localizedErrorMessage(error)
         }
     }
 
@@ -829,7 +1223,7 @@ public struct ImportExportView: View {
      - Side effects:
      - may write supported module files when no overwrite confirmation is required
      - may retain `data` and existing paths in state for a later confirmation action
-     - updates status text with restore success or failure details
+     - presents feedback with restore success or failure details
      - Failure modes: Catches service errors and surfaces them to the settings screen.
      */
     private func prepareAndroidModuleBackupRestore(from data: Data) {
@@ -857,24 +1251,28 @@ public struct ImportExportView: View {
      Side effects:
      - writes supported SWORD module files into the local module directory
      - clears pending confirmation state
-     - updates status text with success or failure details
+     - presents feedback with success or failure details after the overwrite alert closes
      */
     private func restorePendingAndroidModuleBackup() {
         guard let data = pendingAndroidModuleBackupData else {
             clearPendingAndroidModuleBackup()
             return
         }
+        let feedbackMessage: String
         do {
             let report = try androidModuleBackupService.restoreArchive(
                 from: data,
                 allowOverwritingExistingFiles: true
             )
-            statusMessage = androidModuleBackupRestoreStatusMessage(for: report)
+            feedbackMessage = androidModuleBackupRestoreStatusMessage(for: report)
         } catch {
-            statusMessage = localizedErrorMessage(error)
+            feedbackMessage = localizedErrorMessage(error)
         }
         clearPendingAndroidModuleBackup()
-        isRestoringAndroidModuleBackup = false
+        Task { @MainActor in
+            await Task.yield()
+            statusMessage = feedbackMessage
+        }
     }
 
     /**
@@ -934,45 +1332,74 @@ public struct ImportExportView: View {
     }
 
     /**
-     Handles EPUB import results from the file importer.
+     Applies one confirmed Android BackupActivity reset category.
 
-     Side effects:
-     - installs the selected EPUB through `EpubReader.install`
-     - resolves the installed reader title when possible for a friendlier success message
-     - updates status text with the final success or failure message
+     - Parameter category: Reset category selected from the Reset Databases section.
+     - Side effects:
+       - marks the reset category row as active before scheduling work so SwiftUI can render the
+         destructive-alert dismissal and disabled controls before the reset starts
+       - mutates SwiftData/settings/file-backed repository state through `AndroidBackupResetService`
+       - clears category-scoped remote-sync bookkeeping for sync-backed categories
+       - presents feedback with success or failure text after the reset confirmation closes
+     - Failure modes: Reset service errors are caught and surfaced with the shared error prefix.
      */
-    private func handleEpubImport(_ result: Result<[URL], Error>) {
-        switch result {
-        case .success(let urls):
-            guard let url = urls.first else { return }
-            isInstallingEpub = true
-            statusMessage = nil
+    private func resetDatabase(_ category: AndroidBackupResetCategory) {
+        guard !isBackupWorkflowBusy else {
+            return
+        }
+        isResettingBackupCategory = true
+        statusMessage = nil
+
+        Task { @MainActor in
+            await Task.yield()
+            defer {
+                isResettingBackupCategory = false
+            }
 
             do {
-                let identifier = try EpubReader.install(epubURL: url)
-                if let reader = EpubReader(identifier: identifier) {
-                    statusMessage = String(localized: "installed_epub_\(reader.title)")
-                } else {
-                    statusMessage = String(localized: "installed_epub_\(identifier)")
-                }
+                _ = try androidResetService.reset(
+                    category,
+                    modelContext: modelContext,
+                    settingsStore: SettingsStore(modelContext: modelContext)
+                )
+                statusMessage = category.localizedBackupResetSuccessMessage
             } catch {
                 statusMessage = localizedErrorMessage(error)
             }
-
-            isInstallingEpub = false
-
-        case .failure(let error):
-            statusMessage = localizedErrorMessage(error)
         }
     }
 
     /**
-     Returns the current date formatted for exported backup file names.
+     Moves a file-backed Android database backup export to the canonical share-sheet filename.
+
+     Android parity depends on presenting `AndBibleDatabaseBackup.abdb.zip`, while the background
+     export service creates a unique temporary filename to avoid collisions during archive generation.
+
+     - Parameter export: Completed file-backed database backup export.
+     - Returns: Temporary file URL with Android's canonical backup filename.
+     - Side effects:
+       - deletes any previous temporary export with the same canonical filename
+       - moves the generated archive into the share-sheet location
+       - removes the generated archive if the canonical move fails
+     - Failure modes: Rethrows file-system errors when the previous export cannot be removed or the
+       generated archive cannot be moved after attempting to clean up the source archive.
      */
-    private func dateString() -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd"
-        return formatter.string(from: Date())
+    private func moveExportFileToShareDirectory(_ export: AndroidDatabaseBackupFileExport) throws -> URL {
+        let fileManager = FileManager.default
+        let fileURL = fileManager.temporaryDirectory.appendingPathComponent(export.fileName)
+        if fileURL == export.fileURL {
+            return fileURL
+        }
+        do {
+            if fileManager.fileExists(atPath: fileURL.path) {
+                try fileManager.removeItem(at: fileURL)
+            }
+            try fileManager.moveItem(at: export.fileURL, to: fileURL)
+            return fileURL
+        } catch {
+            try? fileManager.removeItem(at: export.fileURL)
+            throw error
+        }
     }
 
     /**
@@ -981,7 +1408,7 @@ public struct ImportExportView: View {
      - Parameters:
        - data: File contents to write.
        - fileName: Target filename appended within the temporary directory.
-     - Returns: Temporary file URL on success, or `nil` after updating `statusMessage` on failure.
+     - Returns: Temporary file URL on success, or `nil` after queuing failure feedback.
      */
     private func saveToTempFile(data: Data, fileName: String) -> URL? {
         let tempDir = FileManager.default.temporaryDirectory

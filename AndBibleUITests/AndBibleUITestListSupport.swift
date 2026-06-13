@@ -788,20 +788,20 @@ extension AndBibleUITests {
     }
 
     /**
-     Opens Import and Export through the reader drawer administration route.
+     Opens Backup & Restore through the reader drawer administration route.
      *
      * - Parameter app: Running application under test.
-     * - Returns: The root accessibility-identified Import and Export screen element.
+     * - Returns: The root accessibility-identified Backup & Restore screen element.
      * - Side effects:
-     *   - opens the reader drawer and presents the Import and Export screen
+     *   - opens the reader drawer and presents the Android-aligned Backup & Restore screen
      * - Failure modes:
-     *   - fails when the Import and Export screen never appears
+     *   - fails when the Backup & Restore screen never appears
      */
     func openImportExport(in app: XCUIApplication) -> XCUIElement {
         openReaderActionDestination(
             actionIdentifier: "readerOpenImportExportAction",
             destinationIdentifier: "importExportScreen",
-            readinessIdentifiers: ["importExportImportButton", "importExportFullBackupButton"],
+            readinessIdentifiers: ["backupWorkflowBackupButton", "backupWorkflowRestoreButton"],
             in: app,
             timeout: 20
         )
@@ -1149,9 +1149,11 @@ extension AndBibleUITests {
      *   - line: Source line used for XCTest failure attribution.
      * - Returns: The production settings row element.
      * - Side effects:
-     *   - scans the current Settings viewport, then scrolls through the form while re-querying
-     *     the live XCUI hierarchy
-     *   - uses the production Settings search field as a final reveal path when CI scrolling cannot
+     *   - scans the current Settings viewport, then uses the production Settings search field as an
+     *     early reveal path for title-backed rows
+     *   - scrolls through the form while re-querying the live XCUI hierarchy when search cannot
+     *     reveal the row
+     *   - retries the production Settings search field as a final reveal path when CI scrolling cannot
      *     reliably bring an offscreen row into the accessibility hierarchy
      * - Failure modes:
      *   - records an XCTest failure if the production row never appears
@@ -1206,6 +1208,19 @@ extension AndBibleUITests {
                 return control
             }
             return nil
+        }
+
+        if let control = resolvedVisibleControl() {
+            return control
+        }
+        if let control = resolveSettingsNavigationControlViaSearch(
+            title: visibleTitle,
+            settingsForm: settingsForm,
+            app: app,
+            timeout: min(max(timeout / 4, 3), 5),
+            resolveControl: resolvedVisibleControl
+        ) {
+            return control
         }
 
         repeat {

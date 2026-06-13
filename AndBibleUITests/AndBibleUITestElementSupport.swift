@@ -473,7 +473,16 @@ extension AndBibleUITests {
             return searchResultRowCandidates(identifier, in: app)
         }
 
-        if identifier.hasPrefix("windowTabButton::") || identifier.hasPrefix("modulePickerRow::") {
+        if identifier.hasPrefix("windowTabButton::") {
+            return [
+                app.scrollViews["windowTabBar"].buttons[identifier].firstMatch,
+                app.otherElements["windowTabBar"].buttons[identifier].firstMatch,
+                app.buttons[identifier].firstMatch,
+                app.otherElements[identifier].firstMatch,
+            ]
+        }
+
+        if identifier.hasPrefix("modulePickerRow::") {
             return [
                 app.buttons[identifier].firstMatch,
                 app.otherElements[identifier].firstMatch,
