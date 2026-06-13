@@ -43,9 +43,12 @@ fi
 #    the disk. Register cleanup immediately after attaching so a later failure
 #    never leaves the RAM disk mounted.
 RAM_DEV="$(hdiutil attach -nomount ram://40960 | tr -d '[:space:]')"   # ~20 MB
-RESTORE_BUILD=""
+INFOPLIST_BAK=""
 cleanup() {
-	[ -n "$RESTORE_BUILD" ] && /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $RESTORE_BUILD" "$INFOPLIST" >/dev/null 2>&1
+	# Restore the original Info.plist byte-for-byte. PlistBuddy reorders keys on
+	# write, so restoring a saved copy (not re-setting the version) keeps the tree
+	# clean.
+	[ -n "$INFOPLIST_BAK" ] && [ -f "$INFOPLIST_BAK" ] && mv -f "$INFOPLIST_BAK" "$INFOPLIST"
 	if [ -n "${RAM_DEV:-}" ]; then
 		hdiutil detach "$RAM_DEV" >/dev/null 2>&1 || diskutil eject "$RAM_DEV" >/dev/null 2>&1 || true
 	fi
@@ -96,9 +99,11 @@ PLIST
 if [ "${REUSE_ARCHIVE:-0}" = "1" ] && [ -d "$ARCHIVE" ]; then
 	echo ">> Reusing existing archive: $ARCHIVE"
 else
-	# Unique, increasing build number (UTC YYYY.MMDD.HHMM), restored on exit so the
-	# working tree stays clean and successive uploads never collide.
-	RESTORE_BUILD="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$INFOPLIST")"
+	# Unique, increasing build number (UTC YYYY.MMDD.HHMM). Back up the original
+	# plist first; cleanup restores it on exit so the working tree stays clean and
+	# successive uploads never collide.
+	INFOPLIST_BAK="build/Info.plist.orig"
+	cp "$INFOPLIST" "$INFOPLIST_BAK"
 	BUILD_NUMBER="$(date -u '+%Y.%m%d.%H%M')"
 	/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" "$INFOPLIST"
 	echo ">> Archiving (build $BUILD_NUMBER)…"
