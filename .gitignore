@@ -52,6 +52,7 @@ libsword/libsword.xcframework/
 .LSOverride
 
 # IDE
+.worktrees/
 .idea/
 .vscode/
 *.swp
