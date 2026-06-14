@@ -100,8 +100,8 @@ public struct ImportExportView: View {
     /// Installed SWORD modules shown in the Android module backup export selection sheet.
     @State private var androidModuleBackupExportModules: [ModuleInfo] = []
 
-    /// Selected Android module backup bytes retained while the overwrite confirmation is visible.
-    @State private var pendingAndroidModuleBackupData: Data?
+    /// Temporary Android module backup archive retained while overwrite confirmation is visible.
+    @State private var pendingAndroidModuleBackupURL: URL?
 
     /// Existing module file paths reported for the pending Android module backup confirmation.
     @State private var pendingAndroidModuleBackupExistingFiles: [String] = []
@@ -126,9 +126,6 @@ public struct ImportExportView: View {
 
     /// Service used to export, load, apply, and clean up Android `.abdb.zip` database backups.
     private let androidBackupService = AndroidDatabaseBackupService()
-
-    /// Service used to inspect, restore, and export Android `.abmd.zip` module backups.
-    private let androidModuleBackupService = AndroidModuleBackupService()
 
     /// Service used to reset Android BackupActivity categories through iOS storage engines.
     private let androidResetService = AndroidBackupResetService()
@@ -815,15 +812,7 @@ public struct ImportExportView: View {
             }
             if AndroidModuleBackupService.isAndroidModuleBackupFileName(url.lastPathComponent) {
                 isRestoringAndroidModuleBackup = true
-                guard let data = try? Data(contentsOf: url) else {
-                    statusMessage = String(localized: "error_read_file")
-                    isRestoringAndroidModuleBackup = false
-                    return
-                }
-                prepareAndroidModuleBackupRestore(from: data)
-                if !showAndroidModuleBackupOverwriteAlert {
-                    isRestoringAndroidModuleBackup = false
-                }
+                prepareAndroidModuleBackupRestore(from: url)
                 return
             }
 
@@ -914,10 +903,7 @@ public struct ImportExportView: View {
                             url.stopAccessingSecurityScopedResource()
                         }
                     }
-                    guard let data = try? Data(contentsOf: url) else {
-                        throw ImportExportFileReadError.unreadable
-                    }
-                    return try AndroidDatabaseBackupService().loadArchive(from: data)
+                    return try AndroidDatabaseBackupService().loadArchive(fromArchiveAt: url)
                 }.value
                 androidBackupArchive = archive
                 androidBackupArchivePendingCleanup = archive
@@ -1219,29 +1205,56 @@ public struct ImportExportView: View {
     /**
      Inspects an Android module backup and either restores it or queues overwrite confirmation.
 
-     - Parameter data: Raw `.abmd.zip` archive bytes selected by the user.
+     - Parameter url: User-selected `.abmd.zip` archive URL.
      - Side effects:
+     - copies the selected security-scoped file to a temporary archive
      - may write supported module files when no overwrite confirmation is required
-     - may retain `data` and existing paths in state for a later confirmation action
+     - may retain the temporary archive URL and existing paths for a later confirmation action
      - presents feedback with restore success or failure details
      - Failure modes: Catches service errors and surfaces them to the settings screen.
      */
-    private func prepareAndroidModuleBackupRestore(from data: Data) {
-        do {
-            let inspection = try androidModuleBackupService.inspectArchive(from: data)
-            guard inspection.existingEntryPaths.isEmpty else {
-                pendingAndroidModuleBackupData = data
-                pendingAndroidModuleBackupExistingFiles = inspection.existingEntryPaths
-                showAndroidModuleBackupOverwriteAlert = true
-                return
+    private func prepareAndroidModuleBackupRestore(from url: URL) {
+        Task { @MainActor in
+            await Task.yield()
+            var temporaryArchiveURL: URL?
+            do {
+                let prepared = try await Task.detached(priority: .userInitiated) {
+                    let accessing = url.startAccessingSecurityScopedResource()
+                    defer {
+                        if accessing {
+                            url.stopAccessingSecurityScopedResource()
+                        }
+                    }
+                    let archiveURL = try Self.copyAndroidModuleBackupArchiveToTemporaryFile(from: url)
+                    let inspection = try AndroidModuleBackupService().inspectArchive(fromArchiveAt: archiveURL)
+                    return (archiveURL, inspection)
+                }.value
+                temporaryArchiveURL = prepared.0
+
+                guard prepared.1.existingEntryPaths.isEmpty else {
+                    pendingAndroidModuleBackupURL = prepared.0
+                    pendingAndroidModuleBackupExistingFiles = prepared.1.existingEntryPaths
+                    showAndroidModuleBackupOverwriteAlert = true
+                    return
+                }
+
+                let report = try await Task.detached(priority: .userInitiated) {
+                    try AndroidModuleBackupService().restoreArchive(
+                        fromArchiveAt: prepared.0,
+                        allowOverwritingExistingFiles: true
+                    )
+                }.value
+                statusMessage = androidModuleBackupRestoreStatusMessage(for: report)
+                isRestoringAndroidModuleBackup = false
+                try? FileManager.default.removeItem(at: prepared.0)
+                temporaryArchiveURL = nil
+            } catch {
+                if let temporaryArchiveURL {
+                    try? FileManager.default.removeItem(at: temporaryArchiveURL)
+                }
+                statusMessage = localizedErrorMessage(error)
+                isRestoringAndroidModuleBackup = false
             }
-            let report = try androidModuleBackupService.restoreArchive(
-                from: data,
-                allowOverwritingExistingFiles: true
-            )
-            statusMessage = androidModuleBackupRestoreStatusMessage(for: report)
-        } catch {
-            statusMessage = localizedErrorMessage(error)
         }
     }
 
@@ -1254,23 +1267,31 @@ public struct ImportExportView: View {
      - presents feedback with success or failure details after the overwrite alert closes
      */
     private func restorePendingAndroidModuleBackup() {
-        guard let data = pendingAndroidModuleBackupData else {
+        guard let archiveURL = pendingAndroidModuleBackupURL else {
             clearPendingAndroidModuleBackup()
             return
         }
-        let feedbackMessage: String
-        do {
-            let report = try androidModuleBackupService.restoreArchive(
-                from: data,
-                allowOverwritingExistingFiles: true
-            )
-            feedbackMessage = androidModuleBackupRestoreStatusMessage(for: report)
-        } catch {
-            feedbackMessage = localizedErrorMessage(error)
-        }
-        clearPendingAndroidModuleBackup()
+        pendingAndroidModuleBackupURL = nil
+        pendingAndroidModuleBackupExistingFiles = []
+        showAndroidModuleBackupOverwriteAlert = false
+        isRestoringAndroidModuleBackup = true
+
         Task { @MainActor in
             await Task.yield()
+            let feedbackMessage: String
+            do {
+                let report = try await Task.detached(priority: .userInitiated) {
+                    try AndroidModuleBackupService().restoreArchive(
+                        fromArchiveAt: archiveURL,
+                        allowOverwritingExistingFiles: true
+                    )
+                }.value
+                feedbackMessage = androidModuleBackupRestoreStatusMessage(for: report)
+            } catch {
+                feedbackMessage = localizedErrorMessage(error)
+            }
+            try? FileManager.default.removeItem(at: archiveURL)
+            isRestoringAndroidModuleBackup = false
             statusMessage = feedbackMessage
         }
     }
@@ -1279,10 +1300,28 @@ public struct ImportExportView: View {
      Clears retained Android module backup confirmation state without mutating user files.
      */
     private func clearPendingAndroidModuleBackup() {
-        pendingAndroidModuleBackupData = nil
+        if let pendingAndroidModuleBackupURL {
+            try? FileManager.default.removeItem(at: pendingAndroidModuleBackupURL)
+        }
+        pendingAndroidModuleBackupURL = nil
         pendingAndroidModuleBackupExistingFiles = []
         showAndroidModuleBackupOverwriteAlert = false
         isRestoringAndroidModuleBackup = false
+    }
+
+    /**
+     Copies a selected Android module backup archive into app-owned temporary storage.
+
+     - Parameter url: Security-scoped document URL selected by the user.
+     - Returns: Temporary `.abmd.zip` archive URL owned by this app.
+     - Side effects: Creates one temporary file by copying `url`.
+     - Failure modes: Rethrows file-system copy failures.
+     */
+    private static func copyAndroidModuleBackupArchiveToTemporaryFile(from url: URL) throws -> URL {
+        let destinationURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("android-module-backup-\(UUID().uuidString).abmd.zip")
+        try FileManager.default.copyItem(at: url, to: destinationURL)
+        return destinationURL
     }
 
     /**

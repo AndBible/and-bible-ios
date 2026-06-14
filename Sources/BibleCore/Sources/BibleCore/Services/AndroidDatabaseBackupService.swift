@@ -654,6 +654,9 @@ public final class AndroidDatabaseBackupService {
         let manifestVersion: Int
     }
 
+    /// Largest Android backup manifest accepted for in-memory JSON decoding.
+    private static let maximumManifestByteCount = 1024 * 1024
+
     private let fileManager: FileManager
     private let temporaryDirectory: URL
     private let bookmarkRestoreService: RemoteSyncBookmarkRestoreService
@@ -908,6 +911,131 @@ public final class AndroidDatabaseBackupService {
     }
 
     /**
+     Loads and validates an Android `.abdb.zip` database backup archive from a file URL.
+
+     This is the production restore path. It mirrors Android's file-backed restore semantics by
+     reading ZIP metadata from the selected archive and streaming selected database entries into a
+     temporary staging directory instead of materializing the whole ZIP or every entry in memory.
+
+     - Parameter archiveURL: File URL for a user-selected Android database backup archive.
+     - Returns: Loaded archive with extracted SQLite database sections.
+     - Side effects:
+       - creates one temporary directory
+       - streams recognized Android database entries into that directory
+       - opens each extracted SQLite file read-only to verify the header and `user_version`
+     - Failure modes:
+       - throws `AndroidDatabaseBackupError` for missing manifests, non-database backups, invalid
+         SQLite files, duplicate entries, or archives without recognizable database sections
+       - maps ZIP parser failures into user-facing archive reasons before surfacing them through
+         Settings status text
+       - throws file-system errors when temporary staging cannot be created or written
+     */
+    public func loadArchive(fromArchiveAt archiveURL: URL) throws -> AndroidDatabaseBackupArchive {
+        let entries: [ZipArchiveFileEntry]
+        do {
+            entries = try ZipArchiveReader.fileEntries(inArchiveAt: archiveURL)
+        } catch let error as ZipArchiveReaderError {
+            throw AndroidDatabaseBackupError.invalidArchive(Self.archiveErrorMessage(for: error))
+        } catch {
+            throw AndroidDatabaseBackupError.invalidArchive(error.localizedDescription)
+        }
+
+        let entriesByName = try Self.fileEntriesByUniqueName(entries)
+        guard let manifestEntry = entriesByName[Self.manifestFileName] else {
+            throw AndroidDatabaseBackupError.missingManifest
+        }
+        let manifestData: Data
+        do {
+            manifestData = try ZipArchiveReader.data(
+                for: manifestEntry,
+                inArchiveAt: archiveURL,
+                maximumByteCount: Self.maximumManifestByteCount,
+                fileManager: fileManager
+            )
+        } catch let error as ZipArchiveReaderError {
+            throw AndroidDatabaseBackupError.invalidArchive(Self.archiveErrorMessage(for: error))
+        } catch {
+            throw AndroidDatabaseBackupError.invalidArchive(error.localizedDescription)
+        }
+        let manifest = try decodeManifest(from: manifestData)
+        guard manifest.backupType == "DB_BACKUP" else {
+            throw AndroidDatabaseBackupError.unsupportedBackupType(manifest.backupType)
+        }
+        guard manifest.manifestVersion <= 1 else {
+            throw AndroidDatabaseBackupError.unsupportedManifestVersion(manifest.manifestVersion)
+        }
+
+        let stagingDirectory = temporaryDirectory.appendingPathComponent(
+            "android-db-backup-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        try fileManager.createDirectory(at: stagingDirectory, withIntermediateDirectories: true)
+
+        var sections: [AndroidDatabaseBackupSection] = []
+        do {
+            for category in AndroidDatabaseBackupCategory.databaseBackedCases {
+                guard let fileName = category.databaseFileName,
+                      let databaseEntry = entriesByName["db/\(fileName)"] else {
+                    continue
+                }
+
+                let databaseURL = stagingDirectory.appendingPathComponent(fileName)
+                do {
+                    try ZipArchiveReader.extract(
+                        databaseEntry,
+                        fromArchiveAt: archiveURL,
+                        to: databaseURL,
+                        fileManager: fileManager
+                    )
+                } catch let error as ZipArchiveReaderError {
+                    throw AndroidDatabaseBackupError.invalidArchive(Self.archiveErrorMessage(for: error))
+                }
+                guard Self.hasSQLiteHeader(at: databaseURL) else {
+                    throw AndroidDatabaseBackupError.invalidSQLiteDatabase(fileName)
+                }
+
+                let databaseVersion = try sqliteUserVersion(at: databaseURL, fileName: fileName)
+                let support = supportState(for: category, databaseVersion: databaseVersion)
+                sections.append(
+                    AndroidDatabaseBackupSection(
+                        category: category,
+                        fileName: fileName,
+                        databaseFileURL: databaseURL,
+                        databaseVersion: databaseVersion,
+                        declaredInManifest: manifest.contains.contains(category),
+                        support: support
+                    )
+                )
+            }
+            for category in manifest.contains
+                where category.databaseFileName == nil {
+                sections.append(
+                    AndroidDatabaseBackupSection(
+                        category: category,
+                        fileName: "",
+                        databaseFileURL: stagingDirectory,
+                        databaseVersion: 0,
+                        declaredInManifest: true,
+                        support: supportState(for: category, databaseVersion: 0)
+                    )
+                )
+            }
+
+            guard !sections.isEmpty else {
+                throw AndroidDatabaseBackupError.noValidDatabaseSections
+            }
+            return AndroidDatabaseBackupArchive(
+                manifest: manifest,
+                sections: sections.sorted { $0.category.displayName < $1.category.displayName },
+                temporaryDirectory: stagingDirectory
+            )
+        } catch {
+            try? fileManager.removeItem(at: stagingDirectory)
+            throw error
+        }
+    }
+
+    /**
      Applies selected Android backup sections to local SwiftData.
 
      - Parameters:
@@ -1028,6 +1156,32 @@ public final class AndroidDatabaseBackupService {
     }
 
     /**
+     Builds a deterministic ZIP file-entry lookup for file-backed Android backup archives.
+
+     This mirrors `entriesByUniqueName(_:)` without materializing payload bytes. Duplicate archive
+     paths remain invalid because Android restore treats manifest and `db/` paths as authoritative
+     inputs.
+
+     - Parameter entries: Non-directory file-backed entries in central-directory order.
+     - Returns: Entry descriptors keyed by ZIP path.
+     - Side effects: none.
+     - Failure modes: Throws `AndroidDatabaseBackupError.invalidArchive` when any entry path appears
+       more than once.
+     */
+    private static func fileEntriesByUniqueName(_ entries: [ZipArchiveFileEntry]) throws -> [String: ZipArchiveFileEntry] {
+        var entriesByName: [String: ZipArchiveFileEntry] = [:]
+        for entry in entries {
+            guard entriesByName[entry.name] == nil else {
+                throw AndroidDatabaseBackupError.invalidArchive(
+                    "ZIP archive contains duplicate entry \(entry.name)."
+                )
+            }
+            entriesByName[entry.name] = entry
+        }
+        return entriesByName
+    }
+
+    /**
      Converts low-level ZIP parser errors into Settings-safe archive failure messages.
 
      `ZipArchiveReaderError` is useful for tests and parser internals but its enum case names are
@@ -1123,6 +1277,29 @@ public final class AndroidDatabaseBackupService {
      */
     private static func hasSQLiteHeader(_ data: Data) -> Bool {
         data.count >= 16 && Data(data.prefix(16)) == Data("SQLite format 3\u{0}".utf8)
+    }
+
+    /**
+     Checks the SQLite file magic in an extracted database file.
+
+     - Parameter url: Extracted database file URL.
+     - Returns: `true` when the file starts with SQLite's canonical header.
+     - Side effects: Opens and reads the first 16 bytes of `url`.
+     - Failure modes: File read failures return `false` so callers surface the existing invalid
+       SQLite archive error.
+     */
+    private static func hasSQLiteHeader(at url: URL) -> Bool {
+        guard let handle = try? FileHandle(forReadingFrom: url) else {
+            return false
+        }
+        defer {
+            try? handle.close()
+        }
+        guard let data = try? handle.read(upToCount: 16),
+              data.count == 16 else {
+            return false
+        }
+        return data == Data("SQLite format 3\u{0}".utf8)
     }
 
     /**

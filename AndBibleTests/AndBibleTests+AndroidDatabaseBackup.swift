@@ -56,6 +56,41 @@ extension AndBibleTests {
     }
 
     /**
+     Verifies Android database backup restore can stage archives from a file URL.
+
+     Setup:
+     - builds a valid Android `.abdb.zip` fixture on disk
+     - loads the archive through the file-backed service API instead of `Data(contentsOf:)`
+
+     Expected result:
+     - the same bookmark section is discovered from the file URL
+     - the staged SQLite URL points at a temporary extracted file
+
+     Failure meaning:
+     - production restore would still rely on eager whole-file memory loading and fail on large
+       Android backups that Android itself can restore from storage.
+     */
+    func testAndroidDatabaseBackupLoadsArchiveFromFileURL() throws {
+        let bookmarkDatabaseURL = try makeAndroidBookmarksDatabase(labels: [])
+        try setSQLiteUserVersion(12, at: bookmarkDatabaseURL)
+        let archiveData = try makeAndroidDatabaseBackupArchiveData(
+            databaseURLsByName: [
+                "bookmarks.sqlite3": bookmarkDatabaseURL,
+            ],
+            contains: [.bookmarks]
+        )
+        let archiveURL = try writeTemporaryAndroidBackupArchive(
+            archiveData,
+            suffix: AndroidDatabaseBackupService.databaseBackupSuffix
+        )
+
+        let archive = try AndroidDatabaseBackupService().loadArchive(fromArchiveAt: archiveURL)
+
+        XCTAssertEqual(archive.sections.map(\.category), [.bookmarks])
+        XCTAssertTrue(FileManager.default.fileExists(atPath: archive.sections[0].databaseFileURL.path))
+    }
+
+    /**
      Verifies that future Android manifest categories do not block known database sections.
 
      Setup:
@@ -886,6 +921,36 @@ extension AndBibleTests {
     }
 
     /**
+     Verifies file-backed ZIP metadata scanning does not inherit the eager reader's memory cap.
+
+     Setup:
+     - creates a sparse Android-shaped ZIP file with one stored entry declaring a 691 MiB payload
+     - scans only central-directory and local-header metadata from the file URL
+
+     Expected result:
+     - the file-backed reader returns the entry metadata without trying to allocate or copy payload
+       bytes
+     - the declared size remains visible to callers for later streaming extraction
+
+     Failure meaning:
+     - iOS restore would continue rejecting valid large Android backups before it even reaches
+       SQLite validation, preserving an iOS-only size policy Android does not impose.
+     */
+    func testZipArchiveReaderScansFileBackedEntriesAboveEagerLimitWithoutMaterializingPayload() throws {
+        let payloadByteCount = UInt32(691 * 1024 * 1024)
+        let archiveURL = try makeSparseStoredZipFile(
+            entryName: "db/bookmarks.sqlite3",
+            declaredPayloadByteCount: payloadByteCount
+        )
+
+        let entries = try ZipArchiveReader.fileEntries(inArchiveAt: archiveURL)
+
+        XCTAssertEqual(entries.map(\.name), ["db/bookmarks.sqlite3"])
+        XCTAssertEqual(entries.first?.compressedSize, UInt64(payloadByteCount))
+        XCTAssertEqual(entries.first?.uncompressedSize, UInt64(payloadByteCount))
+    }
+
+    /**
      Verifies fail-closed ZIP parsing when central-directory sizes do not match materialized data.
 
      Setup:
@@ -1516,6 +1581,108 @@ extension AndBibleTests {
         appendUInt32(centralDirectoryOffset, to: &archive)
         appendUInt16(0, to: &archive)
         return archive
+    }
+
+    /**
+     Writes an Android backup ZIP fixture to a temporary file.
+
+     - Parameters:
+       - archiveData: ZIP bytes to persist.
+       - suffix: Android backup suffix to use in the temporary filename.
+     - Returns: Temporary archive URL registered for teardown cleanup.
+     - Side effects: Writes `archiveData` under the process temporary directory.
+     - Failure modes: Rethrows file write errors.
+     */
+    private func writeTemporaryAndroidBackupArchive(_ archiveData: Data, suffix: String) throws -> URL {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("android-backup-\(UUID().uuidString)\(suffix)")
+        try archiveData.write(to: url)
+        temporarySwordModulePaths.append(url.path)
+        return url
+    }
+
+    /**
+     Builds a sparse stored ZIP file whose declared payload exceeds the eager reader cap.
+
+     The helper writes local and central-directory metadata normally, then seeks across the payload
+     range before writing the central directory. On APFS this models a large Android backup without
+     allocating hundreds of MiB of fixture data.
+
+     - Parameters:
+       - entryName: ZIP entry path to publish.
+       - declaredPayloadByteCount: Stored-entry compressed and uncompressed byte count.
+     - Returns: Temporary sparse archive URL registered for teardown cleanup.
+     - Side effects: Creates a sparse ZIP file in the process temporary directory.
+     - Failure modes: Throws when file creation, seeking, or writing fails.
+     */
+    private func makeSparseStoredZipFile(
+        entryName: String,
+        declaredPayloadByteCount: UInt32
+    ) throws -> URL {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("android-backup-sparse-\(UUID().uuidString).abdb.zip")
+        FileManager.default.createFile(atPath: url.path, contents: nil)
+        temporarySwordModulePaths.append(url.path)
+
+        let handle = try FileHandle(forWritingTo: url)
+        defer {
+            try? handle.close()
+        }
+        guard let nameData = entryName.data(using: .utf8),
+              nameData.count <= Int(UInt16.max) else {
+            throw ZipArchiveReaderError.invalidArchive("Test ZIP entry name is too large")
+        }
+
+        var localHeader = Data()
+        appendUInt32(0x0403_4b50, to: &localHeader)
+        appendUInt16(20, to: &localHeader)
+        appendUInt16(0, to: &localHeader)
+        appendUInt16(0, to: &localHeader)
+        appendUInt16(0, to: &localHeader)
+        appendUInt16(0, to: &localHeader)
+        appendUInt32(0, to: &localHeader)
+        appendUInt32(declaredPayloadByteCount, to: &localHeader)
+        appendUInt32(declaredPayloadByteCount, to: &localHeader)
+        appendUInt16(UInt16(nameData.count), to: &localHeader)
+        appendUInt16(0, to: &localHeader)
+        localHeader.append(nameData)
+        try handle.write(contentsOf: localHeader)
+
+        let centralDirectoryOffset = UInt32(localHeader.count) + declaredPayloadByteCount
+        try handle.seek(toOffset: UInt64(centralDirectoryOffset))
+
+        var centralDirectory = Data()
+        appendUInt32(0x0201_4b50, to: &centralDirectory)
+        appendUInt16(20, to: &centralDirectory)
+        appendUInt16(20, to: &centralDirectory)
+        appendUInt16(0, to: &centralDirectory)
+        appendUInt16(0, to: &centralDirectory)
+        appendUInt16(0, to: &centralDirectory)
+        appendUInt16(0, to: &centralDirectory)
+        appendUInt32(0, to: &centralDirectory)
+        appendUInt32(declaredPayloadByteCount, to: &centralDirectory)
+        appendUInt32(declaredPayloadByteCount, to: &centralDirectory)
+        appendUInt16(UInt16(nameData.count), to: &centralDirectory)
+        appendUInt16(0, to: &centralDirectory)
+        appendUInt16(0, to: &centralDirectory)
+        appendUInt16(0, to: &centralDirectory)
+        appendUInt16(0, to: &centralDirectory)
+        appendUInt32(0, to: &centralDirectory)
+        appendUInt32(0, to: &centralDirectory)
+        centralDirectory.append(nameData)
+        try handle.write(contentsOf: centralDirectory)
+
+        var endRecord = Data()
+        appendUInt32(0x0605_4b50, to: &endRecord)
+        appendUInt16(0, to: &endRecord)
+        appendUInt16(0, to: &endRecord)
+        appendUInt16(1, to: &endRecord)
+        appendUInt16(1, to: &endRecord)
+        appendUInt32(UInt32(centralDirectory.count), to: &endRecord)
+        appendUInt32(centralDirectoryOffset, to: &endRecord)
+        appendUInt16(0, to: &endRecord)
+        try handle.write(contentsOf: endRecord)
+        return url
     }
 
     /**
