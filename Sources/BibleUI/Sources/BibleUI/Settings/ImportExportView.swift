@@ -1226,8 +1226,13 @@ public struct ImportExportView: View {
                         }
                     }
                     let archiveURL = try Self.copyAndroidModuleBackupArchiveToTemporaryFile(from: url)
-                    let inspection = try AndroidModuleBackupService().inspectArchive(fromArchiveAt: archiveURL)
-                    return (archiveURL, inspection)
+                    do {
+                        let inspection = try AndroidModuleBackupService().inspectArchive(fromArchiveAt: archiveURL)
+                        return (archiveURL, inspection)
+                    } catch {
+                        try? FileManager.default.removeItem(at: archiveURL)
+                        throw error
+                    }
                 }.value
                 temporaryArchiveURL = prepared.0
 
@@ -1235,6 +1240,8 @@ public struct ImportExportView: View {
                     pendingAndroidModuleBackupURL = prepared.0
                     pendingAndroidModuleBackupExistingFiles = prepared.1.existingEntryPaths
                     showAndroidModuleBackupOverwriteAlert = true
+                    isRestoringAndroidModuleBackup = false
+                    temporaryArchiveURL = nil
                     return
                 }
 

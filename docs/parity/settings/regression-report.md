@@ -116,7 +116,7 @@ Results:
 
 - Snapshot fallback guardrail: `PASS`
 - Live Android source guardrail: `PASS`
-- Focused locale-pref guardrail tests: `PASS` (`Ran 4 tests`)
+- Focused locale-pref guardrail tests: `PASS` (`Ran 8 tests`)
 
 Observed guardrail output:
 

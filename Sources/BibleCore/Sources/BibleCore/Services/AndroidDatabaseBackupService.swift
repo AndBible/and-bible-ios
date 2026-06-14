@@ -155,10 +155,12 @@ public enum AndroidDatabaseBackupCategory: String, CaseIterable, Identifiable, S
         !supportedApplyModes.isEmpty
     }
 
-    /// Database-backed categories Android scans under `db/` in `.abdb.zip` archives.
-    ///
-    /// The order mirrors Android's `ALL_DB_FILENAMES` so restore/import presentation remains
-    /// stable even when ZIP central-directory order or localized display names differ.
+    /**
+     Database-backed categories Android scans under `db/` in `.abdb.zip` archives.
+
+     The order mirrors Android's `ALL_DB_FILENAMES` so restore/import presentation remains
+     stable even when ZIP central-directory order or localized display names differ.
+     */
     static var databaseBackedCases: [AndroidDatabaseBackupCategory] {
         [
             .bookmarks,
