@@ -235,8 +235,29 @@ def build_android_locale_pref_options(android_root: Path) -> list[LocalePrefOpti
     return options
 
 
-def load_android_locale_pref_options_from_snapshot(path: Path) -> list[LocalePrefOption]:
+def load_snapshot_payload(path: Path) -> dict[str, object]:
+    """Load a generated Android parity snapshot as a JSON object.
+
+    Snapshot readers use this boundary so malformed files fail before their
+    values can be coerced into plausible-looking audit inputs. The function
+    performs only file I/O and JSON decoding, returning the parsed object or
+    raising ValueError when the snapshot root shape is not valid.
+    """
     payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError(f"Snapshot root must be an object: {path}")
+    return payload
+
+
+def load_android_locale_pref_options_from_snapshot(path: Path) -> list[LocalePrefOption]:
+    """Load locale_pref options from a generated Android parity snapshot.
+
+    The default Android option intentionally uses an empty string value, but
+    both snapshot fields must still be present strings. Missing or non-string
+    values indicate a corrupt snapshot and are reported immediately so the
+    parity audit does not continue with fabricated option values.
+    """
+    payload = load_snapshot_payload(path)
     raw_options = payload.get("locale_pref_options")
     if not isinstance(raw_options, list):
         raise ValueError(f"Snapshot missing locale_pref_options: {path}")
@@ -245,10 +266,20 @@ def load_android_locale_pref_options_from_snapshot(path: Path) -> list[LocalePre
     for index, raw in enumerate(raw_options):
         if not isinstance(raw, dict):
             raise ValueError(f"Invalid locale_pref_options[{index}] in {path}")
+        value = raw.get("value")
+        if not isinstance(value, str):
+            raise ValueError(
+                f"Invalid locale_pref_options[{index}].value in {path}: expected string"
+            )
+        label_key = raw.get("label_key")
+        if not isinstance(label_key, str):
+            raise ValueError(
+                f"Invalid locale_pref_options[{index}].label_key in {path}: expected string"
+            )
         options.append(
             LocalePrefOption(
-                value=str(raw.get("value", "")),
-                label_key=str(raw.get("label_key", "")),
+                value=value,
+                label_key=label_key,
             )
         )
     return options
@@ -371,12 +402,33 @@ def build_android_non_english_by_key(android_root: Path) -> dict[str, list[str]]
 
 
 def load_android_non_english_snapshot(path: Path) -> dict[str, list[str]]:
-    payload = json.loads(path.read_text(encoding="utf-8"))
-    raw = payload.get("android_non_english_by_key", {})
+    """Load Android translation coverage from a generated parity snapshot.
+
+    Each tracked parity key must be present and mapped to a list of locale
+    strings. Rejecting missing keys and non-string locales keeps a corrupt
+    baseline from weakening the localization audit through implicit defaults.
+    """
+    payload = load_snapshot_payload(path)
+    raw = payload.get("android_non_english_by_key")
+    if not isinstance(raw, dict):
+        raise ValueError(f"Snapshot missing android_non_english_by_key: {path}")
+
     non_english_by_key: dict[str, list[str]] = {}
     for key in PARITY_KEYS:
-        values = raw.get(key, [])
-        non_english_by_key[key] = sorted(str(locale) for locale in values)
+        values = raw.get(key)
+        if not isinstance(values, list):
+            raise ValueError(f"Invalid android_non_english_by_key[{key}] in {path}: expected list")
+
+        locales: list[str] = []
+        for index, locale in enumerate(values):
+            if not isinstance(locale, str):
+                raise ValueError(
+                    f"Invalid android_non_english_by_key[{key}][{index}] in {path}: "
+                    "expected string"
+                )
+            locales.append(locale)
+
+        non_english_by_key[key] = sorted(locales)
     return non_english_by_key
 
 
@@ -551,8 +603,8 @@ def main() -> int:
         locale_pref_options = build_android_locale_pref_options(args.android_root)
         android_source = f"live:{args.android_root}"
     elif args.android_snapshot.exists():
-        non_english_by_key = load_android_non_english_snapshot(args.android_snapshot)
         try:
+            non_english_by_key = load_android_non_english_snapshot(args.android_snapshot)
             locale_pref_options = load_android_locale_pref_options_from_snapshot(args.android_snapshot)
         except ValueError as exc:
             print(str(exc), file=sys.stderr)

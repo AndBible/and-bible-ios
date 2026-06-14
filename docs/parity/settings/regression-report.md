@@ -105,7 +105,7 @@ python3 scripts/check_settings_localization_guardrails.py --android-root /tmp/do
 
 ```bash
 python3 scripts/check_settings_localization_guardrails.py \
-  --android-root /Users/primetheus/Desktop/and-bible-convert/and-bible/app/src/main/res
+  --android-root /path/to/and-bible/app/src/main/res
 ```
 
 ```bash
