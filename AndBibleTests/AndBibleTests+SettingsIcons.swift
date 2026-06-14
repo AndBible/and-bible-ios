@@ -33,6 +33,17 @@ extension AndBibleTests {
         )
     }
 
+    func testApplicationPreferenceLookAndFeelRowsExposeGlobalTextOptionsShortcut() {
+        XCTAssertEqual(
+            ApplicationSettingsPresentation.lookAndFeelRows.first?.androidKey,
+            "global_text_display_settings"
+        )
+        XCTAssertEqual(
+            ApplicationSettingsPresentation.lookAndFeelRows.first?.icon?.androidDrawableName,
+            "ic_text_format_white_24dp"
+        )
+    }
+
     func testSyncSettingsIconsComeFromAndroidSyncSettingsXml() {
         XCTAssertEqual(
             AndBibleIconCatalog.settingsIcon(forAndroidKey: "sync_bookmarks")?.androidDrawableName,

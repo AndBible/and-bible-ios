@@ -514,6 +514,7 @@
 
 /* Text Display Settings */
 "global_text_display_settings_title" = "Global text options";
+"global_text_display_settings_summary" = "Default text display settings for all workspaces";
 "window_text_display_settings_title" = "Text options - Window %d";
 "text_display_font_size_title_format" = "Font size (%d pt)";
 "text_display_font_family_title_format" = "Font family (%@)";

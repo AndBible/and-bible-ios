@@ -2544,18 +2544,20 @@ public struct BibleReaderView: View {
     /**
      Refreshes reader controllers after root Application Preferences mutate app-level settings.
 
-     The root settings screen no longer edits global text-display defaults; it only changes
-     Android-parity application preferences such as display chrome, animation, and behavior flags.
-     Refreshing without writing `globalDisplaySettings` keeps text-display persistence scoped to the
-     dedicated Text Options screens while still pushing updated app preferences into visible panes.
+     Android exposes Global Text Options from Application Preferences. iOS mirrors that route, so
+     this callback reloads the structured global text-display defaults before re-resolving each
+     pane. Other root settings still flow through the behavior-preference reload below.
 
      - Side effects:
+       - reloads `global_text_display_settings` from `SettingsStore`
        - pushes each visible reader its resolved display settings and app preference payload
        - reloads behavior preferences mirrored by the SwiftUI reader shell
      - Failure modes: Reader refresh failures are handled by the controller update paths; preference
        reloads fall back through `SettingsStore` defaults.
      */
     private func applyApplicationPreferenceChange() {
+        let store = SettingsStore(modelContext: modelContext)
+        globalDisplaySettings = store.globalTextDisplaySettings()
         refreshVisibleControllerDisplaySettings()
         syncActiveDisplaySettings()
         reloadBehaviorPreferences()
