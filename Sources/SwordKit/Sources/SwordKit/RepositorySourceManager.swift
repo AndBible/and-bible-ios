@@ -30,6 +30,35 @@ public struct RepositorySourceRegistration: Sendable {
 
     /// Android custom-repository type that produced this registration.
     public let type: String
+
+    /**
+     Creates a resolved repository registration for persistence through `RepositorySourceManager`.
+
+     - Parameters:
+       - source: Source identity and refresh metadata used by Downloads after persistence.
+       - description: Human-readable source description.
+       - packageDirectory: Android-style package directory for SWORD repositories.
+       - manifestURL: URL that produced this registration.
+       - sourceURL: HTTPS base URL used by catalog refresh.
+       - type: Android custom-repository type.
+     - Side effects: none.
+     - Failure modes: This initializer cannot fail.
+     */
+    public init(
+        source: SourceConfig,
+        description: String,
+        packageDirectory: String,
+        manifestURL: URL,
+        sourceURL: URL,
+        type: String
+    ) {
+        self.source = source
+        self.description = description
+        self.packageDirectory = packageDirectory
+        self.manifestURL = manifestURL
+        self.sourceURL = sourceURL
+        self.type = type
+    }
 }
 
 /**
@@ -389,6 +418,49 @@ public final class RepositorySourceManager: @unchecked Sendable {
             where matchingRecord?.type == SourceConfig.myBibleHTTPSRepositoryType {
         }
         try removeCustomRepositoryRecord(named: name)
+        NotificationCenter.default.post(name: Self.sourcesDidChangeNotification, object: nil)
+    }
+
+    /**
+     Replaces every custom repository source with a restored Android repository set.
+
+     Android's `repositories.sqlite3` is a restore-only database: restoring it replaces the custom
+     repository table instead of importing individual rows. iOS preserves that boundary by routing
+     the restored rows through the same validation and persistence model as the Downloads source UI,
+     then removing any previous custom source rows from `InstallMgr.conf` and
+     `CustomRepositories.json`.
+
+     - Parameter registrations: Validated Android custom repository registrations to persist.
+     - Side effects:
+       - rewrites non-default SWORD source rows in `InstallMgr.conf`
+       - rewrites `CustomRepositories.json` with every restored custom repository
+       - posts `sourcesDidChangeNotification` after a successful replace
+     - Throws: `RepositorySourceManagementError` when restored rows are invalid, duplicate a
+       built-in source, duplicate each other, or cannot be persisted.
+     */
+    public func replaceCustomSources(with registrations: [RepositorySourceRegistration]) throws {
+        var seenNames = Set<String>()
+        for registration in registrations {
+            let source = registration.source
+            try Self.validateSourceFields(source)
+            guard !InstallManager.isDefaultSourceName(source.name) else {
+                throw RepositorySourceManagementError.duplicateSourceName(source.name)
+            }
+            guard seenNames.insert(source.name).inserted else {
+                throw RepositorySourceManagementError.duplicateSourceName(source.name)
+            }
+        }
+
+        var content = try Self.configContentRemovingCustomSourceLines(currentConfigContent())
+        for registration in registrations where !registration.source.isMyBibleRepository {
+            content = Self.configContent(
+                content,
+                inserting: Self.sourceLine(for: registration.source),
+                replacing: nil
+            )
+        }
+        try writeConfig(content)
+        try writeCustomRepositoryRecords(registrations.map(CustomRepositoryRecord.init))
         NotificationCenter.default.post(name: Self.sourcesDidChangeNotification, object: nil)
     }
 
@@ -1173,6 +1245,15 @@ public final class RepositorySourceManager: @unchecked Sendable {
         let updatedLines = lines.filter { line in
             guard let parsed = parseSourceLine(line) else { return true }
             return parsed.source.name != sourceName
+        }
+        return updatedLines.joined(separator: "\n")
+    }
+
+    private static func configContentRemovingCustomSourceLines(_ content: String) -> String {
+        let lines = content.components(separatedBy: .newlines)
+        let updatedLines = lines.filter { line in
+            guard let parsed = parseSourceLine(line) else { return true }
+            return InstallManager.isDefaultSourceName(parsed.source.name)
         }
         return updatedLines.joined(separator: "\n")
     }

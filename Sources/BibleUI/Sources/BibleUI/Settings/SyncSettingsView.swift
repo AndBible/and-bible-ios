@@ -1249,6 +1249,8 @@ public struct SyncSettingsView: View {
             return String(localized: "reading_plans_plural")
         case .myDocuments:
             return String(localized: "my_documents")
+        case .progress:
+            return String(localized: "progress_sync_title", defaultValue: "Reading Progress")
         }
     }
 
@@ -1270,6 +1272,8 @@ public struct SyncSettingsView: View {
             return String(localized: "reading_plans_content")
         case .myDocuments:
             return String(localized: "my_documents_contents")
+        case .progress:
+            return String(localized: "progress_sync_title", defaultValue: "Reading Progress")
         }
     }
 

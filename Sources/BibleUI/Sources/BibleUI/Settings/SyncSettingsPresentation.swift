@@ -90,6 +90,8 @@ enum SyncSettingsPresentation {
             return Row(androidKey: "sync_reading_plans")
         case .myDocuments:
             return Row(androidKey: "sync_documents")
+        case .progress:
+            return Row(androidKey: "sync_reading_progress")
         }
     }
 
