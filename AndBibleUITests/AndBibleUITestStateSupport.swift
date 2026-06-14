@@ -179,6 +179,32 @@ extension AndBibleUITests {
             return candidates
         }
 
+        func promptOwnedTextEntryTapCoordinate() -> XCUICoordinate? {
+            switch resolvedIdentifier {
+            case "labelManagerNewLabelNameField":
+                guard let prompt = resolvedLabelCreationPrompt(in: app),
+                      elementFrameIsUsable(prompt.frame) else {
+                    return nil
+                }
+                return prompt.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.52))
+            case "workspaceNamePromptTextField":
+                guard let prompt = firstExistingElement(
+                    [
+                        app.collectionViews["workspaceNamePromptScreen"].firstMatch,
+                        app.scrollViews["workspaceNamePromptScreen"].firstMatch,
+                        app.otherElements["workspaceNamePromptScreen"].firstMatch,
+                    ],
+                    timeout: 0.2
+                ),
+                    elementFrameIsUsable(prompt.frame) else {
+                    return nil
+                }
+                return prompt.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.18))
+            default:
+                return nil
+            }
+        }
+
         func observedPromptTextValue(preferred preferredCandidates: [XCUIElement] = []) -> String {
             let candidates = promptTextEntryCandidates(preferred: preferredCandidates)
             var fallbackValue = ""
@@ -236,6 +262,7 @@ extension AndBibleUITests {
                         candidate,
                         in: app,
                         preferTrailingEdge: true,
+                        promptTapCoordinate: promptOwnedTextEntryTapCoordinate,
                         timeout: 1,
                         file: file,
                         line: line
@@ -304,6 +331,7 @@ extension AndBibleUITests {
             focusResolvedPromptTextEntryElement(
                 promptTextField,
                 in: app,
+                promptTapCoordinate: promptOwnedTextEntryTapCoordinate,
                 timeout: min(5, max(1, deadline.timeIntervalSinceNow)),
                 file: file,
                 line: line
@@ -1435,11 +1463,16 @@ extension AndBibleUITests {
      snapshots after a prompt-specific resolver has already found the field. Native prompts can also
      time out while evaluating `hasKeyboardFocus`, so this helper only delivers focused-field taps;
      callers prove success by observing the committed prompt value.
+
+     For prompt-owned fields that can stall while re-sampling the field itself, callers can provide
+     a prompt-surface coordinate. That path intentionally avoids `exists` and `frame` checks on the
+     text field after resolution.
      */
     func focusResolvedPromptTextEntryElement(
         _ element: XCUIElement,
         in app: XCUIApplication,
         preferTrailingEdge: Bool = false,
+        promptTapCoordinate: (() -> XCUICoordinate?)? = nil,
         timeout: TimeInterval = 10,
         file: StaticString = #filePath,
         line: UInt = #line
@@ -1448,6 +1481,11 @@ extension AndBibleUITests {
         let tapOffset = CGVector(dx: preferTrailingEdge ? 0.92 : 0.5, dy: 0.5)
 
         repeat {
+            if let coordinate = promptTapCoordinate?() {
+                coordinate.tap()
+                return
+            }
+
             let coordinate: XCUICoordinate
             if element.exists, !element.frame.isEmpty {
                 coordinate = element.coordinate(withNormalizedOffset: tapOffset)
@@ -1902,8 +1940,8 @@ extension AndBibleUITests {
      *   - line: Source line used for XCTest failure attribution.
      * - Returns: The resolved button once XCTest reports a hittable activation point.
      * - Side effects:
-     *   - scrolls Sync Settings lower content until the requested button materializes and becomes
-     *     hittable
+     *   - scrolls Sync Settings lower content until the requested button materializes as a native
+     *     button and becomes hittable
      * - Failure modes:
      *   - records an XCTest failure if the button never appears or never becomes hittable
      */
@@ -1915,10 +1953,11 @@ extension AndBibleUITests {
         line: UInt = #line
     ) -> XCUIElement {
         let deadline = Date().addingTimeInterval(timeout)
-        var lastCandidate = unresolvedElement(identifier, in: app)
+        var lastCandidate = app.buttons[identifier].firstMatch
 
         repeat {
-            if let button = resolvedElement(identifier, in: app) {
+            let button = app.buttons[identifier].firstMatch
+            if button.exists {
                 lastCandidate = button
                 if waitForElementToBecomeHittable(button, timeout: 0.5) {
                     return button
