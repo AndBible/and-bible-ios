@@ -512,7 +512,7 @@
 "bookmarks_contents" = "Yer İmleri, Etiketler ve Çalışma Pedleri";
 "workspaces_contents" = "Çalışma Alanları ve Pencereler";
 "my_documents" = "My Documents";
-"my_documents_contents" = "My Documents and their pages";
+"my_documents_contents" = "My Documents and their content";
 "synchronization_categories" = "Senkronizasyon kategorileri";
 "sync_error" = "Bulut senkronizasyonunda hata oluştu";
 "sync_cant_fetch" = "Bulutta depolanan veritabanı veya yama dosyasının sürümü, bu uygulama tarafından desteklenenden daha yüksektir.";

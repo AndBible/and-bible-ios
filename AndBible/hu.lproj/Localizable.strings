@@ -540,7 +540,7 @@
 "bookmarks_contents" = "Könyvjelzők, Címkék és Jegyzetlapok";
 "workspaces_contents" = "Munkaterületek és ablakok";
 "my_documents" = "My Documents";
-"my_documents_contents" = "My Documents and their pages";
+"my_documents_contents" = "My Documents and their content";
 "synchronization_categories" = "Összehangolási kategóriák";
 "sync_error" = "Hiba történt a felhővel való összehangolás közben";
 "sync_cant_fetch" = "A tárhelyen található adatbázis vagy frissítés verziója magasabb mint az alkalmazásé.";

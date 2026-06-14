@@ -8,6 +8,38 @@ import SQLite3
 
 extension AndBibleTests {
     /**
+     Verifies the iOS JSword KJVA compatibility contract used by Android backup progress rows.
+
+     Setup:
+     - reads the local `JSwordKJVAVersification` constants derived from JSword's `SystemKJVA`
+       and `Versification.maximumOrdinal()` implementation
+
+     Expected result:
+     - the contract names Android's `KJVA` versification
+     - the ordinal domain includes JSword introduction addresses and ends at `maximumOrdinal()`
+     - zero and values past JSword's final ordinal are rejected
+
+     Failure meaning:
+     - iOS would validate Android progress ordinals against an implicit or SWORD-only range instead
+       of the same JSword KJVA address space Android writes into `progress.sqlite3`.
+     */
+    func testJSwordKJVAVersificationExposesAndroidProgressOrdinalDomain() {
+        XCTAssertEqual(JSwordKJVAVersification.name, "KJVA")
+        XCTAssertEqual(JSwordKJVAVersification.bookCount, 83)
+        XCTAssertEqual(JSwordKJVAVersification.canonicalBookCount, 80)
+        XCTAssertEqual(JSwordKJVAVersification.chapterCount, 1_371)
+        XCTAssertEqual(JSwordKJVAVersification.verseCount, 36_819)
+        XCTAssertEqual(JSwordKJVAVersification.maximumOrdinal, 38_272)
+        XCTAssertEqual(JSwordKJVAVersification.ordinalRange, 0...38_272)
+        XCTAssertEqual(JSwordKJVAVersification.progressOrdinalRange, 1...38_272)
+        XCTAssertTrue(JSwordKJVAVersification.containsOrdinal(0))
+        XCTAssertFalse(JSwordKJVAVersification.containsProgressOrdinal(0))
+        XCTAssertTrue(JSwordKJVAVersification.containsProgressOrdinal(1))
+        XCTAssertTrue(JSwordKJVAVersification.containsProgressOrdinal(38_272))
+        XCTAssertFalse(JSwordKJVAVersification.containsProgressOrdinal(38_273))
+    }
+
+    /**
      Verifies that iOS reads Android `.abdb.zip` archives by database file discovery and exposes
      both restorable and unsupported database sections.
 
@@ -1453,6 +1485,75 @@ extension AndBibleTests {
         XCTAssertFalse(readingSnapshot.settings.autoTrackReading)
         XCTAssertEqual(memorizationStore.memorizedOrdinals(bookInitials: "ESV", startOrdinal: 15, endOrdinal: 16), [15, 16])
         XCTAssertEqual(memorizationStore.targetOrdinals(bookInitials: "KJV", startOrdinal: 21, endOrdinal: 22), [21, 22])
+    }
+
+    /**
+     Verifies Android progress restore rejects ordinals outside JSword's KJVA domain.
+
+     Setup:
+     - builds Android's `progress.sqlite3` schema with memorized and target rows whose ordinals
+       exceed the maximum addressable KJVA ordinal derived from JSword `SystemKJVA`
+     - applies the archive through the normal destructive restore workflow
+
+     Expected result:
+     - restore fails with the same invalid-SQLite section error used for malformed Android backup
+       databases
+     - no local progress snapshots are persisted after the failed restore
+
+     Failure meaning:
+     - iOS would accept progress rows Android cannot normally create and could later expand
+       unbounded ordinal ranges during Android backup export or reporting.
+     */
+    func testAndroidDatabaseBackupRejectsProgressOrdinalsOutsideAndroidKJVADomain() throws {
+        let schema = Schema([Setting.self])
+        let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: schema, configurations: [configuration])
+        let modelContext = ModelContext(container)
+        let settingsStore = SettingsStore(modelContext: modelContext)
+        let memorizedID = UUID(uuidString: "15000000-0000-0000-0000-000000000801")!
+        let targetID = UUID(uuidString: "15000000-0000-0000-0000-000000000802")!
+        let settingsID = UUID(uuidString: "b2000000-0000-0000-0000-000000000001")!
+        let progressDatabaseURL = try makeAndroidProgressDatabase(
+            memorizedVerses: [
+                .init(id: memorizedID, kjvOrdinal: 100_000, memorizedAt: 1_700_000_100),
+            ],
+            memorizationTargets: [
+                .init(id: targetID, kjvOrdinalStart: 20, kjvOrdinalEnd: 100_000, createdAt: 1_700_000_200),
+            ],
+            chapterHistory: [],
+            settings: .init(
+                id: settingsID,
+                autoTrackReading: false,
+                autoMarkMemorized: true,
+                memorizeTypeFullWords: false,
+                memorizeWordVisibility: "light",
+                memorizeErrorHeatmap: true,
+                memorizeScrambleHideUsed: false,
+                memorizeIncludeReference: true,
+                activeCycle: 1
+            )
+        )
+        let archiveData = try makeAndroidDatabaseBackupArchiveData(
+            databaseURLsByName: [
+                "progress.sqlite3": progressDatabaseURL,
+            ],
+            contains: [.progress]
+        )
+        let service = AndroidDatabaseBackupService()
+        let archive = try service.loadArchive(from: archiveData)
+
+        XCTAssertThrowsError(
+            try service.apply(
+                archive: archive,
+                selections: [.init(category: .progress, mode: .restore)],
+                modelContext: modelContext,
+                settingsStore: settingsStore
+            )
+        ) { error in
+            XCTAssertEqual(error as? AndroidDatabaseBackupError, .invalidSQLiteDatabase("progress.sqlite3"))
+        }
+        XCTAssertNil(settingsStore.getString(ReadingProgressStore.settingsKey))
+        XCTAssertNil(settingsStore.getString(MemorizationProgressStore.settingsKey))
     }
 
     /**

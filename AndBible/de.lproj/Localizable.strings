@@ -540,7 +540,7 @@
 "bookmarks_contents" = "Lesezeichen, Labels und Studienmappen";
 "workspaces_contents" = "Arbeitsumgebungen und Fenster";
 "my_documents" = "My Documents";
-"my_documents_contents" = "My Documents and their pages";
+"my_documents_contents" = "My Documents and their content";
 "synchronization_categories" = "Synchronisationskategorien";
 "sync_error" = "Fehler bei der Synchronisation mit der Cloud";
 "sync_cant_fetch" = "Die in der Cloud gespeicherte Datenbankversion ist höher, als die Anwendung auf dem lokalen Gerät unterstützt.";

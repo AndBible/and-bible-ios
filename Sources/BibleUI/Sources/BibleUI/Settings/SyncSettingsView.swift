@@ -1240,18 +1240,7 @@ public struct SyncSettingsView: View {
      - Failure modes: This helper cannot fail.
      */
     private func remoteCategoryTitle(for category: RemoteSyncCategory) -> String {
-        switch category {
-        case .bookmarks:
-            return String(localized: "bookmarks")
-        case .workspaces:
-            return String(localized: "help_workspaces_title")
-        case .readingPlans:
-            return String(localized: "reading_plans_plural")
-        case .myDocuments:
-            return String(localized: "my_documents")
-        case .progress:
-            return String(localized: "progress_sync_title", defaultValue: "Reading Progress")
-        }
+        RemoteSyncCategoryLocalization.text(for: category).title.localized
     }
 
     /**
@@ -1263,18 +1252,7 @@ public struct SyncSettingsView: View {
      - Failure modes: This helper cannot fail.
      */
     private func remoteCategoryContentDescription(for category: RemoteSyncCategory) -> String {
-        switch category {
-        case .bookmarks:
-            return String(localized: "bookmarks_contents")
-        case .workspaces:
-            return String(localized: "workspaces_contents")
-        case .readingPlans:
-            return String(localized: "reading_plans_content")
-        case .myDocuments:
-            return String(localized: "my_documents_contents")
-        case .progress:
-            return String(localized: "progress_sync_title", defaultValue: "Reading Progress")
-        }
+        RemoteSyncCategoryLocalization.text(for: category).contents.localized
     }
 
     /**
@@ -1286,12 +1264,7 @@ public struct SyncSettingsView: View {
      - Failure modes: Missing localizations fall back to English defaults.
      */
     private func deferredRemoteCategoryTitle(for category: RemoteSyncDeferredCategory) -> String {
-        switch category {
-        case .aiSettings:
-            return String(localized: "ai_settings_sync_title", defaultValue: "AI Settings")
-        case .progress:
-            return String(localized: "progress_sync_title", defaultValue: "Reading Progress")
-        }
+        RemoteSyncCategoryLocalization.deferredText(for: category).title.localized
     }
 
     /**
@@ -1303,18 +1276,7 @@ public struct SyncSettingsView: View {
      - Failure modes: Missing localizations fall back to English defaults.
      */
     private func deferredRemoteCategoryContentDescription(for category: RemoteSyncDeferredCategory) -> String {
-        switch category {
-        case .aiSettings:
-            return String(
-                localized: "ai_settings_sync_contents",
-                defaultValue: "AI prompts and provider configurations"
-            )
-        case .progress:
-            return String(
-                localized: "progress_sync_contents",
-                defaultValue: "Memorized verses and chapter reading records"
-            )
-        }
+        RemoteSyncCategoryLocalization.deferredText(for: category).contents.localized
     }
 
     /**

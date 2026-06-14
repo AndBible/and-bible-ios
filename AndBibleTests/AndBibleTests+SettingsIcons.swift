@@ -119,6 +119,36 @@ extension AndBibleTests {
         )
     }
 
+    /**
+     Verifies progress sync copy uses Android's distinct title and summary string resources.
+
+     Setup:
+     - reads the shared native iOS sync category localization descriptor that backs both the
+       settings row and lifecycle sync error copy
+     - compares Progress against Android's `progress_sync_title` and `progress_sync_contents`
+       strings from `app/src/main/res/values/strings.xml`
+
+     Expected result:
+     - the title remains "Reading Progress"
+     - the content description uses "Memorized verses and chapter reading records"
+     - active and deferred Progress rows share the same Android string contract
+
+     Failure meaning:
+     - iOS duplicated category string switches have drifted from Android and may show a row title
+       where Android expects explanatory summary copy.
+     */
+    func testSyncSettingsProgressTextUsesAndroidTitleAndContentsKeys() {
+        let active = RemoteSyncCategoryLocalization.text(for: .progress)
+        let deferred = RemoteSyncCategoryLocalization.deferredText(for: .progress)
+
+        XCTAssertEqual(active.title.key, "progress_sync_title")
+        XCTAssertEqual(active.title.defaultValue, "Reading Progress")
+        XCTAssertEqual(active.contents.key, "progress_sync_contents")
+        XCTAssertEqual(active.contents.defaultValue, "Memorized verses and chapter reading records")
+        XCTAssertEqual(active, deferred)
+        XCTAssertNotEqual(active.title.key, active.contents.key)
+    }
+
     func testDeferredSyncCategoriesReserveAndroidCompatibleKeysAndTrackingIssues() {
         XCTAssertEqual(RemoteSyncDeferredCategory.aiSettings.androidSyncEnabledKey, "sync_enable_ai_settings")
         XCTAssertEqual(RemoteSyncDeferredCategory.aiSettings.trackingIssueNumber, 74)

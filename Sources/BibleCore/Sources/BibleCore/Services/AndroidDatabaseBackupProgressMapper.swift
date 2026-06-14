@@ -23,6 +23,8 @@ public struct AndroidDatabaseBackupProgressReport: Sendable, Equatable {
  Android stores memorization state as KJV-normalized global ordinals. iOS preserves that contract by
  importing Android memorization rows as global ranges with an empty `bookInitials` field. Reader
  calls for any module can then see the same KJV ordinal state instead of a module-specific copy.
+ The accepted ordinal range follows JSword's `SystemKJVA` `maximumOrdinal()` contract rather than
+ SWORD module-local ordinals, matching Android's progress database semantics.
  */
 enum AndroidDatabaseBackupProgressMapper {
     private struct Snapshot {
@@ -31,6 +33,8 @@ enum AndroidDatabaseBackupProgressMapper {
     }
 
     private static let singletonSettingsID = UUID(uuidString: "b2000000-0000-0000-0000-000000000001")!
+    /// Android progress rows use one-based JSword KJVA ordinals for stored verse ranges.
+    private static let jswordKJVAOrdinalRange = JSwordKJVAVersification.progressOrdinalRange
 
     /**
      Applies Android progress rows using Restore or Import semantics.
@@ -91,7 +95,7 @@ enum AndroidDatabaseBackupProgressMapper {
             for ordinal in uniqueOrdinals(in: snapshot.memorization.memorizedRanges) {
                 try insertMemorizedVerse(kjvOrdinal: ordinal, into: database, fileName: fileName)
             }
-            for range in snapshot.memorization.targetRanges {
+            for range in exportableKJVARanges(in: snapshot.memorization.targetRanges) {
                 try insertMemorizationTarget(range, into: database, fileName: fileName)
             }
             for row in snapshot.reading.history {
@@ -168,7 +172,7 @@ enum AndroidDatabaseBackupProgressMapper {
         return AndroidDatabaseBackupProgressReport(
             readingCount: normalizedReading.history.count,
             memorizedVerseCount: uniqueOrdinals(in: normalizedMemorization.memorizedRanges).count,
-            targetCount: normalizedMemorization.targetRanges.count
+            targetCount: exportableKJVARanges(in: normalizedMemorization.targetRanges).count
         )
     }
 
@@ -192,7 +196,10 @@ enum AndroidDatabaseBackupProgressMapper {
             guard result == SQLITE_ROW else {
                 throw AndroidDatabaseBackupError.invalidSQLiteDatabase(fileName)
             }
-            let ordinal = AndroidDatabaseBackupSQLite.int(statement, column: 0)
+            let ordinal = try validatedKJVAOrdinal(
+                AndroidDatabaseBackupSQLite.int(statement, column: 0),
+                fileName: fileName
+            )
             ranges.append(MemorizationProgressRange(bookInitials: "", startOrdinal: ordinal, endOrdinal: ordinal))
         }
         return ranges
@@ -219,10 +226,10 @@ enum AndroidDatabaseBackupProgressMapper {
                 throw AndroidDatabaseBackupError.invalidSQLiteDatabase(fileName)
             }
             ranges.append(
-                MemorizationProgressRange(
-                    bookInitials: "",
+                try validatedKJVARange(
                     startOrdinal: AndroidDatabaseBackupSQLite.int(statement, column: 0),
-                    endOrdinal: AndroidDatabaseBackupSQLite.int(statement, column: 1)
+                    endOrdinal: AndroidDatabaseBackupSQLite.int(statement, column: 1),
+                    fileName: fileName
                 )
             )
         }
@@ -413,9 +420,96 @@ enum AndroidDatabaseBackupProgressMapper {
         try AndroidDatabaseBackupSQLite.stepDone(statement, fileName: fileName)
     }
 
+    /**
+     Validates a stored Android progress ordinal against JSword's KJVA address space.
+
+     - Parameters:
+       - ordinal: Raw `kjvOrdinal` value read from Android `progress.sqlite3`.
+       - fileName: Database file name used for section-level error reporting.
+     - Returns: The original ordinal when it is inside Android's KJVA domain.
+     - Side effects: none.
+     - Failure modes: Throws `invalidSQLiteDatabase` when a user-supplied backup contains an
+       ordinal Android cannot normally create through JSword-backed progress flows.
+     */
+    private static func validatedKJVAOrdinal(_ ordinal: Int, fileName: String) throws -> Int {
+        guard jswordKJVAOrdinalRange.contains(ordinal) else {
+            throw AndroidDatabaseBackupError.invalidSQLiteDatabase(fileName)
+        }
+        return ordinal
+    }
+
+    /**
+     Validates and builds an Android global memorization range.
+
+     Android stores memorization target endpoints as KJVA ordinals. The row is accepted only when
+     both endpoints are inside JSword's KJVA domain and the end is not before the start.
+
+     - Parameters:
+       - startOrdinal: Raw `kjvOrdinalStart` value from Android `MemorizationTarget`.
+       - endOrdinal: Raw `kjvOrdinalEnd` value from Android `MemorizationTarget`.
+       - fileName: Database file name used for section-level error reporting.
+     - Returns: A global iOS memorization range with empty `bookInitials`.
+     - Side effects: none.
+     - Failure modes: Throws `invalidSQLiteDatabase` for out-of-domain or reversed ranges.
+     */
+    private static func validatedKJVARange(
+        startOrdinal: Int,
+        endOrdinal: Int,
+        fileName: String
+    ) throws -> MemorizationProgressRange {
+        guard endOrdinal >= startOrdinal else {
+            throw AndroidDatabaseBackupError.invalidSQLiteDatabase(fileName)
+        }
+        return MemorizationProgressRange(
+            bookInitials: "",
+            startOrdinal: try validatedKJVAOrdinal(startOrdinal, fileName: fileName),
+            endOrdinal: try validatedKJVAOrdinal(endOrdinal, fileName: fileName)
+        )
+    }
+
+    /**
+     Checks whether a local memorization range can be represented in Android's progress database.
+
+     - Parameter range: Local iOS memorization range.
+     - Returns: `true` when the endpoints are ordered and inside JSword's KJVA ordinal domain.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    private static func isKJVAOrdinalRange(_ range: MemorizationProgressRange) -> Bool {
+        jswordKJVAOrdinalRange.contains(range.startOrdinal) &&
+            jswordKJVAOrdinalRange.contains(range.endOrdinal) &&
+            range.endOrdinal >= range.startOrdinal
+    }
+
+    /**
+     Filters local memorization ranges to rows Android can represent without clipping.
+
+     Out-of-domain local rows are skipped instead of clamped so iOS does not invent Android progress
+     for only part of a corrupt or non-KJVA range.
+
+     - Parameter ranges: Local memorization ranges from the persisted snapshot.
+     - Returns: Ranges whose endpoints fit Android's JSword KJVA ordinal domain.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    private static func exportableKJVARanges(
+        in ranges: [MemorizationProgressRange]
+    ) -> [MemorizationProgressRange] {
+        ranges.filter(isKJVAOrdinalRange)
+    }
+
+    /**
+     Expands Android-compatible memorized ranges into unique ordinals.
+
+     - Parameter ranges: Local memorized ranges from the persisted snapshot.
+     - Returns: Sorted unique KJVA ordinals that Android can store in `MemorizedVerse`.
+     - Side effects: none.
+     - Failure modes: Out-of-domain ranges are ignored instead of clamped, avoiding unbounded
+       expansion and avoiding invented partial progress.
+     */
     private static func uniqueOrdinals(in ranges: [MemorizationProgressRange]) -> [Int] {
         var ordinals = Set<Int>()
-        for range in ranges where range.startOrdinal > 0 && range.endOrdinal >= range.startOrdinal {
+        for range in ranges where isKJVAOrdinalRange(range) {
             for ordinal in range.startOrdinal...range.endOrdinal {
                 ordinals.insert(ordinal)
             }
