@@ -166,6 +166,14 @@ extension AndBibleTests {
             AndBibleIconCatalog.settingsIcon(forAndroidKey: "ORDINALS")?.androidDrawableName,
             "ic_baseline_star_24"
         )
+        XCTAssertEqual(
+            AndBibleIconCatalog.settingsIcon(forAndroidKey: "open_workspace_settings")?.androidDrawableName,
+            "ic_workspace_overlay_24dp"
+        )
+        XCTAssertEqual(
+            AndBibleIconCatalog.settingsIcon(forAndroidKey: "open_global_settings")?.androidDrawableName,
+            "ic_settings_black_24dp"
+        )
     }
 
     func testTextDisplayPresentationMatchesAndroidRenderedOrder() {
@@ -271,8 +279,16 @@ extension AndBibleTests {
         )
     }
 
+    /**
+     Protects Android text-display scope parity.
+
+     Android renders parent-scope links above the shared text-display rows: window settings can
+     jump to workspace and global settings, workspace settings can jump to global settings, and
+     global settings hide the parent-links category. A failure here means iOS has drifted from
+     Android's visible scope ladder in `TextDisplaySettings.kt`.
+     */
     func testTextDisplayVisibleRowsMatchAndroidScopeVisibility() {
-        let windowVisibleRows = [
+        let editableRows = [
             "STRONGS",
             "MORPH",
             "NON_STRONGS_WORD_ITALIC",
@@ -304,12 +320,16 @@ extension AndBibleTests {
             "MARK_AS_READ_BUTTON",
             "MEMORIZATION_INDICATORS",
         ]
-        let workspaceVisibleRows = windowVisibleRows
-        let globalVisibleRows = windowVisibleRows
 
-        XCTAssertEqual(TextDisplaySettingsPresentation.iosWindowVisibleAndroidKeys, windowVisibleRows)
-        XCTAssertEqual(TextDisplaySettingsPresentation.iosWorkspaceVisibleAndroidKeys, workspaceVisibleRows)
-        XCTAssertEqual(TextDisplaySettingsPresentation.iosGlobalVisibleAndroidKeys, globalVisibleRows)
+        XCTAssertEqual(
+            TextDisplaySettingsPresentation.iosWindowVisibleAndroidKeys,
+            ["open_workspace_settings", "open_global_settings"] + editableRows
+        )
+        XCTAssertEqual(
+            TextDisplaySettingsPresentation.iosWorkspaceVisibleAndroidKeys,
+            ["open_global_settings"] + editableRows
+        )
+        XCTAssertEqual(TextDisplaySettingsPresentation.iosGlobalVisibleAndroidKeys, editableRows)
     }
 
     func testTextDisplayImplementedRowsExposeSupportedIosConfigKeys() {

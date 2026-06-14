@@ -104,6 +104,14 @@ enum AndBibleIconCatalog {
             assetName: "SettingsIconTextFormat",
             androidDrawableName: "ic_text_format_white_24dp"
         ),
+        "open_workspace_settings": .init(
+            assetName: "SettingsIconWorkspace",
+            androidDrawableName: "ic_workspace_overlay_24dp"
+        ),
+        "open_global_settings": .init(
+            assetName: "SettingsIconSettings",
+            androidDrawableName: "ic_settings_black_24dp"
+        ),
         "locale_pref": .init(
             assetName: "SettingsIconApplicationLanguage",
             androidDrawableName: "ic_application_language_24dp"

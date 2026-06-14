@@ -20,11 +20,13 @@ import UIKit
 
  Data dependencies:
  - `settings` is the persisted display-settings model owned by the parent screen
+ - `scope` determines which Android parent-scope links are visible
  - SwiftData labels back the Android `BOOKMARKS_HIDELABELS` picker
  - `onChange` lets the parent push updated settings into the reader after each mutation
 
  Side effects:
  - every binding write mutates `settings` and invokes `onChange`
+ - parent-scope link taps invoke parent routing closures without mutating `settings`
  - hidden bookmark-label choices mutate `settings.bookmarksHideLabels`
  - on iOS, presenting the font picker bridges into `UIFontPickerViewController`
  */
@@ -37,6 +39,18 @@ public struct TextDisplaySettingsView: View {
 
     /// Localized navigation title that reflects the Android settings scope currently being edited.
     private let navigationTitleText: String
+
+    /// Android text-display scope currently being edited by this screen.
+    private let scope: TextDisplaySettingsScope
+
+    /// Workspace name used when rendering Android's workspace parent-link title.
+    private let workspaceName: String?
+
+    /// Parent route invoked by Android's `open_workspace_settings` row.
+    private let onOpenWorkspaceSettings: (() -> Void)?
+
+    /// Parent route invoked by Android's `open_global_settings` row.
+    private let onOpenGlobalSettings: (() -> Void)?
 
     /// User-visible and system labels available for the hidden-bookmark-label picker.
     @Query private var allLabels: [BibleCore.Label]
@@ -91,11 +105,19 @@ public struct TextDisplaySettingsView: View {
        - settings: Shared display settings value to mutate from the form.
        - navigationTitle: Optional Android-scope title shown by the surrounding navigation stack.
          Passing `nil` uses the localized global text-options title.
+       - scope: Android text-display scope currently being edited.
+       - workspaceName: Optional active workspace name used by parent-link titles.
+       - onOpenWorkspaceSettings: Optional route for Android's workspace parent-link row.
+       - onOpenGlobalSettings: Optional route for Android's global parent-link row.
        - onChange: Optional callback invoked after current-scope setting changes.
      */
     public init(
         settings: Binding<TextDisplaySettings>,
         navigationTitle: String? = nil,
+        scope: TextDisplaySettingsScope = .global,
+        workspaceName: String? = nil,
+        onOpenWorkspaceSettings: (() -> Void)? = nil,
+        onOpenGlobalSettings: (() -> Void)? = nil,
         onChange: (() -> Void)? = nil
     ) {
         self._settings = settings
@@ -103,6 +125,10 @@ public struct TextDisplaySettingsView: View {
             localized: "global_text_display_settings_title",
             defaultValue: "Global text options"
         )
+        self.scope = scope
+        self.workspaceName = workspaceName
+        self.onOpenWorkspaceSettings = onOpenWorkspaceSettings
+        self.onOpenGlobalSettings = onOpenGlobalSettings
         self.onChange = onChange
     }
 
@@ -371,10 +397,24 @@ public struct TextDisplaySettingsView: View {
         let justifyState = (settings.justifyText ?? false) ? "justifyTextOn" : "justifyTextOff"
         #if os(iOS)
         let fontPickerState = showFontPicker ? "fontPickerPresented" : "fontPickerHidden"
-        return "\(justifyState)|\(fontPickerState)"
+        return "\(justifyState)|\(fontPickerState)|scope=\(scope.rawValue)"
         #else
-        return "\(justifyState)|fontPickerUnavailable"
+        return "\(justifyState)|fontPickerUnavailable|scope=\(scope.rawValue)"
         #endif
+    }
+
+    /// Whether Android's parent-settings category should be visible for the current scope.
+    private var showsParentSettingsSection: Bool {
+        scope != .global
+    }
+
+    /// Android-localized title for the workspace parent-link row.
+    private var workspaceParentLinkTitle: String {
+        let titleFormat = String(
+            localized: "workspace_text_options_link",
+            defaultValue: "Workspace text options - %@"
+        )
+        return String.localizedStringWithFormat(titleFormat, workspaceName ?? "")
     }
 
     /**
@@ -388,6 +428,10 @@ public struct TextDisplaySettingsView: View {
         ZStack(alignment: .topLeading) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
+                    if showsParentSettingsSection {
+                        parentSettingsSection
+                    }
+
                     preferenceSection(.formatting) {
                         preferenceActionRow(
                             androidKey: "STRONGS",
@@ -681,6 +725,38 @@ public struct TextDisplaySettingsView: View {
     }
 
     /**
+     Builds Android's parent-settings category for non-global text-display scopes.
+
+     Window scope exposes both workspace and global parent routes. Workspace scope exposes only the
+     global route. Global scope hides the category entirely because it is already the root
+     text-display owner.
+     */
+    @ViewBuilder
+    private var parentSettingsSection: some View {
+        preferenceSectionHeader(String(localized: "parent_settings_category_title", defaultValue: "Parent settings")) {
+            if scope == .window {
+                preferenceActionRow(
+                    androidKey: "open_workspace_settings",
+                    title: workspaceParentLinkTitle,
+                    summary: androidSummary("open_workspace_settings"),
+                    accessibilityIdentifier: "textDisplayOpenWorkspaceSettingsButton"
+                ) {
+                    onOpenWorkspaceSettings?()
+                }
+            }
+
+            preferenceActionRow(
+                androidKey: "open_global_settings",
+                title: String(localized: "global_text_options_link", defaultValue: "Global text options"),
+                summary: androidSummary("open_global_settings"),
+                accessibilityIdentifier: "textDisplayOpenGlobalSettingsButton"
+            ) {
+                onOpenGlobalSettings?()
+            }
+        }
+    }
+
+    /**
      Platform background for the flat Android-style preference surface.
 
      - Returns: A system background color on iOS and a transparent fallback on macOS package builds.
@@ -755,8 +831,25 @@ public struct TextDisplaySettingsView: View {
         _ section: TextDisplaySettingsPresentation.Section,
         @ViewBuilder content: () -> Content
     ) -> some View {
+        preferenceSectionHeader(section.titleDefault, content: content)
+    }
+
+    /**
+     Builds one Android-style preference section with an explicit header title.
+
+     - Parameters:
+       - title: Header text rendered above the flat Android-style rows.
+       - content: Rows to display below the section title.
+     - Returns: A flat preference section without SwiftUI grouped-card styling.
+     - Side effects: none; row content owns setting mutation and navigation callbacks.
+     - Failure modes: This helper cannot fail.
+     */
+    private func preferenceSectionHeader<Content: View>(
+        _ title: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            textDisplaySectionHeader(section.titleDefault)
+            textDisplaySectionHeader(title)
                 .padding(.bottom, AndBibleSettingsPreferenceLayout.sectionHeaderBottomPadding)
             content()
         }

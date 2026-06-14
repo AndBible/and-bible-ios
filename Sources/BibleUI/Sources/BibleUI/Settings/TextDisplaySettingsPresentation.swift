@@ -3,6 +3,24 @@
 import Foundation
 
 /**
+ Android text-display settings scope currently being edited.
+
+ Android resolves text presentation as window overrides above workspace overrides above global
+ defaults. The native iOS settings UI uses this scope to expose the same parent-link ladder and to
+ keep writes routed to the correct persistence owner.
+ */
+public enum TextDisplaySettingsScope: String, Sendable {
+    /// App-wide text display defaults.
+    case global
+
+    /// Active workspace text display overrides.
+    case workspace
+
+    /// Single reader window/page-manager text display overrides.
+    case window
+}
+
+/**
  Android-backed presentation and disposition metadata for the native SwiftUI All Text Options
  surface.
 
@@ -147,6 +165,8 @@ enum TextDisplaySettingsPresentation {
 
         /// English Android title defaults keyed by Android preference key.
         private static let titleDefaultsByAndroidKey: [String: String] = [
+            "open_workspace_settings": "Workspace text options",
+            "open_global_settings": "Global text options",
             "COLORS": "Color settings",
             "FONTSIZE": "Font size",
             "FONTFAMILY": "Font family",
@@ -185,6 +205,8 @@ enum TextDisplaySettingsPresentation {
 
         /// English Android summary defaults keyed by Android preference key.
         private static let summaryDefaultsByAndroidKey: [String: String] = [
+            "open_workspace_settings": "Edit text display settings for this workspace",
+            "open_global_settings": "Edit default text display settings for all workspaces",
             "COLORS": "Adjust text and background colors and noise effect",
             "FONTSIZE": "Adjust main text font size",
             "FONTFAMILY": "Change font family. Tip: more fonts can be installed via Download Documents / Add-ons.",
@@ -312,9 +334,25 @@ enum TextDisplaySettingsPresentation {
         ),
     ]
 
+    /// Android parent-link rows declared above the editable text-display settings in XML.
+    static let parentLinkRows: [Row] = [
+        Row(
+            androidKey: "open_workspace_settings",
+            section: .formatting,
+            disposition: .adaptedElsewhere,
+            note: "Visible from window scope; opens workspace-scoped text options."
+        ),
+        Row(
+            androidKey: "open_global_settings",
+            section: .formatting,
+            disposition: .adaptedElsewhere,
+            note: "Visible from window and workspace scopes; opens global text options."
+        ),
+    ]
+
     /// Android row metadata keyed by Android preference key.
     static let rowByAndroidKey: [String: Row] = Dictionary(
-        uniqueKeysWithValues: androidRows.map { ($0.androidKey, $0) }
+        uniqueKeysWithValues: (parentLinkRows + androidRows).map { ($0.androidKey, $0) }
     )
 
     /// Android keys currently exposed as interactive rows in the iOS All Text Options surface.
@@ -332,13 +370,13 @@ enum TextDisplaySettingsPresentation {
     }
 
     /**
-     Android rows visible in the normal iOS window-level All Text Options screen.
+     Android editable rows shared by window, workspace, and global iOS text-display screens.
 
      This list follows the Android rendered menu from the screenshot-backed target:
      broad `Formatting`, `Appearance`, and `Bookmark & My Notes settings` groups, with the reader
      renderer fields from issue #174 included once Swift, bridge, and bibleview-js consumers exist.
      */
-    static var iosWindowVisibleAndroidKeys: [String] {
+    private static var iosEditableVisibleAndroidKeys: [String] {
         [
             "STRONGS",
             "MORPH",
@@ -374,23 +412,31 @@ enum TextDisplaySettingsPresentation {
     }
 
     /**
+     Android rows visible in the normal iOS window-level All Text Options screen.
+
+     Android exposes parent links before the editable rows here because window settings inherit from
+     workspace and global text settings.
+     */
+    static var iosWindowVisibleAndroidKeys: [String] {
+        ["open_workspace_settings", "open_global_settings"] + iosEditableVisibleAndroidKeys
+    }
+
+    /**
      Android rows visible when editing workspace-level text options.
 
-     The user-verified Android target for this issue does not expose parent settings links in the
-     rendered All Text Options list, so workspace scope uses the same visible row set as window
-     scope.
+     Workspace settings inherit from global settings, so Android hides the workspace parent link and
+     keeps the global parent link visible above the shared editable rows.
      */
     static var iosWorkspaceVisibleAndroidKeys: [String] {
-        iosWindowVisibleAndroidKeys
+        ["open_global_settings"] + iosEditableVisibleAndroidKeys
     }
 
     /**
      Android rows visible when editing global text options.
 
-     The user-verified Android target for this issue does not expose parent settings links in the
-     rendered All Text Options list, so global scope uses the same visible row set as window scope.
+     Global settings are the root text-display scope, so Android hides the parent-links category.
      */
     static var iosGlobalVisibleAndroidKeys: [String] {
-        iosWindowVisibleAndroidKeys
+        iosEditableVisibleAndroidKeys
     }
 }

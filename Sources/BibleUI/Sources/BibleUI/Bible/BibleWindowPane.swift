@@ -98,6 +98,9 @@ struct BibleWindowPane: View {
     /// Requests the parent reader to present settings UI.
     var onShowSettings: (() -> Void)?
 
+    /// Requests the parent reader to present this pane's window-scoped text-display settings.
+    var onShowWindowTextOptions: (() -> Void)?
+
     /// Requests the parent reader to present download/module-management UI with optional search.
     var onShowDownloads: ((String?) -> Void)?
 
@@ -311,6 +314,16 @@ struct BibleWindowPane: View {
                         }
                     }
                 }
+            }
+
+            Divider()
+
+            Button(
+                localizedDrawerString("all_text_options_window_menutitle", default: "All text options"),
+                systemImage: "textformat"
+            ) {
+                windowManager.activeWindow = window
+                onShowWindowTextOptions?()
             }
 
             Divider()
@@ -622,6 +635,21 @@ struct BibleWindowPane: View {
         Task { @MainActor in
             wm.registerController(ctrl, for: wid)
         }
+    }
+
+    /**
+     Resolves one Android reader-menu string with an English fallback.
+
+     - Parameters:
+       - key: Android string resource key mirrored into iOS localization files when available.
+       - defaultValue: English fallback used when the key is not present locally.
+     - Returns: Localized menu text for pane-scoped Android parity rows.
+     - Side effects: none.
+     - Failure modes: Missing localizations fall back to `defaultValue`.
+     */
+    private func localizedDrawerString(_ key: String, default defaultValue: String) -> String {
+        let localized = Bundle.main.localizedString(forKey: key, value: nil, table: nil)
+        return localized == key ? defaultValue : localized
     }
 
     /// Floating action bar shown while the pane has an active text selection.

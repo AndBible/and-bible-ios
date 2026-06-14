@@ -115,6 +115,7 @@ extension AndBibleUITests {
         XCTAssertTrue(requireElement("textDisplaySettingsScreen", in: app, timeout: 10).exists)
         waitForReaderRenderedContentState(containing: "readerSheet=none", in: app, timeout: 10)
         waitForReaderRenderedContentState(containing: "readerDestination=textOptions", in: app, timeout: 10)
+        waitForElementValue("textDisplaySettingsScreen", toContain: "scope=workspace", in: app, timeout: 10)
         XCTAssertFalse(
             unresolvedElement("settingsForm", in: app).exists,
             "Expected All Text Options to open the Text Display destination, not Application Preferences."

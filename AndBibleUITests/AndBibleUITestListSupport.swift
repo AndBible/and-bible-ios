@@ -1089,7 +1089,7 @@ extension AndBibleUITests {
      * - Returns: The root accessibility-identified Text Display screen element.
      * - Side effects:
      *   - opens the reader overflow menu and activates the production All Text Options action
-     *   - pushes the window-scoped Text Display screen onto the reader navigation stack
+     *   - pushes the workspace-scoped Text Display screen onto the reader navigation stack
      * - Failure modes:
      *   - fails when the All Text Options action or Text Display screen never appears
      */
