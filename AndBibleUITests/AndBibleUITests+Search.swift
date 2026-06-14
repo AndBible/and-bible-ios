@@ -485,23 +485,27 @@ extension AndBibleUITests {
      Verifies that the real reader Search workflow can navigate to a bundled search hit.
      *
      * - Side effects:
-     *   - launches the standard reader shell with one deterministic seeded query for the Search UI
-     *   - opens Search from the real reader toolbar, waits for the bundled index/search pass, and
-     *     taps the first returned result row
+     *   - launches the standard reader shell without a launch-seeded Search presentation
+     *   - opens Search from the real reader toolbar, enters a deterministic bundled query, waits
+     *     for the bundled index/search pass, and taps the first returned result row
      *   - dismisses Search through the normal result-selection flow and navigates the reader to
      *     the selected passage
      * - Failure modes:
      *   - fails if Search cannot be opened from the reader toolbar
+     *   - fails if the Search field cannot receive and submit the deterministic query
      *   - fails if bundled search results do not produce at least one tappable result row
      *   - fails if selecting the result does not move the reader away from `Genesis 1`
      */
     func testSearchResultSelectionNavigatesReaderToBundledReference() {
-        let app = makeApp(searchQuery: "noah")
+        let app = makeApp()
         app.launch()
 
         let initialReference = requireReaderReferenceValue(in: app, timeout: 15)
 
         _ = openSearch(in: app)
+        let searchField = requireSearchInput(in: app, timeout: 10)
+        replaceText(in: searchField, with: "noah", placeholderHints: ["Search Bible text", "Search Bible", "Search"])
+        dismissKeyboardAfterFocusedTextEntry(searchField, in: app)
         waitForSearchQuery("noah", in: app, timeout: 20)
 
         let noahResultIdentifier = "searchResultRow::Genesis_6_8"
