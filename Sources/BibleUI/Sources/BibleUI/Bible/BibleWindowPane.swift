@@ -154,12 +154,12 @@ struct BibleWindowPane: View {
 
     /// Active reading-background color encoded as the signed ARGB integer expected by BibleWebView.
     private var activeBackgroundColorInt: Int {
-        let d = TextDisplaySettings.appDefaults
-        if nightMode {
-            return displaySettings.nightBackground ?? d.nightBackground ?? -16777216
-        } else {
-            return displaySettings.dayBackground ?? d.dayBackground ?? -1
-        }
+        surfacePalette.backgroundColorInt
+    }
+
+    /// Reader-surface colors derived from this pane's resolved text-display settings.
+    private var surfacePalette: ReaderThemeSurfacePalette {
+        ReaderThemeSurfacePalette(settings: displaySettings, nightMode: nightMode)
     }
 
     var body: some View {
@@ -323,9 +323,9 @@ struct BibleWindowPane: View {
             Image(systemName: "line.3.horizontal")
                 .font(.caption)
                 .fontWeight(.semibold)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(surfacePalette.foregroundColor)
                 .frame(width: 28, height: 28)
-                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 6))
+                .background(surfacePalette.controlFillColor, in: RoundedRectangle(cornerRadius: 6))
         }
         .simultaneousGesture(TapGesture().onEnded {
             windowManager.activeWindow = window

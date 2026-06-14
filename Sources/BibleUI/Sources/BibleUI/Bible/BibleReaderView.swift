@@ -536,6 +536,11 @@ public struct BibleReaderView: View {
             focusedController?.currentCategory == .bible
     }
 
+    /// Reader-shell palette derived from the active pane's text-display colors.
+    private var readerThemeSurfacePalette: ReaderThemeSurfacePalette {
+        ReaderThemeSurfacePalette(settings: displaySettings, nightMode: nightMode)
+    }
+
     /// Bottom inset for the floating reference capsule, accounting for other bottom chrome.
     private var bibleReferenceOverlayBottomPadding: CGFloat {
         var padding: CGFloat = shouldShowWindowTabBar ? 58 : 16
@@ -699,6 +704,7 @@ public struct BibleReaderView: View {
     /// Main reader layout before transient overlays and presentation modifiers are attached.
     @ViewBuilder
     private var readerScreenContent: some View {
+        let surfacePalette = readerThemeSurfacePalette
         VStack(spacing: 0) {
             // Document header bar — hidden in fullscreen mode
             if !isFullScreen {
@@ -721,12 +727,15 @@ public struct BibleReaderView: View {
             // Bottom window tab bar — hidden in fullscreen mode
             if shouldShowWindowTabBar {
                 WindowTabBar(
+                    surfacePalette: surfacePalette,
                     onShowToast: showWindowTabToast,
                     onShowBookChooser: { presentBookChooser(from: windowManager.activeWindow?.id) },
                     onGoToTypedRef: navigateWindowTabReference
                 )
             }
         }
+        .foregroundStyle(surfacePalette.foregroundColor)
+        .background(surfacePalette.backgroundColor.ignoresSafeArea())
     }
 
     /// Floating current-reference capsule shown during fullscreen reading.
@@ -1821,6 +1830,7 @@ public struct BibleReaderView: View {
             mode: documentHeaderMode(for: controller),
             currentReference: currentReference,
             avoidanceInsets: readerWindowControlsAvoidanceInsets,
+            surfacePalette: readerThemeSurfacePalette,
             onOpenNavigationDrawer: {
                 withAnimation(.easeInOut(duration: 0.2)) {
                     showReaderNavigationDrawer = true
