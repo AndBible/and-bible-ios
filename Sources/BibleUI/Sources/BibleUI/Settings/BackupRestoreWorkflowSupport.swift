@@ -384,6 +384,8 @@ extension AndroidBackupResetCategory {
             return String(localized: "settings", defaultValue: "Application Preferences")
         case .myDocuments:
             return String(localized: "my_documents_title", defaultValue: "My Documents")
+        case .aiSettings:
+            return String(localized: "ai_settings_sync_title", defaultValue: "AI Settings")
         case .progress:
             return String(localized: "progress_sync_title", defaultValue: "Reading Progress")
         }

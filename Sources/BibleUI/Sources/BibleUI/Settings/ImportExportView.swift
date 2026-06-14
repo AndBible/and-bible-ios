@@ -215,10 +215,9 @@ public struct ImportExportView: View {
     }
 
     /**
-     Android reset categories with safe iOS storage equivalents.
+     Android reset categories with safe iOS storage equivalents or preserved Android-owned state.
 
-     - Returns: Reset buttons in Android's BackupActivity order, omitting AI Settings until iOS has
-       a real durable AI settings store.
+     - Returns: Reset buttons in Android's BackupActivity order.
      - Side effects: none.
      - Failure modes: none.
      */
@@ -230,6 +229,7 @@ public struct ImportExportView: View {
             .repositories,
             .applicationPreferences,
             .myDocuments,
+            .aiSettings,
             .progress,
         ]
     }

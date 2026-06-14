@@ -485,6 +485,130 @@ extension AndBibleTests {
     }
 
     /**
+     Verifies Android AI Settings databases are preserved as Android-owned state.
+
+     Setup:
+     - imports an Android `ai_settings.sqlite3` database through manual database restore
+     - exports a new manual database backup through the same service instance
+
+     Expected result:
+     - AI Settings is exposed as a supported restore-only category
+     - Import mode is rejected because Android treats this database as replacement-only
+     - the exported `ai_settings.sqlite3` bytes match the restored Android database exactly
+
+     Failure meaning:
+     - iOS would either keep treating a real Android backup category as unsupported or would invent
+       merge semantics that Android does not provide for this database.
+     */
+    func testAndroidDatabaseBackupRestoreAiSettingsPreservesAndroidOwnedDatabaseForRoundTrip() throws {
+        let container = try makeAndroidDatabaseBackupExportModelContainer()
+        let modelContext = ModelContext(container)
+        let settingsStore = SettingsStore(modelContext: modelContext)
+        let preservedRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("android-ai-settings-preserved-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: preservedRoot) }
+        let preservedStore = AndroidDatabaseBackupPreservedDatabaseStore(rootDirectory: preservedRoot)
+        let aiSettingsDatabaseURL = try makeEmptySQLiteDatabase(userVersion: 22)
+        let aiSettingsBytes = try Data(contentsOf: aiSettingsDatabaseURL)
+        let archiveData = try makeAndroidDatabaseBackupArchiveData(
+            databaseURLsByName: [
+                "ai_settings.sqlite3": aiSettingsDatabaseURL,
+            ],
+            contains: [.aiSettings]
+        )
+        let service = AndroidDatabaseBackupService(preservedDatabaseStore: preservedStore)
+        let archive = try service.loadArchive(from: archiveData)
+        defer { service.cleanup(archive) }
+        let section = try XCTUnwrap(archive.sections.first { $0.category == .aiSettings })
+
+        XCTAssertEqual(section.support, .supported)
+        XCTAssertEqual(AndroidDatabaseBackupCategory.aiSettings.supportedApplyModes, [.restore])
+        XCTAssertThrowsError(
+            try service.apply(
+                archive: archive,
+                selections: [.init(category: .aiSettings, mode: .import)],
+                modelContext: modelContext,
+                settingsStore: settingsStore
+            )
+        ) { error in
+            XCTAssertEqual(
+                error as? AndroidDatabaseBackupError,
+                .unsupportedSelectedSection(
+                    .aiSettings,
+                    "AI Settings can only be restored because Android treats ai_settings.sqlite3 as a restore-only database."
+                )
+            )
+        }
+
+        let applyReport = try service.apply(
+            archive: archive,
+            selections: [.init(category: .aiSettings, mode: .restore)],
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+        XCTAssertEqual(applyReport.sections, [
+            AndroidDatabaseBackupAppliedSectionReport(category: .aiSettings, mode: .restore, summary: "1 database"),
+        ])
+
+        let export = try service.exportArchive(modelContext: modelContext, settingsStore: settingsStore)
+        let entriesByName = Dictionary(uniqueKeysWithValues: try ZipArchiveReader.entries(in: export.data).map { ($0.name, $0.data) })
+
+        XCTAssertEqual(
+            export.categories,
+            [.bookmarks, .readingPlans, .workspaces, .repositories, .settings, .aiSettings, .myDocuments, .progress]
+        )
+        XCTAssertEqual(entriesByName["db/ai_settings.sqlite3"], aiSettingsBytes)
+        let manifestData = try XCTUnwrap(entriesByName["AndBibleBackupManifest.json"])
+        let manifest = try XCTUnwrap(JSONSerialization.jsonObject(with: manifestData) as? [String: Any])
+        XCTAssertEqual(
+            manifest["contains"] as? [String],
+            export.categories.map(\.rawValue)
+        )
+    }
+
+    /**
+     Verifies Android BackupActivity reset parity for preserved AI Settings.
+
+     Setup:
+     - stores an Android AI Settings database through the preservation store
+     - runs the native reset service for the AI Settings category
+     - exports a manual database backup afterward
+
+     Expected result:
+     - reset removes the preserved Android-owned database
+     - later exports omit `AI_SETTINGS` rather than emitting a fake empty database
+
+     Failure meaning:
+     - reset would either leave stale Android-only data behind or export placeholder data that does
+       not correspond to any real iOS/Android state.
+     */
+    func testAndroidBackupResetAiSettingsRemovesPreservedAndroidDatabase() throws {
+        let container = try makeAndroidDatabaseBackupExportModelContainer()
+        let modelContext = ModelContext(container)
+        let settingsStore = SettingsStore(modelContext: modelContext)
+        let preservedRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("android-ai-settings-reset-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: preservedRoot) }
+        let preservedStore = AndroidDatabaseBackupPreservedDatabaseStore(rootDirectory: preservedRoot)
+        let aiSettingsDatabaseURL = try makeEmptySQLiteDatabase(userVersion: 22)
+        try preservedStore.restoreDatabase(from: aiSettingsDatabaseURL, category: .aiSettings)
+
+        let resetReport = try AndroidBackupResetService(preservedDatabaseStore: preservedStore).reset(
+            .aiSettings,
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+        let export = try AndroidDatabaseBackupService(preservedDatabaseStore: preservedStore)
+            .exportArchive(modelContext: modelContext, settingsStore: settingsStore)
+        let entriesByName = Dictionary(uniqueKeysWithValues: try ZipArchiveReader.entries(in: export.data).map { ($0.name, $0.data) })
+
+        XCTAssertEqual(resetReport.category, .aiSettings)
+        XCTAssertFalse(preservedStore.hasDatabase(for: .aiSettings))
+        XCTAssertFalse(export.categories.contains(.aiSettings))
+        XCTAssertNil(entriesByName["db/ai_settings.sqlite3"])
+    }
+
+    /**
      Verifies Android-parity restore semantics for a selected database backup section.
 
      Setup:
@@ -1736,22 +1860,21 @@ extension AndBibleTests {
     }
 
     /**
-     Verifies that unsupported Android backup categories keep their unsupported-category reason even
-     when their SQLite schema version is newer than iOS recognizes.
+     Verifies supported preserved Android databases still obey Android schema version gates.
 
      Setup:
-     - builds an Android AI Settings database, which iOS intentionally cannot map yet
-     - sets its SQLite `user_version` above the known Android Settings schema version
+     - builds an Android AI Settings database with a `user_version` newer than this build supports
+     - loads it through the manual database backup parser
 
      Expected result:
      - the archive still exposes the AI Settings section
-     - the section reason says iOS lacks a safe mapper rather than implying a version-only blocker
+     - the section is blocked by version, not hidden or treated as an unsupported category
 
      Failure meaning:
-     - the section picker would mislead users into thinking a future iOS version could restore the
-       category merely by recognizing the schema version, even though the category has no mapper.
+     - iOS could accept an Android-owned database that Android itself would consider newer than the
+       local restore implementation understands.
      */
-    func testAndroidDatabaseBackupUnsupportedCategoriesIgnoreVersionGate() throws {
+    func testAndroidDatabaseBackupPreservedCategoriesObeyVersionGate() throws {
         let settingsDatabaseURL = try makeEmptySQLiteDatabase(userVersion: 99)
         let archiveData = try makeAndroidDatabaseBackupArchiveData(
             databaseURLsByName: [
@@ -1764,7 +1887,7 @@ extension AndBibleTests {
 
         XCTAssertEqual(
             archive.sections.first { $0.category == .aiSettings }?.support,
-            .unsupportedCategory("iOS does not yet have a safe mapper for Android AI Settings data.")
+            .unsupportedVersion(version: 99, supported: 22)
         )
     }
 

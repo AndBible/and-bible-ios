@@ -143,9 +143,9 @@ public enum AndroidDatabaseBackupCategory: String, CaseIterable, Identifiable, S
         switch self {
         case .bookmarks, .workspaces, .readingPlans, .myDocuments, .progress:
             [.restore, .import]
-        case .settings, .repositories:
+        case .settings, .repositories, .aiSettings:
             [.restore]
-        case .modules, .epubs, .aiSettings:
+        case .modules, .epubs:
             []
         }
     }
@@ -628,8 +628,8 @@ public final class AndroidDatabaseBackupService {
     /// Manifest filename used by Android database and module backup archives.
     private static let manifestFileName = "AndBibleBackupManifest.json"
 
-    /// Supported category databases iOS can currently materialize into Android-compatible backups.
-    private static let exportableDatabaseCategories: [AndroidDatabaseBackupCategory] = [
+    /// Semantic category databases iOS can materialize directly from native state.
+    private static let semanticExportableDatabaseCategories: [AndroidDatabaseBackupCategory] = [
         .bookmarks,
         .readingPlans,
         .workspaces,
@@ -703,6 +703,7 @@ public final class AndroidDatabaseBackupService {
     private let myDocumentRestoreService: RemoteSyncMyDocumentRestoreService
     private let myDocumentSnapshotService: RemoteSyncMyDocumentSnapshotService
     private let repositorySourceManager: RepositorySourceManager
+    private let preservedDatabaseStore: AndroidDatabaseBackupPreservedDatabaseStore
 
     /**
      Creates an Android database backup service.
@@ -718,6 +719,8 @@ public final class AndroidDatabaseBackupService {
        - myDocumentRestoreService: My Documents restore engine for Android `mydocuments.sqlite3`.
        - myDocumentSnapshotService: My Documents snapshot engine used for import merges.
        - repositorySourceManager: Repository source manager used for Android `repositories.sqlite3`.
+       - preservedDatabaseStore: Store used to preserve Android-owned databases without native iOS
+         semantic models, currently Android `ai_settings.sqlite3`.
      - Side effects: none.
      - Failure modes: This initializer cannot fail.
      */
@@ -731,7 +734,8 @@ public final class AndroidDatabaseBackupService {
         workspaceRestoreService: RemoteSyncWorkspaceRestoreService = RemoteSyncWorkspaceRestoreService(),
         myDocumentRestoreService: RemoteSyncMyDocumentRestoreService = RemoteSyncMyDocumentRestoreService(),
         myDocumentSnapshotService: RemoteSyncMyDocumentSnapshotService = RemoteSyncMyDocumentSnapshotService(),
-        repositorySourceManager: RepositorySourceManager = RepositorySourceManager()
+        repositorySourceManager: RepositorySourceManager = RepositorySourceManager(),
+        preservedDatabaseStore: AndroidDatabaseBackupPreservedDatabaseStore = AndroidDatabaseBackupPreservedDatabaseStore()
     ) {
         self.fileManager = fileManager
         self.temporaryDirectory = temporaryDirectory ?? fileManager.temporaryDirectory
@@ -743,6 +747,7 @@ public final class AndroidDatabaseBackupService {
         self.myDocumentRestoreService = myDocumentRestoreService
         self.myDocumentSnapshotService = myDocumentSnapshotService
         self.repositorySourceManager = repositorySourceManager
+        self.preservedDatabaseStore = preservedDatabaseStore
     }
 
     /**
@@ -797,9 +802,10 @@ public final class AndroidDatabaseBackupService {
         modelContext: ModelContext,
         settingsStore: SettingsStore
     ) throws -> AndroidDatabaseBackupFileExport {
+        let exportCategories = exportableDatabaseCategories()
         let manifest = ExportManifestDTO(
             backupType: "DB_BACKUP",
-            contains: Self.exportableDatabaseCategories,
+            contains: exportCategories,
             manifestVersion: 1
         )
         let manifestData = try JSONEncoder().encode(manifest)
@@ -813,7 +819,7 @@ public final class AndroidDatabaseBackupService {
             }
         }
 
-        for category in Self.exportableDatabaseCategories {
+        for category in exportCategories {
             guard let databaseFileName = category.databaseFileName else {
                 continue
             }
@@ -843,9 +849,19 @@ public final class AndroidDatabaseBackupService {
         return AndroidDatabaseBackupFileExport(
             fileName: Self.databaseBackupFileName,
             fileURL: archiveURL,
-            categories: Self.exportableDatabaseCategories,
+            categories: exportCategories,
             entryCount: entries.count
         )
+    }
+
+    private func exportableDatabaseCategories() -> [AndroidDatabaseBackupCategory] {
+        var categories = Self.semanticExportableDatabaseCategories
+        guard preservedDatabaseStore.hasDatabase(for: .aiSettings),
+              let insertionIndex = categories.firstIndex(of: .myDocuments) else {
+            return categories
+        }
+        categories.insert(.aiSettings, at: insertionIndex)
+        return categories
     }
 
     private func buildExportDatabase(
@@ -885,7 +901,16 @@ public final class AndroidDatabaseBackupService {
             let databaseURL = temporaryURL(prefix: "android-database-backup-progress-", suffix: "-\(databaseFileName)")
             try AndroidDatabaseBackupProgressMapper.writeDatabase(at: databaseURL, settingsStore: settingsStore)
             return databaseURL
-        case .modules, .epubs, .aiSettings:
+        case .aiSettings:
+            let databaseURL = temporaryURL(prefix: "android-database-backup-ai-settings-", suffix: "-\(databaseFileName)")
+            guard try preservedDatabaseStore.copyDatabase(for: .aiSettings, to: databaseURL) != nil else {
+                throw AndroidDatabaseBackupError.unsupportedSelectedSection(
+                    category,
+                    "No preserved Android \(category.displayName) database is available to export."
+                )
+            }
+            return databaseURL
+        case .modules, .epubs:
             throw AndroidDatabaseBackupError.unsupportedSelectedSection(
                 category,
                 "iOS does not yet have an export mapper for Android \(category.displayName) data."
@@ -1480,7 +1505,13 @@ public final class AndroidDatabaseBackupService {
                 settingsStore: settingsStore
             )
             return "\(report.readingCount) readings, \(report.memorizedVerseCount) memorized verses, \(report.targetCount) targets"
-        case .modules, .epubs, .aiSettings:
+        case .aiSettings:
+            _ = try preservedDatabaseStore.restoreDatabase(
+                from: section.databaseFileURL,
+                category: .aiSettings
+            )
+            return "1 database"
+        case .modules, .epubs:
             throw AndroidDatabaseBackupError.unsupportedSelectedSection(
                 section.category,
                 section.support.explanation ?? "Unsupported by this iOS build."
