@@ -86,15 +86,16 @@ extension AndBibleUITests {
     }
 
     /**
-     Verifies that the reader overflow All Text Options action opens window text-display settings
-     instead of the left-drawer Application Preferences destination.
+     Verifies that Android's main reader All Text Options action opens workspace text-display
+     settings instead of the left-drawer Application Preferences destination.
      *
      * - Side effects:
      *   - launches the reader shell with deterministic in-memory data
      *   - opens the real overflow menu action identified by Android's All Text Options row
-     *   - pushes the native Text Display settings destination
+     *   - pushes the native workspace-scoped Text Display settings destination
      * - Failure modes:
      *   - fails if the overflow action is routed to global Application Preferences
+     *   - fails if the overflow action is routed to window-scoped Text Display settings
      *   - fails if the Text Display settings screen never becomes ready
      */
     func testAllTextOptionsOpensReaderTextDisplaySurface() {
@@ -120,6 +121,107 @@ extension AndBibleUITests {
             unresolvedElement("settingsForm", in: app).exists,
             "Expected All Text Options to open the Text Display destination, not Application Preferences."
         )
+    }
+
+    /**
+     Verifies Android's workspace parent-link behavior from the reader All Text Options route.
+
+     Android shows only the global parent link from workspace-scoped text-display settings. Tapping
+     that link opens global text options, where the parent-link category is hidden because global is
+     the root scope.
+     *
+     * - Side effects:
+     *   - launches the app and opens the production reader All Text Options route
+     *   - taps the Global text options parent link inside Text Display settings
+     * - Failure modes:
+     *   - fails if workspace scope exposes the window-only workspace parent link
+     *   - fails if the global parent link is missing or does not open `scope=global`
+     *   - fails if global scope still exposes parent links
+     */
+    func testWorkspaceTextOptionsParentLinkOpensGlobalScope() {
+        let app = makeApp()
+        app.launch()
+
+        _ = openAllTextOptions(in: app)
+        waitForElementValue("textDisplaySettingsScreen", toContain: "scope=workspace", in: app, timeout: 10)
+        XCTAssertFalse(
+            unresolvedElement("textDisplayOpenWorkspaceSettingsButton", in: app).exists,
+            "Workspace text options must not show Android's window-only workspace parent link."
+        )
+
+        let globalLink = requireElement("textDisplayOpenGlobalSettingsButton", in: app, timeout: 10)
+        tapElementReliably(globalLink, timeout: 10)
+        waitForElementValue("textDisplaySettingsScreen", toContain: "scope=global", in: app, timeout: 10)
+        XCTAssertFalse(unresolvedElement("textDisplayOpenWorkspaceSettingsButton", in: app).exists)
+        XCTAssertFalse(unresolvedElement("textDisplayOpenGlobalSettingsButton", in: app).exists)
+    }
+
+    /**
+     Verifies Android's per-window Text Options route and parent-link ladder.
+
+     Android's pane/window menu opens window-scoped text options. That screen shows both parent
+     links; the workspace link then opens workspace-scoped settings with only the global parent
+     link visible.
+     *
+     * - Side effects:
+     *   - launches the app, creates a second reader window through the tab bar, and opens the
+     *     active pane hamburger menu
+     *   - activates the pane-level All text options command
+     *   - taps the workspace parent link from the window-scoped Text Display screen
+     * - Failure modes:
+     *   - fails if pane All text options routes to workspace/global scope
+     *   - fails if window scope lacks either Android parent link
+     *   - fails if the workspace parent link does not navigate to `scope=workspace`
+     */
+    func testPaneAllTextOptionsOpensWindowScopeAndWorkspaceParentLink() {
+        let app = makeApp()
+        app.launch()
+
+        addWindowTab(expectingOrder: 1, in: app, timeout: 15)
+        let paneMenu = requireElement("windowPaneMenuButton::1", in: app, timeout: 10)
+        tapElementReliably(paneMenu, timeout: 10)
+        let textOptionsAction = requireElement("windowPaneTextOptionsButton", in: app, timeout: 10)
+        tapElementReliably(textOptionsAction, timeout: 10)
+
+        waitForElementValue("textDisplaySettingsScreen", toContain: "scope=window", in: app, timeout: 10)
+        let workspaceLink = requireElement("textDisplayOpenWorkspaceSettingsButton", in: app, timeout: 10)
+        XCTAssertTrue(requireElement("textDisplayOpenGlobalSettingsButton", in: app, timeout: 10).exists)
+
+        tapElementReliably(workspaceLink, timeout: 10)
+        waitForElementValue("textDisplaySettingsScreen", toContain: "scope=workspace", in: app, timeout: 10)
+        XCTAssertFalse(unresolvedElement("textDisplayOpenWorkspaceSettingsButton", in: app).exists)
+        XCTAssertTrue(requireElement("textDisplayOpenGlobalSettingsButton", in: app, timeout: 10).exists)
+    }
+
+    /**
+     Verifies Android's Application Preferences Global text options route.
+
+     The Android root Settings screen exposes `global_text_display_settings` under Look & feel.
+     iOS mirrors that shortcut, and opening it must show global scope with no parent links.
+     *
+     * - Side effects:
+     *   - launches the app and opens Application Preferences from reader actions
+     *   - activates the Global text options row
+     * - Failure modes:
+     *   - fails if the global settings shortcut is metadata-only and not user-navigable
+     *   - fails if Application Preferences opens workspace/window text options instead of global
+     *   - fails if global scope exposes parent links
+     */
+    func testApplicationPreferencesGlobalTextOptionsOpenGlobalScope() {
+        let app = makeApp()
+        app.launch()
+
+        _ = openSettingsDestination(
+            linkIdentifier: "settingsGlobalTextOptionsLink",
+            destinationIdentifier: "textDisplaySettingsScreen",
+            readinessIdentifiers: ["textDisplayFontFamilyButton"],
+            in: app,
+            destinationTimeout: 20
+        )
+
+        waitForElementValue("textDisplaySettingsScreen", toContain: "scope=global", in: app, timeout: 10)
+        XCTAssertFalse(unresolvedElement("textDisplayOpenWorkspaceSettingsButton", in: app).exists)
+        XCTAssertFalse(unresolvedElement("textDisplayOpenGlobalSettingsButton", in: app).exists)
     }
 
     /**

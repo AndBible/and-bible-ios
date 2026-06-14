@@ -2677,19 +2677,12 @@ public struct BibleReaderView: View {
         }
 
         let previousWorkspaceSettings = resolvedWorkspaceDisplaySettings(for: workspace)
-        let hadWorkspaceThemeColors = workspace.textDisplaySettings?.hasThemeColorOverrides ?? false
-        let changedThemeColors = Self.themeColorsDiffer(workspaceDisplaySettings, previousWorkspaceSettings)
-        let shouldPersistThemeColors = hadWorkspaceThemeColors || changedThemeColors
-        var workspaceScopedSettings = workspaceDisplaySettings
-        if !shouldPersistThemeColors {
-            workspaceScopedSettings.clearThemeColors()
-        }
-        _ = workspaceScopedSettings.clearRedundantOverrides(matching: globalDisplaySettings)
-        if shouldPersistThemeColors {
-            workspaceScopedSettings.restoreThemeColors(from: workspaceDisplaySettings)
-        }
-
-        workspace.textDisplaySettings = workspaceScopedSettings
+        workspace.textDisplaySettings = WorkspaceTextDisplaySettingsPropagation.workspaceScopedSettings(
+            editorSettings: workspaceDisplaySettings,
+            previousResolvedSettings: previousWorkspaceSettings,
+            existingWorkspaceSettings: workspace.textDisplaySettings,
+            globalSettings: globalDisplaySettings
+        )
 
         let currentWorkspaceParentSettings = TextDisplaySettings.fullyResolved(
             window: nil,
@@ -2697,15 +2690,17 @@ public struct BibleReaderView: View {
             global: globalDisplaySettings
         )
         for window in workspace.windows ?? [] {
-            guard var windowSettings = window.pageManager?.textDisplaySettings else {
+            guard let windowSettings = window.pageManager?.textDisplaySettings else {
                 continue
             }
-            if windowSettings.clearOverridesMatchingParent(
-                currentWorkspaceParentSettings,
-                changedFrom: previousWorkspaceSettings,
-                to: workspaceDisplaySettings
-            ) {
-                window.pageManager?.textDisplaySettings = windowSettings
+            let propagatedSettings = WorkspaceTextDisplaySettingsPropagation.windowSettingsAfterWorkspaceChange(
+                windowSettings,
+                currentWorkspaceParentSettings: currentWorkspaceParentSettings,
+                previousWorkspaceSettings: previousWorkspaceSettings,
+                currentWorkspaceEditorSettings: workspaceDisplaySettings
+            )
+            if propagatedSettings != windowSettings {
+                window.pageManager?.textDisplaySettings = propagatedSettings
             }
         }
 

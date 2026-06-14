@@ -325,6 +325,7 @@ struct BibleWindowPane: View {
                 windowManager.activeWindow = window
                 onShowWindowTextOptions?()
             }
+            .accessibilityIdentifier("windowPaneTextOptionsButton")
 
             Divider()
 
@@ -340,6 +341,7 @@ struct BibleWindowPane: View {
                 .frame(width: 28, height: 28)
                 .background(surfacePalette.controlFillColor, in: RoundedRectangle(cornerRadius: 6))
         }
+        .accessibilityIdentifier("windowPaneMenuButton::\(window.orderNumber)")
         .simultaneousGesture(TapGesture().onEnded {
             windowManager.activeWindow = window
         })
