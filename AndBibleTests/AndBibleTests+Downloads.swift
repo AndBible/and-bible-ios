@@ -477,6 +477,66 @@ extension AndBibleTests {
         XCTAssertEqual(reader.getVerse(book: 10, chapter: 1, verse: 1), "Alussa loi Jumala")
     }
 
+    /**
+     Local SWORD ZIP install accepts Android-style deflated entries with data descriptors.
+
+     Android's `ZipOutputStream` writes deflated entries before it knows their final sizes, leaving
+     zero sizes in local headers and publishing the real sizes in the central directory and trailing
+     data descriptors. iOS must read the central directory, matching Android's `ZipInputStream`,
+     when installing user-opened SWORD ZIPs and module-backup shaped archives.
+
+     Failure means valid Android-created ZIPs can surface as misleading decompression failures or
+     install incomplete module payloads.
+     */
+    func testModuleRepositoryInstallFromZipAcceptsAndroidDataDescriptorEntries() throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let swordDir = tempDir.appendingPathComponent("sword", isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let conf = Data(
+            """
+            [FINRK]
+            Description=Finnish RK
+            Category=Biblical Texts
+            Lang=fi
+            ModDrv=RawText
+            DataPath=./modules/texts/rawtext/finrk/
+            Version=1.0
+            InstallSize=1
+            """.utf8
+        )
+        let moduleData = Data("genesis-through-revelation".utf8)
+        let zipData = try makeModuleRepositoryZipWithDataDescriptors([
+            (
+                name: "mods.d/finrk.conf",
+                body: conf,
+                compressedBody: makeModuleRepositoryRawDeflateData(conf)
+            ),
+            (
+                name: "modules/texts/rawtext/finrk/ot",
+                body: moduleData,
+                compressedBody: makeModuleRepositoryRawDeflateData(moduleData)
+            ),
+        ])
+        let archiveURL = tempDir.appendingPathComponent("FinRK.zip")
+        try zipData.write(to: archiveURL)
+        let repository = ModuleRepository(basePath: tempDir.path, swordPath: swordDir.path)
+
+        let installedModuleName = try repository.installFromZip(at: archiveURL)
+
+        XCTAssertEqual(installedModuleName, "FINRK")
+        XCTAssertEqual(
+            try Data(contentsOf: swordDir.appendingPathComponent("mods.d/finrk.conf")),
+            conf
+        )
+        XCTAssertEqual(
+            try Data(contentsOf: swordDir.appendingPathComponent("modules/texts/rawtext/finrk/ot")),
+            moduleData
+        )
+    }
+
     func testModuleRepositoryDownloadFailsWithoutInstalledMarkerWhenRequiredFileFails() async throws {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -1553,6 +1613,103 @@ extension AndBibleTests {
         }
 
         let centralDirectoryOffset = UInt32(data.count)
+        data.append(centralDirectory)
+        data.append(contentsOf: [0x50, 0x4b, 0x05, 0x06])
+        appendModuleRepositoryZipUInt16(0, to: &data)
+        appendModuleRepositoryZipUInt16(0, to: &data)
+        appendModuleRepositoryZipUInt16(UInt16(entries.count), to: &data)
+        appendModuleRepositoryZipUInt16(UInt16(entries.count), to: &data)
+        appendModuleRepositoryZipUInt32(UInt32(centralDirectory.count), to: &data)
+        appendModuleRepositoryZipUInt32(centralDirectoryOffset, to: &data)
+        appendModuleRepositoryZipUInt16(0, to: &data)
+
+        return data
+    }
+
+    /**
+     Builds a raw-deflated ZIP archive whose local headers use data descriptors for sizes.
+
+     Android's `ZipOutputStream` emits this shape for deflated entries. The helper mirrors that
+     format so `ModuleRepository.installFromZip(at:)` tests cover the same central-directory path as
+     user-supplied Android module backups without depending on shell ZIP tools.
+
+     - Parameter entries: ZIP entry names, uncompressed payloads, and raw-deflated payloads.
+     - Returns: ZIP bytes with descriptor-based local headers and complete central-directory sizes.
+     - Side effects: none.
+     - Failure modes: Throws if a fixture value exceeds the non-ZIP64 test helper limits.
+     */
+    private func makeModuleRepositoryZipWithDataDescriptors(
+        _ entries: [(name: String, body: Data, compressedBody: Data)]
+    ) throws -> Data {
+        guard entries.count <= Int(UInt16.max) else {
+            throw ModuleRepositoryDownloadTestError.compressionFailed
+        }
+
+        var data = Data()
+        var centralDirectory = Data()
+        var localHeaderOffsets: [UInt32] = []
+
+        for entry in entries {
+            guard let nameData = entry.name.data(using: .utf8),
+                  nameData.count <= Int(UInt16.max),
+                  entry.body.count <= Int(UInt32.max),
+                  entry.compressedBody.count <= Int(UInt32.max),
+                  data.count <= Int(UInt32.max) else {
+                throw ModuleRepositoryDownloadTestError.compressionFailed
+            }
+            let localHeaderOffset = UInt32(data.count)
+            localHeaderOffsets.append(localHeaderOffset)
+            let checksum = moduleRepositoryZipCRC32(entry.body)
+
+            data.append(contentsOf: [0x50, 0x4b, 0x03, 0x04])
+            appendModuleRepositoryZipUInt16(20, to: &data)
+            appendModuleRepositoryZipUInt16(0x0008, to: &data)
+            appendModuleRepositoryZipUInt16(8, to: &data)
+            appendModuleRepositoryZipUInt16(0, to: &data)
+            appendModuleRepositoryZipUInt16(0, to: &data)
+            appendModuleRepositoryZipUInt32(0, to: &data)
+            appendModuleRepositoryZipUInt32(0, to: &data)
+            appendModuleRepositoryZipUInt32(0, to: &data)
+            appendModuleRepositoryZipUInt16(UInt16(nameData.count), to: &data)
+            appendModuleRepositoryZipUInt16(0, to: &data)
+            data.append(nameData)
+            data.append(entry.compressedBody)
+            appendModuleRepositoryZipUInt32(0x0807_4b50, to: &data)
+            appendModuleRepositoryZipUInt32(checksum, to: &data)
+            appendModuleRepositoryZipUInt32(UInt32(entry.compressedBody.count), to: &data)
+            appendModuleRepositoryZipUInt32(UInt32(entry.body.count), to: &data)
+        }
+
+        guard data.count <= Int(UInt32.max) else {
+            throw ModuleRepositoryDownloadTestError.compressionFailed
+        }
+        let centralDirectoryOffset = UInt32(data.count)
+        for (index, entry) in entries.enumerated() {
+            guard let nameData = entry.name.data(using: .utf8) else {
+                throw ModuleRepositoryDownloadTestError.compressionFailed
+            }
+            let checksum = moduleRepositoryZipCRC32(entry.body)
+
+            centralDirectory.append(contentsOf: [0x50, 0x4b, 0x01, 0x02])
+            appendModuleRepositoryZipUInt16(20, to: &centralDirectory)
+            appendModuleRepositoryZipUInt16(20, to: &centralDirectory)
+            appendModuleRepositoryZipUInt16(0x0008, to: &centralDirectory)
+            appendModuleRepositoryZipUInt16(8, to: &centralDirectory)
+            appendModuleRepositoryZipUInt16(0, to: &centralDirectory)
+            appendModuleRepositoryZipUInt16(0, to: &centralDirectory)
+            appendModuleRepositoryZipUInt32(checksum, to: &centralDirectory)
+            appendModuleRepositoryZipUInt32(UInt32(entry.compressedBody.count), to: &centralDirectory)
+            appendModuleRepositoryZipUInt32(UInt32(entry.body.count), to: &centralDirectory)
+            appendModuleRepositoryZipUInt16(UInt16(nameData.count), to: &centralDirectory)
+            appendModuleRepositoryZipUInt16(0, to: &centralDirectory)
+            appendModuleRepositoryZipUInt16(0, to: &centralDirectory)
+            appendModuleRepositoryZipUInt16(0, to: &centralDirectory)
+            appendModuleRepositoryZipUInt16(0, to: &centralDirectory)
+            appendModuleRepositoryZipUInt32(0, to: &centralDirectory)
+            appendModuleRepositoryZipUInt32(localHeaderOffsets[index], to: &centralDirectory)
+            centralDirectory.append(nameData)
+        }
+
         data.append(centralDirectory)
         data.append(contentsOf: [0x50, 0x4b, 0x05, 0x06])
         appendModuleRepositoryZipUInt16(0, to: &data)

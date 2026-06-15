@@ -99,6 +99,12 @@ public struct ExternalDocumentImportService: Sendable {
     /// Closure used to install Android-style app-owned TTF font files; injectable for tests.
     public typealias FontInstaller = @Sendable (URL, String?) throws -> String
 
+    /// Closure used to restore Android `.abmd.zip` module backups; injectable for tests.
+    public typealias AndroidModuleBackupInstaller = @Sendable (URL) throws -> AndroidModuleBackupRestoreReport
+
+    /// Closure used to detect Android module backups when provider filenames are rewritten.
+    public typealias AndroidModuleBackupDetector = @Sendable (URL) -> Bool
+
     /// Closure used to detect EPUB files that arrive through ZIP-looking providers.
     public typealias EpubArchiveDetector = @Sendable (URL) -> Bool
 
@@ -123,6 +129,12 @@ public struct ExternalDocumentImportService: Sendable {
     /// TTF font installer called for Android's font import path.
     private let fontInstaller: FontInstaller
 
+    /// Android module-backup installer called for `.abmd.zip` files.
+    private let androidModuleBackupInstaller: AndroidModuleBackupInstaller
+
+    /// Android module-backup detector called for ZIP files whose names are not enough.
+    private let androidModuleBackupDetector: AndroidModuleBackupDetector
+
     /// EPUB detector used for Android's ZIP-to-EPUB fallback behavior.
     private let epubArchiveDetector: EpubArchiveDetector
 
@@ -137,6 +149,10 @@ public struct ExternalDocumentImportService: Sendable {
               be reopened.
           - fontInstaller: Installer for TTF font files. The default copies the font into the SWORD
               `ttf` directory and writes Android-style addon metadata.
+          - androidModuleBackupInstaller: Installer for Android module backup archives. The default
+              restores supported SWORD module content through `AndroidModuleBackupService`.
+          - androidModuleBackupDetector: Read-only archive classifier for ZIPs whose provider
+              filenames no longer preserve Android's `.abmd.zip` suffix.
           - epubArchiveDetector: ZIP inspector used to reroute EPUB archives that arrive as ZIP.
       - Side effects: none during initialization; installer closures perform file I/O when invoked.
       - Failure modes: This initializer cannot fail.
@@ -152,12 +168,51 @@ public struct ExternalDocumentImportService: Sendable {
         fontInstaller: @escaping FontInstaller = { url, displayName in
             try TtfFontRepository().installFont(from: url, displayName: displayName).fontName
         },
+        androidModuleBackupInstaller: @escaping AndroidModuleBackupInstaller = { url in
+            try AndroidModuleBackupService().restoreArchive(fromArchiveAt: url, allowOverwritingExistingFiles: true)
+        },
+        androidModuleBackupDetector: AndroidModuleBackupDetector? = nil,
         epubArchiveDetector: EpubArchiveDetector? = nil
     ) {
         self.moduleInstaller = moduleInstaller
         self.epubInstaller = epubInstaller
         self.fontInstaller = fontInstaller
+        self.androidModuleBackupInstaller = androidModuleBackupInstaller
+        self.androidModuleBackupDetector = androidModuleBackupDetector
+            ?? Self.defaultAndroidModuleBackupDetector(_:)
         self.epubArchiveDetector = epubArchiveDetector ?? Self.defaultEpubArchiveDetector(_:)
+    }
+
+    /**
+     Default Android module-backup detector used when provider filenames have been rewritten.
+
+     - Parameter url: ZIP-like file URL.
+     - Returns: `true` when archive inspection identifies Android's `MODULE_BACKUP` contract.
+     - Side effects: Reads ZIP metadata plus manifest/config entries; does not write files.
+     - Failure modes: Non-backup archives and unreadable archives return `false`; malformed module
+       backups still return `true` so restore can surface the Android-specific error.
+     */
+    private static func defaultAndroidModuleBackupDetector(_ url: URL) -> Bool {
+        do {
+            _ = try AndroidModuleBackupService().inspectArchive(fromArchiveAt: url)
+            return true
+        } catch let error as AndroidModuleBackupError {
+            switch error {
+            case .invalidArchive, .missingManifest, .unsupportedBackupType:
+                return false
+            case .invalidManifest,
+                 .unsupportedManifestVersion,
+                 .noSupportedModules,
+                 .invalidModuleLayout,
+                 .duplicateEntry,
+                 .moduleFilesAlreadyExist,
+                 .noExportableModules,
+                 .missingExportData:
+                return true
+            }
+        } catch {
+            return false
+        }
     }
 
     /**
@@ -205,6 +260,8 @@ public struct ExternalDocumentImportService: Sendable {
         }
         return withSecurityScopedAccess(to: request.url) {
             switch documentKind(for: request) {
+            case .androidModuleBackup:
+                return installAndroidModuleBackup(at: request.url)
             case .archive:
                 return installArchive(at: request.url)
             case .epub:
@@ -244,16 +301,49 @@ public struct ExternalDocumentImportService: Sendable {
     private func documentKind(for request: ExternalDocumentImportRequest) -> ExternalDocumentKind {
         let ext = request.url.pathExtension.lowercased()
         let contentTypes = resolvedContentTypes(for: request)
+        let isZipDocument = ext == "zip" || contentTypes.contains(where: isZipContentType(_:))
+        if let displayFileName = request.displayFileName,
+           AndroidModuleBackupService.isAndroidModuleBackupFileName(displayFileName) {
+            return .androidModuleBackup
+        }
         if ext == "epub" || contentTypes.contains(where: isEpubContentType(_:)) {
             return .epub
         }
         if ext == "ttf" || contentTypes.contains(where: isFontContentType(_:)) {
             return .font
         }
-        if ext == "zip" || contentTypes.contains(where: isZipContentType(_:)) {
+        if isZipDocument {
+            if androidModuleBackupDetector(request.url) {
+                return .androidModuleBackup
+            }
             return .archive
         }
         return .unsupported
+    }
+
+    /**
+      Restores one Android module backup archive through the backup service.
+
+      Android's external install surface accepts document/module backup ZIPs alongside plain SWORD
+      ZIPs. The backup branch must run before generic ZIP installation so manifest validation,
+      unsupported Android-only payload reporting, and SWORD cache invalidation remain owned by
+      `AndroidModuleBackupService`.
+
+      - Parameter url: URL for a `.abmd.zip` archive.
+      - Returns: Android module-backup success or failure feedback.
+      - Side effects: Mutates local SWORD module storage through `AndroidModuleBackupService`.
+      - Failure modes: Installer errors are captured in the returned failure result.
+      */
+    private func installAndroidModuleBackup(at url: URL) -> ExternalDocumentImportResult {
+        do {
+            let report = try androidModuleBackupInstaller(url)
+            return .installedAndroidModuleBackup(
+                moduleNames: report.installedModuleNames,
+                installedEntryCount: report.installedEntryCount
+            )
+        } catch {
+            return .failed(message: error.localizedDescription)
+        }
     }
 
     /**
@@ -393,6 +483,7 @@ public struct ExternalDocumentImportService: Sendable {
 
 /// Internal installer branch for Android-parity external document routing.
 private enum ExternalDocumentKind {
+    case androidModuleBackup
     case archive
     case epub
     case font
@@ -456,6 +547,9 @@ public enum ExternalDocumentImportResult: Equatable, Sendable {
     /// A TTF font installed successfully; associated value is the installed font name.
     case installedFont(name: String)
 
+    /// An Android module backup restored successfully; associated values describe restored modules.
+    case installedAndroidModuleBackup(moduleNames: [String], installedEntryCount: Int)
+
     /// The file extension is not handled by iOS' implemented document installer path.
     case unsupportedFormat(fileExtension: String)
 
@@ -486,6 +580,20 @@ public enum ExternalDocumentImportResult: Equatable, Sendable {
             return String(
                 format: String(localized: "installed_font_%@", defaultValue: "Installed font: %@"),
                 name
+            )
+        case .installedAndroidModuleBackup(let moduleNames, let installedEntryCount):
+            let summary = moduleNames.isEmpty
+                ? String(
+                    format: String(localized: "installed_module_files_%d", defaultValue: "%d module files"),
+                    installedEntryCount
+                )
+                : moduleNames.joined(separator: ", ")
+            return String(
+                format: String(
+                    localized: "installed_android_module_backup_%@",
+                    defaultValue: "Installed modules: %@"
+                ),
+                summary
             )
         case .unsupportedFormat(let fileExtension):
             return String(
