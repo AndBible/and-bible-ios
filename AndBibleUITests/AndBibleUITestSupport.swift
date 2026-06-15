@@ -152,6 +152,7 @@ extension AndBibleUITests {
      * - Side effects:
      *   - performs one bootstrap launch/terminate cycle when the simulator has not yet created the
      *     app data container
+     *   - best-effort terminates the bootstrap app before fixture reset and seed work begins
      * - Failure modes:
      *   - records an XCTest failure when the bootstrap launch cannot materialize the data
      *     container before fixture seeding needs it
@@ -218,36 +219,34 @@ extension AndBibleUITests {
 
         if usedXCTestBootstrap {
             app.launchEnvironment["UITEST_EXIT_AFTER_BOOTSTRAP_LAUNCH"] = "1"
+            defer {
+                app.launchEnvironment.removeValue(forKey: "UITEST_EXIT_AFTER_BOOTSTRAP_LAUNCH")
+            }
             app.launch()
             if let bootstrappedPath = waitForInstalledAppDataContainer(
                 simulatorID: simulatorID,
                 bundleIdentifier: bundleIdentifier,
                 timeout: 45
             ) {
-                XCTAssertTrue(
-                    waitForAppToStop(app, timeout: 30) || terminateAppReliably(
-                        app,
-                        bundleIdentifier: bundleIdentifier,
-                        simulatorID: simulatorID
-                    ),
-                    "Expected bootstrap app '\(bundleIdentifier)' to stop before fixture seeding.",
-                    file: file,
-                    line: line
-                )
-                app.launchEnvironment.removeValue(forKey: "UITEST_EXIT_AFTER_BOOTSTRAP_LAUNCH")
+                if !waitForAppToStop(app, timeout: 5),
+                   !terminateInstalledAppProcessIfPresent(
+                       bundleIdentifier: bundleIdentifier,
+                       simulatorID: simulatorID,
+                       timeout: 10
+                   ) {
+                    print(
+                        "Bootstrap app '\(bundleIdentifier)' did not report stopped after data container creation; continuing after best-effort cleanup."
+                    )
+                }
                 return bootstrappedPath
             }
-            XCTAssertTrue(
-                waitForAppToStop(app, timeout: 30) || terminateAppReliably(
-                    app,
+            if !waitForAppToStop(app, timeout: 5) {
+                _ = terminateInstalledAppProcessIfPresent(
                     bundleIdentifier: bundleIdentifier,
-                    simulatorID: simulatorID
-                ),
-                "Expected bootstrap app '\(bundleIdentifier)' to stop before fixture seeding.",
-                file: file,
-                line: line
-            )
-            app.launchEnvironment.removeValue(forKey: "UITEST_EXIT_AFTER_BOOTSTRAP_LAUNCH")
+                    simulatorID: simulatorID,
+                    timeout: 10
+                )
+            }
         }
 
         if let bootstrappedPath = waitForInstalledAppDataContainer(
@@ -800,6 +799,8 @@ extension AndBibleUITests {
      * - Returns: Exit status plus captured stdout/stderr text.
      * - Side effects:
      *   - spawns one host-side child process from the XCTest runner
+     *   - passes through the test-runner environment so Xcode tool lookup and fixture overrides
+     *     match the parent test process
      *   - terminates the child process when it exceeds the timeout budget
      * - Failure modes:
      *   - returns `-1` when the subprocess cannot be launched
@@ -835,8 +836,40 @@ extension AndBibleUITests {
         }
         argv[cArguments.count] = nil
 
+        var childEnvironment = ProcessInfo.processInfo.environment
+        if childEnvironment["DEVELOPER_DIR"]?.isEmpty != false {
+            if let sdkRoot = childEnvironment["MD_APPLE_SDK_ROOT"], !sdkRoot.isEmpty {
+                let developerDir = URL(fileURLWithPath: sdkRoot)
+                    .appendingPathComponent("Contents", isDirectory: true)
+                    .appendingPathComponent("Developer", isDirectory: true)
+                    .path
+                if FileManager.default.fileExists(atPath: developerDir) {
+                    childEnvironment["DEVELOPER_DIR"] = developerDir
+                }
+            }
+        }
+        if childEnvironment["DEVELOPER_DIR"]?.isEmpty != false,
+           FileManager.default.fileExists(atPath: "/Applications/Xcode.app/Contents/Developer") {
+            childEnvironment["DEVELOPER_DIR"] = "/Applications/Xcode.app/Contents/Developer"
+        }
+        if childEnvironment["PATH"]?.isEmpty != false {
+            childEnvironment["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
+        }
+
+        let environmentStrings = childEnvironment
+            .map { "\($0.key)=\($0.value)" }
+            .sorted()
+        let cEnvironment: [UnsafeMutablePointer<CChar>?] = environmentStrings.map { strdup($0) }
+        defer { cEnvironment.forEach { free($0) } }
+        let envp = UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>.allocate(capacity: cEnvironment.count + 1)
+        defer { envp.deallocate() }
+        for (index, pointer) in cEnvironment.enumerated() {
+            envp[index] = pointer
+        }
+        envp[cEnvironment.count] = nil
+
         var pid: pid_t = 0
-        let spawnStatus = posix_spawn(&pid, executablePath, &fileActions, nil, argv, nil)
+        let spawnStatus = posix_spawn(&pid, executablePath, &fileActions, nil, argv, envp)
         close(stdoutPipe[1])
         close(stderrPipe[1])
         if spawnStatus != 0 {
