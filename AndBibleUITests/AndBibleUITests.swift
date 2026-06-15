@@ -42,13 +42,13 @@ final class AndBibleUITests: XCTestCase {
      Tears down the currently running UI-test app process after each test method.
      *
      * - Side effects:
-     *   - terminates the tracked app when it is still running so the next test gets a clean launch
+     *   - asks CoreSimulator to terminate the tracked app process so the next test gets a clean launch
      *   - clears the stored app handle for the completed test method
      * - Failure modes:
      *   - silently ignores already-stopped app processes because termination is only cleanup
      */
     override func tearDownWithError() throws {
-        if let trackedApp, trackedApp.state != .notRunning {
+        if let trackedApp {
             _ = terminateAppReliably(trackedApp)
         }
         trackedApp = nil

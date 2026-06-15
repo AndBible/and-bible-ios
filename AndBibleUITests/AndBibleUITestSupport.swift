@@ -6,12 +6,30 @@ import UIKit
 #endif
 
 extension AndBibleUITests {
+    /**
+     Creates a configured app handle for one UI-test launch.
+     *
+     * - Parameters:
+     *   - searchQuery: Optional launch-seeded search query for tests that intentionally start in
+     *     search mode.
+     *   - remoteSyncBootstrapScenario: Optional remote-sync scenario name passed to the app under
+     *     test.
+     * - Returns: A configured `XCUIApplication` that has not yet been launched by the caller.
+     * - Side effects:
+     *   - terminates any previously launched app process through CoreSimulator when possible
+     *   - assigns a fresh `UITEST_SESSION_ID` and standard locale/accessibility launch flags
+     *   - prepares the fixture scenario declared for the current test method
+     * - Failure modes:
+     *   - fixture preparation records XCTest failures when required host-side setup cannot complete
+     */
     func makeApp(
         searchQuery: String? = nil,
         remoteSyncBootstrapScenario: String? = nil
     ) -> XCUIApplication {
-        if let trackedApp, trackedApp.state != .notRunning {
+        if let trackedApp {
             _ = terminateAppReliably(trackedApp)
+        } else {
+            _ = terminateInstalledAppProcessIfPresent()
         }
         let app = XCUIApplication()
         trackedApp = app
@@ -261,19 +279,57 @@ extension AndBibleUITests {
     }
 
     /**
+     Terminates the installed app process directly through CoreSimulator.
+     *
+     * XCTest can lose a valid process handle while the simulator still has the application process
+     * alive. This helper deliberately uses the simulator host as the source of truth so a fresh
+     * `XCUIApplication.launch()` does not inherit a stale process from the previous test.
+     *
+     * - Parameters:
+     *   - bundleIdentifier: Bundle identifier of the app under test.
+     *   - simulatorID: Current simulator UDID when already known.
+     *   - timeout: Maximum time to wait for `simctl terminate`.
+     * - Returns: `true` when `simctl terminate` exits successfully.
+     * - Side effects:
+     *   - resolves the simulator UDID from the current test environment when needed
+     *   - runs `xcrun simctl terminate` against the app under test
+     * - Failure modes: Returns `false` when the simulator cannot be resolved or the host-side
+     *   terminate command reports that no matching app process was stopped.
+     */
+    @discardableResult
+    func terminateInstalledAppProcessIfPresent(
+        bundleIdentifier: String? = nil,
+        simulatorID: String? = nil,
+        timeout: TimeInterval = 10
+    ) -> Bool {
+        let resolvedBundleIdentifier = bundleIdentifier ?? currentUITestBundleIdentifier()
+        guard let resolvedSimulatorID = simulatorID ?? resolveCurrentSimulatorID() else {
+            return false
+        }
+
+        let terminateResult = runHostProcess(
+            executablePath: "/usr/bin/xcrun",
+            arguments: ["simctl", "terminate", resolvedSimulatorID, resolvedBundleIdentifier],
+            timeout: timeout
+        )
+        return terminateResult.status == 0
+    }
+
+    /**
      Terminates the app under test through CoreSimulator instead of XCTest's direct terminate path.
      *
      * XCTest's `terminate()` is not reliable for apps launched solely to materialize the simulator
-     * data container during fixture seeding. When that bootstrap launch cannot be terminated cleanly,
-     * the actual problem is not the test flow but the process-lifecycle helper. Host-side
-     * `simctl terminate` is a better source of truth because the fixture tool also runs against the
-     * simulator host, not the XCUIApplication bridge.
+     * data container during fixture seeding. It can also report `.notRunning` after losing the
+     * process ID for an app that CoreSimulator still needs to terminate before the next launch.
+     * Host-side `simctl terminate` is a better source of truth because the fixture tool and the
+     * launch preflight also run against the simulator host.
      *
      * - Parameters:
-     *   - app: Running app handle to stop.
+     *   - app: App handle to stop when XCTest still tracks it.
      *   - bundleIdentifier: Bundle identifier of the app under test.
      *   - simulatorID: Current simulator UDID when already known.
-     * - Returns: `true` when the app is already stopped or a host-side terminate succeeds.
+     * - Returns: `true` when the app is already stopped from XCTest's perspective or a host-side
+     *   terminate succeeds.
      * - Side effects:
      *   - resolves the simulator UDID from the current test environment when needed
      *   - retries `xcrun simctl terminate` a small number of times before giving up
@@ -284,24 +340,20 @@ extension AndBibleUITests {
         bundleIdentifier: String? = nil,
         simulatorID: String? = nil
     ) -> Bool {
-        if app.state == .notRunning {
-            return true
-        }
-
         let resolvedBundleIdentifier = bundleIdentifier ?? currentUITestBundleIdentifier()
         let resolvedSimulatorID = simulatorID ?? resolveCurrentSimulatorID()
+        let alreadyStopped = app.state == .notRunning
 
         guard let resolvedSimulatorID else {
-            return false
+            return alreadyStopped
         }
 
         for _ in 0..<3 {
-            let terminateResult = runHostProcess(
-                executablePath: "/usr/bin/xcrun",
-                arguments: ["simctl", "terminate", resolvedSimulatorID, resolvedBundleIdentifier],
+            if terminateInstalledAppProcessIfPresent(
+                bundleIdentifier: resolvedBundleIdentifier,
+                simulatorID: resolvedSimulatorID,
                 timeout: 15
-            )
-            if terminateResult.status == 0 {
+            ) {
                 return true
             }
             if app.state == .notRunning {
