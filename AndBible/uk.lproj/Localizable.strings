@@ -540,7 +540,7 @@
 "bookmarks_contents" = "Закладки, мітки та блокноти для навчання";
 "workspaces_contents" = "Робочі області та вікна";
 "my_documents" = "My Documents";
-"my_documents_contents" = "My Documents and their pages";
+"my_documents_contents" = "My Documents and their content";
 "synchronization_categories" = "Категорії синхронізації";
 "sync_error" = "Сталася помилка синхронізації з хмарою";
 "sync_cant_fetch" = "Версія бази даних або файлу виправлення, що зберігається в хмарі, є вищою за ту, що підтримується цією програмою.";

@@ -1,6 +1,7 @@
 # Android Settings Contract (Source Of Truth)
 
-Last audited: 2026-06-03 for #170.
+Last audited: 2026-06-11 for #164 `locale_pref` option contract.
+Full settings inventory last re-audited: 2026-06-03 for #170.
 
 This file records the Android Application preferences contract and the current iOS
 disposition for each Android preference row. It intentionally separates two layers:
@@ -47,8 +48,9 @@ Primary iOS sources:
   on iOS unless iOS gains equivalent e-ink behavior.
 - `notes_content_type` is registry-backed on iOS for Settings/default/appSettings
   parity. Full note-editor content-type behavior remains tracked by #163.
-- `locale_pref` is registry-backed, but the option list is not currently complete
-  against Android `arrays.xml`; that drift is tracked by #164.
+- `locale_pref` is registry-backed. Its option list is source-backed against
+  Android `arrays.xml`, filtered to Android values that can load a shipped iOS
+  `.lproj`, and protected by `scripts/check_settings_localization_guardrails.py`.
 
 ## Category Titles
 
@@ -81,7 +83,7 @@ Primary iOS sources:
 | `volume_keys_scroll` | XML `settings.xml:101-106`; Android handles hardware volume-key scrolling. | Registry-backed documented divergence: iOS keeps persistence/UI for sync continuity but cannot intercept volume buttons for app actions. |
 | `night_mode_pref3` | XML `settings.xml:107-113`; runtime entries/default are replaced at `SettingsActivity.kt:233-242`. | Registry-backed adapted pass. |
 | `global_text_display_settings` | XML `settings.xml:118-122`; action starts global `TextDisplaySettingsActivity` at `SettingsActivity.kt:299-308`. | Outside registry, adapted on iOS. Global display settings use `SettingsStore.globalTextDisplaySettingsKey`; Settings links live in `SettingsView.lookAndFeelSection`. |
-| `locale_pref` | XML `settings.xml:124-130`; option arrays are `arrays.xml:121-230`. | Registry-backed partial. iOS persists/applies locale overrides, but its option list is stale against Android arrays; tracked by #164. |
+| `locale_pref` | XML `settings.xml:124-130`; option arrays are `arrays.xml:121-230`; Android applies the stored value through `LocaleHelper` and `Locale.forLanguageTag`. | Registry-backed pass. iOS persists Android values and maps them to `AppleLanguages` only at the platform boundary. The picker shows Android values that have shipped iOS `.lproj` resources and documents unavailable Android values below. |
 | `disable_click_to_edit` | XML `settings.xml:131-137`; Android emits `disableClickToEdit` into `appSettings`. | Registry-backed pass. |
 | `notes_content_type` | XML `settings.xml:138-145`; default `HTML`; values `HTML`/`MARKDOWN` at `arrays.xml:264-271`; Android emits `notesContentType` at `BibleView.kt:1537`. | Registry-backed partial. iOS shows the row, persists the value, and emits `appSettings.notesContentType`; applying it to newly created bookmark notes and Study Pad entries remains tracked by #163. |
 | `font_size_multiplier` | XML `settings.xml:146-153`; default `100`, min `10`, max `500`; summary updates at `SettingsActivity.kt:255-268`. | Registry-backed pass. |
@@ -115,11 +117,41 @@ Primary iOS sources:
 | `toolbar_button_actions` | `default`, `swap-menu`, `swap-activity` | `arrays.xml:65-74` | Implemented. |
 | `bible_view_swipe_mode` | `CHAPTER`, `PAGE`, `NONE` | `arrays.xml:77-87` | Implemented with native iOS gestures. |
 | `night_mode_pref3` | runtime-dependent `system`/`automatic`/`manual` or `system`/`manual` | `arrays.xml:90-116`, `SettingsActivity.kt:233-242` | Adapted: iOS supports system/manual and documents excluded automatic behavior. |
-| `locale_pref` | Android language label/value arrays | `arrays.xml:121-230` | Partial: option drift tracked by #164. |
+| `locale_pref` | Android language label/value arrays | `arrays.xml:121-230` | Implemented with iOS resource filtering and machine-readable drift guard. |
 | `notes_content_type` | `HTML`, `MARKDOWN` | `arrays.xml:264-271` | Implemented for Settings/default/payload; note creation/storage behavior remains #163. |
 | `disable_bible_bookmark_modal_buttons` | Bible one-tap action IDs | `arrays.xml:231-250` | Implemented. |
 | `disable_gen_bookmark_modal_buttons` | Generic one-tap action IDs | `arrays.xml:251-262` | Implemented. |
 | `experimental_features` | `bookmark_edit_actions`, `add_paragraph_break` | `arrays.xml:273-280` | Implemented. |
+
+## `locale_pref` Option Contract
+
+The iOS picker preserves Android `prefs_interface_locale_values` order after
+filtering values that cannot load a shipped iOS localization resource. Persisted
+values remain Android values for sync/settings parity; the iOS-only mapping is:
+
+| Android value | iOS resource / Apple language value |
+|---|---|
+| `iw` | `he` |
+| `in` | `id` |
+| `zh-Hant-TW` | `zh-Hant` |
+| `zh-Hans-CN` | `zh-Hans` |
+
+Supported iOS picker values:
+
+`""` (default), `af`, `ar`, `bg`, `bn`, `my`, `cs`, `de`, `en`, `eo`, `es`, `et`,
+`fi`, `fr`, `iw`, `hi`, `hr`, `hu`, `in`, `it`, `kk`, `ko`, `lt`, `nb`, `nl`,
+`pl`, `pt`, `pt-BR`, `ro`, `ru`, `sk`, `sl`, `sr`, `sr-Latn`, `ta`, `te`,
+`tr`, `uk`, `uz`, `yue`, `zh-Hant-TW`, `zh-Hans-CN`.
+
+Android values intentionally unavailable on iOS because no matching app
+localization resource is shipped:
+
+`ca`, `da`, `fil`, `ja`, `ms`, `ne`, `sw`, `th`, `ur`, `vi`.
+
+iOS resource locales `az`, `el`, `ml`, and `sv` are not shown in this picker
+because Android does not expose them in `prefs_interface_locale_values`. They
+must not become iOS-only picker options unless the Android source contract also
+adds them.
 
 ## Android Runtime Visibility / Dynamic Rules
 

@@ -35,6 +35,7 @@ extension AndBibleTests {
         XCTAssertEqual(AppPreferenceRegistry.stringDefault(for: .bibleViewSwipeMode), "CHAPTER")
         XCTAssertEqual(AppPreferenceRegistry.stringDefault(for: .notesContentType), "HTML")
         XCTAssertEqual(AppPreferenceRegistry.intDefault(for: .fontSizeMultiplier), 100)
+        XCTAssertEqual(AppPreferenceRegistry.intRange(for: .fontSizeMultiplier), 10...500)
         XCTAssertEqual(AppPreferenceRegistry.boolDefault(for: .openLinksInSpecialWindowPref), true)
         XCTAssertEqual(AppPreferenceRegistry.boolDefault(for: .enableBluetoothPref), true)
     }

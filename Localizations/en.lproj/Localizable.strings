@@ -654,7 +654,7 @@
 "bookmarks_contents" = "Bookmarks, Labels and Study Pads";
 "workspaces_contents" = "Workspaces and Windows";
 "my_documents" = "My Documents";
-"my_documents_contents" = "My Documents and their pages";
+"my_documents_contents" = "My Documents and their content";
 "synchronization_categories" = "Synchronization categories";
 "sync_error" = "Error occurred in Cloud synchronization";
 "sync_cant_fetch" = "The version of database or patch file stored in Cloud is higher than the one supported by this app.";

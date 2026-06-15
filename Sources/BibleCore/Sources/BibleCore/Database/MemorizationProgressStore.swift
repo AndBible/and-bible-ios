@@ -192,7 +192,7 @@ public final class MemorizationProgressStore {
         }
 
         var result = Set<Int>()
-        for range in ranges where range.bookInitials == query.bookInitials {
+        for range in ranges where Self.matchesStoredRange(range, query: query) {
             let start = max(range.startOrdinal, query.startOrdinal)
             let end = min(range.endOrdinal, query.endOrdinal)
             guard start <= end else { continue }
@@ -232,7 +232,7 @@ public final class MemorizationProgressStore {
         in ranges: [MemorizationProgressRange]
     ) -> Bool {
         ranges.contains { range in
-            range.bookInitials == candidate.bookInitials &&
+            matchesStoredRange(range, query: candidate) &&
                 range.startOrdinal <= candidate.startOrdinal &&
                 range.endOrdinal >= candidate.endOrdinal
         }
@@ -244,7 +244,7 @@ public final class MemorizationProgressStore {
     ) -> [MemorizationProgressRange] {
         normalized(
             ranges.flatMap { range -> [MemorizationProgressRange] in
-                guard range.bookInitials == removal.bookInitials,
+                guard matchesStoredRange(range, query: removal),
                       range.startOrdinal <= removal.endOrdinal,
                       range.endOrdinal >= removal.startOrdinal else {
                     return [range]
@@ -276,7 +276,7 @@ public final class MemorizationProgressStore {
 
     private static func normalized(_ ranges: [MemorizationProgressRange]) -> [MemorizationProgressRange] {
         let sorted = ranges
-            .filter { !$0.bookInitials.isEmpty && $0.startOrdinal > 0 && $0.endOrdinal >= $0.startOrdinal }
+            .filter(isStoredRangeValid)
             .sorted {
                 if $0.bookInitials != $1.bookInitials {
                     return $0.bookInitials < $1.bookInitials
@@ -303,5 +303,16 @@ public final class MemorizationProgressStore {
             )
         }
         return result
+    }
+
+    private static func isStoredRangeValid(_ range: MemorizationProgressRange) -> Bool {
+        range.startOrdinal > 0 && range.endOrdinal >= range.startOrdinal
+    }
+
+    private static func matchesStoredRange(
+        _ range: MemorizationProgressRange,
+        query: MemorizationProgressRange
+    ) -> Bool {
+        range.bookInitials.isEmpty || range.bookInitials == query.bookInitials
     }
 }

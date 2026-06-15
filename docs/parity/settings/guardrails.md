@@ -7,6 +7,9 @@ Prevent regressions in settings localization parity by enforcing:
 1. `AndBible/*.lproj` and `Localizations/*.lproj` stay in sync for parity settings keys.
 2. iOS does not keep English strings when Android already has non-English translations.
 3. English-placeholder counts per key do not increase above the committed baseline.
+4. `SettingsView.localeOptions` stays source-backed against Android
+   `prefs_interface_locale_values`, filtered only by shipped iOS `.lproj`
+   availability.
 
 ## Command
 
@@ -46,10 +49,19 @@ This updates:
 
 - `docs/parity/settings/baselines/localization-android.json`
 
+The snapshot includes both Android non-English settings-string coverage and the
+Android `locale_pref` label/value arrays used by CI when the Android checkout is
+not present.
+
 ## Notes
 
 - Baseline is keyed to the current parity-key set and locale set.
 - If Android adds new locale translations, iOS will fail guardrails until matching translations are added (or explicitly updated via approved baseline process).
+- If Android adds a `locale_pref` value, the guardrail fails until iOS either
+  ships a matching localization resource and exposes the value in Android order,
+  or documents the value as unavailable by leaving it filtered out.
+- iOS localization resources that Android does not expose in
+  `prefs_interface_locale_values` must not become iOS-only picker values.
 - CI integration: `.github/workflows/ios-ci.yml` runs this guardrail on pull requests and `main` pushes.
 
 ## Current Automation Status

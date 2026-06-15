@@ -3,6 +3,7 @@
 import Foundation
 import SQLite3
 import SwiftData
+import SwordKit
 
 /**
  Android database categories that can appear in `AndBibleDatabaseBackup.abdb.zip` archives.
@@ -130,14 +131,47 @@ public enum AndroidDatabaseBackupCategory: String, CaseIterable, Identifiable, S
             .readingPlans
         case .myDocuments:
             .myDocuments
-        case .settings, .repositories, .modules, .epubs, .aiSettings, .progress:
+        case .progress:
+            .progress
+        case .settings, .repositories, .modules, .epubs, .aiSettings:
             nil
         }
     }
 
-    /// Database-backed categories Android writes under `db/` in `.abdb.zip` archives.
+    /// Restore/import operations this iOS build can safely offer for the category.
+    public var supportedApplyModes: [AndroidDatabaseBackupApplyMode] {
+        switch self {
+        case .bookmarks, .workspaces, .readingPlans, .myDocuments, .progress:
+            [.restore, .import]
+        case .settings, .repositories, .aiSettings:
+            [.restore]
+        case .modules, .epubs:
+            []
+        }
+    }
+
+    /// Whether the category has at least one safe apply path in this iOS build.
+    public var supportsApply: Bool {
+        !supportedApplyModes.isEmpty
+    }
+
+    /**
+     Database-backed categories Android scans under `db/` in `.abdb.zip` archives.
+
+     The order mirrors Android's `ALL_DB_FILENAMES` so restore/import presentation remains
+     stable even when ZIP central-directory order or localized display names differ.
+     */
     static var databaseBackedCases: [AndroidDatabaseBackupCategory] {
-        allCases.filter { $0.databaseFileName != nil }
+        [
+            .bookmarks,
+            .readingPlans,
+            .workspaces,
+            .repositories,
+            .settings,
+            .aiSettings,
+            .myDocuments,
+            .progress,
+        ]
     }
 }
 
@@ -245,8 +279,9 @@ public struct AndroidDatabaseBackupSection: Identifiable, Sendable, Equatable {
  Manifest payload read from `AndBibleBackupManifest.json`.
 
  Android currently writes `backupType = DB_BACKUP`, `manifestVersion = 1`, and an optional
- `contains` set. iOS uses the manifest to reject non-database backup archives before staging any
- destructive restore UI.
+ `contains` set. Older or hand-carried Android database backups may not contain this file, so iOS
+ treats the manifest as optional metadata while using valid `db/` SQLite entries as the authoritative
+ restore section source.
  */
 public struct AndroidDatabaseBackupManifest: Sendable, Equatable {
     /// Android backup type string, expected to be `DB_BACKUP`.
@@ -295,8 +330,8 @@ public struct AndroidDatabaseBackupArchive: Identifiable, Sendable {
     /// Stable identity for SwiftUI sheet presentation.
     public let id: UUID
 
-    /// Decoded Android backup manifest.
-    public let manifest: AndroidDatabaseBackupManifest
+    /// Decoded Android backup manifest metadata when Android supplied usable DB metadata.
+    public let manifest: AndroidDatabaseBackupManifest?
 
     /// Valid database sections extracted from the archive.
     public let sections: [AndroidDatabaseBackupSection]
@@ -309,7 +344,7 @@ public struct AndroidDatabaseBackupArchive: Identifiable, Sendable {
 
      - Parameters:
        - id: Stable identity for UI presentation.
-       - manifest: Decoded Android backup manifest.
+       - manifest: Decoded Android backup manifest metadata, when present and usable.
        - sections: Valid database sections extracted from the archive.
        - temporaryDirectory: Temporary root directory containing staged SQLite files.
      - Side effects: none.
@@ -317,7 +352,7 @@ public struct AndroidDatabaseBackupArchive: Identifiable, Sendable {
      */
     public init(
         id: UUID = UUID(),
-        manifest: AndroidDatabaseBackupManifest,
+        manifest: AndroidDatabaseBackupManifest?,
         sections: [AndroidDatabaseBackupSection],
         temporaryDirectory: URL
     ) {
@@ -595,12 +630,15 @@ public final class AndroidDatabaseBackupService {
     /// Manifest filename used by Android database and module backup archives.
     private static let manifestFileName = "AndBibleBackupManifest.json"
 
-    /// Supported category databases iOS can currently materialize into Android-compatible backups.
-    private static let exportableDatabaseCategories: [AndroidDatabaseBackupCategory] = [
+    /// Semantic category databases iOS can materialize directly from native state.
+    private static let semanticExportableDatabaseCategories: [AndroidDatabaseBackupCategory] = [
         .bookmarks,
         .readingPlans,
         .workspaces,
+        .repositories,
+        .settings,
         .myDocuments,
+        .progress,
     ]
 
     /**
@@ -654,6 +692,9 @@ public final class AndroidDatabaseBackupService {
         let manifestVersion: Int
     }
 
+    /// Largest Android backup manifest accepted for in-memory JSON decoding.
+    private static let maximumManifestByteCount = 1024 * 1024
+
     private let fileManager: FileManager
     private let temporaryDirectory: URL
     private let bookmarkRestoreService: RemoteSyncBookmarkRestoreService
@@ -663,6 +704,8 @@ public final class AndroidDatabaseBackupService {
     private let workspaceRestoreService: RemoteSyncWorkspaceRestoreService
     private let myDocumentRestoreService: RemoteSyncMyDocumentRestoreService
     private let myDocumentSnapshotService: RemoteSyncMyDocumentSnapshotService
+    private let repositorySourceManager: RepositorySourceManager
+    private let preservedDatabaseStore: AndroidDatabaseBackupPreservedDatabaseStore
 
     /**
      Creates an Android database backup service.
@@ -677,6 +720,9 @@ public final class AndroidDatabaseBackupService {
        - workspaceRestoreService: Workspace restore engine for Android `workspaces.sqlite3`.
        - myDocumentRestoreService: My Documents restore engine for Android `mydocuments.sqlite3`.
        - myDocumentSnapshotService: My Documents snapshot engine used for import merges.
+       - repositorySourceManager: Repository source manager used for Android `repositories.sqlite3`.
+       - preservedDatabaseStore: Store used to preserve Android-owned databases without native iOS
+         semantic models, currently Android `ai_settings.sqlite3`.
      - Side effects: none.
      - Failure modes: This initializer cannot fail.
      */
@@ -689,7 +735,9 @@ public final class AndroidDatabaseBackupService {
         readingPlanSnapshotService: RemoteSyncReadingPlanSnapshotService = RemoteSyncReadingPlanSnapshotService(),
         workspaceRestoreService: RemoteSyncWorkspaceRestoreService = RemoteSyncWorkspaceRestoreService(),
         myDocumentRestoreService: RemoteSyncMyDocumentRestoreService = RemoteSyncMyDocumentRestoreService(),
-        myDocumentSnapshotService: RemoteSyncMyDocumentSnapshotService = RemoteSyncMyDocumentSnapshotService()
+        myDocumentSnapshotService: RemoteSyncMyDocumentSnapshotService = RemoteSyncMyDocumentSnapshotService(),
+        repositorySourceManager: RepositorySourceManager = RepositorySourceManager(),
+        preservedDatabaseStore: AndroidDatabaseBackupPreservedDatabaseStore = AndroidDatabaseBackupPreservedDatabaseStore()
     ) {
         self.fileManager = fileManager
         self.temporaryDirectory = temporaryDirectory ?? fileManager.temporaryDirectory
@@ -700,6 +748,8 @@ public final class AndroidDatabaseBackupService {
         self.workspaceRestoreService = workspaceRestoreService
         self.myDocumentRestoreService = myDocumentRestoreService
         self.myDocumentSnapshotService = myDocumentSnapshotService
+        self.repositorySourceManager = repositorySourceManager
+        self.preservedDatabaseStore = preservedDatabaseStore
     }
 
     /**
@@ -754,9 +804,10 @@ public final class AndroidDatabaseBackupService {
         modelContext: ModelContext,
         settingsStore: SettingsStore
     ) throws -> AndroidDatabaseBackupFileExport {
+        let exportCategories = exportableDatabaseCategories()
         let manifest = ExportManifestDTO(
             backupType: "DB_BACKUP",
-            contains: Self.exportableDatabaseCategories,
+            contains: exportCategories,
             manifestVersion: 1
         )
         let manifestData = try JSONEncoder().encode(manifest)
@@ -770,18 +821,15 @@ public final class AndroidDatabaseBackupService {
             }
         }
 
-        for category in Self.exportableDatabaseCategories {
-            guard let remoteSyncCategory = category.remoteSyncCategory,
-                  let databaseFileName = category.databaseFileName else {
+        for category in exportCategories {
+            guard let databaseFileName = category.databaseFileName else {
                 continue
             }
-            let databaseURL = try RemoteSyncInitialBackupUploadService.buildAndroidDatabaseBackupDatabase(
-                for: remoteSyncCategory,
+            let databaseURL = try buildExportDatabase(
+                for: category,
                 modelContext: modelContext,
                 settingsStore: settingsStore,
-                schemaVersion: category.supportedDatabaseVersion,
-                fileManager: fileManager,
-                temporaryDirectory: temporaryDirectory
+                databaseFileName: databaseFileName
             )
             temporaryDatabaseURLs.append(databaseURL)
             entries.append(
@@ -803,9 +851,73 @@ public final class AndroidDatabaseBackupService {
         return AndroidDatabaseBackupFileExport(
             fileName: Self.databaseBackupFileName,
             fileURL: archiveURL,
-            categories: Self.exportableDatabaseCategories,
+            categories: exportCategories,
             entryCount: entries.count
         )
+    }
+
+    private func exportableDatabaseCategories() -> [AndroidDatabaseBackupCategory] {
+        var categories = Self.semanticExportableDatabaseCategories
+        guard preservedDatabaseStore.hasDatabase(for: .aiSettings),
+              let insertionIndex = categories.firstIndex(of: .myDocuments) else {
+            return categories
+        }
+        categories.insert(.aiSettings, at: insertionIndex)
+        return categories
+    }
+
+    private func buildExportDatabase(
+        for category: AndroidDatabaseBackupCategory,
+        modelContext: ModelContext,
+        settingsStore: SettingsStore,
+        databaseFileName: String
+    ) throws -> URL {
+        switch category {
+        case .bookmarks, .readingPlans, .workspaces, .myDocuments:
+            guard let remoteSyncCategory = category.remoteSyncCategory else {
+                throw AndroidDatabaseBackupError.unsupportedSelectedSection(
+                    category,
+                    "iOS does not yet have an export mapper for Android \(category.displayName) data."
+                )
+            }
+            return try RemoteSyncInitialBackupUploadService.buildAndroidDatabaseBackupDatabase(
+                for: remoteSyncCategory,
+                modelContext: modelContext,
+                settingsStore: settingsStore,
+                schemaVersion: category.supportedDatabaseVersion,
+                fileManager: fileManager,
+                temporaryDirectory: temporaryDirectory
+            )
+        case .settings:
+            let databaseURL = temporaryURL(prefix: "android-database-backup-settings-", suffix: "-\(databaseFileName)")
+            try AndroidDatabaseBackupSettingsMapper.writeDatabase(at: databaseURL, settingsStore: settingsStore)
+            return databaseURL
+        case .repositories:
+            let databaseURL = temporaryURL(prefix: "android-database-backup-repositories-", suffix: "-\(databaseFileName)")
+            try AndroidDatabaseBackupRepositoryMapper.writeDatabase(
+                at: databaseURL,
+                repositorySourceManager: repositorySourceManager
+            )
+            return databaseURL
+        case .progress:
+            let databaseURL = temporaryURL(prefix: "android-database-backup-progress-", suffix: "-\(databaseFileName)")
+            try AndroidDatabaseBackupProgressMapper.writeDatabase(at: databaseURL, settingsStore: settingsStore)
+            return databaseURL
+        case .aiSettings:
+            let databaseURL = temporaryURL(prefix: "android-database-backup-ai-settings-", suffix: "-\(databaseFileName)")
+            guard try preservedDatabaseStore.copyDatabase(for: .aiSettings, to: databaseURL) != nil else {
+                throw AndroidDatabaseBackupError.unsupportedSelectedSection(
+                    category,
+                    "No preserved Android \(category.displayName) database is available to export."
+                )
+            }
+            return databaseURL
+        case .modules, .epubs:
+            throw AndroidDatabaseBackupError.unsupportedSelectedSection(
+                category,
+                "iOS does not yet have an export mapper for Android \(category.displayName) data."
+            )
+        }
     }
 
     /**
@@ -818,8 +930,8 @@ public final class AndroidDatabaseBackupService {
        - writes recognized Android database entries into that directory
        - opens each extracted SQLite file read-only to verify the header and `user_version`
      - Failure modes:
-       - throws `AndroidDatabaseBackupError` for missing manifests, non-database backups, invalid
-         SQLite files, or archives without recognizable database sections
+       - throws `AndroidDatabaseBackupError` for invalid SQLite files or archives without
+         recognizable database sections
        - maps ZIP parser failures into user-facing archive reasons before surfacing them through
          Settings status text
        - throws file-system errors when temporary staging cannot be created
@@ -835,16 +947,8 @@ public final class AndroidDatabaseBackupService {
         }
 
         let entriesByName = try Self.entriesByUniqueName(entries)
-        guard let manifestData = entriesByName[Self.manifestFileName] else {
-            throw AndroidDatabaseBackupError.missingManifest
-        }
-        let manifest = try decodeManifest(from: manifestData)
-        guard manifest.backupType == "DB_BACKUP" else {
-            throw AndroidDatabaseBackupError.unsupportedBackupType(manifest.backupType)
-        }
-        guard manifest.manifestVersion <= 1 else {
-            throw AndroidDatabaseBackupError.unsupportedManifestVersion(manifest.manifestVersion)
-        }
+        let loadedManifest = loadDatabaseManifest(from: entriesByName[Self.manifestFileName])
+        let manifest = loadedManifest.manifest
 
         let stagingDirectory = temporaryDirectory.appendingPathComponent(
             "android-db-backup-\(UUID().uuidString)",
@@ -874,21 +978,8 @@ public final class AndroidDatabaseBackupService {
                         fileName: fileName,
                         databaseFileURL: databaseURL,
                         databaseVersion: databaseVersion,
-                        declaredInManifest: manifest.contains.contains(category),
+                        declaredInManifest: loadedManifest.declaredCategories.contains(category),
                         support: support
-                    )
-                )
-            }
-            for category in manifest.contains
-                where category.databaseFileName == nil {
-                sections.append(
-                    AndroidDatabaseBackupSection(
-                        category: category,
-                        fileName: "",
-                        databaseFileURL: stagingDirectory,
-                        databaseVersion: 0,
-                        declaredInManifest: true,
-                        support: supportState(for: category, databaseVersion: 0)
                     )
                 )
             }
@@ -898,7 +989,109 @@ public final class AndroidDatabaseBackupService {
             }
             return AndroidDatabaseBackupArchive(
                 manifest: manifest,
-                sections: sections.sorted { $0.category.displayName < $1.category.displayName },
+                sections: Self.sectionsInAndroidRestoreOrder(sections),
+                temporaryDirectory: stagingDirectory
+            )
+        } catch {
+            try? fileManager.removeItem(at: stagingDirectory)
+            throw error
+        }
+    }
+
+    /**
+     Loads and validates an Android `.abdb.zip` database backup archive from a file URL.
+
+     This is the production restore path. It mirrors Android's file-backed restore semantics by
+     reading ZIP metadata from the selected archive and streaming selected database entries into a
+     temporary staging directory instead of materializing the whole ZIP or every entry in memory.
+
+     - Parameter archiveURL: File URL for a user-selected Android database backup archive.
+     - Returns: Loaded archive with extracted SQLite database sections.
+     - Side effects:
+       - creates one temporary directory
+       - streams recognized Android database entries into that directory
+       - opens each extracted SQLite file read-only to verify the header and `user_version`
+     - Failure modes:
+       - throws `AndroidDatabaseBackupError` for invalid SQLite files, duplicate entries, or
+         archives without recognizable database sections
+       - maps ZIP parser failures into user-facing archive reasons before surfacing them through
+         Settings status text
+       - throws file-system errors when temporary staging cannot be created or written
+     */
+    public func loadArchive(fromArchiveAt archiveURL: URL) throws -> AndroidDatabaseBackupArchive {
+        let entries: [ZipArchiveFileEntry]
+        do {
+            entries = try ZipArchiveReader.fileEntries(inArchiveAt: archiveURL)
+        } catch let error as ZipArchiveReaderError {
+            throw AndroidDatabaseBackupError.invalidArchive(Self.archiveErrorMessage(for: error))
+        } catch {
+            throw AndroidDatabaseBackupError.invalidArchive(error.localizedDescription)
+        }
+
+        let entriesByName = try Self.fileEntriesByUniqueName(entries)
+        let manifestData: Data?
+        if let manifestEntry = entriesByName[Self.manifestFileName] {
+            manifestData = try? ZipArchiveReader.data(
+                for: manifestEntry,
+                inArchiveAt: archiveURL,
+                maximumByteCount: Self.maximumManifestByteCount,
+                fileManager: fileManager
+            )
+        } else {
+            manifestData = nil
+        }
+        let loadedManifest = loadDatabaseManifest(from: manifestData)
+        let manifest = loadedManifest.manifest
+
+        let stagingDirectory = temporaryDirectory.appendingPathComponent(
+            "android-db-backup-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        try fileManager.createDirectory(at: stagingDirectory, withIntermediateDirectories: true)
+
+        var sections: [AndroidDatabaseBackupSection] = []
+        do {
+            for category in AndroidDatabaseBackupCategory.databaseBackedCases {
+                guard let fileName = category.databaseFileName,
+                      let databaseEntry = entriesByName["db/\(fileName)"] else {
+                    continue
+                }
+
+                let databaseURL = stagingDirectory.appendingPathComponent(fileName)
+                do {
+                    try ZipArchiveReader.extract(
+                        databaseEntry,
+                        fromArchiveAt: archiveURL,
+                        to: databaseURL,
+                        fileManager: fileManager
+                    )
+                } catch let error as ZipArchiveReaderError {
+                    throw AndroidDatabaseBackupError.invalidArchive(Self.archiveErrorMessage(for: error))
+                }
+                guard Self.hasSQLiteHeader(at: databaseURL) else {
+                    throw AndroidDatabaseBackupError.invalidSQLiteDatabase(fileName)
+                }
+
+                let databaseVersion = try sqliteUserVersion(at: databaseURL, fileName: fileName)
+                let support = supportState(for: category, databaseVersion: databaseVersion)
+                sections.append(
+                    AndroidDatabaseBackupSection(
+                        category: category,
+                        fileName: fileName,
+                        databaseFileURL: databaseURL,
+                        databaseVersion: databaseVersion,
+                        declaredInManifest: loadedManifest.declaredCategories.contains(category),
+                        support: support
+                    )
+                )
+            }
+
+            guard !sections.isEmpty else {
+                throw AndroidDatabaseBackupError.noValidDatabaseSections
+            }
+            return AndroidDatabaseBackupArchive(
+                manifest: manifest,
+                sections: Self.sectionsInAndroidRestoreOrder(sections),
                 temporaryDirectory: stagingDirectory
             )
         } catch {
@@ -945,6 +1138,12 @@ public final class AndroidDatabaseBackupService {
                     section.support.explanation ?? "Unsupported by this iOS build."
                 )
             }
+            guard section.category.supportedApplyModes.contains(selection.mode) else {
+                throw AndroidDatabaseBackupError.unsupportedSelectedSection(
+                    selection.category,
+                    unsupportedApplyModeReason(for: selection.category, mode: selection.mode)
+                )
+            }
 
             let summary = try applySupportedSection(
                 section,
@@ -976,6 +1175,73 @@ public final class AndroidDatabaseBackupService {
      */
     public func cleanup(_ archive: AndroidDatabaseBackupArchive) {
         try? fileManager.removeItem(at: archive.temporaryDirectory)
+    }
+
+    /**
+     Manifest metadata plus the categories actually declared by a manifest file.
+
+     Missing or unusable manifests are valid for Android database restore because sections are
+     discovered from filenames under `db/`. This wrapper keeps optional public manifest metadata
+     and per-section declaration state separate.
+     */
+    private struct LoadedDatabaseManifest {
+        /// Decoded manifest metadata exposed on `AndroidDatabaseBackupArchive`, when usable.
+        let manifest: AndroidDatabaseBackupManifest?
+
+        /// Categories that were listed in an actual `AndBibleBackupManifest.json` file.
+        let declaredCategories: Set<AndroidDatabaseBackupCategory>
+    }
+
+    /**
+     Loads optional Android DB manifest metadata.
+
+     Android database restore scans database filenames instead of requiring the manifest. A present
+     manifest is preserved only when it decodes as current DB metadata. Malformed, non-DB, or future
+     manifest payloads are ignored so they cannot override valid database section discovery.
+
+     - Parameter data: Raw `AndBibleBackupManifest.json` bytes, or `nil` when the archive omits it.
+     - Returns: Loaded manifest metadata and actual declared category set.
+     - Side effects: none.
+     - Failure modes: This helper does not throw; bad manifest metadata is advisory and ignored.
+     */
+    private func loadDatabaseManifest(from data: Data?) -> LoadedDatabaseManifest {
+        guard let data else {
+            return LoadedDatabaseManifest(manifest: nil, declaredCategories: [])
+        }
+
+        guard let manifest = try? decodeManifest(from: data),
+              manifest.backupType == "DB_BACKUP",
+              manifest.manifestVersion <= 1 else {
+            return LoadedDatabaseManifest(manifest: nil, declaredCategories: [])
+        }
+        return LoadedDatabaseManifest(manifest: manifest, declaredCategories: manifest.contains)
+    }
+
+    /**
+     Orders loaded database sections the same way Android scans `ALL_DB_FILENAMES`.
+
+     - Parameter sections: Valid database-backed sections discovered in the archive.
+     - Returns: Sections sorted by Android restore order, with a deterministic fallback for any
+       future category not represented in the current order table.
+     - Side effects: none.
+     - Failure modes: This helper cannot fail.
+     */
+    private static func sectionsInAndroidRestoreOrder(
+        _ sections: [AndroidDatabaseBackupSection]
+    ) -> [AndroidDatabaseBackupSection] {
+        let orderByCategory = Dictionary(
+            uniqueKeysWithValues: AndroidDatabaseBackupCategory.databaseBackedCases.enumerated().map { index, category in
+                (category, index)
+            }
+        )
+        return sections.sorted { lhs, rhs in
+            let lhsOrder = orderByCategory[lhs.category] ?? Int.max
+            let rhsOrder = orderByCategory[rhs.category] ?? Int.max
+            if lhsOrder != rhsOrder {
+                return lhsOrder < rhsOrder
+            }
+            return lhs.category.rawValue < rhs.category.rawValue
+        }
     }
 
     /**
@@ -1028,6 +1294,32 @@ public final class AndroidDatabaseBackupService {
     }
 
     /**
+     Builds a deterministic ZIP file-entry lookup for file-backed Android backup archives.
+
+     This mirrors `entriesByUniqueName(_:)` without materializing payload bytes. Duplicate archive
+     paths remain invalid because Android restore treats manifest and `db/` paths as authoritative
+     inputs.
+
+     - Parameter entries: Non-directory file-backed entries in central-directory order.
+     - Returns: Entry descriptors keyed by ZIP path.
+     - Side effects: none.
+     - Failure modes: Throws `AndroidDatabaseBackupError.invalidArchive` when any entry path appears
+       more than once.
+     */
+    private static func fileEntriesByUniqueName(_ entries: [ZipArchiveFileEntry]) throws -> [String: ZipArchiveFileEntry] {
+        var entriesByName: [String: ZipArchiveFileEntry] = [:]
+        for entry in entries {
+            guard entriesByName[entry.name] == nil else {
+                throw AndroidDatabaseBackupError.invalidArchive(
+                    "ZIP archive contains duplicate entry \(entry.name)."
+                )
+            }
+            entriesByName[entry.name] = entry
+        }
+        return entriesByName
+    }
+
+    /**
      Converts low-level ZIP parser errors into Settings-safe archive failure messages.
 
      `ZipArchiveReaderError` is useful for tests and parser internals but its enum case names are
@@ -1066,13 +1358,23 @@ public final class AndroidDatabaseBackupService {
         for category: AndroidDatabaseBackupCategory,
         databaseVersion: Int
     ) -> AndroidDatabaseBackupSectionSupport {
-        guard category.remoteSyncCategory != nil else {
+        guard category.supportsApply else {
             return .unsupportedCategory("iOS does not yet have a safe mapper for Android \(category.displayName) data.")
         }
         if databaseVersion > category.supportedDatabaseVersion {
             return .unsupportedVersion(version: databaseVersion, supported: category.supportedDatabaseVersion)
         }
         return .supported
+    }
+
+    private func unsupportedApplyModeReason(
+        for category: AndroidDatabaseBackupCategory,
+        mode: AndroidDatabaseBackupApplyMode
+    ) -> String {
+        if mode == .import, category.supportedApplyModes == [.restore] {
+            return "\(category.displayName) can only be restored because Android treats \(category.databaseFileName ?? "this database") as a restore-only database."
+        }
+        return "\(mode.displayName) is not supported for Android \(category.displayName) data."
     }
 
     /**
@@ -1126,6 +1428,29 @@ public final class AndroidDatabaseBackupService {
     }
 
     /**
+     Checks the SQLite file magic in an extracted database file.
+
+     - Parameter url: Extracted database file URL.
+     - Returns: `true` when the file starts with SQLite's canonical header.
+     - Side effects: Opens and reads the first 16 bytes of `url`.
+     - Failure modes: File read failures return `false` so callers surface the existing invalid
+       SQLite archive error.
+     */
+    private static func hasSQLiteHeader(at url: URL) -> Bool {
+        guard let handle = try? FileHandle(forReadingFrom: url) else {
+            return false
+        }
+        defer {
+            try? handle.close()
+        }
+        guard let data = try? handle.read(upToCount: 16),
+              data.count == 16 else {
+            return false
+        }
+        return data == Data("SQLite format 3\u{0}".utf8)
+    }
+
+    /**
      Dispatches a validated supported backup section to its category-specific restore/import path.
 
      - Parameters:
@@ -1162,7 +1487,33 @@ public final class AndroidDatabaseBackupService {
                 settingsStore: settingsStore
             )
             return "\(report.restoredDocumentCount) documents, \(report.restoredPageCount) pages"
-        case .settings, .repositories, .modules, .epubs, .aiSettings, .progress:
+        case .settings:
+            let report = try AndroidDatabaseBackupSettingsMapper.restore(
+                from: section.databaseFileURL,
+                settingsStore: settingsStore
+            )
+            return "\(report.appliedSettingCount) settings"
+        case .repositories:
+            let report = try AndroidDatabaseBackupRepositoryMapper.restore(
+                from: section.databaseFileURL,
+                repositorySourceManager: repositorySourceManager,
+                modelContext: modelContext
+            )
+            return "\(report.restoredRepositoryCount) repositories"
+        case .progress:
+            let report = try AndroidDatabaseBackupProgressMapper.apply(
+                from: section.databaseFileURL,
+                mode: mode,
+                settingsStore: settingsStore
+            )
+            return "\(report.readingCount) readings, \(report.memorizedVerseCount) memorized verses, \(report.targetCount) targets"
+        case .aiSettings:
+            _ = try preservedDatabaseStore.restoreDatabase(
+                from: section.databaseFileURL,
+                category: .aiSettings
+            )
+            return "1 database"
+        case .modules, .epubs:
             throw AndroidDatabaseBackupError.unsupportedSelectedSection(
                 section.category,
                 section.support.explanation ?? "Unsupported by this iOS build."

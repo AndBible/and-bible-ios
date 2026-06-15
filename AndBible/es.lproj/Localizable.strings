@@ -540,7 +540,7 @@
 "bookmarks_contents" = "Marcadores, Etiquetas y Pizarras de Estudio";
 "workspaces_contents" = "Espacios de trabajo y Ventanas";
 "my_documents" = "My Documents";
-"my_documents_contents" = "My Documents and their pages";
+"my_documents_contents" = "My Documents and their content";
 "synchronization_categories" = "Categorías de sincronización";
 "sync_error" = "Error ocurrido en la sincronización con la nube";
 "sync_cant_fetch" = "La versión de base de datos o archivo almacenado en la nube es más alta que la que soporta esta aplicación.";

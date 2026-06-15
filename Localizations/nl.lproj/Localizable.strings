@@ -512,7 +512,7 @@
 "bookmarks_contents" = "Bladwijzers, Labels en Studiepaden";
 "workspaces_contents" = "Werkplek en Vensters";
 "my_documents" = "My Documents";
-"my_documents_contents" = "My Documents and their pages";
+"my_documents_contents" = "My Documents and their content";
 "synchronization_categories" = "Synchronisatie categorieën";
 "sync_error" = "Er is een fout opgetreden bij de cloudsynchronisatie";
 "sync_cant_fetch" = "De Cloud-versie van de database of het patch bestand is hoger dan deze app ondersteund.";

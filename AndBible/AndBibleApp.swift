@@ -786,16 +786,7 @@ struct AndBibleApp: App {
      */
     @MainActor
     private func remoteCategoryContentDescription(for category: RemoteSyncCategory) -> String {
-        switch category {
-        case .bookmarks:
-            return String(localized: "bookmarks_contents")
-        case .workspaces:
-            return String(localized: "workspaces_contents")
-        case .readingPlans:
-            return String(localized: "reading_plans_content")
-        case .myDocuments:
-            return String(localized: "my_documents_contents")
-        }
+        RemoteSyncCategoryLocalization.text(for: category).contents.localized
     }
 
     /**

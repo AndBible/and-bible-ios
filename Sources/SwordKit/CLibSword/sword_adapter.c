@@ -726,7 +726,7 @@ int inflate_raw_file_range_to_file(const char *input_path,
             stream.next_out = output_buffer;
             stream.avail_out = (uInt)sizeof(output_buffer);
 
-            ret = inflate(&stream, remaining == 0 ? Z_FINISH : Z_NO_FLUSH);
+            ret = inflate(&stream, Z_NO_FLUSH);
             if (ret != Z_OK && ret != Z_STREAM_END) {
                 result = -7;
                 break;

@@ -24,6 +24,12 @@ private final class ExternalDocumentImportProbe: @unchecked Sendable {
     /// URLs passed to the TTF font installer.
     private var fontURLs: [(url: URL, displayName: String?)] = []
 
+    /// URLs passed to the Android module-backup installer.
+    private var androidModuleBackupURLs: [URL] = []
+
+    /// URLs passed to the Android module-backup archive detector.
+    private var androidModuleBackupDetectionURLs: [URL] = []
+
     /// Number of ZIP archive detector calls.
     private var epubArchiveDetectionCount = 0
 
@@ -75,6 +81,40 @@ private final class ExternalDocumentImportProbe: @unchecked Sendable {
     }
 
     /**
+     Records an Android module-backup installer call and returns a deterministic restore report.
+
+     - Parameter url: URL routed to the Android module-backup installer.
+     - Returns: Stable restore report used for feedback and routing assertions.
+     - Side effects: Appends `url` to the Android module-backup call log.
+     - Failure modes: This test double does not throw.
+     */
+    func installAndroidModuleBackup(from url: URL) throws -> AndroidModuleBackupRestoreReport {
+        lock.lock()
+        androidModuleBackupURLs.append(url)
+        lock.unlock()
+        return AndroidModuleBackupRestoreReport(
+            installedModuleNames: ["ESV2001", "ESV2011"],
+            installedEntryCount: 14,
+            skippedUnsupportedEntryPaths: []
+        )
+    }
+
+    /**
+     Records Android module-backup detection and classifies the archive as a backup.
+
+     - Parameter url: ZIP URL inspected before generic module installation.
+     - Returns: `true` so the service routes the file to the Android backup installer.
+     - Side effects: Appends `url` to the Android module-backup detector log.
+     - Failure modes: This test double cannot fail.
+     */
+    func detectAndroidModuleBackup(_ url: URL) -> Bool {
+        lock.lock()
+        androidModuleBackupDetectionURLs.append(url)
+        lock.unlock()
+        return true
+    }
+
+    /**
      Records an EPUB archive detection pass and classifies the archive as a SWORD ZIP.
 
      - Parameter url: URL inspected by the ZIP classifier.
@@ -101,11 +141,20 @@ private final class ExternalDocumentImportProbe: @unchecked Sendable {
         moduleURLs: [URL],
         epubURLs: [URL],
         fontURLs: [(url: URL, displayName: String?)],
+        androidModuleBackupURLs: [URL],
+        androidModuleBackupDetectionURLs: [URL],
         epubArchiveDetectionCount: Int
     ) {
         lock.lock()
         defer { lock.unlock() }
-        return (moduleURLs, epubURLs, fontURLs, epubArchiveDetectionCount)
+        return (
+            moduleURLs,
+            epubURLs,
+            fontURLs,
+            androidModuleBackupURLs,
+            androidModuleBackupDetectionURLs,
+            epubArchiveDetectionCount
+        )
     }
 }
 
@@ -134,6 +183,7 @@ extension AndBibleTests {
 
      - Parameters:
        - probe: Probe that records module, EPUB, and TTF installer calls.
+       - androidModuleBackupDetector: Optional archive classifier override for renamed backup ZIPs.
        - epubArchiveDetector: Optional ZIP classifier override for EPUB fallback tests.
      - Returns: Service instance with deterministic installer outputs.
      - Side effects: none during construction.
@@ -141,12 +191,15 @@ extension AndBibleTests {
      */
     private func makeExternalDocumentImportService(
         probe: ExternalDocumentImportProbe,
+        androidModuleBackupDetector: ExternalDocumentImportService.AndroidModuleBackupDetector? = nil,
         epubArchiveDetector: ExternalDocumentImportService.EpubArchiveDetector? = nil
     ) -> ExternalDocumentImportService {
         ExternalDocumentImportService(
             moduleInstaller: { url in try probe.installModule(from: url) },
             epubInstaller: { url in try probe.installEpub(from: url) },
             fontInstaller: { url, displayName in try probe.installFont(from: url, displayName: displayName) },
+            androidModuleBackupInstaller: { url in try probe.installAndroidModuleBackup(from: url) },
+            androidModuleBackupDetector: androidModuleBackupDetector,
             epubArchiveDetector: epubArchiveDetector
         )
     }
@@ -169,6 +222,95 @@ extension AndBibleTests {
         XCTAssertEqual(probe.snapshot().moduleURLs, [url])
         XCTAssertEqual(probe.snapshot().epubURLs, [])
         XCTAssertEqual(probe.snapshot().fontURLs.map(\.url), [])
+        XCTAssertEqual(probe.snapshot().androidModuleBackupURLs, [])
+    }
+
+    /**
+     Android module backups opened from Files use the Android backup restore path, not generic ZIP.
+
+     Android's install activity accepts document/module backup ZIPs through the same external-open
+     surface as SWORD ZIPs, but the backup payload contains `AndBibleBackupManifest.json` and should
+     be restored through the Android module-backup service so manifest validation, unsupported
+     Android-only entries, cache invalidation, and overwrite handling remain centralized.
+
+     Failure means `.abmd.zip` files can be routed into the plain SWORD ZIP installer, producing
+     misleading decompression errors and bypassing Android backup semantics.
+     */
+    func testExternalDocumentImportAndroidModuleBackupUsesBackupInstaller() {
+        let probe = ExternalDocumentImportProbe()
+        let service = makeExternalDocumentImportService(probe: probe)
+        let url = URL(fileURLWithPath: "/tmp/ESV.abmd.zip")
+
+        let result = service.importDocument(at: url)
+
+        XCTAssertEqual(
+            result,
+            .installedAndroidModuleBackup(moduleNames: ["ESV2001", "ESV2011"], installedEntryCount: 14)
+        )
+        XCTAssertEqual(result.feedbackMessage, "Installed modules: ESV2001, ESV2011")
+        XCTAssertEqual(probe.snapshot().androidModuleBackupURLs, [url])
+        XCTAssertEqual(probe.snapshot().moduleURLs, [])
+        XCTAssertEqual(probe.snapshot().epubURLs, [])
+        XCTAssertEqual(probe.snapshot().fontURLs.map(\.url), [])
+    }
+
+    /**
+     Provider display names keep Android module-backup routing when URLs have generic ZIP names.
+
+     Some document providers hand iOS a temporary URL while preserving the real filename separately.
+     The importer must use the same normalized display name shown in the confirmation prompt when
+     deciding whether a file is Android's `.abmd.zip` module backup.
+
+     Failure means Files/Mail providers can show `ESV.abmd.zip` to the user but still route the
+     confirmed import into the generic ZIP installer.
+     */
+    func testExternalDocumentImportAndroidModuleBackupUsesProviderDisplayName() {
+        let probe = ExternalDocumentImportProbe()
+        let service = makeExternalDocumentImportService(probe: probe)
+        let url = URL(fileURLWithPath: "/tmp/provider-temporary.zip")
+        let request = ExternalDocumentImportRequest(
+            url: url,
+            suggestedFileName: "  Backups/ESV.abmd.zip  "
+        )
+
+        let result = service.importDocument(request)
+
+        XCTAssertEqual(
+            result,
+            .installedAndroidModuleBackup(moduleNames: ["ESV2001", "ESV2011"], installedEntryCount: 14)
+        )
+        XCTAssertEqual(probe.snapshot().androidModuleBackupURLs, [url])
+        XCTAssertEqual(probe.snapshot().moduleURLs, [])
+    }
+
+    /**
+     Manifest detection preserves Android backup routing when iOS rewrites repeated filenames.
+
+     Files can copy repeated external opens into Inbox-style names such as `ESV.abmd-1.zip`, which
+     no longer satisfy Android's literal `.abmd.zip` suffix. The router must inspect ZIP contents
+     before generic module installation so backup semantics are preserved even when the provider
+     filename changes.
+
+     Failure means repeated imports can silently fall back to the plain SWORD ZIP installer and
+     report only the last module installed, as the simulator did with `ESV.abmd-1.zip`.
+     */
+    func testExternalDocumentImportAndroidModuleBackupUsesManifestWhenFileNameChanges() {
+        let probe = ExternalDocumentImportProbe()
+        let service = makeExternalDocumentImportService(
+            probe: probe,
+            androidModuleBackupDetector: { url in probe.detectAndroidModuleBackup(url) }
+        )
+        let url = URL(fileURLWithPath: "/tmp/ESV.abmd-1.zip")
+
+        let result = service.importDocument(at: url)
+
+        XCTAssertEqual(
+            result,
+            .installedAndroidModuleBackup(moduleNames: ["ESV2001", "ESV2011"], installedEntryCount: 14)
+        )
+        XCTAssertEqual(probe.snapshot().androidModuleBackupDetectionURLs, [url])
+        XCTAssertEqual(probe.snapshot().androidModuleBackupURLs, [url])
+        XCTAssertEqual(probe.snapshot().moduleURLs, [])
     }
 
     /**
