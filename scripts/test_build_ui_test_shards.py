@@ -153,6 +153,8 @@ class BuildUITestShardsTests(unittest.TestCase):
             "-only-testing:AndBibleUITests/AndBibleUITests/testAlpha\n"
             "-only-testing:AndBibleUITests/AndBibleUITests/testBeta",
         )
+        self.assertEqual(entry["xcodebuild_timeout_seconds"], 1800)
+        self.assertEqual(entry["xcodebuild_step_timeout_minutes"], 35)
 
     def test_choose_shard_count_expands_from_runtime_target(self) -> None:
         identifiers = [
