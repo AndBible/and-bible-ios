@@ -17,10 +17,6 @@ TEST_METHOD_PATTERN = re.compile(
     r"func\s+(test[A-Z][A-Za-z0-9_]*)\s*\(",
     re.MULTILINE,
 )
-XCODEBUILD_TIMEOUT_FLOOR_SECONDS = 1800
-XCODEBUILD_TIMEOUT_OVERHEAD_SECONDS = 600
-XCODEBUILD_TIMEOUT_ESTIMATE_MULTIPLIER = 2.0
-XCODEBUILD_STEP_TIMEOUT_GRACE_MINUTES = 5
 
 
 @dataclass(frozen=True)
@@ -195,29 +191,17 @@ def build_matrix(
     *,
     timeout_minutes: int,
 ) -> dict[str, list[dict[str, object]]]:
-    """Build GitHub Actions matrix entries with shard selection and timeout budgets."""
+    """Build the GitHub Actions matrix payload for the UI shards."""
     include: list[dict[str, object]] = []
     shard_count = len(shards)
     for index, shard in enumerate(shards, start=1):
         selection_args = "\n".join(f"-only-testing:{case.identifier}" for case in shard)
         estimated_seconds = round(sum(case.estimated_seconds for case in shard), 3)
-        xcodebuild_timeout_seconds = max(
-            XCODEBUILD_TIMEOUT_FLOOR_SECONDS,
-            math.ceil(
-                estimated_seconds * XCODEBUILD_TIMEOUT_ESTIMATE_MULTIPLIER
-                + XCODEBUILD_TIMEOUT_OVERHEAD_SECONDS
-            ),
-        )
         include.append(
             {
                 "job_name": f"UI Tests (Simulator, Shard {index}/{shard_count})",
                 "artifact_suffix": f"ui-shard-{index}",
                 "timeout_minutes": timeout_minutes,
-                "xcodebuild_timeout_seconds": xcodebuild_timeout_seconds,
-                "xcodebuild_step_timeout_minutes": (
-                    math.ceil(xcodebuild_timeout_seconds / 60)
-                    + XCODEBUILD_STEP_TIMEOUT_GRACE_MINUTES
-                ),
                 "build_xcresult_bundle_path": f".artifacts/AndBibleBuild-ui-shard-{index}.xcresult",
                 "test_xcresult_bundle_path": f".artifacts/AndBibleTests-ui-shard-{index}.xcresult",
                 "test_selection_args": selection_args,

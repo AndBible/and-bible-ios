@@ -5,7 +5,6 @@ from __future__ import annotations
 import pathlib
 import os
 import sys
-import subprocess
 import unittest
 from unittest import mock
 
@@ -15,7 +14,6 @@ from run_xcodebuild_with_test_selection import (
     build_xcodebuild_command,
     main,
     parse_test_selection_args,
-    run_xcodebuild_command,
 )
 
 
@@ -91,10 +89,10 @@ class BuildXcodebuildCommandTests(unittest.TestCase):
 
 
 class MainTests(unittest.TestCase):
-    @mock.patch("run_xcodebuild_with_test_selection.run_xcodebuild_command", return_value=0)
+    @mock.patch("run_xcodebuild_with_test_selection.subprocess.run")
     def test_main_reads_selection_args_from_environment_when_option_is_omitted(
         self,
-        runner_mock: mock.Mock,
+        run_mock: mock.Mock,
     ) -> None:
         with mock.patch.dict(
             os.environ,
@@ -125,7 +123,7 @@ class MainTests(unittest.TestCase):
                 ]
             )
         self.assertEqual(exit_code, 0)
-        runner_mock.assert_called_once_with(
+        run_mock.assert_called_once_with(
             [
                 "xcodebuild",
                 "-project",
@@ -145,30 +143,8 @@ class MainTests(unittest.TestCase):
                 "-only-testing:AndBibleUITests/AndBibleUITests/testTwo",
                 "test-without-building",
             ],
-            timeout_seconds=None,
+            check=True,
         )
-
-    @mock.patch("run_xcodebuild_with_test_selection.os.killpg")
-    @mock.patch("run_xcodebuild_with_test_selection.subprocess.Popen")
-    def test_run_xcodebuild_command_terminates_process_group_after_timeout(
-        self,
-        popen_mock: mock.Mock,
-        killpg_mock: mock.Mock,
-    ) -> None:
-        process = mock.Mock()
-        process.pid = 12345
-        process.wait.side_effect = [
-            subprocess.TimeoutExpired(cmd=["xcodebuild"], timeout=30),
-            0,
-        ]
-        popen_mock.return_value = process
-
-        exit_code = run_xcodebuild_command(["xcodebuild", "test"], timeout_seconds=30)
-
-        self.assertEqual(exit_code, 124)
-        popen_mock.assert_called_once_with(["xcodebuild", "test"], start_new_session=True)
-        killpg_mock.assert_called_once()
-        self.assertEqual(killpg_mock.call_args.args[0], 12345)
 
 
 if __name__ == "__main__":

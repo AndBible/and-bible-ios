@@ -5,14 +5,9 @@ from __future__ import annotations
 
 import argparse
 import os
-import signal
 import shlex
 import subprocess
-import sys
 from typing import Sequence
-
-TIMEOUT_EXIT_CODE = 124
-TIMEOUT_TERMINATION_GRACE_SECONDS = 10
 
 
 def parse_test_selection_args(selection_text: str) -> list[str]:
@@ -54,47 +49,6 @@ def build_xcodebuild_command(
     ]
 
 
-def run_xcodebuild_command(command: Sequence[str], *, timeout_seconds: int | None) -> int:
-    """Run xcodebuild while bounding hangs in the spawned XCTest process tree.
-
-    The command inherits stdout and stderr so GitHub Actions receives the normal xcodebuild log
-    stream. When a timeout is supplied, xcodebuild runs in its own process group so the timeout path
-    can terminate xcodebuild and child XCTest processes together before returning a controlled
-    failure code.
-    """
-    process = subprocess.Popen(list(command), start_new_session=True)
-    try:
-        return_code = process.wait(timeout=timeout_seconds)
-    except subprocess.TimeoutExpired:
-        print(
-            f"xcodebuild timed out after {timeout_seconds}s; terminating process group.",
-            file=sys.stderr,
-            flush=True,
-        )
-        try:
-            os.killpg(process.pid, signal.SIGTERM)
-        except ProcessLookupError:
-            pass
-        try:
-            process.wait(timeout=TIMEOUT_TERMINATION_GRACE_SECONDS)
-        except subprocess.TimeoutExpired:
-            print(
-                "xcodebuild did not exit after SIGTERM; sending SIGKILL.",
-                file=sys.stderr,
-                flush=True,
-            )
-            try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            process.wait()
-        return TIMEOUT_EXIT_CODE
-
-    if return_code != 0:
-        raise subprocess.CalledProcessError(return_code, list(command))
-    return 0
-
-
 def create_argument_parser() -> argparse.ArgumentParser:
     """Create the CLI parser."""
     parser = argparse.ArgumentParser(
@@ -108,7 +62,6 @@ def create_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--result-bundle-path", required=True)
     parser.add_argument("--test-selection-args")
     parser.add_argument("--code-signing-allowed", default="NO")
-    parser.add_argument("--timeout-seconds", type=int)
     parser.add_argument(
         "--action",
         required=True,
@@ -136,7 +89,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         action=args.action,
     )
     print("Running:", shlex.join(command))
-    return run_xcodebuild_command(command, timeout_seconds=args.timeout_seconds)
+    subprocess.run(command, check=True)
+    return 0
 
 
 if __name__ == "__main__":

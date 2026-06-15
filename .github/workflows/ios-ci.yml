@@ -547,7 +547,6 @@ jobs:
 
       - name: Run selected simulator tests without rebuilding
         if: needs.repo-standards.outputs.required_checks_only != 'true'
-        timeout-minutes: ${{ matrix.xcodebuild_step_timeout_minutes }}
         env:
           UITEST_FIXTURE_TOOL_PATH: ${{ github.workspace }}/.build/debug/UITestFixtureTool
           UITEST_BUNDLE_ID: org.andbible.ios
@@ -561,7 +560,6 @@ jobs:
             --derived-data-path "${DERIVED_DATA_PATH}" \
             --result-bundle-path "${TEST_XCRESULT_BUNDLE_PATH}" \
             --code-signing-allowed NO \
-            --timeout-seconds "${{ matrix.xcodebuild_timeout_seconds }}" \
             --action test-without-building
 
       - name: Upload xcodebuild test result bundle

@@ -801,10 +801,13 @@ extension AndBibleUITests {
      *   - spawns one host-side child process from the XCTest runner
      *   - passes through the test-runner environment so Xcode tool lookup and fixture overrides
      *     match the parent test process
+     *   - drains stdout and stderr while the child runs so pipe buffers cannot stall the child
      *   - terminates the child process when it exceeds the timeout budget
      * - Failure modes:
      *   - returns `-1` when the subprocess cannot be launched
      *   - returns `-2` when the subprocess is terminated after exceeding the timeout budget
+     *   - captures only output available from the direct command before it exits; descriptors kept
+     *     open by descendants are deliberately not treated as command progress
      */
     func runHostProcess(
         executablePath: String,
@@ -816,6 +819,14 @@ extension AndBibleUITests {
         guard pipe(&stdoutPipe) == 0, pipe(&stderrPipe) == 0 else {
             return (-1, "", "Failed to create host-process pipes.")
         }
+        guard makeReadDescriptorNonBlocking(stdoutPipe[0]),
+              makeReadDescriptorNonBlocking(stderrPipe[0]) else {
+            close(stdoutPipe[0])
+            close(stdoutPipe[1])
+            close(stderrPipe[0])
+            close(stderrPipe[1])
+            return (-1, "", "Failed to configure host-process pipes.")
+        }
 
         var fileActions: posix_spawn_file_actions_t? = nil
         posix_spawn_file_actions_init(&fileActions)
@@ -825,6 +836,8 @@ extension AndBibleUITests {
         posix_spawn_file_actions_adddup2(&fileActions, stderrPipe[1], STDERR_FILENO)
         posix_spawn_file_actions_addclose(&fileActions, stdoutPipe[0])
         posix_spawn_file_actions_addclose(&fileActions, stderrPipe[0])
+        posix_spawn_file_actions_addclose(&fileActions, stdoutPipe[1])
+        posix_spawn_file_actions_addclose(&fileActions, stderrPipe[1])
 
         let command = [executablePath] + arguments
         let cArguments = command.map { strdup($0) }
@@ -882,7 +895,11 @@ extension AndBibleUITests {
         let deadline = Date().addingTimeInterval(timeout)
         var waitStatus: Int32 = 0
         var timedOut = false
+        var stdoutData = Data()
+        var stderrData = Data()
         while true {
+            stdoutData.append(readAvailableData(from: stdoutPipe[0]))
+            stderrData.append(readAvailableData(from: stderrPipe[0]))
             let waitResult = waitpid(pid, &waitStatus, WNOHANG)
             if waitResult == pid {
                 break
@@ -896,10 +913,12 @@ extension AndBibleUITests {
             RunLoop.current.run(until: Date().addingTimeInterval(0.1))
         }
 
-        let stdout = readAll(from: stdoutPipe[0])
-        let stderr = readAll(from: stderrPipe[0])
+        stdoutData.append(readAvailableData(from: stdoutPipe[0]))
+        stderrData.append(readAvailableData(from: stderrPipe[0]))
         close(stdoutPipe[0])
         close(stderrPipe[0])
+        let stdout = decodeCapturedOutput(stdoutData)
+        let stderr = decodeCapturedOutput(stderrData)
 
         if timedOut {
             return (-2, stdout, stderr)
@@ -915,29 +934,68 @@ extension AndBibleUITests {
     }
 
     /**
-     Reads all currently available UTF-8 text from one file descriptor.
+     Configures a pipe read descriptor so draining output never waits for inherited writers.
      *
-     * - Parameter fileDescriptor: Open descriptor positioned at the start of the captured stream.
-     * - Returns: Best-effort UTF-8 decoded contents.
-     * - Side effects:
-     *   - drains the descriptor until EOF
-     * - Failure modes:
-     *   - returns an empty string when the descriptor cannot be read or the bytes are not valid
-     *     UTF-8
+     * - Parameter fileDescriptor: Open pipe descriptor that the current process owns.
+     * - Returns: `true` when `O_NONBLOCK` is set successfully.
+     * - Side effects: Mutates file descriptor flags for the current process only.
+     * - Failure modes: Returns `false` when `fcntl` cannot read or update the descriptor flags.
      */
-    func readAll(from fileDescriptor: Int32) -> String {
+    func makeReadDescriptorNonBlocking(_ fileDescriptor: Int32) -> Bool {
+        let flags = fcntl(fileDescriptor, F_GETFL)
+        guard flags != -1 else {
+            return false
+        }
+        return fcntl(fileDescriptor, F_SETFL, flags | O_NONBLOCK) != -1
+    }
+
+    /**
+     Drains bytes that are immediately available from one nonblocking pipe.
+     *
+     * - Parameter fileDescriptor: Nonblocking pipe descriptor to read from.
+     * - Returns: Captured bytes available at the time of the call.
+     * - Side effects:
+     *   - advances the descriptor read position for bytes that were already buffered
+     * - Failure modes:
+     *   - returns bytes read before an interrupt, EOF, or nonblocking no-data condition
+     *   - treats other read errors as an empty capture so process status remains the source of truth
+     */
+    func readAvailableData(from fileDescriptor: Int32) -> Data {
         var data = Data()
         var buffer = [UInt8](repeating: 0, count: 4096)
 
         while true {
             let bytesRead = read(fileDescriptor, &buffer, buffer.count)
-            if bytesRead <= 0 {
+            if bytesRead > 0 {
+                data.append(buffer, count: bytesRead)
+                continue
+            }
+            if bytesRead == 0 {
                 break
             }
-            data.append(buffer, count: bytesRead)
+            if errno == EINTR {
+                continue
+            }
+            if errno == EAGAIN || errno == EWOULDBLOCK {
+                break
+            }
+            break
         }
 
-        return String(data: data, encoding: .utf8) ?? ""
+        return data
+    }
+
+    /**
+     Converts captured subprocess bytes to UTF-8 text for XCTest failure messages.
+     *
+     * - Parameter data: Raw bytes captured from stdout or stderr.
+     * - Returns: UTF-8 decoded text, or an empty string when the stream is not valid UTF-8.
+     * - Side effects: none.
+     * - Failure modes: Invalid UTF-8 is intentionally discarded because callers use process status
+     *   and stderr text as diagnostic context, not as a binary transport.
+     */
+    func decodeCapturedOutput(_ data: Data) -> String {
+        String(data: data, encoding: .utf8) ?? ""
     }
 
 }
