@@ -1119,6 +1119,59 @@ extension AndBibleTests {
     }
 
     /**
+     Verifies Android settings restore rejects integer preference values outside Android's domain.
+
+     Setup:
+     - seeds local application preferences that would be cleared by a destructive Settings restore
+     - loads Android's `settings.sqlite3` with a `LongSetting` value that Android's settings UI
+       cannot create for `font_size_multiplier`
+
+     Expected result:
+     - restore fails with `invalidSQLiteDatabase("settings.sqlite3")`
+     - existing local preferences remain intact because validation happens before reset/apply
+
+     Failure meaning:
+     - iOS would accept corrupt Android preference payloads and persist values that Android cannot
+       produce, or it would clear local settings before discovering the backup is invalid.
+     */
+    func testAndroidDatabaseBackupRejectsSettingsIntOutsideAndroidPreferenceRangeBeforeReset() throws {
+        let schema = Schema([Setting.self])
+        let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: schema, configurations: [configuration])
+        let modelContext = ModelContext(container)
+        let settingsStore = SettingsStore(modelContext: modelContext)
+        settingsStore.setBool(.autoFullscreenPref, value: true)
+        settingsStore.setInt(.fontSizeMultiplier, value: 125)
+
+        let settingsDatabaseURL = try makeAndroidSettingsDatabase(
+            longSettings: [
+                AppPreferenceKey.fontSizeMultiplier.rawValue: Int64.max,
+            ]
+        )
+        let archiveData = try makeAndroidDatabaseBackupArchiveData(
+            databaseURLsByName: [
+                "settings.sqlite3": settingsDatabaseURL,
+            ],
+            contains: [.settings]
+        )
+        let service = AndroidDatabaseBackupService()
+        let archive = try service.loadArchive(from: archiveData)
+
+        XCTAssertThrowsError(
+            try service.apply(
+                archive: archive,
+                selections: [.init(category: .settings, mode: .restore)],
+                modelContext: modelContext,
+                settingsStore: settingsStore
+            )
+        ) { error in
+            XCTAssertEqual(error as? AndroidDatabaseBackupError, .invalidSQLiteDatabase("settings.sqlite3"))
+        }
+        XCTAssertTrue(settingsStore.getBool(.autoFullscreenPref))
+        XCTAssertEqual(settingsStore.getInt(.fontSizeMultiplier), 125)
+    }
+
+    /**
      Verifies Android restore-only databases cannot be applied through Import mode.
 
      Setup:

@@ -38,18 +38,21 @@ enum AndroidDatabaseBackupSettingsMapper {
        - clears existing registered app preferences first
        - writes supported Android preference values through `SettingsStore`
      - Failure modes: Throws `AndroidDatabaseBackupError.invalidSQLiteDatabase` when the Android
-       database cannot be read as schema version 1.
+       database cannot be read as schema version 1 or contains an unsupported registered
+       preference value.
      */
     static func restore(
         from databaseURL: URL,
         settingsStore: SettingsStore
     ) throws -> AndroidDatabaseBackupSettingsReport {
+        let fileName = databaseURL.lastPathComponent
         let snapshot = try readSnapshot(from: databaseURL)
+        try validate(snapshot, fileName: fileName)
         settingsStore.resetApplicationPreferences()
 
         var appliedCount = 0
         for definition in AppPreferenceRegistry.definitions where definition.storage != .action {
-            guard apply(definition, from: snapshot, to: settingsStore) else {
+            guard try apply(definition, from: snapshot, to: settingsStore, fileName: fileName) else {
                 continue
             }
             appliedCount += 1
@@ -112,19 +115,16 @@ enum AndroidDatabaseBackupSettingsMapper {
     private static func apply(
         _ definition: AppPreferenceDefinition,
         from snapshot: Snapshot,
-        to settingsStore: SettingsStore
-    ) -> Bool {
+        to settingsStore: SettingsStore,
+        fileName: String
+    ) throws -> Bool {
         switch definition.valueType {
         case .bool:
             guard let value = snapshot.booleans[definition.key.rawValue] else { return false }
             settingsStore.setBool(definition.key, value: value)
             return true
         case .int:
-            if let value = snapshot.longs[definition.key.rawValue] {
-                settingsStore.setInt(definition.key, value: Int(value))
-                return true
-            }
-            if let stringValue = snapshot.strings[definition.key.rawValue], let value = Int(stringValue) {
+            if let value = try intValue(definition, from: snapshot, fileName: fileName) {
                 settingsStore.setInt(definition.key, value: value)
                 return true
             }
@@ -140,6 +140,98 @@ enum AndroidDatabaseBackupSettingsMapper {
         case .action:
             return false
         }
+    }
+
+    /**
+     Validates registered Android preference values before the destructive Settings reset.
+
+     - Parameters:
+       - snapshot: Parsed Android settings rows.
+       - fileName: Backup database name used in thrown errors.
+     - Side effects: none.
+     - Failure modes: Throws `invalidSQLiteDatabase` when a registered integer preference cannot
+       be represented on the current platform or falls outside Android's declared preference range.
+     */
+    private static func validate(_ snapshot: Snapshot, fileName: String) throws {
+        for definition in AppPreferenceRegistry.definitions
+            where definition.storage != .action && definition.valueType == .int {
+            _ = try intValue(definition, from: snapshot, fileName: fileName)
+        }
+    }
+
+    /**
+     Reads and validates a registered integer preference from Android settings rows.
+
+     Android stores app integer preferences in `LongSetting`. The string fallback is retained for
+     tolerance of older or manually-created fixtures, but any value that decodes as an integer must
+     still satisfy the registry's Android domain metadata.
+
+     - Parameters:
+       - definition: Registered parity preference definition.
+       - snapshot: Parsed Android settings rows.
+       - fileName: Backup database name used in thrown errors.
+     - Returns: Validated integer value, or `nil` when no decodable row exists.
+     - Side effects: none.
+     - Failure modes: Throws `invalidSQLiteDatabase` when the value is unrepresentable as Swift
+       `Int` or violates Android's registered integer range.
+     */
+    private static func intValue(
+        _ definition: AppPreferenceDefinition,
+        from snapshot: Snapshot,
+        fileName: String
+    ) throws -> Int? {
+        if let value = snapshot.longs[definition.key.rawValue] {
+            return try validatedInt(value, for: definition, fileName: fileName)
+        }
+        if let stringValue = snapshot.strings[definition.key.rawValue], let value = Int(stringValue) {
+            return try validatedInt(value, for: definition, fileName: fileName)
+        }
+        return nil
+    }
+
+    /**
+     Converts an Android `LongSetting` integer into a registry-valid Swift integer.
+
+     - Parameters:
+       - value: Raw SQLite 64-bit integer.
+       - definition: Registered parity preference definition.
+       - fileName: Backup database name used in thrown errors.
+     - Returns: Swift `Int` when representable and Android-valid.
+     - Side effects: none.
+     - Failure modes: Throws `invalidSQLiteDatabase` when the raw value cannot be represented by
+       `Int` or falls outside the Android-supported range for the preference.
+     */
+    private static func validatedInt(
+        _ value: Int64,
+        for definition: AppPreferenceDefinition,
+        fileName: String
+    ) throws -> Int {
+        guard let intValue = Int(exactly: value) else {
+            throw AndroidDatabaseBackupError.invalidSQLiteDatabase(fileName)
+        }
+        return try validatedInt(intValue, for: definition, fileName: fileName)
+    }
+
+    /**
+     Checks a decoded integer against the registry's Android-supported value domain.
+
+     - Parameters:
+       - value: Decoded preference value.
+       - definition: Registered parity preference definition.
+       - fileName: Backup database name used in thrown errors.
+     - Returns: `value` when it satisfies the registered domain.
+     - Side effects: none.
+     - Failure modes: Throws `invalidSQLiteDatabase` for values outside Android's declared range.
+     */
+    private static func validatedInt(
+        _ value: Int,
+        for definition: AppPreferenceDefinition,
+        fileName: String
+    ) throws -> Int {
+        if let range = definition.intRange, !range.contains(value) {
+            throw AndroidDatabaseBackupError.invalidSQLiteDatabase(fileName)
+        }
+        return value
     }
 
     private static func insert(
