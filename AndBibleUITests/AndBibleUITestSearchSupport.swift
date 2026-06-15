@@ -402,10 +402,12 @@ extension AndBibleUITests {
      *     hittable.
      * - Side effects:
      *   - resolves the requested Search scope button from the accessibility hierarchy and taps
-     *     its center point directly; callers verify the resulting Search state separately
+     *     it through XCTest
+     *   - verifies the compact Search state export after each tap and retries when hosted
+     *     simulators synthesize a tap that does not activate the SwiftUI button
      * - Failure modes:
-     *   - fails if the requested scope button never appears or never becomes hittable within the
-     *     allotted timeout
+     *   - fails if the requested scope button never appears, never becomes hittable, or never
+     *     updates the exported Search scope within the allotted timeout
      */
     func tapSearchScope(
         _ scopeToken: SearchScopeToken,
@@ -414,8 +416,20 @@ extension AndBibleUITests {
     ) {
         let deadline = Date().addingTimeInterval(timeout)
         let identifier = "searchScopeButton::\(scopeToken.rawValue)"
+        let expectedStateToken = "scope=\(scopeToken.rawValue)"
+
+        func isExpectedScopeSelected() -> Bool {
+            searchStateCandidateValues(in: app).contains { value in
+                value.contains("state=ready")
+                    && value.contains("searching=false")
+                    && value.contains(expectedStateToken)
+            }
+        }
 
         while Date() < deadline {
+            if isExpectedScopeSelected() {
+                return
+            }
             dismissSearchFieldFocusIfNeeded(in: app)
             revealSearchControls(in: app)
 
@@ -434,7 +448,14 @@ extension AndBibleUITests {
                     && waitForElementToBecomeHittable($0, timeout: 0.5)
             }) {
                 tapElementReliably(identifierElement, timeout: 3)
-                return
+                let activationDeadline = min(Date().addingTimeInterval(2), deadline)
+                repeat {
+                    if isExpectedScopeSelected() {
+                        return
+                    }
+                    RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+                } while Date() < activationDeadline
+                continue
             }
 
             if scopeStrip.exists, !scopeStrip.frame.isEmpty {
@@ -453,7 +474,11 @@ extension AndBibleUITests {
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         }
 
-        XCTFail("Expected Search scope button '\(scopeToken.fallbackLabel)' to exist within \(timeout) seconds.")
+        let finalValues = searchStateCandidateValues(in: app)
+        let lastValue = finalValues.isEmpty ? "nil" : finalValues.joined(separator: " || ")
+        XCTFail(
+            "Expected Search scope button '\(scopeToken.fallbackLabel)' to select '\(expectedStateToken)' within \(timeout) seconds; last Search state was '\(lastValue)'."
+        )
     }
 
     /**
