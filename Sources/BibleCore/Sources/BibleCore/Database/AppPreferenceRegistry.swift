@@ -119,7 +119,7 @@ public enum AppPreferenceValueNormalizer {
  * Defines the full iOS-side contract for one Android parity preference key.
  *
  * Each definition records the durable key, storage backend, logical value type, optional default,
- * and the Android source reference used during parity review.
+ * optional integer value domain, and the Android source reference used during parity review.
  */
 public struct AppPreferenceDefinition: Sendable {
     /// Durable preference key shared with Android parity tracking.
@@ -130,6 +130,8 @@ public struct AppPreferenceDefinition: Sendable {
     public let valueType: AppPreferenceValueType
     /// Default raw value used when no persisted value exists.
     public let defaultValue: String?
+    /// Android-supported integer range for bounded numeric preferences.
+    public let intRange: ClosedRange<Int>?
     /// Android source reference proving the contract origin for this key.
     public let androidReference: String
 
@@ -139,12 +141,14 @@ public struct AppPreferenceDefinition: Sendable {
         storage: AppPreferenceStorageBackend,
         valueType: AppPreferenceValueType,
         defaultValue: String?,
+        intRange: ClosedRange<Int>? = nil,
         androidReference: String
     ) {
         self.key = key
         self.storage = storage
         self.valueType = valueType
         self.defaultValue = defaultValue
+        self.intRange = intRange
         self.androidReference = androidReference
     }
 }
@@ -305,6 +309,7 @@ public enum AppPreferenceRegistry {
             storage: .swiftData,
             valueType: .int,
             defaultValue: "100",
+            intRange: 10...500,
             androidReference: "settings.xml:146-153"
         ),
         .fullScreenHideButtonsPref: .init(
@@ -482,6 +487,16 @@ public enum AppPreferenceRegistry {
     public static func intDefault(for key: AppPreferenceKey) -> Int? {
         guard let value = definition(for: key).defaultValue else { return nil }
         return Int(value)
+    }
+
+    /**
+     * Returns the Android-supported integer domain for a bounded parity preference.
+     * - Parameter key: Android parity preference key.
+     * - Returns: Closed integer range for bounded integer preferences, or `nil` for unbounded or
+     *   non-integer preferences.
+     */
+    public static func intRange(for key: AppPreferenceKey) -> ClosedRange<Int>? {
+        definition(for: key).intRange
     }
 
     /**

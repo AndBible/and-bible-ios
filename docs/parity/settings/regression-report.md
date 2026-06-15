@@ -93,6 +93,44 @@ Evidence:
 - `docs/parity/settings/baselines/localization-android.json`
 - `docs/parity/settings/baselines/localization-guardrail.json`
 
+### 1a. SETPAR-164 locale_pref option contract
+
+Date: 2026-06-11
+
+Commands:
+
+```bash
+python3 scripts/check_settings_localization_guardrails.py --android-root /tmp/does-not-exist
+```
+
+```bash
+python3 scripts/check_settings_localization_guardrails.py \
+  --android-root /path/to/and-bible/app/src/main/res
+```
+
+```bash
+python3 -m unittest scripts/test_check_settings_localization_guardrails.py
+```
+
+Results:
+
+- Snapshot fallback guardrail: `PASS`
+- Live Android source guardrail: `PASS`
+- Focused locale-pref guardrail tests: `PASS` (`Ran 8 tests`)
+
+Observed guardrail output:
+
+- `locale_pref supported values: 42`
+- `locale_pref unavailable Android values: 10`
+- `locale_pref extra iOS-only resource locales: 4`
+
+Evidence:
+
+- Android source arrays: `and-bible/app/src/main/res/values/arrays.xml:121-230`
+- iOS picker: `Sources/BibleUI/Sources/BibleUI/Settings/SettingsView.swift`
+- Guardrail: `scripts/check_settings_localization_guardrails.py`
+- Snapshot fallback: `docs/parity/settings/baselines/localization-android.json`
+
 ### 2. Xcode simulator unit test run (explicit result bundle)
 
 Command:

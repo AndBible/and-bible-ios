@@ -540,7 +540,7 @@
 "bookmarks_contents" = "书签、标签、研经笔记";
 "workspaces_contents" = "工作空间与窗口";
 "my_documents" = "My Documents";
-"my_documents_contents" = "My Documents and their pages";
+"my_documents_contents" = "My Documents and their content";
 "synchronization_categories" = "同步类别";
 "sync_error" = "云同步发生报错";
 "sync_cant_fetch" = "云端的数据库或补丁文件版本，高于软件支持的版本。";

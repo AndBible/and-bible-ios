@@ -111,6 +111,41 @@ extension AndBibleTests {
     }
 
     /**
+     Verifies Android module backup restore can inspect and install from a file URL.
+
+     Setup:
+     - writes an Android-shaped `.abmd.zip` fixture to disk
+     - inspects and restores through file-backed service APIs instead of retaining raw `Data`
+
+     Expected result:
+     - inspection reports the supported module from the file URL
+     - restore writes the supported SWORD payload into the module root
+
+     Failure meaning:
+     - the Documents restore/import target would keep the same whole-file memory behavior that
+       blocks large Android backups and diverges from Android's file-backed restore path.
+     */
+    func testAndroidModuleBackupRestoresArchiveFromFileURL() throws {
+        let moduleRoot = try makeTemporaryAndroidModuleBackupRoot()
+        let service = AndroidModuleBackupService(moduleDirectory: moduleRoot)
+        let archiveData = try makeAndroidModuleBackupArchiveData(entries: [
+            ("mods.d/kjv.conf", makeAndroidModuleBackupConf(moduleName: "KJV")),
+            ("modules/texts/rawtext/kjv/ot", Data("Genesis content".utf8)),
+        ])
+        let archiveURL = try writeTemporaryAndroidModuleBackupArchive(archiveData)
+
+        let inspection = try service.inspectArchive(fromArchiveAt: archiveURL)
+        let report = try service.restoreArchive(fromArchiveAt: archiveURL)
+
+        XCTAssertEqual(inspection.supportedModuleNames, ["KJV"])
+        XCTAssertEqual(report.installedModuleNames, ["KJV"])
+        XCTAssertEqual(
+            try String(contentsOf: moduleRoot.appendingPathComponent("modules/texts/rawtext/kjv/ot"), encoding: .utf8),
+            "Genesis content"
+        )
+    }
+
+    /**
      Verifies that overwrite protection matches the UI confirmation contract for Android module
      backup restore.
 
@@ -337,6 +372,22 @@ extension AndBibleTests {
         let zipEntries = [ZipArchiveWriterEntry(name: "AndBibleBackupManifest.json", data: manifest)]
             + entries.map { ZipArchiveWriterEntry(name: $0.0, data: $0.1) }
         return try ZipArchiveWriter.storedArchive(entries: zipEntries)
+    }
+
+    /**
+     Writes an Android module backup fixture to a temporary file.
+
+     - Parameter archiveData: ZIP bytes to persist.
+     - Returns: Temporary `.abmd.zip` URL registered for teardown cleanup.
+     - Side effects: Writes `archiveData` under the process temporary directory.
+     - Failure modes: Rethrows file write errors.
+     */
+    private func writeTemporaryAndroidModuleBackupArchive(_ archiveData: Data) throws -> URL {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("android-module-backup-\(UUID().uuidString).abmd.zip")
+        try archiveData.write(to: url)
+        temporarySwordModulePaths.append(url.path)
+        return url
     }
 
     /**

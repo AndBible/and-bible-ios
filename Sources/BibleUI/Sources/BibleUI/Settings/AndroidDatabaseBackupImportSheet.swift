@@ -91,15 +91,17 @@ struct AndroidDatabaseBackupImportSheet: View {
         NavigationStack {
             List {
                 Section {
-                    LabeledContent(
-                        String(localized: "android_backup_manifest_version", defaultValue: "Manifest version"),
-                        value: "\(archive.manifest.manifestVersion)"
-                    )
-                    if let andBibleVersion = archive.manifest.andBibleVersion {
+                    if let manifest = archive.manifest {
                         LabeledContent(
-                            String(localized: "android_backup_app_version", defaultValue: "Android app version"),
-                            value: "\(andBibleVersion)"
+                            String(localized: "android_backup_manifest_version", defaultValue: "Manifest version"),
+                            value: "\(manifest.manifestVersion)"
                         )
+                        if let andBibleVersion = manifest.andBibleVersion {
+                            LabeledContent(
+                                String(localized: "android_backup_app_version", defaultValue: "Android app version"),
+                                value: "\(andBibleVersion)"
+                            )
+                        }
                     }
                     LabeledContent(
                         String(localized: "android_backup_sections", defaultValue: "Sections"),
@@ -188,9 +190,11 @@ struct AndroidDatabaseBackupImportSheet: View {
                   selectedCategories.contains(section.category) else {
                 return nil
             }
+            let supportedModes = section.category.supportedApplyModes
+            let selectedMode = modesByCategory[section.category] ?? supportedModes.first ?? .restore
             return AndroidDatabaseBackupSelection(
                 category: section.category,
-                mode: modesByCategory[section.category] ?? .restore
+                mode: supportedModes.contains(selectedMode) ? selectedMode : supportedModes.first ?? .restore
             )
         }
     }
@@ -283,12 +287,12 @@ private struct AndroidDatabaseBackupSectionRow: View {
                 }
                 .accessibilityIdentifier("androidBackupSectionToggle.\(section.category.rawValue)")
 
-                if isSelected {
+                if isSelected, section.category.supportedApplyModes.count > 1 {
                     Picker(
                         String(localized: "android_backup_mode", defaultValue: "Mode"),
                         selection: $mode
                     ) {
-                        ForEach(AndroidDatabaseBackupApplyMode.allCases) { mode in
+                        ForEach(section.category.supportedApplyModes) { mode in
                             Text(mode.localizedBackupModeName).tag(mode)
                         }
                     }
@@ -337,14 +341,6 @@ private struct AndroidDatabaseBackupSectionRow: View {
                     defaultValue: "Manifest category"
                 ),
             ]
-        if !section.declaredInManifest {
-            pieces.append(
-                String(
-                    localized: "android_backup_not_declared",
-                    defaultValue: "found in archive"
-                )
-            )
-        }
         return pieces.joined(separator: " • ")
     }
 }

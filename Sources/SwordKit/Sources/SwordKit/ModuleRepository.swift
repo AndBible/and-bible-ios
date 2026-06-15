@@ -1711,6 +1711,59 @@ public final class ModuleRepository: @unchecked Sendable {
     }
 
     /**
+     Writes one SWORD ZIP entry to disk using the file-backed extractor shared by local imports and
+     downloaded repository package fallbacks.
+
+     - Parameters:
+       - entry: ZIP entry metadata already accepted by SWORD path normalization.
+       - zipURL: Archive containing the compressed payload.
+       - destinationURL: Destination path inside a staging directory or SWORD home.
+     - Side effects:
+       - creates the destination parent directory
+       - replaces any existing destination file with the extracted payload
+       - reads compressed bytes from `zipURL`
+     - Throws:
+       - `ModuleRepositoryError.invalidZip` for encrypted entries or unsupported compression
+         methods
+       - `ModuleRepositoryError.decompressionFailed` when zlib rejects a deflated entry
+       - file-system errors from creating directories, replacing files, or writing output
+     */
+    private func writeSwordZipEntry(
+        _ entry: FileBackedZipEntry,
+        from zipURL: URL,
+        to destinationURL: URL
+    ) throws {
+        guard entry.generalPurposeFlags & 0x0001 == 0 else {
+            throw ModuleRepositoryError.invalidZip("Encrypted ZIP entries are not supported")
+        }
+
+        let fm = FileManager.default
+        try fm.createDirectory(
+            at: destinationURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        if fm.fileExists(atPath: destinationURL.path) {
+            try fm.removeItem(at: destinationURL)
+        }
+
+        do {
+            switch entry.compressionMethod {
+            case 0:
+                try copyStoredZipEntry(entry, from: zipURL, to: destinationURL)
+            case 8:
+                try inflateDeflatedZipEntry(entry, from: zipURL, to: destinationURL)
+            default:
+                throw ModuleRepositoryError.invalidZip(
+                    "Unsupported ZIP compression method \(entry.compressionMethod)"
+                )
+            }
+        } catch {
+            try? fm.removeItem(at: destinationURL)
+            throw error
+        }
+    }
+
+    /**
      Copies one stored ZIP payload from the package file to staging in bounded chunks.
 
      - Parameters:
@@ -1964,8 +2017,7 @@ public final class ModuleRepository: @unchecked Sendable {
 
         guard let downloadedPackageURL else { return false }
 
-        let zipData = try Data(contentsOf: packageDownloadURL)
-        let entries = try parseZip(zipData)
+        let entries = try readFileBackedZipEntries(from: packageDownloadURL)
         guard !entries.isEmpty else {
             throw ModuleRepositoryError.invalidZip("\(downloadedPackageURL.lastPathComponent) is empty")
         }
@@ -1988,12 +2040,9 @@ public final class ModuleRepository: @unchecked Sendable {
                 continue
             }
 
-            let destinationURL = extractionRootURL.appendingPathComponent(relativePath)
-            try fm.createDirectory(
-                at: destinationURL.deletingLastPathComponent(),
-                withIntermediateDirectories: true
-            )
-            try entry.data.write(to: destinationURL)
+            let destinationPath = (extractionRootURL.path as NSString).appendingPathComponent(relativePath)
+            let destinationURL = URL(fileURLWithPath: destinationPath)
+            try writeSwordZipEntry(entry, from: packageDownloadURL, to: destinationURL)
             extractedDataFileCount += 1
         }
 
@@ -2399,24 +2448,21 @@ public final class ModuleRepository: @unchecked Sendable {
        - rethrows filesystem failures while creating directories or writing extracted files
      */
     public func installFromZip(at url: URL) throws -> String {
-        let fm = FileManager.default
-
-        // Read ZIP data
-        guard let zipData = try? Data(contentsOf: url) else {
-            throw ModuleRepositoryError.invalidZip("Could not read ZIP file")
-        }
-
-        // Parse ZIP entries
-        let entries = try parseZip(zipData)
+        let entries = try readFileBackedZipEntries(from: url)
         guard !entries.isEmpty else {
             throw ModuleRepositoryError.invalidZip("ZIP file is empty")
         }
 
-        // Find .conf files in mods.d/
-        let confEntries = entries.filter { entry in
-            let name = entry.name.lowercased()
-            return (name.hasPrefix("mods.d/") || name.contains("/mods.d/"))
-                && name.hasSuffix(".conf")
+        let installableEntries = entries.compactMap { entry -> (entry: FileBackedZipEntry, path: String)? in
+            guard let relativePath = normalizedSwordPackageEntryPath(entry.name) else {
+                return nil
+            }
+            return (entry, relativePath)
+        }
+
+        let confEntries = installableEntries.filter { entry in
+            let name = entry.path.lowercased()
+            return name.hasPrefix("mods.d/") && name.hasSuffix(".conf")
         }
 
         guard !confEntries.isEmpty else {
@@ -2425,21 +2471,10 @@ public final class ModuleRepository: @unchecked Sendable {
 
         var installedModuleName = ""
 
-        for entry in entries {
-            // Normalize path — remove leading "./" or module folder prefix
-            var relativePath = entry.name
-            if relativePath.hasPrefix("./") {
-                relativePath = String(relativePath.dropFirst(2))
-            }
-            // Some zips nest everything under a folder like "KJV/"
-            // Detect if all paths share a common prefix that's not mods.d/ or modules/
-            if relativePath.isEmpty || relativePath.hasSuffix("/") { continue }
-
+        for entry in installableEntries {
+            let relativePath = entry.path
             let destPath = (swordPath as NSString).appendingPathComponent(relativePath)
-            let destDir = (destPath as NSString).deletingLastPathComponent
-
-            try fm.createDirectory(atPath: destDir, withIntermediateDirectories: true)
-            try entry.data.write(to: URL(fileURLWithPath: destPath))
+            try writeSwordZipEntry(entry.entry, from: url, to: URL(fileURLWithPath: destPath))
 
             // Track the module name from .conf filename
             if relativePath.lowercased().hasPrefix("mods.d/") && relativePath.lowercased().hasSuffix(".conf") {
@@ -2780,59 +2815,6 @@ public final class ModuleRepository: @unchecked Sendable {
         return data
     }
 
-    private struct ZipEntry {
-        let name: String
-        let data: Data
-    }
-
-    /**
-     Parse ZIP file data and extract all entries.
-     Supports stored (method 0) and deflated (method 8) entries.
-     */
-    private func parseZip(_ data: Data) throws -> [ZipEntry] {
-        var entries: [ZipEntry] = []
-        var offset = 0
-
-        while offset + 30 <= data.count {
-            // Local file header signature: 0x04034b50
-            let sig = data.subdata(in: offset..<offset+4)
-            guard sig == Data([0x50, 0x4b, 0x03, 0x04]) else { break }
-
-            let method = readUInt16(data, at: offset + 8)
-            let compressedSize = Int(readUInt32(data, at: offset + 18))
-            let uncompressedSize = Int(readUInt32(data, at: offset + 22))
-            let nameLen = Int(readUInt16(data, at: offset + 26))
-            let extraLen = Int(readUInt16(data, at: offset + 28))
-
-            let nameStart = offset + 30
-            guard nameStart + nameLen <= data.count else { break }
-            let name = String(data: data[nameStart..<nameStart+nameLen], encoding: .utf8) ?? ""
-
-            let dataStart = nameStart + nameLen + extraLen
-            guard dataStart + compressedSize <= data.count else { break }
-            let compressedData = data[dataStart..<dataStart+compressedSize]
-
-            if !name.isEmpty && !name.hasSuffix("/") {
-                let fileData: Data
-                switch method {
-                case 0: // Stored
-                    fileData = Data(compressedData)
-                case 8: // Deflated
-                    fileData = try inflateData(Data(compressedData), uncompressedSize: uncompressedSize)
-                default:
-                    // Skip unsupported compression methods
-                    offset = dataStart + compressedSize
-                    continue
-                }
-                entries.append(ZipEntry(name: name, data: fileData))
-            }
-
-            offset = dataStart + compressedSize
-        }
-
-        return entries
-    }
-
     /**
      Reads a little-endian 16-bit integer from ZIP bytes without assuming pointer alignment.
 
@@ -2862,28 +2844,6 @@ public final class ModuleRepository: @unchecked Sendable {
             | (UInt32(data[offset + 1]) << 8)
             | (UInt32(data[offset + 2]) << 16)
             | (UInt32(data[offset + 3]) << 24)
-    }
-
-    /// Inflate deflated data using the C adapter's inflate_raw_data().
-    private func inflateData(_ compressed: Data, uncompressedSize: Int) throws -> Data {
-        return try compressed.withUnsafeBytes { (ptr: UnsafeRawBufferPointer) -> Data in
-            guard let baseAddress = ptr.baseAddress else {
-                throw ModuleRepositoryError.decompressionFailed
-            }
-
-            var outputLen: UInt = 0
-            guard let output = inflate_raw_data(
-                baseAddress.assumingMemoryBound(to: UInt8.self),
-                UInt(compressed.count),
-                UInt(uncompressedSize),
-                &outputLen
-            ) else {
-                throw ModuleRepositoryError.decompressionFailed
-            }
-
-            defer { gunzip_free(output) }
-            return Data(bytes: output, count: Int(outputLen))
-        }
     }
 
     /// Find the source for a given module name from the catalog cache.

@@ -512,7 +512,7 @@
 "bookmarks_contents" = "Boekmerke, etikette en studieblokkies";
 "workspaces_contents" = "Werkspasies en Windows";
 "my_documents" = "My Documents";
-"my_documents_contents" = "My Documents and their pages";
+"my_documents_contents" = "My Documents and their content";
 "synchronization_categories" = "Sinchronisasie kategorieë";
 "sync_error" = "Fout het voorgekom in Clud sinchronisasie";
 "sync_cant_fetch" = "";

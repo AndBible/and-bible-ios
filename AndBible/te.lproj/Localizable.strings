@@ -540,7 +540,7 @@
 "bookmarks_contents" = "బుక్‌మార్క్‌లు, లేబుల్‌లు మరియు స్టడీ ప్యాడ్‌లు";
 "workspaces_contents" = "కార్యస్థలాలు మరియు విండోస్";
 "my_documents" = "My Documents";
-"my_documents_contents" = "My Documents and their pages";
+"my_documents_contents" = "My Documents and their content";
 "synchronization_categories" = "సమకాలీకరణ వర్గాలు";
 "sync_error" = "క్లౌడ్ సింక్రొనైజేషన్‌లో లోపం సంభవించింది";
 "sync_cant_fetch" = "క్లౌడ్‌లో నిల్వ చేయబడిన డేటాబేస్ లేదా ప్యాచ్ ఫైల్ వెర్షన్ ఈ యాప్ ద్వారా సపోర్ట్ చేసే దాని కంటే ఎక్కువగా ఉంది.";

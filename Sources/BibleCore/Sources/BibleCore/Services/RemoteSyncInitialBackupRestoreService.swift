@@ -178,6 +178,8 @@ public final class RemoteSyncInitialBackupRestoreService {
                 modelContext: modelContext
             )
             report = .myDocuments(myDocumentReport)
+        case .progress:
+            throw RemoteSyncSynchronizationError.unsupportedCategory(category)
         }
 
         _ = metadataRestoreService.replaceLocalMetadata(

@@ -540,7 +540,7 @@
 "bookmarks_contents" = "Conteúdo dos favoritos";
 "workspaces_contents" = "Áreas de trabalho e Janelas";
 "my_documents" = "My Documents";
-"my_documents_contents" = "My Documents and their pages";
+"my_documents_contents" = "My Documents and their content";
 "synchronization_categories" = "Categorias de sincronização";
 "sync_error" = "Ocorreu um erro de sincronização na Nuvem";
 "sync_cant_fetch" = "A versão do banco de dados ou arquivo de patch armazenado na nuvem é maior do que a suportada por este aplicativo.";
