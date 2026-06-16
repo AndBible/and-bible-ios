@@ -19,6 +19,9 @@ public enum RemoteSyncBookmarkRestoreError: Error, Equatable {
     /// One Android UUID-like blob could not be converted into an iOS `UUID`.
     case invalidIdentifierBlob(table: String, column: String)
 
+    /// One staged scalar value is not valid for Android's declared column type.
+    case invalidColumnValue(table: String, column: String)
+
     /// One or more staged rows referenced missing parent records or required companion rows.
     case orphanReferences([String])
 
@@ -51,7 +54,8 @@ public struct RemoteSyncAndroidBookmarkLabelLink: Sendable, Equatable {
        - indentLevel: Nesting depth used by label/StudyPad outline rendering.
        - expandContent: Whether child content was expanded in Android's StudyPad-like views.
      - Side effects: none.
-     - Failure modes: This initializer cannot fail.
+     - Failure modes: This initializer cannot fail; staged SQLite readers validate non-null values
+       before constructing these value types.
      */
     public init(labelID: UUID, orderNumber: Int, indentLevel: Int, expandContent: Bool) {
         self.labelID = labelID
@@ -275,7 +279,7 @@ public struct RemoteSyncAndroidBibleBookmark: Sendable, Equatable {
         self.endOffset = endOffset
         self.primaryLabelID = primaryLabelID
         self.notes = notes
-        self.notesContentType = notesContentType.map(AppPreferenceValueNormalizer.notesContentType)
+        self.notesContentType = AppPreferenceValueNormalizer.notesContentTypeRow(notesContentType)
         self.lastUpdatedOn = lastUpdatedOn
         self.wholeVerse = wholeVerse
         self.type = type
@@ -362,7 +366,8 @@ public struct RemoteSyncAndroidGenericBookmark: Sendable, Equatable {
        - editAction: Optional bookmark note-edit automation descriptor.
        - labelLinks: Label rows linked to this bookmark via `GenericBookmarkToLabel`.
      - Side effects: none.
-     - Failure modes: This initializer cannot fail.
+     - Failure modes: This initializer cannot fail; staged SQLite readers validate non-null values
+       before constructing these value types.
      */
     public init(
         id: UUID,
@@ -393,7 +398,7 @@ public struct RemoteSyncAndroidGenericBookmark: Sendable, Equatable {
         self.endOffset = endOffset
         self.primaryLabelID = primaryLabelID
         self.notes = notes
-        self.notesContentType = notesContentType.map(AppPreferenceValueNormalizer.notesContentType)
+        self.notesContentType = AppPreferenceValueNormalizer.notesContentTypeRow(notesContentType)
         self.lastUpdatedOn = lastUpdatedOn
         self.wholeVerse = wholeVerse
         self.playbackSettingsJSON = playbackSettingsJSON
@@ -436,7 +441,8 @@ public struct RemoteSyncAndroidStudyPadEntry: Sendable, Equatable {
        - contentType: Optional Android `TextContentType` raw value for the detached text payload.
        - text: Detached StudyPad text payload.
      - Side effects: none.
-     - Failure modes: This initializer cannot fail.
+     - Failure modes: This initializer cannot fail; staged SQLite readers validate non-null values
+       before constructing these value types.
      */
     public init(
         id: UUID,
@@ -450,7 +456,7 @@ public struct RemoteSyncAndroidStudyPadEntry: Sendable, Equatable {
         self.labelID = labelID
         self.orderNumber = orderNumber
         self.indentLevel = indentLevel
-        self.contentType = contentType.map(AppPreferenceValueNormalizer.notesContentType)
+        self.contentType = AppPreferenceValueNormalizer.notesContentTypeRow(contentType)
         self.text = text
     }
 }
@@ -1579,6 +1585,8 @@ public final class RemoteSyncBookmarkRestoreService {
      - Failure modes:
        - throws `RemoteSyncBookmarkRestoreError.invalidSQLiteDatabase` when the query cannot be prepared
        - throws `RemoteSyncBookmarkRestoreError.invalidIdentifierBlob` when one bookmark ID BLOB is malformed
+       - throws `RemoteSyncBookmarkRestoreError.invalidColumnValue` when one non-null
+         `contentType` value is not an Android `TextContentType`
      */
     private func fetchNoteRows(
         from db: OpaquePointer,
@@ -1601,7 +1609,9 @@ public final class RemoteSyncBookmarkRestoreService {
                 RemoteSyncCurrentBookmarkNoteRow(
                     bookmarkID: try uuidFromBlob(statement: statement, column: 0, table: tableName, name: "bookmarkId"),
                     notes: stringColumn(statement: statement, index: 1),
-                    contentType: hasContentType ? optionalStringColumn(statement: statement, index: 2) : nil
+                    contentType: hasContentType
+                        ? try optionalNotesContentTypeColumn(statement: statement, index: 2, table: tableName, name: "contentType")
+                        : nil
                 )
             )
         }
@@ -1658,6 +1668,8 @@ public final class RemoteSyncBookmarkRestoreService {
      - Failure modes:
        - throws `RemoteSyncBookmarkRestoreError.invalidSQLiteDatabase` when the query cannot be prepared
        - throws `RemoteSyncBookmarkRestoreError.invalidIdentifierBlob` when one entry or label ID BLOB is malformed
+       - throws `RemoteSyncBookmarkRestoreError.invalidColumnValue` when one non-null
+         `contentType` value is not an Android `TextContentType`
      */
     private func fetchStudyPadEntries(from db: OpaquePointer) throws -> [RawStudyPadEntryRow] {
         let hasContentType = try tableHasColumn("contentType", in: "StudyPadTextEntry", database: db)
@@ -1679,7 +1691,9 @@ public final class RemoteSyncBookmarkRestoreService {
                     labelID: try uuidFromBlob(statement: statement, column: 1, table: "StudyPadTextEntry", name: "labelId"),
                     orderNumber: Int(sqlite3_column_int(statement, 2)),
                     indentLevel: Int(sqlite3_column_int(statement, 3)),
-                    contentType: hasContentType ? optionalStringColumn(statement: statement, index: 4) : nil
+                    contentType: hasContentType
+                        ? try optionalNotesContentTypeColumn(statement: statement, index: 4, table: "StudyPadTextEntry", name: "contentType")
+                        : nil
                 )
             )
         }
@@ -1813,6 +1827,37 @@ public final class RemoteSyncBookmarkRestoreService {
             return nil
         }
         return String(cString: raw)
+    }
+
+    /**
+     Reads and validates one optional Android note `TextContentType` column.
+
+     Android Room maps non-null note content-type values through `TextContentType.valueOf`, so a
+     staged sync database containing any string other than `HTML` or `MARKDOWN` is not a valid
+     Android bookmark database. `nil` is still valid and means the row inherits the global setting.
+
+     - Parameters:
+       - statement: Active SQLite statement positioned on a row.
+       - index: Zero-based text column index.
+       - table: Android table name used for error reporting.
+       - name: Android column name used for error reporting.
+     - Returns: `nil`, `HTML`, or `MARKDOWN`.
+     - Side effects: none.
+     - Failure modes:
+       - throws `RemoteSyncBookmarkRestoreError.invalidColumnValue` when a non-null value is not
+         one of Android's `TextContentType` enum cases.
+     */
+    private func optionalNotesContentTypeColumn(
+        statement: OpaquePointer?,
+        index: Int32,
+        table: String,
+        name: String
+    ) throws -> String? {
+        let rawValue = optionalStringColumn(statement: statement, index: index)
+        guard AppPreferenceValueNormalizer.isValidNotesContentTypeRow(rawValue) else {
+            throw RemoteSyncBookmarkRestoreError.invalidColumnValue(table: table, column: name)
+        }
+        return AppPreferenceValueNormalizer.notesContentTypeRow(rawValue)
     }
 
     /**

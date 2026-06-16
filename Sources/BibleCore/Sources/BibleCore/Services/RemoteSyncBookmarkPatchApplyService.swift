@@ -1294,6 +1294,8 @@ public final class RemoteSyncBookmarkPatchApplyService {
        - prepares and steps one SQLite select statement
      - Failure modes:
        - throws `RemoteSyncBookmarkRestoreError.invalidSQLiteDatabase` when the query cannot be prepared
+       - throws `RemoteSyncBookmarkRestoreError.invalidColumnValue` when a non-null `contentType`
+         value is not an Android `TextContentType`
        - throws `RemoteSyncBookmarkRestoreError.invalidIdentifierBlob` when the row identifier is malformed
      */
     private func fetchLabel(id: UUID, from database: OpaquePointer) throws -> WorkingLabel? {
@@ -1431,7 +1433,9 @@ public final class RemoteSyncBookmarkPatchApplyService {
         return RemoteSyncCurrentBookmarkNoteRow(
             bookmarkID: bookmarkID,
             notes: stringColumn(statement: statement, index: 0),
-            contentType: hasContentType ? optionalStringColumn(statement: statement, index: 1) : nil
+            contentType: hasContentType
+                ? try optionalNotesContentTypeColumn(statement: statement, index: 1, table: tableName, name: "contentType")
+                : nil
         )
     }
 
@@ -1489,6 +1493,8 @@ public final class RemoteSyncBookmarkPatchApplyService {
      - Failure modes:
        - throws `RemoteSyncBookmarkRestoreError.invalidSQLiteDatabase` when the query cannot be prepared
        - throws `RemoteSyncBookmarkRestoreError.invalidIdentifierBlob` when the row or label identifier is malformed
+       - throws `RemoteSyncBookmarkRestoreError.invalidColumnValue` when a non-null `contentType`
+         value is not an Android `TextContentType`
      */
     private func fetchGenericBookmark(
         id: UUID,
@@ -1580,7 +1586,9 @@ public final class RemoteSyncBookmarkPatchApplyService {
             orderNumber: Int(sqlite3_column_int(statement, 2)),
             indentLevel: Int(sqlite3_column_int(statement, 3)),
             text: preservingText,
-            contentType: hasContentType ? optionalStringColumn(statement: statement, index: 4) : preservingContentType
+            contentType: hasContentType
+                ? try optionalNotesContentTypeColumn(statement: statement, index: 4, table: "StudyPadTextEntry", name: "contentType")
+                : preservingContentType
         )
     }
 
@@ -1957,6 +1965,36 @@ public final class RemoteSyncBookmarkPatchApplyService {
             return nil
         }
         return String(cString: raw)
+    }
+
+    /**
+     Reads and validates one optional Android note `TextContentType` column.
+
+     Patch databases use the same Android Room enum contract as initial backup databases: `NULL`
+     inherits the global setting, while non-null values must be exactly `HTML` or `MARKDOWN`.
+
+     - Parameters:
+       - statement: Active SQLite statement positioned on a row.
+       - index: Zero-based text column index.
+       - table: Android table name used for error reporting.
+       - name: Android column name used for error reporting.
+     - Returns: `nil`, `HTML`, or `MARKDOWN`.
+     - Side effects: none.
+     - Failure modes:
+       - throws `RemoteSyncBookmarkRestoreError.invalidColumnValue` when a non-null value is not
+         one of Android's `TextContentType` enum cases.
+     */
+    private func optionalNotesContentTypeColumn(
+        statement: OpaquePointer?,
+        index: Int32,
+        table: String,
+        name: String
+    ) throws -> String? {
+        let rawValue = optionalStringColumn(statement: statement, index: index)
+        guard AppPreferenceValueNormalizer.isValidNotesContentTypeRow(rawValue) else {
+            throw RemoteSyncBookmarkRestoreError.invalidColumnValue(table: table, column: name)
+        }
+        return AppPreferenceValueNormalizer.notesContentTypeRow(rawValue)
     }
 
     /**

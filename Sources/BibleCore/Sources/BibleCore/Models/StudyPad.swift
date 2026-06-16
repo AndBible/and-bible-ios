@@ -40,8 +40,9 @@ public final class StudyPadTextEntry {
        - id: Stable identifier for SwiftData persistence and text payload linkage.
        - orderNumber: Zero-based order within the parent label's outline.
        - indentLevel: Nesting level rendered by the StudyPad UI.
-       - contentType: Optional Android `TextContentType` raw value; invalid non-nil values are
-         normalized to the app default.
+       - contentType: Optional Android `TextContentType` raw value; invalid non-nil row values are
+         stored as `nil` so they keep Android's nullable inheritance semantics instead of becoming
+         the app default.
      - Note: Callers typically create the paired `StudyPadTextEntryText` immediately after
        insertion so the row has visible content.
      */
@@ -54,7 +55,7 @@ public final class StudyPadTextEntry {
         self.id = id
         self.orderNumber = orderNumber
         self.indentLevel = indentLevel
-        self.contentType = contentType.map(AppPreferenceValueNormalizer.notesContentType)
+        self.contentType = AppPreferenceValueNormalizer.notesContentTypeRow(contentType)
     }
 }
 

@@ -221,13 +221,14 @@ public final class BibleBookmarkNotes {
      - Parameters:
        - bookmarkId: Identifier of the owning bookmark.
        - notes: Stored note body.
-       - contentType: Optional Android `TextContentType` raw value; invalid non-nil values are
-         normalized to the app default.
+       - contentType: Optional Android `TextContentType` raw value; invalid non-nil row values are
+         stored as `nil` so they keep Android's nullable inheritance semantics instead of becoming
+         the app default.
      */
     public init(bookmarkId: UUID, notes: String = "", contentType: String? = nil) {
         self.bookmarkId = bookmarkId
         self.notes = notes
-        self.contentType = contentType.map(AppPreferenceValueNormalizer.notesContentType)
+        self.contentType = AppPreferenceValueNormalizer.notesContentTypeRow(contentType)
     }
 }
 
@@ -395,13 +396,14 @@ public final class GenericBookmarkNotes {
      - Parameters:
        - bookmarkId: Identifier of the owning bookmark.
        - notes: Stored note body.
-       - contentType: Optional Android `TextContentType` raw value; invalid non-nil values are
-         normalized to the app default.
+       - contentType: Optional Android `TextContentType` raw value; invalid non-nil row values are
+         stored as `nil` so they keep Android's nullable inheritance semantics instead of becoming
+         the app default.
      */
     public init(bookmarkId: UUID, notes: String = "", contentType: String? = nil) {
         self.bookmarkId = bookmarkId
         self.notes = notes
-        self.contentType = contentType.map(AppPreferenceValueNormalizer.notesContentType)
+        self.contentType = AppPreferenceValueNormalizer.notesContentTypeRow(contentType)
     }
 }
 

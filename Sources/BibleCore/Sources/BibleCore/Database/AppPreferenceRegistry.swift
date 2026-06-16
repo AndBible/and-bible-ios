@@ -113,6 +113,44 @@ public enum AppPreferenceValueNormalizer {
             return "HTML"
         }
     }
+
+    /**
+     Validates an optional Android note-row `TextContentType` value without applying app defaults.
+     *
+     Row-level note content types are nullable on Android. `nil` means "inherit the current app
+     preference", while non-null values are read through `TextContentType.valueOf` and therefore must
+     be exactly `HTML` or `MARKDOWN`. This helper preserves that distinction for local models and
+     sync snapshots so corrupt row values do not silently become HTML.
+     *
+     - Parameter rawValue: Raw nullable row value from SwiftData, bridge payloads, or sync staging.
+     - Returns: `nil`, `HTML`, or `MARKDOWN`; invalid non-null values are returned as `nil`.
+     - Side effects: none.
+     - Failure modes: This helper cannot fail; callers that need Android-import strictness should
+       check `isValidNotesContentTypeRow(_:)` first and throw a parse error for invalid values.
+     */
+    public static func notesContentTypeRow(_ rawValue: String?) -> String? {
+        guard let rawValue else {
+            return nil
+        }
+        switch rawValue {
+        case "HTML", "MARKDOWN":
+            return rawValue
+        default:
+            return nil
+        }
+    }
+
+    /**
+     Checks whether an optional note-row `TextContentType` is representable by Android.
+     *
+     - Parameter rawValue: Raw nullable row value from a staged or local note table.
+     - Returns: `true` for `nil`, `HTML`, and `MARKDOWN`; `false` for any other non-null string.
+     - Side effects: none.
+     - Failure modes: This helper cannot fail.
+     */
+    public static func isValidNotesContentTypeRow(_ rawValue: String?) -> Bool {
+        rawValue == nil || notesContentTypeRow(rawValue) != nil
+    }
 }
 
 /**

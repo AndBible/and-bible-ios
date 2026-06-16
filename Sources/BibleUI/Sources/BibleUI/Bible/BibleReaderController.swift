@@ -2708,6 +2708,26 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         return true
     }
 
+    /**
+     Persists a bookmark note update from the web reader and emits the JavaScript bridge mutation event
+     from the stored row state.
+
+     - Parameters:
+       - bookmarkId: Identifier for either a Bible bookmark or generic bookmark note row.
+       - note: Raw note text supplied by the web editor. Whitespace-only text is delegated to the
+         bookmark service, which treats it as a delete to match Android bridge behavior.
+     - Returns: `true` when the service is available and the bridge payload could be serialized,
+       otherwise `false`.
+
+     Side effects:
+     - mutates bookmark note persistence through `BookmarkService`
+     - increments `myNotesMutationRevision`
+     - emits `bookmark_note_modified` to the embedded BibleView runtime
+
+     Failure modes:
+     - returns `false` without persistence when no bookmark service is configured
+     - returns `false` after persistence when JSON serialization unexpectedly fails
+     */
     @discardableResult
     private func saveBookmarkNoteAndNotify(bookmarkId: UUID, note: String?) -> Bool {
         guard let service = bookmarkService else { return false }
@@ -2718,11 +2738,13 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         )
         myNotesMutationRevision += 1
         let timestamp = Int(Date().timeIntervalSince1970 * 1000)
-        let notesContentType = service.bibleBookmark(id: bookmarkId)?.notes?.contentType
-            ?? service.genericBookmark(id: bookmarkId)?.notes?.contentType
+        let bibleNote = service.bibleBookmark(id: bookmarkId)?.notes
+        let genericNote = service.genericBookmark(id: bookmarkId)?.notes
+        let savedNote = bibleNote?.notes ?? genericNote?.notes
+        let notesContentType = bibleNote?.contentType ?? genericNote?.contentType
         let payload: [String: Any] = [
             "id": bookmarkId.uuidString,
-            "notes": note ?? "",
+            "notes": savedNote ?? "",
             "notesContentType": notesContentType ?? NSNull(),
             "lastUpdatedOn": timestamp,
         ]

@@ -16,12 +16,23 @@
  */
 
 import {mount} from "@vue/test-utils";
-import {describe, expect, it} from "vitest";
-import {ref} from "vue";
+import {describe, expect, it, vi} from "vitest";
+import {nextTick, ref} from "vue";
+import {readFileSync} from "fs";
 
 import EditableText from "@/components/EditableText.vue";
+import MarkdownTextEditor from "@/components/MarkdownTextEditor.vue";
 import {useConfig} from "@/composables/config";
-import {androidKey, appSettingsKey, calculatedConfigKey, configKey, exportModeKey, stringsKey} from "@/types/constants";
+import {
+    androidKey,
+    appSettingsKey,
+    calculatedConfigKey,
+    configKey,
+    customFeaturesKey,
+    exportModeKey,
+    keyboardKey,
+    stringsKey,
+} from "@/types/constants";
 import {useStrings} from "@/composables/strings";
 
 window.bibleViewDebug = {};
@@ -42,6 +53,37 @@ function editableTextProvides(notesContentType = "HTML") {
         [calculatedConfigKey]: ref({topOffset: 0, topMargin: 0, marginLeft: 0, marginRight: 0}),
         [stringsKey]: useStrings(),
         [androidKey]: {},
+        [exportModeKey]: ref(false),
+    };
+}
+
+/**
+ * Builds the richer dependency set required by the Android-parity Markdown editor.
+ *
+ * @returns Vue provide map with reader settings, bridge stubs, keyboard state, strings, and an
+ * English fallback reference parser.
+ * @remarks The editor test exercises local Markdown editing controls, so bridge methods are stubs
+ * unless a control explicitly requests them.
+ */
+function markdownEditorProvides() {
+    const {config, appSettings} = useConfig(ref("bible"));
+    return {
+        [configKey]: config,
+        [appSettingsKey]: appSettings,
+        [calculatedConfigKey]: ref({topOffset: 0, topMargin: 0, marginLeft: 0, marginRight: 0}),
+        [stringsKey]: useStrings(),
+        [androidKey]: {
+            parseRef: vi.fn(async () => ""),
+            refChooserDialog: vi.fn(async () => ""),
+            openDownloads: vi.fn(),
+        },
+        [customFeaturesKey]: {
+            features: new Set(),
+            parse: vi.fn(() => ""),
+        },
+        [keyboardKey]: {
+            editorMode: ref(0),
+        },
         [exportModeKey]: ref(false),
     };
 }
@@ -89,5 +131,59 @@ describe("EditableText note content type rendering", () => {
 
         expect(wrapper.find(".notes-display strong").exists()).toBe(false);
         expect(wrapper.find(".notes-display").text()).toContain("**Not markdown**");
+    });
+
+    it("marks the Android-compatible display container for rendered Markdown notes", () => {
+        const wrapper = mount(EditableText, {
+            props: {
+                text: "**Container**",
+                contentType: "MARKDOWN",
+            },
+            global: {provide: editableTextProvides("HTML")},
+        });
+
+        expect(wrapper.find(".notes-display.markdown-notes").exists()).toBe(true);
+        expect(wrapper.find(".notes-display > .markdown-notes").exists()).toBe(false);
+    });
+
+    /**
+     * Protects Android CSS parity for rendered Markdown note blocks.
+     *
+     * Android excludes Markdown displays from the generic rich-text div margin rule and applies
+     * monochrome/e-ink mixins for both light and night modes. These selectors are not observable in
+     * jsdom's mounted DOM, so this checks the SFC style contract directly.
+     */
+    it("keeps Android Markdown note spacing and monochrome style selectors", () => {
+        const source = readFileSync(`${process.cwd()}/src/components/EditableText.vue`, "utf8");
+
+        expect(source).toContain(".notes-display:not(.markdown-notes) div");
+        expect(source).toContain(".monochrome .markdown-notes");
+        expect(source).toContain(".monochrome.night .markdown-notes");
+    });
+});
+
+describe("MarkdownTextEditor Android parity controls", () => {
+    /**
+     * Protects the Android Markdown editor contract instead of accepting a plain textarea lookalike.
+     *
+     * Android exposes formatting controls and keyboard shortcuts that mutate Markdown source text in
+     * place. This test verifies the iOS editor has the same core source-editing path for bold text.
+     */
+    it("wraps the selected text with Markdown bold using the Android keyboard shortcut", async () => {
+        const wrapper = mount(MarkdownTextEditor, {
+            props: {text: "word"},
+            global: {provide: markdownEditorProvides()},
+        });
+        const textarea = wrapper.get("textarea").element;
+
+        textarea.selectionStart = 0;
+        textarea.selectionEnd = 4;
+        await wrapper.get("textarea").trigger("keydown", {key: "b", metaKey: true});
+        await nextTick();
+
+        expect(textarea.value).toBe("**word**");
+        expect(wrapper.html()).toContain("data-icon=\"heading\"");
+        expect(wrapper.html()).toContain("data-icon=\"list-ul\"");
+        expect(wrapper.html()).toContain("data-icon=\"book-bible\"");
     });
 });

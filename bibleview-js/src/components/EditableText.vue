@@ -37,7 +37,7 @@
       <div
           v-if="editText"
           class="notes-display"
-          :class="{constraintDisplayHeight}"
+          :class="{constraintDisplayHeight, 'markdown-notes': isMarkdown}"
           :role="displayAccessibilityLabel ? 'button' : undefined"
           :tabindex="displayAccessibilityLabel ? 0 : undefined"
           :aria-label="displayAccessibilityLabel"
@@ -46,7 +46,7 @@
           @keydown.enter.prevent="handleKeyboardEdit"
           @keydown.space.prevent="handleKeyboardEdit"
       >
-        <div :class="{'markdown-notes': isMarkdown}" v-html="displayHtml"/>
+        <div v-html="displayHtml"/>
       </div>
       <div class="placeholder" v-else-if="showPlaceholder" @click="handleClicks">
         <slot>
@@ -226,7 +226,7 @@ defineExpose({editMode});
 <style lang="scss">
 @use "@/lib/markdown-render" as md;
 
-div.pell-content, .pell-content div, .notes-display div {
+div.pell-content, .pell-content div, .notes-display:not(.markdown-notes) div {
   margin-top: 5px;
 }
 
@@ -250,11 +250,19 @@ div.pell-content, .pell-content div, .notes-display div {
   padding: 15px;
 }
 
-.editable-text .markdown-notes {
+.markdown-notes {
   @include md.markdown-content;
 }
 
-.night .editable-text .markdown-notes {
+.night .markdown-notes {
   @include md.markdown-content-night;
+}
+
+.monochrome .markdown-notes {
+  @include md.markdown-content-monochrome;
+}
+
+.monochrome.night .markdown-notes {
+  @include md.markdown-content-monochrome-night;
 }
 </style>

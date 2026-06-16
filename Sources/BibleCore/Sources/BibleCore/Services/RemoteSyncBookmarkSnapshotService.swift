@@ -23,14 +23,16 @@ public struct RemoteSyncCurrentBookmarkNoteRow: Sendable, Equatable, Codable {
      - Parameters:
        - bookmarkID: Android bookmark identifier that owns the detached note row.
        - notes: Raw detached note payload stored in the Android note table.
-       - contentType: Optional Android `TextContentType` raw value for the detached note payload.
+       - contentType: Optional Android `TextContentType` raw value for the detached note payload;
+         invalid non-nil row values are represented as `nil` so they keep Android inheritance
+         semantics instead of becoming the app default.
      - Side effects: none.
      - Failure modes: This initializer cannot fail.
      */
     public init(bookmarkID: UUID, notes: String, contentType: String? = nil) {
         self.bookmarkID = bookmarkID
         self.notes = notes
-        self.contentType = contentType.map(AppPreferenceValueNormalizer.notesContentType)
+        self.contentType = AppPreferenceValueNormalizer.notesContentTypeRow(contentType)
     }
 }
 

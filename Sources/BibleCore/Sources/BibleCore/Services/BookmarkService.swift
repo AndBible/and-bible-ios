@@ -24,6 +24,26 @@ public final class BookmarkService {
     }
 
     /**
+     Checks whether a bridge note payload should be persisted instead of deleting the note row.
+
+     Android's JavaScript bridge converts `null` and trim-empty strings to a deleted bookmark note,
+     but it preserves the original text for nonblank payloads. Matching that contract keeps iOS from
+     retaining invisible notes that Android would remove while avoiding unintended whitespace edits
+     for user-authored content.
+
+     - Parameter note: Optional note payload from reader JavaScript, tests, or service callers.
+     - Returns: `true` when the payload has at least one non-whitespace/newline character.
+     - Side effects: none.
+     - Failure modes: This helper cannot fail.
+     */
+    private static func shouldPersistNote(_ note: String?) -> Bool {
+        guard let note else {
+            return false
+        }
+        return !note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    /**
      Creates a bookmark service backed by the given persistence store.
      - Parameter store: Store responsible for all bookmark, label, and StudyPad persistence.
      */
@@ -88,7 +108,7 @@ public final class BookmarkService {
 
      - Parameters:
        - bookmarkId: Identifier of the Bible or generic bookmark whose note should change.
-       - note: New note body. `nil` or an empty string deletes the detached note row.
+       - note: New note body. `nil` or whitespace-only text deletes the detached note row.
        - defaultContentType: Current global notes-content-type setting used only when creating a
          row or backfilling a legacy row that has no stored type.
      - Side effects: mutates SwiftData bookmark/note rows and saves the backing context.
@@ -103,7 +123,7 @@ public final class BookmarkService {
         let normalizedDefaultContentType = Self.normalizedNotesContentType(defaultContentType)
         // Try Bible bookmark first
         if let bookmark = store.bibleBookmark(id: bookmarkId) {
-            if let note, !note.isEmpty {
+            if let note, Self.shouldPersistNote(note) {
                 if let existing = bookmark.notes ?? store.bibleBookmarkNotes(bookmarkId: bookmarkId) {
                     bookmark.notes = existing
                     existing.notes = note
@@ -131,7 +151,7 @@ public final class BookmarkService {
 
         // Try generic bookmark
         if let bookmark = store.genericBookmark(id: bookmarkId) {
-            if let note, !note.isEmpty {
+            if let note, Self.shouldPersistNote(note) {
                 if let existing = bookmark.notes ?? store.genericBookmarkNotes(bookmarkId: bookmarkId) {
                     bookmark.notes = existing
                     existing.notes = note

@@ -296,6 +296,52 @@ extension AndBibleTests {
         let bibleNote = try XCTUnwrap(try modelContext.fetch(FetchDescriptor<BibleBookmarkNotes>()).first)
         XCTAssertEqual(bibleNote.contentType, "MARKDOWN")
     }
+
+    /**
+     Verifies Android bridge parity for notes cleared to whitespace-only text.
+
+     Android's `BibleJavascriptInterface.saveBookmarkNote` trims only to decide whether a save should
+     become `null`; whitespace-only bookmark and generic notes therefore delete the detached note row
+     rather than persisting a blank row with a content type. This exercises the iOS reader delegate
+     path so the web editor, bridge, and service cannot drift from that behavior.
+     */
+    @MainActor
+    func testReaderSaveBookmarkNoteDeletesWhitespaceOnlyNotesLikeAndroidBridge() throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let container = try makeBookmarkRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        let bookmarkService = BookmarkService(store: BookmarkStore(modelContext: modelContext))
+        let controller = BibleReaderController(bridge: bridge)
+        controller.bookmarkService = bookmarkService
+
+        let bibleBookmark = bookmarkService.addBibleBookmark(
+            bookInitials: "KJV",
+            startOrdinal: 1,
+            endOrdinal: 1,
+            wholeVerse: true
+        )
+        let genericBookmark = bookmarkService.addGenericBookmark(
+            bookInitials: "DICT",
+            key: "entry-key",
+            startOrdinal: 2,
+            endOrdinal: 2
+        )
+        bookmarkService.saveBibleBookmarkNote(bookmarkId: bibleBookmark.id, note: "Bible note")
+        bookmarkService.saveBibleBookmarkNote(bookmarkId: genericBookmark.id, note: "Generic note")
+
+        controller.bridge(BibleBridge(), saveBookmarkNote: bibleBookmark.id.uuidString, note: " \n\t ")
+        controller.bridge(BibleBridge(), saveBookmarkNote: genericBookmark.id.uuidString, note: " \n\t ")
+
+        XCTAssertTrue(try modelContext.fetch(FetchDescriptor<BibleBookmarkNotes>()).isEmpty)
+        XCTAssertTrue(try modelContext.fetch(FetchDescriptor<GenericBookmarkNotes>()).isEmpty)
+
+        let payload = try XCTUnwrap(
+            bridgeEmissionPayload(from: recordedScripts(), event: "bookmark_note_modified") as? [String: Any]
+        )
+        XCTAssertEqual(payload["id"] as? String, bibleBookmark.id.uuidString)
+        XCTAssertEqual(payload["notes"] as? String, "")
+        XCTAssertTrue(payload["notesContentType"] is NSNull)
+    }
     #endif
 
     /**

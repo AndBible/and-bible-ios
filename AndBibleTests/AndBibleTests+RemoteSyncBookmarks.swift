@@ -230,6 +230,63 @@ extension AndBibleTests {
         XCTAssertNil(snapshot.studyPadEntries[0].contentType)
     }
 
+    /**
+     Verifies that Android bookmark restore treats invalid note content-type row values as invalid
+     database data rather than falling back to the global preference default.
+
+     Android Room reads `TextContentType` columns through `TextContentType.valueOf`, so only `HTML`,
+     `MARKDOWN`, and `NULL` are valid row values. The settings fallback helper is intentionally not
+     the row-validation contract; otherwise corrupted or future Android values would be silently
+     rendered as HTML on iOS.
+     */
+    func testRemoteSyncBookmarkRestoreRejectsInvalidTextContentTypeRows() throws {
+        let service = RemoteSyncBookmarkRestoreService()
+        let labelID = UUID(uuidString: "d2100000-0000-0000-0000-000000000010")!
+        let bookmarkID = UUID(uuidString: "d2100000-0000-0000-0000-000000000020")!
+        let studyPadEntryID = UUID(uuidString: "d2100000-0000-0000-0000-000000000030")!
+
+        let invalidNoteDatabaseURL = try makeAndroidBookmarksDatabase(
+            labels: [.init(id: labelID, name: "Invalid", colour: Int(Int32(bitPattern: 0xFF00FF00)))],
+            bibleBookmarks: [
+                .init(
+                    id: bookmarkID,
+                    kjvOrdinalStart: 10,
+                    kjvOrdinalEnd: 10,
+                    ordinalStart: 10,
+                    ordinalEnd: 10,
+                    createdAt: Date(timeIntervalSince1970: 1_700_000_000),
+                    primaryLabelID: labelID,
+                    lastUpdatedOn: Date(timeIntervalSince1970: 1_700_000_100)
+                )
+            ],
+            bibleNotes: [.init(bookmarkID: bookmarkID, notes: "Bad note", contentType: "PLAINTEXT")]
+        )
+        defer { try? FileManager.default.removeItem(at: invalidNoteDatabaseURL) }
+
+        XCTAssertThrowsError(try service.readSnapshot(from: invalidNoteDatabaseURL)) { error in
+            XCTAssertEqual(
+                String(describing: error),
+                #"invalidColumnValue(table: "BibleBookmarkNotes", column: "contentType")"#
+            )
+        }
+
+        let invalidStudyPadDatabaseURL = try makeAndroidBookmarksDatabase(
+            labels: [.init(id: labelID, name: "Invalid", colour: Int(Int32(bitPattern: 0xFF00FF00)))],
+            studyPadEntries: [
+                .init(id: studyPadEntryID, labelID: labelID, orderNumber: 1, indentLevel: 0, contentType: "PLAINTEXT")
+            ],
+            studyPadTexts: [.init(entryID: studyPadEntryID, text: "Bad StudyPad")]
+        )
+        defer { try? FileManager.default.removeItem(at: invalidStudyPadDatabaseURL) }
+
+        XCTAssertThrowsError(try service.readSnapshot(from: invalidStudyPadDatabaseURL)) { error in
+            XCTAssertEqual(
+                String(describing: error),
+                #"invalidColumnValue(table: "StudyPadTextEntry", column: "contentType")"#
+            )
+        }
+    }
+
     func testRemoteSyncBookmarkRestoreReplacesLocalDataAndPreservesAndroidFidelity() throws {
         let container = try makeBookmarkRestoreModelContainer()
         let modelContext = ModelContext(container)
