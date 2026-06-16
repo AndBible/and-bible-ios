@@ -881,7 +881,8 @@ extension AndBibleUITests {
      *   - app: Running application under test.
      *   - timeout: Maximum number of seconds to wait before failing.
      * - Side effects:
-     *   - resolves the mode control from Search's visible hierarchy and taps it directly
+     *   - reveals Search controls before querying stable word-mode identifiers
+     *   - dismisses text-field focus only after stable control lookup fails
      * - Failure modes:
      *   - fails if the requested mode control never appears on Search within the timeout
      */
@@ -893,7 +894,6 @@ extension AndBibleUITests {
         let deadline = Date().addingTimeInterval(timeout)
 
         repeat {
-            dismissSearchFieldFocusIfNeeded(in: app)
             revealSearchControls(in: app)
             let searchScreen = unresolvedElement("searchScreen", in: app)
 
@@ -941,6 +941,7 @@ extension AndBibleUITests {
                 return
             }
 
+            dismissSearchFieldFocusIfNeeded(in: app)
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         } while Date() < deadline
 
