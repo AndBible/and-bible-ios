@@ -187,3 +187,22 @@ describe("MarkdownTextEditor Android parity controls", () => {
         expect(wrapper.html()).toContain("data-icon=\"book-bible\"");
     });
 });
+
+describe("TextEditor Android parity sizing", () => {
+    /**
+     * Protects Android editor sizing parity for HTML bookmark notes.
+     *
+     * Android's Pell editor content starts at one line and grows with content, matching the
+     * Markdown source editor's compact empty-note behavior. A failure means iOS has drifted back to
+     * a fixed-height HTML note editor that Android does not use.
+     */
+    it("does not force HTML notes into a fixed-height Pell content area", () => {
+        const pellSource = readFileSync(`${process.cwd()}/src/lib/pell/pell.scss`, "utf8");
+        const textEditorSource = readFileSync(`${process.cwd()}/src/components/TextEditor.vue`, "utf8");
+
+        expect(pellSource).toContain("min-height: 1em");
+        expect(pellSource).not.toContain("height: $pell-content-height");
+        expect(pellSource).not.toContain("overflow-y: auto");
+        expect(textEditorSource).not.toContain("height: inherit");
+    });
+});

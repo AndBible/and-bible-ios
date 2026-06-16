@@ -32,9 +32,9 @@ $pell-content-padding: 10px !default;
 
 .pell-content {
   box-sizing: border-box;
-  height: $pell-content-height;
+  min-height: 1em;
   outline: 0;
-  overflow-y: auto;
+  overflow-y: hidden;
   padding: $pell-content-padding;
 }
 
