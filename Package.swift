@@ -31,6 +31,9 @@ let package = Package(
             cSettings: [
                 .define("USE_REAL_SWORD"),
             ],
+            cxxSettings: [
+                .headerSearchPath("../../../libsword/libsword.xcframework/ios-arm64_x86_64-simulator/Headers/sword"),
+            ],
             linkerSettings: [
                 .linkedLibrary("z"),
                 .linkedLibrary("bz2"),

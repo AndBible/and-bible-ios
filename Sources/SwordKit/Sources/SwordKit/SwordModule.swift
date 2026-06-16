@@ -9,7 +9,7 @@ public struct VerseKeyChildren: Sendable {
     public let book: Int
     public let chapter: Int
     public let verse: Int
-    /// Calculated verse ordinal when supplied by the caller; raw flat SWORD key children do not expose this directly.
+    /// SWORD/JSword-style versification ordinal including book and chapter intro slots.
     public let index: Int
     public let chapterMax: Int
     public let verseMax: Int
@@ -78,8 +78,6 @@ public struct VerseKeyReference: Sendable, Equatable {
 public final class SwordModule: @unchecked Sendable {
     let handle: UnsafeMutableRawPointer
     private let queue: DispatchQueue
-    private var cachedVersificationBooks: [VersificationBook]?
-    private var cachedVerseCountsByBookChapter: [String: [Int: Int]] = [:]
 
     /// Module metadata.
     public let info: ModuleInfo
@@ -152,22 +150,18 @@ public final class SwordModule: @unchecked Sendable {
     /// Get the current SWORD VerseKey index for verse-key modules.
     public func currentVerseKeyIndex() -> Int? {
         queue.sync {
-            guard let children = Self.currentVerseKeyChildren(handle: handle) else { return nil }
-            return verseOrdinalLocked(
-                osisBookId: children.osisBookName,
-                chapter: children.chapter,
-                verse: children.verse
-            )
+            let index = SWModule_getVerseKeyIndex(handle)
+            return index >= 0 ? Int(index) : nil
         }
     }
 
     /**
      Resolves a verse to the ordinal used by the module's active versification.
 
-     Android gets these ordinals through JSword `Versification.getOrdinal(Verse)`. SWORD exposes
-     the equivalent through `VerseKey.getIndex()`, including intro slots for the Bible, testament,
-     book, and chapter. The method uses exact-key syntax and validates the resolved key so a missing
-     or out-of-range verse cannot silently normalize to a neighboring reference.
+     Android gets these ordinals through JSword `Versification.getOrdinal(Verse)`. This method
+     delegates to SWORD's native `VerseKey.getIndex()`, including intro slots for the Bible,
+     testament, book, and chapter. The method uses exact-key syntax and validates the resolved key
+     so a missing or out-of-range verse cannot silently normalize to a neighboring reference.
 
      - Parameters:
        - osisBookId: OSIS book identifier such as `Gen`, `Ruth`, or `1Cor`.
@@ -186,7 +180,17 @@ public final class SwordModule: @unchecked Sendable {
             let previousKey = String(cString: SWModule_getKeyText(handle))
             defer { SWModule_setKeyText(handle, previousKey) }
 
-            return verseOrdinalLocked(osisBookId: osisBookId, chapter: chapter, verse: verse)
+            guard let children = exactVerseKeyChildrenLocked(
+                osisBookId: osisBookId,
+                chapter: chapter,
+                verse: verse
+            ) else {
+                return nil
+            }
+
+            let index = SWModule_getVerseKeyIndex(handle)
+            guard index >= 0, children.chapter > 0, children.verse > 0 else { return nil }
+            return Int(index)
         }
     }
 
@@ -194,7 +198,7 @@ public final class SwordModule: @unchecked Sendable {
      Resolves a versification ordinal back to a concrete verse reference.
 
      Android can reverse-map bookmark and memorization ordinals through JSword's versification. This
-     method provides the same boundary for iOS by positioning SWORD's `VerseKey` with
+     method provides the same boundary for iOS by positioning SWORD's native `VerseKey` with
      `setIndex(_:)`, reading structured key metadata, and then restoring the caller's prior cursor.
      When `osisBookId` is provided, the method rejects ordinals that resolve outside that book.
 
@@ -210,7 +214,29 @@ public final class SwordModule: @unchecked Sendable {
         guard ordinal > 0 else { return nil }
 
         return queue.sync {
-            verseReferenceLocked(osisBookId: osisBookId, ordinal: ordinal)
+            let previousKey = String(cString: SWModule_getKeyText(handle))
+            defer { SWModule_setKeyText(handle, previousKey) }
+
+            guard SWModule_setVerseKeyIndex(handle, CLong(ordinal)) == 0,
+                  let children = Self.currentVerseKeyChildren(handle: handle),
+                  children.chapter > 0,
+                  children.verse > 0 else {
+                return nil
+            }
+
+            let resolvedOsisBookId = children.osisBookName
+            if let osisBookId, osisBookId != resolvedOsisBookId {
+                return nil
+            }
+
+            let resolvedOrdinal = SWModule_getVerseKeyIndex(handle)
+            guard Int(resolvedOrdinal) == ordinal else { return nil }
+            return VerseKeyReference(
+                osisBookId: resolvedOsisBookId,
+                chapter: children.chapter,
+                verse: children.verse,
+                ordinal: Int(resolvedOrdinal)
+            )
         }
     }
 
@@ -246,7 +272,7 @@ public final class SwordModule: @unchecked Sendable {
 
         var parts: [String] = []
         var index = 0
-        while index < 8, let ptr = children[index] {
+        while index < 11, let ptr = children[index] {
             parts.append(String(cString: ptr))
             index += 1
         }
@@ -261,186 +287,29 @@ public final class SwordModule: @unchecked Sendable {
             return nil
         }
 
+        let keyIndex = SWModule_getVerseKeyIndex(handle)
+        guard keyIndex >= 0 else { return nil }
+
+        let osisRef = parts[7]
+        let fallbackOsisBookName = osisRef.components(separatedBy: ".").first ?? osisRef
+        let shortText = parts.count > 8 && !parts[8].isEmpty ? parts[8] : osisRef
+        let bookAbbreviation = parts.count > 9 && !parts[9].isEmpty ? parts[9] : fallbackOsisBookName
+        let osisBookName = parts.count > 10 && !parts[10].isEmpty ? parts[10] : fallbackOsisBookName
+
         return VerseKeyChildren(
             testament: testament,
             book: book,
             chapter: chapter,
             verse: verse,
-            index: 0,
+            index: Int(keyIndex),
             chapterMax: chapterMax,
             verseMax: verseMax,
             bookName: parts[6],
-            osisRef: parts[7],
-            shortText: parts[7],
-            bookAbbreviation: parts[7].components(separatedBy: ".").first ?? parts[7],
-            osisBookName: parts[7].components(separatedBy: ".").first ?? parts[7]
+            osisRef: osisRef,
+            shortText: shortText,
+            bookAbbreviation: bookAbbreviation,
+            osisBookName: osisBookName
         )
-    }
-
-    /**
-     Canonical OSIS candidates used to discover the active SWORD versification order.
-
-     SWORD's flat key-children API exposes testament/book ordinals only after positioning a key; it
-     does not expose a book iterator. This list gives the probe set, while SWORD decides which
-     identifiers are valid for the module's versification and how they sort.
-     */
-    private static let versificationProbeOsisBookIds: [String] = [
-        "Gen", "Exod", "Lev", "Num", "Deut", "Josh", "Judg", "Ruth",
-        "1Sam", "2Sam", "1Kgs", "2Kgs", "1Chr", "2Chr", "Ezra", "Neh", "Esth",
-        "Job", "Ps", "Prov", "Eccl", "Song", "Isa", "Jer", "Lam", "Ezek", "Dan",
-        "Hos", "Joel", "Amos", "Obad", "Jonah", "Mic", "Nah", "Hab", "Zeph",
-        "Hag", "Zech", "Mal", "Tob", "Jdt", "AddEsth", "Wis", "Sir", "Bar",
-        "EpJer", "PrAzar", "Sus", "Bel", "1Macc", "2Macc", "3Macc", "4Macc",
-        "PrMan", "1Esd", "2Esd", "Ps151", "Matt", "Mark", "Luke", "John",
-        "Acts", "Rom", "1Cor", "2Cor", "Gal", "Eph", "Phil", "Col", "1Thess",
-        "2Thess", "1Tim", "2Tim", "Titus", "Phlm", "Heb", "Jas", "1Pet",
-        "2Pet", "1John", "2John", "3John", "Jude", "Rev",
-    ]
-
-    /// One book resolved from SWORD's active versification and sorted by SWORD book order.
-    private struct VersificationBook: Sendable {
-        let osisBookId: String
-        let testament: Int
-        let book: Int
-        let chapterMax: Int
-    }
-
-    /**
-     Computes a JSword/SWORD-style ordinal while the module queue is already held.
-
-     The flat SWORD API does not expose `VerseKey.getIndex()`. Android's JSword ordinal includes
-     testament, book, and chapter intro slots, so this method derives the same value from SWORD's
-     active versification order and per-chapter verse counts instead of using fixed chapter math.
-     */
-    private func verseOrdinalLocked(osisBookId: String, chapter: Int, verse: Int) -> Int? {
-        guard let target = exactVerseKeyChildrenLocked(
-            osisBookId: osisBookId,
-            chapter: chapter,
-            verse: verse
-        ) else {
-            return nil
-        }
-
-        var ordinal = 0
-        var currentTestament = 0
-        for book in versificationBooksLocked() {
-            if book.testament != currentTestament {
-                ordinal += 1
-                currentTestament = book.testament
-            }
-
-            ordinal += 1
-            for chapterNumber in 1...book.chapterMax {
-                ordinal += 1
-                if book.osisBookId == target.osisBookName && chapterNumber == target.chapter {
-                    guard target.verse <= verseCountLocked(osisBookId: book.osisBookId, chapter: chapterNumber) else {
-                        return nil
-                    }
-                    return ordinal + target.verse
-                }
-                ordinal += verseCountLocked(osisBookId: book.osisBookId, chapter: chapterNumber)
-            }
-        }
-
-        return nil
-    }
-
-    /**
-     Reverse-maps a JSword/SWORD-style ordinal while the module queue is already held.
-
-     Intro slots for testament, book, and chapter intentionally do not produce verse references.
-     That matches JSword's distinction between structural keys and normal `Verse` keys.
-     */
-    private func verseReferenceLocked(osisBookId: String?, ordinal: Int) -> VerseKeyReference? {
-        var cursor = 0
-        var currentTestament = 0
-        for book in versificationBooksLocked() {
-            if book.testament != currentTestament {
-                cursor += 1
-                if cursor == ordinal { return nil }
-                currentTestament = book.testament
-            }
-
-            cursor += 1
-            if cursor == ordinal { return nil }
-
-            for chapter in 1...book.chapterMax {
-                cursor += 1
-                if cursor == ordinal { return nil }
-
-                let verseCount = verseCountLocked(osisBookId: book.osisBookId, chapter: chapter)
-                if ordinal <= cursor + verseCount {
-                    let verse = ordinal - cursor
-                    guard verse > 0 else { return nil }
-                    if let osisBookId, osisBookId != book.osisBookId {
-                        return nil
-                    }
-                    return VerseKeyReference(
-                        osisBookId: book.osisBookId,
-                        chapter: chapter,
-                        verse: verse,
-                        ordinal: ordinal
-                    )
-                }
-                cursor += verseCount
-            }
-        }
-        return nil
-    }
-
-    /// Returns active-versification books sorted by SWORD testament/book order.
-    private func versificationBooksLocked() -> [VersificationBook] {
-        if let cachedVersificationBooks {
-            return cachedVersificationBooks
-        }
-
-        var books: [VersificationBook] = []
-        var seen = Set<String>()
-        for osisBookId in Self.versificationProbeOsisBookIds {
-            SWModule_setKeyText(handle, "=\(osisBookId).1.1")
-            guard let children = Self.currentVerseKeyChildren(handle: handle),
-                  children.testament > 0,
-                  children.chapter == 1,
-                  children.verse == 1,
-                  children.osisBookName == osisBookId,
-                  seen.insert(osisBookId).inserted else {
-                continue
-            }
-            books.append(VersificationBook(
-                osisBookId: osisBookId,
-                testament: children.testament,
-                book: children.book,
-                chapterMax: children.chapterMax
-            ))
-        }
-
-        let sortedBooks = books.sorted {
-            if $0.testament != $1.testament {
-                return $0.testament < $1.testament
-            }
-            return $0.book < $1.book
-        }
-        cachedVersificationBooks = sortedBooks
-        return sortedBooks
-    }
-
-    /// Returns a SWORD verse count for one chapter while caching repeated ordinal calculations.
-    private func verseCountLocked(osisBookId: String, chapter: Int) -> Int {
-        if let cached = cachedVerseCountsByBookChapter[osisBookId]?[chapter] {
-            return cached
-        }
-
-        let count: Int
-        if let children = exactVerseKeyChildrenLocked(osisBookId: osisBookId, chapter: chapter, verse: 1) {
-            count = max(0, children.verseMax)
-        } else {
-            count = 0
-        }
-
-        var chapterCounts = cachedVerseCountsByBookChapter[osisBookId] ?? [:]
-        chapterCounts[chapter] = count
-        cachedVerseCountsByBookChapter[osisBookId] = chapterCounts
-        return count
     }
 
     /// Positions an exact verse key and rejects SWORD normalization to neighboring references.
@@ -449,7 +318,9 @@ public final class SwordModule: @unchecked Sendable {
         guard let children = Self.currentVerseKeyChildren(handle: handle),
               children.osisBookName == osisBookId,
               children.chapter == chapter,
-              children.verse == verse else {
+              children.verse == verse,
+              children.chapter <= children.chapterMax,
+              children.verse <= children.verseMax else {
             return nil
         }
         return children
@@ -508,6 +379,7 @@ public final class SwordModule: @unchecked Sendable {
             guard let children = Self.currentVerseKeyChildren(handle: handle),
                   children.osisBookName == osisBookId,
                   children.chapter == chapter,
+                  children.chapter <= children.chapterMax,
                   children.verseMax > 0 else {
                 return nil
             }

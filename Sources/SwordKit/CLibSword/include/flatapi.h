@@ -130,6 +130,12 @@ void SWModule_setCipherKey(void *module, const char *key);
 /// [testament, book, chapter, verse, chapterMax, verseMax, bookName, osisRef, ...]
 const char **SWModule_getKeyChildren(void *module);
 
+/// Get the current VerseKey intro-inclusive index, or -1 when the module key is not a VerseKey.
+long SWModule_getVerseKeyIndex(void *module);
+
+/// Set the current VerseKey intro-inclusive index. Returns 0 on success and nonzero on failure.
+int SWModule_setVerseKeyIndex(void *module, long index);
+
 /// Pop the last error code. Returns 0 if no error.
 char SWModule_popError(void *module);
 

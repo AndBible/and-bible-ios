@@ -272,15 +272,62 @@ extension AndBibleTests {
             "Expected bundled KJV module to be available for ordinal parity testing"
         )
 
+        module.setKey("=Gen.1.1")
+        XCTAssertEqual(module.currentVerseKeyIndex(), 4)
         XCTAssertEqual(module.verseOrdinal(osisBookId: "Gen", chapter: 1, verse: 1), 4)
         XCTAssertEqual(module.verseOrdinal(osisBookId: "Gen", chapter: 1, verse: 31), 34)
         XCTAssertEqual(module.verseOrdinal(osisBookId: "Gen", chapter: 2, verse: 1), 36)
         XCTAssertEqual(
+            module.verseReference(ordinal: 4),
+            VerseKeyReference(osisBookId: "Gen", chapter: 1, verse: 1, ordinal: 4)
+        )
+        XCTAssertEqual(
             module.verseReference(osisBookId: "Gen", ordinal: 36),
             VerseKeyReference(osisBookId: "Gen", chapter: 2, verse: 1, ordinal: 36)
         )
+        XCTAssertNil(module.verseReference(ordinal: 1))
         XCTAssertNil(module.verseReference(osisBookId: "Exod", ordinal: 36))
         XCTAssertNil(module.verseOrdinal(osisBookId: "Gen", chapter: 1, verse: 99))
+        XCTAssertNil(module.verseOrdinal(osisBookId: "Gen", chapter: 99, verse: 1))
+        XCTAssertNil(module.verseCount(osisBookId: "Gen", chapter: 99))
+    }
+
+    /**
+     Verifies the Swift VerseKey parser preserves SWORD-provided metadata while accepting the
+     flat API's documented 8-field minimum.
+
+     `SWModule_getKeyChildren` has shipped with both an 8-field comment and 11 named VerseKey
+     constants. iOS must not collapse all text fields to the OSIS reference when the richer fields
+     are present, because book discovery, chapter rendering, and reference validation consume the
+     copied book name, abbreviation, and OSIS book fields. The bundled KJV fixture exercises the
+     same SWORD bridge used by imported Android backup modules.
+     */
+    func testBundledKJVVerseKeyChildrenExposeBookMetadata() throws {
+        let modulePath = try makeTemporaryBundledSwordPath()
+        let manager = try XCTUnwrap(
+            SwordManager(modulePath: modulePath),
+            "Expected SwordManager to initialize against a temporary bundled sword module path"
+        )
+        let module = try XCTUnwrap(
+            manager.module(named: "KJV"),
+            "Expected bundled KJV module to be available for VerseKey metadata parity testing"
+        )
+
+        module.setKey("=Gen.1.1")
+        let children = try XCTUnwrap(module.currentVerseKeyChildren())
+
+        XCTAssertEqual(children.testament, 1)
+        XCTAssertEqual(children.book, 1)
+        XCTAssertEqual(children.chapter, 1)
+        XCTAssertEqual(children.verse, 1)
+        XCTAssertEqual(children.index, 4)
+        XCTAssertEqual(children.chapterMax, 50)
+        XCTAssertEqual(children.verseMax, 31)
+        XCTAssertEqual(children.bookName, "Genesis")
+        XCTAssertEqual(children.osisRef, "Gen.1.1")
+        XCTAssertFalse(children.shortText.isEmpty)
+        XCTAssertEqual(children.bookAbbreviation, "Gen")
+        XCTAssertEqual(children.osisBookName, "Gen")
     }
 
     func testBibleChapterDocumentBuilderPreservesSecondCorinthiansIntroAndChapterMarker() throws {
