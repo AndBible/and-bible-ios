@@ -683,6 +683,8 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+    debouncedSave.cancel();
+    commitTyping.cancel();
     save();
     window.visualViewport?.removeEventListener("resize", onViewportResize);
     document.removeEventListener("click", onDocumentClick, true);

@@ -186,17 +186,30 @@ describe("MarkdownTextEditor Android parity controls", () => {
         expect(wrapper.html()).toContain("data-icon=\"list-ul\"");
         expect(wrapper.html()).toContain("data-icon=\"book-bible\"");
     });
+
+    /**
+     * Protects the editor teardown contract for debounced Markdown source edits.
+     *
+     * The editor uses debounced callbacks for auto-save and undo checkpointing. Unmount must cancel
+     * both timers before the final synchronous save so closed note editors cannot later mutate local
+     * state or emit stale saves.
+     */
+    it("cancels pending debounce timers before the final unmount save", () => {
+        const source = readFileSync(`${process.cwd()}/src/components/MarkdownTextEditor.vue`, "utf8");
+
+        expect(source).toMatch(/onBeforeUnmount\(\(\) => \{\s*debouncedSave\.cancel\(\);\s*commitTyping\.cancel\(\);\s*save\(\);/s);
+    });
 });
 
 describe("TextEditor Android parity sizing", () => {
     /**
-     * Protects Android editor sizing parity for HTML bookmark notes.
+     * Protects Android editor sizing parity and reachability for HTML bookmark notes.
      *
      * Android's Pell editor content starts at one line and grows with content, matching the
-     * Markdown source editor's compact empty-note behavior. A failure means iOS has drifted back to
-     * a fixed-height HTML note editor that Android does not use.
+     * Markdown source editor's compact empty-note behavior. When iOS caps the editor to keep the
+     * toolbar reachable, the content area must scroll instead of clipping longer notes.
      */
-    it("does not force HTML notes into a fixed-height Pell content area", () => {
+    it("does not force HTML notes into a fixed-height Pell content area and keeps overflow reachable", () => {
         const pellSource = readFileSync(`${process.cwd()}/src/lib/pell/pell.scss`, "utf8");
         const textEditorSource = readFileSync(`${process.cwd()}/src/components/TextEditor.vue`, "utf8");
 
@@ -204,5 +217,6 @@ describe("TextEditor Android parity sizing", () => {
         expect(pellSource).not.toContain("height: $pell-content-height");
         expect(pellSource).not.toContain("overflow-y: auto");
         expect(textEditorSource).not.toContain("height: inherit");
+        expect(textEditorSource).toContain("overflow-y: auto");
     });
 });
