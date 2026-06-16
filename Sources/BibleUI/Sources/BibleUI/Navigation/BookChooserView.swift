@@ -12,6 +12,9 @@ import SwordKit
 
  Data dependencies:
  - `books` is the module-specific canon and chapter metadata provided by the caller
+ - `verseCountProvider` supplies module-specific `Versification.getLastVerse` equivalents when
+   the chooser drills into verse selection; `nil` means the active module could not resolve the
+   selected chapter and no synthetic verse list should be shown
  - `dismiss` closes the chooser when the user cancels the flow
 
  Side effects:
@@ -25,6 +28,9 @@ public struct BookChooserView: View {
 
     /// Whether the flow should include a verse chooser after chapter selection.
     let navigateToVerse: Bool
+
+    /// Provides the last verse number for a selected book/chapter.
+    let verseCountProvider: (BookInfo, Int) -> Int?
 
     /// Callback invoked when the user has completed the selection flow.
     let onSelect: (String, Int, Int?) -> Void
@@ -44,15 +50,22 @@ public struct BookChooserView: View {
      - Parameters:
        - books: Book list from the active module's versification.
        - navigateToVerse: Whether the flow should include verse selection.
+       - verseCountProvider: Optional provider for module-specific chapter verse counts. A missing
+         provider keeps existing no-module callers functional by falling back to the static
+         compatibility table.
        - onSelect: Callback receiving `(bookName, chapter, verse?)` when selection completes.
      */
     public init(
         books: [BookInfo],
         navigateToVerse: Bool = false,
+        verseCountProvider: ((BookInfo, Int) -> Int?)? = nil,
         onSelect: @escaping (String, Int, Int?) -> Void
     ) {
         self.books = books
         self.navigateToVerse = navigateToVerse
+        self.verseCountProvider = verseCountProvider ?? { book, chapter in
+            BibleReaderController.verseCount(for: book.name, chapter: chapter)
+        }
         self.onSelect = onSelect
     }
 
@@ -76,7 +89,7 @@ public struct BookChooserView: View {
                     VerseChooserView(
                         bookName: book.name,
                         chapter: chapter,
-                        verseCount: BibleReaderController.verseCount(for: book.name, chapter: chapter)
+                        verseCount: verseCountProvider(book, chapter) ?? 0
                     ) { verse in
                         onSelect(book.name, chapter, verse)
                     }

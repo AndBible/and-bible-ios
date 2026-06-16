@@ -28,6 +28,7 @@ extension AndBibleTests {
 
     func testStrongsQueryNormalizationHandlesLeadingZeroes() {
         let options = StrongsSearchSupport.normalizedQueryOptions(for: "H02022")
+        XCTAssertEqual(options?.canonicalStrongTokens, ["H2022"])
         XCTAssertEqual(
             options?.entryAttributeQueries,
             ["Word//Lemma./H02022", "Word//Lemma./H2022"]
@@ -36,6 +37,7 @@ extension AndBibleTests {
 
     func testStrongsQueryNormalizationAcceptsDecoratedInput() {
         let options = StrongsSearchSupport.normalizedQueryOptions(for: "lemma:strong:g00123")
+        XCTAssertEqual(options?.canonicalStrongTokens, ["G0123"])
         XCTAssertEqual(
             options?.entryAttributeQueries,
             ["Word//Lemma./G00123", "Word//Lemma./G0123", "Word//Lemma./G123"]
@@ -44,9 +46,37 @@ extension AndBibleTests {
 
     func testStrongsQueryNormalizationIncludesIntermediateZeroTrimVariants() {
         let options = StrongsSearchSupport.normalizedQueryOptions(for: "H00430")
+        XCTAssertEqual(options?.canonicalStrongTokens, ["H0430"])
         XCTAssertEqual(
             options?.entryAttributeQueries,
             ["Word//Lemma./H00430", "Word//Lemma./H0430", "Word//Lemma./H430"]
+        )
+    }
+
+    /**
+     Verifies iOS tokenizes Strong's OSIS lemma values the same way JSword populates the Lucene
+     `strong` field.
+
+     JSword `OSISUtil.getStrongsNumbers` extracts `strong:` lemma values from `<w>` elements, and
+     `StrongsNumberFilter` normalizes each number to four digits. Part-suffixed values are indexed
+     twice: once as the base number and once as the full part token. A failure means iOS "find all
+     occurrences" can disagree with Android even when both apps read the same SWORD verse content.
+     */
+    func testStrongsRawLemmaExtractionUsesJSwordCanonicalTokens() {
+        let rawEntry = """
+        <verse osisID="Gen.1.1">
+          <w lemma="strong:H00430 strong:H01234!b">God</w>
+          <w lemma="lemma:noise strong:g00123a">made</w>
+        </verse>
+        """
+
+        XCTAssertEqual(
+            StrongsSearchSupport.canonicalStrongTokens(
+                rawEntry: rawEntry,
+                renderedText: "",
+                book: "Genesis"
+            ),
+            ["H0430", "H1234", "H1234b", "G0123", "G0123a"]
         )
     }
 
@@ -125,6 +155,132 @@ extension AndBibleTests {
             hits.isEmpty,
             "Expected the bundled KJV Strong's search for H00430 to return at least one verse"
         )
+        XCTAssertTrue(
+            hits.contains { $0.book == "Genesis" && $0.chapter == 1 && $0.verse == 1 },
+            "Expected JSword-style Strong's token search for H00430/H0430 to find Genesis 1:1"
+        )
+    }
+
+    /**
+     Verifies SWORD Bible book discovery exposes the full Protestant canon for a complete module.
+
+     The bundled KJV fixture contains content for all 66 books and exercises the same
+     `SwordModule.getBookList()` path used by restored Android `.abmd.zip` Bible modules such as
+     ESV. A failure means the reader's dynamic book picker can hide valid restored content even
+     though the module files and verse entries are present. The test copies bundled SWORD resources
+     into a temporary directory and relies on the shared test cleanup to remove those files.
+     */
+    func testBundledKJVBookListIncludesAllCanonicalBooks() throws {
+        let modulePath = try makeTemporaryBundledSwordPath()
+        let manager = try XCTUnwrap(
+            SwordManager(modulePath: modulePath),
+            "Expected SwordManager to initialize against a temporary bundled sword module path"
+        )
+        let module = try XCTUnwrap(
+            manager.module(named: "KJV"),
+            "Expected bundled KJV module to be available for book-list regression testing"
+        )
+
+        let discoveredBookIds = module.getBookList().map(\.osisId)
+
+        XCTAssertEqual(discoveredBookIds.count, 66)
+        XCTAssertEqual(
+            discoveredBookIds,
+            [
+                "Gen", "Exod", "Lev", "Num", "Deut", "Josh", "Judg", "Ruth",
+                "1Sam", "2Sam", "1Kgs", "2Kgs", "1Chr", "2Chr", "Ezra", "Neh",
+                "Esth", "Job", "Ps", "Prov", "Eccl", "Song", "Isa", "Jer",
+                "Lam", "Ezek", "Dan", "Hos", "Joel", "Amos", "Obad", "Jonah",
+                "Mic", "Nah", "Hab", "Zeph", "Hag", "Zech", "Mal", "Matt",
+                "Mark", "Luke", "John", "Acts", "Rom", "1Cor", "2Cor", "Gal",
+                "Eph", "Phil", "Col", "1Thess", "2Thess", "1Tim", "2Tim", "Titus",
+                "Phlm", "Heb", "Jas", "1Pet", "2Pet", "1John", "2John", "3John",
+                "Jude", "Rev",
+            ]
+        )
+    }
+
+    /**
+     Verifies iOS expands OSIS reference ranges through the same SWORD key parser boundary that
+     backs JSword-style passage semantics.
+
+     Android uses JSword `PassageKeyFactory` for OSIS references, so a range such as
+     `Gen.1.1-Gen.1.3` resolves to every verse in the range rather than only the textual endpoints.
+     The setup loads the bundled KJV fixture and asks the active SWORD module to parse the range;
+     a failure means reader cross-reference links can silently omit middle verses.
+     */
+    func testBundledKJVParseKeyListExpandsOsisRanges() throws {
+        let modulePath = try makeTemporaryBundledSwordPath()
+        let manager = try XCTUnwrap(
+            SwordManager(modulePath: modulePath),
+            "Expected SwordManager to initialize against a temporary bundled sword module path"
+        )
+        let module = try XCTUnwrap(
+            manager.module(named: "KJV"),
+            "Expected bundled KJV module to be available for key-list parsing parity testing"
+        )
+
+        XCTAssertEqual(
+            module.parseKeyList("Gen.1.1-Gen.1.3"),
+            ["Gen.1.1", "Gen.1.2", "Gen.1.3"]
+        )
+    }
+
+    /**
+     Verifies iOS obtains chapter verse counts from the active module's SWORD `VerseKey` metadata.
+
+     Android's passage chooser uses JSword `Versification.getLastVerse(book, chapterNo)`, not a
+     partial hard-coded table. The KJV fixture exercises common and uncommon chapter counts; Ruth 4
+     is intentionally included because the previous fallback returned `30` for unknown chapters.
+     A failure means the native verse picker can offer invalid verses or hide valid verses.
+     */
+    func testBundledKJVVerseCountUsesModuleVersification() throws {
+        let modulePath = try makeTemporaryBundledSwordPath()
+        let manager = try XCTUnwrap(
+            SwordManager(modulePath: modulePath),
+            "Expected SwordManager to initialize against a temporary bundled sword module path"
+        )
+        let module = try XCTUnwrap(
+            manager.module(named: "KJV"),
+            "Expected bundled KJV module to be available for verse-count parity testing"
+        )
+
+        XCTAssertEqual(module.verseCount(osisBookId: "Gen", chapter: 1), 31)
+        XCTAssertEqual(module.verseCount(osisBookId: "Ruth", chapter: 4), 22)
+        XCTAssertEqual(module.verseCount(osisBookId: "Ps", chapter: 119), 176)
+        XCTAssertEqual(module.verseCount(osisBookId: "Rev", chapter: 22), 21)
+        XCTAssertNil(module.verseCount(osisBookId: "Bogus", chapter: 1))
+    }
+
+    /**
+     Verifies iOS uses SWORD/JSword-style verse ordinals instead of per-chapter arithmetic.
+
+     JSword `Versification.getOrdinal(Verse)` includes Bible, testament, book, and chapter intro
+     slots before the first normal verse. SWORD's `VerseKey.getIndex()` follows the same convention,
+     so `Gen.1.1` is ordinal 4 and `Gen.2.1` is ordinal 36, not ordinals 1 and 41. The reverse
+     lookup assertion protects bookmark, memorization, and bridge code that must map persisted
+     Android ordinals back to exact verse references.
+     */
+    func testBundledKJVVerseOrdinalsUseIntroInclusiveVersification() throws {
+        let modulePath = try makeTemporaryBundledSwordPath()
+        let manager = try XCTUnwrap(
+            SwordManager(modulePath: modulePath),
+            "Expected SwordManager to initialize against a temporary bundled sword module path"
+        )
+        let module = try XCTUnwrap(
+            manager.module(named: "KJV"),
+            "Expected bundled KJV module to be available for ordinal parity testing"
+        )
+
+        XCTAssertEqual(module.verseOrdinal(osisBookId: "Gen", chapter: 1, verse: 1), 4)
+        XCTAssertEqual(module.verseOrdinal(osisBookId: "Gen", chapter: 1, verse: 31), 34)
+        XCTAssertEqual(module.verseOrdinal(osisBookId: "Gen", chapter: 2, verse: 1), 36)
+        XCTAssertEqual(
+            module.verseReference(osisBookId: "Gen", ordinal: 36),
+            VerseKeyReference(osisBookId: "Gen", chapter: 2, verse: 1, ordinal: 36)
+        )
+        XCTAssertNil(module.verseReference(osisBookId: "Exod", ordinal: 36))
+        XCTAssertNil(module.verseOrdinal(osisBookId: "Gen", chapter: 1, verse: 99))
     }
 
     func testBibleChapterDocumentBuilderPreservesSecondCorinthiansIntroAndChapterMarker() throws {

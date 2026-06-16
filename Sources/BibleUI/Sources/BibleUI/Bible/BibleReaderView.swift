@@ -805,7 +805,16 @@ public struct BibleReaderView: View {
         NavigationStack {
             BookChooserView(
                 books: panePresentationController?.bookList ?? BibleReaderController.defaultBooks,
-                navigateToVerse: navigateToVersePref
+                navigateToVerse: navigateToVersePref,
+                verseCountProvider: { book, chapter in
+                    guard let panePresentationController else {
+                        return BibleReaderController.verseCount(for: book.name, chapter: chapter)
+                    }
+                    return panePresentationController.verseCountForActiveModule(
+                        book: book.name,
+                        chapter: chapter
+                    )
+                }
             ) { book, chapter, verse in
                 dismissBookChooser()
                 panePresentationController?.navigateTo(book: book, chapter: chapter, verse: verse)

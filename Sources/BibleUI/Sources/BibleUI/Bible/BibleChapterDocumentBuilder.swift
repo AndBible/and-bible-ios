@@ -83,9 +83,13 @@ struct BibleChapterDocumentBuilder {
 
             let text = module.rawEntry()
             if !text.isEmpty {
+                guard let ordinal = ordinal(osisBookId: osisBookId, chapter: chapter, verse: parsedVerse) else {
+                    chapterBuilderLogger.warning("SWORD: Could not resolve ordinal for \(osisBookId) \(chapter):\(parsedVerse)")
+                    return nil
+                }
                 let verseEntry = VerseEntry(
                     verse: parsedVerse,
-                    ordinal: Self.ordinal(chapter: chapter, verse: parsedVerse),
+                    ordinal: ordinal,
                     xml: text
                 )
                 verseCount += 1
@@ -115,6 +119,27 @@ struct BibleChapterDocumentBuilder {
 
     static func ordinal(chapter: Int, verse: Int) -> Int {
         (chapter - 1) * 40 + max(1, verse)
+    }
+
+    /**
+     Resolves the verse ordinal used in reader OSIS output.
+
+     Android receives verse ordinals from JSword's active `Versification`; SWORD exposes the same
+     concept through `VerseKey.getIndex()`. The fallback exists only for placeholder/unavailable
+     module paths and preserves historical rendering when the bridge cannot resolve a real
+     `VerseKey`.
+
+     - Parameters:
+       - osisBookId: OSIS book identifier for the verse being rendered.
+       - chapter: One-based chapter number.
+       - verse: One-based verse number.
+     - Returns: The active module's versification ordinal, or `nil` if the exact verse cannot be
+       resolved through the module.
+     - Side effects: May temporarily move the SWORD module cursor through `SwordModule`; the module
+       restores its previous key before returning.
+     */
+    private func ordinal(osisBookId: String, chapter: Int, verse: Int) -> Int? {
+        module.verseOrdinal(osisBookId: osisBookId, chapter: chapter, verse: verse)
     }
 
     private func normalizedOsisSegment(_ xml: String) -> String {
