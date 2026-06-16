@@ -540,7 +540,7 @@
 "bookmarks_contents" = "Straničnici, Oznake i Radne bilježnice";
 "workspaces_contents" = "Radne površine i Prozori";
 "my_documents" = "My Documents";
-"my_documents_contents" = "My Documents and their pages";
+"my_documents_contents" = "My Documents and their content";
 "synchronization_categories" = "Kategorije usklađivanja";
 "sync_error" = "Došlo je do pogreške tijekom usklađivanja u oblaku";
 "sync_cant_fetch" = "Verzija baze podataka ili zakrpe koje se drže na oblaku novija je nego ona koju podržava ova aplikacija.";

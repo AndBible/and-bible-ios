@@ -707,6 +707,8 @@ public final class RemoteSyncSynchronizationService {
                     settingsStore: settingsStore
                 )
             )
+        case .progress:
+            throw RemoteSyncSynchronizationError.unsupportedCategory(category)
         }
     }
 
@@ -769,6 +771,8 @@ public final class RemoteSyncSynchronizationService {
             ) {
                 return .myDocuments(report)
             }
+            return nil
+        case .progress:
             return nil
         }
     }

@@ -23,6 +23,9 @@ public enum RemoteSyncCategory: String, CaseIterable, Sendable {
     /// My Documents document/page/content data.
     case myDocuments = "mydocuments"
 
+    /// Reading and memorization progress data.
+    case progress = "progress"
+
     /**
      Categories currently backed by iOS sync engines and eligible for lifecycle sweeps.
 
@@ -38,6 +41,8 @@ public enum RemoteSyncCategory: String, CaseIterable, Sendable {
         switch self {
         case .myDocuments:
             RemoteSyncMyDocumentRestoreService.supportedAndroidSchemaVersion
+        case .progress:
+            9
         case .bookmarks, .workspaces, .readingPlans:
             1
         }

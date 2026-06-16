@@ -98,6 +98,9 @@ struct BibleWindowPane: View {
     /// Requests the parent reader to present settings UI.
     var onShowSettings: (() -> Void)?
 
+    /// Requests the parent reader to present this pane's window-scoped text-display settings.
+    var onShowWindowTextOptions: (() -> Void)?
+
     /// Requests the parent reader to present download/module-management UI with optional search.
     var onShowDownloads: ((String?) -> Void)?
 
@@ -154,12 +157,12 @@ struct BibleWindowPane: View {
 
     /// Active reading-background color encoded as the signed ARGB integer expected by BibleWebView.
     private var activeBackgroundColorInt: Int {
-        let d = TextDisplaySettings.appDefaults
-        if nightMode {
-            return displaySettings.nightBackground ?? d.nightBackground ?? -16777216
-        } else {
-            return displaySettings.dayBackground ?? d.dayBackground ?? -1
-        }
+        surfacePalette.backgroundColorInt
+    }
+
+    /// Reader-surface colors derived from this pane's resolved text-display settings.
+    private var surfacePalette: ReaderThemeSurfacePalette {
+        ReaderThemeSurfacePalette(settings: displaySettings, nightMode: nightMode)
     }
 
     var body: some View {
@@ -315,6 +318,17 @@ struct BibleWindowPane: View {
 
             Divider()
 
+            Button(
+                localizedDrawerString("all_text_options_window_menutitle", default: "All text options"),
+                systemImage: "textformat"
+            ) {
+                windowManager.activeWindow = window
+                onShowWindowTextOptions?()
+            }
+            .accessibilityIdentifier("windowPaneTextOptionsButton")
+
+            Divider()
+
             Button(String(localized: "close"), systemImage: "xmark", role: .destructive) {
                 windowManager.removeWindow(window)
             }
@@ -323,10 +337,11 @@ struct BibleWindowPane: View {
             Image(systemName: "line.3.horizontal")
                 .font(.caption)
                 .fontWeight(.semibold)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(surfacePalette.foregroundColor)
                 .frame(width: 28, height: 28)
-                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 6))
+                .background(surfacePalette.controlFillColor, in: RoundedRectangle(cornerRadius: 6))
         }
+        .accessibilityIdentifier("windowPaneMenuButton::\(window.orderNumber)")
         .simultaneousGesture(TapGesture().onEnded {
             windowManager.activeWindow = window
         })
@@ -622,6 +637,21 @@ struct BibleWindowPane: View {
         Task { @MainActor in
             wm.registerController(ctrl, for: wid)
         }
+    }
+
+    /**
+     Resolves one Android reader-menu string with an English fallback.
+
+     - Parameters:
+       - key: Android string resource key mirrored into iOS localization files when available.
+       - defaultValue: English fallback used when the key is not present locally.
+     - Returns: Localized menu text for pane-scoped Android parity rows.
+     - Side effects: none.
+     - Failure modes: Missing localizations fall back to `defaultValue`.
+     */
+    private func localizedDrawerString(_ key: String, default defaultValue: String) -> String {
+        let localized = Bundle.main.localizedString(forKey: key, value: nil, table: nil)
+        return localized == key ? defaultValue : localized
     }
 
     /// Floating action bar shown while the pane has an active text selection.

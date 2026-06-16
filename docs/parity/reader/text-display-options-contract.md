@@ -32,21 +32,19 @@ Android has two relevant text-display settings routes:
 - Main reader overflow `allTextOptions` opens workspace-scoped text display settings.
 - Per-window popup settings open window-scoped text display settings.
 
-iOS now maps `readerOpenTextOptionsAction` to `ReaderDestination.textOptions`, backed by
-window-scoped `TextDisplaySettingsView`, because the current iOS entry point is attached to the
-selected reader window and matches Android's `SplitBibleArea` per-window popup route. The left
-drawer `readerOpenSettingsAction` remains global Application Preferences.
-
-iOS has not yet added a separate workspace-scoped All Text Options entry matching Android's main
-reader overflow route. If that route is added, it should be implemented as a distinct workspace-level
-destination rather than changing the existing window-scoped route.
+iOS maps `readerOpenTextOptionsAction` to `ReaderDestination.workspaceTextOptions`, backed by
+workspace-scoped `TextDisplaySettingsView`, matching Android's main reader overflow route. The
+per-pane hamburger menu exposes Android's window-scoped All Text Options route through
+`ReaderDestination.windowTextOptions`. Application Preferences exposes Android's
+`global_text_display_settings`, and the text-options screen parent links can jump from window to
+workspace/global or from workspace to global.
 
 ## Row Inventory
 
 | Android key | Android category | iOS disposition | Notes |
 | --- | --- | --- | --- |
-| `open_workspace_settings` | Parent links | Not implemented in this route | iOS window-level All Text Options maps to Android's per-window route; workspace text options need a separate entry point. |
-| `open_global_settings` | Parent links | Adapted elsewhere | iOS global Application Preferences remain a separate left-drawer route. |
+| `open_workspace_settings` | Parent links | Implemented | Visible from window scope; opens workspace-scoped text options. |
+| `open_global_settings` | Parent links | Implemented | Visible from window and workspace scopes; opens global text options. |
 | `COLORS` | Font and colors | Implemented | Native color editor backed by existing config color fields. |
 | `FONTSIZE` | Font and colors | Implemented | Existing `fontSize` model and renderer field. |
 | `FONTFAMILY` | Font and colors | Implemented | Existing `fontFamily` model and renderer field. |
@@ -89,8 +87,7 @@ destination rather than changing the existing window-scoped route.
 - Keep `TextDisplaySettingsPresentation.androidRows` in the same order as Android
   `text_display_settings.xml`.
 - Do not add e-ink-only rows to iOS unless iOS gets an explicit e-ink feature.
-- Keep the current iOS All Text Options entry window-scoped because it matches Android's
+- Keep the main reader overflow All Text Options entry workspace-scoped because it matches
+  Android's `MainBibleActivity` route.
+- Keep the pane hamburger All Text Options entry window-scoped because it matches Android's
   `SplitBibleArea` per-window popup route.
-- If iOS adds Android's main reader overflow `allTextOptions` route, implement it as a separate
-  workspace-scoped destination. Do not reuse the window-scoped destination and silently change its
-  persistence scope.

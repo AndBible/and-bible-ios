@@ -3,6 +3,164 @@
 import BibleCore
 
 /**
+ Android string resource descriptor for one localized sync settings label.
+
+ The descriptor keeps the Android resource key and English default together so native iOS callers
+ can share one category copy contract without duplicating switch statements across settings rows
+ and lifecycle error messages.
+
+ - Returns: Localized text through `localized`.
+ - Side effects: none.
+ - Failure modes: Missing localization resources fall back to `defaultValue`.
+ */
+public struct RemoteSyncLocalizedString: Equatable, Sendable {
+    /// Android string resource key mirrored by the iOS localization catalog.
+    public let key: String
+
+    /// English fallback copied from Android's default `strings.xml`.
+    public let defaultValue: String
+
+    /**
+     Creates a reusable Android string descriptor.
+
+     - Parameters:
+       - key: Android string resource key.
+       - defaultValue: English fallback from Android's default resources.
+     - Returns: Value semantics suitable for production localization and parity tests.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    public init(key: String, defaultValue: String) {
+        self.key = key
+        self.defaultValue = defaultValue
+    }
+
+    /**
+     Resolves the descriptor through Swift localization.
+
+     - Returns: Localized text for `key`, falling back to `defaultValue`.
+     - Side effects: Reads the process localization bundle.
+     - Failure modes: Missing localization resources fall back to `defaultValue`.
+     */
+    public var localized: String {
+        let localized = String(localized: String.LocalizationValue(key))
+        return localized == key ? defaultValue : localized
+    }
+}
+
+/**
+ Android-backed title and content strings for one remote sync category.
+
+ Android exposes each sync category as a preference title plus summary. iOS uses this descriptor
+ to keep visible settings text and lifecycle sync messages on the same Android source keys.
+
+ - Returns: Value semantics for UI composition and parity tests.
+ - Side effects: none.
+ - Failure modes: Individual string descriptors handle localization fallback independently.
+ */
+public struct RemoteSyncCategoryText: Equatable, Sendable {
+    /// Android preference title string.
+    public let title: RemoteSyncLocalizedString
+
+    /// Android preference summary/content string.
+    public let contents: RemoteSyncLocalizedString
+
+    /**
+     Creates one title/content descriptor pair.
+
+     - Parameters:
+       - title: Android title string descriptor.
+       - contents: Android summary string descriptor.
+     - Returns: Value semantics for category copy.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    public init(title: RemoteSyncLocalizedString, contents: RemoteSyncLocalizedString) {
+        self.title = title
+        self.contents = contents
+    }
+}
+
+/**
+ Android-backed localization catalog for remote sync categories.
+
+ The catalog centralizes category title and summary keys so active settings rows, deferred rows,
+ and app lifecycle error copy cannot drift independently.
+
+ - Returns: Android string descriptors for sync category copy.
+ - Side effects: none.
+ - Failure modes: none; every supported category has an explicit Android string mapping.
+ */
+public enum RemoteSyncCategoryLocalization {
+    /**
+     Returns Android title and summary descriptors for an implemented sync category.
+
+     - Parameter category: Implemented remote sync category.
+     - Returns: Android-backed title/content descriptors.
+     - Side effects: none.
+     - Failure modes: This helper cannot fail because all active categories are mapped.
+     */
+    public static func text(for category: RemoteSyncCategory) -> RemoteSyncCategoryText {
+        switch category {
+        case .bookmarks:
+            return RemoteSyncCategoryText(
+                title: .init(key: "bookmarks", defaultValue: "Bookmarks"),
+                contents: .init(key: "bookmarks_contents", defaultValue: "Bookmarks, Labels and Study Pads")
+            )
+        case .workspaces:
+            return RemoteSyncCategoryText(
+                title: .init(key: "help_workspaces_title", defaultValue: "Workspaces"),
+                contents: .init(key: "workspaces_contents", defaultValue: "Workspaces and Windows")
+            )
+        case .readingPlans:
+            return RemoteSyncCategoryText(
+                title: .init(key: "reading_plans_plural", defaultValue: "Reading Plans"),
+                contents: .init(key: "reading_plans_content", defaultValue: "Reading plans and their statuses")
+            )
+        case .myDocuments:
+            return RemoteSyncCategoryText(
+                title: .init(key: "my_documents", defaultValue: "My Documents"),
+                contents: .init(key: "my_documents_contents", defaultValue: "My Documents and their content")
+            )
+        case .progress:
+            return RemoteSyncCategoryText(
+                title: .init(key: "progress_sync_title", defaultValue: "Reading Progress"),
+                contents: .init(
+                    key: "progress_sync_contents",
+                    defaultValue: "Memorized verses and chapter reading records"
+                )
+            )
+        }
+    }
+
+    /**
+     Returns Android title and summary descriptors for a visible deferred sync category.
+
+     Deferred categories use the same Android title/content resources as the future active
+     implementation so the visible parity surface does not change when the engine lands.
+
+     - Parameter category: Android-visible category whose iOS sync engine is not implemented yet.
+     - Returns: Android-backed title/content descriptors.
+     - Side effects: none.
+     - Failure modes: This helper cannot fail because all deferred categories are mapped.
+     */
+    static func deferredText(for category: RemoteSyncDeferredCategory) -> RemoteSyncCategoryText {
+        switch category {
+        case .aiSettings:
+            return RemoteSyncCategoryText(
+                title: .init(key: "ai_settings_sync_title", defaultValue: "AI Settings"),
+                contents: .init(
+                    key: "ai_settings_sync_contents",
+                    defaultValue: "AI prompts and provider configurations"
+                )
+            )
+        case .progress:
+            return text(for: .progress)
+        }
+    }
+}
+
+/**
  Android-backed presentation metadata for the native SwiftUI sync settings screen.
 
  The sync settings workflow remains native SwiftUI on iOS, but the rows should not choose ad hoc
@@ -90,6 +248,8 @@ enum SyncSettingsPresentation {
             return Row(androidKey: "sync_reading_plans")
         case .myDocuments:
             return Row(androidKey: "sync_documents")
+        case .progress:
+            return Row(androidKey: "sync_reading_progress")
         }
     }
 

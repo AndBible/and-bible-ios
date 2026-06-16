@@ -251,6 +251,9 @@ public final class AndroidModuleBackupService {
     /// SWORD drivers whose `DataPath` points at a file stem inside the actual module directory.
     private static let singleFileDataPathDrivers: Set<String> = ["rawld", "zld", "rawgenbook", "rawfiles"]
 
+    /// Largest manifest or SWORD config entry accepted for in-memory metadata parsing.
+    private static let maximumMetadataEntryByteCount = 1024 * 1024
+
     private let fileManager: FileManager
     private let moduleDirectory: URL
     private let temporaryDirectory: URL
@@ -315,6 +318,28 @@ public final class AndroidModuleBackupService {
     }
 
     /**
+     Reads an Android module backup from a file URL without mutating local module files.
+
+     - Parameter archiveURL: File URL for a `.abmd.zip` archive.
+     - Returns: Summary of supported modules, unsupported Android-only entries, and existing files.
+     - Side effects: Reads ZIP metadata and small manifest/config entries; no module files are
+       written.
+     - Throws: `AndroidModuleBackupError` for malformed archives, wrong backup types, unsupported
+       manifest versions, duplicate entries, or incomplete SWORD module layouts.
+     */
+    public func inspectArchive(fromArchiveAt archiveURL: URL) throws -> AndroidModuleBackupInspection {
+        let archive = try loadClassifiedArchive(fromArchiveAt: archiveURL)
+        let existingPaths = existingEntryPaths(in: archive.supportedEntries)
+        return AndroidModuleBackupInspection(
+            manifest: archive.manifest,
+            supportedModuleNames: archive.moduleNames,
+            supportedEntryCount: archive.supportedEntries.count,
+            unsupportedEntryPaths: archive.unsupportedEntryPaths,
+            existingEntryPaths: existingPaths
+        )
+    }
+
+    /**
      Installs supported SWORD content from an Android module backup.
 
      - Parameters:
@@ -361,6 +386,74 @@ public final class AndroidModuleBackupService {
                 withIntermediateDirectories: true
             )
             try entry.data.write(to: destinationURL, options: .atomic)
+        }
+
+        try publishStagedEntries(
+            archive.supportedEntries.map(\.name),
+            from: stagingDirectory,
+            rollbackDirectory: rollbackDirectory
+        )
+        invalidateModuleCache()
+
+        return AndroidModuleBackupRestoreReport(
+            installedModuleNames: archive.moduleNames,
+            installedEntryCount: archive.supportedEntries.count,
+            skippedUnsupportedEntryPaths: archive.unsupportedEntryPaths
+        )
+    }
+
+    /**
+     Installs supported SWORD content from a file-backed Android module backup.
+
+     - Parameters:
+       - archiveURL: File URL for a `.abmd.zip` archive.
+       - allowOverwritingExistingFiles: Whether existing local module files may be replaced.
+     - Returns: Installed module names and skipped unsupported Android-only entries.
+     - Side effects:
+       - streams supported `mods.d/` and `modules/` entries into staging
+       - publishes staged files into the local SWORD module directory with rollback backups
+       - deletes SWORD's `modules-conf.cache` so the next manager scan sees restored modules
+     - Throws: `AndroidModuleBackupError` for invalid archives, unsupported-only content, or
+       existing files when overwrite is disabled; rethrows file-system failures during staging or
+       publish after attempting rollback.
+     */
+    public func restoreArchive(
+        fromArchiveAt archiveURL: URL,
+        allowOverwritingExistingFiles: Bool = true
+    ) throws -> AndroidModuleBackupRestoreReport {
+        let archive = try loadClassifiedArchive(fromArchiveAt: archiveURL)
+        let existingPaths = existingEntryPaths(in: archive.supportedEntries)
+        if !allowOverwritingExistingFiles, !existingPaths.isEmpty {
+            throw AndroidModuleBackupError.moduleFilesAlreadyExist(existingPaths)
+        }
+
+        let stagingDirectory = temporaryDirectory.appendingPathComponent(
+            "android-module-backup-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        let rollbackDirectory = temporaryDirectory.appendingPathComponent(
+            "android-module-backup-rollback-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        try fileManager.createDirectory(at: stagingDirectory, withIntermediateDirectories: true)
+        try fileManager.createDirectory(at: rollbackDirectory, withIntermediateDirectories: true)
+        defer {
+            try? fileManager.removeItem(at: stagingDirectory)
+            try? fileManager.removeItem(at: rollbackDirectory)
+        }
+
+        for entry in archive.supportedEntries {
+            let destinationURL = stagingDirectory.appendingPathComponent(entry.name)
+            do {
+                try ZipArchiveReader.extract(
+                    entry.source,
+                    fromArchiveAt: archiveURL,
+                    to: destinationURL,
+                    fileManager: fileManager
+                )
+            } catch let error as ZipArchiveReaderError {
+                throw AndroidModuleBackupError.invalidArchive(Self.archiveErrorMessage(for: error))
+            }
         }
 
         try publishStagedEntries(
@@ -496,6 +589,72 @@ public final class AndroidModuleBackupService {
     }
 
     /**
+     Parses and classifies a file-backed Android module backup into supported and unsupported groups.
+     */
+    private func loadClassifiedArchive(fromArchiveAt archiveURL: URL) throws -> ClassifiedFileArchive {
+        let entries: [ZipArchiveFileEntry]
+        do {
+            entries = try ZipArchiveReader.fileEntries(inArchiveAt: archiveURL)
+        } catch let error as ZipArchiveReaderError {
+            throw AndroidModuleBackupError.invalidArchive(Self.archiveErrorMessage(for: error))
+        } catch {
+            throw AndroidModuleBackupError.invalidArchive(error.localizedDescription)
+        }
+
+        let normalizedEntries = try entries.map { entry in
+            ClassifiedFileEntry(name: try normalizedArchivePath(entry.name), source: entry)
+        }
+
+        var normalizedNames: Set<String> = []
+        for entry in normalizedEntries {
+            let collisionKey = entry.name.lowercased()
+            guard normalizedNames.insert(collisionKey).inserted else {
+                throw AndroidModuleBackupError.duplicateEntry(entry.name)
+            }
+        }
+
+        let manifestName = Self.manifestFileName.lowercased()
+        guard let manifestEntry = normalizedEntries.first(where: { $0.name.lowercased() == manifestName }) else {
+            throw AndroidModuleBackupError.missingManifest
+        }
+        let manifest = try decodeManifest(
+            from: fileBackedEntryData(manifestEntry.source, fromArchiveAt: archiveURL)
+        )
+        guard manifest.backupType == "MODULE_BACKUP" else {
+            throw AndroidModuleBackupError.unsupportedBackupType(manifest.backupType)
+        }
+        guard manifest.manifestVersion <= 1 else {
+            throw AndroidModuleBackupError.unsupportedManifestVersion(manifest.manifestVersion)
+        }
+
+        var supportedEntries: [ClassifiedFileEntry] = []
+        var unsupportedEntryPaths: [String] = []
+        for entry in normalizedEntries where entry.name.lowercased() != manifestName {
+            let normalizedPath = entry.name
+            let lowercasedPath = normalizedPath.lowercased()
+            if isSupportedSwordEntry(lowercasedPath) {
+                supportedEntries.append(ClassifiedFileEntry(name: normalizedPath, source: entry.source))
+            } else if Self.unsupportedAndroidModulePrefixes.contains(where: lowercasedPath.hasPrefix) {
+                unsupportedEntryPaths.append(normalizedPath)
+            } else {
+                throw AndroidModuleBackupError.invalidModuleLayout("Unsupported entry \(normalizedPath).")
+            }
+        }
+
+        let moduleNames = try supportedModuleNames(
+            in: supportedEntries,
+            unsupportedEntryPaths: unsupportedEntryPaths,
+            archiveURL: archiveURL
+        )
+        return ClassifiedFileArchive(
+            manifest: manifest,
+            supportedEntries: supportedEntries,
+            unsupportedEntryPaths: unsupportedEntryPaths.sorted(),
+            moduleNames: moduleNames
+        )
+    }
+
+    /**
      Decodes Android's backup manifest while preserving Android defaults for omitted fields.
      */
     private func decodeManifest(from data: Data) throws -> AndroidModuleBackupManifest {
@@ -508,6 +667,24 @@ public final class AndroidModuleBackupService {
             )
         } catch {
             throw AndroidModuleBackupError.invalidManifest
+        }
+    }
+
+    /**
+     Reads one small metadata entry from a file-backed module backup.
+     */
+    private func fileBackedEntryData(_ entry: ZipArchiveFileEntry, fromArchiveAt archiveURL: URL) throws -> Data {
+        do {
+            return try ZipArchiveReader.data(
+                for: entry,
+                inArchiveAt: archiveURL,
+                maximumByteCount: Self.maximumMetadataEntryByteCount,
+                fileManager: fileManager
+            )
+        } catch let error as ZipArchiveReaderError {
+            throw AndroidModuleBackupError.invalidArchive(Self.archiveErrorMessage(for: error))
+        } catch {
+            throw AndroidModuleBackupError.invalidArchive(error.localizedDescription)
         }
     }
 
@@ -600,9 +777,62 @@ public final class AndroidModuleBackupService {
     }
 
     /**
+     Validates file-backed supported SWORD entries and returns module initials.
+     */
+    private func supportedModuleNames(
+        in supportedEntries: [ClassifiedFileEntry],
+        unsupportedEntryPaths: [String],
+        archiveURL: URL
+    ) throws -> [String] {
+        guard !supportedEntries.isEmpty else {
+            throw AndroidModuleBackupError.noSupportedModules(unsupportedEntryPaths.sorted())
+        }
+
+        let confEntries = supportedEntries.filter { entry in
+            let lowercasedPath = entry.name.lowercased()
+            return lowercasedPath.hasPrefix("mods.d/") && lowercasedPath.hasSuffix(".conf")
+        }
+        guard !confEntries.isEmpty else {
+            throw AndroidModuleBackupError.invalidModuleLayout("No module .conf files found in mods.d/.")
+        }
+        let dataEntryNames = Set(
+            supportedEntries.map(\.name).filter { $0.lowercased().hasPrefix("modules/") }
+        )
+        guard !dataEntryNames.isEmpty else {
+            throw AndroidModuleBackupError.invalidModuleLayout("No module data files found in modules/.")
+        }
+
+        var moduleNames: [String] = []
+        for entry in confEntries {
+            let configData = try fileBackedEntryData(entry.source, fromArchiveAt: archiveURL)
+            let config = try parseModuleConfig(data: configData, fallbackPath: entry.name)
+            let expectedDataRoot = dataDirectoryPath(for: config)
+            let hasData = dataEntryNames.contains { entryName in
+                entryName == expectedDataRoot || entryName.hasPrefix("\(expectedDataRoot)/")
+            }
+            guard hasData else {
+                throw AndroidModuleBackupError.invalidModuleLayout(
+                    "\(config.moduleName) references missing data path \(expectedDataRoot)."
+                )
+            }
+            moduleNames.append(config.moduleName)
+        }
+        return moduleNames
+    }
+
+    /**
      Finds supported archive paths that would overwrite existing local module files.
      */
     private func existingEntryPaths(in supportedEntries: [ZipArchiveEntry]) -> [String] {
+        supportedEntries.map(\.name)
+            .filter { fileManager.fileExists(atPath: moduleDirectory.appendingPathComponent($0).path) }
+            .sorted()
+    }
+
+    /**
+     Finds file-backed supported archive paths that would overwrite existing local module files.
+     */
+    private func existingEntryPaths(in supportedEntries: [ClassifiedFileEntry]) -> [String] {
         supportedEntries.map(\.name)
             .filter { fileManager.fileExists(atPath: moduleDirectory.appendingPathComponent($0).path) }
             .sorted()
@@ -866,6 +1096,34 @@ public final class AndroidModuleBackupService {
 
         /// Supported SWORD entries safe to write under the local module directory.
         let supportedEntries: [ZipArchiveEntry]
+
+        /// Recognized Android-only entries that iOS skips.
+        let unsupportedEntryPaths: [String]
+
+        /// Module initials derived from supported config entries.
+        let moduleNames: [String]
+    }
+
+    /**
+     Normalized file-backed ZIP entry used internally by inspection and restore.
+     */
+    private struct ClassifiedFileEntry {
+        /// Normalized archive-relative path safe to publish under the module directory.
+        let name: String
+
+        /// Original file-backed ZIP entry descriptor used for streaming extraction.
+        let source: ZipArchiveFileEntry
+    }
+
+    /**
+     Classified, validated file-backed archive entries used internally by inspection and restore.
+     */
+    private struct ClassifiedFileArchive {
+        /// Decoded Android manifest.
+        let manifest: AndroidModuleBackupManifest
+
+        /// Supported SWORD entries safe to write under the local module directory.
+        let supportedEntries: [ClassifiedFileEntry]
 
         /// Recognized Android-only entries that iOS skips.
         let unsupportedEntryPaths: [String]

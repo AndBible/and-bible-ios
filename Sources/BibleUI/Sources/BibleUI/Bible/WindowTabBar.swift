@@ -17,6 +17,9 @@ struct WindowTabBar: View {
     /// Shared workspace/window coordinator used to read and mutate tab state.
     @Environment(WindowManager.self) private var windowManager
 
+    /// Reader-surface colors shared with the active WebView display settings.
+    var surfacePalette: ReaderThemeSurfacePalette = .standard
+
     /// Presents transient toast feedback in the parent reader.
     var onShowToast: ((String) -> Void)?
 
@@ -63,9 +66,9 @@ struct WindowTabBar: View {
                                 .font(.caption)
                         }
                     }
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(surfacePalette.secondaryForegroundColor)
                     .frame(width: 28, height: 28)
-                    .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
+                    .background(surfacePalette.controlFillColor, in: RoundedRectangle(cornerRadius: 6))
                 }
                 .buttonStyle(.plain)
                 .disabled(isAddWindowDisabled)
@@ -80,7 +83,8 @@ struct WindowTabBar: View {
             .padding(.vertical, 6)
         }
         .accessibilityIdentifier("windowTabBar")
-        .background(.bar)
+        .foregroundStyle(surfacePalette.foregroundColor)
+        .background(surfacePalette.backgroundColor)
         .alert(String(localized: "go_to_reference"), isPresented: $showGoToRefAlert) {
             TextField(String(localized: "go_to_reference_placeholder"), text: $goToRefText)
             Button(String(localized: "go")) {
@@ -124,10 +128,10 @@ struct WindowTabBar: View {
                     // Minimized: small "eye.slash" icon instead of dot
                     Image(systemName: "eye.slash")
                         .font(.system(size: 8))
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(surfacePalette.secondaryForegroundColor.opacity(0.75))
                 } else {
                     Circle()
-                        .fill(isActive ? Color.green : Color.secondary.opacity(0.4))
+                        .fill(isActive ? Color.green : surfacePalette.secondaryForegroundColor)
                         .frame(width: 6, height: 6)
                 }
 
@@ -140,7 +144,7 @@ struct WindowTabBar: View {
                 if !isMinimized && !reference.isEmpty {
                     Text(reference)
                         .font(.caption2)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(surfacePalette.secondaryForegroundColor)
                         .lineLimit(1)
                 }
             }
@@ -154,8 +158,8 @@ struct WindowTabBar: View {
                 RoundedRectangle(cornerRadius: 8)
                     .strokeBorder(
                         isActive ? Color.accentColor
-                            : isMinimized ? Color.secondary.opacity(0.15)
-                            : Color.secondary.opacity(0.3),
+                            : isMinimized ? surfacePalette.inactiveBorderColor.opacity(0.55)
+                            : surfacePalette.inactiveBorderColor,
                         style: isMinimized
                             ? StrokeStyle(lineWidth: 1, dash: [4, 3])
                             : StrokeStyle(lineWidth: 1)

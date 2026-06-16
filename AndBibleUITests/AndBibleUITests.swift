@@ -42,15 +42,79 @@ final class AndBibleUITests: XCTestCase {
      Tears down the currently running UI-test app process after each test method.
      *
      * - Side effects:
-     *   - terminates the tracked app when it is still running so the next test gets a clean launch
+     *   - asks CoreSimulator to terminate the tracked app process so the next test gets a clean launch
      *   - clears the stored app handle for the completed test method
      * - Failure modes:
      *   - silently ignores already-stopped app processes because termination is only cleanup
      */
     override func tearDownWithError() throws {
-        if let trackedApp, trackedApp.state != .notRunning {
+        if let trackedApp {
             _ = terminateAppReliably(trackedApp)
         }
         trackedApp = nil
+    }
+
+    /**
+     Protects the host-process capture helper from blocking on descendants that inherit stdout.
+     *
+     * Setup:
+     * - runs a Python process that exits immediately after writing output
+     * - forks a short-lived descendant that keeps the inherited stdout descriptor open
+     *
+     * Expected result:
+     * - the helper returns after the direct child exits and captures the direct child's output
+     * - the descendant is still alive when the helper returns, proving capture did not wait for
+     *   inherited pipe descriptors to close
+     *
+     * Failure meaning:
+     * - UI-test fixture bootstrap can stall when `simctl launch` or another host command leaves
+     *   pipe descriptors attached to a launched process that outlives the command
+     *
+     * Side effects:
+     * - starts and terminates one descendant host Python process that inherits stdout
+     */
+    func testHostProcessCaptureReturnsAfterChildExitWhenDescendantKeepsPipeOpen() {
+        var descendantPID: pid_t?
+        defer {
+            if let descendantPID {
+                _ = kill(descendantPID, SIGTERM)
+            }
+        }
+
+        let result = runHostProcess(
+            executablePath: "/usr/bin/python3",
+            arguments: [
+                "-c",
+                """
+                import os
+                import sys
+                import time
+
+                child_pid = os.fork()
+                if child_pid == 0:
+                    time.sleep(30)
+                    os._exit(0)
+
+                sys.stdout.write(f"fixture-ready:{child_pid}")
+                sys.stdout.flush()
+                os._exit(0)
+                """
+            ],
+            timeout: 15
+        )
+
+        XCTAssertEqual(result.status, 0)
+        let outputParts = result.stdout.split(separator: ":", maxSplits: 1)
+        XCTAssertEqual(outputParts.first, "fixture-ready")
+        XCTAssertEqual(outputParts.count, 2)
+        descendantPID = outputParts.last.flatMap { pid_t(String($0)) }
+        XCTAssertNotNil(descendantPID)
+        if let descendantPID {
+            XCTAssertEqual(
+                kill(descendantPID, 0),
+                0,
+                "Host process capture should not block until inherited pipe descriptors close."
+            )
+        }
     }
 }

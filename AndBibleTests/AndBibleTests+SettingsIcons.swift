@@ -33,6 +33,17 @@ extension AndBibleTests {
         )
     }
 
+    func testApplicationPreferenceLookAndFeelRowsExposeGlobalTextOptionsShortcut() {
+        XCTAssertEqual(
+            ApplicationSettingsPresentation.lookAndFeelRows.first?.androidKey,
+            "global_text_display_settings"
+        )
+        XCTAssertEqual(
+            ApplicationSettingsPresentation.lookAndFeelRows.first?.icon?.androidDrawableName,
+            "ic_text_format_white_24dp"
+        )
+    }
+
     func testSyncSettingsIconsComeFromAndroidSyncSettingsXml() {
         XCTAssertEqual(
             AndBibleIconCatalog.settingsIcon(forAndroidKey: "sync_bookmarks")?.androidDrawableName,
@@ -119,6 +130,36 @@ extension AndBibleTests {
         )
     }
 
+    /**
+     Verifies progress sync copy uses Android's distinct title and summary string resources.
+
+     Setup:
+     - reads the shared native iOS sync category localization descriptor that backs both the
+       settings row and lifecycle sync error copy
+     - compares Progress against Android's `progress_sync_title` and `progress_sync_contents`
+       strings from `app/src/main/res/values/strings.xml`
+
+     Expected result:
+     - the title remains "Reading Progress"
+     - the content description uses "Memorized verses and chapter reading records"
+     - active and deferred Progress rows share the same Android string contract
+
+     Failure meaning:
+     - iOS duplicated category string switches have drifted from Android and may show a row title
+       where Android expects explanatory summary copy.
+     */
+    func testSyncSettingsProgressTextUsesAndroidTitleAndContentsKeys() {
+        let active = RemoteSyncCategoryLocalization.text(for: .progress)
+        let deferred = RemoteSyncCategoryLocalization.deferredText(for: .progress)
+
+        XCTAssertEqual(active.title.key, "progress_sync_title")
+        XCTAssertEqual(active.title.defaultValue, "Reading Progress")
+        XCTAssertEqual(active.contents.key, "progress_sync_contents")
+        XCTAssertEqual(active.contents.defaultValue, "Memorized verses and chapter reading records")
+        XCTAssertEqual(active, deferred)
+        XCTAssertNotEqual(active.title.key, active.contents.key)
+    }
+
     func testDeferredSyncCategoriesReserveAndroidCompatibleKeysAndTrackingIssues() {
         XCTAssertEqual(RemoteSyncDeferredCategory.aiSettings.androidSyncEnabledKey, "sync_enable_ai_settings")
         XCTAssertEqual(RemoteSyncDeferredCategory.aiSettings.trackingIssueNumber, 74)
@@ -154,6 +195,14 @@ extension AndBibleTests {
         XCTAssertEqual(
             AndBibleIconCatalog.settingsIcon(forAndroidKey: "ORDINALS")?.androidDrawableName,
             "ic_baseline_star_24"
+        )
+        XCTAssertEqual(
+            AndBibleIconCatalog.settingsIcon(forAndroidKey: "open_workspace_settings")?.androidDrawableName,
+            "ic_workspace_overlay_24dp"
+        )
+        XCTAssertEqual(
+            AndBibleIconCatalog.settingsIcon(forAndroidKey: "open_global_settings")?.androidDrawableName,
+            "ic_settings_black_24dp"
         )
     }
 
@@ -260,8 +309,16 @@ extension AndBibleTests {
         )
     }
 
+    /**
+     Protects Android text-display scope parity.
+
+     Android renders parent-scope links above the shared text-display rows: window settings can
+     jump to workspace and global settings, workspace settings can jump to global settings, and
+     global settings hide the parent-links category. A failure here means iOS has drifted from
+     Android's visible scope ladder in `TextDisplaySettings.kt`.
+     */
     func testTextDisplayVisibleRowsMatchAndroidScopeVisibility() {
-        let windowVisibleRows = [
+        let editableRows = [
             "STRONGS",
             "MORPH",
             "NON_STRONGS_WORD_ITALIC",
@@ -293,12 +350,16 @@ extension AndBibleTests {
             "MARK_AS_READ_BUTTON",
             "MEMORIZATION_INDICATORS",
         ]
-        let workspaceVisibleRows = windowVisibleRows
-        let globalVisibleRows = windowVisibleRows
 
-        XCTAssertEqual(TextDisplaySettingsPresentation.iosWindowVisibleAndroidKeys, windowVisibleRows)
-        XCTAssertEqual(TextDisplaySettingsPresentation.iosWorkspaceVisibleAndroidKeys, workspaceVisibleRows)
-        XCTAssertEqual(TextDisplaySettingsPresentation.iosGlobalVisibleAndroidKeys, globalVisibleRows)
+        XCTAssertEqual(
+            TextDisplaySettingsPresentation.iosWindowVisibleAndroidKeys,
+            ["open_workspace_settings", "open_global_settings"] + editableRows
+        )
+        XCTAssertEqual(
+            TextDisplaySettingsPresentation.iosWorkspaceVisibleAndroidKeys,
+            ["open_global_settings"] + editableRows
+        )
+        XCTAssertEqual(TextDisplaySettingsPresentation.iosGlobalVisibleAndroidKeys, editableRows)
     }
 
     func testTextDisplayImplementedRowsExposeSupportedIosConfigKeys() {

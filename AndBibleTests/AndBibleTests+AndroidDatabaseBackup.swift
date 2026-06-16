@@ -1,4 +1,5 @@
 import XCTest
+import CLibSword
 @testable import BibleCore
 @testable import BibleUI
 @testable import SwordKit
@@ -7,17 +8,50 @@ import SQLite3
 
 extension AndBibleTests {
     /**
-     Verifies that iOS reads Android `.abdb.zip` archives through the manifest and exposes both
-     restorable and unsupported sections.
+     Verifies the iOS JSword KJVA compatibility contract used by Android backup progress rows.
+
+     Setup:
+     - reads the local `JSwordKJVAVersification` constants derived from JSword's `SystemKJVA`
+       and `Versification.maximumOrdinal()` implementation
+
+     Expected result:
+     - the contract names Android's `KJVA` versification
+     - the ordinal domain includes JSword introduction addresses and ends at `maximumOrdinal()`
+     - zero and values past JSword's final ordinal are rejected
+
+     Failure meaning:
+     - iOS would validate Android progress ordinals against an implicit or SWORD-only range instead
+       of the same JSword KJVA address space Android writes into `progress.sqlite3`.
+     */
+    func testJSwordKJVAVersificationExposesAndroidProgressOrdinalDomain() {
+        XCTAssertEqual(JSwordKJVAVersification.name, "KJVA")
+        XCTAssertEqual(JSwordKJVAVersification.bookCount, 83)
+        XCTAssertEqual(JSwordKJVAVersification.canonicalBookCount, 80)
+        XCTAssertEqual(JSwordKJVAVersification.chapterCount, 1_371)
+        XCTAssertEqual(JSwordKJVAVersification.verseCount, 36_819)
+        XCTAssertEqual(JSwordKJVAVersification.maximumOrdinal, 38_272)
+        XCTAssertEqual(JSwordKJVAVersification.ordinalRange, 0...38_272)
+        XCTAssertEqual(JSwordKJVAVersification.progressOrdinalRange, 1...38_272)
+        XCTAssertTrue(JSwordKJVAVersification.containsOrdinal(0))
+        XCTAssertFalse(JSwordKJVAVersification.containsProgressOrdinal(0))
+        XCTAssertTrue(JSwordKJVAVersification.containsProgressOrdinal(1))
+        XCTAssertTrue(JSwordKJVAVersification.containsProgressOrdinal(38_272))
+        XCTAssertFalse(JSwordKJVAVersification.containsProgressOrdinal(38_273))
+    }
+
+    /**
+     Verifies that iOS reads Android `.abdb.zip` archives by database file discovery and exposes
+     both restorable and unsupported database sections.
 
      Setup:
      - builds a stored ZIP with Android's `AndBibleBackupManifest.json`
-     - includes a supported `bookmarks.sqlite3`, unsupported `settings.sqlite3`, and manifest-only
+     - includes supported `bookmarks.sqlite3` and restore-only `settings.sqlite3`, plus manifest-only
        `MODULES` category
 
      Expected result:
      - the bookmark section is selectable for restore/import
-     - the settings and modules sections remain visible but disabled with unsupported-category reasons
+     - the settings section remains visible and restorable because Android includes it in DB backup
+     - manifest-only non-database categories do not appear in the DB restore section list
 
      Failure meaning:
      - iOS would either hide valid Android backup contents or offer a section it cannot safely map.
@@ -40,19 +74,132 @@ extension AndBibleTests {
 
         let archive = try AndroidDatabaseBackupService().loadArchive(from: archiveData)
 
-        XCTAssertEqual(archive.manifest.backupType, "DB_BACKUP")
-        XCTAssertEqual(archive.manifest.manifestVersion, 1)
-        XCTAssertEqual(archive.manifest.contains, [.bookmarks, .settings, .modules])
-        XCTAssertEqual(archive.sections.map(\.category), [.bookmarks, .modules, .settings])
+        XCTAssertEqual(archive.manifest?.backupType, "DB_BACKUP")
+        XCTAssertEqual(archive.manifest?.manifestVersion, 1)
+        XCTAssertEqual(archive.manifest?.contains, [.bookmarks, .settings, .modules])
+        XCTAssertEqual(archive.sections.map(\.category), [.bookmarks, .settings])
         XCTAssertEqual(archive.sections.first { $0.category == .bookmarks }?.support, .supported)
-        XCTAssertEqual(
-            archive.sections.first { $0.category == .modules }?.support,
-            .unsupportedCategory("iOS does not yet have a safe mapper for Android Modules data.")
+        XCTAssertEqual(archive.sections.first { $0.category == .settings }?.support, .supported)
+    }
+
+    /**
+     Verifies Android database backup restore can stage archives from a file URL.
+
+     Setup:
+     - builds a valid Android `.abdb.zip` fixture on disk
+     - loads the archive through the file-backed service API instead of `Data(contentsOf:)`
+
+     Expected result:
+     - the same bookmark section is discovered from the file URL
+     - the staged SQLite URL points at a temporary extracted file
+
+     Failure meaning:
+     - production restore would still rely on eager whole-file memory loading and fail on large
+       Android backups that Android itself can restore from storage.
+     */
+    func testAndroidDatabaseBackupLoadsArchiveFromFileURL() throws {
+        let bookmarkDatabaseURL = try makeAndroidBookmarksDatabase(labels: [])
+        try setSQLiteUserVersion(12, at: bookmarkDatabaseURL)
+        let archiveData = try makeAndroidDatabaseBackupArchiveData(
+            databaseURLsByName: [
+                "bookmarks.sqlite3": bookmarkDatabaseURL,
+            ],
+            contains: [.bookmarks]
         )
-        XCTAssertEqual(
-            archive.sections.first { $0.category == .settings }?.support,
-            .unsupportedCategory("iOS does not yet have a safe mapper for Android Settings data.")
+        let archiveURL = try writeTemporaryAndroidBackupArchive(
+            archiveData,
+            suffix: AndroidDatabaseBackupService.databaseBackupSuffix
         )
+
+        let archive = try AndroidDatabaseBackupService().loadArchive(fromArchiveAt: archiveURL)
+
+        XCTAssertEqual(archive.sections.map(\.category), [.bookmarks])
+        XCTAssertTrue(FileManager.default.fileExists(atPath: archive.sections[0].databaseFileURL.path))
+    }
+
+    /**
+     Verifies Android-parity section discovery when a database backup has no manifest.
+
+     Setup:
+     - builds a manifestless stored ZIP containing valid Android database filenames in a shuffled
+       central-directory order
+     - includes supported iOS-mapped databases and Android's restore-only Settings database
+
+     Expected result:
+     - iOS infers a DB backup from valid SQLite entries under `db/`
+     - sections are returned in Android `ALL_DB_FILENAMES` order, not ZIP order or localized label
+       order
+     - discovered sections are marked as found in the archive rather than declared by a manifest
+
+     Failure meaning:
+     - iOS would reject pre-manifest Android DB backups or present section ordering that differs
+       from Android's restore dialog.
+     */
+    func testAndroidDatabaseBackupLoadsManifestlessArchiveFromDatabaseEntriesInAndroidOrder() throws {
+        let bookmarkDatabaseURL = try makeAndroidBookmarksDatabase(labels: [])
+        try setSQLiteUserVersion(12, at: bookmarkDatabaseURL)
+        let readingPlanDatabaseURL = try makeEmptySQLiteDatabase(userVersion: 1)
+        let workspaceDatabaseURL = try makeEmptySQLiteDatabase(userVersion: 22)
+        let settingsDatabaseURL = try makeEmptySQLiteDatabase(userVersion: 1)
+        let archiveData = try makeStoredZip(entries: [
+            ("db/settings.sqlite3", try Data(contentsOf: settingsDatabaseURL)),
+            ("db/workspaces.sqlite3", try Data(contentsOf: workspaceDatabaseURL)),
+            ("db/bookmarks.sqlite3", try Data(contentsOf: bookmarkDatabaseURL)),
+            ("db/readingplans.sqlite3", try Data(contentsOf: readingPlanDatabaseURL)),
+        ])
+
+        let archive = try AndroidDatabaseBackupService().loadArchive(from: archiveData)
+
+        XCTAssertNil(archive.manifest)
+        XCTAssertEqual(archive.sections.map(\.category), [.bookmarks, .readingPlans, .workspaces, .settings])
+        XCTAssertTrue(archive.sections.allSatisfy { !$0.declaredInManifest })
+        XCTAssertEqual(archive.sections.first { $0.category == .bookmarks }?.support, .supported)
+        XCTAssertEqual(archive.sections.first { $0.category == .readingPlans }?.support, .supported)
+        XCTAssertEqual(archive.sections.first { $0.category == .workspaces }?.support, .supported)
+        XCTAssertEqual(archive.sections.first { $0.category == .settings }?.support, .supported)
+    }
+
+    /**
+     Verifies the production file-backed restore path accepts Android `ZipOutputStream` database
+     entries without a manifest.
+
+     Setup:
+     - creates a real SQLite bookmark database
+     - writes it as a raw-deflated ZIP entry with data-descriptor sizes, matching Android
+       `ZipOutputStream`
+     - loads the backup through `loadArchive(fromArchiveAt:)`
+
+     Expected result:
+     - the service streams and inflates the SQLite entry from disk
+     - the bookmark section is discovered without materializing the whole archive in memory
+
+     Failure meaning:
+     - iOS would still reject valid Android DB backups produced with deflated data-descriptor
+       entries on the real document-picker restore path.
+     */
+    func testAndroidDatabaseBackupLoadsManifestlessDeflatedDatabaseFromFileURL() throws {
+        let bookmarkDatabaseURL = try makeAndroidBookmarksDatabase(labels: [])
+        try setSQLiteUserVersion(12, at: bookmarkDatabaseURL)
+        let databaseData = try Data(contentsOf: bookmarkDatabaseURL)
+        let archiveData = try makeDeflatedDescriptorZip(entries: [
+            (
+                name: "db/bookmarks.sqlite3",
+                compressedData: try makeRawDeflateData(databaseData),
+                uncompressedData: databaseData
+            ),
+        ])
+        let archiveURL = try writeTemporaryAndroidBackupArchive(
+            archiveData,
+            suffix: AndroidDatabaseBackupService.databaseBackupSuffix
+        )
+
+        let archive = try AndroidDatabaseBackupService().loadArchive(fromArchiveAt: archiveURL)
+
+        XCTAssertNil(archive.manifest)
+        XCTAssertEqual(archive.sections.map(\.category), [.bookmarks])
+        XCTAssertEqual(archive.sections.first?.databaseVersion, 12)
+        XCTAssertEqual(archive.sections.first?.support, .supported)
+        XCTAssertEqual(try Data(contentsOf: archive.sections[0].databaseFileURL).prefix(16), databaseData.prefix(16))
     }
 
     /**
@@ -86,9 +233,49 @@ extension AndBibleTests {
 
         let archive = try AndroidDatabaseBackupService().loadArchive(from: archiveData)
 
-        XCTAssertEqual(archive.manifest.contains, [.bookmarks])
+        XCTAssertEqual(archive.manifest?.contains, [.bookmarks])
         XCTAssertEqual(archive.sections.map(\.category), [.bookmarks])
         XCTAssertEqual(archive.sections.first?.support, .supported)
+    }
+
+    /**
+     Verifies Android-parity DB restore when a present manifest is malformed or not a DB manifest.
+
+     Setup:
+     - builds two ZIPs with valid `db/bookmarks.sqlite3` entries
+     - one ZIP contains malformed manifest JSON, and the other contains a module-backup manifest
+
+     Expected result:
+     - valid Android database filenames remain authoritative
+     - bad manifest metadata is ignored rather than blocking restore section discovery
+     - sections are marked archive-discovered rather than manifest-declared
+
+     Failure meaning:
+     - iOS would preserve a manifest-gated restore path that Android does not use for database
+       restore, rejecting user backups that Android can restore.
+     */
+    func testAndroidDatabaseBackupTreatsPresentManifestAsAdvisoryMetadata() throws {
+        let bookmarkDatabaseURL = try makeAndroidBookmarksDatabase(labels: [])
+        try setSQLiteUserVersion(12, at: bookmarkDatabaseURL)
+        let databaseData = try Data(contentsOf: bookmarkDatabaseURL)
+        let malformedManifestArchive = try makeStoredZip(entries: [
+            ("AndBibleBackupManifest.json", Data("{".utf8)),
+            ("db/bookmarks.sqlite3", databaseData),
+        ])
+        let wrongTypeManifestArchive = try makeStoredZip(entries: [
+            ("AndBibleBackupManifest.json", Data(#"{"backupType":"MODULE_BACKUP","manifestVersion":99}"#.utf8)),
+            ("db/bookmarks.sqlite3", databaseData),
+        ])
+
+        let malformedArchive = try AndroidDatabaseBackupService().loadArchive(from: malformedManifestArchive)
+        let wrongTypeArchive = try AndroidDatabaseBackupService().loadArchive(from: wrongTypeManifestArchive)
+
+        XCTAssertNil(malformedArchive.manifest)
+        XCTAssertEqual(malformedArchive.sections.map(\.category), [.bookmarks])
+        XCTAssertFalse(malformedArchive.sections[0].declaredInManifest)
+        XCTAssertNil(wrongTypeArchive.manifest)
+        XCTAssertEqual(wrongTypeArchive.sections.map(\.category), [.bookmarks])
+        XCTAssertFalse(wrongTypeArchive.sections[0].declaredInManifest)
     }
 
     /**
@@ -139,6 +326,33 @@ extension AndBibleTests {
         let workspaceID = UUID(uuidString: "15000000-0000-0000-0000-000000000303")!
         let documentID = UUID(uuidString: "15000000-0000-0000-0000-000000000304")!
         let pageID = UUID(uuidString: "15000000-0000-0000-0000-000000000305")!
+        let repositoryBaseURL = try temporaryRepositorySourceBaseURL()
+        let repositoryManager = RepositorySourceManager(basePath: repositoryBaseURL.path)
+        try repositoryManager.replaceCustomSources(
+            with: [
+                RepositorySourceRegistration(
+                    source: SourceConfig(
+                        name: "Custom SWORD",
+                        type: "HTTP",
+                        host: "example.org",
+                        catalogPath: "/sword",
+                        repositoryType: SourceConfig.swordHTTPSRepositoryType,
+                        description: "Custom SWORD catalog",
+                        packageDirectory: "/sword/packages",
+                        manifestURL: URL(string: "https://example.org/manifest.json")!,
+                        sourceURL: URL(string: "https://example.org/sword")!
+                    ),
+                    description: "Custom SWORD catalog",
+                    packageDirectory: "/sword/packages",
+                    manifestURL: URL(string: "https://example.org/manifest.json")!,
+                    sourceURL: URL(string: "https://example.org/sword")!,
+                    type: SourceConfig.swordHTTPSRepositoryType
+                ),
+            ]
+        )
+        defer {
+            UserDefaults.standard.removeObject(forKey: AppPreferenceKey.localePref.rawValue)
+        }
 
         modelContext.insert(Label(id: labelID, name: "Prayer", color: 7, favourite: true))
         modelContext.insert(
@@ -174,22 +388,48 @@ extension AndBibleTests {
         modelContext.insert(page)
         modelContext.insert(content)
         try modelContext.save()
+        settingsStore.setBool(.screenKeepOnPref, value: true)
+        settingsStore.setString(.localePref, value: "fi")
+        _ = ReadingProgressStore(settingsStore: settingsStore).recordChapterRead(
+            bookInitials: "KJV",
+            startOrdinal: 15,
+            kjvBookOrdinal: 1,
+            chapter: 1,
+            source: .manual,
+            readAt: 1_700_000_200
+        )
+        MemorizationProgressStore(settingsStore: settingsStore).markAsMemorized(
+            bookInitials: "KJV",
+            startOrdinal: 15,
+            endOrdinal: 15
+        )
+        MemorizationProgressStore(settingsStore: settingsStore).addMemorizationTarget(
+            bookInitials: "KJV",
+            startOrdinal: 20,
+            endOrdinal: 21
+        )
 
-        let service = AndroidDatabaseBackupService()
+        let service = AndroidDatabaseBackupService(repositorySourceManager: repositoryManager)
         let export = try service.exportArchive(modelContext: modelContext, settingsStore: settingsStore)
         let entriesByName = Dictionary(uniqueKeysWithValues: try ZipArchiveReader.entries(in: export.data).map { ($0.name, $0.data) })
         let expectedCategories: [AndroidDatabaseBackupCategory] = [
             .bookmarks,
             .readingPlans,
             .workspaces,
+            .repositories,
+            .settings,
             .myDocuments,
+            .progress,
         ]
         let expectedEntryNames: Set<String> = [
             "AndBibleBackupManifest.json",
             "db/bookmarks.sqlite3",
             "db/readingplans.sqlite3",
             "db/workspaces.sqlite3",
+            "db/repositories.sqlite3",
+            "db/settings.sqlite3",
             "db/mydocuments.sqlite3",
+            "db/progress.sqlite3",
         ]
 
         XCTAssertEqual(export.fileName, AndroidDatabaseBackupService.databaseBackupFileName)
@@ -205,8 +445,8 @@ extension AndBibleTests {
 
         let loadedArchive = try service.loadArchive(from: export.data)
         defer { service.cleanup(loadedArchive) }
-        XCTAssertEqual(loadedArchive.manifest.backupType, "DB_BACKUP")
-        XCTAssertEqual(loadedArchive.sections.map(\.category), [.bookmarks, .myDocuments, .readingPlans, .workspaces])
+        XCTAssertEqual(loadedArchive.manifest?.backupType, "DB_BACKUP")
+        XCTAssertEqual(loadedArchive.sections.map(\.category), expectedCategories)
         XCTAssertTrue(loadedArchive.sections.allSatisfy { $0.support == .supported })
 
         let materializedDatabases = try materializeExportedDatabases(entriesByName: entriesByName)
@@ -218,10 +458,13 @@ extension AndBibleTests {
         XCTAssertEqual(try readSQLiteUserVersion(at: materializedDatabases["bookmarks.sqlite3"]!), 12)
         XCTAssertEqual(try readSQLiteUserVersion(at: materializedDatabases["readingplans.sqlite3"]!), 1)
         XCTAssertEqual(try readSQLiteUserVersion(at: materializedDatabases["workspaces.sqlite3"]!), 22)
+        XCTAssertEqual(try readSQLiteUserVersion(at: materializedDatabases["repositories.sqlite3"]!), 1)
+        XCTAssertEqual(try readSQLiteUserVersion(at: materializedDatabases["settings.sqlite3"]!), 1)
         XCTAssertEqual(
             try readSQLiteUserVersion(at: materializedDatabases["mydocuments.sqlite3"]!),
             RemoteSyncMyDocumentRestoreService.supportedAndroidSchemaVersion
         )
+        XCTAssertEqual(try readSQLiteUserVersion(at: materializedDatabases["progress.sqlite3"]!), 9)
         XCTAssertEqual(
             try readSQLiteInteger(
                 "SELECT COUNT(*) FROM Label WHERE name = 'Prayer';",
@@ -229,6 +472,172 @@ extension AndBibleTests {
             ),
             1
         )
+        XCTAssertEqual(
+            try readSQLiteInteger(
+                "SELECT COUNT(*) FROM CustomRepository WHERE name = 'Custom SWORD';",
+                at: materializedDatabases["repositories.sqlite3"]!
+            ),
+            1
+        )
+        XCTAssertEqual(
+            try readSQLiteInteger(
+                "SELECT COUNT(*) FROM BooleanSetting WHERE `key` = 'screen_keep_on_pref' AND value = 1;",
+                at: materializedDatabases["settings.sqlite3"]!
+            ),
+            1
+        )
+        XCTAssertEqual(
+            try readSQLiteInteger(
+                "SELECT COUNT(*) FROM StringSetting WHERE `key` = 'locale_pref' AND value = 'fi';",
+                at: materializedDatabases["settings.sqlite3"]!
+            ),
+            1
+        )
+        XCTAssertEqual(
+            try readSQLiteInteger(
+                "SELECT COUNT(*) FROM ChapterReadHistory WHERE kjvBookOrdinal = 1 AND chapter = 1;",
+                at: materializedDatabases["progress.sqlite3"]!
+            ),
+            1
+        )
+        XCTAssertEqual(
+            try readSQLiteInteger(
+                "SELECT COUNT(*) FROM MemorizedVerse WHERE kjvOrdinal = 15;",
+                at: materializedDatabases["progress.sqlite3"]!
+            ),
+            1
+        )
+        XCTAssertEqual(
+            try readSQLiteInteger(
+                "SELECT COUNT(*) FROM MemorizationTarget WHERE kjvOrdinalStart = 20 AND kjvOrdinalEnd = 21;",
+                at: materializedDatabases["progress.sqlite3"]!
+            ),
+            1
+        )
+    }
+
+    /**
+     Verifies Android AI Settings databases are preserved as Android-owned state.
+
+     Setup:
+     - imports an Android `ai_settings.sqlite3` database through manual database restore
+     - exports a new manual database backup through the same service instance
+
+     Expected result:
+     - AI Settings is exposed as a supported restore-only category
+     - Import mode is rejected because Android treats this database as replacement-only
+     - the exported `ai_settings.sqlite3` bytes match the restored Android database exactly
+
+     Failure meaning:
+     - iOS would either keep treating a real Android backup category as unsupported or would invent
+       merge semantics that Android does not provide for this database.
+     */
+    func testAndroidDatabaseBackupRestoreAiSettingsPreservesAndroidOwnedDatabaseForRoundTrip() throws {
+        let container = try makeAndroidDatabaseBackupExportModelContainer()
+        let modelContext = ModelContext(container)
+        let settingsStore = SettingsStore(modelContext: modelContext)
+        let preservedRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("android-ai-settings-preserved-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: preservedRoot) }
+        let preservedStore = AndroidDatabaseBackupPreservedDatabaseStore(rootDirectory: preservedRoot)
+        let aiSettingsDatabaseURL = try makeEmptySQLiteDatabase(userVersion: 22)
+        let aiSettingsBytes = try Data(contentsOf: aiSettingsDatabaseURL)
+        let archiveData = try makeAndroidDatabaseBackupArchiveData(
+            databaseURLsByName: [
+                "ai_settings.sqlite3": aiSettingsDatabaseURL,
+            ],
+            contains: [.aiSettings]
+        )
+        let service = AndroidDatabaseBackupService(preservedDatabaseStore: preservedStore)
+        let archive = try service.loadArchive(from: archiveData)
+        defer { service.cleanup(archive) }
+        let section = try XCTUnwrap(archive.sections.first { $0.category == .aiSettings })
+
+        XCTAssertEqual(section.support, .supported)
+        XCTAssertEqual(AndroidDatabaseBackupCategory.aiSettings.supportedApplyModes, [.restore])
+        XCTAssertThrowsError(
+            try service.apply(
+                archive: archive,
+                selections: [.init(category: .aiSettings, mode: .import)],
+                modelContext: modelContext,
+                settingsStore: settingsStore
+            )
+        ) { error in
+            XCTAssertEqual(
+                error as? AndroidDatabaseBackupError,
+                .unsupportedSelectedSection(
+                    .aiSettings,
+                    "AI Settings can only be restored because Android treats ai_settings.sqlite3 as a restore-only database."
+                )
+            )
+        }
+
+        let applyReport = try service.apply(
+            archive: archive,
+            selections: [.init(category: .aiSettings, mode: .restore)],
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+        XCTAssertEqual(applyReport.sections, [
+            AndroidDatabaseBackupAppliedSectionReport(category: .aiSettings, mode: .restore, summary: "1 database"),
+        ])
+
+        let export = try service.exportArchive(modelContext: modelContext, settingsStore: settingsStore)
+        let entriesByName = Dictionary(uniqueKeysWithValues: try ZipArchiveReader.entries(in: export.data).map { ($0.name, $0.data) })
+
+        XCTAssertEqual(
+            export.categories,
+            [.bookmarks, .readingPlans, .workspaces, .repositories, .settings, .aiSettings, .myDocuments, .progress]
+        )
+        XCTAssertEqual(entriesByName["db/ai_settings.sqlite3"], aiSettingsBytes)
+        let manifestData = try XCTUnwrap(entriesByName["AndBibleBackupManifest.json"])
+        let manifest = try XCTUnwrap(JSONSerialization.jsonObject(with: manifestData) as? [String: Any])
+        XCTAssertEqual(
+            manifest["contains"] as? [String],
+            export.categories.map(\.rawValue)
+        )
+    }
+
+    /**
+     Verifies Android BackupActivity reset parity for preserved AI Settings.
+
+     Setup:
+     - stores an Android AI Settings database through the preservation store
+     - runs the native reset service for the AI Settings category
+     - exports a manual database backup afterward
+
+     Expected result:
+     - reset removes the preserved Android-owned database
+     - later exports omit `AI_SETTINGS` rather than emitting a fake empty database
+
+     Failure meaning:
+     - reset would either leave stale Android-only data behind or export placeholder data that does
+       not correspond to any real iOS/Android state.
+     */
+    func testAndroidBackupResetAiSettingsRemovesPreservedAndroidDatabase() throws {
+        let container = try makeAndroidDatabaseBackupExportModelContainer()
+        let modelContext = ModelContext(container)
+        let settingsStore = SettingsStore(modelContext: modelContext)
+        let preservedRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("android-ai-settings-reset-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: preservedRoot) }
+        let preservedStore = AndroidDatabaseBackupPreservedDatabaseStore(rootDirectory: preservedRoot)
+        let aiSettingsDatabaseURL = try makeEmptySQLiteDatabase(userVersion: 22)
+        try preservedStore.restoreDatabase(from: aiSettingsDatabaseURL, category: .aiSettings)
+
+        let resetReport = try AndroidBackupResetService(preservedDatabaseStore: preservedStore).reset(
+            .aiSettings,
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+        let export = try AndroidDatabaseBackupService(preservedDatabaseStore: preservedStore)
+            .exportArchive(modelContext: modelContext, settingsStore: settingsStore)
+        let entriesByName = Dictionary(uniqueKeysWithValues: try ZipArchiveReader.entries(in: export.data).map { ($0.name, $0.data) })
+
+        XCTAssertEqual(resetReport.category, .aiSettings)
+        XCTAssertFalse(preservedStore.hasDatabase(for: .aiSettings))
+        XCTAssertFalse(export.categories.contains(.aiSettings))
+        XCTAssertNil(entriesByName["db/ai_settings.sqlite3"])
     }
 
     /**
@@ -641,36 +1050,586 @@ extension AndBibleTests {
     }
 
     /**
+     Verifies Android settings database restore replaces the registered iOS application preferences.
+
+     Setup:
+     - seeds local app preferences that should be cleared by destructive Settings restore
+     - loads Android's `settings.sqlite3` shape with Boolean, Long, and String preference tables
+
+     Expected result:
+     - the Settings section is supported and restore applies Android-backed registered preferences
+     - registered local values absent from the backup return to Android defaults
+     - UserDefaults-backed preferences such as locale route through the same registry as the UI
+
+     Failure meaning:
+     - iOS would preserve the artificial Settings unsupported gate or perform a partial restore
+       that leaves stale iOS-only preference values after Android's raw-copy restore boundary.
+     */
+    func testAndroidDatabaseBackupRestoreSettingsReplacesRegisteredAppPreferences() throws {
+        let schema = Schema([Setting.self])
+        let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: schema, configurations: [configuration])
+        let modelContext = ModelContext(container)
+        let settingsStore = SettingsStore(modelContext: modelContext)
+        defer {
+            UserDefaults.standard.removeObject(forKey: AppPreferenceKey.localePref.rawValue)
+        }
+        settingsStore.setBool(.autoFullscreenPref, value: true)
+        settingsStore.setString(.localePref, value: "en")
+
+        let settingsDatabaseURL = try makeAndroidSettingsDatabase(
+            booleanSettings: [
+                AppPreferenceKey.screenKeepOnPref.rawValue: true,
+            ],
+            longSettings: [
+                AppPreferenceKey.fontSizeMultiplier.rawValue: 125,
+            ],
+            stringSettings: [
+                AppPreferenceKey.nightModePref3.rawValue: "dark",
+                AppPreferenceKey.localePref.rawValue: "fi",
+                AppPreferenceKey.notesContentType.rawValue: "MARKDOWN",
+                AppPreferenceKey.disabledWordLookupDictionaries.rawValue: "KJV,ESV",
+            ]
+        )
+        let archiveData = try makeAndroidDatabaseBackupArchiveData(
+            databaseURLsByName: [
+                "settings.sqlite3": settingsDatabaseURL,
+            ],
+            contains: [.settings]
+        )
+        let service = AndroidDatabaseBackupService()
+        let archive = try service.loadArchive(from: archiveData)
+
+        let report = try service.apply(
+            archive: archive,
+            selections: [.init(category: .settings, mode: .restore)],
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+
+        XCTAssertEqual(archive.sections.first?.support, .supported)
+        XCTAssertEqual(report.sections, [.init(category: .settings, mode: .restore, summary: "6 settings")])
+        XCTAssertTrue(settingsStore.getBool(.screenKeepOnPref))
+        XCTAssertEqual(settingsStore.getInt(.fontSizeMultiplier), 125)
+        XCTAssertEqual(settingsStore.getString(.nightModePref3), "dark")
+        XCTAssertEqual(settingsStore.getString(.notesContentType), "MARKDOWN")
+        XCTAssertEqual(settingsStore.getString(.localePref), "fi")
+        XCTAssertEqual(settingsStore.getStringSet(.disabledWordLookupDictionaries), ["ESV", "KJV"])
+        XCTAssertFalse(settingsStore.getBool(.autoFullscreenPref))
+    }
+
+    /**
+     Verifies Android settings restore rejects integer preference values outside Android's domain.
+
+     Setup:
+     - seeds local application preferences that would be cleared by a destructive Settings restore
+     - loads Android's `settings.sqlite3` with a `LongSetting` value that Android's settings UI
+       cannot create for `font_size_multiplier`
+
+     Expected result:
+     - restore fails with `invalidSQLiteDatabase("settings.sqlite3")`
+     - existing local preferences remain intact because validation happens before reset/apply
+
+     Failure meaning:
+     - iOS would accept corrupt Android preference payloads and persist values that Android cannot
+       produce, or it would clear local settings before discovering the backup is invalid.
+     */
+    func testAndroidDatabaseBackupRejectsSettingsIntOutsideAndroidPreferenceRangeBeforeReset() throws {
+        let schema = Schema([Setting.self])
+        let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: schema, configurations: [configuration])
+        let modelContext = ModelContext(container)
+        let settingsStore = SettingsStore(modelContext: modelContext)
+        settingsStore.setBool(.autoFullscreenPref, value: true)
+        settingsStore.setInt(.fontSizeMultiplier, value: 125)
+
+        let settingsDatabaseURL = try makeAndroidSettingsDatabase(
+            longSettings: [
+                AppPreferenceKey.fontSizeMultiplier.rawValue: Int64.max,
+            ]
+        )
+        let archiveData = try makeAndroidDatabaseBackupArchiveData(
+            databaseURLsByName: [
+                "settings.sqlite3": settingsDatabaseURL,
+            ],
+            contains: [.settings]
+        )
+        let service = AndroidDatabaseBackupService()
+        let archive = try service.loadArchive(from: archiveData)
+
+        XCTAssertThrowsError(
+            try service.apply(
+                archive: archive,
+                selections: [.init(category: .settings, mode: .restore)],
+                modelContext: modelContext,
+                settingsStore: settingsStore
+            )
+        ) { error in
+            XCTAssertEqual(error as? AndroidDatabaseBackupError, .invalidSQLiteDatabase("settings.sqlite3"))
+        }
+        XCTAssertTrue(settingsStore.getBool(.autoFullscreenPref))
+        XCTAssertEqual(settingsStore.getInt(.fontSizeMultiplier), 125)
+    }
+
+    /**
+     Verifies Android restore-only databases cannot be applied through Import mode.
+
+     Setup:
+     - loads Android Settings and Repositories database sections, which Android raw-copies instead
+       of sending through `importDatabaseFile`
+
+     Expected result:
+     - both sections are visible and supported for Restore
+     - selecting Import fails before mutating local settings or repository state
+
+     Failure meaning:
+     - iOS would invent Import semantics for Android raw-copy databases and drift from Android's
+       restore/import choice boundary.
+     */
+    func testAndroidDatabaseBackupRejectsImportForRestoreOnlyDatabases() throws {
+        let schema = Schema([
+            Repository.self,
+            Setting.self,
+        ])
+        let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: schema, configurations: [configuration])
+        let modelContext = ModelContext(container)
+        let settingsStore = SettingsStore(modelContext: modelContext)
+        let settingsDatabaseURL = try makeAndroidSettingsDatabase(
+            booleanSettings: [AppPreferenceKey.screenKeepOnPref.rawValue: true]
+        )
+        let repositoriesDatabaseURL = try makeAndroidRepositoriesDatabase(
+            customRepositories: [
+                .init(
+                    name: "Custom SWORD",
+                    description: "Custom SWORD catalog",
+                    type: SourceConfig.swordHTTPSRepositoryType,
+                    host: "example.org",
+                    catalogDirectory: "/sword",
+                    packageDirectory: "/sword/packages",
+                    manifestURL: "https://example.org/manifest.json"
+                ),
+            ]
+        )
+        let archiveData = try makeAndroidDatabaseBackupArchiveData(
+            databaseURLsByName: [
+                "settings.sqlite3": settingsDatabaseURL,
+                "repositories.sqlite3": repositoriesDatabaseURL,
+            ],
+            contains: [.settings, .repositories]
+        )
+        let service = AndroidDatabaseBackupService(
+            repositorySourceManager: RepositorySourceManager(basePath: try temporaryRepositorySourceBaseURL().path)
+        )
+        let archive = try service.loadArchive(from: archiveData)
+
+        XCTAssertEqual(archive.sections.map(\.support), [.supported, .supported])
+        XCTAssertThrowsError(
+            try service.apply(
+                archive: archive,
+                selections: [.init(category: .settings, mode: .import)],
+                modelContext: modelContext,
+                settingsStore: settingsStore
+            )
+        ) { error in
+            XCTAssertEqual(
+                error as? AndroidDatabaseBackupError,
+                .unsupportedSelectedSection(
+                    .settings,
+                    "Settings can only be restored because Android treats settings.sqlite3 as a restore-only database."
+                )
+            )
+        }
+        XCTAssertThrowsError(
+            try service.apply(
+                archive: archive,
+                selections: [.init(category: .repositories, mode: .import)],
+                modelContext: modelContext,
+                settingsStore: settingsStore
+            )
+        ) { error in
+            XCTAssertEqual(
+                error as? AndroidDatabaseBackupError,
+                .unsupportedSelectedSection(
+                    .repositories,
+                    "Repositories can only be restored because Android treats repositories.sqlite3 as a restore-only database."
+                )
+            )
+        }
+    }
+
+    /**
+     Verifies Android repository database restore replaces custom repository source configuration.
+
+     Setup:
+     - seeds a legacy SwiftData repository row
+     - loads Android's `repositories.sqlite3` with a SWORD HTTPS custom repository row
+     - points the repository source manager at an isolated InstallMgr directory
+
+     Expected result:
+     - the Repositories section is supported and restore reports the imported custom source
+     - legacy repository rows are removed after source persistence succeeds
+     - the restored SWORD source is available through the normal Downloads source loader
+
+     Failure meaning:
+     - iOS would keep platform-specific repository backup semantics instead of restoring Android's
+       user-visible custom repository database into the iOS source configuration boundary.
+     */
+    func testAndroidDatabaseBackupRestoreRepositoriesReplacesCustomSourceConfiguration() throws {
+        let schema = Schema([
+            Repository.self,
+            Setting.self,
+        ])
+        let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: schema, configurations: [configuration])
+        let modelContext = ModelContext(container)
+        let settingsStore = SettingsStore(modelContext: modelContext)
+        modelContext.insert(Repository(name: "Legacy", url: "https://legacy.example.test/repo"))
+        try modelContext.save()
+
+        let baseURL = try temporaryRepositorySourceBaseURL()
+        defer { try? FileManager.default.removeItem(at: baseURL) }
+        let repositoryManager = RepositorySourceManager(basePath: baseURL.path)
+        let repositoriesDatabaseURL = try makeAndroidRepositoriesDatabase(
+            customRepositories: [
+                .init(
+                    name: "Custom SWORD",
+                    description: "Custom SWORD catalog",
+                    type: SourceConfig.swordHTTPSRepositoryType,
+                    host: "example.org",
+                    catalogDirectory: "/sword",
+                    packageDirectory: "/sword/packages",
+                    manifestURL: "https://example.org/manifest.json"
+                ),
+            ]
+        )
+        let archiveData = try makeAndroidDatabaseBackupArchiveData(
+            databaseURLsByName: [
+                "repositories.sqlite3": repositoriesDatabaseURL,
+            ],
+            contains: [.repositories]
+        )
+        let service = AndroidDatabaseBackupService(repositorySourceManager: repositoryManager)
+        let archive = try service.loadArchive(from: archiveData)
+
+        let report = try service.apply(
+            archive: archive,
+            selections: [.init(category: .repositories, mode: .restore)],
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+
+        XCTAssertEqual(archive.sections.first?.support, .supported)
+        XCTAssertEqual(report.sections, [.init(category: .repositories, mode: .restore, summary: "1 repositories")])
+        XCTAssertTrue(try modelContext.fetch(FetchDescriptor<Repository>()).isEmpty)
+        let restoredSource = try XCTUnwrap(repositoryManager.loadSources().first { $0.name == "Custom SWORD" })
+        XCTAssertEqual(restoredSource.repositoryType, SourceConfig.swordHTTPSRepositoryType)
+        XCTAssertEqual(restoredSource.host, "example.org")
+        XCTAssertEqual(restoredSource.catalogPath, "/sword")
+        XCTAssertEqual(restoredSource.packageDirectory, "/sword/packages")
+        XCTAssertEqual(restoredSource.manifestURL?.absoluteString, "https://example.org/manifest.json")
+    }
+
+    /**
+     Verifies Android progress restore replaces native iOS progress snapshots with KJV-global data.
+
+     Setup:
+     - seeds local chapter reading history and module-specific memorization progress
+     - restores Android's `progress.sqlite3` with chapter history, memorized verses, targets, and
+       the singleton global progress settings row
+
+     Expected result:
+     - Progress is a supported section
+     - reading history/settings are replaced by Android rows
+     - memorized and target ordinals imported from Android apply across module identities because
+       Android stores KJV-normalized global ordinals
+
+     Failure meaning:
+     - iOS would preserve the unsupported Progress gate or map Android progress into a
+       module-specific fallback that does not match Android's KJV-global behavior.
+     */
+    func testAndroidDatabaseBackupRestoreProgressReplacesSnapshotsWithKJVGlobalState() throws {
+        let schema = Schema([Setting.self])
+        let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: schema, configurations: [configuration])
+        let modelContext = ModelContext(container)
+        let settingsStore = SettingsStore(modelContext: modelContext)
+        let readingStore = ReadingProgressStore(settingsStore: settingsStore)
+        let memorizationStore = MemorizationProgressStore(settingsStore: settingsStore)
+        _ = readingStore.recordChapterRead(
+            bookInitials: "ESV",
+            startOrdinal: 100,
+            kjvBookOrdinal: 1,
+            chapter: 1,
+            source: .manual,
+            readAt: 1_700_000_000
+        )
+        memorizationStore.markAsMemorized(bookInitials: "ESV", startOrdinal: 100, endOrdinal: 100)
+
+        let historyID = UUID(uuidString: "15000000-0000-0000-0000-000000000601")!
+        let memorizedID = UUID(uuidString: "15000000-0000-0000-0000-000000000602")!
+        let targetID = UUID(uuidString: "15000000-0000-0000-0000-000000000603")!
+        let settingsID = UUID(uuidString: "b2000000-0000-0000-0000-000000000001")!
+        let progressDatabaseURL = try makeAndroidProgressDatabase(
+            memorizedVerses: [
+                .init(id: memorizedID, kjvOrdinal: 15, memorizedAt: 1_700_000_100),
+            ],
+            memorizationTargets: [
+                .init(id: targetID, kjvOrdinalStart: 20, kjvOrdinalEnd: 22, createdAt: 1_700_000_200),
+            ],
+            chapterHistory: [
+                .init(
+                    id: historyID,
+                    kjvBookOrdinal: 1,
+                    chapter: 2,
+                    cycle: 3,
+                    readAt: 1_700_000_300,
+                    bookInitials: "",
+                    source: .autoTts
+                ),
+            ],
+            settings: .init(
+                id: settingsID,
+                autoTrackReading: true,
+                autoMarkMemorized: false,
+                memorizeTypeFullWords: true,
+                memorizeWordVisibility: "hidden",
+                memorizeErrorHeatmap: false,
+                memorizeScrambleHideUsed: true,
+                memorizeIncludeReference: false,
+                activeCycle: 3
+            )
+        )
+        let archiveData = try makeAndroidDatabaseBackupArchiveData(
+            databaseURLsByName: [
+                "progress.sqlite3": progressDatabaseURL,
+            ],
+            contains: [.progress]
+        )
+        let service = AndroidDatabaseBackupService()
+        let archive = try service.loadArchive(from: archiveData)
+
+        let report = try service.apply(
+            archive: archive,
+            selections: [.init(category: .progress, mode: .restore)],
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+
+        XCTAssertEqual(archive.sections.first?.support, .supported)
+        XCTAssertEqual(report.sections, [.init(category: .progress, mode: .restore, summary: "1 readings, 1 memorized verses, 1 targets")])
+        let readingSnapshot = readingStore.snapshot()
+        XCTAssertEqual(readingSnapshot.history.map(\.id), [historyID])
+        XCTAssertEqual(readingSnapshot.history.first?.bookInitials, "")
+        XCTAssertEqual(readingSnapshot.history.first?.source, .autoTts)
+        XCTAssertEqual(readingSnapshot.settings.activeCycle, 3)
+        XCTAssertTrue(readingSnapshot.settings.autoTrackReading)
+        XCTAssertFalse(readingSnapshot.settings.autoMarkMemorized)
+        XCTAssertEqual(memorizationStore.memorizedOrdinals(bookInitials: "ESV", startOrdinal: 15, endOrdinal: 15), [15])
+        XCTAssertEqual(memorizationStore.memorizedOrdinals(bookInitials: "KJV", startOrdinal: 15, endOrdinal: 15), [15])
+        XCTAssertEqual(memorizationStore.targetOrdinals(bookInitials: "FinRK", startOrdinal: 20, endOrdinal: 22), [20, 21, 22])
+        XCTAssertEqual(memorizationStore.memorizedOrdinals(bookInitials: "ESV", startOrdinal: 100, endOrdinal: 100), [])
+    }
+
+    /**
+     Verifies Android progress Import keeps local rows and adds only missing backup rows.
+
+     Setup:
+     - seeds local reading history and KJV-global memorization progress
+     - imports an Android `progress.sqlite3` containing duplicate and new chapter/memorization rows
+
+     Expected result:
+     - duplicate history UUIDs and memorized ordinals keep local values
+     - new Android rows are added
+     - existing local settings remain local-first, matching Android `INSERT OR IGNORE`
+
+     Failure meaning:
+     - iOS Progress Import would overwrite local progress or fail to add missing Android rows,
+       drifting from Android's table-level `INSERT OR IGNORE` import behavior.
+     */
+    func testAndroidDatabaseBackupImportProgressKeepsLocalRowsAndAddsMissingRows() throws {
+        let schema = Schema([Setting.self])
+        let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: schema, configurations: [configuration])
+        let modelContext = ModelContext(container)
+        let settingsStore = SettingsStore(modelContext: modelContext)
+        let readingStore = ReadingProgressStore(settingsStore: settingsStore)
+        let memorizationStore = MemorizationProgressStore(settingsStore: settingsStore)
+        let duplicateHistoryID = UUID(uuidString: "15000000-0000-0000-0000-000000000701")!
+        let newHistoryID = UUID(uuidString: "15000000-0000-0000-0000-000000000702")!
+        let duplicateMemorizedID = UUID(uuidString: "15000000-0000-0000-0000-000000000703")!
+        let newMemorizedID = UUID(uuidString: "15000000-0000-0000-0000-000000000704")!
+        let targetID = UUID(uuidString: "15000000-0000-0000-0000-000000000705")!
+        let settingsID = UUID(uuidString: "b2000000-0000-0000-0000-000000000001")!
+        settingsStore.setString(
+            ReadingProgressStore.settingsKey,
+            value: """
+            {"history":[{"id":"\(duplicateHistoryID.uuidString)","bookInitials":"ESV","startOrdinal":10,"kjvBookOrdinal":1,"chapter":1,"cycle":1,"readAt":1000,"source":"MANUAL"}],"settings":{"autoTrackReading":false,"activeCycle":1,"autoMarkMemorized":true,"memorizeTypeFullWords":false,"memorizeWordVisibility":"light","memorizeErrorHeatmap":true,"memorizeScrambleHideUsed":false,"memorizeIncludeReference":true}}
+            """
+        )
+        settingsStore.setString(
+            MemorizationProgressStore.settingsKey,
+            value: #"{"memorizedRanges":[{"bookInitials":"","startOrdinal":15,"endOrdinal":15}],"targetRanges":[]}"#
+        )
+
+        let progressDatabaseURL = try makeAndroidProgressDatabase(
+            memorizedVerses: [
+                .init(id: duplicateMemorizedID, kjvOrdinal: 15, memorizedAt: 1_700_000_100),
+                .init(id: newMemorizedID, kjvOrdinal: 16, memorizedAt: 1_700_000_200),
+            ],
+            memorizationTargets: [
+                .init(id: targetID, kjvOrdinalStart: 21, kjvOrdinalEnd: 22, createdAt: 1_700_000_300),
+            ],
+            chapterHistory: [
+                .init(
+                    id: duplicateHistoryID,
+                    kjvBookOrdinal: 1,
+                    chapter: 1,
+                    cycle: 1,
+                    readAt: 9_999,
+                    bookInitials: "KJV",
+                    source: .autoScroll
+                ),
+                .init(
+                    id: newHistoryID,
+                    kjvBookOrdinal: 1,
+                    chapter: 2,
+                    cycle: 1,
+                    readAt: 2_000,
+                    bookInitials: "KJV",
+                    source: .manual
+                ),
+            ],
+            settings: .init(
+                id: settingsID,
+                autoTrackReading: true,
+                autoMarkMemorized: false,
+                memorizeTypeFullWords: true,
+                memorizeWordVisibility: "hidden",
+                memorizeErrorHeatmap: false,
+                memorizeScrambleHideUsed: true,
+                memorizeIncludeReference: false,
+                activeCycle: 9
+            )
+        )
+        let archiveData = try makeAndroidDatabaseBackupArchiveData(
+            databaseURLsByName: [
+                "progress.sqlite3": progressDatabaseURL,
+            ],
+            contains: [.progress]
+        )
+        let service = AndroidDatabaseBackupService()
+        let archive = try service.loadArchive(from: archiveData)
+
+        let report = try service.apply(
+            archive: archive,
+            selections: [.init(category: .progress, mode: .import)],
+            modelContext: modelContext,
+            settingsStore: settingsStore
+        )
+
+        XCTAssertEqual(report.sections, [.init(category: .progress, mode: .import, summary: "2 readings, 2 memorized verses, 1 targets")])
+        let readingSnapshot = readingStore.snapshot()
+        XCTAssertEqual(Set(readingSnapshot.history.map(\.id)), Set([duplicateHistoryID, newHistoryID]))
+        XCTAssertEqual(readingSnapshot.history.first { $0.id == duplicateHistoryID }?.readAt, 1000)
+        XCTAssertEqual(readingSnapshot.history.first { $0.id == duplicateHistoryID }?.source, .manual)
+        XCTAssertEqual(readingSnapshot.history.first { $0.id == newHistoryID }?.readAt, 2_000)
+        XCTAssertEqual(readingSnapshot.settings.activeCycle, 1)
+        XCTAssertFalse(readingSnapshot.settings.autoTrackReading)
+        XCTAssertEqual(memorizationStore.memorizedOrdinals(bookInitials: "ESV", startOrdinal: 15, endOrdinal: 16), [15, 16])
+        XCTAssertEqual(memorizationStore.targetOrdinals(bookInitials: "KJV", startOrdinal: 21, endOrdinal: 22), [21, 22])
+    }
+
+    /**
+     Verifies Android progress restore rejects ordinals outside JSword's KJVA domain.
+
+     Setup:
+     - builds Android's `progress.sqlite3` schema with memorized and target rows whose ordinals
+       exceed the maximum addressable KJVA ordinal derived from JSword `SystemKJVA`
+     - applies the archive through the normal destructive restore workflow
+
+     Expected result:
+     - restore fails with the same invalid-SQLite section error used for malformed Android backup
+       databases
+     - no local progress snapshots are persisted after the failed restore
+
+     Failure meaning:
+     - iOS would accept progress rows Android cannot normally create and could later expand
+       unbounded ordinal ranges during Android backup export or reporting.
+     */
+    func testAndroidDatabaseBackupRejectsProgressOrdinalsOutsideAndroidKJVADomain() throws {
+        let schema = Schema([Setting.self])
+        let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: schema, configurations: [configuration])
+        let modelContext = ModelContext(container)
+        let settingsStore = SettingsStore(modelContext: modelContext)
+        let memorizedID = UUID(uuidString: "15000000-0000-0000-0000-000000000801")!
+        let targetID = UUID(uuidString: "15000000-0000-0000-0000-000000000802")!
+        let settingsID = UUID(uuidString: "b2000000-0000-0000-0000-000000000001")!
+        let progressDatabaseURL = try makeAndroidProgressDatabase(
+            memorizedVerses: [
+                .init(id: memorizedID, kjvOrdinal: 100_000, memorizedAt: 1_700_000_100),
+            ],
+            memorizationTargets: [
+                .init(id: targetID, kjvOrdinalStart: 20, kjvOrdinalEnd: 100_000, createdAt: 1_700_000_200),
+            ],
+            chapterHistory: [],
+            settings: .init(
+                id: settingsID,
+                autoTrackReading: false,
+                autoMarkMemorized: true,
+                memorizeTypeFullWords: false,
+                memorizeWordVisibility: "light",
+                memorizeErrorHeatmap: true,
+                memorizeScrambleHideUsed: false,
+                memorizeIncludeReference: true,
+                activeCycle: 1
+            )
+        )
+        let archiveData = try makeAndroidDatabaseBackupArchiveData(
+            databaseURLsByName: [
+                "progress.sqlite3": progressDatabaseURL,
+            ],
+            contains: [.progress]
+        )
+        let service = AndroidDatabaseBackupService()
+        let archive = try service.loadArchive(from: archiveData)
+
+        XCTAssertThrowsError(
+            try service.apply(
+                archive: archive,
+                selections: [.init(category: .progress, mode: .restore)],
+                modelContext: modelContext,
+                settingsStore: settingsStore
+            )
+        ) { error in
+            XCTAssertEqual(error as? AndroidDatabaseBackupError, .invalidSQLiteDatabase("progress.sqlite3"))
+        }
+        XCTAssertNil(settingsStore.getString(ReadingProgressStore.settingsKey))
+        XCTAssertNil(settingsStore.getString(MemorizationProgressStore.settingsKey))
+    }
+
+    /**
      Verifies Android backup loader failures for malformed archive inputs.
 
      Setup:
      - passes bytes that are not ZIP-shaped into the Android backup loader
-     - builds one ZIP without `AndBibleBackupManifest.json`
      - builds one ZIP whose bookmark entry is not a SQLite database
 
      Expected result:
      - malformed ZIP inputs surface a clean user-facing archive reason
-     - missing manifests fail as `missingManifest`
      - invalid SQLite entries fail before section selection or restore can start
 
      Failure meaning:
      - iOS would allow ambiguous or corrupt Android backup files into a destructive restore path.
      */
-    func testAndroidDatabaseBackupRejectsMissingManifestAndInvalidSQLite() throws {
+    func testAndroidDatabaseBackupRejectsMalformedArchiveAndInvalidSQLite() throws {
         let service = AndroidDatabaseBackupService()
         XCTAssertThrowsError(try service.loadArchive(from: Data("not zip".utf8))) { error in
             XCTAssertEqual(
                 error as? AndroidDatabaseBackupError,
                 .invalidArchive("The file is not a ZIP archive or its central directory is missing.")
             )
-        }
-
-        let missingManifestArchive = try makeStoredZip(entries: [
-            ("db/bookmarks.sqlite3", Data()),
-        ])
-
-        XCTAssertThrowsError(try service.loadArchive(from: missingManifestArchive)) { error in
-            XCTAssertEqual(error as? AndroidDatabaseBackupError, .missingManifest)
         }
 
         let invalidSQLiteArchive = try makeAndroidDatabaseBackupArchiveData(
@@ -886,6 +1845,36 @@ extension AndBibleTests {
     }
 
     /**
+     Verifies file-backed ZIP metadata scanning does not inherit the eager reader's memory cap.
+
+     Setup:
+     - creates a sparse Android-shaped ZIP file with one stored entry declaring a 691 MiB payload
+     - scans only central-directory and local-header metadata from the file URL
+
+     Expected result:
+     - the file-backed reader returns the entry metadata without trying to allocate or copy payload
+       bytes
+     - the declared size remains visible to callers for later streaming extraction
+
+     Failure meaning:
+     - iOS restore would continue rejecting valid large Android backups before it even reaches
+       SQLite validation, preserving an iOS-only size policy Android does not impose.
+     */
+    func testZipArchiveReaderScansFileBackedEntriesAboveEagerLimitWithoutMaterializingPayload() throws {
+        let payloadByteCount = UInt32(691 * 1024 * 1024)
+        let archiveURL = try makeSparseStoredZipFile(
+            entryName: "db/bookmarks.sqlite3",
+            declaredPayloadByteCount: payloadByteCount
+        )
+
+        let entries = try ZipArchiveReader.fileEntries(inArchiveAt: archiveURL)
+
+        XCTAssertEqual(entries.map(\.name), ["db/bookmarks.sqlite3"])
+        XCTAssertEqual(entries.first?.compressedSize, UInt64(payloadByteCount))
+        XCTAssertEqual(entries.first?.uncompressedSize, UInt64(payloadByteCount))
+    }
+
+    /**
      Verifies fail-closed ZIP parsing when central-directory sizes do not match materialized data.
 
      Setup:
@@ -1025,36 +2014,483 @@ extension AndBibleTests {
     }
 
     /**
-     Verifies that unsupported Android backup categories keep their unsupported-category reason even
-     when their SQLite schema version is newer than iOS recognizes.
+     Verifies supported preserved Android databases still obey Android schema version gates.
 
      Setup:
-     - builds an Android Settings database, which iOS intentionally cannot map yet
-     - sets its SQLite `user_version` above the known Android Settings schema version
+     - builds an Android AI Settings database with a `user_version` newer than this build supports
+     - loads it through the manual database backup parser
 
      Expected result:
-     - the archive still exposes the Settings section
-     - the section reason says iOS lacks a safe mapper rather than implying a version-only blocker
+     - the archive still exposes the AI Settings section
+     - the section is blocked by version, not hidden or treated as an unsupported category
 
      Failure meaning:
-     - the section picker would mislead users into thinking a future iOS version could restore the
-       category merely by recognizing the schema version, even though the category has no mapper.
+     - iOS could accept an Android-owned database that Android itself would consider newer than the
+       local restore implementation understands.
      */
-    func testAndroidDatabaseBackupUnsupportedCategoriesIgnoreVersionGate() throws {
+    func testAndroidDatabaseBackupPreservedCategoriesObeyVersionGate() throws {
         let settingsDatabaseURL = try makeEmptySQLiteDatabase(userVersion: 99)
         let archiveData = try makeAndroidDatabaseBackupArchiveData(
             databaseURLsByName: [
-                "settings.sqlite3": settingsDatabaseURL,
+                "ai_settings.sqlite3": settingsDatabaseURL,
             ],
-            contains: [.settings]
+            contains: [.aiSettings]
         )
 
         let archive = try AndroidDatabaseBackupService().loadArchive(from: archiveData)
 
         XCTAssertEqual(
-            archive.sections.first { $0.category == .settings }?.support,
-            .unsupportedCategory("iOS does not yet have a safe mapper for Android Settings data.")
+            archive.sections.first { $0.category == .aiSettings }?.support,
+            .unsupportedVersion(version: 99, supported: 22)
         )
+    }
+
+    private struct AndroidCustomRepositoryFixture {
+        let name: String
+        let description: String
+        let type: String
+        let host: String
+        let catalogDirectory: String
+        let packageDirectory: String
+        let manifestURL: String?
+    }
+
+    private struct AndroidMemorizedVerseFixture {
+        let id: UUID
+        let kjvOrdinal: Int
+        let memorizedAt: Int64
+    }
+
+    private struct AndroidMemorizationTargetFixture {
+        let id: UUID
+        let kjvOrdinalStart: Int
+        let kjvOrdinalEnd: Int
+        let createdAt: Int64
+    }
+
+    private struct AndroidChapterReadHistoryFixture {
+        let id: UUID
+        let kjvBookOrdinal: Int
+        let chapter: Int
+        let cycle: Int
+        let readAt: Int64
+        let bookInitials: String
+        let source: ReadingProgressSource
+    }
+
+    private struct AndroidGlobalProgressSettingsFixture {
+        let id: UUID
+        let autoTrackReading: Bool
+        let autoMarkMemorized: Bool
+        let memorizeTypeFullWords: Bool
+        let memorizeWordVisibility: String
+        let memorizeErrorHeatmap: Bool
+        let memorizeScrambleHideUsed: Bool
+        let memorizeIncludeReference: Bool
+        let activeCycle: Int
+    }
+
+    /**
+     Builds Android's split Settings database shape for backup restore tests.
+
+     - Parameters:
+       - booleanSettings: Rows for Android's `BooleanSetting` table.
+       - longSettings: Rows for Android's `LongSetting` table.
+       - stringSettings: Rows for Android's `StringSetting` table.
+       - doubleSettings: Rows for Android's `DoubleSetting` table.
+     - Returns: Temporary SQLite database URL with `user_version = 1`.
+     - Side effects: writes a temporary SQLite file under the process temporary directory.
+     - Failure modes: Throws `AndroidDatabaseBackupError.invalidSQLiteDatabase` when fixture
+       creation, statement preparation, binding, or stepping fails.
+     */
+    private func makeAndroidSettingsDatabase(
+        booleanSettings: [String: Bool] = [:],
+        longSettings: [String: Int64] = [:],
+        stringSettings: [String: String] = [:],
+        doubleSettings: [String: Double] = [:]
+    ) throws -> URL {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("android-backup-settings-\(UUID().uuidString).sqlite3")
+        var database: OpaquePointer?
+        guard sqlite3_open(url.path, &database) == SQLITE_OK, let database else {
+            throw AndroidDatabaseBackupError.invalidSQLiteDatabase(url.lastPathComponent)
+        }
+        defer { sqlite3_close(database) }
+
+        try executeSQLite(
+            """
+            CREATE TABLE BooleanSetting (`key` TEXT NOT NULL PRIMARY KEY, value INTEGER NOT NULL);
+            CREATE TABLE LongSetting (`key` TEXT NOT NULL PRIMARY KEY, value INTEGER NOT NULL);
+            CREATE TABLE StringSetting (`key` TEXT NOT NULL PRIMARY KEY, value TEXT NOT NULL);
+            CREATE TABLE DoubleSetting (`key` TEXT NOT NULL PRIMARY KEY, value REAL NOT NULL);
+            """,
+            on: database,
+            fileName: url.lastPathComponent
+        )
+
+        for row in booleanSettings.sorted(by: { $0.key < $1.key }) {
+            try insertSQLiteKeyValue(
+                tableName: "BooleanSetting",
+                key: row.key,
+                bindValue: { statement in sqlite3_bind_int(statement, 2, row.value ? 1 : 0) },
+                on: database,
+                fileName: url.lastPathComponent
+            )
+        }
+        for row in longSettings.sorted(by: { $0.key < $1.key }) {
+            try insertSQLiteKeyValue(
+                tableName: "LongSetting",
+                key: row.key,
+                bindValue: { statement in sqlite3_bind_int64(statement, 2, row.value) },
+                on: database,
+                fileName: url.lastPathComponent
+            )
+        }
+        for row in stringSettings.sorted(by: { $0.key < $1.key }) {
+            try insertSQLiteKeyValue(
+                tableName: "StringSetting",
+                key: row.key,
+                bindValue: { statement in self.bindOptionalText(row.value, to: statement, index: 2) },
+                on: database,
+                fileName: url.lastPathComponent
+            )
+        }
+        for row in doubleSettings.sorted(by: { $0.key < $1.key }) {
+            try insertSQLiteKeyValue(
+                tableName: "DoubleSetting",
+                key: row.key,
+                bindValue: { statement in sqlite3_bind_double(statement, 2, row.value) },
+                on: database,
+                fileName: url.lastPathComponent
+            )
+        }
+
+        try setSQLiteUserVersion(1, on: database, fileName: url.lastPathComponent)
+        return url
+    }
+
+    /**
+     Builds Android's Repositories database shape for backup restore tests.
+
+     - Parameter customRepositories: Android `CustomRepository` rows to persist.
+     - Returns: Temporary SQLite database URL with `user_version = 1`.
+     - Side effects: writes a temporary SQLite file under the process temporary directory.
+     - Failure modes: Throws `AndroidDatabaseBackupError.invalidSQLiteDatabase` when fixture
+       creation or row insertion fails.
+     */
+    private func makeAndroidRepositoriesDatabase(
+        customRepositories: [AndroidCustomRepositoryFixture]
+    ) throws -> URL {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("android-backup-repositories-\(UUID().uuidString).sqlite3")
+        var database: OpaquePointer?
+        guard sqlite3_open(url.path, &database) == SQLITE_OK, let database else {
+            throw AndroidDatabaseBackupError.invalidSQLiteDatabase(url.lastPathComponent)
+        }
+        defer { sqlite3_close(database) }
+
+        try executeSQLite(
+            """
+            CREATE TABLE CustomRepository (
+                id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                name TEXT NOT NULL,
+                description TEXT NOT NULL,
+                type TEXT NOT NULL,
+                host TEXT NOT NULL,
+                catalogDirectory TEXT NOT NULL,
+                packageDirectory TEXT NOT NULL,
+                manifestUrl TEXT
+            );
+            CREATE UNIQUE INDEX index_CustomRepository_name ON CustomRepository (name);
+            CREATE TABLE SwordDocumentInfo (
+                initials TEXT NOT NULL PRIMARY KEY,
+                name TEXT NOT NULL,
+                abbreviation TEXT NOT NULL,
+                language TEXT NOT NULL,
+                repository TEXT NOT NULL,
+                cipherKey TEXT
+            );
+            """,
+            on: database,
+            fileName: url.lastPathComponent
+        )
+
+        let sql = """
+        INSERT INTO CustomRepository (
+            name,
+            description,
+            type,
+            host,
+            catalogDirectory,
+            packageDirectory,
+            manifestUrl
+        ) VALUES (?, ?, ?, ?, ?, ?, ?);
+        """
+        for repository in customRepositories {
+            var statement: OpaquePointer?
+            guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK,
+                  let statement else {
+                throw AndroidDatabaseBackupError.invalidSQLiteDatabase(url.lastPathComponent)
+            }
+            bindOptionalText(repository.name, to: statement, index: 1)
+            bindOptionalText(repository.description, to: statement, index: 2)
+            bindOptionalText(repository.type, to: statement, index: 3)
+            bindOptionalText(repository.host, to: statement, index: 4)
+            bindOptionalText(repository.catalogDirectory, to: statement, index: 5)
+            bindOptionalText(repository.packageDirectory, to: statement, index: 6)
+            bindOptionalText(repository.manifestURL, to: statement, index: 7)
+            XCTAssertEqual(sqlite3_step(statement), SQLITE_DONE)
+            sqlite3_finalize(statement)
+        }
+
+        try setSQLiteUserVersion(1, on: database, fileName: url.lastPathComponent)
+        return url
+    }
+
+    /**
+     Builds Android's Progress database shape for backup restore/import tests.
+
+     - Parameters:
+       - memorizedVerses: Android `MemorizedVerse` rows keyed by KJV ordinal.
+       - memorizationTargets: Android `MemorizationTarget` rows keyed by UUID.
+       - chapterHistory: Android `ChapterReadHistory` rows keyed by UUID.
+       - settings: Android singleton `GlobalReadingProgressSettings` row.
+     - Returns: Temporary SQLite database URL with `user_version = 9`.
+     - Side effects: writes a temporary SQLite file under the process temporary directory.
+     - Failure modes: Throws `AndroidDatabaseBackupError.invalidSQLiteDatabase` when fixture
+       creation or row insertion fails.
+     */
+    private func makeAndroidProgressDatabase(
+        memorizedVerses: [AndroidMemorizedVerseFixture],
+        memorizationTargets: [AndroidMemorizationTargetFixture],
+        chapterHistory: [AndroidChapterReadHistoryFixture],
+        settings: AndroidGlobalProgressSettingsFixture
+    ) throws -> URL {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("android-backup-progress-\(UUID().uuidString).sqlite3")
+        var database: OpaquePointer?
+        guard sqlite3_open(url.path, &database) == SQLITE_OK, let database else {
+            throw AndroidDatabaseBackupError.invalidSQLiteDatabase(url.lastPathComponent)
+        }
+        defer { sqlite3_close(database) }
+
+        try executeSQLite(
+            """
+            CREATE TABLE MemorizedVerse (
+                id BLOB NOT NULL PRIMARY KEY,
+                kjvOrdinal INTEGER NOT NULL,
+                memorizedAt INTEGER NOT NULL
+            );
+            CREATE UNIQUE INDEX index_MemorizedVerse_kjvOrdinal ON MemorizedVerse (kjvOrdinal);
+            CREATE TABLE MemorizationTarget (
+                id BLOB NOT NULL PRIMARY KEY,
+                kjvOrdinalStart INTEGER NOT NULL,
+                kjvOrdinalEnd INTEGER NOT NULL,
+                createdAt INTEGER NOT NULL
+            );
+            CREATE TABLE ChapterReadHistory (
+                id BLOB NOT NULL PRIMARY KEY,
+                kjvBookOrdinal INTEGER NOT NULL,
+                chapter INTEGER NOT NULL,
+                cycle INTEGER NOT NULL DEFAULT 1,
+                readAt INTEGER NOT NULL,
+                bookInitials TEXT NOT NULL DEFAULT '',
+                source TEXT NOT NULL DEFAULT 'MANUAL'
+            );
+            CREATE INDEX index_ChapterReadHistory_kjvBookOrdinal_chapter_cycle
+                ON ChapterReadHistory (kjvBookOrdinal, chapter, cycle);
+            CREATE TABLE GlobalReadingProgressSettings (
+                id BLOB NOT NULL PRIMARY KEY,
+                autoTrackReading INTEGER NOT NULL DEFAULT 0,
+                autoMarkMemorized INTEGER NOT NULL DEFAULT 1,
+                memorizeTypeFullWords INTEGER NOT NULL DEFAULT 0,
+                memorizeWordVisibility TEXT NOT NULL DEFAULT 'light',
+                memorizeErrorHeatmap INTEGER NOT NULL DEFAULT 1,
+                memorizeScrambleHideUsed INTEGER NOT NULL DEFAULT 0,
+                memorizeIncludeReference INTEGER NOT NULL DEFAULT 1,
+                activeCycle INTEGER NOT NULL DEFAULT 0
+            );
+            """,
+            on: database,
+            fileName: url.lastPathComponent
+        )
+
+        for verse in memorizedVerses {
+            var statement: OpaquePointer?
+            guard sqlite3_prepare_v2(
+                database,
+                "INSERT INTO MemorizedVerse (id, kjvOrdinal, memorizedAt) VALUES (?, ?, ?);",
+                -1,
+                &statement,
+                nil
+            ) == SQLITE_OK, let statement else {
+                throw AndroidDatabaseBackupError.invalidSQLiteDatabase(url.lastPathComponent)
+            }
+            bindUUIDBlob(verse.id, to: statement, index: 1)
+            sqlite3_bind_int(statement, 2, Int32(verse.kjvOrdinal))
+            sqlite3_bind_int64(statement, 3, verse.memorizedAt)
+            XCTAssertEqual(sqlite3_step(statement), SQLITE_DONE)
+            sqlite3_finalize(statement)
+        }
+
+        for target in memorizationTargets {
+            var statement: OpaquePointer?
+            guard sqlite3_prepare_v2(
+                database,
+                "INSERT INTO MemorizationTarget (id, kjvOrdinalStart, kjvOrdinalEnd, createdAt) VALUES (?, ?, ?, ?);",
+                -1,
+                &statement,
+                nil
+            ) == SQLITE_OK, let statement else {
+                throw AndroidDatabaseBackupError.invalidSQLiteDatabase(url.lastPathComponent)
+            }
+            bindUUIDBlob(target.id, to: statement, index: 1)
+            sqlite3_bind_int(statement, 2, Int32(target.kjvOrdinalStart))
+            sqlite3_bind_int(statement, 3, Int32(target.kjvOrdinalEnd))
+            sqlite3_bind_int64(statement, 4, target.createdAt)
+            XCTAssertEqual(sqlite3_step(statement), SQLITE_DONE)
+            sqlite3_finalize(statement)
+        }
+
+        for history in chapterHistory {
+            var statement: OpaquePointer?
+            guard sqlite3_prepare_v2(
+                database,
+                """
+                INSERT INTO ChapterReadHistory (
+                    id,
+                    kjvBookOrdinal,
+                    chapter,
+                    cycle,
+                    readAt,
+                    bookInitials,
+                    source
+                ) VALUES (?, ?, ?, ?, ?, ?, ?);
+                """,
+                -1,
+                &statement,
+                nil
+            ) == SQLITE_OK, let statement else {
+                throw AndroidDatabaseBackupError.invalidSQLiteDatabase(url.lastPathComponent)
+            }
+            bindUUIDBlob(history.id, to: statement, index: 1)
+            sqlite3_bind_int(statement, 2, Int32(history.kjvBookOrdinal))
+            sqlite3_bind_int(statement, 3, Int32(history.chapter))
+            sqlite3_bind_int(statement, 4, Int32(history.cycle))
+            sqlite3_bind_int64(statement, 5, history.readAt)
+            bindOptionalText(history.bookInitials, to: statement, index: 6)
+            bindOptionalText(history.source.rawValue, to: statement, index: 7)
+            XCTAssertEqual(sqlite3_step(statement), SQLITE_DONE)
+            sqlite3_finalize(statement)
+        }
+
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(
+            database,
+            """
+            INSERT INTO GlobalReadingProgressSettings (
+                id,
+                autoTrackReading,
+                autoMarkMemorized,
+                memorizeTypeFullWords,
+                memorizeWordVisibility,
+                memorizeErrorHeatmap,
+                memorizeScrambleHideUsed,
+                memorizeIncludeReference,
+                activeCycle
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+            """,
+            -1,
+            &statement,
+            nil
+        ) == SQLITE_OK, let statement else {
+            throw AndroidDatabaseBackupError.invalidSQLiteDatabase(url.lastPathComponent)
+        }
+        bindUUIDBlob(settings.id, to: statement, index: 1)
+        sqlite3_bind_int(statement, 2, settings.autoTrackReading ? 1 : 0)
+        sqlite3_bind_int(statement, 3, settings.autoMarkMemorized ? 1 : 0)
+        sqlite3_bind_int(statement, 4, settings.memorizeTypeFullWords ? 1 : 0)
+        bindOptionalText(settings.memorizeWordVisibility, to: statement, index: 5)
+        sqlite3_bind_int(statement, 6, settings.memorizeErrorHeatmap ? 1 : 0)
+        sqlite3_bind_int(statement, 7, settings.memorizeScrambleHideUsed ? 1 : 0)
+        sqlite3_bind_int(statement, 8, settings.memorizeIncludeReference ? 1 : 0)
+        sqlite3_bind_int(statement, 9, Int32(settings.activeCycle))
+        XCTAssertEqual(sqlite3_step(statement), SQLITE_DONE)
+        sqlite3_finalize(statement)
+
+        try setSQLiteUserVersion(9, on: database, fileName: url.lastPathComponent)
+        return url
+    }
+
+    /**
+     Creates an isolated repository-source base directory for backup restore tests.
+
+     - Returns: Existing temporary directory that callers may pass to `RepositorySourceManager`.
+     - Side effects: creates the directory and records it for test teardown.
+     - Failure modes: Rethrows file-system creation failures.
+     */
+    private func temporaryRepositorySourceBaseURL() throws -> URL {
+        let baseURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("android-backup-repositories-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: baseURL, withIntermediateDirectories: true)
+        temporarySwordModulePaths.append(baseURL.path)
+        return baseURL
+    }
+
+    /**
+     Executes schema SQL while building Android SQLite fixtures.
+
+     - Parameters:
+       - sql: SQL batch to execute.
+       - database: Open SQLite fixture connection.
+       - fileName: Fixture name used for failure mapping.
+     - Side effects: mutates the open SQLite fixture.
+     - Failure modes: Throws `AndroidDatabaseBackupError.invalidSQLiteDatabase` when SQLite rejects
+       the batch.
+     */
+    private func executeSQLite(_ sql: String, on database: OpaquePointer, fileName: String) throws {
+        guard sqlite3_exec(database, sql, nil, nil, nil) == SQLITE_OK else {
+            throw AndroidDatabaseBackupError.invalidSQLiteDatabase(fileName)
+        }
+    }
+
+    /**
+     Inserts one Android settings key-value fixture row.
+
+     - Parameters:
+       - tableName: Android settings table name.
+       - key: Preference key to insert.
+       - bindValue: Closure that binds the table-specific value at parameter index 2.
+       - database: Open SQLite fixture connection.
+       - fileName: Fixture name used for failure mapping.
+     - Side effects: prepares, binds, steps, and finalizes one SQLite insert statement.
+     - Failure modes: Throws `AndroidDatabaseBackupError.invalidSQLiteDatabase` when SQLite rejects
+       statement preparation or stepping.
+     */
+    private func insertSQLiteKeyValue(
+        tableName: String,
+        key: String,
+        bindValue: (OpaquePointer?) -> Void,
+        on database: OpaquePointer,
+        fileName: String
+    ) throws {
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(
+            database,
+            "INSERT INTO \(tableName) (`key`, value) VALUES (?, ?);",
+            -1,
+            &statement,
+            nil
+        ) == SQLITE_OK, let statement else {
+            throw AndroidDatabaseBackupError.invalidSQLiteDatabase(fileName)
+        }
+        bindOptionalText(key, to: statement, index: 1)
+        bindValue(statement)
+        guard sqlite3_step(statement) == SQLITE_DONE else {
+            sqlite3_finalize(statement)
+            throw AndroidDatabaseBackupError.invalidSQLiteDatabase(fileName)
+        }
+        sqlite3_finalize(statement)
     }
 
     /**
@@ -1195,9 +2631,10 @@ extension AndBibleTests {
     /**
      Builds an in-memory model container containing every model needed by supported backup export categories.
 
-     Android database backup export reads bookmarks, reading plans, workspaces, My Documents, and
-     local fidelity settings in one pass. This fixture keeps that graph in one container so the
-     export test exercises the same `ModelContext` shape the Settings screen supplies.
+     Android database backup export reads bookmarks, reading plans, workspaces, My Documents,
+     settings, repositories, and progress in one pass. This fixture keeps that graph in one
+     container so the export test exercises the same `ModelContext` shape the Settings screen
+     supplies.
 
      - Returns: In-memory SwiftData container for supported Android database backup export models.
      - Side effects: none.
@@ -1243,7 +2680,10 @@ extension AndBibleTests {
             "bookmarks.sqlite3",
             "readingplans.sqlite3",
             "workspaces.sqlite3",
+            "repositories.sqlite3",
+            "settings.sqlite3",
             "mydocuments.sqlite3",
+            "progress.sqlite3",
         ]
         var urlsByName: [String: URL] = [:]
         for databaseName in databaseNames {
@@ -1458,64 +2898,240 @@ extension AndBibleTests {
         compressedData: Data,
         uncompressedData: Data
     ) throws -> Data {
-        guard let nameData = name.data(using: .utf8),
-              nameData.count <= Int(UInt16.max),
-              compressedData.count <= Int(UInt32.max),
-              uncompressedData.count <= Int(UInt32.max) else {
-            throw ZipArchiveReaderError.invalidArchive("Test ZIP entry is too large")
+        return try makeDeflatedDescriptorZip(entries: [
+            (name: name, compressedData: compressedData, uncompressedData: uncompressedData),
+        ])
+    }
+
+    /**
+     Builds a raw-deflated ZIP archive whose entries use data-descriptor sizes.
+
+     Android's `ZipOutputStream` writes deflated database payloads in this shape. The helper allows
+     service-level tests to cover multi-entry and file-backed restore paths without invoking shell
+     zip tools or storing binary fixtures.
+
+     - Parameter entries: Entry paths with raw deflate bytes and their expected uncompressed data.
+     - Returns: Raw ZIP bytes with central-directory metadata for all entries.
+     - Side effects: none.
+     - Failure modes: Throws if any fixture entry exceeds this helper's non-ZIP64 limits.
+     */
+    private func makeDeflatedDescriptorZip(
+        entries: [(name: String, compressedData: Data, uncompressedData: Data)]
+    ) throws -> Data {
+        guard entries.count <= Int(UInt16.max) else {
+            throw ZipArchiveReaderError.invalidArchive("Test ZIP contains too many entries")
+        }
+        var archive = Data()
+        var centralDirectory = Data()
+        var localHeaderOffsets: [UInt32] = []
+
+        for entry in entries {
+            guard let nameData = entry.name.data(using: .utf8),
+                  nameData.count <= Int(UInt16.max),
+                  entry.compressedData.count <= Int(UInt32.max),
+                  entry.uncompressedData.count <= Int(UInt32.max),
+                  archive.count <= Int(UInt32.max) else {
+                throw ZipArchiveReaderError.invalidArchive("Test ZIP entry is too large")
+            }
+
+            localHeaderOffsets.append(UInt32(archive.count))
+            appendUInt32(0x0403_4b50, to: &archive)
+            appendUInt16(20, to: &archive)
+            appendUInt16(0x0008, to: &archive)
+            appendUInt16(8, to: &archive)
+            appendUInt16(0, to: &archive)
+            appendUInt16(0, to: &archive)
+            appendUInt32(0, to: &archive)
+            appendUInt32(0, to: &archive)
+            appendUInt32(0, to: &archive)
+            appendUInt16(UInt16(nameData.count), to: &archive)
+            appendUInt16(0, to: &archive)
+            archive.append(nameData)
+            archive.append(entry.compressedData)
+            appendUInt32(0x0807_4b50, to: &archive)
+            appendUInt32(0, to: &archive)
+            appendUInt32(UInt32(entry.compressedData.count), to: &archive)
+            appendUInt32(UInt32(entry.uncompressedData.count), to: &archive)
         }
 
-        var archive = Data()
-        let localHeaderOffset = UInt32(archive.count)
-        appendUInt32(0x0403_4b50, to: &archive)
-        appendUInt16(20, to: &archive)
-        appendUInt16(0x0008, to: &archive)
-        appendUInt16(8, to: &archive)
-        appendUInt16(0, to: &archive)
-        appendUInt16(0, to: &archive)
-        appendUInt32(0, to: &archive)
-        appendUInt32(0, to: &archive)
-        appendUInt32(0, to: &archive)
-        appendUInt16(UInt16(nameData.count), to: &archive)
-        appendUInt16(0, to: &archive)
-        archive.append(nameData)
-        archive.append(compressedData)
-        appendUInt32(0x0807_4b50, to: &archive)
-        appendUInt32(0, to: &archive)
-        appendUInt32(UInt32(compressedData.count), to: &archive)
-        appendUInt32(UInt32(uncompressedData.count), to: &archive)
-
+        guard archive.count <= Int(UInt32.max) else {
+            throw ZipArchiveReaderError.invalidArchive("Test ZIP central directory offset is too large")
+        }
         let centralDirectoryOffset = UInt32(archive.count)
+        for (index, entry) in entries.enumerated() {
+            guard let nameData = entry.name.data(using: .utf8) else {
+                throw ZipArchiveReaderError.invalidArchive("Test ZIP entry name is malformed")
+            }
+            appendUInt32(0x0201_4b50, to: &centralDirectory)
+            appendUInt16(20, to: &centralDirectory)
+            appendUInt16(20, to: &centralDirectory)
+            appendUInt16(0x0008, to: &centralDirectory)
+            appendUInt16(8, to: &centralDirectory)
+            appendUInt16(0, to: &centralDirectory)
+            appendUInt16(0, to: &centralDirectory)
+            appendUInt32(0, to: &centralDirectory)
+            appendUInt32(UInt32(entry.compressedData.count), to: &centralDirectory)
+            appendUInt32(UInt32(entry.uncompressedData.count), to: &centralDirectory)
+            appendUInt16(UInt16(nameData.count), to: &centralDirectory)
+            appendUInt16(0, to: &centralDirectory)
+            appendUInt16(0, to: &centralDirectory)
+            appendUInt16(0, to: &centralDirectory)
+            appendUInt16(0, to: &centralDirectory)
+            appendUInt32(0, to: &centralDirectory)
+            appendUInt32(localHeaderOffsets[index], to: &centralDirectory)
+            centralDirectory.append(nameData)
+        }
+
+        guard centralDirectory.count <= Int(UInt32.max) else {
+            throw ZipArchiveReaderError.invalidArchive("Test ZIP central directory is too large")
+        }
+        archive.append(centralDirectory)
+        appendUInt32(0x0605_4b50, to: &archive)
+        appendUInt16(0, to: &archive)
+        appendUInt16(0, to: &archive)
+        appendUInt16(UInt16(entries.count), to: &archive)
+        appendUInt16(UInt16(entries.count), to: &archive)
+        appendUInt32(UInt32(centralDirectory.count), to: &archive)
+        appendUInt32(centralDirectoryOffset, to: &archive)
+        appendUInt16(0, to: &archive)
+        return archive
+    }
+
+    /**
+     Converts test payload bytes into the raw deflate stream used by ZIP compression method 8.
+
+     The CLibSword bridge exposes gzip compression for tests; raw ZIP deflate is the gzip body
+     without the ten-byte header and eight-byte trailer.
+
+     - Parameter data: Uncompressed fixture payload.
+     - Returns: Raw deflate bytes suitable for a ZIP deflated entry.
+     - Side effects: Allocates and frees a temporary C compression buffer.
+     - Failure modes: Throws when the C compressor fails or returns malformed gzip output.
+     */
+    private func makeRawDeflateData(_ data: Data) throws -> Data {
+        let gzipData = try data.withUnsafeBytes { buffer in
+            guard let baseAddress = buffer.baseAddress else {
+                throw ZipArchiveReaderError.invalidArchive("Test compression failed")
+            }
+
+            var outputLength: UInt = 0
+            guard let output = gzip_data(
+                baseAddress.assumingMemoryBound(to: UInt8.self),
+                UInt(data.count),
+                &outputLength
+            ) else {
+                throw ZipArchiveReaderError.invalidArchive("Test compression failed")
+            }
+
+            defer { gunzip_free(output) }
+            return Data(bytes: output, count: Int(outputLength))
+        }
+        guard gzipData.count > 18 else {
+            throw ZipArchiveReaderError.invalidArchive("Test compression failed")
+        }
+        return Data(gzipData.dropFirst(10).dropLast(8))
+    }
+
+    /**
+     Writes an Android backup ZIP fixture to a temporary file.
+
+     - Parameters:
+       - archiveData: ZIP bytes to persist.
+       - suffix: Android backup suffix to use in the temporary filename.
+     - Returns: Temporary archive URL registered for teardown cleanup.
+     - Side effects: Writes `archiveData` under the process temporary directory.
+     - Failure modes: Rethrows file write errors.
+     */
+    private func writeTemporaryAndroidBackupArchive(_ archiveData: Data, suffix: String) throws -> URL {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("android-backup-\(UUID().uuidString)\(suffix)")
+        try archiveData.write(to: url)
+        temporarySwordModulePaths.append(url.path)
+        return url
+    }
+
+    /**
+     Builds a sparse stored ZIP file whose declared payload exceeds the eager reader cap.
+
+     The helper writes local and central-directory metadata normally, then seeks across the payload
+     range before writing the central directory. On APFS this models a large Android backup without
+     allocating hundreds of MiB of fixture data.
+
+     - Parameters:
+       - entryName: ZIP entry path to publish.
+       - declaredPayloadByteCount: Stored-entry compressed and uncompressed byte count.
+     - Returns: Temporary sparse archive URL registered for teardown cleanup.
+     - Side effects: Creates a sparse ZIP file in the process temporary directory.
+     - Failure modes: Throws when file creation, seeking, or writing fails.
+     */
+    private func makeSparseStoredZipFile(
+        entryName: String,
+        declaredPayloadByteCount: UInt32
+    ) throws -> URL {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("android-backup-sparse-\(UUID().uuidString).abdb.zip")
+        FileManager.default.createFile(atPath: url.path, contents: nil)
+        temporarySwordModulePaths.append(url.path)
+
+        let handle = try FileHandle(forWritingTo: url)
+        defer {
+            try? handle.close()
+        }
+        guard let nameData = entryName.data(using: .utf8),
+              nameData.count <= Int(UInt16.max) else {
+            throw ZipArchiveReaderError.invalidArchive("Test ZIP entry name is too large")
+        }
+
+        var localHeader = Data()
+        appendUInt32(0x0403_4b50, to: &localHeader)
+        appendUInt16(20, to: &localHeader)
+        appendUInt16(0, to: &localHeader)
+        appendUInt16(0, to: &localHeader)
+        appendUInt16(0, to: &localHeader)
+        appendUInt16(0, to: &localHeader)
+        appendUInt32(0, to: &localHeader)
+        appendUInt32(declaredPayloadByteCount, to: &localHeader)
+        appendUInt32(declaredPayloadByteCount, to: &localHeader)
+        appendUInt16(UInt16(nameData.count), to: &localHeader)
+        appendUInt16(0, to: &localHeader)
+        localHeader.append(nameData)
+        try handle.write(contentsOf: localHeader)
+
+        let centralDirectoryOffset = UInt32(localHeader.count) + declaredPayloadByteCount
+        try handle.seek(toOffset: UInt64(centralDirectoryOffset))
+
         var centralDirectory = Data()
         appendUInt32(0x0201_4b50, to: &centralDirectory)
         appendUInt16(20, to: &centralDirectory)
         appendUInt16(20, to: &centralDirectory)
-        appendUInt16(0x0008, to: &centralDirectory)
-        appendUInt16(8, to: &centralDirectory)
+        appendUInt16(0, to: &centralDirectory)
+        appendUInt16(0, to: &centralDirectory)
         appendUInt16(0, to: &centralDirectory)
         appendUInt16(0, to: &centralDirectory)
         appendUInt32(0, to: &centralDirectory)
-        appendUInt32(UInt32(compressedData.count), to: &centralDirectory)
-        appendUInt32(UInt32(uncompressedData.count), to: &centralDirectory)
+        appendUInt32(declaredPayloadByteCount, to: &centralDirectory)
+        appendUInt32(declaredPayloadByteCount, to: &centralDirectory)
         appendUInt16(UInt16(nameData.count), to: &centralDirectory)
         appendUInt16(0, to: &centralDirectory)
         appendUInt16(0, to: &centralDirectory)
         appendUInt16(0, to: &centralDirectory)
         appendUInt16(0, to: &centralDirectory)
         appendUInt32(0, to: &centralDirectory)
-        appendUInt32(localHeaderOffset, to: &centralDirectory)
+        appendUInt32(0, to: &centralDirectory)
         centralDirectory.append(nameData)
+        try handle.write(contentsOf: centralDirectory)
 
-        archive.append(centralDirectory)
-        appendUInt32(0x0605_4b50, to: &archive)
-        appendUInt16(0, to: &archive)
-        appendUInt16(0, to: &archive)
-        appendUInt16(1, to: &archive)
-        appendUInt16(1, to: &archive)
-        appendUInt32(UInt32(centralDirectory.count), to: &archive)
-        appendUInt32(centralDirectoryOffset, to: &archive)
-        appendUInt16(0, to: &archive)
-        return archive
+        var endRecord = Data()
+        appendUInt32(0x0605_4b50, to: &endRecord)
+        appendUInt16(0, to: &endRecord)
+        appendUInt16(0, to: &endRecord)
+        appendUInt16(1, to: &endRecord)
+        appendUInt16(1, to: &endRecord)
+        appendUInt32(UInt32(centralDirectory.count), to: &endRecord)
+        appendUInt32(centralDirectoryOffset, to: &endRecord)
+        appendUInt16(0, to: &endRecord)
+        try handle.write(contentsOf: endRecord)
+        return url
     }
 
     /**

@@ -1,6 +1,6 @@
 # SETPAR-701 Verification Matrix (Android Application Preferences -> iOS)
 
-Date: 2026-06-03
+Date: 2026-06-11
 
 ## Scope and Method
 
@@ -30,9 +30,9 @@ divergences.
 
 - Android actionable rows inventoried: 41/41.
 - iOS registry-backed rows: 36.
-- Registry-backed `Pass`: 21.
+- Registry-backed `Pass`: 22.
 - Registry-backed `Adapted Pass`: 11.
-- Registry-backed `Partial`: 2 (`locale_pref`, tracked by #164; `notes_content_type`, tracked by #163).
+- Registry-backed `Partial`: 1 (`notes_content_type`, tracked by #163).
 - Registry-backed `Documented Divergence`: 2 (`volume_keys_scroll`, `request_sdcard_permission_pref`).
 - Non-registry tracked gap: 0.
 - Non-registry documented divergence: 1 (`eink_mode`).
@@ -60,7 +60,7 @@ divergences.
 | `volume_keys_scroll` | `AppPreferenceRegistry`; `SettingsView` persistence plus iOS note; `dispositions.md` | Documented Divergence | iOS cannot intercept hardware volume buttons for arbitrary app scrolling. |
 | `night_mode_pref3` | `AppPreferenceRegistry`; `SettingsView`; `NightModeSettingsResolver`; app color-scheme state | Adapted Pass | Android automatic sensor mode is excluded by platform constraint. |
 | `global_text_display_settings` | `SettingsStore.globalTextDisplaySettingsKey`; `SettingsView.lookAndFeelSection`; `TextDisplaySettingsView`/`ColorSettingsView` | Outside Registry | Android action row is adapted as iOS Look & feel navigation, not a registry preference. |
-| `locale_pref` | `AppPreferenceRegistry`; `SettingsView.localeOptions`; `AppleLanguages` override | Partial | Persistence works, but Android locale arrays are not fully represented; tracked by #164. |
+| `locale_pref` | `AppPreferenceRegistry`; `SettingsView.localeOptions`; `AppleLanguages` override; `check_settings_localization_guardrails.py` | Pass | Picker values are Android `arrays.xml` values filtered to shipped iOS `.lproj` resources, with Android legacy values mapped only at the Apple language boundary. |
 | `disable_click_to_edit` | `AppPreferenceRegistry`; `SettingsView`; iOS Vue `appSettings.disableClickToEdit` | Pass | Emitted into iOS reader payload. |
 | `notes_content_type` | `AppPreferenceRegistry`; `SettingsView` picker; iOS Vue `appSettings.notesContentType` payload | Partial | Settings/default/payload parity is implemented. Applying the value to newly created bookmark notes and Study Pad entries remains tracked by #163. |
 | `font_size_multiplier` | `AppPreferenceRegistry`; `SettingsView` stepper; iOS Vue `fontSizeMultiplier` payload | Pass | 10-500 clamp and percent-to-float conversion implemented. |
@@ -92,8 +92,6 @@ divergences.
 - #163: apply `notes_content_type` when creating bookmark notes and Study Pad
   entries so the stored note content type follows the same HTML/Markdown default
   behavior Android exposes.
-- #164: reconcile `locale_pref` option arrays with Android source and actual iOS
-  localization resources.
 - AI settings shortcut remains intentionally absent until the iOS AI settings workflow
   exists. The shortcut is tracked with the AI parity issues (#5, #74, #89-#92), not
   as a standalone dead Application preferences row.

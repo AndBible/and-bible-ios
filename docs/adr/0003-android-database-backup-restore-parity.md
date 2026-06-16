@@ -116,9 +116,10 @@ The top-level workflow may use native iOS plumbing:
 - Android application backup exports an APK. iOS apps cannot export their
   installed bundle as an IPA/APK equivalent at runtime, so iOS omits the
   Application/APK backup row instead of presenting an inert choice.
-- Android AI Settings reset is not shown until iOS has a durable
-  Android-equivalent AI settings store. Adding that row requires a real mapper
-  or store first.
+- Android AI Settings backup/reset is represented by preserved Android-owned
+  database storage until iOS has a native semantic AI settings model. iOS must
+  not synthesize an empty `ai_settings.sqlite3`; it may export that category
+  only after a real Android database was restored or otherwise preserved.
 - Android crash-info export and local backup listing are platform-adjacent
   features that require dedicated iOS storage/logging contracts before they can
   be surfaced without inventing iOS-only semantics.

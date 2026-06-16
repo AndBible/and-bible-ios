@@ -323,6 +323,8 @@ public final class RemoteSyncInitialBackupUploadService {
                 settingsStore: settingsStore,
                 schemaVersion: schemaVersion
             )
+        case .progress:
+            throw RemoteSyncInitialBackupUploadError.unsupportedCategory(category)
         }
     }
 
@@ -397,6 +399,8 @@ public final class RemoteSyncInitialBackupUploadService {
                 modelContext: modelContext,
                 settingsStore: settingsStore
             )
+        case .progress:
+            break
         }
     }
 

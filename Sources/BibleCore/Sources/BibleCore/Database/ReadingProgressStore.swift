@@ -427,12 +427,7 @@ public final class ReadingProgressStore {
     private static func normalized(_ snapshot: ReadingProgressSnapshot) -> ReadingProgressSnapshot {
         let history = snapshot.history
             .filter {
-                isValid(
-                    bookInitials: $0.bookInitials,
-                    startOrdinal: $0.startOrdinal,
-                    kjvBookOrdinal: $0.kjvBookOrdinal,
-                    chapter: $0.chapter
-                ) && $0.cycle > 0
+                isStoredRowValid($0)
             }
             .sorted {
                 if $0.readAt != $1.readAt {
@@ -464,6 +459,15 @@ public final class ReadingProgressStore {
         chapter: Int
     ) -> Bool {
         !bookInitials.isEmpty && startOrdinal > 0 && kjvBookOrdinal > 0 && chapter > 0
+    }
+
+    private static func isStoredRowValid(_ row: ReadingProgressHistoryRow) -> Bool {
+        guard row.kjvBookOrdinal > 0,
+              row.chapter > 0,
+              row.cycle > 0 else {
+            return false
+        }
+        return row.startOrdinal >= 0
     }
 
     private static func currentTimeMilliseconds() -> Int64 {

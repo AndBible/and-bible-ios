@@ -512,7 +512,7 @@
 "bookmarks_contents" = "বুকমার্ক, লেবেল এবং স্টাডি প্যাড";
 "workspaces_contents" = "ওয়ার্কস্পেস এবং উইন্ডোজ";
 "my_documents" = "My Documents";
-"my_documents_contents" = "My Documents and their pages";
+"my_documents_contents" = "My Documents and their content";
 "synchronization_categories" = "সিঙ্ক্রোনাইজেশন বিভাগ";
 "sync_error" = "ক্লাউড সিঙ্ক্রোনাইজেশনে ত্রুটি ঘটেছে৷";
 "sync_cant_fetch" = "ক্লাউডে সংরক্ষিত ডাটাবেস বা প্যাচ ফাইলের সংস্করণ এই অ্যাপ দ্বারা সমর্থিত সংস্করণের চেয়ে বেশি।";

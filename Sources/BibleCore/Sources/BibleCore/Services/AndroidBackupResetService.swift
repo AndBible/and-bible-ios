@@ -5,7 +5,8 @@ import SwiftData
 import SwordKit
 
 /**
- Android BackupActivity reset categories that have safe iOS persistence equivalents.
+ Android BackupActivity reset categories that have safe iOS persistence equivalents or preserved
+ Android-owned database state.
 
  Android exposes reset buttons from the Backup & Restore screen rather than from each
  feature-specific settings page. iOS mirrors that user-facing grouping while keeping the storage
@@ -13,8 +14,6 @@ import SwordKit
  snapshots, repositories reset through the SWORD repository source manager, and application
  preferences reset through the registry-backed settings store.
 
- - Note: AI Settings is intentionally not represented because this iOS build does not yet have a
-   durable Android-equivalent AI settings store. Adding it requires a real mapper/store first.
  */
 public enum AndroidBackupResetCategory: String, CaseIterable, Identifiable, Sendable {
     /// Bookmarks, labels, notes, and StudyPad rows.
@@ -35,6 +34,9 @@ public enum AndroidBackupResetCategory: String, CaseIterable, Identifiable, Send
     /// My Documents document/page/content rows.
     case myDocuments
 
+    /// Preserved Android-owned AI Settings database.
+    case aiSettings
+
     /// Local memorization and chapter reading progress stores.
     case progress
 
@@ -52,7 +54,7 @@ public enum AndroidBackupResetCategory: String, CaseIterable, Identifiable, Send
             return .readingPlans
         case .myDocuments:
             return .myDocuments
-        case .repositories, .applicationPreferences, .progress:
+        case .repositories, .applicationPreferences, .aiSettings, .progress:
             return nil
         }
     }
@@ -94,6 +96,7 @@ public struct AndroidBackupResetReport: Sendable, Equatable {
  - `ModelContext` owns the SwiftData rows being reset
  - `SettingsStore` owns local fidelity, remote-sync, progress, and preference state
  - `RepositorySourceManager` owns `InstallMgr.conf` repository source plumbing
+ - `AndroidDatabaseBackupPreservedDatabaseStore` owns Android-only preserved database files
 
  Failure modes:
  - restore-engine and repository-source errors are rethrown so callers can show a visible failure
@@ -106,6 +109,7 @@ public final class AndroidBackupResetService {
     private let readingPlanRestoreService: RemoteSyncReadingPlanRestoreService
     private let myDocumentRestoreService: RemoteSyncMyDocumentRestoreService
     private let repositorySourceManager: RepositorySourceManager
+    private let preservedDatabaseStore: AndroidDatabaseBackupPreservedDatabaseStore
 
     /**
      Creates a reset service with injectable category engines.
@@ -116,6 +120,7 @@ public final class AndroidBackupResetService {
        - readingPlanRestoreService: Engine used to reset reading-plan rows and status side stores.
        - myDocumentRestoreService: Engine used to reset My Documents rows.
        - repositorySourceManager: Manager used to restore Android-compatible repository sources.
+       - preservedDatabaseStore: Store used to reset preserved Android-owned database files.
      - Side effects: none.
      - Failure modes: This initializer cannot fail.
      */
@@ -124,13 +129,15 @@ public final class AndroidBackupResetService {
         workspaceRestoreService: RemoteSyncWorkspaceRestoreService = RemoteSyncWorkspaceRestoreService(),
         readingPlanRestoreService: RemoteSyncReadingPlanRestoreService = RemoteSyncReadingPlanRestoreService(),
         myDocumentRestoreService: RemoteSyncMyDocumentRestoreService = RemoteSyncMyDocumentRestoreService(),
-        repositorySourceManager: RepositorySourceManager = RepositorySourceManager()
+        repositorySourceManager: RepositorySourceManager = RepositorySourceManager(),
+        preservedDatabaseStore: AndroidDatabaseBackupPreservedDatabaseStore = AndroidDatabaseBackupPreservedDatabaseStore()
     ) {
         self.bookmarkRestoreService = bookmarkRestoreService
         self.workspaceRestoreService = workspaceRestoreService
         self.readingPlanRestoreService = readingPlanRestoreService
         self.myDocumentRestoreService = myDocumentRestoreService
         self.repositorySourceManager = repositorySourceManager
+        self.preservedDatabaseStore = preservedDatabaseStore
     }
 
     /**
@@ -193,6 +200,8 @@ public final class AndroidBackupResetService {
                 ),
                 modelContext: modelContext
             )
+        case .aiSettings:
+            try preservedDatabaseStore.removeDatabase(for: .aiSettings)
         case .progress:
             resetProgress(settingsStore: settingsStore)
         }
