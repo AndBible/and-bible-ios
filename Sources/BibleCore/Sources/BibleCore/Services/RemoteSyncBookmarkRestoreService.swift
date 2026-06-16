@@ -192,6 +192,9 @@ public struct RemoteSyncAndroidBibleBookmark: Sendable, Equatable {
     /// Optional detached note text.
     public let notes: String?
 
+    /// Optional Android `TextContentType` raw value for the detached note text.
+    public let notesContentType: String?
+
     /// Last bookmark mutation timestamp.
     public let lastUpdatedOn: Date
 
@@ -227,6 +230,7 @@ public struct RemoteSyncAndroidBibleBookmark: Sendable, Equatable {
        - endOffset: Optional end character offset for a sub-verse selection.
        - primaryLabelID: Optional Android primary-label identifier.
        - notes: Optional detached note text.
+       - notesContentType: Optional Android `TextContentType` raw value for the detached note text.
        - lastUpdatedOn: Last bookmark mutation timestamp.
        - wholeVerse: Whether the bookmark covers the whole verse instead of a text span.
        - type: Optional Android raw bookmark-type string.
@@ -250,6 +254,7 @@ public struct RemoteSyncAndroidBibleBookmark: Sendable, Equatable {
         endOffset: Int?,
         primaryLabelID: UUID?,
         notes: String?,
+        notesContentType: String? = nil,
         lastUpdatedOn: Date,
         wholeVerse: Bool,
         type: String?,
@@ -270,6 +275,7 @@ public struct RemoteSyncAndroidBibleBookmark: Sendable, Equatable {
         self.endOffset = endOffset
         self.primaryLabelID = primaryLabelID
         self.notes = notes
+        self.notesContentType = notesContentType.map(AppPreferenceValueNormalizer.notesContentType)
         self.lastUpdatedOn = lastUpdatedOn
         self.wholeVerse = wholeVerse
         self.type = type
@@ -313,6 +319,9 @@ public struct RemoteSyncAndroidGenericBookmark: Sendable, Equatable {
     /// Optional detached note text.
     public let notes: String?
 
+    /// Optional Android `TextContentType` raw value for the detached note text.
+    public let notesContentType: String?
+
     /// Last bookmark mutation timestamp.
     public let lastUpdatedOn: Date
 
@@ -345,6 +354,7 @@ public struct RemoteSyncAndroidGenericBookmark: Sendable, Equatable {
        - endOffset: Optional end character offset for a partial selection.
        - primaryLabelID: Optional Android primary-label identifier.
        - notes: Optional detached note text.
+       - notesContentType: Optional Android `TextContentType` raw value for the detached note text.
        - lastUpdatedOn: Last bookmark mutation timestamp.
        - wholeVerse: Whether the bookmark covers the whole keyed entry.
        - playbackSettingsJSON: Raw Android `playbackSettings` JSON payload, when present.
@@ -365,6 +375,7 @@ public struct RemoteSyncAndroidGenericBookmark: Sendable, Equatable {
         endOffset: Int?,
         primaryLabelID: UUID?,
         notes: String?,
+        notesContentType: String? = nil,
         lastUpdatedOn: Date,
         wholeVerse: Bool,
         playbackSettingsJSON: String?,
@@ -382,6 +393,7 @@ public struct RemoteSyncAndroidGenericBookmark: Sendable, Equatable {
         self.endOffset = endOffset
         self.primaryLabelID = primaryLabelID
         self.notes = notes
+        self.notesContentType = notesContentType.map(AppPreferenceValueNormalizer.notesContentType)
         self.lastUpdatedOn = lastUpdatedOn
         self.wholeVerse = wholeVerse
         self.playbackSettingsJSON = playbackSettingsJSON
@@ -407,6 +419,9 @@ public struct RemoteSyncAndroidStudyPadEntry: Sendable, Equatable {
     /// Nesting depth within the StudyPad outline.
     public let indentLevel: Int
 
+    /// Optional Android `TextContentType` raw value for the detached StudyPad text payload.
+    public let contentType: String?
+
     /// Detached StudyPad text payload.
     public let text: String
 
@@ -418,15 +433,24 @@ public struct RemoteSyncAndroidStudyPadEntry: Sendable, Equatable {
        - labelID: Android label identifier that owns the StudyPad entry.
        - orderNumber: Display order within the label-backed StudyPad outline.
        - indentLevel: Nesting depth within the StudyPad outline.
+       - contentType: Optional Android `TextContentType` raw value for the detached text payload.
        - text: Detached StudyPad text payload.
      - Side effects: none.
      - Failure modes: This initializer cannot fail.
      */
-    public init(id: UUID, labelID: UUID, orderNumber: Int, indentLevel: Int, text: String) {
+    public init(
+        id: UUID,
+        labelID: UUID,
+        orderNumber: Int,
+        indentLevel: Int,
+        contentType: String? = nil,
+        text: String
+    ) {
         self.id = id
         self.labelID = labelID
         self.orderNumber = orderNumber
         self.indentLevel = indentLevel
+        self.contentType = contentType.map(AppPreferenceValueNormalizer.notesContentType)
         self.text = text
     }
 }
@@ -611,6 +635,7 @@ public final class RemoteSyncBookmarkRestoreService {
         let labelID: UUID
         let orderNumber: Int
         let indentLevel: Int
+        let contentType: String?
     }
 
     private struct PreparedLabel {
@@ -725,8 +750,8 @@ public final class RemoteSyncBookmarkRestoreService {
             studyPadTexts: studyPadTexts
         )
 
-        let bibleNotesByID = Dictionary(uniqueKeysWithValues: bibleNotes.map { ($0.bookmarkID, $0.notes) })
-        let genericNotesByID = Dictionary(uniqueKeysWithValues: genericNotes.map { ($0.bookmarkID, $0.notes) })
+        let bibleNotesByID = Dictionary(uniqueKeysWithValues: bibleNotes.map { ($0.bookmarkID, $0) })
+        let genericNotesByID = Dictionary(uniqueKeysWithValues: genericNotes.map { ($0.bookmarkID, $0) })
         let bibleLinksByBookmarkID = Dictionary(grouping: bibleLinks, by: \.bookmarkID)
         let genericLinksByBookmarkID = Dictionary(grouping: genericLinks, by: \.bookmarkID)
         let studyPadTextsByID = Dictionary(uniqueKeysWithValues: studyPadTexts.map { ($0.entryID, $0.text) })
@@ -752,7 +777,8 @@ public final class RemoteSyncBookmarkRestoreService {
                     startOffset: bookmark.startOffset,
                     endOffset: bookmark.endOffset,
                     primaryLabelID: bookmark.primaryLabelID,
-                    notes: bibleNotesByID[bookmark.id],
+                    notes: bibleNotesByID[bookmark.id]?.notes,
+                    notesContentType: bibleNotesByID[bookmark.id]?.contentType,
                     lastUpdatedOn: bookmark.lastUpdatedOn,
                     wholeVerse: bookmark.wholeVerse,
                     type: bookmark.type,
@@ -781,7 +807,8 @@ public final class RemoteSyncBookmarkRestoreService {
                     startOffset: bookmark.startOffset,
                     endOffset: bookmark.endOffset,
                     primaryLabelID: bookmark.primaryLabelID,
-                    notes: genericNotesByID[bookmark.id],
+                    notes: genericNotesByID[bookmark.id]?.notes,
+                    notesContentType: genericNotesByID[bookmark.id]?.contentType,
                     lastUpdatedOn: bookmark.lastUpdatedOn,
                     wholeVerse: bookmark.wholeVerse,
                     playbackSettingsJSON: bookmark.playbackSettingsJSON,
@@ -805,6 +832,7 @@ public final class RemoteSyncBookmarkRestoreService {
                     labelID: entry.labelID,
                     orderNumber: entry.orderNumber,
                     indentLevel: entry.indentLevel,
+                    contentType: entry.contentType,
                     text: studyPadTextsByID[entry.id] ?? ""
                 )
             }
@@ -897,7 +925,11 @@ public final class RemoteSyncBookmarkRestoreService {
             bookmark.customIcon = preparedBookmark.bookmark.customIcon
             bookmark.editAction = preparedBookmark.bookmark.editAction
             if let notes = preparedBookmark.bookmark.notes {
-                let noteEntity = BibleBookmarkNotes(bookmarkId: bookmark.id, notes: notes)
+                let noteEntity = BibleBookmarkNotes(
+                    bookmarkId: bookmark.id,
+                    notes: notes,
+                    contentType: preparedBookmark.bookmark.notesContentType
+                )
                 noteEntity.bookmark = bookmark
                 bookmark.notes = noteEntity
                 modelContext.insert(noteEntity)
@@ -925,7 +957,11 @@ public final class RemoteSyncBookmarkRestoreService {
             bookmark.customIcon = preparedBookmark.bookmark.customIcon
             bookmark.editAction = preparedBookmark.bookmark.editAction
             if let notes = preparedBookmark.bookmark.notes {
-                let noteEntity = GenericBookmarkNotes(bookmarkId: bookmark.id, notes: notes)
+                let noteEntity = GenericBookmarkNotes(
+                    bookmarkId: bookmark.id,
+                    notes: notes,
+                    contentType: preparedBookmark.bookmark.notesContentType
+                )
                 noteEntity.bookmark = bookmark
                 bookmark.notes = noteEntity
                 modelContext.insert(noteEntity)
@@ -969,7 +1005,8 @@ public final class RemoteSyncBookmarkRestoreService {
             let entry = StudyPadTextEntry(
                 id: preparedEntry.entry.id,
                 orderNumber: preparedEntry.entry.orderNumber,
-                indentLevel: preparedEntry.entry.indentLevel
+                indentLevel: preparedEntry.entry.indentLevel,
+                contentType: preparedEntry.entry.contentType
             )
             entry.label = label
             modelContext.insert(entry)
@@ -1247,8 +1284,8 @@ public final class RemoteSyncBookmarkRestoreService {
         labels: [RemoteSyncAndroidLabel],
         bibleBookmarks: [RawBibleBookmarkRow],
         genericBookmarks: [RawGenericBookmarkRow],
-        bibleNotes: [(bookmarkID: UUID, notes: String)],
-        genericNotes: [(bookmarkID: UUID, notes: String)],
+        bibleNotes: [RemoteSyncCurrentBookmarkNoteRow],
+        genericNotes: [RemoteSyncCurrentBookmarkNoteRow],
         bibleLinks: [(bookmarkID: UUID, labelID: UUID, orderNumber: Int, indentLevel: Int, expandContent: Bool)],
         genericLinks: [(bookmarkID: UUID, labelID: UUID, orderNumber: Int, indentLevel: Int, expandContent: Bool)],
         studyPadEntries: [RawStudyPadEntryRow],
@@ -1335,6 +1372,43 @@ public final class RemoteSyncBookmarkRestoreService {
         guard result == SQLITE_ROW else {
             throw RemoteSyncBookmarkRestoreError.missingTable(tableName)
         }
+    }
+
+    /**
+     Checks whether an optional Android column is present before selecting it from a staged backup.
+
+     Android backup schemas evolve with Room migrations. Restores must accept older staged databases
+     that do not yet have nullable metadata columns while preserving the column when it is present.
+
+     - Parameters:
+       - columnName: SQLite column name to look up.
+       - tableName: SQLite table name whose schema should be inspected.
+       - db: Open staged SQLite database handle.
+     - Returns: `true` when `PRAGMA table_info` reports the column; otherwise `false`.
+     - Side effects:
+       - executes one SQLite schema query against the staged database
+     - Failure modes:
+       - throws `RemoteSyncBookmarkRestoreError.invalidSQLiteDatabase` when the schema query cannot be prepared
+     */
+    private func tableHasColumn(
+        _ columnName: String,
+        in tableName: String,
+        database db: OpaquePointer
+    ) throws -> Bool {
+        let sql = "PRAGMA table_info(\(tableName))"
+        var statement: OpaquePointer?
+        defer { sqlite3_finalize(statement) }
+
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK, let statement else {
+            throw RemoteSyncBookmarkRestoreError.invalidSQLiteDatabase
+        }
+
+        while sqlite3_step(statement) == SQLITE_ROW {
+            if stringColumn(statement: statement, index: 1) == columnName {
+                return true
+            }
+        }
+        return false
     }
 
     /**
@@ -1509,8 +1583,11 @@ public final class RemoteSyncBookmarkRestoreService {
     private func fetchNoteRows(
         from db: OpaquePointer,
         tableName: String
-    ) throws -> [(bookmarkID: UUID, notes: String)] {
-        let sql = "SELECT bookmarkId, notes FROM \(tableName) ORDER BY bookmarkId"
+    ) throws -> [RemoteSyncCurrentBookmarkNoteRow] {
+        let hasContentType = try tableHasColumn("contentType", in: tableName, database: db)
+        let sql = hasContentType
+            ? "SELECT bookmarkId, notes, contentType FROM \(tableName) ORDER BY bookmarkId"
+            : "SELECT bookmarkId, notes FROM \(tableName) ORDER BY bookmarkId"
         var statement: OpaquePointer?
         defer { sqlite3_finalize(statement) }
 
@@ -1518,12 +1595,13 @@ public final class RemoteSyncBookmarkRestoreService {
             throw RemoteSyncBookmarkRestoreError.invalidSQLiteDatabase
         }
 
-        var rows: [(bookmarkID: UUID, notes: String)] = []
+        var rows: [RemoteSyncCurrentBookmarkNoteRow] = []
         while sqlite3_step(statement) == SQLITE_ROW {
             rows.append(
-                (
+                RemoteSyncCurrentBookmarkNoteRow(
                     bookmarkID: try uuidFromBlob(statement: statement, column: 0, table: tableName, name: "bookmarkId"),
-                    notes: stringColumn(statement: statement, index: 1)
+                    notes: stringColumn(statement: statement, index: 1),
+                    contentType: hasContentType ? optionalStringColumn(statement: statement, index: 2) : nil
                 )
             )
         }
@@ -1582,7 +1660,10 @@ public final class RemoteSyncBookmarkRestoreService {
        - throws `RemoteSyncBookmarkRestoreError.invalidIdentifierBlob` when one entry or label ID BLOB is malformed
      */
     private func fetchStudyPadEntries(from db: OpaquePointer) throws -> [RawStudyPadEntryRow] {
-        let sql = "SELECT id, labelId, orderNumber, indentLevel FROM StudyPadTextEntry ORDER BY orderNumber, id"
+        let hasContentType = try tableHasColumn("contentType", in: "StudyPadTextEntry", database: db)
+        let sql = hasContentType
+            ? "SELECT id, labelId, orderNumber, indentLevel, contentType FROM StudyPadTextEntry ORDER BY orderNumber, id"
+            : "SELECT id, labelId, orderNumber, indentLevel FROM StudyPadTextEntry ORDER BY orderNumber, id"
         var statement: OpaquePointer?
         defer { sqlite3_finalize(statement) }
 
@@ -1597,7 +1678,8 @@ public final class RemoteSyncBookmarkRestoreService {
                     id: try uuidFromBlob(statement: statement, column: 0, table: "StudyPadTextEntry", name: "id"),
                     labelID: try uuidFromBlob(statement: statement, column: 1, table: "StudyPadTextEntry", name: "labelId"),
                     orderNumber: Int(sqlite3_column_int(statement, 2)),
-                    indentLevel: Int(sqlite3_column_int(statement, 3))
+                    indentLevel: Int(sqlite3_column_int(statement, 3)),
+                    contentType: hasContentType ? optionalStringColumn(statement: statement, index: 4) : nil
                 )
             )
         }

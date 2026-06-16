@@ -28,7 +28,7 @@
     </div>
     <div v-if="bookmark.hasNote" class="note one-liner small">
       <FontAwesomeIcon icon="edit" size="xs"/>
-      {{ htmlToString(bookmarkNotes) }}
+      {{ htmlToString(bookmarkNotesHtml) }}
     </div>
 
     <div style="overflow-x: auto" class="label-list">
@@ -56,6 +56,11 @@ import {FontAwesomeIcon} from "@fortawesome/vue-fontawesome";
 import {globalBookmarksKey, locateTopKey} from "@/types/constants";
 import {BaseBookmark} from "@/types/client-objects";
 import {isBibleBookmark, resolveIcon} from "@/composables/bookmarks";
+import {Marked} from "marked";
+import DOMPurify from "dompurify";
+import {PURIFY_CONFIG} from "@/composables/slot-html-content";
+
+const markdownParser = new Marked({breaks: true, gfm: true});
 
 const $emit = defineEmits(["selected"]);
 const props = defineProps<{ bookmarkId: IdType }>();
@@ -64,6 +69,15 @@ const {bookmarkMap, bookmarkLabels} = inject(globalBookmarksKey)!;
 const {appSettings} = useCommon();
 const bookmark = computed(() => bookmarkMap.get(props.bookmarkId)! as BaseBookmark);
 const bookmarkNotes = computed(() => bookmark.value.notes!);
+const bookmarkNotesHtml = computed(() => {
+    if (
+        bookmark.value.notesContentType === "MARKDOWN" ||
+        (bookmark.value.notesContentType == null && appSettings.notesContentType === "MARKDOWN")
+    ) {
+        return DOMPurify.sanitize(markdownParser.parse(bookmarkNotes.value) as string, PURIFY_CONFIG);
+    }
+    return bookmarkNotes.value;
+});
 
 const primaryLabel = computed(() => {
     const primaryLabelId = bookmark.value.primaryLabelId || bookmark.value.labels[0];

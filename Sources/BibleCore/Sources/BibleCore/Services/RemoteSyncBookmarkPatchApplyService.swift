@@ -148,6 +148,7 @@ public final class RemoteSyncBookmarkPatchApplyService {
         var endOffset: Int?
         var primaryLabelID: UUID?
         var notes: String?
+        var notesContentType: String?
         var lastUpdatedOn: Date
         var wholeVerse: Bool
         var type: String?
@@ -167,6 +168,7 @@ public final class RemoteSyncBookmarkPatchApplyService {
         var endOffset: Int?
         var primaryLabelID: UUID?
         var notes: String?
+        var notesContentType: String?
         var lastUpdatedOn: Date
         var wholeVerse: Bool
         var playbackSettingsJSON: String?
@@ -181,6 +183,7 @@ public final class RemoteSyncBookmarkPatchApplyService {
         var orderNumber: Int
         var indentLevel: Int
         var text: String?
+        var contentType: String?
     }
 
     private struct WorkingSnapshot {
@@ -233,6 +236,7 @@ public final class RemoteSyncBookmarkPatchApplyService {
                             endOffset: $0.endOffset,
                             primaryLabelID: $0.primaryLabelID,
                             notes: $0.notes,
+                            notesContentType: $0.notesContentType,
                             lastUpdatedOn: $0.lastUpdatedOn,
                             wholeVerse: $0.wholeVerse,
                             type: $0.type,
@@ -255,6 +259,7 @@ public final class RemoteSyncBookmarkPatchApplyService {
                             endOffset: $0.endOffset,
                             primaryLabelID: $0.primaryLabelID,
                             notes: $0.notes,
+                            notesContentType: $0.notesContentType,
                             lastUpdatedOn: $0.lastUpdatedOn,
                             wholeVerse: $0.wholeVerse,
                             playbackSettingsJSON: $0.playbackSettingsJSON,
@@ -271,6 +276,7 @@ public final class RemoteSyncBookmarkPatchApplyService {
                             labelID: $0.labelID,
                             orderNumber: $0.orderNumber,
                             indentLevel: $0.indentLevel,
+                            contentType: $0.contentType,
                             text: $0.text ?? ""
                         )
                     }
@@ -539,8 +545,8 @@ public final class RemoteSyncBookmarkPatchApplyService {
         let studyPadEntries = try modelContext.fetch(FetchDescriptor<StudyPadTextEntry>())
         let studyPadTexts = try modelContext.fetch(FetchDescriptor<StudyPadTextEntryText>())
 
-        let bibleNotesByBookmarkID = Dictionary(uniqueKeysWithValues: bibleNotes.map { ($0.bookmarkId, $0.notes) })
-        let genericNotesByBookmarkID = Dictionary(uniqueKeysWithValues: genericNotes.map { ($0.bookmarkId, $0.notes) })
+        let bibleNotesByBookmarkID = Dictionary(uniqueKeysWithValues: bibleNotes.map { ($0.bookmarkId, $0) })
+        let genericNotesByBookmarkID = Dictionary(uniqueKeysWithValues: genericNotes.map { ($0.bookmarkId, $0) })
         let studyPadTextsByEntryID = Dictionary(uniqueKeysWithValues: studyPadTexts.map { ($0.studyPadTextEntryId, $0.text) })
 
         let bibleLinksByBookmarkID = Dictionary(grouping: bibleLinks.compactMap { link -> (UUID, RemoteSyncAndroidBookmarkLabelLink)? in
@@ -618,7 +624,8 @@ public final class RemoteSyncBookmarkPatchApplyService {
                     startOffset: bookmark.startOffset,
                     endOffset: bookmark.endOffset,
                     primaryLabelID: bookmark.primaryLabelId.map { reverseAliases[$0] ?? $0 },
-                    notes: bibleNotesByBookmarkID[bookmark.id],
+                    notes: bibleNotesByBookmarkID[bookmark.id]?.notes,
+                    notesContentType: bibleNotesByBookmarkID[bookmark.id]?.contentType,
                     lastUpdatedOn: bookmark.lastUpdatedOn,
                     wholeVerse: bookmark.wholeVerse,
                     type: bookmark.type,
@@ -647,7 +654,8 @@ public final class RemoteSyncBookmarkPatchApplyService {
                     startOffset: bookmark.startOffset,
                     endOffset: bookmark.endOffset,
                     primaryLabelID: bookmark.primaryLabelId.map { reverseAliases[$0] ?? $0 },
-                    notes: genericNotesByBookmarkID[bookmark.id],
+                    notes: genericNotesByBookmarkID[bookmark.id]?.notes,
+                    notesContentType: genericNotesByBookmarkID[bookmark.id]?.contentType,
                     lastUpdatedOn: bookmark.lastUpdatedOn,
                     wholeVerse: bookmark.wholeVerse,
                     playbackSettingsJSON: playbackJSON,
@@ -670,7 +678,8 @@ public final class RemoteSyncBookmarkPatchApplyService {
                     labelID: remoteLabelID,
                     orderNumber: entry.orderNumber,
                     indentLevel: entry.indentLevel,
-                    text: studyPadTextsByEntryID[entry.id]
+                    text: studyPadTextsByEntryID[entry.id],
+                    contentType: entry.contentType
                 )
             )
         })
@@ -806,7 +815,8 @@ public final class RemoteSyncBookmarkPatchApplyService {
                 throw RemoteSyncBookmarkPatchApplyError.missingPatchRow(table: entry.tableName, entityID1: bookmarkID, entityID2: nil)
             }
             if var bookmark = snapshot.bibleBookmarksByID[bookmarkID] {
-                bookmark.notes = notes
+                bookmark.notes = notes.notes
+                bookmark.notesContentType = notes.contentType
                 snapshot.bibleBookmarksByID[bookmarkID] = bookmark
             }
             logEntriesByKey[logEntryStore.key(for: .bookmarks, entry: entry)] = entry
@@ -816,6 +826,7 @@ public final class RemoteSyncBookmarkPatchApplyService {
             let bookmarkID = try uuid(from: entry.entityID1, tableName: entry.tableName, field: "entityId1")
             if var bookmark = snapshot.bibleBookmarksByID[bookmarkID] {
                 bookmark.notes = nil
+                bookmark.notesContentType = nil
                 snapshot.bibleBookmarksByID[bookmarkID] = bookmark
             }
             logEntriesByKey[logEntryStore.key(for: .bookmarks, entry: entry)] = entry
@@ -954,7 +965,8 @@ public final class RemoteSyncBookmarkPatchApplyService {
                 throw RemoteSyncBookmarkPatchApplyError.missingPatchRow(table: entry.tableName, entityID1: bookmarkID, entityID2: nil)
             }
             if var bookmark = snapshot.genericBookmarksByID[bookmarkID] {
-                bookmark.notes = notes
+                bookmark.notes = notes.notes
+                bookmark.notesContentType = notes.contentType
                 snapshot.genericBookmarksByID[bookmarkID] = bookmark
             }
             logEntriesByKey[logEntryStore.key(for: .bookmarks, entry: entry)] = entry
@@ -964,6 +976,7 @@ public final class RemoteSyncBookmarkPatchApplyService {
             let bookmarkID = try uuid(from: entry.entityID1, tableName: entry.tableName, field: "entityId1")
             if var bookmark = snapshot.genericBookmarksByID[bookmarkID] {
                 bookmark.notes = nil
+                bookmark.notesContentType = nil
                 snapshot.genericBookmarksByID[bookmarkID] = bookmark
             }
             logEntriesByKey[logEntryStore.key(for: .bookmarks, entry: entry)] = entry
@@ -1053,7 +1066,13 @@ public final class RemoteSyncBookmarkPatchApplyService {
         for entry in upserts {
             let entryID = try uuid(from: entry.entityID1, tableName: entry.tableName, field: "entityId1")
             let existingText = snapshot.studyPadEntriesByID[entryID]?.text
-            guard let studyPadEntry = try fetchStudyPadEntry(id: entryID, preservingText: existingText, from: database) else {
+            let existingContentType = snapshot.studyPadEntriesByID[entryID]?.contentType
+            guard let studyPadEntry = try fetchStudyPadEntry(
+                id: entryID,
+                preservingText: existingText,
+                preservingContentType: existingContentType,
+                from: database
+            ) else {
                 throw RemoteSyncBookmarkPatchApplyError.missingPatchRow(table: entry.tableName, entityID1: entryID, entityID2: nil)
             }
             snapshot.studyPadEntriesByID[entryID] = studyPadEntry
@@ -1227,6 +1246,44 @@ public final class RemoteSyncBookmarkPatchApplyService {
     }
 
     /**
+     Checks whether a staged patch table exposes an optional Android column before selecting it.
+
+     Patch archives can be produced by Android versions on either side of a Room schema migration.
+     This helper lets replay preserve newer nullable metadata columns without rejecting older patch
+     databases that only contain the original columns.
+
+     - Parameters:
+       - columnName: SQLite column name to find.
+       - tableName: SQLite table whose schema should be inspected.
+       - database: Open staged patch database handle.
+     - Returns: `true` when `PRAGMA table_info` reports the column; otherwise `false`.
+     - Side effects:
+       - prepares and steps one SQLite schema statement
+     - Failure modes:
+       - throws `RemoteSyncBookmarkRestoreError.invalidSQLiteDatabase` when the schema statement cannot be prepared
+     */
+    private func tableHasColumn(
+        _ columnName: String,
+        in tableName: String,
+        database: OpaquePointer
+    ) throws -> Bool {
+        let sql = "PRAGMA table_info(\(tableName))"
+        var statement: OpaquePointer?
+        defer { sqlite3_finalize(statement) }
+
+        guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK, let statement else {
+            throw RemoteSyncBookmarkRestoreError.invalidSQLiteDatabase
+        }
+
+        while sqlite3_step(statement) == SQLITE_ROW {
+            if stringColumn(statement: statement, index: 1) == columnName {
+                return true
+            }
+        }
+        return false
+    }
+
+    /**
      Reads one `Label` row from a staged patch database by UUID.
 
      - Parameters:
@@ -1326,6 +1383,7 @@ public final class RemoteSyncBookmarkPatchApplyService {
             endOffset: optionalIntColumn(statement: statement, index: 10),
             primaryLabelID: try optionalUUIDFromBlob(statement: statement, column: 11, table: "BibleBookmark", name: "primaryLabelId"),
             notes: existing?.notes,
+            notesContentType: existing?.notesContentType,
             lastUpdatedOn: dateFromMillisecondsColumn(statement: statement, index: 12),
             wholeVerse: boolColumn(statement: statement, index: 13),
             type: optionalStringColumn(statement: statement, index: 14),
@@ -1345,7 +1403,7 @@ public final class RemoteSyncBookmarkPatchApplyService {
        - bookmarkID: Android bookmark identifier used as the note-table primary key.
        - tableName: Either `BibleBookmarkNotes` or `GenericBookmarkNotes`.
        - database: Open staged patch database handle.
-     - Returns: Note text when present in the staged patch database; otherwise `nil`.
+     - Returns: Note text and nullable content type when present in the staged patch database; otherwise `nil`.
      - Side effects:
        - prepares and steps one SQLite select statement
      - Failure modes:
@@ -1355,8 +1413,11 @@ public final class RemoteSyncBookmarkPatchApplyService {
         bookmarkID: UUID,
         tableName: String,
         from database: OpaquePointer
-    ) throws -> String? {
-        let sql = "SELECT notes FROM \(tableName) WHERE bookmarkId = ? LIMIT 1"
+    ) throws -> RemoteSyncCurrentBookmarkNoteRow? {
+        let hasContentType = try tableHasColumn("contentType", in: tableName, database: database)
+        let sql = hasContentType
+            ? "SELECT notes, contentType FROM \(tableName) WHERE bookmarkId = ? LIMIT 1"
+            : "SELECT notes FROM \(tableName) WHERE bookmarkId = ? LIMIT 1"
         var statement: OpaquePointer?
         defer { sqlite3_finalize(statement) }
 
@@ -1367,7 +1428,11 @@ public final class RemoteSyncBookmarkPatchApplyService {
         guard sqlite3_step(statement) == SQLITE_ROW else {
             return nil
         }
-        return stringColumn(statement: statement, index: 0)
+        return RemoteSyncCurrentBookmarkNoteRow(
+            bookmarkID: bookmarkID,
+            notes: stringColumn(statement: statement, index: 0),
+            contentType: hasContentType ? optionalStringColumn(statement: statement, index: 1) : nil
+        )
     }
 
     /**
@@ -1460,6 +1525,7 @@ public final class RemoteSyncBookmarkPatchApplyService {
             endOffset: optionalIntColumn(statement: statement, index: 7),
             primaryLabelID: try optionalUUIDFromBlob(statement: statement, column: 8, table: "GenericBookmark", name: "primaryLabelId"),
             notes: existing?.notes,
+            notesContentType: existing?.notesContentType,
             lastUpdatedOn: dateFromMillisecondsColumn(statement: statement, index: 9),
             wholeVerse: boolColumn(statement: statement, index: 10),
             playbackSettingsJSON: optionalStringColumn(statement: statement, index: 11),
@@ -1473,11 +1539,12 @@ public final class RemoteSyncBookmarkPatchApplyService {
     }
 
     /**
-     Reads one `StudyPadTextEntry` row from a staged patch database and merges it with the preserved text payload.
+     Reads one `StudyPadTextEntry` row from a staged patch database and merges it with preserved child-row metadata.
 
      - Parameters:
        - id: Android `StudyPadTextEntry.id` value to fetch.
        - preservingText: Existing working text payload for the entry, when present.
+       - preservingContentType: Existing working content type used when an older patch database lacks the column.
        - database: Open staged patch database handle.
      - Returns: Working StudyPad entry when present in the staged patch database; otherwise `nil`.
      - Side effects:
@@ -1489,9 +1556,13 @@ public final class RemoteSyncBookmarkPatchApplyService {
     private func fetchStudyPadEntry(
         id: UUID,
         preservingText: String?,
+        preservingContentType: String?,
         from database: OpaquePointer
     ) throws -> WorkingStudyPadEntry? {
-        let sql = "SELECT id, labelId, orderNumber, indentLevel FROM StudyPadTextEntry WHERE id = ? LIMIT 1"
+        let hasContentType = try tableHasColumn("contentType", in: "StudyPadTextEntry", database: database)
+        let sql = hasContentType
+            ? "SELECT id, labelId, orderNumber, indentLevel, contentType FROM StudyPadTextEntry WHERE id = ? LIMIT 1"
+            : "SELECT id, labelId, orderNumber, indentLevel FROM StudyPadTextEntry WHERE id = ? LIMIT 1"
         var statement: OpaquePointer?
         defer { sqlite3_finalize(statement) }
 
@@ -1508,7 +1579,8 @@ public final class RemoteSyncBookmarkPatchApplyService {
             labelID: try uuidFromBlob(statement: statement, column: 1, table: "StudyPadTextEntry", name: "labelId"),
             orderNumber: Int(sqlite3_column_int(statement, 2)),
             indentLevel: Int(sqlite3_column_int(statement, 3)),
-            text: preservingText
+            text: preservingText,
+            contentType: hasContentType ? optionalStringColumn(statement: statement, index: 4) : preservingContentType
         )
     }
 

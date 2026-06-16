@@ -8,7 +8,9 @@ import SwiftData
 
  StudyPad entries are ordered, nestable notes that live under a `Label`. The heavy text
  payload is split into `StudyPadTextEntryText` so list queries can fetch ordering and
- hierarchy metadata without loading the full note body.
+ hierarchy metadata without loading the full note body. `contentType` mirrors Android's
+ nullable `TextContentType` column so StudyPad rows retain HTML versus Markdown rendering
+ independently from later global setting changes.
  */
 @Model
 public final class StudyPadTextEntry {
@@ -24,6 +26,9 @@ public final class StudyPadTextEntry {
     /// Hierarchy depth used by the StudyPad outline renderer.
     public var indentLevel: Int
 
+    /// Optional Android `TextContentType` raw value (`HTML` or `MARKDOWN`) for the text payload.
+    public var contentType: String?
+
     /// Rich-text payload stored in a companion entity and cascade-deleted with the entry.
     @Relationship(deleteRule: .cascade, inverse: \StudyPadTextEntryText.entry)
     public var textEntry: StudyPadTextEntryText?
@@ -35,17 +40,21 @@ public final class StudyPadTextEntry {
        - id: Stable identifier for SwiftData persistence and text payload linkage.
        - orderNumber: Zero-based order within the parent label's outline.
        - indentLevel: Nesting level rendered by the StudyPad UI.
+       - contentType: Optional Android `TextContentType` raw value; invalid non-nil values are
+         normalized to the app default.
      - Note: Callers typically create the paired `StudyPadTextEntryText` immediately after
        insertion so the row has visible content.
      */
     public init(
         id: UUID = UUID(),
         orderNumber: Int = 0,
-        indentLevel: Int = 0
+        indentLevel: Int = 0,
+        contentType: String? = nil
     ) {
         self.id = id
         self.orderNumber = orderNumber
         self.indentLevel = indentLevel
+        self.contentType = contentType.map(AppPreferenceValueNormalizer.notesContentType)
     }
 }
 

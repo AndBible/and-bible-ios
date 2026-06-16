@@ -677,6 +677,13 @@ extension AndBibleTests {
     struct AndroidBookmarkNoteRow {
         let bookmarkID: UUID
         let notes: String
+        let contentType: String?
+
+        init(bookmarkID: UUID, notes: String, contentType: String? = nil) {
+            self.bookmarkID = bookmarkID
+            self.notes = notes
+            self.contentType = contentType
+        }
     }
 
     struct AndroidBookmarkLabelLinkRow {
@@ -692,6 +699,15 @@ extension AndBibleTests {
         let labelID: UUID
         let orderNumber: Int
         let indentLevel: Int
+        let contentType: String?
+
+        init(id: UUID, labelID: UUID, orderNumber: Int, indentLevel: Int, contentType: String? = nil) {
+            self.id = id
+            self.labelID = labelID
+            self.orderNumber = orderNumber
+            self.indentLevel = indentLevel
+            self.contentType = contentType
+        }
     }
 
     struct AndroidStudyPadTextRow {
@@ -937,6 +953,32 @@ extension AndBibleTests {
         )
     }
 
+    /**
+     Builds a temporary Android-shaped bookmark SQLite database for restore, import, and sync tests.
+
+     The default schema mirrors current Android bookmark tables, including nullable note and
+     StudyPad `contentType` columns. Tests can set `includeContentTypeColumns` to `false` only when
+     they intentionally validate backward-compatible reads of older Android databases.
+
+     - Parameters:
+       - labels: Android label rows to insert.
+       - bibleBookmarks: Android Bible bookmark parent rows to insert.
+       - bibleNotes: Detached Bible note rows, including optional Android `TextContentType` values.
+       - bibleLinks: Bible bookmark-to-label junction rows.
+       - genericBookmarks: Android generic bookmark parent rows to insert.
+       - genericNotes: Detached generic note rows, including optional Android `TextContentType` values.
+       - genericLinks: Generic bookmark-to-label junction rows.
+       - studyPadEntries: StudyPad parent rows, including optional Android `TextContentType` values.
+       - studyPadTexts: StudyPad text payload rows.
+       - logEntries: Android sync log entries to insert for patch/metadata tests.
+       - includeContentTypeColumns: Whether to create current Android content-type columns. Defaults
+         to `true`; use `false` only for legacy-schema compatibility tests.
+     - Returns: File URL for the temporary SQLite database. The caller is responsible for cleanup.
+     - Side effects:
+       - writes a temporary SQLite file in the process temporary directory
+     - Failure modes:
+       - throws when SQLite setup fails or when fixture rows cannot be inserted
+     */
     func makeAndroidBookmarksDatabase(
         labels: [AndroidLabelRow],
         bibleBookmarks: [AndroidBibleBookmarkRow] = [],
@@ -947,7 +989,8 @@ extension AndBibleTests {
         genericLinks: [AndroidBookmarkLabelLinkRow] = [],
         studyPadEntries: [AndroidStudyPadEntryRow] = [],
         studyPadTexts: [AndroidStudyPadTextRow] = [],
-        logEntries: [AndroidLogEntryRow] = []
+        logEntries: [AndroidLogEntryRow] = [],
+        includeContentTypeColumns: Bool = true
     ) throws -> URL {
         let databaseURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("android-bookmarks-\(UUID().uuidString).sqlite3")
@@ -999,7 +1042,8 @@ extension AndBibleTests {
                 );
                 CREATE TABLE BibleBookmarkNotes (
                     bookmarkId BLOB NOT NULL PRIMARY KEY,
-                    notes TEXT NOT NULL
+                    notes TEXT NOT NULL\(includeContentTypeColumns ? "," : "")
+                    \(includeContentTypeColumns ? "contentType TEXT DEFAULT NULL" : "")
                 );
                 CREATE TABLE BibleBookmarkToLabel (
                     bookmarkId BLOB NOT NULL,
@@ -1028,7 +1072,8 @@ extension AndBibleTests {
                 );
                 CREATE TABLE GenericBookmarkNotes (
                     bookmarkId BLOB NOT NULL PRIMARY KEY,
-                    notes TEXT NOT NULL
+                    notes TEXT NOT NULL\(includeContentTypeColumns ? "," : "")
+                    \(includeContentTypeColumns ? "contentType TEXT DEFAULT NULL" : "")
                 );
                 CREATE TABLE GenericBookmarkToLabel (
                     bookmarkId BLOB NOT NULL,
@@ -1042,7 +1087,8 @@ extension AndBibleTests {
                     id BLOB NOT NULL PRIMARY KEY,
                     labelId BLOB NOT NULL,
                     orderNumber INTEGER NOT NULL,
-                    indentLevel INTEGER NOT NULL DEFAULT 0
+                    indentLevel INTEGER NOT NULL DEFAULT 0\(includeContentTypeColumns ? "," : "")
+                    \(includeContentTypeColumns ? "contentType TEXT DEFAULT NULL" : "")
                 );
                 CREATE TABLE StudyPadTextEntryText (
                     studyPadTextEntryId BLOB NOT NULL PRIMARY KEY,
@@ -1128,7 +1174,12 @@ extension AndBibleTests {
         }
 
         for note in bibleNotes {
-            try insertBookmarkNote(note, tableName: "BibleBookmarkNotes", db: db)
+            try insertBookmarkNote(
+                note,
+                tableName: "BibleBookmarkNotes",
+                includeContentTypeColumn: includeContentTypeColumns,
+                db: db
+            )
         }
 
         for link in bibleLinks {
@@ -1167,7 +1218,12 @@ extension AndBibleTests {
         }
 
         for note in genericNotes {
-            try insertBookmarkNote(note, tableName: "GenericBookmarkNotes", db: db)
+            try insertBookmarkNote(
+                note,
+                tableName: "GenericBookmarkNotes",
+                includeContentTypeColumn: includeContentTypeColumns,
+                db: db
+            )
         }
 
         for link in genericLinks {
@@ -1179,7 +1235,9 @@ extension AndBibleTests {
             XCTAssertEqual(
                 sqlite3_prepare_v2(
                     db,
-                    "INSERT INTO StudyPadTextEntry (id, labelId, orderNumber, indentLevel) VALUES (?, ?, ?, ?)",
+                    includeContentTypeColumns
+                        ? "INSERT INTO StudyPadTextEntry (id, labelId, orderNumber, indentLevel, contentType) VALUES (?, ?, ?, ?, ?)"
+                        : "INSERT INTO StudyPadTextEntry (id, labelId, orderNumber, indentLevel) VALUES (?, ?, ?, ?)",
                     -1,
                     &statement,
                     nil
@@ -1190,6 +1248,9 @@ extension AndBibleTests {
             bindUUIDBlob(entry.labelID, to: statement, index: 2)
             sqlite3_bind_int(statement, 3, Int32(entry.orderNumber))
             sqlite3_bind_int(statement, 4, Int32(entry.indentLevel))
+            if includeContentTypeColumns {
+                bindOptionalText(entry.contentType, to: statement, index: 5)
+            }
             XCTAssertEqual(sqlite3_step(statement), SQLITE_DONE)
             sqlite3_finalize(statement)
         }
@@ -1237,12 +1298,19 @@ extension AndBibleTests {
         return databaseURL
     }
 
-    func insertBookmarkNote(_ note: AndroidBookmarkNoteRow, tableName: String, db: OpaquePointer) throws {
+    func insertBookmarkNote(
+        _ note: AndroidBookmarkNoteRow,
+        tableName: String,
+        includeContentTypeColumn: Bool = true,
+        db: OpaquePointer
+    ) throws {
         var statement: OpaquePointer?
         XCTAssertEqual(
             sqlite3_prepare_v2(
                 db,
-                "INSERT INTO \(tableName) (bookmarkId, notes) VALUES (?, ?)",
+                includeContentTypeColumn
+                    ? "INSERT INTO \(tableName) (bookmarkId, notes, contentType) VALUES (?, ?, ?)"
+                    : "INSERT INTO \(tableName) (bookmarkId, notes) VALUES (?, ?)",
                 -1,
                 &statement,
                 nil
@@ -1251,6 +1319,9 @@ extension AndBibleTests {
         )
         bindUUIDBlob(note.bookmarkID, to: statement, index: 1)
         sqlite3_bind_text(statement, 2, note.notes, -1, sqliteTransient)
+        if includeContentTypeColumn {
+            bindOptionalText(note.contentType, to: statement, index: 3)
+        }
         XCTAssertEqual(sqlite3_step(statement), SQLITE_DONE)
         sqlite3_finalize(statement)
     }
