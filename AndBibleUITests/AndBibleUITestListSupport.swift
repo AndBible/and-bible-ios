@@ -1089,7 +1089,7 @@ extension AndBibleUITests {
      * - Returns: The root accessibility-identified Text Display screen element.
      * - Side effects:
      *   - opens the reader overflow menu and activates the production All Text Options action
-     *   - pushes the window-scoped Text Display screen onto the reader navigation stack
+     *   - pushes the workspace-scoped Text Display screen onto the reader navigation stack
      * - Failure modes:
      *   - fails when the All Text Options action or Text Display screen never appears
      */
@@ -1191,13 +1191,11 @@ extension AndBibleUITests {
                     settingsForm.cells[visibleTitle].firstMatch,
                     settingsForm.otherElements[visibleTitle].firstMatch,
                     settingsForm.cells.containing(.staticText, identifier: visibleTitle).firstMatch,
-                    settingsForm.staticTexts[visibleTitle].firstMatch,
                     app.links[visibleTitle].firstMatch,
                     app.buttons[visibleTitle].firstMatch,
                     app.cells[visibleTitle].firstMatch,
                     app.otherElements[visibleTitle].firstMatch,
                     app.cells.containing(.staticText, identifier: visibleTitle).firstMatch,
-                    app.staticTexts[visibleTitle].firstMatch,
                 ], at: 0)
             }
 
@@ -1379,6 +1377,8 @@ extension AndBibleUITests {
             "Repositories"
         case "settingsImportExportLink":
             "Import & Export"
+        case "settingsGlobalTextOptionsLink":
+            "Global text options"
         case "settingsSyncLink":
             "Device synchronization"
         case "settingsReadingProgressLink":
@@ -1392,7 +1392,7 @@ extension AndBibleUITests {
 
     /**
      Opens one Settings destination and retries the row tap once when hosted simulators leave the
-     view on the Settings form after the first navigation attempt.
+     view on the Settings form after a no-op navigation attempt.
      *
      * - Parameters:
      *   - linkIdentifier: Accessibility identifier of the Settings row to activate.
@@ -1404,8 +1404,8 @@ extension AndBibleUITests {
      *   - line: Source line used for XCTest failure attribution.
      * - Returns: The resolved destination root element.
      * - Side effects:
-     *   - opens Settings, taps the requested row, and retries the tap once when the first attempt
-     *     leaves the UI on the Settings form
+     *   - opens Settings, taps the requested row, and retries the tap in place when the first
+     *     attempt leaves the UI on the Settings form
      * - Failure modes:
      *   - records an XCTest failure if the destination screen never appears after two attempts
      */
@@ -1454,8 +1454,6 @@ extension AndBibleUITests {
                     waitForSettingsReady(in: app, timeout: 3) ||
                     unresolvedElement("settingsForm", in: app).exists
                 if settingsStillVisible {
-                    dismissSettings(in: app)
-                    openSettings(in: app)
                     continue
                 }
             }

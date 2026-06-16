@@ -19,6 +19,7 @@ struct BibleReaderDocumentHeader<ToolbarActions: View>: View {
     private let mode: BibleReaderDocumentHeaderMode
     private let currentReference: String
     private let avoidanceInsets: EdgeInsets
+    private let surfacePalette: ReaderThemeSurfacePalette
     private let onOpenNavigationDrawer: () -> Void
     private let onNavigatePrevious: () -> Void
     private let onShowBookChooser: () -> Void
@@ -33,6 +34,7 @@ struct BibleReaderDocumentHeader<ToolbarActions: View>: View {
         mode: BibleReaderDocumentHeaderMode,
         currentReference: String,
         avoidanceInsets: EdgeInsets,
+        surfacePalette: ReaderThemeSurfacePalette = .standard,
         onOpenNavigationDrawer: @escaping () -> Void,
         onNavigatePrevious: @escaping () -> Void,
         onShowBookChooser: @escaping () -> Void,
@@ -46,6 +48,7 @@ struct BibleReaderDocumentHeader<ToolbarActions: View>: View {
         self.mode = mode
         self.currentReference = currentReference
         self.avoidanceInsets = avoidanceInsets
+        self.surfacePalette = surfacePalette
         self.onOpenNavigationDrawer = onOpenNavigationDrawer
         self.onNavigatePrevious = onNavigatePrevious
         self.onShowBookChooser = onShowBookChooser
@@ -66,7 +69,8 @@ struct BibleReaderDocumentHeader<ToolbarActions: View>: View {
             .padding(.bottom, 8)
             .padding(.leading, 16 + avoidanceInsets.leading)
             .padding(.trailing, 16)
-            .background(.bar)
+            .foregroundStyle(surfacePalette.foregroundColor)
+            .background(surfacePalette.backgroundColor)
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("readerDocumentHeader")
         }
@@ -157,7 +161,7 @@ struct BibleReaderDocumentHeader<ToolbarActions: View>: View {
                 if let subtitle {
                     Text(subtitle)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(surfacePalette.secondaryForegroundColor)
                         .lineLimit(1)
                 }
             }
@@ -183,7 +187,7 @@ struct BibleReaderDocumentHeader<ToolbarActions: View>: View {
             Button(action: onNavigatePrevious) {
                 Image(systemName: "chevron.left")
                     .font(.body.weight(.semibold))
-                    .foregroundStyle(hasPrevious ? .primary : .tertiary)
+                    .foregroundStyle(hasPrevious ? surfacePalette.foregroundColor : surfacePalette.disabledForegroundColor)
             }
             .disabled(!hasPrevious)
             .accessibilityLabel(String(localized: "previous_chapter"))
@@ -199,7 +203,7 @@ struct BibleReaderDocumentHeader<ToolbarActions: View>: View {
                     }
                     Text(subtitle)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(surfacePalette.secondaryForegroundColor)
                         .lineLimit(1)
                 }
             }
@@ -211,7 +215,7 @@ struct BibleReaderDocumentHeader<ToolbarActions: View>: View {
             Button(action: onNavigateNext) {
                 Image(systemName: "chevron.right")
                     .font(.body.weight(.semibold))
-                    .foregroundStyle(hasNext ? .primary : .tertiary)
+                    .foregroundStyle(hasNext ? surfacePalette.foregroundColor : surfacePalette.disabledForegroundColor)
             }
             .disabled(!hasNext)
             .accessibilityLabel(String(localized: "next_chapter"))
@@ -234,7 +238,7 @@ struct BibleReaderDocumentHeader<ToolbarActions: View>: View {
         Button(action: onOpenNavigationDrawer) {
             Image(systemName: "line.3.horizontal")
                 .font(.body.weight(.semibold))
-                .foregroundStyle(.primary)
+                .foregroundStyle(surfacePalette.foregroundColor)
                 .frame(width: 28, height: 28)
         }
         .buttonStyle(.plain)

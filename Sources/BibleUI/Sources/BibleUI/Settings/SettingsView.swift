@@ -128,6 +128,9 @@ public struct SettingsView: View {
     /// Global font size multiplier percentage applied to reader rendering.
     @State private var fontSizeMultiplier = AppPreferenceRegistry.intDefault(for: .fontSizeMultiplier) ?? 100
 
+    /// Global structured text-display settings edited from Android's root Application Preferences.
+    @State private var globalTextDisplaySettings = TextDisplaySettings.appDefaults
+
     /// Whether the bottom window button bar should hide in fullscreen mode.
     @State private var fullScreenHideButtons =
         AppPreferenceRegistry.boolDefault(for: .fullScreenHideButtonsPref) ?? true
@@ -1233,13 +1236,26 @@ public struct SettingsView: View {
     /**
      Builds Android's root "Look & feel" Application Preferences section.
 
-     Text display and color editors stay on the reader All Text Options route; this root section
-     mirrors the Android application-preference rows visible in production, such as language,
-     animation, window chrome, and one-tap action preferences.
+     This mirrors Android's root settings category, including the structured Global Text Options
+     shortcut plus scalar rows such as language, animation, window chrome, and one-tap action
+     preferences.
      */
     @ViewBuilder
     private var lookAndFeelSection: some View {
         settingsPreferenceSection(String(localized: "prefs_display_customization_cat", defaultValue: "Look & feel")) {
+            if settingsSearchMatchesEntry(globalTextDisplaySettingsSearchEntry) {
+                settingsNavigationLink(
+                    title: globalTextDisplaySettingsSearchEntry.title,
+                    androidKey: ApplicationSettingsPresentation.globalTextOptions.androidKey,
+                    summary: globalTextDisplaySettingsSearchEntry.summary,
+                    accessibilityIdentifier: globalTextDisplaySettingsSearchEntry.identifier
+                ) {
+                    TextDisplaySettingsView(
+                        settings: $globalTextDisplaySettings,
+                        onChange: applyGlobalTextDisplaySettingsChange
+                    )
+                }
+            }
             if settingsSearchMatchesPreference(.localePref, in: lookAndFeelSettingsSearchEntries) {
                 settingsMenuRow(
                     preferenceKey: .localePref,
@@ -1892,6 +1908,7 @@ public struct SettingsView: View {
     /// Search entries for appearance preferences shown in Android's root Application Preferences.
     private var lookAndFeelSettingsSearchEntries: [AndBibleSettingsSearchEntry] {
         [
+            globalTextDisplaySettingsSearchEntry,
             preferenceSearchEntry(
                 .localePref,
                 title: String(localized: "prefs_interface_locale_title", defaultValue: "Application language")
@@ -2062,6 +2079,19 @@ public struct SettingsView: View {
                 keywords: ["about", "application"]
             ),
         ]
+    }
+
+    /// Search entry for Android's root Global Text Options shortcut.
+    private var globalTextDisplaySettingsSearchEntry: AndBibleSettingsSearchEntry {
+        .init(
+            identifier: "settingsGlobalTextOptionsLink",
+            title: String(localized: "global_text_display_settings_title", defaultValue: "Global text options"),
+            summary: String(
+                localized: "global_text_display_settings_summary",
+                defaultValue: "Default text display settings for all workspaces"
+            ),
+            keywords: [ApplicationSettingsPresentation.globalTextOptions.androidKey]
+        )
     }
 
     /// Whether a non-empty query currently filters out every available settings section.
@@ -2430,7 +2460,7 @@ public struct SettingsView: View {
         guard UITestRuntimeConfiguration.enablesDetailedAccessibilityExports else {
             return ""
         }
-        var primaryLinks = ["settingsSyncLink"]
+        var primaryLinks = ["settingsGlobalTextOptionsLink", "settingsSyncLink"]
         if canOpenReadingProgressSettings {
             primaryLinks.append("settingsReadingProgressLink")
         }
@@ -2474,6 +2504,7 @@ public struct SettingsView: View {
         showErrorBox = store.getBool(.showErrorBox)
         enableBluetoothMediaButtons = store.getBool(.enableBluetoothPref)
         fontSizeMultiplier = store.getInt(.fontSizeMultiplier)
+        globalTextDisplaySettings = store.globalTextDisplaySettings()
         fullScreenHideButtons = store.getBool(.fullScreenHideButtonsPref)
         hideWindowButtons = store.getBool(.hideWindowButtons)
         hideBibleReferenceOverlay = store.getBool(.hideBibleReferenceOverlay)
@@ -2612,6 +2643,25 @@ public struct SettingsView: View {
             UserDefaults.standard.removeObject(forKey: "AppleLanguages")
         }
         showRestartAlert = true
+    }
+
+    /**
+     Persists Android's global text-display settings from Application Preferences.
+
+     Android stores this structured row separately from scalar app preferences and refreshes all
+     windows after changes. iOS uses `SettingsStore.setGlobalTextDisplaySettings` so matching
+     workspace/window overrides are cleared through the existing Android-parity propagation path.
+
+     - Side Effects:
+       - writes `global_text_display_settings`
+       - may clear redundant workspace/window text-display overrides
+       - invokes `onSettingsChanged` so visible reader panes reload the new global defaults
+     - Failure: Store failures follow the soft-failure behavior documented by `SettingsStore`.
+     */
+    private func applyGlobalTextDisplaySettingsChange() {
+        let store = SettingsStore(modelContext: modelContext)
+        store.setGlobalTextDisplaySettings(globalTextDisplaySettings)
+        onSettingsChanged?()
     }
 
     /**

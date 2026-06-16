@@ -526,7 +526,14 @@
 
 /* Text Display Settings */
 "global_text_display_settings_title" = "Global text options";
+"global_text_display_settings_summary" = "Default text display settings for all workspaces";
+"workspace_text_display_settings_title" = "Text options - %@";
 "window_text_display_settings_title" = "Text options - Window %d";
+"parent_settings_category_title" = "Parent settings";
+"workspace_text_options_link" = "Workspace text options - %@";
+"workspace_text_options_link_summary" = "Edit text display settings for this workspace";
+"global_text_options_link" = "Global text options";
+"global_text_options_link_summary" = "Edit default text display settings for all workspaces";
 "text_display_font_size_title_format" = "Font size (%d pt)";
 "text_display_font_family_title_format" = "Font family (%@)";
 "text_display_line_spacing_title_format" = "Line spacing (%1.1fx)";
@@ -536,6 +543,7 @@
 "text_display_left_margin_title_format" = "Left margin (%d mm)";
 "text_display_right_margin_title_format" = "Right margin (%d mm)";
 "text_display_max_width_title_format" = "Maximum width of text (%d mm)";
+"all_text_options_window_menutitle" = "All text options";
 
 "prefs_behavior_customization_cat" = "Application behavior";
 "prefs_display_customization_cat" = "Look & feel";
