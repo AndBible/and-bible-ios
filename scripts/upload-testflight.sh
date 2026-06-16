@@ -13,6 +13,10 @@
 # The encrypted key lives outside the repo (default: ~/.appstoreconnect/...).
 set -euo pipefail
 
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+REPO_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd -P)"
+cd "$REPO_ROOT"
+
 PROJECT="AndBible.xcodeproj"
 SCHEME="AndBible"
 KEY_ID="${ASC_KEY_ID:?Set ASC_KEY_ID to the App Store Connect API key ID}"
@@ -85,6 +89,8 @@ cat > "$EXPORT_OPTS" <<PLIST
 	<string>${TEAM_ID}</string>
 	<key>uploadSymbols</key>
 	<true/>
+	<key>manageAppVersionAndBuildNumber</key>
+	<false/>
 	<!-- Automatic (cloud) signing: the Admin App Store Connect API key creates and
 	     downloads the iOS Distribution certificate and App Store provisioning
 	     profile on demand. Requires xcodebuild -allowProvisioningUpdates. -->
@@ -99,17 +105,20 @@ PLIST
 if [ "${REUSE_ARCHIVE:-0}" = "1" ] && [ -d "$ARCHIVE" ]; then
 	echo ">> Reusing existing archive: $ARCHIVE"
 else
-	# Unique, increasing build number (UTC YYYY.MMDD.HHMM). Back up the original
+	# Unique, increasing build number (UTC YYYY.MMDD.HHMMSS). Back up the original
 	# plist first; cleanup restores it on exit so the working tree stays clean and
 	# successive uploads never collide.
 	INFOPLIST_BAK="build/Info.plist.orig"
 	cp "$INFOPLIST" "$INFOPLIST_BAK"
-	BUILD_NUMBER="$(date -u '+%Y.%m%d.%H%M')"
+	BUILD_NUMBER="$(date -u '+%Y.%m%d.%H%M%S')"
 	/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" "$INFOPLIST"
 	echo ">> Archiving (build $BUILD_NUMBER)…"
 	xcodebuild -project "$PROJECT" -scheme "$SCHEME" \
 		-sdk iphoneos -destination 'generic/platform=iOS' \
 		-archivePath "$ARCHIVE" -allowProvisioningUpdates \
+		-authenticationKeyPath "$KEYFILE" \
+		-authenticationKeyID "$KEY_ID" \
+		-authenticationKeyIssuerID "$ISSUER_ID" \
 		clean archive
 fi
 
