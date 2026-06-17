@@ -26,8 +26,8 @@ public struct VerseKeyChildren: Sendable {
  The reader bridge needs the same category of answers Android receives from JSword's
  `Versification`: exact book/chapter/verse identity plus the intro-inclusive ordinal used by
  bookmarks, navigation, highlighting, memorization, and reference documents. This value is copied
- out of the SWORD module while the module cursor is protected by `SwordModule`'s serialization
- queue, so callers can retain it without holding any SWORD-owned pointers.
+ out of the SWORD module while the module cursor is protected by `SwordRuntime`, so callers can
+ retain it without holding any SWORD-owned pointers.
  */
 public struct VerseKeyReference: Sendable, Equatable {
     /// OSIS book identifier, such as `Gen`, `Ruth`, or `1Cor`.
@@ -71,54 +71,55 @@ public struct VerseKeyReference: Sendable, Equatable {
  Swift wrapper around a SWORD SWModule instance.
 
  Provides verse key navigation, text retrieval, and search capabilities.
- All operations are serialized on an internal queue since libsword is not thread-safe.
+ All operations are serialized through `SwordRuntime` since libsword and the flat bridge keep
+ process-global state and are not thread-safe.
 
  Do not create instances directly — obtain them from `SwordManager.module(named:)`.
  */
 public final class SwordModule: @unchecked Sendable {
     let handle: UnsafeMutableRawPointer
-    private let queue: DispatchQueue
 
     /// Module metadata.
     public let info: ModuleInfo
 
-    init(handle: UnsafeMutableRawPointer, queue: DispatchQueue, modulePath: String? = nil) {
+    init(handle: UnsafeMutableRawPointer, modulePath: String? = nil) {
         self.handle = handle
-        self.queue = queue
 
-        // Extract metadata once at init
-        let name = String(cString: SWModule_getName(handle))
-        let description = String(cString: SWModule_getDescription(handle))
-        let typeStr = String(cString: SWModule_getType(handle))
-        let language = String(cString: SWModule_getLanguage(handle))
+        self.info = SwordRuntime.sync {
+            // Extract metadata once at init
+            let name = String(cString: SWModule_getName(handle))
+            let description = String(cString: SWModule_getDescription(handle))
+            let typeStr = String(cString: SWModule_getType(handle))
+            let language = String(cString: SWModule_getLanguage(handle))
 
-        // Detect features by parsing the .conf file directly from disk.
-        // SWORD's flat API getConfigEntry() only returns the FIRST value for
-        // multi-value keys (Feature, GlobalOptionFilter), so modules like KJV
-        // where StrongsNumbers isn't the first entry are missed. Reading the
-        // .conf file catches ALL entries.
-        let features = SwordModule.detectFeatures(
-            name: name, handle: handle, modulePath: modulePath
-        )
+            // Detect features by parsing the .conf file directly from disk.
+            // SWORD's flat API getConfigEntry() only returns the FIRST value for
+            // multi-value keys (Feature, GlobalOptionFilter), so modules like KJV
+            // where StrongsNumbers isn't the first entry are missed. Reading the
+            // .conf file catches ALL entries.
+            let features = SwordModule.detectFeatures(
+                name: name, handle: handle, modulePath: modulePath
+            )
 
-        let cipherKey = SWModule_getConfigEntry(handle, "CipherKey")
-        let isEncrypted = cipherKey != nil
-        let directionPtr = SWModule_getConfigEntry(handle, "Direction")
-        let direction = directionPtr != nil ? String(cString: directionPtr!) : "LtoR"
-        let versionPtr = SWModule_getConfigEntry(handle, "Version")
-        let versionStr = versionPtr != nil ? String(cString: versionPtr!) : ""
+            let cipherKey = SWModule_getConfigEntry(handle, "CipherKey")
+            let isEncrypted = cipherKey != nil
+            let directionPtr = SWModule_getConfigEntry(handle, "Direction")
+            let direction = directionPtr != nil ? String(cString: directionPtr!) : "LtoR"
+            let versionPtr = SWModule_getConfigEntry(handle, "Version")
+            let versionStr = versionPtr != nil ? String(cString: versionPtr!) : ""
 
-        self.info = ModuleInfo(
-            name: name,
-            description: description,
-            category: ModuleCategory(typeString: typeStr),
-            language: language,
-            version: versionStr,
-            isEncrypted: isEncrypted,
-            isUnlocked: !isEncrypted || (cipherKey.map { String(cString: $0) } ?? "").isEmpty == false,
-            features: features,
-            isRightToLeft: direction == "RtoL"
-        )
+            return ModuleInfo(
+                name: name,
+                description: description,
+                category: ModuleCategory(typeString: typeStr),
+                language: language,
+                version: versionStr,
+                isEncrypted: isEncrypted,
+                isUnlocked: !isEncrypted || (cipherKey.map { String(cString: $0) } ?? "").isEmpty == false,
+                features: features,
+                isRightToLeft: direction == "RtoL"
+            )
+        }
     }
 
     // MARK: - Key Navigation
@@ -128,28 +129,28 @@ public final class SwordModule: @unchecked Sendable {
      - Parameter keyText: A verse reference like "Gen 1:1" or a dictionary key.
      */
     public func setKey(_ keyText: String) {
-        queue.sync {
+        SwordRuntime.sync {
             SWModule_setKeyText(handle, keyText)
         }
     }
 
     /// Get the current key text.
     public func currentKey() -> String {
-        queue.sync {
+        SwordRuntime.sync {
             String(cString: SWModule_getKeyText(handle))
         }
     }
 
     /// Get structured VerseKey data for the current position when the module uses VerseKey.
     public func currentVerseKeyChildren() -> VerseKeyChildren? {
-        queue.sync {
+        SwordRuntime.sync {
             Self.currentVerseKeyChildren(handle: handle)
         }
     }
 
     /// Get the current SWORD VerseKey index for verse-key modules.
     public func currentVerseKeyIndex() -> Int? {
-        queue.sync {
+        SwordRuntime.sync {
             let index = SWModule_getVerseKeyIndex(handle)
             return index >= 0 ? Int(index) : nil
         }
@@ -176,7 +177,7 @@ public final class SwordModule: @unchecked Sendable {
     public func verseOrdinal(osisBookId: String, chapter: Int, verse: Int) -> Int? {
         guard chapter > 0, verse > 0, !osisBookId.isEmpty else { return nil }
 
-        return queue.sync {
+        return SwordRuntime.sync {
             let previousKey = String(cString: SWModule_getKeyText(handle))
             defer { SWModule_setKeyText(handle, previousKey) }
 
@@ -213,7 +214,7 @@ public final class SwordModule: @unchecked Sendable {
     public func verseReference(osisBookId: String? = nil, ordinal: Int) -> VerseKeyReference? {
         guard ordinal > 0 else { return nil }
 
-        return queue.sync {
+        return SwordRuntime.sync {
             let previousKey = String(cString: SWModule_getKeyText(handle))
             defer { SWModule_setKeyText(handle, previousKey) }
 
@@ -256,7 +257,7 @@ public final class SwordModule: @unchecked Sendable {
     public func inspectVerseKeyAndRawEntryRestoringPrevious(
         _ keyText: String
     ) -> (actualKey: String, verseKey: VerseKeyChildren?, rawEntry: String) {
-        queue.sync {
+        SwordRuntime.sync {
             let previousKey = String(cString: SWModule_getKeyText(handle))
             SWModule_setKeyText(handle, keyText)
             let actualKey = String(cString: SWModule_getKeyText(handle))
@@ -343,7 +344,7 @@ public final class SwordModule: @unchecked Sendable {
        desynchronizing later raw-entry reads.
      */
     public func parseKeyList(_ keyText: String) -> [String] {
-        queue.sync {
+        SwordRuntime.sync {
             let previousKey = String(cString: SWModule_getKeyText(handle))
             defer { SWModule_setKeyText(handle, previousKey) }
 
@@ -371,7 +372,7 @@ public final class SwordModule: @unchecked Sendable {
     public func verseCount(osisBookId: String, chapter: Int) -> Int? {
         guard chapter > 0, !osisBookId.isEmpty else { return nil }
 
-        return queue.sync {
+        return SwordRuntime.sync {
             let previousKey = String(cString: SWModule_getKeyText(handle))
             defer { SWModule_setKeyText(handle, previousKey) }
 
@@ -414,7 +415,7 @@ public final class SwordModule: @unchecked Sendable {
                                 level2: String? = nil,
                                 level3: String? = nil,
                                 filtered: Bool = false) -> [String] {
-        queue.sync {
+        SwordRuntime.sync {
             func withOptionalCString<T>(_ value: String?, _ body: (UnsafePointer<CChar>?) -> T) -> T {
                 guard let value else { return body(nil) }
                 return value.withCString(body)
@@ -446,7 +447,7 @@ public final class SwordModule: @unchecked Sendable {
      */
     @discardableResult
     public func next() -> Bool {
-        queue.sync {
+        SwordRuntime.sync {
             SWModule_next(handle) == 0
         }
     }
@@ -457,21 +458,21 @@ public final class SwordModule: @unchecked Sendable {
      */
     @discardableResult
     public func previous() -> Bool {
-        queue.sync {
+        SwordRuntime.sync {
             SWModule_previous(handle) == 0
         }
     }
 
     /// Navigate to the beginning of the module.
     public func begin() {
-        queue.sync {
+        SwordRuntime.sync {
             SWModule_begin(handle)
         }
     }
 
     /// Check if the current position is at the end.
     public var isAtEnd: Bool {
-        queue.sync {
+        SwordRuntime.sync {
             SWModule_isEnd(handle) != 0
         }
     }
@@ -479,12 +480,12 @@ public final class SwordModule: @unchecked Sendable {
     // MARK: - Text Retrieval
 
     /**
-     Atomically set key, read back actual key, and render text in one queue.sync block.
+     Atomically set key, read back actual key, and render text in one `SwordRuntime.sync` block.
      This prevents interleaving with other SWORD operations between setKey/currentKey/renderText.
      Returns (actualKey, renderedText).
      */
     public func setKeyAndRender(_ keyText: String) -> (actualKey: String, text: String) {
-        queue.sync {
+        SwordRuntime.sync {
             SWModule_setKeyText(handle, keyText)
             let actualKey = String(cString: SWModule_getKeyText(handle))
             let text = String(cString: SWModule_getRenderText(handle))
@@ -505,7 +506,7 @@ public final class SwordModule: @unchecked Sendable {
         includeRenderedText: Bool = true,
         includeStrippedText: Bool = true
     ) -> (actualKey: String, rawEntry: String, renderedText: String, strippedText: String) {
-        queue.sync {
+        SwordRuntime.sync {
             SWModule_setKeyText(handle, keyText)
             let actualKey = String(cString: SWModule_getKeyText(handle))
             let rawEntry = String(cString: SWModule_getRawEntry(handle))
@@ -521,28 +522,28 @@ public final class SwordModule: @unchecked Sendable {
 
     /// Get rendered text (with markup/HTML) at the current position.
     public func renderText() -> String {
-        queue.sync {
+        SwordRuntime.sync {
             String(cString: SWModule_getRenderText(handle))
         }
     }
 
     /// Get raw entry text at the current position (no markup processing).
     public func rawEntry() -> String {
-        queue.sync {
+        SwordRuntime.sync {
             String(cString: SWModule_getRawEntry(handle))
         }
     }
 
     /// Get plain/strip text at the current position (no markup at all).
     public func stripText() -> String {
-        queue.sync {
+        SwordRuntime.sync {
             String(cString: SWModule_getStripText(handle))
         }
     }
 
     /// Get rendered header text (chapter/book introductions).
     public func renderHeader() -> String {
-        queue.sync {
+        SwordRuntime.sync {
             String(cString: SWModule_getRenderHeader(handle))
         }
     }
@@ -555,7 +556,7 @@ public final class SwordModule: @unchecked Sendable {
      - Returns: The value, or nil if not found.
      */
     public func configEntry(_ key: String) -> String? {
-        queue.sync {
+        SwordRuntime.sync {
             guard let cStr = SWModule_getConfigEntry(handle, key) else { return nil }
             return String(cString: cStr)
         }
@@ -566,7 +567,7 @@ public final class SwordModule: @unchecked Sendable {
      - Parameter key: The decryption key.
      */
     public func setCipherKey(_ key: String) {
-        queue.sync {
+        SwordRuntime.sync {
             SWModule_setCipherKey(handle, key)
         }
     }
@@ -592,7 +593,7 @@ public final class SwordModule: @unchecked Sendable {
      */
     public func getBookList() -> [BookInfo] {
         guard info.category == .bible || info.category == .commentary else { return [] }
-        return queue.sync {
+        return SwordRuntime.sync {
             let savedKey = String(cString: SWModule_getKeyText(handle))
             defer { SWModule_setKeyText(handle, savedKey) }
 
@@ -787,7 +788,7 @@ public final class SwordModule: @unchecked Sendable {
      Faster than `iterateAllEntries` since it skips text retrieval.
      */
     public func allKeys() -> [String] {
-        queue.sync {
+        SwordRuntime.sync {
             let savedKey = String(cString: SWModule_getKeyText(handle))
             defer { SWModule_setKeyText(handle, savedKey) }
 
@@ -809,7 +810,7 @@ public final class SwordModule: @unchecked Sendable {
      Returns the NULL-terminated string array from SWORD's getKeyChildren.
      */
     public func keyChildren() -> [String] {
-        queue.sync {
+        SwordRuntime.sync {
             guard let children = SWModule_getKeyChildren(handle) else { return [] }
             var result: [String] = []
             var i = 0
@@ -827,13 +828,13 @@ public final class SwordModule: @unchecked Sendable {
      Iterate through all entries in the module, calling the callback for each.
 
      The callback receives `(key, plainText, index)` and should return `true` to continue.
-     All SWORD operations run in a single queue.sync block for efficiency.
+     All SWORD operations run in a single `SwordRuntime.sync` block for correctness.
      The module's current key position is saved and restored after iteration.
 
      - Parameter callback: Called for each entry. Return `false` to stop early.
      */
     public func iterateAllEntries(_ callback: (String, String, Int) -> Bool) {
-        queue.sync {
+        SwordRuntime.sync {
             // Save current position
             let savedKey = String(cString: SWModule_getKeyText(handle))
 
@@ -865,7 +866,7 @@ public final class SwordModule: @unchecked Sendable {
      - Returns: Search results.
      */
     public func search(_ options: SearchOptions) -> SearchResults {
-        queue.sync {
+        SwordRuntime.sync {
             let flags: Int32 = options.caseInsensitive ? 2 : 0 // REG_ICASE = 2
 
             _ = SWModule_search(

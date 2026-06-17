@@ -17,6 +17,45 @@ import WebKit
 import struct SwiftUI.Color
 #endif
 
+/**
+ Thread-safe recorder for SWORD concurrency regression failures.
+
+ The stress test below intentionally runs native SWORD reads from multiple Dispatch worker threads.
+ XCTest assertions are collected here and asserted after `concurrentPerform` returns so failures are
+ deterministic and reported from the test method rather than from racing background closures.
+
+ - Side effects: Stores failure messages in memory behind an `NSLock`.
+ - Failure modes: None expected; lock contention only serializes recorder access, not SWORD access.
+ */
+private final class SwordConcurrencyFailureRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var messages: [String] = []
+
+    /**
+     Records one validation failure from a concurrent worker.
+
+     - Parameter message: Human-readable failure evidence including the worker index.
+     - Side effects: Appends to the protected message list.
+     */
+    func record(_ message: String) {
+        lock.lock()
+        messages.append(message)
+        lock.unlock()
+    }
+
+    /**
+     Returns all collected failures in insertion order.
+
+     - Returns: A copied array so XCTest can inspect it after worker execution completes.
+     - Side effects: Acquires the recorder lock while copying.
+     */
+    var all: [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return messages
+    }
+}
+
 extension AndBibleTests {
     func testCSVSetEncodingAndDecodingRoundTrip() {
         let encoded = AppPreferenceRegistry.encodeCSVSet(["  KJV  ", "", "ESV", "KJV", "  "])
@@ -290,6 +329,65 @@ extension AndBibleTests {
         XCTAssertNil(module.verseOrdinal(osisBookId: "Gen", chapter: 1, verse: 99))
         XCTAssertNil(module.verseOrdinal(osisBookId: "Gen", chapter: 99, verse: 1))
         XCTAssertNil(module.verseCount(osisBookId: "Gen", chapter: 99))
+    }
+
+    /**
+     Verifies concurrent Swift SWORD wrappers cannot interleave native libsword state.
+
+     The app can create fresh `SwordManager` instances after imports, restores, and module-store
+     refreshes while other reader/search code is still reading existing modules. The local C bridge
+     and libsword hold process-global pointer caches, so per-instance queues leave a race that can
+     surface as the CI-only `SIGSEGV` seen in the ordinal test. This regression runs many managers
+     against the same bundled KJV fixture in parallel; success means every worker received stable
+     JSword-parity verse ordinals, reverse references, verse counts, and parsed ranges.
+
+     - Setup: Copies the bundled SWORD fixture into one temporary module path shared by all workers.
+     - Expected result: No worker records a missing manager/module or inconsistent SWORD result.
+     - Failure meaning: Native SWORD access is not serialized at the process boundary, risking app
+       crashes during restore/import refreshes or parallel reader/search activity.
+     - Side effects: Creates temporary SWORD fixture files that shared test cleanup removes.
+     */
+    func testBundledKJVNativeAccessSerializesAcrossConcurrentManagers() throws {
+        let modulePath = try makeTemporaryBundledSwordPath()
+        let failures = SwordConcurrencyFailureRecorder()
+
+        DispatchQueue.concurrentPerform(iterations: 48) { index in
+            autoreleasepool {
+                guard let manager = SwordManager(modulePath: modulePath) else {
+                    failures.record("worker \(index): missing SwordManager")
+                    return
+                }
+                guard let module = manager.module(named: "KJV") else {
+                    failures.record("worker \(index): missing KJV module")
+                    return
+                }
+
+                let target = index.isMultiple(of: 2)
+                    ? (osisBookId: "Gen", chapter: 1, verse: 1, ordinal: 4)
+                    : (osisBookId: "Gen", chapter: 2, verse: 1, ordinal: 36)
+                let ordinal = module.verseOrdinal(
+                    osisBookId: target.osisBookId,
+                    chapter: target.chapter,
+                    verse: target.verse
+                )
+                let reference = module.verseReference(ordinal: target.ordinal)
+
+                if ordinal != target.ordinal {
+                    failures.record("worker \(index): expected ordinal \(target.ordinal), got \(String(describing: ordinal))")
+                }
+                if reference?.osisRef != "\(target.osisBookId).\(target.chapter).\(target.verse)" {
+                    failures.record("worker \(index): expected reference for ordinal \(target.ordinal), got \(String(describing: reference))")
+                }
+                if module.verseCount(osisBookId: "Gen", chapter: 1) != 31 {
+                    failures.record("worker \(index): unexpected Genesis 1 verse count")
+                }
+                if module.parseKeyList("Gen.1.1-Gen.1.3") != ["Gen.1.1", "Gen.1.2", "Gen.1.3"] {
+                    failures.record("worker \(index): OSIS range did not expand deterministically")
+                }
+            }
+        }
+
+        XCTAssertEqual(failures.all, [])
     }
 
     /**

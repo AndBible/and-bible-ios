@@ -83,7 +83,8 @@ public struct RemoteModuleInfo: Sendable, Identifiable {
 /**
  Swift wrapper around SWORD's InstallMgr for downloading and installing modules.
 
- All operations are serialized since libsword is not thread-safe.
+ All native operations are serialized through `SwordRuntime` since libsword and the flat bridge
+ keep process-global state and are not thread-safe.
 
  Usage:
  ```swift
@@ -117,7 +118,6 @@ public final class InstallManager: @unchecked Sendable {
     ]
 
     private let handle: UnsafeMutableRawPointer
-    private let queue = DispatchQueue(label: "org.andbible.InstallManager", qos: .userInitiated)
 
     /// The base path for install manager data.
     public let basePath: String
@@ -133,15 +133,19 @@ public final class InstallManager: @unchecked Sendable {
         // Ensure default remote sources config exists
         InstallManager.ensureDefaultConfig(at: path)
 
-        guard let h = InstallMgr_new(path) else { return nil }
+        guard let h = SwordRuntime.sync({ InstallMgr_new(path) }) else { return nil }
         self.handle = h
 
         // Accept disclaimer to enable remote operations
-        InstallMgr_setUserDisclaimerConfirmed(h)
+        SwordRuntime.sync {
+            InstallMgr_setUserDisclaimerConfirmed(h)
+        }
     }
 
     deinit {
-        InstallMgr_delete(handle)
+        SwordRuntime.sync {
+            InstallMgr_delete(handle)
+        }
     }
 
     /// Default base path for InstallManager data.
@@ -268,7 +272,7 @@ public final class InstallManager: @unchecked Sendable {
 
     /// List configured remote sources.
     public func remoteSources() -> [RemoteSource] {
-        queue.sync {
+        SwordRuntime.sync {
             let count = InstallMgr_getRemoteSourceCount(handle)
             var sources: [RemoteSource] = []
             sources.reserveCapacity(Int(count))
@@ -289,7 +293,7 @@ public final class InstallManager: @unchecked Sendable {
      */
     @discardableResult
     public func refreshSource(_ sourceName: String) -> Bool {
-        queue.sync {
+        SwordRuntime.sync {
             InstallMgr_refreshRemoteSource(handle, sourceName) == 0
         }
     }
@@ -302,7 +306,7 @@ public final class InstallManager: @unchecked Sendable {
      - Returns: List of available modules.
      */
     public func availableModules(from sourceName: String) -> [RemoteModuleInfo] {
-        queue.sync {
+        SwordRuntime.sync {
             let count = InstallMgr_getRemoteModuleCount(handle, sourceName)
             var modules: [RemoteModuleInfo] = []
             modules.reserveCapacity(Int(count))
@@ -355,9 +359,9 @@ public final class InstallManager: @unchecked Sendable {
     @discardableResult
     public func install(moduleName: String, from sourceName: String, into manager: SwordManager) -> Bool {
         // Note: This blocks until download completes. Call from a background task.
-        let mgrHandle = manager.rawHandle
-        return queue.sync {
-            InstallMgr_installModule(handle, mgrHandle, sourceName, moduleName) == 0
+        return SwordRuntime.sync {
+            let mgrHandle = manager.rawHandle
+            return InstallMgr_installModule(handle, mgrHandle, sourceName, moduleName) == 0
         }
     }
 
@@ -370,9 +374,9 @@ public final class InstallManager: @unchecked Sendable {
      */
     @discardableResult
     public func uninstall(moduleName: String, from manager: SwordManager) -> Bool {
-        let mgrHandle = manager.rawHandle
-        return queue.sync {
-            InstallMgr_uninstallModule(handle, mgrHandle, moduleName) == 0
+        return SwordRuntime.sync {
+            let mgrHandle = manager.rawHandle
+            return InstallMgr_uninstallModule(handle, mgrHandle, moduleName) == 0
         }
     }
 }
