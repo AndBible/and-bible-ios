@@ -882,9 +882,12 @@ extension AndBibleUITests {
      *   - timeout: Maximum number of seconds to wait before failing.
      * - Side effects:
      *   - reveals Search controls before querying stable word-mode identifiers
-     *   - dismisses text-field focus only after stable control lookup fails
+     *   - dismisses text-field focus before each activation attempt
+     *   - verifies the compact Search state export after each tap and retries when hosted
+     *     simulators synthesize a segmented-control tap without changing the selected mode
      * - Failure modes:
-     *   - fails if the requested mode control never appears on Search within the timeout
+     *   - fails if the requested mode control never appears or never updates the exported
+     *     Search word mode within the timeout
      */
     func tapSearchWordMode(
         _ label: String,
@@ -892,42 +895,79 @@ extension AndBibleUITests {
         timeout: TimeInterval = 10
     ) {
         let deadline = Date().addingTimeInterval(timeout)
+        guard let expectedToken = searchWordModeToken(forVisibleLabel: label) else {
+            XCTFail("Expected Search mode button '\(label)' to map to a stable word-mode token.")
+            return
+        }
+        let expectedStateToken = "wordMode=\(expectedToken)"
+
+        func isExpectedWordModeSelected() -> Bool {
+            searchStateCandidateValues(in: app).contains { value in
+                value.contains("state=ready")
+                    && value.contains("searching=false")
+                    && value.contains(expectedStateToken)
+            }
+        }
+
+        func waitForExpectedWordModeActivation(until activationDeadline: Date) -> Bool {
+            repeat {
+                if isExpectedWordModeSelected() {
+                    return true
+                }
+                RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+            } while Date() < activationDeadline
+            return isExpectedWordModeSelected()
+        }
 
         repeat {
+            if isExpectedWordModeSelected() {
+                return
+            }
+            dismissSearchFieldFocusIfNeeded(in: app)
             revealSearchControls(in: app)
             let searchScreen = unresolvedElement("searchScreen", in: app)
 
-            if let token = searchWordModeToken(forVisibleLabel: label) {
-                let identifier = "searchWordModeButton::\(token)"
-                let identifierCandidates = [
-                    searchScreen.buttons[identifier].firstMatch,
-                    searchScreen.otherElements[identifier].firstMatch,
-                    searchScreen.segmentedControls["searchWordModePicker"].buttons[label].firstMatch,
-                    searchScreen.segmentedControls.buttons[label].firstMatch,
-                    app.buttons[identifier].firstMatch,
-                    app.otherElements[identifier].firstMatch,
-                    app.segmentedControls["searchWordModePicker"].buttons[label].firstMatch,
-                    app.segmentedControls.buttons[label].firstMatch,
-                ]
-                for candidate in identifierCandidates where candidate.exists || candidate.waitForExistence(timeout: 0.2) {
-                    tapElementReliably(candidate, timeout: timeout)
+            let identifier = "searchWordModeButton::\(expectedToken)"
+            let identifierCandidates = [
+                searchScreen.buttons[identifier].firstMatch,
+                searchScreen.otherElements[identifier].firstMatch,
+                searchScreen.segmentedControls["searchWordModePicker"].buttons[label].firstMatch,
+                searchScreen.segmentedControls.buttons[label].firstMatch,
+                app.buttons[identifier].firstMatch,
+                app.otherElements[identifier].firstMatch,
+                app.segmentedControls["searchWordModePicker"].buttons[label].firstMatch,
+                app.segmentedControls.buttons[label].firstMatch,
+            ]
+            if let candidate = identifierCandidates.first(where: {
+                ($0.exists || $0.waitForExistence(timeout: 0.2))
+                    && waitForElementToBecomeHittable($0, timeout: 0.5)
+            }) {
+                tapElementReliably(candidate, timeout: min(2, max(0.5, deadline.timeIntervalSinceNow)))
+                if waitForExpectedWordModeActivation(until: min(Date().addingTimeInterval(2), deadline)) {
                     return
                 }
+                continue
             }
 
             if let segmentIndex = searchWordModeSegmentIndex(forVisibleLabel: label),
                let picker = [
                    searchScreen.segmentedControls["searchWordModePicker"].firstMatch,
                    searchScreen.otherElements["searchWordModePicker"].firstMatch,
-               ].first(where: { $0.exists || $0.waitForExistence(timeout: 0.2) })
+               ].first(where: {
+                   ($0.exists || $0.waitForExistence(timeout: 0.2))
+                       && !$0.frame.isEmpty
+               })
             {
                 tapSegmentedControlSegment(
                     picker,
                     index: segmentIndex,
                     segmentCount: SearchWordModeControl.segmentCount,
-                    timeout: timeout
+                    timeout: min(2, max(0.5, deadline.timeIntervalSinceNow))
                 )
-                return
+                if waitForExpectedWordModeActivation(until: min(Date().addingTimeInterval(2), deadline)) {
+                    return
+                }
+                continue
             }
 
             let fallbackCandidates = [
@@ -936,16 +976,28 @@ extension AndBibleUITests {
                 app.segmentedControls.buttons[label].firstMatch,
                 app.buttons[label].firstMatch,
             ]
-            for candidate in fallbackCandidates where candidate.exists || candidate.waitForExistence(timeout: 0.2) {
-                tapElementReliably(candidate, timeout: timeout)
-                return
+            if let candidate = fallbackCandidates.first(where: {
+                ($0.exists || $0.waitForExistence(timeout: 0.2))
+                    && waitForElementToBecomeHittable($0, timeout: 0.5)
+            }) {
+                tapElementReliably(candidate, timeout: min(2, max(0.5, deadline.timeIntervalSinceNow)))
+                if waitForExpectedWordModeActivation(until: min(Date().addingTimeInterval(2), deadline)) {
+                    return
+                }
+                continue
             }
 
-            dismissSearchFieldFocusIfNeeded(in: app)
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         } while Date() < deadline
 
-        XCTFail("Expected Search mode button '\(label)' to exist within \(timeout) seconds.")
+        let finalValues = searchStateCandidateValues(in: app)
+        if finalValues.contains(where: { $0.contains(expectedStateToken) }) {
+            return
+        }
+        let lastValue = finalValues.isEmpty ? "nil" : finalValues.joined(separator: " || ")
+        XCTFail(
+            "Expected Search mode button '\(label)' to select '\(expectedStateToken)' within \(timeout) seconds; last Search state was '\(lastValue)'."
+        )
     }
 
     /**
