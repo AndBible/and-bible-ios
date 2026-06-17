@@ -125,9 +125,10 @@ const char *SWModule_getConfigEntry(void *module, const char *key);
 /// Set the module's cipher key (for encrypted modules).
 void SWModule_setCipherKey(void *module, const char *key);
 
-/// Get key children for VerseKey modules.
-/// Returns a NULL-terminated array of strings:
-/// [testament, book, chapter, verse, chapterMax, verseMax, bookName, osisRef, ...]
+/// Get key children for VerseKey and tree-key modules.
+/// VerseKey modules return a NULL-terminated array of copied strings:
+/// [testament, book, chapter, verse, chapterMax, verseMax, bookName, osisRef, shortText, bookAbbreviation, osisBookName].
+/// Module and testament intro positions keep numeric fields but leave text fields empty.
 const char **SWModule_getKeyChildren(void *module);
 
 /// Get the current VerseKey intro-inclusive index, or -1 when the module key is not a VerseKey.

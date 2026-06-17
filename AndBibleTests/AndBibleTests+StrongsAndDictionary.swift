@@ -391,14 +391,12 @@ extension AndBibleTests {
     }
 
     /**
-     Verifies the Swift VerseKey parser preserves SWORD-provided metadata while accepting the
-     flat API's documented 8-field minimum.
+     Verifies the Swift VerseKey parser preserves SWORD-provided metadata from the native adapter.
 
-     `SWModule_getKeyChildren` has shipped with both an 8-field comment and 11 named VerseKey
-     constants. iOS must not collapse all text fields to the OSIS reference when the richer fields
-     are present, because book discovery, chapter rendering, and reference validation consume the
-     copied book name, abbreviation, and OSIS book fields. The bundled KJV fixture exercises the
-     same SWORD bridge used by imported Android backup modules.
+     iOS must not collapse all text fields to the OSIS reference, because book discovery, chapter
+     rendering, and reference validation consume the copied book name, abbreviation, and OSIS book
+     fields. The bundled KJV fixture exercises the same SWORD bridge used by imported Android
+     backup modules.
      */
     func testBundledKJVVerseKeyChildrenExposeBookMetadata() throws {
         let modulePath = try makeTemporaryBundledSwordPath()
