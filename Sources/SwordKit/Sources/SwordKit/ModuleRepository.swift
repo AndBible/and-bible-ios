@@ -1532,6 +1532,7 @@ public final class ModuleRepository: @unchecked Sendable {
        - streams readable MyBible SQLite payloads into a staged directory
        - writes installed-module metadata beside the extracted payload
        - atomically replaces any previous install for the same MyBible module initials
+       - posts `SwordModuleStore.modulesDidChangeNotification` after the staged install publishes
      - Throws:
        - `ModuleRepositoryError.invalidURL` when the manifest row has no HTTPS package URL
        - `ModuleRepositoryError.invalidZip` when the package is empty or lacks a MyBible payload
@@ -1604,6 +1605,7 @@ public final class ModuleRepository: @unchecked Sendable {
 
         try Task.checkCancellation()
         try commitStagedMyBibleInstall(stagingDirURL: stagingDirURL, moduleName: entry.name)
+        SwordModuleStore.notifyModulesDidChange()
         progress?(1.0)
     }
 
@@ -2359,7 +2361,10 @@ public final class ModuleRepository: @unchecked Sendable {
      and config files and invalidates SWORD's module cache.
 
      - Parameter moduleName: Installed module initials to remove.
-     - Side effects: deletes module files and may invalidate SWORD's module cache.
+     - Side effects:
+       - deletes module files
+       - invalidates SWORD's module cache for SWORD modules
+       - posts `SwordModuleStore.modulesDidChangeNotification` when a module is actually removed
      - Throws: file-system errors when deletion fails; SWORD lookup failures surface as
        `ModuleRepositoryError.moduleNotFound`.
      */
@@ -2408,7 +2413,9 @@ public final class ModuleRepository: @unchecked Sendable {
 
      - Parameter moduleName: MyBible module initials to remove.
      - Returns: `true` when a MyBible install was found and removed, otherwise `false`.
-     - Side effects: deletes the installed MyBible module directory.
+     - Side effects:
+       - deletes the installed MyBible module directory
+       - posts `SwordModuleStore.modulesDidChangeNotification` after successful removal
      - Failure modes: propagates file-system deletion errors.
      */
     private func uninstallMyBibleModuleIfPresent(named moduleName: String) throws -> Bool {
@@ -2418,15 +2425,28 @@ public final class ModuleRepository: @unchecked Sendable {
             return false
         }
         try FileManager.default.removeItem(at: moduleDirURL)
+        SwordModuleStore.notifyModulesDidChange()
         return true
     }
 
-    /// Delete SWORD's modules-conf.cache so the next SWMgr instance rescans mods.d/.
+    /**
+     Deletes SWORD's module cache and announces that installed-module snapshots should rescan.
+
+     Side effects:
+     - deletes `mods.d/modules-conf.cache` on a best-effort basis
+     - posts `SwordModuleStore.modulesDidChangeNotification` after successful module install or
+       uninstall paths publish their file-system mutations
+
+     Failure modes:
+     - cache deletion errors are ignored because SWORD can rebuild the cache and callers have already
+       completed the user-visible storage operation.
+     */
     private func invalidateModuleCache() {
         let cachePath = (swordPath as NSString)
             .appendingPathComponent("mods.d")
             .appending("/modules-conf.cache")
         try? FileManager.default.removeItem(atPath: cachePath)
+        SwordModuleStore.notifyModulesDidChange()
     }
 
     // MARK: - Install from ZIP

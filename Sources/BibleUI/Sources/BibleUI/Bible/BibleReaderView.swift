@@ -675,6 +675,11 @@ public struct BibleReaderView: View {
         .onChange(of: activeReaderDestination) { oldValue, newValue in
             handleActiveReaderDestinationChange(from: oldValue, to: newValue)
         }
+        .onReceive(NotificationCenter.default.publisher(for: SwordModuleStore.modulesDidChangeNotification)) { _ in
+            Task { @MainActor in
+                handleModuleStoreDidChange()
+            }
+        }
         .onChange(of: showReaderOverflowMenu) { oldValue, newValue in
             guard oldValue, !newValue else {
                 return
@@ -1274,6 +1279,29 @@ public struct BibleReaderView: View {
             return
         }
         reloadBehaviorPreferences()
+    }
+
+    /**
+     Refreshes open reader controllers after the installed SWORD module store changes.
+
+     Settings restores, external ZIP opens, and Downloads installs mutate module files outside the
+     reader controllers that own visible picker state. Those controllers must rebuild their
+     `SwordManager` instances because SWORD and the C bridge cache module lists per manager.
+
+     Side effects:
+     - recreates SWORD managers inside every open `BibleReaderController`
+     - hides the no-Bible startup prompt when a newly restored or installed Bible is now available
+
+     Failure modes:
+     - controllers that cannot create a replacement `SwordManager` retain their existing state.
+     */
+    private func handleModuleStoreDidChange() {
+        for (_, ctrl) in windowManager.controllers {
+            (ctrl as? BibleReaderController)?.refreshInstalledModules()
+        }
+        if showStartupDownloadPrompt, !startupHasNoBibleModules() {
+            showStartupDownloadPrompt = false
+        }
     }
 
     /// Presents a follow-up top-level sheet after another flow already captured the pane target.
