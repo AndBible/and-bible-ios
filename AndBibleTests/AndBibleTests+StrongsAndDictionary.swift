@@ -119,6 +119,56 @@ extension AndBibleTests {
         )
     }
 
+    /**
+     Verifies Strong's token extraction keeps the JSword raw-OSIS path primary and does not render
+     verse text when raw lexical tokens are already present.
+
+     JSword builds its `strong` field from parsed OSIS `<w lemma="strong:...">` values. Rendering a
+     verse to recover `showStrong` links is an iOS compatibility fallback for modules that do not
+     expose usable raw OSIS, not part of Android's primary search path. A failure means "find all
+     occurrences" may pay unnecessary render cost or merge fallback tokens into a verse whose raw
+     lexical data is already authoritative.
+     */
+    func testStrongsCanonicalExtractionSkipsRenderedFallbackWhenRawOSISHasLexicalTokens() {
+        var renderCount = 0
+
+        let tokens = StrongsSearchSupport.canonicalStrongTokens(
+            rawEntry: #"<w lemma="strong:H00430">God</w>"#,
+            renderedTextProvider: {
+                renderCount += 1
+                return #"<a href="passagestudy.jsp?action=showStrong=01234#cv">unexpected</a>"#
+            },
+            book: "Genesis"
+        )
+
+        XCTAssertEqual(tokens, ["H0430"])
+        XCTAssertEqual(renderCount, 0)
+    }
+
+    /**
+     Verifies the rendered-text fallback remains reachable for modules whose raw entries do not
+     expose JSword-style lexical tokens.
+
+     Some SWORD modules only expose Strong's links after rendering. iOS should still recover those
+     `showStrong` links when raw OSIS extraction finds no tokens, while keeping the same canonical
+     four-digit token shape used by JSword's Strong's index.
+     */
+    func testStrongsCanonicalExtractionUsesRenderedFallbackWhenRawOSISHasNoLexicalTokens() {
+        var renderCount = 0
+
+        let tokens = StrongsSearchSupport.canonicalStrongTokens(
+            rawEntry: "<p>God created.</p>",
+            renderedTextProvider: {
+                renderCount += 1
+                return #"<a href="passagestudy.jsp?action=showStrong=0430#cv">God</a>"#
+            },
+            book: "Genesis"
+        )
+
+        XCTAssertEqual(tokens, ["H0430"])
+        XCTAssertEqual(renderCount, 1)
+    }
+
     func testParseVerseKeySupportsHumanReadableFormat() {
         let parsed = StrongsSearchSupport.parseVerseKey("I Samuel 2:3")
         XCTAssertEqual(parsed?.book, "I Samuel")

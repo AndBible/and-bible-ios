@@ -80,6 +80,61 @@ extension AndBibleTests {
         )
     }
 
+    /**
+     Verifies bookmark-list range text keeps JSword's same-chapter shorthand.
+     *
+     Android reconstructs a JSword `VerseRange` from stored ordinals and displays the range name.
+     For a range within one chapter, JSword emits `Book chapter:start-end`, so the iOS bookmark
+     list should not expand the repeated chapter or collapse a real multi-verse range.
+     */
+    func testBookmarkListVerseReferenceFormatsSameChapterRangeLikeJSword() {
+        let bookmark = BibleBookmark(
+            kjvOrdinalStart: 5,
+            kjvOrdinalEnd: 7,
+            ordinalStart: 5,
+            ordinalEnd: 7,
+            v11n: "KJVA"
+        )
+        bookmark.book = "Genesis"
+
+        let reference = BookmarkListView.verseReference(for: bookmark) { _, ordinal in
+            [
+                5: BookmarkListVerseReference(chapter: 1, verse: 5),
+                7: BookmarkListVerseReference(chapter: 1, verse: 7),
+            ][ordinal]
+        }
+
+        XCTAssertEqual(reference, "Genesis 1:5-7")
+    }
+
+    /**
+     Verifies bookmark-list range text preserves the end chapter when a stored ordinal range crosses
+     a chapter boundary.
+     *
+     JSword `VerseRange` names same-book cross-chapter ranges as `Book startChapter:startVerse-
+     endChapter:endVerse`. A failure here means two different ranges such as `Genesis 1:5-2:5` and
+     `Genesis 1:5` can be rendered ambiguously or collapsed in the iOS bookmark list.
+     */
+    func testBookmarkListVerseReferenceKeepsCrossChapterEndChapterLikeJSword() {
+        let bookmark = BibleBookmark(
+            kjvOrdinalStart: 5,
+            kjvOrdinalEnd: 45,
+            ordinalStart: 5,
+            ordinalEnd: 45,
+            v11n: "KJVA"
+        )
+        bookmark.book = "Genesis"
+
+        let reference = BookmarkListView.verseReference(for: bookmark) { _, ordinal in
+            [
+                5: BookmarkListVerseReference(chapter: 1, verse: 5),
+                45: BookmarkListVerseReference(chapter: 2, verse: 5),
+            ][ordinal]
+        }
+
+        XCTAssertEqual(reference, "Genesis 1:5-2:5")
+    }
+
     #if os(iOS)
     @MainActor
     func testReaderBookmarkBridgeUpdateEmitsTypedPayloadShape() throws {
@@ -131,6 +186,103 @@ extension AndBibleTests {
         XCTAssertEqual(relation["type"] as? String, "BibleBookmarkToLabel")
         XCTAssertEqual(relation["bookmarkId"] as? String, bookmark.id.uuidString)
         XCTAssertEqual(relation["labelId"] as? String, Label.unlabeledId.uuidString)
+    }
+
+    /**
+     Verifies bookmark bridge payloads derive range fields from the same ordinal-backed
+     JSword-style verse range Android serializes through `ClientBibleBookmark`.
+     *
+     Data dependencies:
+     * - copies the bundled KJV SWORD module into a temporary module path
+     * - creates one Bible bookmark that spans Genesis 1:31 through Genesis 2:2
+     *
+     * Failure modes:
+     * - throws if bundled KJV cannot be loaded or its ordinals cannot be resolved
+     * - fails if iOS collapses cross-chapter ranges to the start chapter, emits a non-JSword OSIS
+     *   ref, or omits verse text from the end chapter
+     */
+    @MainActor
+    func testReaderBookmarkBridgeUpdateEmitsJSwordCrossChapterRangePayload() throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let modulePath = try makeTemporaryBundledSwordPath()
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let container = try makeBookmarkRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        let bookmarkStore = BookmarkStore(modelContext: modelContext)
+        let bookmarkService = BookmarkService(store: bookmarkStore)
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        controller.bookmarkService = bookmarkService
+        let module = try XCTUnwrap(manager.module(named: controller.activeModuleName))
+        let startOrdinal = try XCTUnwrap(module.verseOrdinal(osisBookId: "Gen", chapter: 1, verse: 31))
+        let endOrdinal = try XCTUnwrap(module.verseOrdinal(osisBookId: "Gen", chapter: 2, verse: 2))
+
+        let bookmark = bookmarkService.addBibleBookmark(
+            bookInitials: "KJV",
+            startOrdinal: startOrdinal,
+            endOrdinal: endOrdinal,
+            wholeVerse: true
+        )
+        bookmark.book = "Genesis"
+
+        controller.refreshBookmarkInVueJS(bookmarkId: bookmark.id)
+
+        let payload = try XCTUnwrap(
+            bridgeEmissionPayload(from: recordedScripts(), event: "add_or_update_bookmarks") as? [[String: Any]]
+        )
+        let bookmarkObject = try XCTUnwrap(payload.first)
+        XCTAssertEqual(bookmarkObject["osisRef"] as? String, "Gen.1.31-Gen.2.2")
+        XCTAssertEqual(bookmarkObject["verseRange"] as? String, "Genesis 1:31-2:2")
+        XCTAssertEqual(bookmarkObject["verseRangeOnlyNumber"] as? String, "31-2")
+        XCTAssertEqual(bookmarkObject["verseRangeAbbreviated"] as? String, "Gen 1:31-2:2")
+
+        let fullText = try XCTUnwrap(bookmarkObject["fullText"] as? String)
+        XCTAssertTrue(
+            fullText.contains("the heavens and the earth were finished"),
+            "Expected bridge payload text to include Genesis 2:1 content; got: \(fullText)"
+        )
+    }
+
+    /**
+     Verifies StudyPad bookmark payloads use the same JSword-style cross-chapter range projection
+     as live bookmark update events.
+     *
+     Android serializes Study Pad bookmarks through the same `ClientBibleBookmark` DTO as bookmark
+     update events. A failure means iOS has reintroduced drift between equivalent bridge payloads.
+     */
+    @MainActor
+    func testReaderStudyPadDocumentBridgeEmissionUsesJSwordCrossChapterRangePayload() throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let container = try makeBookmarkRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        let bookmarkStore = BookmarkStore(modelContext: modelContext)
+        let bookmarkService = BookmarkService(store: bookmarkStore)
+        let controller = BibleReaderController(bridge: bridge)
+        controller.bookmarkService = bookmarkService
+
+        let label = bookmarkService.createLabel(name: "Cross Chapter", color: Label.defaultColor)
+        let bookmark = bookmarkService.addBibleBookmark(
+            bookInitials: "KJV",
+            startOrdinal: 31,
+            endOrdinal: 42,
+            wholeVerse: true
+        )
+        bookmark.book = "Genesis"
+        _ = bookmarkService.toggleLabel(bookmarkId: bookmark.id, labelId: label.id)
+
+        controller.bridgeDidSetClientReady(bridge)
+        let scriptCount = recordedScripts().count
+        controller.loadStudyPadDocument(labelId: label.id, bookmarkId: bookmark.id)
+        let studyPadScripts = Array(recordedScripts().dropFirst(scriptCount))
+
+        let payload = try XCTUnwrap(
+            bridgeEmissionPayload(from: studyPadScripts, event: "add_documents") as? [String: Any]
+        )
+        let bookmarks = try XCTUnwrap(payload["bookmarks"] as? [[String: Any]])
+        let bookmarkObject = try XCTUnwrap(bookmarks.first)
+        XCTAssertEqual(bookmarkObject["osisRef"] as? String, "Gen.1.31-Gen.2.2")
+        XCTAssertEqual(bookmarkObject["verseRange"] as? String, "Genesis 1:31-2:2")
+        XCTAssertEqual(bookmarkObject["verseRangeOnlyNumber"] as? String, "31-2")
+        XCTAssertEqual(bookmarkObject["verseRangeAbbreviated"] as? String, "Gen 1:31-2:2")
     }
 
     @MainActor

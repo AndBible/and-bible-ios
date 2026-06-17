@@ -420,7 +420,7 @@ public struct BookmarkListView: View {
      Converts bookmark ordinals into a human-readable verse reference string.
 
      - Parameter bookmark: Bookmark whose ordinals should be rendered for the list UI.
-     - Returns: Reference text like `Genesis 1:1` or `Genesis 1:1-3`.
+     - Returns: Reference text like `Genesis 1:1`, `Genesis 1:1-3`, or `Genesis 1:31-2:1`.
      */
     static func verseReference(
         for bookmark: BibleBookmark,
@@ -434,10 +434,12 @@ public struct BookmarkListView: View {
         let endReference = ordinalResolver?(bookName, effectiveEnd)
             ?? compatibilityVerseReference(ordinal: effectiveEnd)
 
-        if effectiveEnd == bookmark.ordinalStart || endReference.verse == startReference.verse {
+        if effectiveEnd == bookmark.ordinalStart || endReference == startReference {
             return "\(bookName) \(startReference.chapter):\(startReference.verse)"
-        } else {
+        } else if endReference.chapter == startReference.chapter {
             return "\(bookName) \(startReference.chapter):\(startReference.verse)-\(endReference.verse)"
+        } else {
+            return "\(bookName) \(startReference.chapter):\(startReference.verse)-\(endReference.chapter):\(endReference.verse)"
         }
     }
 

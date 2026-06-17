@@ -7597,6 +7597,115 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     }
 
     /**
+     Ordinal-backed Bible bookmark range projected into the bridge fields used by Vue.js.
+
+     Android serializes bookmark ranges from a JSword `VerseRange`; this projection is the iOS
+     equivalent. It keeps `osisRef`, display names, abbreviated names, and number-only labels
+     derived from one resolved start/end pair instead of repeating range formatting at each bridge
+     call site.
+     */
+    private struct BookmarkBridgeVerseRangeProjection {
+        let startBookName: String
+        let startBookAbbreviation: String
+        let start: VerseKeyReference
+        let endBookName: String
+        let endBookAbbreviation: String
+        let end: VerseKeyReference
+
+        private var isSingleVerse: Bool {
+            start.osisBookId == end.osisBookId
+                && start.chapter == end.chapter
+                && start.verse == end.verse
+        }
+
+        var osisRef: String {
+            let startRef = "\(start.osisBookId).\(start.chapter).\(start.verse)"
+            guard !isSingleVerse else { return startRef }
+            return "\(startRef)-\(end.osisBookId).\(end.chapter).\(end.verse)"
+        }
+
+        var verseRange: String {
+            formattedRange(startBook: startBookName, endBook: endBookName)
+        }
+
+        var verseRangeOnlyNumber: String {
+            isSingleVerse ? "\(start.verse)" : "\(start.verse)-\(end.verse)"
+        }
+
+        var verseRangeAbbreviated: String {
+            formattedRange(startBook: startBookAbbreviation, endBook: endBookAbbreviation)
+        }
+
+        private func formattedRange(startBook: String, endBook: String) -> String {
+            if isSingleVerse {
+                return "\(startBook) \(start.chapter):\(start.verse)"
+            }
+            if start.osisBookId == end.osisBookId {
+                if start.chapter == end.chapter {
+                    return "\(startBook) \(start.chapter):\(start.verse)-\(end.verse)"
+                }
+                return "\(startBook) \(start.chapter):\(start.verse)-\(end.chapter):\(end.verse)"
+            }
+            return "\(startBook) \(start.chapter):\(start.verse)-\(endBook) \(end.chapter):\(end.verse)"
+        }
+    }
+
+    /**
+     Resolves a bookmark's stored ordinals into the bridge range projection used by Android's
+     `ClientBibleBookmark` fields.
+
+     - Parameters:
+       - bookName: Stored or current start book name.
+       - startOrdinal: Stored start ordinal in the bookmark versification.
+       - endOrdinal: Stored end ordinal in the bookmark versification.
+     - Returns: A normalized range projection. Invalid or reversed end ordinals collapse to the
+       start verse, matching existing single-verse normalization.
+     */
+    private func bibleBookmarkRangeProjection(
+        bookName: String,
+        startOrdinal: Int,
+        endOrdinal: Int
+    ) -> BookmarkBridgeVerseRangeProjection {
+        let startReference = verseReference(book: bookName, ordinal: startOrdinal)
+            ?? activeModule?.verseReference(ordinal: startOrdinal)
+            ?? fallbackVerseReference(bookName: bookName, ordinal: startOrdinal)
+        let effectiveEndOrdinal = endOrdinal > startOrdinal ? endOrdinal : startOrdinal
+        let endReference = verseReference(book: bookName, ordinal: effectiveEndOrdinal)
+            ?? activeModule?.verseReference(ordinal: effectiveEndOrdinal)
+            ?? startReference
+
+        return BookmarkBridgeVerseRangeProjection(
+            startBookName: bridgeBookName(for: startReference, fallback: bookName),
+            startBookAbbreviation: bridgeBookAbbreviation(for: startReference),
+            start: startReference,
+            endBookName: bridgeBookName(for: endReference, fallback: bookName),
+            endBookAbbreviation: bridgeBookAbbreviation(for: endReference),
+            end: endReference
+        )
+    }
+
+    private func fallbackVerseReference(bookName: String, ordinal: Int) -> VerseKeyReference {
+        let safeOrdinal = max(1, ordinal)
+        let chapter = max(1, ((safeOrdinal - 1) / 40) + 1)
+        let verse = max(1, safeOrdinal - ((chapter - 1) * 40))
+        return VerseKeyReference(
+            osisBookId: osisBookId(for: bookName),
+            chapter: chapter,
+            verse: verse,
+            ordinal: safeOrdinal
+        )
+    }
+
+    private func bridgeBookName(for reference: VerseKeyReference, fallback: String) -> String {
+        Self.bookName(forOsisId: reference.osisBookId) ?? fallback
+    }
+
+    private func bridgeBookAbbreviation(for reference: VerseKeyReference) -> String {
+        Self.defaultBooks.first(where: { $0.osisId == reference.osisBookId })?.abbreviation
+            ?? reference.osisBookId
+    }
+
+    /**
      Builds the typed Bible bookmark bridge payload consumed by Vue.js.
 
      - Parameter bookmark: SwiftData Bible bookmark model to project.
@@ -7624,31 +7733,14 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
         // Compute verse references from ordinals using the active versification.
         let bookmarkBook = bookmark.book ?? currentBook
-        let osisBookId = osisBookId(for: bookmarkBook)
-        let startReference = verseReference(book: bookmarkBook, ordinal: bookmark.ordinalStart)
-        let endReference = verseReference(book: bookmarkBook, ordinal: bookmark.ordinalEnd)
-        let chapter = startReference?.chapter ?? currentChapter
-        let startVerse = startReference?.verse ?? 1
-        let endVerse = max(startVerse, endReference?.verse ?? startVerse)
-
-        let osisRef: String
-        let verseRange: String
-        let verseRangeOnlyNumber: String
-        let verseRangeAbbreviated: String
-        if startVerse == endVerse {
-            osisRef = "\(osisBookId).\(chapter).\(startVerse)"
-            verseRange = "\(bookmarkBook) \(chapter):\(startVerse)"
-            verseRangeOnlyNumber = "\(startVerse)"
-            verseRangeAbbreviated = "\(osisBookId) \(chapter):\(startVerse)"
-        } else {
-            osisRef = "\(osisBookId).\(chapter).\(startVerse)-\(osisBookId).\(chapter).\(endVerse)"
-            verseRange = "\(bookmarkBook) \(chapter):\(startVerse)-\(endVerse)"
-            verseRangeOnlyNumber = "\(startVerse)-\(endVerse)"
-            verseRangeAbbreviated = "\(osisBookId) \(chapter):\(startVerse)-\(endVerse)"
-        }
+        let rangeProjection = bibleBookmarkRangeProjection(
+            bookName: bookmarkBook,
+            startOrdinal: bookmark.ordinalStart,
+            endOrdinal: bookmark.ordinalEnd
+        )
 
         // Load verse text from SWORD if available
-        let fullText = loadVerseText(osisBookId: osisBookId, chapter: chapter, startVerse: startVerse, endVerse: endVerse)
+        let fullText = loadVerseText(for: rangeProjection)
 
         return BibleBookmarkData(
             id: id,
@@ -7659,7 +7751,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             labels: labelPayload.labelIDs,
             bookInitials: activeModuleName,
             bookName: activeModuleName,
-            bookAbbreviation: osisBookId,
+            bookAbbreviation: rangeProjection.start.osisBookId,
             createdAt: createdAt,
             text: fullText,
             fullText: fullText,
@@ -7671,11 +7763,11 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             wholeVerse: bookmark.wholeVerse,
             customIcon: bookmark.customIcon,
             editAction: EditActionData(),
-            osisRef: osisRef,
+            osisRef: rangeProjection.osisRef,
             originalOrdinalRange: [bookmark.kjvOrdinalStart, bookmark.kjvOrdinalEnd],
-            verseRange: verseRange,
-            verseRangeOnlyNumber: verseRangeOnlyNumber,
-            verseRangeAbbreviated: verseRangeAbbreviated,
+            verseRange: rangeProjection.verseRange,
+            verseRangeOnlyNumber: rangeProjection.verseRangeOnlyNumber,
+            verseRangeAbbreviated: rangeProjection.verseRangeAbbreviated,
             v11n: bookmark.v11n,
             osisFragment: nil
         )
@@ -7688,12 +7780,24 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         buildBookmarkJSON(bookmark)
     }
 
-    /// Load plain text for a verse range from the active SWORD module.
-    private func loadVerseText(osisBookId: String, chapter: Int, startVerse: Int, endVerse: Int) -> String {
+    /**
+     Load plain text for an ordinal-backed verse range from the active SWORD module.
+
+     Android's bookmark DTO uses a JSword `VerseRange`, so text extraction can span chapter
+     boundaries. Iterating the resolved SWORD ordinals keeps iOS aligned with that behavior instead
+     of assuming the start chapter applies to every verse in the bookmark.
+     */
+    private func loadVerseText(for range: BookmarkBridgeVerseRangeProjection) -> String {
         guard let module = activeModule else { return "" }
         var parts: [String] = []
-        for verse in startVerse...endVerse {
-            let key = "\(osisBookId) \(chapter):\(verse)"
+
+        let lowerOrdinal = min(range.start.ordinal, range.end.ordinal)
+        let upperOrdinal = max(range.start.ordinal, range.end.ordinal)
+        for ordinal in lowerOrdinal...upperOrdinal {
+            guard let reference = module.verseReference(ordinal: ordinal) else {
+                continue
+            }
+            let key = "\(reference.osisBookId) \(reference.chapter):\(reference.verse)"
             module.setKey(key)
             let raw = module.rawEntry()
             // Strip XML tags to get plain text
@@ -7828,33 +7932,19 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         )
 
         // Compute verse references
-        let bookOsisId: String
         let bookName: String
         if let book = bookmark.book {
-            bookOsisId = osisBookId(for: book)
             bookName = book
         } else {
-            bookOsisId = osisBookId(for: currentBook)
             bookName = currentBook
         }
-        let startReference = verseReference(book: bookName, ordinal: bookmark.ordinalStart)
-        let endReference = verseReference(book: bookName, ordinal: bookmark.ordinalEnd)
-        let chapter = startReference?.chapter ?? currentChapter
-        let startVerse = startReference?.verse ?? 1
-        let endVerse = max(startVerse, endReference?.verse ?? startVerse)
+        let rangeProjection = bibleBookmarkRangeProjection(
+            bookName: bookName,
+            startOrdinal: bookmark.ordinalStart,
+            endOrdinal: bookmark.ordinalEnd
+        )
 
-        let osisRef = startVerse == endVerse
-            ? "\(bookOsisId).\(chapter).\(startVerse)"
-            : "\(bookOsisId).\(chapter).\(startVerse)-\(bookOsisId).\(chapter).\(endVerse)"
-        let verseRange = startVerse == endVerse
-            ? "\(bookName) \(chapter):\(startVerse)"
-            : "\(bookName) \(chapter):\(startVerse)-\(endVerse)"
-        let verseRangeOnlyNumber = startVerse == endVerse ? "\(startVerse)" : "\(startVerse)-\(endVerse)"
-        let verseRangeAbbreviated = startVerse == endVerse
-            ? "\(bookOsisId) \(chapter):\(startVerse)"
-            : "\(bookOsisId) \(chapter):\(startVerse)-\(endVerse)"
-
-        let fullText = loadVerseText(osisBookId: bookOsisId, chapter: chapter, startVerse: startVerse, endVerse: endVerse)
+        let fullText = loadVerseText(for: rangeProjection)
 
         return BibleBookmarkData(
             id: id,
@@ -7865,7 +7955,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             labels: labelPayload.labelIDs,
             bookInitials: activeModuleName,
             bookName: activeModuleName,
-            bookAbbreviation: bookOsisId,
+            bookAbbreviation: rangeProjection.start.osisBookId,
             createdAt: createdAt,
             text: fullText,
             fullText: fullText,
@@ -7877,11 +7967,11 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             wholeVerse: bookmark.wholeVerse,
             customIcon: bookmark.customIcon,
             editAction: editActionData(bookmark.editAction),
-            osisRef: osisRef,
+            osisRef: rangeProjection.osisRef,
             originalOrdinalRange: [bookmark.kjvOrdinalStart, bookmark.kjvOrdinalEnd],
-            verseRange: verseRange,
-            verseRangeOnlyNumber: verseRangeOnlyNumber,
-            verseRangeAbbreviated: verseRangeAbbreviated,
+            verseRange: rangeProjection.verseRange,
+            verseRangeOnlyNumber: rangeProjection.verseRangeOnlyNumber,
+            verseRangeAbbreviated: rangeProjection.verseRangeAbbreviated,
             v11n: bookmark.v11n,
             osisFragment: nil
         )

@@ -154,7 +154,7 @@ enum StrongsSearchSupport {
     }
 
     /**
-     Extracts JSword/Lucene Strong's index tokens from raw OSIS and rendered SWORD entry text.
+     Extracts JSword/Lucene Strong's index tokens from raw OSIS, with rendered SWORD text fallback.
 
      - Parameters:
        - rawEntry: Raw SWORD entry, usually OSIS with `<w lemma="strong:...">` values.
@@ -164,10 +164,40 @@ enum StrongsSearchSupport {
      - Returns: Ordered unique canonical tokens matching JSword `StrongsNumberFilter` output.
      */
     static func canonicalStrongTokens(rawEntry: String, renderedText: String, book: String) -> [String] {
-        var tokens: [String] = []
-        tokens.append(contentsOf: canonicalStrongTokensFromRawOSIS(rawEntry))
-        tokens.append(contentsOf: canonicalStrongTokensFromRenderedText(renderedText, book: book))
-        return orderedUnique(tokens)
+        canonicalStrongTokens(
+            rawEntry: rawEntry,
+            renderedTextProvider: { renderedText },
+            book: book
+        )
+    }
+
+    /**
+     Extracts JSword/Lucene Strong's index tokens while preserving Android's raw-OSIS-first
+     behavior.
+
+     Android's JSword index reads Strong's numbers from parsed OSIS. Rendering is an iOS fallback
+     for modules whose raw entries do not expose lexical tokens; the provider keeps that fallback
+     lazy so normal OSIS-backed modules do not render every verse during "find all occurrences".
+
+     - Parameters:
+       - rawEntry: Raw SWORD entry, usually OSIS with `<w lemma="strong:...">` values.
+       - renderedTextProvider: Lazy rendered HTML provider used only when raw extraction finds no
+         lexical tokens.
+       - book: Human-readable book name used to infer Hebrew/Greek prefix for rendered SWORD
+         Strong's links that carry only digits.
+     - Returns: Ordered unique canonical tokens matching JSword `StrongsNumberFilter` output.
+     */
+    static func canonicalStrongTokens(
+        rawEntry: String,
+        renderedTextProvider: () -> String,
+        book: String
+    ) -> [String] {
+        let rawTokens = canonicalStrongTokensFromRawOSIS(rawEntry)
+        if !rawTokens.isEmpty {
+            return orderedUnique(rawTokens)
+        }
+
+        return orderedUnique(canonicalStrongTokensFromRenderedText(renderedTextProvider(), book: book))
     }
 
     private static func searchVerseHitsByEntryAttributes(
@@ -226,7 +256,13 @@ enum StrongsSearchSupport {
 
             let tokens = canonicalStrongTokens(
                 rawEntry: inspection.rawEntry,
-                renderedText: inspection.renderedText,
+                renderedTextProvider: {
+                    module.setKeyAndInspect(
+                        key,
+                        includeRenderedText: true,
+                        includeStrippedText: false
+                    ).renderedText
+                },
                 book: normalizedBook
             )
             if !tokens.isEmpty {
