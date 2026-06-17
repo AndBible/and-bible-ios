@@ -302,7 +302,7 @@ extension AndBibleUITests {
      *   - line: Source line used for nested helper attribution.
      * - Returns: `true` when the production overflow menu becomes visible.
      * - Side effects:
-     *   - taps the production more-menu button and waits for the menu surface to appear
+     *   - taps the production more-menu chrome control and waits for the menu surface to appear
      * - Failure modes:
      *   - returns `false` when the menu never appears before the local retry budget expires
      */
@@ -316,15 +316,9 @@ extension AndBibleUITests {
         let deadline = Date().addingTimeInterval(timeout)
 
         repeat {
-            let button = unresolvedElement("readerMoreMenuButton", in: app)
             if tapReaderMoreMenuChromeCoordinate(in: app),
                waitForReaderOverflowMenu(in: app, timeout: min(2, max(1, deadline.timeIntervalSinceNow))) {
                 return true
-            }
-            if elementHasUsableFrame(button) {
-                button.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
-            } else if waitForElementToBecomeHittable(button, timeout: min(2, max(0.5, deadline.timeIntervalSinceNow))) {
-                button.tap()
             }
             if waitForReaderOverflowMenu(in: app, timeout: min(5, max(1, deadline.timeIntervalSinceNow))) {
                 return true
@@ -462,8 +456,8 @@ extension AndBibleUITests {
      *   - file: Source file used for XCTest failure attribution.
      *   - line: Source line used for XCTest failure attribution.
      * - Side effects:
-     *   - resolves the production `readerNavigationDrawerButton`
-     *   - taps it directly and waits for the `readerNavigationDrawer` surface
+     *   - taps the production reader navigation-drawer chrome control
+     *   - waits for the `readerNavigationDrawer` surface
      * - Failure modes:
      *   - records an XCTest failure if the drawer never appears in time
      */
@@ -494,7 +488,8 @@ extension AndBibleUITests {
      *   - line: Source line used for nested helper attribution.
      * - Returns: `true` when the production drawer becomes visible.
      * - Side effects:
-     *   - taps the production navigation-drawer button and waits for drawer affordances to appear
+     *   - taps the production navigation-drawer chrome control and waits for drawer affordances to
+     *     appear
      * - Failure modes:
      *   - returns `false` when the drawer never appears before the local retry budget expires
      */
@@ -508,18 +503,12 @@ extension AndBibleUITests {
         let deadline = Date().addingTimeInterval(timeout)
 
         repeat {
-            let button = unresolvedElement("readerNavigationDrawerButton", in: app)
             if tapReaderNavigationDrawerChromeCoordinate(in: app),
                waitForReaderNavigationDrawer(
                    in: app,
                    timeout: min(2, max(1, deadline.timeIntervalSinceNow))
                ) {
                 return true
-            }
-            if elementHasUsableFrame(button) {
-                button.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
-            } else if waitForElementToBecomeHittable(button, timeout: min(2, max(0.5, deadline.timeIntervalSinceNow))) {
-                button.tap()
             }
             if waitForReaderNavigationDrawer(
                 in: app,
@@ -534,14 +523,12 @@ extension AndBibleUITests {
     }
 
     /**
-     Attempts the reader drawer chrome-coordinate tap only when the app frame is safe to sample.
+     Attempts the reader drawer chrome-coordinate tap without polling the hosted button's existence.
 
      The coordinate tap preserves coverage for hosted reader chrome that may not expose a stable
-     accessibility button immediately after launch. Hosted XCTest can briefly expose an application
-     frame with infinite coordinates while the reader shell is settling, and creating a coordinate
-     from that frame raises an XCTest exception before the explicit button fallback can run.
-     This helper leaves the app untouched when the sampled frame is unusable so callers can retry
-     through the button path.
+     accessibility button immediately after launch. It first samples the production control through
+     XCTest's throwing snapshot path, then falls back to the document-header frame so sharded CI does
+     not tap the status-bar region or enter a fragile toolbar-button existence retry.
 
      - Parameter app: The launched AndBible application under test.
      - Returns: `true` when the chrome coordinate was tapped, or `false` when callers should use the
@@ -549,20 +536,23 @@ extension AndBibleUITests {
      */
     @discardableResult
     func tapReaderNavigationDrawerChromeCoordinate(in app: XCUIApplication) -> Bool {
-        guard elementHasUsableFrame(app) else {
-            return false
-        }
-        app.coordinate(withNormalizedOffset: CGVector(dx: 0.06, dy: 0.06)).tap()
-        return true
+        tapReaderHeaderChromeCoordinate(
+            in: app,
+            controlIdentifier: "readerNavigationDrawerButton",
+            horizontalInset: 28,
+            usesTrailingEdge: false,
+            fallbackNormalizedOffset: CGVector(dx: 0.06, dy: 0.06)
+        )
     }
 
     /**
-     Attempts the reader overflow chrome-coordinate tap only when the app frame is safe to sample.
+     Attempts the reader overflow chrome-coordinate tap without polling the hosted button's
+     existence.
 
      The coordinate tap avoids forcing an early snapshot of hosted reader chrome before the overflow
-     button has stabilized. If XCTest reports a non-finite application frame, the helper does not tap
-     and lets the caller fall back to the explicit toolbar button, preventing the infinite-coordinate
-     exception seen in sharded CI.
+     button has stabilized. It first samples the production control through XCTest's throwing
+     snapshot path, then falls back to the document-header frame so sharded CI does not tap the
+     status-bar region or enter a fragile toolbar-button existence retry.
 
      - Parameter app: The launched AndBible application under test.
      - Returns: `true` when the chrome coordinate was tapped, or `false` when callers should use the
@@ -570,11 +560,117 @@ extension AndBibleUITests {
      */
     @discardableResult
     func tapReaderMoreMenuChromeCoordinate(in app: XCUIApplication) -> Bool {
-        guard elementHasUsableFrame(app) else {
+        tapReaderHeaderChromeCoordinate(
+            in: app,
+            controlIdentifier: "readerMoreMenuButton",
+            horizontalInset: 28,
+            usesTrailingEdge: true,
+            fallbackNormalizedOffset: CGVector(dx: 0.94, dy: 0.06)
+        )
+    }
+
+    /**
+     Taps a leading or trailing reader-header chrome control without polling `.exists`.
+     *
+     * - Parameters:
+     *   - app: Running application under test.
+     *   - controlIdentifier: Accessibility identifier for the production header control.
+     *   - horizontalInset: Distance from the sampled header edge to the intended control center.
+     *   - usesTrailingEdge: Whether to anchor the tap from the trailing header edge.
+     *   - fallbackNormalizedOffset: Legacy app-relative coordinate used when the header cannot be
+     *     sampled.
+     * - Returns: `true` when a finite coordinate was tapped.
+     * - Side effects:
+     *   - samples the app, optional header-control, and document-header snapshots
+     *   - taps the computed screen coordinate
+     * - Failure modes:
+     *   - returns `false` when the app frame is unavailable or non-finite.
+     */
+    private func tapReaderHeaderChromeCoordinate(
+        in app: XCUIApplication,
+        controlIdentifier: String,
+        horizontalInset: CGFloat,
+        usesTrailingEdge: Bool,
+        fallbackNormalizedOffset: CGVector
+    ) -> Bool {
+        guard let appSnapshot = try? app.snapshot(),
+              elementFrameIsUsable(appSnapshot.frame)
+        else {
             return false
         }
-        app.coordinate(withNormalizedOffset: CGVector(dx: 0.94, dy: 0.06)).tap()
+
+        if let controlFrame = snapshotFrame(of: unresolvedElement(controlIdentifier, in: app)) {
+            app.coordinate(withNormalizedOffset: .zero).withOffset(
+                CGVector(
+                    dx: controlFrame.midX - appSnapshot.frame.minX,
+                    dy: controlFrame.midY - appSnapshot.frame.minY
+                )
+            ).tap()
+            return true
+        }
+
+        if let headerFrame = readerDocumentHeaderFrame(in: app) {
+            let tapX = usesTrailingEdge
+                ? headerFrame.maxX - horizontalInset
+                : headerFrame.minX + horizontalInset
+            let tapY = headerFrame.midY
+            guard tapX.isFinite, tapY.isFinite else {
+                return false
+            }
+            app.coordinate(withNormalizedOffset: .zero).withOffset(
+                CGVector(dx: tapX - appSnapshot.frame.minX, dy: tapY - appSnapshot.frame.minY)
+            ).tap()
+            return true
+        }
+
+        app.coordinate(withNormalizedOffset: fallbackNormalizedOffset).tap()
         return true
+    }
+
+    /**
+     Samples the compact reader document-header frame without forcing a broad toolbar lookup.
+     *
+     * - Parameter app: Running application under test.
+     * - Returns: A finite document-header frame when XCTest can snapshot one of the narrow header
+     *   candidates.
+     * - Side effects: none.
+     * - Failure modes:
+     *   - returns `nil` when the header is not currently exposed or cannot be snapshotted.
+     */
+    private func readerDocumentHeaderFrame(in app: XCUIApplication) -> CGRect? {
+        let headerCandidates = [
+            app.otherElements["readerDocumentHeader"].firstMatch,
+            app.staticTexts["readerDocumentHeader"].firstMatch,
+        ]
+
+        for header in headerCandidates {
+            guard let snapshot = try? header.snapshot() else {
+                continue
+            }
+            let frame = snapshot.frame
+            if elementFrameIsUsable(frame) {
+                return frame
+            }
+        }
+
+        return nil
+    }
+
+    /**
+     Samples one element's frame through XCTest's throwing snapshot path.
+     *
+     * - Parameter element: Narrow element query whose current frame should be sampled.
+     * - Returns: A finite frame when the element can be snapshotted.
+     * - Side effects: none.
+     * - Failure modes:
+     *   - returns `nil` when the element is absent, unstable, or exposes a non-finite frame.
+     */
+    private func snapshotFrame(of element: XCUIElement) -> CGRect? {
+        guard let snapshot = try? element.snapshot() else {
+            return nil
+        }
+        let frame = snapshot.frame
+        return elementFrameIsUsable(frame) ? frame : nil
     }
 
     /**
