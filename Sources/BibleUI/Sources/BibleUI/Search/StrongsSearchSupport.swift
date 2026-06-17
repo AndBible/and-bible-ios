@@ -137,6 +137,15 @@ enum StrongsSearchSupport {
     ) -> [StrongsSearchVerseHit] {
         guard !queryOptions.canonicalStrongTokens.isEmpty else { return [] }
 
+        let indexedCandidateResult = searchVerseHitsByEntryAttributeCandidates(
+            in: module,
+            queryOptions: queryOptions,
+            scope: scope
+        )
+        if !indexedCandidateResult.hits.isEmpty {
+            return indexedCandidateResult.hits
+        }
+
         let canonicalResult = searchVerseHitsByCanonicalTokens(
             in: module,
             queryOptions: queryOptions,
@@ -200,6 +209,44 @@ enum StrongsSearchSupport {
         return orderedUnique(canonicalStrongTokensFromRenderedText(renderedTextProvider(), book: book))
     }
 
+    /**
+     Uses SWORD entry-attribute search as a candidate index, then validates candidates against
+     JSword-style canonical Strong's tokens.
+
+     Android's find-all path is backed by JSword's indexed `strong` field. iOS does not yet have a
+     persistent Strong's index, but SWORD entry attributes can cheaply identify candidate verses for
+     many modules. This helper treats those candidates only as a narrowing mechanism: each candidate
+     still has to expose the requested canonical lexical tokens before it is returned.
+
+     - Parameters:
+       - module: Module to search.
+       - queryOptions: Normalized Strong's query variants to try in order.
+       - scope: Optional SWORD search scope string.
+     - Returns: Canonically validated candidate hits plus whether any candidate exposed lexical
+       Strong's tokens.
+     */
+    static func searchVerseHitsByEntryAttributeCandidates(
+        in module: SwordModule,
+        queryOptions: NormalizedStrongsQueryOptions,
+        scope: String? = nil
+    ) -> (hits: [StrongsSearchVerseHit], sawLexicalTokens: Bool) {
+        let candidateKeys = entryAttributeCandidateKeys(
+            in: module,
+            queryOptions: queryOptions,
+            scope: scope
+        )
+        guard !candidateKeys.isEmpty else {
+            return ([], false)
+        }
+
+        return searchVerseHitsByCanonicalTokens(
+            in: module,
+            queryOptions: queryOptions,
+            scope: scope,
+            candidateKeys: candidateKeys
+        )
+    }
+
     private static func searchVerseHitsByEntryAttributes(
         in module: SwordModule,
         queryOptions: NormalizedStrongsQueryOptions,
@@ -229,16 +276,40 @@ enum StrongsSearchSupport {
         return []
     }
 
-    private static func searchVerseHitsByCanonicalTokens(
+    private static func entryAttributeCandidateKeys(
         in module: SwordModule,
         queryOptions: NormalizedStrongsQueryOptions,
         scope: String?
+    ) -> [String] {
+        var candidateKeys: [String] = []
+        var seenKeys = Set<String>()
+
+        for query in queryOptions.entryAttributeQueries {
+            let options = SearchOptions(
+                query: query,
+                searchType: .entryAttribute,
+                caseInsensitive: true,
+                scope: scope
+            )
+            for result in module.search(options).results.prefix(5000) where seenKeys.insert(result.key).inserted {
+                candidateKeys.append(result.key)
+            }
+        }
+
+        return candidateKeys
+    }
+
+    private static func searchVerseHitsByCanonicalTokens(
+        in module: SwordModule,
+        queryOptions: NormalizedStrongsQueryOptions,
+        scope: String?,
+        candidateKeys: [String]? = nil
     ) -> (hits: [StrongsSearchVerseHit], sawLexicalTokens: Bool) {
         var hits: [StrongsSearchVerseHit] = []
         var seenReferences = Set<String>()
         var sawLexicalTokens = false
 
-        for key in module.allKeys() {
+        for key in candidateKeys ?? module.allKeys() {
             let inspection = module.setKeyAndInspect(
                 key,
                 includeRenderedText: false,

@@ -251,6 +251,45 @@ extension AndBibleTests {
     }
 
     /**
+     Verifies the Strong's search path can use SWORD entry-attribute results as a candidate index
+     without trusting them as the semantic result source.
+
+     Android's find-all path reads JSword's canonical `strong` field, so iOS must still validate
+     candidate verses against parsed Strong's lemma tokens. A failure means the UI search path may
+     either fall back to an expensive full-module scan when SWORD already has candidate verses, or
+     return entry-attribute hits that do not match JSword token semantics.
+     */
+    func testStrongsSearchEntryAttributeCandidatesAreCanonicallyValidated() throws {
+        let modulePath = try makeTemporaryBundledSwordPath()
+        let manager = try XCTUnwrap(
+            SwordManager(modulePath: modulePath),
+            "Expected SwordManager to initialize against a temporary bundled sword module path"
+        )
+        let module = try XCTUnwrap(
+            manager.module(named: "KJV"),
+            "Expected bundled KJV module to be available for Strong's candidate regression testing"
+        )
+        let queryOptions = try XCTUnwrap(
+            StrongsSearchSupport.normalizedQueryOptions(for: "H00430"),
+            "Expected H00430 to normalize into Strong's search queries"
+        )
+
+        let candidateResult = StrongsSearchSupport.searchVerseHitsByEntryAttributeCandidates(
+            in: module,
+            queryOptions: queryOptions
+        )
+
+        XCTAssertTrue(
+            candidateResult.sawLexicalTokens,
+            "Expected SWORD candidate verses to expose JSword-style lexical Strong's tokens"
+        )
+        XCTAssertTrue(
+            candidateResult.hits.contains { $0.book == "Genesis" && $0.chapter == 1 && $0.verse == 1 },
+            "Expected candidate-index search to validate Genesis 1:1 against canonical H0430 tokens"
+        )
+    }
+
+    /**
      Verifies SWORD Bible book discovery exposes the full Protestant canon for a complete module.
 
      The bundled KJV fixture contains content for all 66 books and exercises the same
