@@ -1097,25 +1097,25 @@ extension AndBibleUITests {
     /**
      Moves focus away from the active Search field so the lower Search option rows can surface.
 
-     This helper intentionally avoids `app.keyboards`. Hosted CI has timed out while resolving the
-     broad keyboard hierarchy after SwiftUI already dismissed the keyboard, while the Search input's
-     `hasKeyboardFocus` predicate remains bounded to one known field.
+     This helper intentionally avoids resolving `app.keyboards` or the Search text field unless a
+     compact Search state token first proves focus is active. Hosted CI has timed out while resolving
+     both broad keyboard queries and stale SwiftUI text-field snapshots after the field already lost
+     focus.
      *
      * - Parameter app: Running application under test.
      * - Side effects:
-     *   - uses one visible keyboard dismissal action when the Search field still owns focus
-     *     after query submission
+     *   - taps a stable non-control area, then an option control fallback, only when the Search
+     *     state export reports `searchFieldFocused=true`
      * - Failure modes:
      *   - silently leaves focus unchanged when no keyboard dismissal action is available
      */
     func dismissSearchFieldFocusIfNeeded(in app: XCUIApplication) {
-        guard let searchField = resolveVisibleSearchInput(in: app, waitTimeout: 0.2),
-              waitForElementKeyboardFocus(searchField, timeout: 0.2) else {
+        guard searchFieldFocusIsActive(in: app) else {
             return
         }
 
         dismissKeyboardIfPresent(in: app)
-        guard waitForElementKeyboardFocus(searchField, timeout: 0.2) else {
+        guard !waitForSearchFieldFocusToClear(in: app, timeout: 0.5) else {
             return
         }
         let searchScreen = unresolvedElement("searchScreen", in: app)
@@ -1128,6 +1128,9 @@ extension AndBibleUITests {
         ]
         for candidate in dismissalCandidates where candidate.exists && !candidate.frame.isEmpty {
             tapElementReliably(candidate, timeout: 5)
+            if waitForSearchFieldFocusToClear(in: app, timeout: 0.5) {
+                return
+            }
             return
         }
 
@@ -1142,7 +1145,73 @@ extension AndBibleUITests {
                 segmentCount: SearchWordModeControl.segmentCount,
                 timeout: 5
             )
+            _ = waitForSearchFieldFocusToClear(in: app, timeout: 0.5)
         }
+    }
+
+    /**
+     Reads the Search field focus state from the compact UI-test state export.
+
+     The focus state is part of the Search screen contract because option controls can be obscured by
+     the keyboard, but probing `searchQueryField.exists` has repeatedly wedged XCTest snapshots in CI.
+     Keeping the decision on the state export lets controls that are already unfocused proceed without
+     touching the text-field hierarchy at all.
+     *
+     * - Parameter app: Running application under test.
+     * - Returns: `true` when the Search export reports `searchFieldFocused=true`.
+     * - Side effects: none.
+     * - Failure modes: returns `false` when Search has not exported state yet.
+     */
+    func searchFieldFocusIsActive(in app: XCUIApplication) -> Bool {
+        searchFieldFocusState(in: app) == true
+    }
+
+    /**
+     Resolves the Search field focus token from the compact UI-test state export.
+
+     - Parameter app: Running application under test.
+     - Returns: `true` for `searchFieldFocused=true`, `false` for `searchFieldFocused=false`, or
+       `nil` when Search has not exported either token.
+     - Side effects: none.
+     - Failure modes: returns `nil` when the Search state export is temporarily absent.
+     */
+    func searchFieldFocusState(in app: XCUIApplication) -> Bool? {
+        for value in searchStateCandidateValues(in: app) {
+            if value.contains("searchFieldFocused=true") {
+                return true
+            }
+            if value.contains("searchFieldFocused=false") {
+                return false
+            }
+        }
+        return nil
+    }
+
+    /**
+     Waits for the compact Search state export to report that text-field focus has cleared.
+
+     - Parameters:
+       - app: Running application under test.
+       - timeout: Maximum number of seconds to poll the Search state export.
+     - Returns: `true` when an exported Search state explicitly reports
+       `searchFieldFocused=false`.
+     - Side effects: none.
+     - Failure modes: returns `false` when the state export continues reporting focused input until
+       timeout or becomes temporarily unavailable.
+     */
+    func waitForSearchFieldFocusToClear(
+        in app: XCUIApplication,
+        timeout: TimeInterval
+    ) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            if searchFieldFocusState(in: app) == false {
+                return true
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        } while Date() < deadline
+
+        return searchFieldFocusState(in: app) == false
     }
 
     /**
