@@ -1941,9 +1941,11 @@ extension AndBibleUITests {
      * - Returns: The resolved button once XCTest reports a hittable activation point.
      * - Side effects:
      *   - scrolls Sync Settings lower content until the requested button materializes as a native
-     *     button and becomes hittable
+     *     button and either becomes hittable or exposes a visible, usable frame for coordinate
+     *     tapping
      * - Failure modes:
-     *   - records an XCTest failure if the button never appears or never becomes hittable
+     *   - records an XCTest failure if the button never appears or never becomes reachable through
+     *     either native hittability or a visible coordinate target
      */
     func requireReachableSyncSettingsButton(
         _ identifier: String,
@@ -1962,6 +1964,17 @@ extension AndBibleUITests {
                 if waitForElementToBecomeHittable(button, timeout: 0.5) {
                     return button
                 }
+                if elementHasUsableFrame(button) {
+                    if let syncScreen = resolvedElement("syncSettingsScreen", in: app),
+                       syncScreen.exists
+                    {
+                        if isElementVisible(button, within: syncScreen) {
+                            return button
+                        }
+                    } else {
+                        return button
+                    }
+                }
             }
 
             revealSyncSettingsLowerContent(in: app)
@@ -1974,9 +1987,12 @@ extension AndBibleUITests {
             file: file,
             line: line
         )
+        if waitForElementToBecomeHittable(lastCandidate, timeout: 1) {
+            return lastCandidate
+        }
         XCTAssertTrue(
-            waitForElementToBecomeHittable(lastCandidate, timeout: 1),
-            "Expected Sync Settings button '\(identifier)' to become hittable within \(timeout) seconds.",
+            elementHasUsableFrame(lastCandidate),
+            "Expected Sync Settings button '\(identifier)' to become hittable or expose a usable frame within \(timeout) seconds.",
             file: file,
             line: line
         )

@@ -1104,8 +1104,8 @@ extension AndBibleUITests {
      *
      * - Parameter app: Running application under test.
      * - Side effects:
-     *   - taps a stable non-control area, then an option control fallback, only when the Search
-     *     state export reports `searchFieldFocused=true`
+     *   - submits the focused field through the keyboard bridge, then tries coordinate and option
+     *     control fallbacks only when the Search state export reports `searchFieldFocused=true`
      * - Failure modes:
      *   - silently leaves focus unchanged when no keyboard dismissal action is available
      */
@@ -1114,6 +1114,14 @@ extension AndBibleUITests {
             return
         }
 
+        app.typeText(XCUIKeyboardKey.return.rawValue)
+        guard !waitForSearchFieldFocusToClear(in: app, timeout: 1.5) else {
+            return
+        }
+        app.coordinate(withNormalizedOffset: KeyboardDismissalCoordinate.softwareReturnKey).tap()
+        guard !waitForSearchFieldFocusToClear(in: app, timeout: 0.5) else {
+            return
+        }
         dismissKeyboardIfPresent(in: app)
         guard !waitForSearchFieldFocusToClear(in: app, timeout: 0.5) else {
             return
