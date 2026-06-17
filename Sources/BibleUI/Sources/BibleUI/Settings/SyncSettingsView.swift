@@ -463,10 +463,11 @@ public struct SyncSettingsView: View {
                         SyncSettingsPresentation.syncInfo,
                         title: String(localized: "test_connection"),
                         isEnabled: !isTestingConnection,
-                        accessibilityIdentifier: "syncNextCloudTestConnectionButton"
+                        accessibilityIdentifier: "syncNextCloudTestConnectionButtonLabel"
                     )
                 }
                 .disabled(isTestingConnection)
+                .accessibilityIdentifier("syncNextCloudTestConnectionButton")
 
                 LabeledContent {
                     remoteStatusView

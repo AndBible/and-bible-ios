@@ -79,7 +79,7 @@ extension AndBibleUITests {
         repeat {
             if let promptField = firstExistingElement(
                 workspaceNamePromptTextFieldCandidates(in: app),
-                timeout: 0.2
+                timeout: 0
             ) {
                 return promptField
             }
