@@ -459,13 +459,13 @@ public struct SyncSettingsView: View {
                         await testRemoteConnection()
                     }
                 } label: {
-                    syncSettingsButtonLabel(
+                    syncSettingsRowLabel(
                         SyncSettingsPresentation.syncInfo,
                         title: String(localized: "test_connection"),
-                        isEnabled: !isTestingConnection,
-                        accessibilityIdentifier: "syncNextCloudTestConnectionButtonLabel"
+                        isEnabled: !isTestingConnection
                     )
                 }
+                .buttonStyle(.plain)
                 .disabled(isTestingConnection)
                 .accessibilityIdentifier("syncNextCloudTestConnectionButton")
 
@@ -603,34 +603,6 @@ public struct SyncSettingsView: View {
             icon: row.icon,
             isEnabled: isEnabled
         )
-    }
-
-    /**
-     Builds an Android-backed label for action rows that must remain discoverable in UI tests.
-
-     SwiftUI can expose disabled custom `Button` labels differently than string-backed buttons.
-     Applying the identifier to the combined label preserves the existing UI-test contract while
-     leaving the button itself as the interactive control when it is enabled.
-
-     - Parameters:
-       - row: Android sync-settings presentation row that supplies icon metadata.
-       - title: Primary row title.
-       - isEnabled: Whether the row should render with enabled or disabled emphasis.
-       - accessibilityIdentifier: Stable identifier already used by UI automation.
-     - Returns: Combined row label with button traits and the supplied accessibility identifier.
-     - Side effects: Renders an image from the module bundle when `row` has catalog metadata.
-     - Failure modes: Missing icon metadata simply keeps the row aligned without an icon.
-     */
-    private func syncSettingsButtonLabel(
-        _ row: SyncSettingsPresentation.Row,
-        title: String,
-        isEnabled: Bool = true,
-        accessibilityIdentifier: String
-    ) -> some View {
-        syncSettingsRowLabel(row, title: title, isEnabled: isEnabled)
-            .accessibilityElement(children: .combine)
-            .accessibilityAddTraits(.isButton)
-            .accessibilityIdentifier(accessibilityIdentifier)
     }
 
     /**
