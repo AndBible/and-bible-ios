@@ -858,6 +858,44 @@ public final class SwordModule: @unchecked Sendable {
         }
     }
 
+    /**
+     Iterate through all entries while capturing plain text and raw OSIS from the same cursor.
+
+     Search-index creation needs the cleaned verse text shown to users and the lexical markup
+     Android's JSword indexes for Strong's lookup. Reading both values inside one runtime block
+     prevents another SWORD operation from moving the module cursor between the stripped-text and
+     raw-entry reads.
+
+     - Parameter callback: Receives `(key, plainText, rawEntry, index)` for each module entry and
+       returns `true` to continue or `false` to stop early.
+     - Side effects: Moves the module cursor from the beginning through each entry, then restores
+       the cursor that was active before iteration.
+     - Failure modes: Stops without invoking the callback when SWORD cannot position at the first
+       entry. Native rendering failures surface as empty strings from SWORD and are left for the
+       caller to filter.
+     - Important: Callback work runs while holding `SwordRuntime`; keep it bounded and do not wait
+       on work that also needs SWORD access from another thread.
+     */
+    public func iterateAllEntriesWithRaw(_ callback: (String, String, String, Int) -> Bool) {
+        SwordRuntime.sync {
+            let savedKey = String(cString: SWModule_getKeyText(handle))
+            defer { SWModule_setKeyText(handle, savedKey) }
+
+            SWModule_begin(handle)
+            guard SWModule_popError(handle) == 0 else { return }
+
+            var index = 0
+            while true {
+                let key = String(cString: SWModule_getKeyText(handle))
+                let text = String(cString: SWModule_getStripText(handle))
+                let rawEntry = String(cString: SWModule_getRawEntry(handle))
+                if !callback(key, text, rawEntry, index) { break }
+                index += 1
+                if SWModule_next(handle) != 0 { break }
+            }
+        }
+    }
+
     // MARK: - Search
 
     /**

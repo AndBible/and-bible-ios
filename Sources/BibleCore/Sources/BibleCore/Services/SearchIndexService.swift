@@ -128,6 +128,21 @@ public final class SearchIndexService: @unchecked Sendable {
         """, nil, nil, nil)
 
         sqlite3_exec(db, """
+            CREATE TABLE IF NOT EXISTS verse_strongs (
+                module_name TEXT NOT NULL,
+                token TEXT NOT NULL,
+                verse_key TEXT NOT NULL,
+                entry_order INTEGER NOT NULL,
+                PRIMARY KEY (module_name, token, verse_key)
+            )
+        """, nil, nil, nil)
+
+        sqlite3_exec(db, """
+            CREATE INDEX IF NOT EXISTS idx_verse_strongs_module_token
+            ON verse_strongs (module_name, token, entry_order)
+        """, nil, nil, nil)
+
+        sqlite3_exec(db, """
             CREATE TABLE IF NOT EXISTS indexed_modules (
                 module_name TEXT PRIMARY KEY,
                 verse_count INTEGER DEFAULT 0,
@@ -227,11 +242,25 @@ public final class SearchIndexService: @unchecked Sendable {
                     }
                     return
                 }
+                let insertStrongsSql = """
+                    INSERT OR IGNORE INTO verse_strongs (module_name, token, verse_key, entry_order)
+                    VALUES (?, ?, ?, ?)
+                """
+                var insertStrongsStmt: OpaquePointer?
+                guard sqlite3_prepare_v2(db, insertStrongsSql, -1, &insertStrongsStmt, nil) == SQLITE_OK else {
+                    sqlite3_finalize(insertStmt)
+                    sqlite3_exec(db, "ROLLBACK", nil, nil, nil)
+                    DispatchQueue.main.async {
+                        self.isIndexing = false
+                        continuation.resume()
+                    }
+                    return
+                }
 
                 var totalCount = 0
                 let estimatedTotal = 31102.0 // standard Bible verse count
 
-                module.iterateAllEntries { key, text, index in
+                module.iterateAllEntriesWithRaw { key, text, rawEntry, index in
                     // Skip empty entries
                     let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
                     guard !trimmed.isEmpty else { return true }
@@ -239,12 +268,29 @@ public final class SearchIndexService: @unchecked Sendable {
                     // Strip Strong's numbers and other inline markup
                     let cleaned = Self.cleanText(trimmed)
                     guard !cleaned.isEmpty else { return true }
+                    let rawTokens = StrongsTokenNormalizer.canonicalTokens(
+                        rawEntry: rawEntry,
+                        renderedTextProvider: { "" },
+                        isNewTestamentBook: false
+                    )
+                    let taggedTextTokens = StrongsTokenNormalizer.canonicalTokens(taggedText: trimmed)
+                    let strongTokens = Self.orderedUnique(rawTokens + taggedTextTokens)
 
                     sqlite3_reset(insertStmt)
                     sqlite3_bind_text(insertStmt, 1, key, -1, self.sqliteTransient)
                     sqlite3_bind_text(insertStmt, 2, cleaned, -1, self.sqliteTransient)
                     sqlite3_bind_text(insertStmt, 3, moduleName, -1, self.sqliteTransient)
                     sqlite3_step(insertStmt)
+
+                    for token in strongTokens {
+                        sqlite3_reset(insertStrongsStmt)
+                        sqlite3_clear_bindings(insertStrongsStmt)
+                        sqlite3_bind_text(insertStrongsStmt, 1, moduleName, -1, self.sqliteTransient)
+                        sqlite3_bind_text(insertStrongsStmt, 2, token, -1, self.sqliteTransient)
+                        sqlite3_bind_text(insertStrongsStmt, 3, key, -1, self.sqliteTransient)
+                        sqlite3_bind_int(insertStrongsStmt, 4, Int32(index))
+                        sqlite3_step(insertStrongsStmt)
+                    }
 
                     totalCount = index + 1
 
@@ -261,6 +307,7 @@ public final class SearchIndexService: @unchecked Sendable {
                 }
 
                 sqlite3_finalize(insertStmt)
+                sqlite3_finalize(insertStrongsStmt)
                 sqlite3_exec(db, "COMMIT", nil, nil, nil)
 
                 // Record completion
@@ -377,6 +424,13 @@ public final class SearchIndexService: @unchecked Sendable {
     private func deleteIndexData(db: OpaquePointer, moduleName: String) {
         var stmt: OpaquePointer?
 
+        if sqlite3_prepare_v2(db, "DELETE FROM verse_strongs WHERE module_name = ?", -1, &stmt, nil) == SQLITE_OK {
+            sqlite3_bind_text(stmt, 1, moduleName, -1, sqliteTransient)
+            sqlite3_step(stmt)
+        }
+        sqlite3_finalize(stmt)
+        stmt = nil
+
         if sqlite3_prepare_v2(db, "DELETE FROM verse_fts WHERE module_name = ?", -1, &stmt, nil) == SQLITE_OK {
             sqlite3_bind_text(stmt, 1, moduleName, -1, sqliteTransient)
             sqlite3_step(stmt)
@@ -445,6 +499,87 @@ public final class SearchIndexService: @unchecked Sendable {
             }
 
             results.append(IndexSearchResult(key: key, snippet: snippet, moduleName: modName))
+        }
+
+        return results
+    }
+
+    /**
+     Searches the Strong's-token index for verses containing all requested canonical tokens.
+
+     Android stores Strong's numbers in JSword's Lucene `strong` field and queries that field for
+     "find all occurrences". iOS mirrors that architecture by keeping lexical Strong's tokens in a
+     separate SQLite table linked to the normal verse-text index. This keeps plain text search free
+     of Strong's tags while avoiding per-search SWORD scans for common numbers.
+
+     - Parameters:
+       - canonicalTokens: JSword-style canonical tokens such as `H0430` or `G0123a`; every token
+         must be present in a returned verse.
+       - moduleName: SWORD module initials whose completed index should be searched.
+       - scopeBookName: Optional human-readable book-name prefix for current-book searches.
+       - scopeTestament: Optional `OT` or `NT` testament filter.
+     - Returns: Matching verse keys with cleaned preview snippets in canonical module order.
+     - Side effects: Reads the SQLite search-index database.
+     - Failure modes:
+       - returns an empty array when the database is unavailable, tokens are empty, or SQLite
+         statement preparation fails
+     */
+    public func searchStrongs(
+        canonicalTokens: [String],
+        moduleName: String,
+        scopeBookName: String? = nil,
+        scopeTestament: String? = nil
+    ) -> [IndexSearchResult] {
+        guard let db else { return [] }
+        let tokens = Self.orderedUnique(canonicalTokens).filter { !$0.isEmpty }
+        guard !tokens.isEmpty else { return [] }
+
+        let placeholders = Array(repeating: "?", count: tokens.count).joined(separator: ",")
+        let sql = """
+            SELECT s.verse_key, f.plain_text, s.module_name, MIN(s.entry_order) AS sort_order
+            FROM verse_strongs s
+            JOIN verse_fts f
+                ON f.verse_key = s.verse_key
+                AND f.module_name = s.module_name
+            WHERE s.module_name = ?
+                AND s.token IN (\(placeholders))
+            GROUP BY s.module_name, s.verse_key
+            HAVING COUNT(DISTINCT s.token) = ?
+            ORDER BY sort_order
+            LIMIT 5000
+        """
+
+        var stmt: OpaquePointer?
+        defer { sqlite3_finalize(stmt) }
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+
+        sqlite3_bind_text(stmt, 1, moduleName, -1, sqliteTransient)
+        for (offset, token) in tokens.enumerated() {
+            sqlite3_bind_text(stmt, Int32(offset + 2), token, -1, sqliteTransient)
+        }
+        sqlite3_bind_int(stmt, Int32(tokens.count + 2), Int32(tokens.count))
+
+        var results: [IndexSearchResult] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            guard let keyPtr = sqlite3_column_text(stmt, 0),
+                  let snippetPtr = sqlite3_column_text(stmt, 1),
+                  let modPtr = sqlite3_column_text(stmt, 2) else { continue }
+
+            let key = String(cString: keyPtr)
+            let snippet = String(cString: snippetPtr)
+            let modName = String(cString: modPtr)
+
+            if let bookName = scopeBookName, !key.hasPrefix(bookName + " ") { continue }
+            if let testament = scopeTestament {
+                if testament == "OT" && Self.isNewTestament(key) { continue }
+                if testament == "NT" && !Self.isNewTestament(key) { continue }
+            }
+
+            results.append(IndexSearchResult(
+                key: key,
+                snippet: String(snippet.prefix(200)),
+                moduleName: modName
+            ))
         }
 
         return results
@@ -545,10 +680,19 @@ public final class SearchIndexService: @unchecked Sendable {
     // MARK: - SQLite Helpers
 
     /// Current schema version. Increment to force re-indexing when text processing changes.
-    private static let schemaVersion = 2
+    private static let schemaVersion = 3
 
     /// SQLITE_TRANSIENT equivalent — tells SQLite to make a copy of the bound string.
     private var sqliteTransient: sqlite3_destructor_type {
         unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+    }
+
+    private static func orderedUnique(_ values: [String]) -> [String] {
+        var seen = Set<String>()
+        var result: [String] = []
+        for value in values where seen.insert(value).inserted {
+            result.append(value)
+        }
+        return result
     }
 }

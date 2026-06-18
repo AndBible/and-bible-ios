@@ -251,6 +251,56 @@ extension AndBibleTests {
     }
 
     /**
+     Verifies the app's reusable search index stores and queries canonical Strong's tokens.
+
+     Android routes "find all occurrences" through JSword's Lucene index rather than walking every
+     verse during the visible search. The iOS index must therefore preserve the same canonical
+     Strong's token contract while keeping normal text snippets available for result rows. A failure
+     means Search can regress to a long SWORD scan for common numbers such as H00430, which is the
+     production behavior that made the UI shard sit in `searching=true`.
+
+     - Setup: Builds an isolated SQLite search index from the bundled KJV SWORD fixture.
+     - Expected result: Searching the canonical H00430/H0430 token finds Genesis 1:1 through the
+       index with cleaned preview text.
+     - Failure meaning: Strong's searches are not backed by the same indexed semantics Android uses.
+     - Side effects: Creates temporary SWORD and SQLite files removed by shared test cleanup/defer.
+     */
+    func testSearchIndexFindsCanonicalStrongsTokens() async throws {
+        let modulePath = try makeTemporaryBundledSwordPath()
+        let manager = try XCTUnwrap(
+            SwordManager(modulePath: modulePath),
+            "Expected SwordManager to initialize against a temporary bundled sword module path"
+        )
+        let module = try XCTUnwrap(
+            manager.module(named: "KJV"),
+            "Expected bundled KJV module to be available for Strong's index regression testing"
+        )
+        let queryOptions = try XCTUnwrap(
+            StrongsSearchSupport.normalizedQueryOptions(for: "H00430"),
+            "Expected H00430 to normalize into canonical Strong's search tokens"
+        )
+        let databaseURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("search-index-strongs-\(UUID().uuidString).sqlite")
+        defer { try? FileManager.default.removeItem(at: databaseURL) }
+        let service = SearchIndexService(databasePath: databaseURL.path)
+
+        await service.createIndex(module: module)
+        let hits = service.searchStrongs(
+            canonicalTokens: queryOptions.canonicalStrongTokens,
+            moduleName: "KJV"
+        )
+
+        XCTAssertTrue(
+            hits.contains { $0.key == "Genesis 1:1" },
+            "Expected indexed Strong's search for H00430/H0430 to find Genesis 1:1"
+        )
+        XCTAssertTrue(
+            hits.allSatisfy { !$0.snippet.contains("<H") && !$0.snippet.contains("<G") },
+            "Expected indexed Strong's previews to use cleaned verse text rather than raw Strong's tags"
+        )
+    }
+
+    /**
      Verifies the Strong's search path can use SWORD entry-attribute results as a candidate index
      without trusting them as the semantic result source.
 

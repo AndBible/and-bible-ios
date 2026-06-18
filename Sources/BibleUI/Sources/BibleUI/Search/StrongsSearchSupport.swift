@@ -1,19 +1,6 @@
 import Foundation
+import BibleCore
 import SwordKit
-
-/**
- Normalized Strong's query variants used for SWORD entry-attribute searches.
-
- The search flow may need more than one query because SWORD lemma values can be stored with or
- without leading zeroes.
- */
-struct NormalizedStrongsQueryOptions: Equatable, Sendable {
-    /// Canonical JSword/Lucene Strong's tokens to match in parsed verse lexical data.
-    let canonicalStrongTokens: [String]
-
-    /// Ordered set of entry-attribute query strings to try against SWORD.
-    let entryAttributeQueries: [String]
-}
 
 /**
  One Strong's search hit mapped into verse coordinates and preview text.
@@ -57,40 +44,7 @@ enum StrongsSearchSupport {
        JSword-invalid values so callers do not fall through to plain full-text search
      */
     static func normalizedQueryOptions(for query: String) -> NormalizedStrongsQueryOptions? {
-        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return nil }
-
-        var candidate = trimmed.uppercased()
-        if candidate.hasPrefix("LEMMA:STRONG:") {
-            candidate = String(candidate.dropFirst("LEMMA:STRONG:".count))
-        } else if candidate.hasPrefix("STRONG:") {
-            candidate = String(candidate.dropFirst("STRONG:".count))
-        } else if candidate.hasPrefix("LEMMA:") {
-            candidate = String(candidate.dropFirst("LEMMA:".count))
-        }
-
-        guard let parsedQuery = parseStrongNumber(candidate) else { return nil }
-        let prefix = parsedQuery.language
-        let digitsRaw = parsedQuery.digits
-
-        // SWORD lemma storage is inconsistent about zero padding. Some modules use
-        // the fully padded key, some use a partially trimmed key (for example
-        // H00430 -> H0430), and some use the fully stripped form.
-        var digitVariants: [String] = [digitsRaw]
-        var currentDigits = digitsRaw
-        while currentDigits.hasPrefix("0"), currentDigits.count > 1 {
-            currentDigits.removeFirst()
-            digitVariants.append(currentDigits)
-        }
-
-        let entryAttributeQueries = orderedUnique(
-            digitVariants.map { "Word//Lemma./\(prefix)\($0)" }
-        )
-
-        return NormalizedStrongsQueryOptions(
-            canonicalStrongTokens: canonicalStrongNumberTokens(from: parsedQuery).queryTokens,
-            entryAttributeQueries: entryAttributeQueries
-        )
+        StrongsTokenNormalizer.normalizedQueryOptions(for: query)
     }
 
     /**
@@ -201,12 +155,11 @@ enum StrongsSearchSupport {
         renderedTextProvider: () -> String,
         book: String
     ) -> [String] {
-        let rawTokens = canonicalStrongTokensFromRawOSIS(rawEntry)
-        if !rawTokens.isEmpty {
-            return orderedUnique(rawTokens)
-        }
-
-        return orderedUnique(canonicalStrongTokensFromRenderedText(renderedTextProvider(), book: book))
+        StrongsTokenNormalizer.canonicalTokens(
+            rawEntry: rawEntry,
+            renderedTextProvider: renderedTextProvider,
+            isNewTestamentBook: BibleReaderController.isNewTestament(normalizedBookName(book))
+        )
     }
 
     /**
@@ -428,117 +381,6 @@ enum StrongsSearchSupport {
             return nil
         }
         return rawEntry[osisRange].split(separator: " ").first.map(String.init)
-    }
-
-    private struct ParsedStrongNumber: Equatable {
-        let language: Character
-        let digits: String
-        let part: String?
-
-        var numericValue: Int {
-            Int(digits) ?? 0
-        }
-    }
-
-    private struct CanonicalStrongNumberTokens: Equatable {
-        let baseToken: String
-        let fullToken: String?
-
-        var indexTokens: [String] {
-            guard !baseToken.isEmpty else { return [] }
-            if let fullToken {
-                return [baseToken, fullToken]
-            }
-            return [baseToken]
-        }
-
-        var queryTokens: [String] {
-            guard !baseToken.isEmpty else { return [] }
-            if let fullToken {
-                return [fullToken]
-            }
-            return [baseToken]
-        }
-    }
-
-    private static func parseStrongNumber(_ text: String) -> ParsedStrongNumber? {
-        let pattern = #"^([GgHh])([0-9]+)!?([A-Za-z]+)?"#
-        guard let regex = try? NSRegularExpression(pattern: pattern),
-              let match = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
-              let languageRange = Range(match.range(at: 1), in: text),
-              let digitsRange = Range(match.range(at: 2), in: text) else {
-            return nil
-        }
-
-        let language = Character(String(text[languageRange]).uppercased())
-        let digits = String(text[digitsRange])
-        let part: String?
-        if match.range(at: 3).location != NSNotFound,
-           let partRange = Range(match.range(at: 3), in: text) {
-            part = String(text[partRange])
-        } else {
-            part = nil
-        }
-
-        return ParsedStrongNumber(language: language, digits: digits, part: part)
-    }
-
-    private static func canonicalStrongNumberTokens(
-        from parsed: ParsedStrongNumber
-    ) -> CanonicalStrongNumberTokens {
-        guard isValidStrongsNumber(parsed) else {
-            return CanonicalStrongNumberTokens(baseToken: "", fullToken: nil)
-        }
-
-        let base = "\(parsed.language)\(String(format: "%04d", parsed.numericValue))"
-        let part = parsed.part?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let full = part?.isEmpty == false ? base + (part ?? "") : nil
-        return CanonicalStrongNumberTokens(baseToken: base, fullToken: full)
-    }
-
-    private static func isValidStrongsNumber(_ parsed: ParsedStrongNumber) -> Bool {
-        let number = parsed.numericValue
-        switch parsed.language {
-        case "H":
-            return (1...8674).contains(number)
-        case "G":
-            return (number >= 1 && number < 1418)
-                || (number > 1418 && number < 2717)
-                || (number > 2717 && number < 3203)
-                || (number > 3302 && number < 5624)
-                || (number > 5999 && number < 10000)
-        default:
-            return false
-        }
-    }
-
-    private static func canonicalStrongTokensFromRawOSIS(_ rawEntry: String) -> [String] {
-        let pattern = #"strong:([GgHh][0-9]+!?[A-Za-z]*)"#
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
-
-        let matches = regex.matches(in: rawEntry, range: NSRange(rawEntry.startIndex..., in: rawEntry))
-        return matches.flatMap { match -> [String] in
-            guard let range = Range(match.range(at: 1), in: rawEntry),
-                  let parsed = parseStrongNumber(String(rawEntry[range])) else {
-                return []
-            }
-            return canonicalStrongNumberTokens(from: parsed).indexTokens.filter { !$0.isEmpty }
-        }
-    }
-
-    private static func canonicalStrongTokensFromRenderedText(_ renderedText: String, book: String) -> [String] {
-        let pattern = #"showStrong=([0-9]+!?[A-Za-z]*)#cv"#
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
-        let prefix = BibleReaderController.isNewTestament(normalizedBookName(book)) ? "G" : "H"
-
-        let matches = regex.matches(in: renderedText, range: NSRange(renderedText.startIndex..., in: renderedText))
-        return matches.flatMap { match -> [String] in
-            guard let range = Range(match.range(at: 1), in: renderedText),
-                  let parsed = parseStrongNumber(prefix + String(renderedText[range])) else {
-                return []
-            }
-            return canonicalStrongNumberTokens(from: parsed).indexTokens.filter { !$0.isEmpty }
-        }
     }
 
     private static func scopeAllows(book: String, scope: String?) -> Bool {

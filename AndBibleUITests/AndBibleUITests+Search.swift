@@ -526,14 +526,14 @@ extension AndBibleUITests {
     }
 
     /**
-     Verifies that a bundled Strong's query reaches the direct lemma-search path and returns hits.
+     Verifies that a bundled Strong's query reaches the indexed lexical-token path and returns hits.
      *
      * - Side effects:
      *   - launches the app directly into Search with one deterministic Strong's query
-     *   - waits for Search to bypass any FTS index prompt and settle with non-zero results
+     *   - lets Search create the bundled KJV index when missing, then waits for non-zero results
      * - Failure modes:
-     *   - fails if Search never reaches the ready state for the Strong's query
-     *   - fails if the bundled Strong's-capable Bible still reports zero matches
+     *   - fails if Search never reaches the ready state for the Strong's query after index setup
+     *   - fails if the bundled Strong's-capable Bible still reports zero indexed lexical matches
      */
     func testSearchDirectLaunchStrongsQueryReturnsBundledResults() {
         let app = makeApp(searchQuery: "H00430")

@@ -1008,7 +1008,12 @@ public struct SearchView: View {
     // MARK: - Index Management
 
     /**
-     Checks whether the selected modules already have indexes and updates `viewState` accordingly.
+     Checks whether the selected search target modules already have indexes.
+
+     Android checks JSword index readiness before launching indexed searches, including Strong's
+     "find all occurrences" queries. iOS mirrors that behavior by resolving Strong's-capable Bible
+     modules for Strong's input and ordinary selected modules for text input, then prompting for
+     the first missing index before allowing the search to auto-run.
 
      Side effects:
      - mutates `viewState` to `.ready`, `.needsIndex`, or `.creatingIndex`
@@ -1016,11 +1021,40 @@ public struct SearchView: View {
      - reads index availability from `SearchIndexService`
 
      Failure modes:
-     - if either `searchIndexService` or `swordModule` is unavailable, the method intentionally
-       skips index inspection, marks the view ready, and continues without indexed search setup
+     - if `searchIndexService` is unavailable, the method intentionally skips index inspection,
+       marks the view ready, and leaves `performSearch()` to use its non-indexed SWORD fallback
+     - if no Strong's-capable module can be resolved for a Strong's query, the method marks the
+       view ready so the search can finish with zero results rather than blocking on an index that
+       cannot be built
      */
     private func checkIndex() {
         if StrongsSearchSupport.normalizedQueryOptions(for: query) != nil {
+            guard let service = searchIndexService else {
+                viewState = .ready
+                autoSearchIfNeeded()
+                return
+            }
+
+            let strongsModules = Self.resolveStrongsSearchModules(
+                currentModule: swordModule,
+                installedModules: installedBibleModules,
+                swordManager: swordManager,
+                searchIndexService: service
+            )
+            guard !strongsModules.isEmpty else {
+                viewState = .ready
+                autoSearchIfNeeded()
+                return
+            }
+
+            if let missingModule = strongsModules.first(where: { !service.hasIndex(for: $0.info.name) }) {
+                viewState = .needsIndex(
+                    moduleName: missingModule.info.name,
+                    moduleDescription: moduleDescription(for: missingModule.info.name)
+                )
+                return
+            }
+
             viewState = .ready
             autoSearchIfNeeded()
             return
@@ -1094,9 +1128,12 @@ public struct SearchView: View {
     }
 
     /**
-     Starts asynchronous index creation for the primary and any selected unindexed modules.
+     Starts asynchronous index creation for the modules required by the current query.
 
-     Once all requested indexes are built, the view transitions back to `.ready`.
+     Ordinary text searches index the primary and selected translation modules. Strong's searches
+     index Strong's-capable Bible modules so the later query can use the same indexed lexical-token
+     architecture Android gets from JSword. Once all requested indexes are built, the view
+     transitions back to `.ready`.
 
      Side effects:
      - mutates `viewState` to `.creatingIndex` and later back to `.ready`
@@ -1121,6 +1158,19 @@ public struct SearchView: View {
         // Collect all modules that need indexing
         let modulesToIndex: [(SwordModule, String)] = {
             var list: [(SwordModule, String)] = []
+            if StrongsSearchSupport.normalizedQueryOptions(for: query) != nil {
+                let strongsModules = Self.resolveStrongsSearchModules(
+                    currentModule: swordModule,
+                    installedModules: installedBibleModules,
+                    swordManager: swordManager,
+                    searchIndexService: service
+                )
+                for mod in strongsModules where !service.hasIndex(for: mod.info.name) {
+                    list.append((mod, mod.info.name))
+                }
+                return list
+            }
+
             // Always index the primary module
             if let mod = swordModule, !service.hasIndex(for: mod.info.name) {
                 list.append((mod, mod.info.name))
@@ -1150,7 +1200,7 @@ public struct SearchView: View {
     // MARK: - Search Execution
 
     /**
-     Executes the current search query using Strong's lookup, indexed FTS, or SWORD fallback.
+     Executes the current search query using indexed Strong's lookup, indexed FTS, or SWORD fallback.
 
      The method snapshots current view state, then performs the potentially expensive work in a
      detached task so UI updates remain responsive. Results are marshalled back to the main actor.
@@ -1192,7 +1242,8 @@ public struct SearchView: View {
             Self.resolveStrongsSearchModules(
                 currentModule: currentSwordModule,
                 installedModules: currentInstalledBibleModules,
-                swordManager: currentSwordManager
+                swordManager: currentSwordManager,
+                searchIndexService: currentSearchIndexService
             )
         } else {
             []
@@ -1200,24 +1251,34 @@ public struct SearchView: View {
         let singleModuleName = currentSelectedModules.first ?? currentSwordModule?.info.name ?? ""
 
         Task.detached(priority: .userInitiated) {
-            // Android parity: find-all occurrences uses "strong:<key>" query syntax and
-            // a Strong's-capable Bible module, not plain-text FTS.
+            // Android parity: find-all occurrences uses canonical Strong's tokens from the
+            // module index and a Strong's-capable Bible module, not plain-text FTS.
             if let strongsQueryOptions {
                 if !strongsModules.isEmpty {
                     var hits: [SearchHit] = []
                     for strongsModule in strongsModules {
-                        hits = StrongsSearchSupport.searchVerseHits(
-                            in: strongsModule,
-                            queryOptions: strongsQueryOptions,
-                            scope: swordScope
-                        ).map {
-                            SearchHit(
-                                book: $0.book,
-                                chapter: $0.chapter,
-                                verse: $0.verse,
-                                text: $0.previewText,
-                                moduleName: nil
-                            )
+                        if let service = currentSearchIndexService,
+                           service.hasIndex(for: strongsModule.info.name) {
+                            hits = Self.convertIndexResults(service.searchStrongs(
+                                canonicalTokens: strongsQueryOptions.canonicalStrongTokens,
+                                moduleName: strongsModule.info.name,
+                                scopeBookName: scopeBookName,
+                                scopeTestament: scopeTestament
+                            ))
+                        } else {
+                            hits = StrongsSearchSupport.searchVerseHits(
+                                in: strongsModule,
+                                queryOptions: strongsQueryOptions,
+                                scope: swordScope
+                            ).map {
+                                SearchHit(
+                                    book: $0.book,
+                                    chapter: $0.chapter,
+                                    verse: $0.verse,
+                                    text: $0.previewText,
+                                    moduleName: nil
+                                )
+                            }
                         }
                         if !hits.isEmpty { break }
                     }
@@ -1386,48 +1447,50 @@ public struct SearchView: View {
     }
 
     /**
-     Resolves the best modules to use for Strong's "find all occurrences" searches.
+     Resolves the effective module for Strong's "find all occurrences" searches.
+
+     Android uses the current Bible when it has Strong's data; otherwise it chooses a default
+     Strong's Bible, preferring one that already has a completed index. This resolver returns at
+     most one module so iOS does not require indexing unrelated Strong's translations before a
+     single find-all search can run.
 
      - Parameters:
        - currentModule: Currently open Bible module, preferred when it advertises Strong's support.
        - installedModules: Installed Bible modules available to the reader.
-       - swordManager: Module manager used to resolve additional Strong's-capable modules.
-     - Returns: Ordered modules to try for Strong's search, without duplicates.
+       - swordManager: Module manager used to resolve the fallback Strong's-capable module.
+       - searchIndexService: Optional index service used to prefer an already-indexed fallback
+         module when the current module is not Strong's-capable.
+     - Returns: A single Strong's-capable module when one can be resolved, otherwise an empty list.
      */
     nonisolated private static func resolveStrongsSearchModules(
         currentModule: SwordModule?,
         installedModules: [ModuleInfo],
-        swordManager: SwordManager?
+        swordManager: SwordManager?,
+        searchIndexService: SearchIndexService?
     ) -> [SwordModule] {
-        var modules: [SwordModule] = []
-        var seenNames = Set<String>()
-
-        func appendUnique(_ module: SwordModule?) {
-            guard let module else { return }
-            if seenNames.insert(module.info.name).inserted {
-                modules.append(module)
-            }
-        }
-
-        // Prefer the currently-open module when it already has Strong's data.
         if let currentModule, currentModule.info.features.contains(.strongsNumbers) {
-            appendUnique(currentModule)
+            return [currentModule]
         }
 
-        // Then try every installed Strong's-capable Bible module.
-        if let swordManager {
-            let strongsBibleNames = installedModules
-                .filter { $0.features.contains(.strongsNumbers) }
-                .map(\.name)
-                .sorted()
-            for moduleName in strongsBibleNames {
-                appendUnique(swordManager.module(named: moduleName))
+        guard let swordManager else { return [] }
+        let strongsBibleInfos = installedModules
+            .enumerated()
+            .filter { $0.element.features.contains(.strongsNumbers) }
+            .sorted { lhs, rhs in
+                let leftIndexed = searchIndexService?.hasIndex(for: lhs.element.name) ?? false
+                let rightIndexed = searchIndexService?.hasIndex(for: rhs.element.name) ?? false
+                if leftIndexed != rightIndexed {
+                    return leftIndexed && !rightIndexed
+                }
+                return lhs.offset < rhs.offset
             }
-        }
+            .map(\.element)
 
-        // Final fallback to current module even if feature metadata is missing/stale.
-        appendUnique(currentModule)
-        return modules
+        guard let defaultInfo = strongsBibleInfos.first,
+              let defaultModule = swordManager.module(named: defaultInfo.name) else {
+            return []
+        }
+        return [defaultModule]
     }
 
 }
