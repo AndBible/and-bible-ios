@@ -189,11 +189,7 @@ extension AndBibleUITests {
                 return prompt.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.52))
             case "workspaceNamePromptTextField":
                 guard let prompt = firstExistingElement(
-                    [
-                        app.collectionViews["workspaceNamePromptScreen"].firstMatch,
-                        app.scrollViews["workspaceNamePromptScreen"].firstMatch,
-                        app.otherElements["workspaceNamePromptScreen"].firstMatch,
-                    ],
+                    workspaceNamePromptScreenCandidates(in: app),
                     timeout: 0.2
                 ),
                     elementFrameIsUsable(prompt.frame) else {
