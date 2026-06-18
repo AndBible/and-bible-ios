@@ -464,9 +464,15 @@ public struct SyncSettingsView: View {
                         title: String(localized: "test_connection"),
                         isEnabled: !isTestingConnection
                     )
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
                 .disabled(isTestingConnection)
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel(String(localized: "test_connection"))
                 .accessibilityIdentifier("syncNextCloudTestConnectionButton")
 
                 LabeledContent {

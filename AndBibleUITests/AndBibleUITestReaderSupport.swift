@@ -488,8 +488,9 @@ extension AndBibleUITests {
      *   - line: Source line used for nested helper attribution.
      * - Returns: `true` when the production drawer becomes visible.
      * - Side effects:
-     *   - taps the production navigation-drawer chrome control and waits for drawer affordances to
-     *     appear
+     *   - prefers XCTest's native tap path for the production navigation-drawer button, then falls
+     *     back to the sampled chrome coordinate when the hosted button is not yet hittable
+     *   - waits for drawer affordances to appear after each activation attempt
      * - Failure modes:
      *   - returns `false` when the drawer never appears before the local retry budget expires
      */
@@ -501,8 +502,19 @@ extension AndBibleUITests {
     ) -> Bool {
         _ = waitForReaderShellReady(in: app, timeout: min(10, timeout))
         let deadline = Date().addingTimeInterval(timeout)
+        let drawerButton = unresolvedElement("readerNavigationDrawerButton", in: app)
 
         repeat {
+            if waitForElementToBecomeHittable(drawerButton, timeout: 0.5) {
+                drawerButton.tap()
+                if waitForReaderNavigationDrawer(
+                    in: app,
+                    timeout: min(2, max(1, deadline.timeIntervalSinceNow))
+                ) {
+                    return true
+                }
+            }
+
             if tapReaderNavigationDrawerChromeCoordinate(in: app),
                waitForReaderNavigationDrawer(
                    in: app,
