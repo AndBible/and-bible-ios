@@ -33,7 +33,9 @@ class SyncSettingsUITestContractTests(unittest.TestCase):
         test_body = source[test_start:test_end]
 
         self.assertNotIn("triggerSyncConnectionTest", test_body)
-        self.assertIn("dismissKeyboardAfterFocusedTextEntry", test_body)
+        self.assertNotIn("dismissKeyboardAfterFocusedTextEntry", test_body)
+        self.assertIn('"syncNextCloudServerURLCommitButton"', test_body)
+        self.assertIn("tapElementReliably(commitButton", test_body)
         self.assertIn(
             'waitForElementValue("syncSettingsState", toContain: "remoteStatus=failureInvalidURL"',
             test_body,
@@ -69,6 +71,9 @@ class SyncSettingsUITestContractTests(unittest.TestCase):
 
         self.assertIn("validateNextCloudServerURLAfterEditing()", credential_body)
         self.assertIn("focusedNextCloudCredentialField", credential_body)
+        self.assertIn('"syncNextCloudServerURLCommitButton"', source)
+        self.assertIn("ToolbarItemGroup(placement: .keyboard)", source)
+        self.assertIn("-> Bool", validation_body)
         self.assertIn("@State private var lastCommittedServerURL", source)
         self.assertIn("lastCommittedServerURL = serverURL", persist_body)
         self.assertIn("isAndroidValidNextCloudServerURL(serverURL)", persist_body)

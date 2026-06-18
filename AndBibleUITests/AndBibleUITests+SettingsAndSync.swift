@@ -449,7 +449,8 @@ extension AndBibleUITests {
      *
      * - Side effects:
      *   - launches the app on the reader shell and opens Sync Settings from the reader action
-     *   - enters one invalid server URL and commits the inline credential edit
+     *   - enters one invalid server URL and commits the inline credential edit through the
+     *     Android-equivalent keyboard commit action
      * - Failure modes:
      *   - fails if the Sync Settings sheet never appears
      *   - fails if the NextCloud server field is missing
@@ -463,7 +464,8 @@ extension AndBibleUITests {
         let serverField = requireElement("syncNextCloudServerURLField", in: app, timeout: 10)
 
         replaceText(in: serverField, with: "not-a-url")
-        dismissKeyboardAfterFocusedTextEntry(serverField, in: app)
+        let commitButton = requireElement("syncNextCloudServerURLCommitButton", in: app, timeout: 5)
+        tapElementReliably(commitButton, timeout: 2)
         waitForElementValue("syncSettingsState", toContain: "remoteStatus=failureInvalidURL", in: app, timeout: 10)
     }
 

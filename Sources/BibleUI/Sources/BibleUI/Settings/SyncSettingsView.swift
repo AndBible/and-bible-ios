@@ -203,9 +203,24 @@ public struct SyncSettingsView: View {
         }
         .onChange(of: focusedNextCloudCredentialField) { oldValue, newValue in
             if oldValue == .serverURL, newValue != .serverURL {
-                validateNextCloudServerURLAfterEditing()
+                _ = validateNextCloudServerURLAfterEditing()
             }
         }
+        #if os(iOS)
+        .toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                if focusedNextCloudCredentialField == .serverURL {
+                    Spacer()
+                    Button(String(localized: "ok")) {
+                        if validateNextCloudServerURLAfterEditing() {
+                            focusedNextCloudCredentialField = nil
+                        }
+                    }
+                    .accessibilityIdentifier("syncNextCloudServerURLCommitButton")
+                }
+            }
+        }
+        #endif
         .alert(
             String(localized: "cloud_sync_title"),
             isPresented: Binding(
@@ -417,7 +432,9 @@ public struct SyncSettingsView: View {
                         .multilineTextAlignment(.trailing)
                         .focused($focusedNextCloudCredentialField, equals: .serverURL)
                         .onSubmit {
-                            validateNextCloudServerURLAfterEditing()
+                            if validateNextCloudServerURLAfterEditing() {
+                                focusedNextCloudCredentialField = nil
+                            }
                         }
                         .accessibilityIdentifier("syncNextCloudServerURLField")
                         #if os(iOS)
@@ -1028,7 +1045,8 @@ public struct SyncSettingsView: View {
      and rejects malformed edits before they are written to preferences. iOS uses an inline
      `TextField`, so submit and focus-loss events call this method as the equivalent commit boundary.
 
-     Side effects:
+     - Returns: `true` when the edit was accepted and persisted, otherwise `false`.
+     - Side effects:
      - invalid URLs update the transient remote status and present the same localized error dialog
      - valid URLs clear stale connection-test status and persist the current remote settings
 
@@ -1036,21 +1054,28 @@ public struct SyncSettingsView: View {
      - local persistence failures are still swallowed by `persistRemoteSettings()`, matching the
        existing settings-save behavior
      */
-    private func validateNextCloudServerURLAfterEditing() {
+    @discardableResult
+    private func validateNextCloudServerURLAfterEditing() -> Bool {
         guard selectedBackend == .nextCloud else {
-            return
+            return true
         }
 
         let invalidURLMessage = String(localized: "invalid_url_message")
+        if serverURL == lastCommittedServerURL,
+           remoteConnectionStatus == .failure(invalidURLMessage)
+        {
+            return false
+        }
         guard isAndroidValidNextCloudServerURL(serverURL) else {
             remoteConnectionStatus = .failure(invalidURLMessage)
             remoteSyncErrorMessage = invalidURLMessage
             serverURL = lastCommittedServerURL
-            return
+            return false
         }
 
         remoteConnectionStatus = nil
         persistRemoteSettings()
+        return true
     }
 
     /**
