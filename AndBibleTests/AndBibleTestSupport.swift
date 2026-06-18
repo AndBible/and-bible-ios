@@ -353,6 +353,58 @@ extension AndBibleTests {
         return tempRoot.path
     }
 
+    /**
+     Seeds a deterministic empty SWORD commentary module into a temporary module directory.
+
+     The bundled test fixture intentionally carries only KJV, but commentary parity tests need an
+     installed verse-key commentary category so `BibleReaderController` exercises its commentary
+     loading path. The module uses SWORD's `RawCom` driver with empty testament data files, which
+     is enough for category discovery and missing-entry behavior without redistributing another
+     module.
+
+     - Parameters:
+       - moduleName: SWORD module initials to publish in `mods.d`.
+       - modulePath: Temporary SWORD root returned by `makeTemporaryBundledSwordPath()`.
+     - Side effects: Writes a `.conf` file and empty `RawCom` data files under `modulePath`.
+     - Failure modes: Propagates filesystem write errors.
+     */
+    func seedEmptyRawCommentaryModule(named moduleName: String = "UITestComm", in modulePath: String) throws {
+        let fm = FileManager.default
+        let moduleRoot = URL(fileURLWithPath: modulePath, isDirectory: true)
+        let modsDURL = moduleRoot.appendingPathComponent("mods.d", isDirectory: true)
+        let dataURL = moduleRoot
+            .appendingPathComponent("modules", isDirectory: true)
+            .appendingPathComponent("comments", isDirectory: true)
+            .appendingPathComponent("rawcom", isDirectory: true)
+            .appendingPathComponent(moduleName.lowercased(), isDirectory: true)
+
+        try fm.createDirectory(at: modsDURL, withIntermediateDirectories: true)
+        try fm.createDirectory(at: dataURL, withIntermediateDirectories: true)
+        for fileName in ["ot", "ot.vss", "nt", "nt.vss"] {
+            let fileURL = dataURL.appendingPathComponent(fileName, isDirectory: false)
+            if !fm.fileExists(atPath: fileURL.path) {
+                try Data().write(to: fileURL)
+            }
+        }
+
+        let conf = """
+        [\(moduleName)]
+        Description=UI Test Commentary
+        DataPath=./modules/comments/rawcom/\(moduleName.lowercased())/
+        ModDrv=RawCom
+        SourceType=OSIS
+        Encoding=UTF-8
+        Lang=en
+        Versification=KJV
+        About=Deterministic empty commentary module for iOS parity tests.
+        """
+        try conf.write(
+            to: modsDURL.appendingPathComponent("\(moduleName.lowercased()).conf", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+    }
+
     func copyDirectoryContents(from source: URL, to destination: URL) throws {
         let fm = FileManager.default
         try fm.createDirectory(at: destination, withIntermediateDirectories: true)

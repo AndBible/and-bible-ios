@@ -5,6 +5,34 @@ import SwiftData
 import BibleCore
 
 /**
+ Verse reference resolved from an Android/JSword-style bookmark ordinal.
+
+ Bookmark rows are built from persisted SwiftData records, but those records store ordinals in the
+ source versification rather than chapter/verse text. The reader injects a resolver backed by
+ SWORD's `VerseKey` so the list can display and navigate bookmarks without reintroducing local
+ ordinal arithmetic.
+ */
+public struct BookmarkListVerseReference: Sendable, Equatable {
+    /// One-based chapter number.
+    public let chapter: Int
+
+    /// One-based verse number.
+    public let verse: Int
+
+    /**
+     Creates a resolved bookmark verse reference.
+
+     - Parameters:
+       - chapter: One-based chapter number.
+       - verse: One-based verse number.
+     */
+    public init(chapter: Int, verse: Int) {
+        self.chapter = chapter
+        self.verse = verse
+    }
+}
+
+/**
  Displays a searchable, filterable, and sortable list of Bible and generic bookmarks from SwiftData.
 
  `BookmarkListView` is the main bookmark-browser surface. It excludes note-bearing bookmarks that
@@ -60,19 +88,26 @@ public struct BookmarkListView: View {
     /// Optional callback used to open a study pad for a selected label.
     var onOpenStudyPad: ((UUID) -> Void)?
 
+    /// Optional SWORD-backed resolver for Bible bookmark ordinals.
+    var bibleOrdinalResolver: ((String, Int) -> BookmarkListVerseReference?)?
+
     /**
      Creates the bookmark list view.
 
      - Parameters:
        - onNavigate: Callback invoked when the user opens a bookmark from the list.
        - onOpenStudyPad: Callback invoked when the user wants to open a selected label's study pad.
+       - bibleOrdinalResolver: Optional resolver that maps `(bookName, ordinal)` to a concrete
+         chapter/verse using the active Bible versification.
      */
     public init(
         onNavigate: ((String, Int) -> Void)? = nil,
-        onOpenStudyPad: ((UUID) -> Void)? = nil
+        onOpenStudyPad: ((UUID) -> Void)? = nil,
+        bibleOrdinalResolver: ((String, Int) -> BookmarkListVerseReference?)? = nil
     ) {
         self.onNavigate = onNavigate
         self.onOpenStudyPad = onOpenStudyPad
+        self.bibleOrdinalResolver = bibleOrdinalResolver
     }
 
     /**
@@ -114,7 +149,7 @@ public struct BookmarkListView: View {
     private var bookmarkListItems: [BookmarkListItem] {
         let bibleItems = bibleBookmarks
             .filter { ($0.notes?.notes ?? "").isEmpty }
-            .map(BookmarkListItem.init(bibleBookmark:))
+            .map { BookmarkListItem(bibleBookmark: $0, ordinalResolver: bibleOrdinalResolver) }
         let genericItems = genericBookmarks
             .filter { ($0.notes?.notes ?? "").isEmpty }
             .map(BookmarkListItem.init(genericBookmark:))
@@ -385,21 +420,40 @@ public struct BookmarkListView: View {
      Converts bookmark ordinals into a human-readable verse reference string.
 
      - Parameter bookmark: Bookmark whose ordinals should be rendered for the list UI.
-     - Returns: Reference text like `Genesis 1:1` or `Genesis 1:1-3`.
+     - Returns: Reference text like `Genesis 1:1`, `Genesis 1:1-3`, or `Genesis 1:31-2:1`.
      */
-    static func verseReference(for bookmark: BibleBookmark) -> String {
+    static func verseReference(
+        for bookmark: BibleBookmark,
+        ordinalResolver: ((String, Int) -> BookmarkListVerseReference?)? = nil
+    ) -> String {
         let bookName = bookmark.book ?? "Unknown"
-        let startChapter = bookmark.ordinalStart / 40 + 1
-        let startVerse = max(bookmark.ordinalStart % 40, 1)
+        let startReference = ordinalResolver?(bookName, bookmark.ordinalStart)
+            ?? compatibilityVerseReference(ordinal: bookmark.ordinalStart)
         // Normalize: treat endOrdinal <= 0 or <= startOrdinal as single verse
         let effectiveEnd = bookmark.ordinalEnd > bookmark.ordinalStart ? bookmark.ordinalEnd : bookmark.ordinalStart
-        let endVerse = max(effectiveEnd % 40, 1)
+        let endReference = ordinalResolver?(bookName, effectiveEnd)
+            ?? compatibilityVerseReference(ordinal: effectiveEnd)
 
-        if effectiveEnd == bookmark.ordinalStart || endVerse == startVerse {
-            return "\(bookName) \(startChapter):\(startVerse)"
+        if effectiveEnd == bookmark.ordinalStart || endReference == startReference {
+            return "\(bookName) \(startReference.chapter):\(startReference.verse)"
+        } else if endReference.chapter == startReference.chapter {
+            return "\(bookName) \(startReference.chapter):\(startReference.verse)-\(endReference.verse)"
         } else {
-            return "\(bookName) \(startChapter):\(startVerse)-\(endVerse)"
+            return "\(bookName) \(startReference.chapter):\(startReference.verse)-\(endReference.chapter):\(endReference.verse)"
         }
+    }
+
+    /**
+     Compatibility fallback for no-module bookmark list previews.
+
+     Real reader-owned bookmark lists should inject `bibleOrdinalResolver` so ordinals are decoded
+     through SWORD's versification. The fallback keeps design previews and isolated unit tests
+     functional when no reader/controller exists.
+     */
+    fileprivate static func compatibilityVerseReference(ordinal: Int) -> BookmarkListVerseReference {
+        let chapter = max(1, ((ordinal - 1) / 40) + 1)
+        let verse = max(1, ordinal - ((chapter - 1) * 40))
+        return BookmarkListVerseReference(chapter: chapter, verse: verse)
     }
 
     /**
@@ -496,8 +550,11 @@ private struct BookmarkListItem: Identifiable {
     }
 
     /// Creates a normalized row for one Bible bookmark.
-    init(bibleBookmark bookmark: BibleBookmark) {
-        let reference = BookmarkListView.verseReference(for: bookmark)
+    init(
+        bibleBookmark bookmark: BibleBookmark,
+        ordinalResolver: ((String, Int) -> BookmarkListVerseReference?)? = nil
+    ) {
+        let reference = BookmarkListView.verseReference(for: bookmark, ordinalResolver: ordinalResolver)
         let noteText = bookmark.notes?.notes ?? ""
         self.id = bookmark.id
         self.source = .bible(bookmark)
@@ -509,9 +566,12 @@ private struct BookmarkListItem: Identifiable {
         self.customIcon = bookmark.customIcon
         self.noteText = noteText
         self.labels = bookmark.bookmarkToLabels?.compactMap { $0.label }.sorted { $0.name < $1.name } ?? []
+        let bookName = bookmark.book ?? "Genesis"
+        let resolvedStart = ordinalResolver?(bookName, bookmark.ordinalStart)
+            ?? BookmarkListView.compatibilityVerseReference(ordinal: bookmark.ordinalStart)
         self.navigationTarget = (
-            bookName: bookmark.book ?? "Genesis",
-            chapter: bookmark.ordinalStart / 40 + 1
+            bookName: bookName,
+            chapter: resolvedStart.chapter
         )
     }
 

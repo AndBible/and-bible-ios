@@ -18,6 +18,8 @@
 
 #include "sword_real_api.h"
 
+const char **SWModule_getVerseKeyChildrenDirect(void *module);
+
 // --- Cached state for module list iteration ---
 static const struct org_crosswire_sword_ModInfo *cached_mod_list = NULL;
 static SWHANDLE cached_mod_list_mgr = 0;
@@ -310,6 +312,8 @@ void SWModule_setCipherKey(void *module, const char *key) {
 
 const char **SWModule_getKeyChildren(void *module) {
     if (!module) return NULL;
+    const char **verseKeyChildren = SWModule_getVerseKeyChildrenDirect(module);
+    if (verseKeyChildren) return verseKeyChildren;
     return org_crosswire_sword_SWModule_getKeyChildren(
         (SWHANDLE)(uintptr_t)module);
 }
@@ -518,6 +522,8 @@ int SWModule_hasFeature(void *module, const char *feature) { return 0; }
 const char *SWModule_getConfigEntry(void *module, const char *key) { return NULL; }
 void SWModule_setCipherKey(void *module, const char *key) { }
 const char **SWModule_getKeyChildren(void *module) { return NULL; }
+long SWModule_getVerseKeyIndex(void *module) { return -1; }
+int SWModule_setVerseKeyIndex(void *module, long index) { return 1; }
 
 void *InstallMgr_new(const char *basePath) {
     static int sentinel = 2;

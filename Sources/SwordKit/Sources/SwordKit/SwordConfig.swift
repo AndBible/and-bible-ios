@@ -6,11 +6,11 @@ import CLibSword
 /**
  Swift wrapper around SWORD's SWConfig for reading/writing configuration files.
 
- Used to manage sword.conf and module .conf files.
+ Used to manage sword.conf and module .conf files. Native config calls are routed through
+ `SwordRuntime` because the flat SWORD bridge is process-global and not thread-safe.
  */
 public final class SwordConfig: @unchecked Sendable {
     private let handle: UnsafeMutableRawPointer
-    private let queue = DispatchQueue(label: "org.andbible.SwordConfig", qos: .userInitiated)
 
     /// The file path this config was loaded from.
     public let filePath: String
@@ -21,12 +21,14 @@ public final class SwordConfig: @unchecked Sendable {
      */
     public init?(filePath: String) {
         self.filePath = filePath
-        guard let h = SWConfig_new(filePath) else { return nil }
+        guard let h = SwordRuntime.sync({ SWConfig_new(filePath) }) else { return nil }
         self.handle = h
     }
 
     deinit {
-        SWConfig_delete(handle)
+        SwordRuntime.sync {
+            SWConfig_delete(handle)
+        }
     }
 
     /**
@@ -37,7 +39,7 @@ public final class SwordConfig: @unchecked Sendable {
      - Returns: The value, or nil if not found.
      */
     public func getValue(section: String, key: String) -> String? {
-        queue.sync {
+        SwordRuntime.sync {
             guard let cStr = SWConfig_getValue(handle, section, key) else { return nil }
             let value = String(cString: cStr)
             return value.isEmpty ? nil : value
@@ -52,14 +54,14 @@ public final class SwordConfig: @unchecked Sendable {
        - value: The value to set.
      */
     public func setValue(section: String, key: String, value: String) {
-        queue.sync {
+        SwordRuntime.sync {
             SWConfig_setValue(handle, section, key, value)
         }
     }
 
     /// Save configuration changes to disk.
     public func save() {
-        queue.sync {
+        SwordRuntime.sync {
             SWConfig_save(handle)
         }
     }

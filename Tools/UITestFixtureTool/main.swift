@@ -2,6 +2,7 @@ import Foundation
 import SQLite3
 import SwiftData
 import BibleCore
+import SwordKit
 
 /**
  Host-side fixture writer for XCUITests.
@@ -130,6 +131,9 @@ private struct ToolArguments {
 private enum FixtureToolError: LocalizedError {
     case usage(String)
     case sqlite(String)
+    case missingBundledSwordResources(String)
+    case missingSwordModule(String)
+    case unresolvedVerse(String)
     case missingWorkspace
     case missingWindow
     case missingPageManager
@@ -140,6 +144,12 @@ private enum FixtureToolError: LocalizedError {
             return message
         case .sqlite(let message):
             return message
+        case .missingBundledSwordResources(let path):
+            return "Fixture seeding could not find bundled SWORD resources at '\(path)'."
+        case .missingSwordModule(let moduleName):
+            return "Fixture seeding could not load required SWORD module '\(moduleName)'."
+        case .unresolvedVerse(let reference):
+            return "Fixture seeding could not resolve required SWORD verse '\(reference)'."
         case .missingWorkspace:
             return "Fixture seeding could not resolve or create an active workspace."
         case .missingWindow:
@@ -279,6 +289,7 @@ private struct FixtureTool {
             swordURL.appendingPathComponent("mods.d/uitestweb.conf", isDirectory: false),
             swordURL.appendingPathComponent("modules/comments/rawcom/uitestcomm", isDirectory: true),
             swordURL.appendingPathComponent("modules/texts/rawtext/uitestweb", isDirectory: true),
+            swordURL.appendingPathComponent("modules/texts/ztext/uitestweb", isDirectory: true),
         ]
         for candidate in candidates where fileManager.fileExists(atPath: candidate.path) {
             try fileManager.removeItem(at: candidate)
@@ -297,6 +308,7 @@ private final class FixtureContext {
     private let bookmarkService: BookmarkService
     private let remoteSyncSettingsStore: RemoteSyncSettingsStore
     private let fileManager = FileManager.default
+    private var swordManager: SwordManager?
 
     /**
      Creates the store-backed fixture writer for one simulator container.
@@ -391,23 +403,23 @@ private final class FixtureContext {
             try seedUITestBibleModule()
             try seedMultiTranslationSearchIndex()
         case .bookmarkNavigation:
-            seedBookmarkNavigation()
+            try seedBookmarkNavigation()
         case .bookmarkMultiRow:
-            seedBookmarkMultiRow()
+            try seedBookmarkMultiRow()
         case .bookmarkFilter:
-            seedBookmarkFilter()
+            try seedBookmarkFilter()
         case .bookmarkRowLabel:
-            seedBookmarkRowLabel()
+            try seedBookmarkRowLabel()
         case .bookmarkGenericVisible:
             seedBookmarkGenericVisible()
         case .bookmarkStudyPad:
-            seedBookmarkStudyPad()
+            try seedBookmarkStudyPad()
         case .historySingle:
             seedHistorySingle(window: baseline.window)
         case .historyMultiRow:
             seedHistoryMultiRow(window: baseline.window)
         case .myNotesSingle:
-            seedMyNotesSingle()
+            try seedMyNotesSingle()
         case .syncNextCloud:
             seedSyncNextCloud(enabledCategories: [])
         case .syncNextCloudBookmarksEnabled:
@@ -452,11 +464,13 @@ private final class FixtureContext {
 
         try prepareSearchIndexSchema(in: db)
         try executeSearchSQL("DELETE FROM verse_fts WHERE module_name = 'KJV'", db: db)
+        try executeSearchSQL("DELETE FROM verse_strongs WHERE module_name = 'KJV'", db: db)
         try executeSearchSQL("DELETE FROM indexed_modules WHERE module_name = 'KJV'", db: db)
         try executeSearchSQL("BEGIN TRANSACTION", db: db)
 
         do {
             try insertSeededSearchRows(into: db)
+            try insertSeededStrongRows(into: db)
             try recordSeededSearchModule(
                 "KJV",
                 into: db,
@@ -501,6 +515,7 @@ private final class FixtureContext {
         try prepareSearchIndexSchema(in: db)
         for moduleName in ["KJV", "UITESTWEB"] {
             try executeSearchSQL("DELETE FROM verse_fts WHERE module_name = '\(moduleName)'", db: db)
+            try executeSearchSQL("DELETE FROM verse_strongs WHERE module_name = '\(moduleName)'", db: db)
             try executeSearchSQL("DELETE FROM indexed_modules WHERE module_name = '\(moduleName)'", db: db)
         }
         try executeSearchSQL("BEGIN TRANSACTION", db: db)
@@ -508,6 +523,7 @@ private final class FixtureContext {
         do {
             let rows = Self.seededSearchRows + Self.seededMultiTranslationSearchRows
             try insertSeededSearchRows(rows, into: db)
+            try insertSeededStrongRows(into: db)
             for moduleName in Set(rows.map { $0.moduleName }).sorted() {
                 let verseCount = rows.filter { $0.moduleName == moduleName }.count
                 try recordSeededSearchModule(moduleName, into: db, verseCount: Int32(verseCount))
@@ -541,7 +557,10 @@ private final class FixtureContext {
         _ rows: [(verseKey: String, plainText: String, moduleName: String)],
         into db: OpaquePointer
     ) throws {
-        let sql = "INSERT INTO verse_fts (verse_key, plain_text, module_name) VALUES (?, ?, ?)"
+        let sql = """
+            INSERT INTO verse_fts (verse_key, plain_text, module_name, entry_order)
+            VALUES (?, ?, ?, ?)
+        """
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK,
               let statement else {
@@ -552,12 +571,13 @@ private final class FixtureContext {
         }
         defer { sqlite3_finalize(statement) }
 
-        for row in rows {
+        for (entryOrder, row) in rows.enumerated() {
             sqlite3_reset(statement)
             sqlite3_clear_bindings(statement)
             sqlite3_bind_text(statement, 1, row.verseKey, -1, sqliteTransient)
             sqlite3_bind_text(statement, 2, row.plainText, -1, sqliteTransient)
             sqlite3_bind_text(statement, 3, row.moduleName, -1, sqliteTransient)
+            sqlite3_bind_int(statement, 4, Int32(entryOrder))
             guard sqlite3_step(statement) == SQLITE_DONE else {
                 throw sqliteError(
                     from: db,
@@ -568,7 +588,52 @@ private final class FixtureContext {
     }
 
     /**
+     Inserts deterministic Strong's-token rows paired with the seeded KJV FTS rows.
+
+     The Search UI treats ordinary text search and Strong's lookup as separate index facets, just
+     like Android's JSword/Lucene index has distinct text and `strong` fields. The fixture must
+     therefore seed lexical-token rows for Strong's UI tests instead of marking a text-only index as
+     Strong's-ready.
+
+     - Parameter db: Open SQLite handle for `search_indexes.sqlite`.
+     - Throws: `FixtureToolError.sqlite` when row insertion fails.
+     */
+    private func insertSeededStrongRows(into db: OpaquePointer) throws {
+        let sql = """
+            INSERT OR IGNORE INTO verse_strongs (module_name, token, verse_key, entry_order)
+            VALUES (?, ?, ?, ?)
+        """
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK,
+              let statement else {
+            throw sqliteError(
+                from: db,
+                fallback: "Unable to prepare seeded Strong's row insert statement."
+            )
+        }
+        defer { sqlite3_finalize(statement) }
+
+        for row in Self.seededStrongRows {
+            sqlite3_reset(statement)
+            sqlite3_clear_bindings(statement)
+            sqlite3_bind_text(statement, 1, row.moduleName, -1, sqliteTransient)
+            sqlite3_bind_text(statement, 2, row.token, -1, sqliteTransient)
+            sqlite3_bind_text(statement, 3, row.verseKey, -1, sqliteTransient)
+            sqlite3_bind_int(statement, 4, Int32(row.entryOrder))
+            guard sqlite3_step(statement) == SQLITE_DONE else {
+                throw sqliteError(
+                    from: db,
+                    fallback: "Unable to insert seeded Strong's row '\(row.verseKey)'."
+                )
+            }
+        }
+    }
+
+    /**
      Records the seeded module metadata expected by `SearchIndexService.hasIndex`.
+
+     The schema version comes from production `SearchIndexService` so fixture-generated search
+     databases remain valid when the app intentionally invalidates older index formats.
      *
      * - Parameters:
      *   - moduleName: Module abbreviation to record as indexed.
@@ -593,7 +658,7 @@ private final class FixtureContext {
 
         sqlite3_bind_text(statement, 1, moduleName, -1, sqliteTransient)
         sqlite3_bind_int(statement, 2, verseCount)
-        sqlite3_bind_int(statement, 3, 2)
+        sqlite3_bind_int(statement, 3, Int32(SearchIndexService.currentSchemaVersion))
 
         guard sqlite3_step(statement) == SQLITE_DONE else {
             throw sqliteError(
@@ -616,8 +681,22 @@ private final class FixtureContext {
                 verse_key,
                 plain_text,
                 module_name UNINDEXED,
+                entry_order UNINDEXED,
                 tokenize='unicode61'
             )
+        """, db: db)
+        try executeSearchSQL("""
+            CREATE TABLE IF NOT EXISTS verse_strongs (
+                module_name TEXT NOT NULL,
+                token TEXT NOT NULL,
+                verse_key TEXT NOT NULL,
+                entry_order INTEGER NOT NULL,
+                PRIMARY KEY (module_name, token, verse_key)
+            )
+        """, db: db)
+        try executeSearchSQL("""
+            CREATE INDEX IF NOT EXISTS idx_verse_strongs_module_token
+            ON verse_strongs (module_name, token, entry_order)
         """, db: db)
         try executeSearchSQL("""
             CREATE TABLE IF NOT EXISTS indexed_modules (
@@ -678,6 +757,22 @@ private final class FixtureContext {
     ]
 
     /**
+     SQLite rows preseeded into the bundled KJV Strong's index facet.
+
+     The token is attached to `Genesis 1:2`, which already exists in `seededSearchRows`; this keeps
+     Strong's fixture coverage without changing the deterministic ordinary-text result totals for
+     broad `earth` searches.
+     */
+    private static let seededStrongRows: [(verseKey: String, token: String, moduleName: String, entryOrder: Int)] = [
+        (
+            verseKey: "Genesis 1:2",
+            token: "H0430",
+            moduleName: "KJV",
+            entryOrder: 0
+        ),
+    ]
+
+    /**
      Additional deterministic rows used only by the grouped multi-translation Search fixture.
      */
     private static let seededMultiTranslationSearchRows: [(verseKey: String, plainText: String, moduleName: String)] = [
@@ -699,45 +794,48 @@ private final class FixtureContext {
     }
 
     /**
-     Seeds a minimal SWORD Bible module used by multi-translation Search UI tests.
+     Seeds a real SWORD Bible module used by multi-translation Search UI tests.
 
-     Search assertions read deterministic FTS rows from `search_indexes.sqlite`, so the module only
-     needs enough SWORD metadata to appear as an installed Bible translation in the real picker.
+     Search assertions read deterministic FTS rows from `search_indexes.sqlite`, but production
+     module discovery and book-list generation now require normal SWORD zText semantics. The fixture
+     therefore clones the bundled KJV module data under deterministic `UITESTWEB` metadata instead of
+     publishing an empty RawText shell that Android/JSword-style discovery would reject.
      */
     private func seedUITestBibleModule() throws {
         let swordURL = paths.documentsURL.appendingPathComponent("sword", isDirectory: true)
         let modsDURL = swordURL.appendingPathComponent("mods.d", isDirectory: true)
         let dataURL = swordURL.appendingPathComponent(
-            "modules/texts/rawtext/uitestweb",
+            "modules/texts/ztext/uitestweb",
             isDirectory: true
         )
+        let sourceDataURL = try bundledSwordResourceURL()
+            .appendingPathComponent("modules", isDirectory: true)
+            .appendingPathComponent("texts", isDirectory: true)
+            .appendingPathComponent("ztext", isDirectory: true)
+            .appendingPathComponent("kjv", isDirectory: true)
+
         try fileManager.createDirectory(at: modsDURL, withIntermediateDirectories: true)
-        try fileManager.createDirectory(at: dataURL, withIntermediateDirectories: true)
         try removeCachedSwordModuleConfig(in: modsDURL)
+        try copyDirectoryContents(from: sourceDataURL, to: dataURL, replacingExisting: true)
 
         let conf = """
         [UITESTWEB]
         Description=UI Test Web Bible
-        DataPath=./modules/texts/rawtext/uitestweb/
-        ModDrv=RawText
+        DataPath=./modules/texts/ztext/uitestweb/
+        ModDrv=zText
         SourceType=OSIS
         Encoding=UTF-8
+        CompressType=ZIP
+        BlockType=BOOK
         Lang=en
         Versification=KJV
-        About=Deterministic empty Bible module for iOS multi-translation Search UI automation.
+        About=Deterministic Bible module for iOS multi-translation Search UI automation.
         """
         try conf.write(
             to: modsDURL.appendingPathComponent("uitestweb.conf", isDirectory: false),
             atomically: true,
             encoding: .utf8
         )
-
-        for fileName in ["ot", "ot.vss", "nt", "nt.vss"] {
-            let url = dataURL.appendingPathComponent(fileName, isDirectory: false)
-            if !fileManager.fileExists(atPath: url.path) {
-                try Data().write(to: url)
-            }
-        }
     }
 
     /**
@@ -787,6 +885,106 @@ private final class FixtureContext {
         let cacheURL = modsDURL.appendingPathComponent("modules-conf.cache", isDirectory: false)
         if fileManager.fileExists(atPath: cacheURL.path) {
             try fileManager.removeItem(at: cacheURL)
+        }
+    }
+
+    /**
+     Resolves the repo-bundled SWORD resource directory used by the app at first launch.
+
+     The host fixture tool runs outside the app bundle, so it cannot use `Bundle.main`. Resolving from
+     `#filePath` keeps the fixture tied to the checked-out resources that Xcode also packages into
+     the app.
+
+     - Returns: Repository `AndBible/Resources/sword` directory.
+     - Throws: `FixtureToolError.missingBundledSwordResources` when the resources are unavailable.
+     */
+    private func bundledSwordResourceURL() throws -> URL {
+        let repositoryRootURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let bundledSwordURL = repositoryRootURL
+            .appendingPathComponent("AndBible", isDirectory: true)
+            .appendingPathComponent("Resources", isDirectory: true)
+            .appendingPathComponent("sword", isDirectory: true)
+
+        guard fileManager.fileExists(atPath: bundledSwordURL.path) else {
+            throw FixtureToolError.missingBundledSwordResources(bundledSwordURL.path)
+        }
+        return bundledSwordURL
+    }
+
+    /**
+     Ensures the simulator SWORD directory contains the bundled KJV module.
+
+     UI fixture commands can run before app launch has copied bundled modules. Bookmark fixtures need
+     KJV available immediately so their persisted ordinals are produced by SWORD instead of by a
+     static approximation.
+
+     - Returns: Simulator document `sword` directory.
+     - Throws: Filesystem errors or `FixtureToolError.missingBundledSwordResources`.
+     */
+    @discardableResult
+    private func ensureBundledKJVSwordModuleAvailable() throws -> URL {
+        let sourceSwordURL = try bundledSwordResourceURL()
+        let destinationSwordURL = paths.documentsURL.appendingPathComponent("sword", isDirectory: true)
+        let sourceConfURL = sourceSwordURL
+            .appendingPathComponent("mods.d", isDirectory: true)
+            .appendingPathComponent("kjv.conf", isDirectory: false)
+        let destinationModsDURL = destinationSwordURL.appendingPathComponent("mods.d", isDirectory: true)
+        let destinationConfURL = destinationModsDURL.appendingPathComponent("kjv.conf", isDirectory: false)
+        let sourceDataURL = sourceSwordURL
+            .appendingPathComponent("modules", isDirectory: true)
+            .appendingPathComponent("texts", isDirectory: true)
+            .appendingPathComponent("ztext", isDirectory: true)
+            .appendingPathComponent("kjv", isDirectory: true)
+        let destinationDataURL = destinationSwordURL
+            .appendingPathComponent("modules", isDirectory: true)
+            .appendingPathComponent("texts", isDirectory: true)
+            .appendingPathComponent("ztext", isDirectory: true)
+            .appendingPathComponent("kjv", isDirectory: true)
+
+        try fileManager.createDirectory(at: destinationModsDURL, withIntermediateDirectories: true)
+        if !fileManager.fileExists(atPath: destinationConfURL.path) {
+            try fileManager.copyItem(at: sourceConfURL, to: destinationConfURL)
+        }
+        try copyDirectoryContents(from: sourceDataURL, to: destinationDataURL, replacingExisting: false)
+        return destinationSwordURL
+    }
+
+    /**
+     Recursively copies directory contents for deterministic SWORD fixture modules.
+
+     - Parameters:
+       - source: Source directory to copy.
+       - destination: Destination directory to create or update.
+       - replacingExisting: Whether an existing destination tree should be removed first.
+     - Throws: Filesystem errors when copying fails.
+     */
+    private func copyDirectoryContents(from source: URL, to destination: URL, replacingExisting: Bool) throws {
+        if replacingExisting, fileManager.fileExists(atPath: destination.path) {
+            try fileManager.removeItem(at: destination)
+        }
+        try fileManager.createDirectory(at: destination, withIntermediateDirectories: true)
+
+        for item in try fileManager.contentsOfDirectory(
+            at: source,
+            includingPropertiesForKeys: [.isDirectoryKey]
+        ) {
+            let values = try item.resourceValues(forKeys: [.isDirectoryKey])
+            let target = destination.appendingPathComponent(
+                item.lastPathComponent,
+                isDirectory: values.isDirectory == true
+            )
+
+            if values.isDirectory == true {
+                try copyDirectoryContents(from: item, to: target, replacingExisting: replacingExisting)
+            } else if replacingExisting || !fileManager.fileExists(atPath: target.path) {
+                if fileManager.fileExists(atPath: target.path) {
+                    try fileManager.removeItem(at: target)
+                }
+                try fileManager.copyItem(at: item, to: target)
+            }
         }
     }
 
@@ -843,8 +1041,8 @@ private final class FixtureContext {
     /**
      Seeds one bookmark that should navigate from Genesis 1 to Exodus 2.
      */
-    private func seedBookmarkNavigation() {
-        _ = createBibleBookmark(
+    private func seedBookmarkNavigation() throws {
+        _ = try createBibleBookmark(
             bookName: "Exodus",
             chapter: 2,
             labelName: nil,
@@ -856,15 +1054,15 @@ private final class FixtureContext {
     /**
      Seeds two bookmark rows used by delete and sort workflows.
      */
-    private func seedBookmarkMultiRow() {
-        _ = createBibleBookmark(
+    private func seedBookmarkMultiRow() throws {
+        _ = try createBibleBookmark(
             bookName: "Matthew",
             chapter: 3,
             labelName: nil,
             note: nil,
             createdAt: seededDate(offset: 20)
         )
-        _ = createBibleBookmark(
+        _ = try createBibleBookmark(
             bookName: "Exodus",
             chapter: 2,
             labelName: nil,
@@ -876,17 +1074,17 @@ private final class FixtureContext {
     /**
      Seeds two labeled bookmark rows used by filter-reset workflows.
      */
-    private func seedBookmarkFilter() {
+    private func seedBookmarkFilter() throws {
         let uiTestLabel = ensureUserLabel(name: "UI Test Seed", color: 0xFF91A7FF)
         let secondaryLabel = ensureUserLabel(name: "Other Label", color: 0xFFFFCC99)
-        _ = createBibleBookmark(
+        _ = try createBibleBookmark(
             bookName: "Exodus",
             chapter: 2,
             label: secondaryLabel,
             note: nil,
             createdAt: seededDate(offset: 10)
         )
-        _ = createBibleBookmark(
+        _ = try createBibleBookmark(
             bookName: "Genesis",
             chapter: 1,
             label: uiTestLabel,
@@ -898,9 +1096,9 @@ private final class FixtureContext {
     /**
      Seeds one bookmark assigned to the primary UI-test label.
      */
-    private func seedBookmarkRowLabel() {
+    private func seedBookmarkRowLabel() throws {
         let uiTestLabel = ensureUserLabel(name: "UI Test Seed", color: 0xFF91A7FF)
-        _ = createBibleBookmark(
+        _ = try createBibleBookmark(
             bookName: "Genesis",
             chapter: 1,
             label: uiTestLabel,
@@ -928,9 +1126,9 @@ private final class FixtureContext {
     /**
      Seeds one label-backed bookmark and an initial empty StudyPad entry.
      */
-    private func seedBookmarkStudyPad() {
+    private func seedBookmarkStudyPad() throws {
         let uiTestLabel = ensureUserLabel(name: "UI Test Seed", color: 0xFF91A7FF)
-        _ = createBibleBookmark(
+        _ = try createBibleBookmark(
             bookName: "Genesis",
             chapter: 1,
             label: uiTestLabel,
@@ -984,8 +1182,8 @@ private final class FixtureContext {
     /**
      Seeds one Genesis 1 bookmark note for the My Notes flow.
      */
-    private func seedMyNotesSingle() {
-        let bookmark = createBibleBookmark(
+    private func seedMyNotesSingle() throws {
+        let bookmark = try createBibleBookmark(
             bookName: "Genesis",
             chapter: 1,
             labelName: nil,
@@ -1022,15 +1220,162 @@ private final class FixtureContext {
     }
 
     /**
+     Resolves one KJV verse ordinal through SWORD versification metadata.
+
+     Bookmark and My Notes fixtures must store SWORD/JSword-style ordinals, including intro slots.
+     Arithmetic ordinals are invalid under the current reader contract and break chapter-range
+     lookups as soon as production code asks SWORD for real verse positions. The host fixture
+     executable runs on macOS, so it derives the ordinal from SWORD's book order and chapter verse
+     counts using JSword's introduction-slot model instead of trusting platform-local
+     `VerseKey.getIndex()` behavior.
+
+     - Parameters:
+       - bookName: Human-readable SWORD book name such as `Genesis` or `Matthew`.
+       - chapter: One-based chapter number.
+       - verse: One-based verse number.
+     - Returns: Native SWORD verse-key ordinal.
+     - Throws: `FixtureToolError` when the bundled KJV module or verse cannot be resolved.
+     */
+    private func resolveKJVOrdinal(bookName: String, chapter: Int, verse: Int) throws -> Int {
+        let module = try kjvSwordModule()
+        let osisBookId = try resolveOsisBookId(bookName: bookName, chapter: chapter, module: module)
+        return try resolveIntroInclusiveOrdinal(
+            osisBookId: osisBookId,
+            chapter: chapter,
+            verse: verse,
+            module: module
+        )
+    }
+
+    /**
+     Loads the bundled KJV module from the simulator SWORD directory.
+
+     The returned module borrows handles owned by `SwordManager`, so the manager is cached for the
+     lifetime of the fixture context.
+
+     - Returns: Loaded bundled KJV SWORD module.
+     - Throws: `FixtureToolError.missingSwordModule` if SWORD cannot load KJV.
+     */
+    private func kjvSwordModule() throws -> SwordModule {
+        let swordURL = try ensureBundledKJVSwordModuleAvailable()
+        let manager: SwordManager
+        if let existingManager = swordManager {
+            manager = existingManager
+        } else if let createdManager = SwordManager(modulePath: swordURL.path) {
+            swordManager = createdManager
+            manager = createdManager
+        } else {
+            throw FixtureToolError.missingSwordModule("KJV")
+        }
+
+        guard let module = manager.module(named: "KJV") else {
+            throw FixtureToolError.missingSwordModule("KJV")
+        }
+        return module
+    }
+
+    /**
+     Resolves a human-readable book name to the active SWORD OSIS identifier.
+
+     The primary path uses SWORD's discovered book list. The parser fallback still delegates to SWORD
+     and covers alternate names or abbreviations without adding a parallel iOS-only book table.
+
+     - Parameters:
+       - bookName: Human-readable book name to resolve.
+       - chapter: Chapter used when asking SWORD's parser for a concrete key fallback.
+       - module: Loaded SWORD module.
+     - Returns: OSIS book identifier, such as `Gen`, `Exod`, or `Matt`.
+     - Throws: `FixtureToolError.unresolvedVerse` when SWORD cannot resolve the book.
+     */
+    private func resolveOsisBookId(bookName: String, chapter: Int, module: SwordModule) throws -> String {
+        let normalizedBookName = bookName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if let book = module.getBookList().first(where: { book in
+            book.name.lowercased() == normalizedBookName ||
+            book.abbreviation.lowercased() == normalizedBookName ||
+            book.osisId.lowercased() == normalizedBookName
+        }) {
+            return book.osisId
+        }
+
+        let parsedKeys = module.parseKeyList("\(bookName) \(chapter):1")
+        if let firstKey = parsedKeys.first,
+           let osisBookId = firstKey.split(separator: ".").first,
+           !osisBookId.isEmpty {
+            return String(osisBookId)
+        }
+
+        throw FixtureToolError.unresolvedVerse("\(bookName) \(chapter):1")
+    }
+
+    /**
+     Computes JSword/SWORD-style ordinals from real SWORD book and chapter metadata.
+
+     JSword ordinals include the Bible introduction, testament introductions, one book introduction
+     per book, and one chapter introduction per real chapter. This mirrors the iOS reader contract
+     protected by `testBundledKJVVerseOrdinalsUseIntroInclusiveVersification` while avoiding the
+     previous fixture-only `chapter * 40` approximation.
+
+     - Parameters:
+       - osisBookId: OSIS book identifier resolved by SWORD.
+       - chapter: One-based chapter number.
+       - verse: One-based verse number.
+       - module: Loaded SWORD module supplying book order and chapter lengths.
+     - Returns: Intro-inclusive ordinal for the requested verse.
+     - Throws: `FixtureToolError.unresolvedVerse` when the reference is outside the module.
+     */
+    private func resolveIntroInclusiveOrdinal(
+        osisBookId: String,
+        chapter: Int,
+        verse: Int,
+        module: SwordModule
+    ) throws -> Int {
+        var ordinal = 0
+        var currentTestament: Int?
+
+        for book in module.getBookList() {
+            if currentTestament != book.testament {
+                ordinal += 1
+                currentTestament = book.testament
+            }
+
+            ordinal += 1
+            guard book.chapterCount > 0 else { continue }
+
+            for candidateChapter in 1...book.chapterCount {
+                ordinal += 1
+
+                guard let verseCount = module.verseCount(
+                    osisBookId: book.osisId,
+                    chapter: candidateChapter
+                ) else {
+                    throw FixtureToolError.unresolvedVerse("\(book.osisId).\(candidateChapter).1")
+                }
+
+                if book.osisId == osisBookId && candidateChapter == chapter {
+                    guard (1...verseCount).contains(verse) else {
+                        throw FixtureToolError.unresolvedVerse("\(osisBookId).\(chapter).\(verse)")
+                    }
+                    return ordinal + verse
+                }
+
+                ordinal += verseCount
+            }
+        }
+
+        throw FixtureToolError.unresolvedVerse("\(osisBookId).\(chapter).\(verse)")
+    }
+
+    /**
      Creates one deterministic Bible bookmark with optional label and note state.
      *
      * - Parameters:
      *   - bookName: Human-readable book name surfaced by the bookmark list.
-     *   - chapter: One-based chapter number. The test bookmark UI only needs chapter-level fidelity.
+     *   - chapter: One-based chapter number. The fixture stores the first verse in that chapter.
      *   - label: Optional user label that should be assigned as the primary label.
      *   - note: Optional bookmark note.
      *   - createdAt: Deterministic creation date used to control list ordering.
      * - Returns: The persisted bookmark.
+     * - Throws: `FixtureToolError` when SWORD cannot resolve the requested verse.
      */
     @discardableResult
     private func createBibleBookmark(
@@ -1039,8 +1384,8 @@ private final class FixtureContext {
         label: Label?,
         note: String?,
         createdAt: Date
-    ) -> BibleBookmark {
-        let ordinalStart = (chapter - 1) * 40 + 1
+    ) throws -> BibleBookmark {
+        let ordinalStart = try resolveKJVOrdinal(bookName: bookName, chapter: chapter, verse: 1)
         let bookmark = bookmarkService.addBibleBookmark(
             bookInitials: "KJV",
             startOrdinal: ordinalStart,
@@ -1071,9 +1416,9 @@ private final class FixtureContext {
         labelName: String?,
         note: String?,
         createdAt: Date
-    ) -> BibleBookmark {
+    ) throws -> BibleBookmark {
         let label = labelName.map { ensureUserLabel(name: $0, color: Label.defaultColor) }
-        return createBibleBookmark(
+        return try createBibleBookmark(
             bookName: bookName,
             chapter: chapter,
             label: label,

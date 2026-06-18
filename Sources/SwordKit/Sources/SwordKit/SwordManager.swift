@@ -9,8 +9,8 @@ import CLibSword
  Manages the SWORD module installation directory, provides access to
  installed modules, and controls global rendering options.
 
- All libsword operations are serialized on an internal queue since
- the library is not thread-safe.
+ All libsword operations are serialized through `SwordRuntime` since
+ the library and bridge keep process-global state and are not thread-safe.
 
  Usage:
  ```swift
@@ -24,7 +24,6 @@ import CLibSword
  */
 public final class SwordManager: @unchecked Sendable {
     private let handle: UnsafeMutableRawPointer
-    private let queue = DispatchQueue(label: "org.andbible.SwordManager", qos: .userInitiated)
 
     /// Internal access to the C handle for InstallManager operations.
     var rawHandle: UnsafeMutableRawPointer { handle }
@@ -42,13 +41,15 @@ public final class SwordManager: @unchecked Sendable {
         let path = modulePath ?? SwordManager.defaultModulePath()
         self.modulePath = path
 
-        guard let h = SWMgr_new(path) else { return nil }
+        guard let h = SwordRuntime.sync({ SWMgr_new(path) }) else { return nil }
         self.handle = h
     }
 
     deinit {
-        moduleCache.removeAll()
-        SWMgr_delete(handle)
+        SwordRuntime.sync {
+            moduleCache.removeAll()
+            SWMgr_delete(handle)
+        }
     }
 
     /// Default path for SWORD modules in the app's documents directory.
@@ -67,14 +68,14 @@ public final class SwordManager: @unchecked Sendable {
 
     /// Get the number of installed modules.
     public var moduleCount: Int {
-        queue.sync {
+        SwordRuntime.sync {
             Int(SWMgr_getModuleCount(handle))
         }
     }
 
     /// List all installed modules.
     public func installedModules() -> [ModuleInfo] {
-        queue.sync {
+        SwordRuntime.sync {
             let count = SWMgr_getModuleCount(handle)
             var modules: [ModuleInfo] = []
             modules.reserveCapacity(Int(count))
@@ -103,7 +104,7 @@ public final class SwordManager: @unchecked Sendable {
      - Returns: The module, or nil if not installed.
      */
     public func module(named name: String) -> SwordModule? {
-        queue.sync {
+        SwordRuntime.sync {
             if let cached = moduleCache[name] { return cached }
             guard let modHandle = SWMgr_getModuleByName(handle, name) else { return nil }
             return getOrCreateModule(name: name, handle: modHandle)
@@ -112,7 +113,7 @@ public final class SwordManager: @unchecked Sendable {
 
     private func getOrCreateModule(name: String, handle: UnsafeMutableRawPointer) -> SwordModule {
         if let cached = moduleCache[name] { return cached }
-        let mod = SwordModule(handle: handle, queue: queue, modulePath: modulePath)
+        let mod = SwordModule(handle: handle, modulePath: modulePath)
         moduleCache[name] = mod
         return mod
     }
@@ -138,7 +139,7 @@ public final class SwordManager: @unchecked Sendable {
        - enabled: Whether the option should be enabled.
      */
     public func setGlobalOption(_ option: GlobalOption, enabled: Bool) {
-        queue.sync {
+        SwordRuntime.sync {
             SWMgr_setGlobalOption(handle, option.rawValue, enabled ? "On" : "Off")
         }
     }
@@ -149,7 +150,7 @@ public final class SwordManager: @unchecked Sendable {
      - Returns: Whether the option is currently enabled.
      */
     public func isGlobalOptionEnabled(_ option: GlobalOption) -> Bool {
-        queue.sync {
+        SwordRuntime.sync {
             guard let value = SWMgr_getGlobalOption(handle, option.rawValue) else { return false }
             return String(cString: value) == "On"
         }
@@ -159,7 +160,7 @@ public final class SwordManager: @unchecked Sendable {
 
     /// The configuration path used by the manager.
     public var configPath: String {
-        queue.sync {
+        SwordRuntime.sync {
             guard let path = SWMgr_getConfigPath(handle) else { return "" }
             return String(cString: path)
         }
@@ -167,7 +168,7 @@ public final class SwordManager: @unchecked Sendable {
 
     /// The prefix path (module install root).
     public var prefixPath: String {
-        queue.sync {
+        SwordRuntime.sync {
             guard let path = SWMgr_getPrefixPath(handle) else { return "" }
             return String(cString: path)
         }
@@ -180,7 +181,7 @@ public final class SwordManager: @unchecked Sendable {
      Call after installing or uninstalling modules.
      */
     public func refresh() {
-        queue.sync {
+        SwordRuntime.sync {
             moduleCache.removeAll()
         }
         // Recreate is the simplest way to refresh libsword's module list.
