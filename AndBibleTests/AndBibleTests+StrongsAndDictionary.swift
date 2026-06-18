@@ -301,6 +301,80 @@ extension AndBibleTests {
     }
 
     /**
+     Verifies text-index readiness is not treated as Strong's-index readiness.
+
+     Android's JSword index has distinct fields for normal verse text and Strong's tokens. A
+     text-only SQLite fixture or stale partial index must therefore remain usable for ordinary text
+     search while being rejected as an indexed Strong's source. The fallback/index-creation decision
+     in Search depends on this distinction; otherwise a Strong's query can short-circuit to an empty
+     `verse_strongs` table and report zero hits.
+
+     - Setup: Creates an isolated search database with KJV `verse_fts` rows and current metadata,
+       then adds a matching `verse_strongs` row in a second serialized mutation.
+     - Expected result: `hasIndex` is true for the text facet, `hasStrongsIndex` is false until the
+       lexical row exists, and indexed Strong's search returns the seeded row only after that point.
+     - Failure meaning: Search can confuse text-only indexes with Android/JSword-style Strong's
+       indexes, recreating the UI failure where `H00430` settles with zero results.
+     - Side effects: Creates and removes one temporary SQLite database.
+     */
+    func testSearchIndexDistinguishesTextAndStrongsReadiness() async throws {
+        let databaseURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("search-index-text-only-\(UUID().uuidString).sqlite")
+        defer { try? FileManager.default.removeItem(at: databaseURL) }
+
+        let service = SearchIndexService(databasePath: databaseURL.path)
+        try await service.performIndexMutationForTesting { db in
+            let sql = """
+            INSERT INTO verse_fts (verse_key, plain_text, module_name, entry_order)
+            VALUES ('Genesis 1:2', 'And the Spirit of God moved upon the face of the waters.', 'KJV', 0);
+            INSERT INTO indexed_modules (module_name, verse_count, indexed_at, schema_version)
+            VALUES ('KJV', 1, datetime('now'), \(SearchIndexService.currentSchemaVersion));
+            """
+            guard sqlite3_exec(db, sql, nil, nil, nil) == SQLITE_OK else {
+                let message = sqlite3_errmsg(db).map { String(cString: $0) } ?? "SQLite write failed"
+                throw NSError(domain: "SearchIndexFixture", code: 1, userInfo: [
+                    NSLocalizedDescriptionKey: message
+                ])
+            }
+        }
+
+        let queryOptions = try XCTUnwrap(
+            StrongsSearchSupport.normalizedQueryOptions(for: "H00430"),
+            "Expected H00430 to normalize into canonical Strong's tokens"
+        )
+
+        XCTAssertTrue(service.hasIndex(for: "KJV"))
+        XCTAssertFalse(
+            service.hasStrongsIndex(for: "KJV"),
+            "A text-only index must not satisfy the Strong's index facet."
+        )
+        XCTAssertTrue(
+            service.searchStrongs(canonicalTokens: queryOptions.canonicalStrongTokens, moduleName: "KJV").isEmpty,
+            "Strong's search must not synthesize hits from text-only FTS rows."
+        )
+
+        try await service.performIndexMutationForTesting { db in
+            let sql = """
+            INSERT INTO verse_strongs (module_name, token, verse_key, entry_order)
+            VALUES ('KJV', 'H0430', 'Genesis 1:2', 0);
+            """
+            guard sqlite3_exec(db, sql, nil, nil, nil) == SQLITE_OK else {
+                let message = sqlite3_errmsg(db).map { String(cString: $0) } ?? "SQLite write failed"
+                throw NSError(domain: "SearchIndexFixture", code: 1, userInfo: [
+                    NSLocalizedDescriptionKey: message
+                ])
+            }
+        }
+
+        XCTAssertTrue(service.hasStrongsIndex(for: "KJV"))
+        let hits = service.searchStrongs(
+            canonicalTokens: queryOptions.canonicalStrongTokens,
+            moduleName: "KJV"
+        )
+        XCTAssertEqual(hits.map(\.key), ["Genesis 1:2"])
+    }
+
+    /**
      Verifies indexed text search emits hits in Android-style canonical verse order.
 
      Android groups Lucene hits by verse and sorts scripture results by book, chapter, and verse

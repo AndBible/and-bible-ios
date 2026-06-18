@@ -239,6 +239,33 @@ public final class SearchIndexService: @unchecked Sendable {
         return sqlite3_step(stmt) == SQLITE_ROW && sqlite3_column_int(stmt, 0) > 0
     }
 
+    /**
+     Checks whether a module has the lexical Strong's facet required for indexed Strong's search.
+
+     Text FTS and Strong's lookup are separate Android/JSword index facets: a module can have
+     `verse_fts` rows that satisfy ordinary text search while still lacking `verse_strongs` rows
+     needed by "find all occurrences" for Strong's numbers. This method deliberately validates the
+     real token table, not only `indexed_modules`, so stale or partial text-only indexes cannot be
+     mistaken for Strong's-capable indexes.
+
+     - Parameter moduleName: SWORD module initials to inspect.
+     - Returns: `true` only when module metadata exists and at least one lexical Strong's token row
+       is present for the module.
+     - Side effects: Reads the SQLite search-index database.
+     - Failure modes: Returns `false` when the database handle is unavailable, metadata is missing,
+       the Strong's token table is absent/empty, or SQLite statement preparation fails.
+     */
+    public func hasStrongsIndex(for moduleName: String) -> Bool {
+        guard hasIndex(for: moduleName), let db else { return false }
+        var stmt: OpaquePointer?
+        defer { sqlite3_finalize(stmt) }
+
+        let sql = "SELECT 1 FROM verse_strongs WHERE module_name = ? LIMIT 1"
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return false }
+        sqlite3_bind_text(stmt, 1, moduleName, -1, sqliteTransient)
+        return sqlite3_step(stmt) == SQLITE_ROW
+    }
+
     /// Return module names from the given list that don't have an index yet.
     public func modulesNeedingIndex(from moduleNames: [String]) -> [String] {
         moduleNames.filter { !hasIndex(for: $0) }

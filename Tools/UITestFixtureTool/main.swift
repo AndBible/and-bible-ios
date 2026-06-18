@@ -464,11 +464,13 @@ private final class FixtureContext {
 
         try prepareSearchIndexSchema(in: db)
         try executeSearchSQL("DELETE FROM verse_fts WHERE module_name = 'KJV'", db: db)
+        try executeSearchSQL("DELETE FROM verse_strongs WHERE module_name = 'KJV'", db: db)
         try executeSearchSQL("DELETE FROM indexed_modules WHERE module_name = 'KJV'", db: db)
         try executeSearchSQL("BEGIN TRANSACTION", db: db)
 
         do {
             try insertSeededSearchRows(into: db)
+            try insertSeededStrongRows(into: db)
             try recordSeededSearchModule(
                 "KJV",
                 into: db,
@@ -513,6 +515,7 @@ private final class FixtureContext {
         try prepareSearchIndexSchema(in: db)
         for moduleName in ["KJV", "UITESTWEB"] {
             try executeSearchSQL("DELETE FROM verse_fts WHERE module_name = '\(moduleName)'", db: db)
+            try executeSearchSQL("DELETE FROM verse_strongs WHERE module_name = '\(moduleName)'", db: db)
             try executeSearchSQL("DELETE FROM indexed_modules WHERE module_name = '\(moduleName)'", db: db)
         }
         try executeSearchSQL("BEGIN TRANSACTION", db: db)
@@ -520,6 +523,7 @@ private final class FixtureContext {
         do {
             let rows = Self.seededSearchRows + Self.seededMultiTranslationSearchRows
             try insertSeededSearchRows(rows, into: db)
+            try insertSeededStrongRows(into: db)
             for moduleName in Set(rows.map { $0.moduleName }).sorted() {
                 let verseCount = rows.filter { $0.moduleName == moduleName }.count
                 try recordSeededSearchModule(moduleName, into: db, verseCount: Int32(verseCount))
@@ -584,6 +588,48 @@ private final class FixtureContext {
     }
 
     /**
+     Inserts deterministic Strong's-token rows paired with the seeded KJV FTS rows.
+
+     The Search UI treats ordinary text search and Strong's lookup as separate index facets, just
+     like Android's JSword/Lucene index has distinct text and `strong` fields. The fixture must
+     therefore seed lexical-token rows for Strong's UI tests instead of marking a text-only index as
+     Strong's-ready.
+
+     - Parameter db: Open SQLite handle for `search_indexes.sqlite`.
+     - Throws: `FixtureToolError.sqlite` when row insertion fails.
+     */
+    private func insertSeededStrongRows(into db: OpaquePointer) throws {
+        let sql = """
+            INSERT OR IGNORE INTO verse_strongs (module_name, token, verse_key, entry_order)
+            VALUES (?, ?, ?, ?)
+        """
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK,
+              let statement else {
+            throw sqliteError(
+                from: db,
+                fallback: "Unable to prepare seeded Strong's row insert statement."
+            )
+        }
+        defer { sqlite3_finalize(statement) }
+
+        for row in Self.seededStrongRows {
+            sqlite3_reset(statement)
+            sqlite3_clear_bindings(statement)
+            sqlite3_bind_text(statement, 1, row.moduleName, -1, sqliteTransient)
+            sqlite3_bind_text(statement, 2, row.token, -1, sqliteTransient)
+            sqlite3_bind_text(statement, 3, row.verseKey, -1, sqliteTransient)
+            sqlite3_bind_int(statement, 4, Int32(row.entryOrder))
+            guard sqlite3_step(statement) == SQLITE_DONE else {
+                throw sqliteError(
+                    from: db,
+                    fallback: "Unable to insert seeded Strong's row '\(row.verseKey)'."
+                )
+            }
+        }
+    }
+
+    /**
      Records the seeded module metadata expected by `SearchIndexService.hasIndex`.
 
      The schema version comes from production `SearchIndexService` so fixture-generated search
@@ -640,6 +686,19 @@ private final class FixtureContext {
             )
         """, db: db)
         try executeSearchSQL("""
+            CREATE TABLE IF NOT EXISTS verse_strongs (
+                module_name TEXT NOT NULL,
+                token TEXT NOT NULL,
+                verse_key TEXT NOT NULL,
+                entry_order INTEGER NOT NULL,
+                PRIMARY KEY (module_name, token, verse_key)
+            )
+        """, db: db)
+        try executeSearchSQL("""
+            CREATE INDEX IF NOT EXISTS idx_verse_strongs_module_token
+            ON verse_strongs (module_name, token, entry_order)
+        """, db: db)
+        try executeSearchSQL("""
             CREATE TABLE IF NOT EXISTS indexed_modules (
                 module_name TEXT PRIMARY KEY,
                 verse_count INTEGER DEFAULT 0,
@@ -694,6 +753,22 @@ private final class FixtureContext {
             verseKey: "Matthew 1:1",
             plainText: "The book of the generation of Jesus Christ, the son of David, the son of Abraham.",
             moduleName: "KJV"
+        ),
+    ]
+
+    /**
+     SQLite rows preseeded into the bundled KJV Strong's index facet.
+
+     The token is attached to `Genesis 1:2`, which already exists in `seededSearchRows`; this keeps
+     Strong's fixture coverage without changing the deterministic ordinary-text result totals for
+     broad `earth` searches.
+     */
+    private static let seededStrongRows: [(verseKey: String, token: String, moduleName: String, entryOrder: Int)] = [
+        (
+            verseKey: "Genesis 1:2",
+            token: "H0430",
+            moduleName: "KJV",
+            entryOrder: 0
         ),
     ]
 

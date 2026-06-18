@@ -1047,7 +1047,7 @@ public struct SearchView: View {
                 return
             }
 
-            if let missingModule = strongsModules.first(where: { !service.hasIndex(for: $0.info.name) }) {
+            if let missingModule = strongsModules.first(where: { !service.hasStrongsIndex(for: $0.info.name) }) {
                 viewState = .needsIndex(
                     moduleName: missingModule.info.name,
                     moduleDescription: moduleDescription(for: missingModule.info.name)
@@ -1165,7 +1165,7 @@ public struct SearchView: View {
                     swordManager: swordManager,
                     searchIndexService: service
                 )
-                for mod in strongsModules where !service.hasIndex(for: mod.info.name) {
+                for mod in strongsModules where !service.hasStrongsIndex(for: mod.info.name) {
                     list.append((mod, mod.info.name))
                 }
                 return list
@@ -1258,7 +1258,7 @@ public struct SearchView: View {
                     var hits: [SearchHit] = []
                     for strongsModule in strongsModules {
                         if let service = currentSearchIndexService,
-                           service.hasIndex(for: strongsModule.info.name) {
+                           service.hasStrongsIndex(for: strongsModule.info.name) {
                             hits = Self.convertIndexResults(service.searchStrongs(
                                 canonicalTokens: strongsQueryOptions.canonicalStrongTokens,
                                 moduleName: strongsModule.info.name,
