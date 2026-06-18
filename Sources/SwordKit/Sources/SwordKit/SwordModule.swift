@@ -902,6 +902,52 @@ public final class SwordModule: @unchecked Sendable {
         }
     }
 
+    /**
+     Search the module and return only matching keys.
+
+     Strong's candidate-index searches need SWORD's result keys but validate and render each verse
+     through a separate canonical-token path. Keeping this key-only avoids stripping preview text
+     for thousands of candidates before the caller knows which verses are semantically valid.
+
+     - Parameters:
+       - options: Search configuration.
+       - limit: Optional maximum number of keys to return.
+     - Returns: Matching SWORD keys in result order.
+     - Side effects:
+       - performs a SWORD search while holding the runtime lock
+       - restores the module's current key after reading search results
+     - Failure modes:
+       - returns an empty list when SWORD reports no results or the limit is zero
+     */
+    public func searchKeys(_ options: SearchOptions, limit: Int? = nil) -> [String] {
+        SwordRuntime.sync {
+            let savedKey = String(cString: SWModule_getKeyText(handle))
+            defer { SWModule_setKeyText(handle, savedKey) }
+
+            let flags: Int32 = options.caseInsensitive ? 2 : 0 // REG_ICASE = 2
+
+            _ = SWModule_search(
+                handle,
+                options.query,
+                Int32(options.searchType.rawValue),
+                flags,
+                options.scope,
+                nil
+            )
+
+            let count = Int(SWModule_searchResultCount(handle))
+            let boundedCount = limit.map { min(max($0, 0), count) } ?? count
+            guard boundedCount > 0 else { return [] }
+
+            var keys: [String] = []
+            keys.reserveCapacity(boundedCount)
+            for index in 0..<boundedCount {
+                keys.append(String(cString: SWModule_getSearchResultKeyText(handle, Int32(index))))
+            }
+            return keys
+        }
+    }
+
     // MARK: - Feature Detection
 
     /**

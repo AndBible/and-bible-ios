@@ -291,8 +291,8 @@ enum StrongsSearchSupport {
                 caseInsensitive: true,
                 scope: scope
             )
-            for result in module.search(options).results.prefix(5000) where seenKeys.insert(result.key).inserted {
-                candidateKeys.append(result.key)
+            for key in module.searchKeys(options, limit: 5000) where seenKeys.insert(key).inserted {
+                candidateKeys.append(key)
             }
         }
 

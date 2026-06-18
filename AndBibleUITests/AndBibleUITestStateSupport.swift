@@ -525,7 +525,8 @@ extension AndBibleUITests {
      Returns the visible native prompt container used by the create-label flow.
 
      - Parameter app: Running application under test.
-     - Returns: The title-matched alert/sheet used by the create-label prompt.
+     - Returns: The title-matched alert/sheet used by the create-label prompt, or the current
+       native prompt surface when SwiftUI has exposed the text field but not the alert title.
      - Side effects: none.
      - Failure modes: returns `nil` when XCTest cannot observe a presented prompt.
      */
@@ -534,6 +535,8 @@ extension AndBibleUITests {
             [
                 app.alerts["New Label"].firstMatch,
                 app.sheets["New Label"].firstMatch,
+                app.alerts.firstMatch,
+                app.sheets.firstMatch,
             ],
             timeout: 0.2
         )
