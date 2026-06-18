@@ -15,6 +15,66 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 class SyncSettingsUITestContractTests(unittest.TestCase):
     """Guards Sync Settings UI helpers against CI-only SwiftUI Form reachability stalls."""
 
+    def test_invalid_server_url_test_uses_android_edit_validation_contract(self) -> None:
+        """Invalid URL coverage must not depend on the iOS-only offscreen connection button.
+
+        Android's `SyncSettingsFragment` rejects malformed `cloud_sync_server_url` edits from the
+        preference change listener. If the iOS shard test scrolls to the lower manual connection row,
+        it is asserting an iOS drift point and can wedge inside XCUI Form geometry queries before it
+        reaches the behavior under test.
+        """
+        source = (
+            REPO_ROOT / "AndBibleUITests" / "AndBibleUITests+SettingsAndSync.swift"
+        ).read_text()
+        test_start = source.index(
+            "func testSyncSettingsNextCloudInvalidURLShowsValidationStatus()"
+        )
+        test_end = source.index("/**", test_start)
+        test_body = source[test_start:test_end]
+
+        self.assertNotIn("triggerSyncConnectionTest", test_body)
+        self.assertIn("dismissKeyboardAfterFocusedTextEntry", test_body)
+        self.assertIn(
+            'waitForElementValue("syncSettingsState", toContain: "remoteStatus=failureInvalidURL"',
+            test_body,
+        )
+
+    def test_sync_settings_validates_server_url_when_editing_commits(self) -> None:
+        """Sync Settings should reject malformed NextCloud server URLs at the edit boundary.
+
+        Android handles this in `serverUrlPref.setOnPreferenceChangeListener`, before the invalid
+        value is written to preferences. The iOS inline TextField needs an equivalent commit/focus
+        validation path so users and tests do not have to reach an unrelated lower Form row.
+        """
+        source = (
+            REPO_ROOT
+            / "Sources"
+            / "BibleUI"
+            / "Sources"
+            / "BibleUI"
+            / "Settings"
+            / "SyncSettingsView.swift"
+        ).read_text()
+        credential_start = source.index(
+            'TextField(String(localized: "auth_server_uri"), text: $serverURL)'
+        )
+        credential_end = source.index('TextField(String(localized: "auth_username")', credential_start)
+        credential_body = source[credential_start:credential_end]
+        persist_start = source.index("private func persistRemoteSettings()")
+        persist_end = source.index("/**", persist_start)
+        persist_body = source[persist_start:persist_end]
+        validation_start = source.index("private func validateNextCloudServerURLAfterEditing()")
+        validation_end = source.index("/**", validation_start)
+        validation_body = source[validation_start:validation_end]
+
+        self.assertIn("validateNextCloudServerURLAfterEditing()", credential_body)
+        self.assertIn("focusedNextCloudCredentialField", credential_body)
+        self.assertIn("@State private var lastCommittedServerURL", source)
+        self.assertIn("lastCommittedServerURL = serverURL", persist_body)
+        self.assertIn("isAndroidValidNextCloudServerURL(serverURL)", persist_body)
+        self.assertIn("return", persist_body)
+        self.assertIn("serverURL = lastCommittedServerURL", validation_body)
+
     def test_sync_settings_button_resolution_accepts_visible_viewport_row(self) -> None:
         """The Sync Settings resolver must not depend only on XCTest `isHittable`.
 

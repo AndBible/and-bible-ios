@@ -46,6 +46,9 @@ public struct SyncSettingsView: View {
     /// User-entered or persisted NextCloud/WebDAV server root URL.
     @State private var serverURL = ""
 
+    /// Last server URL accepted by Android-style edit validation and eligible for persistence.
+    @State private var lastCommittedServerURL = ""
+
     /// User-entered or persisted NextCloud/WebDAV username.
     @State private var username = ""
 
@@ -82,6 +85,9 @@ public struct SyncSettingsView: View {
     /// Last successfully completed confirmation branch exported only for UI-test assertions.
     @State private var lastRemoteConfirmationAction: String?
 
+    /// Currently focused inline NextCloud credential field, used to mirror Android edit commits.
+    @FocusState private var focusedNextCloudCredentialField: NextCloudCredentialField?
+
     /**
      Represents the last manual WebDAV connection-test result shown in the status section.
 
@@ -93,6 +99,18 @@ public struct SyncSettingsView: View {
 
         /// The most recent connection test failed with a human-readable message.
         case failure(String)
+    }
+
+    /**
+     Focusable inline credential fields that should apply Android preference-edit behavior.
+
+     Android's `EditTextPreference` validates and either accepts or rejects values when the edit
+     dialog commits. iOS renders these settings inline, so focus transitions and submit actions are
+     the equivalent commit boundary.
+     */
+    private enum NextCloudCredentialField: Hashable {
+        /// NextCloud/WebDAV server root URL.
+        case serverURL
     }
 
     /**
@@ -182,6 +200,11 @@ public struct SyncSettingsView: View {
         .onChange(of: selectedBackend) { _, newValue in
             remoteSettingsStore.selectedBackend = newValue
             remoteConnectionStatus = nil
+        }
+        .onChange(of: focusedNextCloudCredentialField) { oldValue, newValue in
+            if oldValue == .serverURL, newValue != .serverURL {
+                validateNextCloudServerURLAfterEditing()
+            }
         }
         .alert(
             String(localized: "cloud_sync_title"),
@@ -392,9 +415,14 @@ public struct SyncSettingsView: View {
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .multilineTextAlignment(.trailing)
+                        .focused($focusedNextCloudCredentialField, equals: .serverURL)
+                        .onSubmit {
+                            validateNextCloudServerURLAfterEditing()
+                        }
                         .accessibilityIdentifier("syncNextCloudServerURLField")
                         #if os(iOS)
                         .textContentType(.URL)
+                        .submitLabel(.done)
                         #endif
                 } label: {
                     syncSettingsRowLabel(
@@ -932,6 +960,7 @@ public struct SyncSettingsView: View {
         if UITestRuntimeConfiguration.remoteSyncBootstrapScenario == .adoptExisting {
             selectedBackend = .nextCloud
             serverURL = "https://example.invalid/remote.php/dav/files/ui-test"
+            lastCommittedServerURL = serverURL
             username = "ui-test"
             password = "ui-test"
             folderPath = ""
@@ -948,8 +977,11 @@ public struct SyncSettingsView: View {
 
         if let configuration = remoteSettingsStore.loadWebDAVConfiguration() {
             serverURL = configuration.serverURL
+            lastCommittedServerURL = configuration.serverURL
             username = configuration.username
             folderPath = configuration.folderPath ?? ""
+        } else {
+            lastCommittedServerURL = serverURL
         }
         password = remoteSettingsStore.webDAVPassword() ?? ""
         remoteCategoryEnabled = Dictionary(
@@ -975,6 +1007,9 @@ public struct SyncSettingsView: View {
     private func persistRemoteSettings() {
         let store = remoteSettingsStore
         store.selectedBackend = selectedBackend
+        guard isAndroidValidNextCloudServerURL(serverURL) else {
+            return
+        }
         try? store.saveWebDAVConfiguration(
             WebDAVSyncConfiguration(
                 serverURL: serverURL,
@@ -983,6 +1018,69 @@ public struct SyncSettingsView: View {
             ),
             password: password
         )
+        lastCommittedServerURL = serverURL
+    }
+
+    /**
+     Applies Android's server URL edit-validation behavior to the inline iOS field.
+
+     Android validates `cloud_sync_server_url` from `serverUrlPref.setOnPreferenceChangeListener`
+     and rejects malformed edits before they are written to preferences. iOS uses an inline
+     `TextField`, so submit and focus-loss events call this method as the equivalent commit boundary.
+
+     Side effects:
+     - invalid URLs update the transient remote status and present the same localized error dialog
+     - valid URLs clear stale connection-test status and persist the current remote settings
+
+     Failure modes:
+     - local persistence failures are still swallowed by `persistRemoteSettings()`, matching the
+       existing settings-save behavior
+     */
+    private func validateNextCloudServerURLAfterEditing() {
+        guard selectedBackend == .nextCloud else {
+            return
+        }
+
+        let invalidURLMessage = String(localized: "invalid_url_message")
+        guard isAndroidValidNextCloudServerURL(serverURL) else {
+            remoteConnectionStatus = .failure(invalidURLMessage)
+            remoteSyncErrorMessage = invalidURLMessage
+            serverURL = lastCommittedServerURL
+            return
+        }
+
+        remoteConnectionStatus = nil
+        persistRemoteSettings()
+    }
+
+    /**
+     Checks the NextCloud server URL with the same structural rules Android applies before saving.
+
+     Android requires a syntactically valid HTTP(S) URL, rejects whitespace, and prevents users from
+     saving a `/login` page URL instead of the server root. Username and password are intentionally
+     not part of this check because Android validates the server preference independently.
+
+     - Parameter candidate: User-entered server URL.
+     - Returns: `true` when the URL may be saved to WebDAV settings.
+     - Side effects: none.
+     - Failure modes: This helper cannot fail.
+     */
+    private func isAndroidValidNextCloudServerURL(_ candidate: String) -> Bool {
+        let trimmedCandidate = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedCandidate.isEmpty else {
+            return false
+        }
+        guard trimmedCandidate.rangeOfCharacter(from: .whitespacesAndNewlines) == nil else {
+            return false
+        }
+        guard let components = URLComponents(string: trimmedCandidate),
+              let scheme = components.scheme?.lowercased(),
+              scheme == "http" || scheme == "https",
+              components.host?.isEmpty == false
+        else {
+            return false
+        }
+        return !trimmedCandidate.hasSuffix("/login")
     }
 
     /**
