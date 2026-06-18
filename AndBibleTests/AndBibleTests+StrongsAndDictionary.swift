@@ -301,6 +301,59 @@ extension AndBibleTests {
     }
 
     /**
+     Verifies indexed text search emits hits in Android-style canonical verse order.
+
+     Android groups Lucene hits by verse and sorts scripture results by book, chapter, and verse
+     before rendering them. The iOS FTS index must therefore preserve module entry order instead of
+     exposing SQLite's rank ordering for broad queries such as `earth`, `jesus`, and `noah`. A
+     failure means users can see search results jump to later books even though earlier canonical
+     matches exist.
+
+     - Setup: Builds an isolated SQLite search index from the bundled KJV SWORD fixture.
+     - Expected result: Broad searches return early canonical KJV hits before later-book relevance
+       matches.
+     - Failure meaning: Indexed search result ordering has drifted from Android's visible search
+       result contract.
+     - Side effects: Creates temporary SWORD and SQLite files removed by shared test cleanup/defer.
+     */
+    func testSearchIndexReturnsTextHitsInCanonicalEntryOrder() async throws {
+        let modulePath = try makeTemporaryBundledSwordPath()
+        let manager = try XCTUnwrap(
+            SwordManager(modulePath: modulePath),
+            "Expected SwordManager to initialize against a temporary bundled sword module path"
+        )
+        let module = try XCTUnwrap(
+            manager.module(named: "KJV"),
+            "Expected bundled KJV module to be available for text index ordering regression testing"
+        )
+        let databaseURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("search-index-order-\(UUID().uuidString).sqlite")
+        defer { try? FileManager.default.removeItem(at: databaseURL) }
+        let service = SearchIndexService(databasePath: databaseURL.path)
+
+        await service.createIndex(module: module)
+        let earthHits = service.search(query: "earth", moduleName: "KJV", wordMode: .allWords)
+        let jesusHits = service.search(query: "jesus", moduleName: "KJV", wordMode: .allWords)
+        let noahHits = service.search(query: "noah", moduleName: "KJV", wordMode: .allWords)
+
+        XCTAssertGreaterThanOrEqual(earthHits.count, 2, "Expected broad KJV search for earth to return multiple hits")
+        XCTAssertEqual(
+            Array(earthHits.prefix(2).map(\.key)),
+            ["Genesis 1:1", "Genesis 1:2"],
+            "Expected indexed search hits to follow canonical module order, not SQLite rank order"
+        )
+        XCTAssertEqual(
+            jesusHits.first?.key,
+            "Matthew 1:1",
+            "Expected broad New Testament hits to start at the first canonical KJV match"
+        )
+        XCTAssertTrue(
+            noahHits.prefix(5).map(\.key).contains("Genesis 6:8"),
+            "Expected early canonical Noah hits to remain visible in the first rendered results"
+        )
+    }
+
+    /**
      Verifies the Strong's search path can use SWORD entry-attribute results as a candidate index
      without trusting them as the semantic result source.
 

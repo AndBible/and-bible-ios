@@ -22,7 +22,7 @@ Date: 2026-06-18
 
 ## Summary
 
-- `Pass`: 6
+- `Pass`: 7
 - `Adapted Pass`: 2
 - `Partial`: 0
 
@@ -35,6 +35,7 @@ Date: 2026-06-18
 | Search scopes (`whole Bible`, `OT`, `NT`, `current book`) rerun the active query | `SearchView.swift` scope controls and rerun path; UI test `testSearchScopeChangeRerunsQueryAndUpdatesResults` | Pass | Current-book scope is reader-context driven and documented as an iOS adaptation. |
 | Strong's and lemma query normalization plus indexed lexical search | `SearchView.swift` Strong's index-readiness flow; `SearchIndexService.searchStrongs(...)`; `StrongsTokenNormalizer`; unit tests for `H02022`, decorated input, bundled KJV Strong's hit search, and indexed H00430/H0430 lookup | Pass | Shorthand and decorated forms stay Android-compatible, and Strong's find-all uses indexed canonical tokens extracted from raw OSIS before falling back to direct SWORD search. |
 | Result selection navigates the reader | `SearchView.navigateTo(_:)`; UI test `testSearchResultSelectionNavigatesReaderToBundledReference` | Pass | Search is verified as a real reader-owned workflow, not only a direct-launch harness. |
+| Indexed scripture result ordering | `SearchIndexService.search(...)`; unit test `testSearchIndexReturnsTextHitsInCanonicalEntryOrder`; Android reference sorts grouped scripture results by book/chapter/verse in `SearchControl.getMultiSearchResults(...)` | Pass | iOS stores module entry order in the FTS index so broad queries display canonical scripture order instead of SQLite rank order. |
 | Direct-launch query retention for deterministic search workflows | UI test `testSearchDirectLaunchRetainsSeededQuery` | Pass | This protects the test harness path used by deeper search regression coverage. |
 | Search implementation backing via local FTS service plus direct SWORD fallback | `SearchView.swift`, `SearchService.swift`, `SearchIndexService`; documented in `dispositions.md` | Adapted Pass | The parity goal is query semantics and user-facing behavior, not Android's exact internal search stack. |
 | Multi-translation selection and grouped result totals | `SearchView.swift` translation picker, `MultiResultGroup`, and rerun-on-selection path; `SearchIndexService.searchMultiple(...)`; UI test `testSearchMultiTranslationSelectionUpdatesGroupedTotals`; Android reference uses `selectedTranslations` and `getMultiSearchResults(...)` in `SearchResults.kt` | Pass | The focused UI regression selects a second translation, verifies grouped totals/per-module counts, and selects a grouped result, so this path now fails if Search only returns the primary translation or grouped rows stop navigating. |

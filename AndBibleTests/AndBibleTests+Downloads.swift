@@ -1876,10 +1876,10 @@ extension AndBibleTests {
     private func seedSearchIndexFixture(moduleName: String, db: OpaquePointer?) throws {
         let escapedModuleName = moduleName.replacingOccurrences(of: "'", with: "''")
         let sql = """
-        INSERT INTO verse_fts (verse_key, plain_text, module_name)
-        VALUES ('Genesis 1:1', 'created', '\(escapedModuleName)');
+        INSERT INTO verse_fts (verse_key, plain_text, module_name, entry_order)
+        VALUES ('Genesis 1:1', 'created', '\(escapedModuleName)', 0);
         INSERT INTO indexed_modules (module_name, verse_count, indexed_at, schema_version)
-        VALUES ('\(escapedModuleName)', 1, datetime('now'), 1);
+        VALUES ('\(escapedModuleName)', 1, datetime('now'), \(SearchIndexService.currentSchemaVersion));
         """
         guard sqlite3_exec(db, sql, nil, nil, nil) == SQLITE_OK else {
             throw SearchIndexFixtureError.writeFailed

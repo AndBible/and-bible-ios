@@ -40,6 +40,7 @@ Verification matrix:
 - `AndBibleTests/testStrongsSearchFindAllOccurrencesReturnsBundledKJVMatches`
 - `AndBibleTests/testStrongsSearchFindAllOccurrencesSupportsIntermediateZeroTrimVariant`
 - `AndBibleTests/testSearchIndexFindsCanonicalStrongsTokens`
+- `AndBibleTests/testSearchIndexReturnsTextHitsInCanonicalEntryOrder`
 
 ### UI
 
@@ -57,6 +58,7 @@ Verification matrix:
 - seeded query survives hydration into the visible Search screen
 - the harness can build a disposable index against bundled modules
 - the ready state reports non-zero bundled results for deterministic queries
+- indexed text results are emitted in canonical verse order for broad queries
 
 ### Search options
 

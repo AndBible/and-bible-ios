@@ -553,7 +553,10 @@ private final class FixtureContext {
         _ rows: [(verseKey: String, plainText: String, moduleName: String)],
         into db: OpaquePointer
     ) throws {
-        let sql = "INSERT INTO verse_fts (verse_key, plain_text, module_name) VALUES (?, ?, ?)"
+        let sql = """
+            INSERT INTO verse_fts (verse_key, plain_text, module_name, entry_order)
+            VALUES (?, ?, ?, ?)
+        """
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK,
               let statement else {
@@ -564,12 +567,13 @@ private final class FixtureContext {
         }
         defer { sqlite3_finalize(statement) }
 
-        for row in rows {
+        for (entryOrder, row) in rows.enumerated() {
             sqlite3_reset(statement)
             sqlite3_clear_bindings(statement)
             sqlite3_bind_text(statement, 1, row.verseKey, -1, sqliteTransient)
             sqlite3_bind_text(statement, 2, row.plainText, -1, sqliteTransient)
             sqlite3_bind_text(statement, 3, row.moduleName, -1, sqliteTransient)
+            sqlite3_bind_int(statement, 4, Int32(entryOrder))
             guard sqlite3_step(statement) == SQLITE_DONE else {
                 throw sqliteError(
                     from: db,
@@ -581,6 +585,9 @@ private final class FixtureContext {
 
     /**
      Records the seeded module metadata expected by `SearchIndexService.hasIndex`.
+
+     The schema version comes from production `SearchIndexService` so fixture-generated search
+     databases remain valid when the app intentionally invalidates older index formats.
      *
      * - Parameters:
      *   - moduleName: Module abbreviation to record as indexed.
@@ -605,7 +612,7 @@ private final class FixtureContext {
 
         sqlite3_bind_text(statement, 1, moduleName, -1, sqliteTransient)
         sqlite3_bind_int(statement, 2, verseCount)
-        sqlite3_bind_int(statement, 3, 2)
+        sqlite3_bind_int(statement, 3, Int32(SearchIndexService.currentSchemaVersion))
 
         guard sqlite3_step(statement) == SQLITE_DONE else {
             throw sqliteError(
@@ -628,6 +635,7 @@ private final class FixtureContext {
                 verse_key,
                 plain_text,
                 module_name UNINDEXED,
+                entry_order UNINDEXED,
                 tokenize='unicode61'
             )
         """, db: db)

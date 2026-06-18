@@ -70,6 +70,8 @@ The result surface preserves:
 
 - per-module hit totals
 - flattened passage hit rows for navigation
+- canonical module entry ordering for scripture hits, matching Android's
+  book/chapter/verse display order rather than search-engine relevance rank
 
 ## Result Navigation Contract
 

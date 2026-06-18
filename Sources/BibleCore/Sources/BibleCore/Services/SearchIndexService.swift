@@ -23,6 +23,9 @@ import Observation
  */
 @Observable
 public final class SearchIndexService: @unchecked Sendable {
+    /// Current search-index schema version. Increment to force re-indexing when text processing changes.
+    public static let currentSchemaVersion = 4
+
     private var db: OpaquePointer?
     @ObservationIgnored
     private let dbPath: String
@@ -118,11 +121,18 @@ public final class SearchIndexService: @unchecked Sendable {
 
         sqlite3_exec(db, "PRAGMA journal_mode=WAL", nil, nil, nil)
 
+        if Self.searchSchemaNeedsRebuild(db: db) {
+            sqlite3_exec(db, "DROP TABLE IF EXISTS verse_strongs", nil, nil, nil)
+            sqlite3_exec(db, "DROP TABLE IF EXISTS verse_fts", nil, nil, nil)
+            sqlite3_exec(db, "DROP TABLE IF EXISTS indexed_modules", nil, nil, nil)
+        }
+
         sqlite3_exec(db, """
             CREATE VIRTUAL TABLE IF NOT EXISTS verse_fts USING fts5(
                 verse_key,
                 plain_text,
                 module_name UNINDEXED,
+                entry_order UNINDEXED,
                 tokenize='unicode61'
             )
         """, nil, nil, nil)
@@ -157,6 +167,42 @@ public final class SearchIndexService: @unchecked Sendable {
             DELETE FROM indexed_modules WHERE schema_version < \(Self.schemaVersion)
                 OR schema_version IS NULL
         """, nil, nil, nil)
+    }
+
+    /**
+     Detects whether the persisted FTS schema predates canonical entry ordering.
+
+     The app stores search indexes in a durable SQLite database. `CREATE VIRTUAL TABLE IF NOT
+     EXISTS` cannot add a new FTS5 column to an existing table, so schema upgrades that change FTS
+     columns must drop the generated index tables and let callers rebuild modules on demand.
+     Android displays scripture search hits in canonical verse order; retaining a rank-only legacy
+     table would preserve the user-visible ordering bug after app upgrade.
+
+     - Parameter db: Open SQLite handle for the search-index database.
+     - Returns: `true` when `verse_fts` exists without the required `entry_order` column.
+     - Side effects: Reads SQLite table metadata only.
+     - Failure modes: Returns `false` when SQLite cannot prepare metadata, allowing the normal
+       create path to handle a missing or corrupt table.
+     */
+    private static func searchSchemaNeedsRebuild(db: OpaquePointer?) -> Bool {
+        var stmt: OpaquePointer?
+        defer { sqlite3_finalize(stmt) }
+
+        guard sqlite3_prepare_v2(db, "PRAGMA table_info(verse_fts)", -1, &stmt, nil) == SQLITE_OK else {
+            return false
+        }
+
+        var sawColumn = false
+        var hasEntryOrder = false
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            sawColumn = true
+            guard let namePtr = sqlite3_column_text(stmt, 1) else { continue }
+            if String(cString: namePtr) == "entry_order" {
+                hasEntryOrder = true
+            }
+        }
+
+        return sawColumn && !hasEntryOrder
     }
 
     /**
@@ -232,7 +278,10 @@ public final class SearchIndexService: @unchecked Sendable {
                 // Begin bulk insert transaction
                 sqlite3_exec(db, "BEGIN TRANSACTION", nil, nil, nil)
 
-                let insertSql = "INSERT INTO verse_fts (verse_key, plain_text, module_name) VALUES (?, ?, ?)"
+                let insertSql = """
+                    INSERT INTO verse_fts (verse_key, plain_text, module_name, entry_order)
+                    VALUES (?, ?, ?, ?)
+                """
                 var insertStmt: OpaquePointer?
                 guard sqlite3_prepare_v2(db, insertSql, -1, &insertStmt, nil) == SQLITE_OK else {
                     sqlite3_exec(db, "ROLLBACK", nil, nil, nil)
@@ -280,6 +329,7 @@ public final class SearchIndexService: @unchecked Sendable {
                     sqlite3_bind_text(insertStmt, 1, key, -1, self.sqliteTransient)
                     sqlite3_bind_text(insertStmt, 2, cleaned, -1, self.sqliteTransient)
                     sqlite3_bind_text(insertStmt, 3, moduleName, -1, self.sqliteTransient)
+                    sqlite3_bind_int(insertStmt, 4, Int32(index))
                     sqlite3_step(insertStmt)
 
                     for token in strongTokens {
@@ -471,7 +521,7 @@ public final class SearchIndexService: @unchecked Sendable {
             SELECT verse_key, snippet(verse_fts, 1, '', '', '...', 64), module_name
             FROM verse_fts
             WHERE verse_fts MATCH ? AND module_name = ?
-            ORDER BY rank
+            ORDER BY CAST(entry_order AS INTEGER)
             LIMIT 5000
         """
 
@@ -679,8 +729,7 @@ public final class SearchIndexService: @unchecked Sendable {
 
     // MARK: - SQLite Helpers
 
-    /// Current schema version. Increment to force re-indexing when text processing changes.
-    private static let schemaVersion = 3
+    private static let schemaVersion = currentSchemaVersion
 
     /// SQLITE_TRANSIENT equivalent — tells SQLite to make a copy of the bound string.
     private var sqliteTransient: sqlite3_destructor_type {
