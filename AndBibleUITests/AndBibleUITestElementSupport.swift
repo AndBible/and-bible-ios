@@ -334,12 +334,29 @@ extension AndBibleUITests {
     }
 
     /**
-     Returns workspace-name prompt text-field candidates without probing arbitrary fields.
+     Returns observable workspace-name prompt container candidates.
+     *
+     * - Parameter app: Running application under test.
+     * - Returns: Typed candidates for the custom workspace-name prompt surface.
+     * - Side effects: none.
+     * - Failure modes: This helper cannot fail; callers decide whether absence is expected.
+     */
+    func workspaceNamePromptScreenCandidates(in app: XCUIApplication) -> [XCUIElement] {
+        let identifier = "workspaceNamePromptScreen"
+        return [
+            app.collectionViews[identifier].firstMatch,
+            app.scrollViews[identifier].firstMatch,
+            app.otherElements[identifier].firstMatch,
+        ]
+    }
 
-     The production workspace prompt exports a text-field identifier. The candidate list therefore
-     stays bounded to that identifier and localized field-title fallbacks; it deliberately avoids
-     prompt-root descendant scans and app-wide focused-field queries because those can wedge XCTest
-     snapshot resolution on hosted simulators.
+    /**
+     Returns workspace-name prompt text-field candidates without app-wide placeholder scans.
+
+     The production workspace prompt exports a text-field identifier inside a known prompt surface.
+     Hosted XCTest can wedge while proving that unrelated app-wide `"Name"` text fields are absent,
+     so this list stays limited to the explicit field identifier and descendants of the prompt
+     container once the prompt exists.
      */
     func workspaceNamePromptTextFieldCandidates(in app: XCUIApplication) -> [XCUIElement] {
         let identifier = "workspaceNamePromptTextField"
@@ -347,15 +364,13 @@ extension AndBibleUITests {
             app.textFields[identifier].firstMatch,
             app.otherElements[identifier].firstMatch,
         ]
-        let titledCandidates = ["Name", "name"].flatMap { title in
+        let promptScopedCandidates = workspaceNamePromptScreenCandidates(in: app).flatMap { prompt in
             [
-                app.textFields[title].firstMatch,
-                app.collectionViews.textFields[title].firstMatch,
-                app.tables.textFields[title].firstMatch,
-                app.scrollViews.textFields[title].firstMatch,
+                prompt.textFields[identifier].firstMatch,
+                prompt.textFields.element(boundBy: 0),
             ]
         }
-        return identifierCandidates + titledCandidates
+        return identifierCandidates + promptScopedCandidates
     }
 
     /// Returns workspace-name prompt buttons without walking the custom sheet hierarchy.

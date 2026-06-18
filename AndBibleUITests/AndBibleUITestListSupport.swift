@@ -34,29 +34,26 @@ extension AndBibleUITests {
             timeout: timeout
         )
         if let promptElement = waitForAnyElement(
-            [
-                "workspaceNamePromptTextField",
-                "workspaceNamePromptConfirmButton",
-                "workspaceNamePromptCancelButton",
-                "workspaceNamePromptScreen",
-            ],
+            ["workspaceNamePromptScreen"],
             in: app,
             timeout: timeout
         ) {
             return promptElement
         }
 
-        let promptField = unresolvedElement("workspaceNamePromptTextField", in: app)
-        XCTAssertTrue(
-            promptField.exists,
+        let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        screenshot.name = "Workspace prompt missing after tapping Add"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+        XCTFail(
             "Expected the workspace name prompt to appear within \(timeout) seconds."
         )
-        return promptField
+        return workspaceNamePromptScreenCandidates(in: app).last
+            ?? app.otherElements["workspaceNamePromptScreen"].firstMatch
     }
 
     /**
-     Resolves the workspace-name prompt field using prompt-scoped fallbacks when SwiftUI does not
-     export the text-field accessibility identifier reliably.
+     Resolves the workspace-name prompt field using identifier and prompt-scoped candidates only.
      *
      * - Parameters:
      *   - app: Running application under test.
@@ -65,7 +62,8 @@ extension AndBibleUITests {
      *   - line: Source line used for XCTest failure attribution.
      * - Returns: The prompt text field used to enter the workspace name.
      * - Side effects:
-     *   - polls the custom prompt and system modal surfaces for one owned text field
+     *   - waits for the custom prompt surface before resolving one owned text field
+     *   - avoids app-wide placeholder text-field scans that can wedge hosted XCTest snapshots
      * - Failure modes:
      *   - records an XCTest failure when no prompt text field becomes available in time
      */
@@ -75,6 +73,7 @@ extension AndBibleUITests {
         file: StaticString = #filePath,
         line: UInt = #line
     ) -> XCUIElement {
+        _ = waitForAnyElement(["workspaceNamePromptScreen"], in: app, timeout: timeout)
         let deadline = Date().addingTimeInterval(timeout)
         repeat {
             if let promptField = firstExistingElement(
@@ -88,8 +87,7 @@ extension AndBibleUITests {
         } while Date() < deadline
 
         let fallbackField = unresolvedElement("workspaceNamePromptTextField", in: app)
-        XCTAssertTrue(
-            fallbackField.exists,
+        XCTFail(
             "Expected the workspace name field to appear within \(timeout) seconds.",
             file: file,
             line: line

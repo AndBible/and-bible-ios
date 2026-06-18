@@ -1938,12 +1938,12 @@ extension AndBibleUITests {
      *   - timeout: Maximum time to keep resolving and revealing the form.
      *   - file: Source file used for XCTest failure attribution.
      *   - line: Source line used for XCTest failure attribution.
-     * - Returns: The resolved button once XCTest reports a hittable activation point.
+     * - Returns: The resolved button once it is visible inside the Sync Settings viewport.
      * - Side effects:
      *   - scrolls Sync Settings lower content until the requested button materializes as a native
-     *     button and becomes hittable through XCTest's native activation path
+     *     button inside the visible form viewport
      * - Failure modes:
-     *   - records an XCTest failure if the button never appears or never becomes hittable
+     *   - records an XCTest failure if the button never appears or never becomes visible
      */
     func requireReachableSyncSettingsButton(
         _ identifier: String,
@@ -1952,6 +1952,13 @@ extension AndBibleUITests {
         file: StaticString = #filePath,
         line: UInt = #line
     ) -> XCUIElement {
+        let syncScreen = requireElement(
+            "syncSettingsScreen",
+            in: app,
+            timeout: min(timeout, 5),
+            file: file,
+            line: line
+        )
         let deadline = Date().addingTimeInterval(timeout)
         var lastCandidate = app.buttons[identifier].firstMatch
 
@@ -1959,7 +1966,7 @@ extension AndBibleUITests {
             let button = app.buttons[identifier].firstMatch
             if button.exists {
                 lastCandidate = button
-                if waitForElementToBecomeHittable(button, timeout: 0.5) {
+                if isElementVisible(button, within: syncScreen) {
                     return button
                 }
             }
@@ -1974,11 +1981,9 @@ extension AndBibleUITests {
             file: file,
             line: line
         )
-        if waitForElementToBecomeHittable(lastCandidate, timeout: 1) {
-            return lastCandidate
-        }
-        XCTFail(
-            "Expected Sync Settings button '\(identifier)' to become hittable within \(timeout) seconds.",
+        XCTAssertTrue(
+            isElementVisible(lastCandidate, within: syncScreen),
+            "Expected Sync Settings button '\(identifier)' to become visible within \(timeout) seconds.",
             file: file,
             line: line
         )
@@ -2011,9 +2016,9 @@ extension AndBibleUITests {
      *   - file: Source file used for XCTest failure attribution.
      *   - line: Source line used for XCTest failure attribution.
      * - Side effects:
-     *   - scrolls the Sync Settings form until the real test-connection button is reachable
-     *   - taps the native hittable button and polls the compact Sync Settings export until the
-     *     remote status changes
+     *   - scrolls the Sync Settings form until the real test-connection button is visible
+     *   - taps the visible button and polls the compact Sync Settings export until the remote
+     *     status changes
      * - Failure modes:
      *   - records an XCTest failure if the button never drives the exported remote status away
      *     from `idle`
@@ -2041,15 +2046,7 @@ extension AndBibleUITests {
                 return
             }
 
-            guard waitForElementToBecomeHittable(button, timeout: 5) else {
-                XCTFail(
-                    "Expected Sync Settings button 'syncNextCloudTestConnectionButton' to stay hittable while triggering the connection test.",
-                    file: file,
-                    line: line
-                )
-                return
-            }
-            button.tap()
+            tapElementReliably(button, timeout: 1, file: file, line: line)
 
             let settleDeadline = Date().addingTimeInterval(2)
             repeat {
