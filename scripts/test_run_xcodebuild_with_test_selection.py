@@ -266,6 +266,38 @@ class MainTests(unittest.TestCase):
         run_mock.assert_not_called()
 
     @mock.patch("run_xcodebuild_with_test_selection.subprocess.run")
+    def test_main_rejects_project_mode_inputs_with_xctestrun_path_before_running_xcodebuild(
+        self,
+        run_mock: mock.Mock,
+    ) -> None:
+        """Keep .xctestrun mode command shape unambiguous for CI reuse jobs."""
+        with mock.patch("sys.stderr", new_callable=io.StringIO) as stderr:
+            with self.assertRaises(SystemExit) as raised:
+                main(
+                    [
+                        "--xctestrun-path",
+                        ".derivedData/Build/Products/AndBible_iphonesimulator.xctestrun",
+                        "--project",
+                        "AndBible.xcodeproj",
+                        "--scheme",
+                        "AndBible",
+                        "--destination",
+                        "id=DEVICE",
+                        "--result-bundle-path",
+                        ".artifacts/AndBibleTests-ui-reuse.xcresult",
+                        "--action",
+                        "test-without-building",
+                    ]
+                )
+
+        self.assertEqual(raised.exception.code, 2)
+        self.assertIn(
+            "the following arguments cannot be used with --xctestrun-path: --project, --scheme",
+            stderr.getvalue(),
+        )
+        run_mock.assert_not_called()
+
+    @mock.patch("run_xcodebuild_with_test_selection.subprocess.run")
     def test_main_treats_sigsegv_after_passing_result_bundle_as_success(
         self,
         run_mock: mock.Mock,

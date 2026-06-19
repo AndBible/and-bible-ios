@@ -135,18 +135,25 @@ def main(argv: Sequence[str] | None = None) -> int:
     """Run the selected xcodebuild action."""
     parser = create_argument_parser()
     args = parser.parse_args(argv)
+    project_mode_args = (
+        ("--project", args.project),
+        ("--scheme", args.scheme),
+        ("--configuration", args.configuration),
+        ("--derived-data-path", args.derived_data_path),
+    )
     if args.xctestrun_path is not None:
         if args.action != "test-without-building":
             parser.error("--xctestrun-path can only be used with --action test-without-building")
+        forbidden_args = [option for option, value in project_mode_args if value is not None]
+        if forbidden_args:
+            parser.error(
+                "the following arguments cannot be used with --xctestrun-path: "
+                + ", ".join(forbidden_args)
+            )
     else:
         missing_args = [
             option
-            for option, value in (
-                ("--project", args.project),
-                ("--scheme", args.scheme),
-                ("--configuration", args.configuration),
-                ("--derived-data-path", args.derived_data_path),
-            )
+            for option, value in project_mode_args
             if value is None
         ]
         if missing_args:
