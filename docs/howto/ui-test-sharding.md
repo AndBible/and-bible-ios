@@ -54,7 +54,8 @@ The current timing manifest was regenerated from successful CI run
 
 ### Workflow shape
 
-1. discover test identifiers from `AndBibleUITests/AndBibleUITests.swift`
+1. discover test identifiers from files matching
+   `AndBibleUITests/AndBibleUITests*.swift`
 2. load estimated durations from `scripts/ui_test_timings.json`
 3. build a shard matrix via `scripts/build_ui_test_shards.py`
 4. for each shard:

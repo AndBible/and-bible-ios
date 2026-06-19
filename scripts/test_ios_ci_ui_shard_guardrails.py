@@ -23,7 +23,7 @@ class IOSCIUIShardGuardrailsTests(unittest.TestCase):
 
         self.assertRegex(
             workflow_text,
-            re.compile(r'^\s+UI_TEST_MAX_SHARD_COUNT:\s+"4"\s*$', re.MULTILINE),
+            re.compile(r"^\s+UI_TEST_MAX_SHARD_COUNT:\s+['\"]?4['\"]?\s*$", re.MULTILINE),
         )
         self.assertRegex(
             workflow_text,
