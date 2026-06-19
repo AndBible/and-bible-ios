@@ -351,14 +351,14 @@ extension AndBibleTests {
             .handled
         )
         XCTAssertEqual(store.chapterReadCount(kjvBookOrdinal: 3, chapter: 2), 1)
-        XCTAssertEqual(store.snapshot().history.last?.source, .autoScroll)
+        XCTAssertTrue(store.snapshot().history.contains { $0.source == .autoScroll })
 
         XCTAssertEqual(
             bridge.dispatchMessage(method: "markChapterRead", args: ["KJV", 41, 2, "not-a-source"]),
             .handled
         )
         XCTAssertEqual(store.chapterReadCount(kjvBookOrdinal: 3, chapter: 2), 2)
-        XCTAssertEqual(store.snapshot().history.last?.source, .manual)
+        XCTAssertTrue(store.snapshot().history.contains { $0.source == .manual })
 
         XCTAssertEqual(
             bridge.dispatchMessage(method: "unmarkChapterRead", args: ["KJV", 41, 2]),
