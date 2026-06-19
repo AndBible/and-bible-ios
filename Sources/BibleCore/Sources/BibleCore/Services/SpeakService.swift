@@ -507,7 +507,7 @@ public final class SpeakService: NSObject, ObservableObject, AVSpeechSynthesizer
             return
         }
         let word = String(text[range])
-        logger.info("willSpeak: '\(word)' at \(characterRange.location) callback=\(self.onWordSpoken != nil)")
+        logger.debug("willSpeak: '\(word)' at \(characterRange.location) callback=\(self.onWordSpoken != nil)")
         onWordSpoken?(word, characterRange)
     }
 
