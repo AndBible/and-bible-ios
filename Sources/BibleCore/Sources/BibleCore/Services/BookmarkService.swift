@@ -4,6 +4,39 @@ import Foundation
 import Observation
 
 /**
+ Result of applying Android-style initial labels to a bookmark.
+
+ The result lets reader-side callers persist workspace cursor movement without coupling the UI layer
+ to bookmark-to-label insertion or StudyPad order maintenance.
+ */
+public struct BookmarkInitialLabelAssignmentResult {
+    /// Label identifiers that existed locally and were applied to the bookmark.
+    public let appliedLabelIds: [UUID]
+    /// Updated workspace settings when StudyPad cursors advanced, otherwise the unchanged input.
+    public let updatedWorkspaceSettings: WorkspaceSettings?
+    /// Whether the caller should persist the owning workspace after cursor changes.
+    public let changedWorkspaceSettings: Bool
+
+    /**
+     Creates an initial-label assignment result.
+
+     - Parameters:
+       - appliedLabelIds: Valid label identifiers applied to the bookmark.
+       - updatedWorkspaceSettings: Workspace settings after cursor changes, if settings were supplied.
+       - changedWorkspaceSettings: Whether cursor updates changed the workspace settings.
+     */
+    public init(
+        appliedLabelIds: [UUID],
+        updatedWorkspaceSettings: WorkspaceSettings?,
+        changedWorkspaceSettings: Bool
+    ) {
+        self.appliedLabelIds = appliedLabelIds
+        self.updatedWorkspaceSettings = updatedWorkspaceSettings
+        self.changedWorkspaceSettings = changedWorkspaceSettings
+    }
+}
+
+/**
  Business logic for bookmark operations, coordinating between
  BookmarkStore and the bridge layer.
  */
@@ -315,6 +348,68 @@ public final class BookmarkService {
         }
     }
 
+    /**
+     Applies Android's initial bookmark-label assignment semantics to a newly-created bookmark.
+
+     For newly-created bookmarks, Android validates requested labels, inserts bookmark-to-label rows
+     at the workspace StudyPad cursor position clamped to the current StudyPad item count, bumps later
+     StudyPad rows, advances any used cursor, and repairs `primaryLabelId` so it points at one of the
+     assigned labels. Existing bookmark label replacement stays with the dedicated label-management
+     flows.
+
+     - Parameters:
+       - bookmarkId: Bible or generic bookmark identifier.
+       - labelIds: Desired initial label set for the new bookmark.
+       - workspaceSettings: Workspace settings that may contain StudyPad cursor positions.
+     - Returns: Assignment details, or `nil` when no matching bookmark exists.
+     - Side effects: Inserts bookmark-to-label rows, mutates affected StudyPad order numbers,
+       bookmark timestamps, primary-label state, and returned workspace settings.
+     - Failure modes: Missing labels are ignored; missing bookmarks return `nil`.
+     */
+    @discardableResult
+    public func applyInitialLabels(
+        bookmarkId: UUID,
+        labelIds: Set<UUID>,
+        workspaceSettings: WorkspaceSettings?
+    ) -> BookmarkInitialLabelAssignmentResult? {
+        let validLabelIds = labelIds
+            .compactMap { store.label(id: $0)?.id }
+            .filter { $0 != Label.unlabeledId }
+            .sorted { $0.uuidString < $1.uuidString }
+        var updatedWorkspaceSettings = workspaceSettings
+        var changedWorkspaceSettings = false
+
+        if let bookmark = store.bibleBookmark(id: bookmarkId) {
+            applyBibleLabels(
+                validLabelIds,
+                to: bookmark,
+                workspaceSettings: &updatedWorkspaceSettings,
+                changedWorkspaceSettings: &changedWorkspaceSettings
+            )
+            return BookmarkInitialLabelAssignmentResult(
+                appliedLabelIds: validLabelIds,
+                updatedWorkspaceSettings: updatedWorkspaceSettings,
+                changedWorkspaceSettings: changedWorkspaceSettings
+            )
+        }
+
+        if let bookmark = store.genericBookmark(id: bookmarkId) {
+            applyGenericLabels(
+                validLabelIds,
+                to: bookmark,
+                workspaceSettings: &updatedWorkspaceSettings,
+                changedWorkspaceSettings: &changedWorkspaceSettings
+            )
+            return BookmarkInitialLabelAssignmentResult(
+                appliedLabelIds: validLabelIds,
+                updatedWorkspaceSettings: updatedWorkspaceSettings,
+                changedWorkspaceSettings: changedWorkspaceSettings
+            )
+        }
+
+        return nil
+    }
+
     /// Set whole verse mode for a bookmark (Bible or generic).
     public func setWholeVerse(bookmarkId: UUID, value: Bool) {
         if let bookmark = store.bibleBookmark(id: bookmarkId) {
@@ -383,6 +478,90 @@ public final class BookmarkService {
         link.bookmark = bookmark
         link.label = label
         store.insert(link)
+    }
+
+    private func applyBibleLabels(
+        _ validLabelIds: [UUID],
+        to bookmark: BibleBookmark,
+        workspaceSettings: inout WorkspaceSettings?,
+        changedWorkspaceSettings: inout Bool
+    ) {
+        let existingLinks = bookmark.bookmarkToLabels ?? []
+        let existingLabelIds = Set(existingLinks.compactMap { $0.label?.id })
+
+        for labelId in validLabelIds where !existingLabelIds.contains(labelId) {
+            guard let label = store.label(id: labelId) else { continue }
+            let orderNumber = studyPadInsertionOrder(
+                labelId: labelId,
+                workspaceSettings: &workspaceSettings,
+                changedWorkspaceSettings: &changedWorkspaceSettings
+            )
+            _ = incrementOrderNumbers(labelId: labelId, fromOrder: orderNumber, excludingEntryId: nil)
+            let link = BibleBookmarkToLabel(orderNumber: orderNumber)
+            link.bookmark = bookmark
+            link.label = label
+            store.insert(link)
+        }
+
+        repairPrimaryLabel(validLabelIds: validLabelIds, primaryLabelId: &bookmark.primaryLabelId)
+        bookmark.lastUpdatedOn = Date()
+        store.saveChanges()
+    }
+
+    private func applyGenericLabels(
+        _ validLabelIds: [UUID],
+        to bookmark: GenericBookmark,
+        workspaceSettings: inout WorkspaceSettings?,
+        changedWorkspaceSettings: inout Bool
+    ) {
+        let existingLinks = bookmark.bookmarkToLabels ?? []
+        let existingLabelIds = Set(existingLinks.compactMap { $0.label?.id })
+
+        for labelId in validLabelIds where !existingLabelIds.contains(labelId) {
+            guard let label = store.label(id: labelId) else { continue }
+            let orderNumber = studyPadInsertionOrder(
+                labelId: labelId,
+                workspaceSettings: &workspaceSettings,
+                changedWorkspaceSettings: &changedWorkspaceSettings
+            )
+            _ = incrementOrderNumbers(labelId: labelId, fromOrder: orderNumber, excludingEntryId: nil)
+            let link = GenericBookmarkToLabel(orderNumber: orderNumber)
+            link.bookmark = bookmark
+            link.label = label
+            store.insert(link)
+        }
+
+        repairPrimaryLabel(validLabelIds: validLabelIds, primaryLabelId: &bookmark.primaryLabelId)
+        bookmark.lastUpdatedOn = Date()
+        store.saveChanges()
+    }
+
+    private func studyPadInsertionOrder(
+        labelId: UUID,
+        workspaceSettings: inout WorkspaceSettings?,
+        changedWorkspaceSettings: inout Bool
+    ) -> Int {
+        let itemCount = studyPadItemCount(labelId: labelId)
+        guard let cursor = workspaceSettings?.studyPadCursors[labelId] else {
+            return itemCount
+        }
+        let orderNumber = min(cursor, itemCount)
+        workspaceSettings?.studyPadCursors[labelId] = orderNumber + 1
+        changedWorkspaceSettings = true
+        return orderNumber
+    }
+
+    private func studyPadItemCount(labelId: UUID) -> Int {
+        store.bibleBookmarkToLabels(labelId: labelId).count
+            + store.genericBookmarkToLabels(labelId: labelId).count
+            + store.studyPadEntries(labelId: labelId).count
+    }
+
+    private func repairPrimaryLabel(validLabelIds: [UUID], primaryLabelId: inout UUID?) {
+        if let primaryLabelId, validLabelIds.contains(primaryLabelId) {
+            return
+        }
+        primaryLabelId = validLabelIds.first
     }
 
     /**
