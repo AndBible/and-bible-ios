@@ -535,8 +535,6 @@ jobs:
         id: simulator
         run: >-
           python3 scripts/resolve_ios_simulator_destination.py
-          --project AndBible.xcodeproj
-          --scheme AndBible
           --create-dedicated-device
           --device-name-prefix "AndBible CI UI Reuse Consumer"
 

@@ -126,8 +126,12 @@ class IOSCIUIShardGuardrailsTests(unittest.TestCase):
         producer = workflow_job_block(workflow_text, "ios-ui-build-product-reuse-producer")
         consumer = workflow_job_block(workflow_text, "ios-ui-build-product-reuse-consumer")
         stage_run = workflow_step_run_block(workflow_text, "Stage reusable UI build products")
+        consumer_resolve_run = workflow_step_run_block(
+            consumer,
+            "Resolve iOS simulator destination",
+        )
         consumer_run = workflow_step_run_block(
-            workflow_text,
+            consumer,
             "Run reused UI build products without rebuilding",
         )
 
@@ -141,6 +145,8 @@ class IOSCIUIShardGuardrailsTests(unittest.TestCase):
         self.assertIn("tar -czf .artifacts/ui-build-product-reuse.tar.gz", stage_run)
         self.assertIn("andbible-ui-build-products-${{ github.run_id }}", consumer)
         self.assertIn("tar -xzf .artifacts/reuse-download/ui-build-product-reuse.tar.gz", consumer)
+        self.assertNotIn("--project", consumer_resolve_run)
+        self.assertNotIn("--scheme", consumer_resolve_run)
         self.assertIn(
             "-only-testing:AndBibleUITests/AndBibleUITests/testAboutScreenOpensFromReaderMenu",
             consumer,
