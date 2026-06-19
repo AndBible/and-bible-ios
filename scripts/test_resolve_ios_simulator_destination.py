@@ -12,7 +12,6 @@ from resolve_ios_simulator_destination import (
     choose_device_type,
     choose_existing_device,
     choose_runtime,
-    find_candidate_by_simulator_id,
     has_simulator_placeholder,
     main,
     parse_candidates,
@@ -93,18 +92,6 @@ class ResolveIosSimulatorDestinationTests(unittest.TestCase):
         self.assertIsNotNone(device)
         self.assertEqual(device["udid"], "ID-16P")
 
-    def test_find_candidate_by_simulator_id_matches_created_device(self) -> None:
-        candidates = [
-            ("iPhone 15", "17.5", "ID-15"),
-            ("iPhone 16 Pro", "18.2", "ID-16P"),
-        ]
-
-        self.assertEqual(
-            find_candidate_by_simulator_id(candidates, "ID-16P"),
-            ("iPhone 16 Pro", "18.2", "ID-16P"),
-        )
-        self.assertIsNone(find_candidate_by_simulator_id(candidates, "MISSING"))
-
     def test_print_resolved_output_emits_local_cli_values(self) -> None:
         with patch("sys.stdout", new_callable=io.StringIO) as stdout:
             print_resolved_output("id=ABC-123", "iPhone 16 Pro", "18.2", simulator_created=True)
@@ -118,7 +105,14 @@ class ResolveIosSimulatorDestinationTests(unittest.TestCase):
             "simulator_created=true\n",
         )
 
-    def test_main_uses_created_simulator_when_showdestinations_has_not_caught_up(self) -> None:
+    def test_main_uses_created_dedicated_simulator_without_showdestinations(self) -> None:
+        """Protect dedicated simulator resolution from project package graph failures.
+
+        CI jobs that already create a concrete simulator only need the CoreSimulator
+        UDID for the following boot/build step. Calling xcodebuild
+        -showdestinations after simctl create can fail on unrelated package
+        artifacts before the job reaches the behavior it is meant to validate.
+        """
         with patch(
             "resolve_ios_simulator_destination.provision_simulator",
             return_value=("SIM-1", "iPhone 17", "26.2"),
@@ -126,8 +120,8 @@ class ResolveIosSimulatorDestinationTests(unittest.TestCase):
             with patch(
                 "resolve_ios_simulator_destination.discover_candidates",
                 return_value=([("iPhone 16 Pro", "26.2", "OTHER-SIM")], ""),
-            ):
-                with patch("resolve_ios_simulator_destination.time.sleep"):
+            ) as discover_candidates:
+                with patch("resolve_ios_simulator_destination.time.sleep") as sleep:
                     with patch.dict(os.environ, {}, clear=True):
                         with patch("sys.stdout", new_callable=io.StringIO) as stdout:
                             self.assertEqual(
@@ -135,10 +129,9 @@ class ResolveIosSimulatorDestinationTests(unittest.TestCase):
                                 0,
                             )
 
-        self.assertIn(
-            "Created simulator did not appear in xcodebuild -showdestinations output; using the created simulator directly.",
-            stdout.getvalue(),
-        )
+        discover_candidates.assert_not_called()
+        sleep.assert_not_called()
+        self.assertIn("Selected simulator: iPhone 17 (iOS 26.2)", stdout.getvalue())
         self.assertIn("destination=id=SIM-1\n", stdout.getvalue())
 
 
