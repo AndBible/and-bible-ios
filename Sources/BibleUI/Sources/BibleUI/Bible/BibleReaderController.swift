@@ -515,6 +515,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     private var compareDocumentRequestID = UUID()
     /// TTS service
     var speakService: SpeakService?
+    /// Speech-specific collaborator that builds TTS payloads and owns word-highlight state.
+    private let speechCoordinator = BibleReaderSpeechCoordinator()
     /// Workspace store for history recording
     var workspaceStore: WorkspaceStore?
     /// The current window (for history recording)
@@ -701,13 +703,6 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         return String(format: "#%02x%02x%02x", r, g, b)
     }
 
-    /// Verse-to-character-offset mapping for TTS word highlighting.
-    private var speakVerseOffsets: [(osisID: String, ordinal: Int, startOffset: Int, endOffset: Int)] = []
-    /// Currently highlighted verse ordinal during TTS.
-    private var currentHighlightedOrdinal: Int?
-    /// The full spoken text (for word extraction).
-    private var speakFullText: String = ""
-
     /**
      Speak the current chapter using TTS with word-level highlighting.
 
@@ -719,119 +714,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      text extraction and restored immediately after.
      */
     public func speakCurrentChapter() {
-        guard let module = activeModule, let service = speakService else { return }
-        let osisBookId = osisBookId(for: currentBook)
-        let chapter = currentChapter
-
-        // Set Now Playing metadata before speaking
-        service.currentTitle = "\(currentBook) \(currentChapter)"
-        service.currentSubtitle = activeModuleName
-
-        // Temporarily disable Strong's/morphology so stripText() returns clean plain text.
-        // These options cause stripText() to include Strong's number tokens (e.g. "H7225")
-        // which corrupt TTS output and cause premature utterance completion.
-        let mgr = swordManager
-        let strongsWasOn = (displaySettings.strongsMode ?? 0) > 0
-        let morphWasOn = displaySettings.showMorphology ?? false
-        if strongsWasOn { mgr?.setGlobalOption(.strongsNumbers, enabled: false) }
-        if morphWasOn { mgr?.setGlobalOption(.morphology, enabled: false) }
-
-        // Build text and verse offset map
-        module.setKey("\(osisBookId) \(chapter):1")
-        let preamble = "\(currentBook) chapter \(chapter). "
-        var text = preamble
-        var offsets: [(osisID: String, ordinal: Int, startOffset: Int, endOffset: Int)] = []
-
-        while true {
-            let key = module.currentKey()
-            guard let (_, parsedChapter, parsedVerse) = parseVerseKey(key) else { break }
-            if parsedChapter != chapter { break }
-
-            let verseText = module.stripText()
-            if !verseText.isEmpty {
-                let trimmed = verseText.trimmingCharacters(in: .whitespacesAndNewlines) + " "
-                let startOffset = text.utf16.count
-                text += trimmed
-                let endOffset = text.utf16.count
-                let osisID = "\(osisBookId).\(chapter).\(parsedVerse)"
-                guard let ordinal = verseOrdinal(osisBookId: osisBookId, chapter: chapter, verse: parsedVerse) else {
-                    break
-                }
-                offsets.append((osisID: osisID, ordinal: ordinal, startOffset: startOffset, endOffset: endOffset))
-            }
-            if !module.next() { break }
-        }
-
-        // Restore Strong's/morphology options
-        if strongsWasOn { mgr?.setGlobalOption(.strongsNumbers, enabled: true) }
-        if morphWasOn { mgr?.setGlobalOption(.morphology, enabled: true) }
-
-        speakVerseOffsets = offsets
-        speakFullText = text
-        currentHighlightedOrdinal = nil
-
-        // Wire up word-level callback
-        service.onWordSpoken = { [weak self] word, range in
-            self?.handleWordSpoken(word: word, range: range)
-        }
-        service.onSpeechStopped = { [weak self] in
-            self?.clearSpeakHighlight()
-        }
-
-        let lang = module.info.language
-        let speechLang = lang.hasPrefix("en") ? "en-US" : lang
-        service.speak(text: text, language: speechLang)
-    }
-
-    private struct VerseRangeSpeechPayload {
-        let text: String
-        let language: String
-    }
-
-    private func speechPayloadForVerseRange(startOrdinal: Int, endOrdinal: Int) -> VerseRangeSpeechPayload? {
-        guard let module = activeModule else { return nil }
-        let osisBookId = osisBookId(for: currentBook)
-        let chapter = currentChapter
-
-        // Temporarily disable Strong's/morphology so stripText() returns clean plain text.
-        let mgr = swordManager
-        let strongsWasOn = (displaySettings.strongsMode ?? 0) > 0
-        let morphWasOn = displaySettings.showMorphology ?? false
-        if strongsWasOn { mgr?.setGlobalOption(.strongsNumbers, enabled: false) }
-        if morphWasOn { mgr?.setGlobalOption(.morphology, enabled: false) }
-        defer {
-            if strongsWasOn { mgr?.setGlobalOption(.strongsNumbers, enabled: true) }
-            if morphWasOn { mgr?.setGlobalOption(.morphology, enabled: true) }
-        }
-
-        // Collect text for the specified ordinal range
-        module.setKey("\(osisBookId) \(chapter):1")
-        var text = ""
-
-        while true {
-            let key = module.currentKey()
-            guard let (_, parsedChapter, parsedVerse) = parseVerseKey(key) else { break }
-            if parsedChapter != chapter { break }
-
-            guard let ordinal = verseOrdinal(osisBookId: osisBookId, chapter: chapter, verse: parsedVerse) else {
-                break
-            }
-            if ordinal >= startOrdinal && ordinal <= endOrdinal {
-                let verseText = module.stripText()
-                if !verseText.isEmpty {
-                    text += verseText.trimmingCharacters(in: .whitespacesAndNewlines) + " "
-                }
-            }
-            if ordinal > endOrdinal { break }
-            if !module.next() { break }
-        }
-
-        let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedText.isEmpty else { return nil }
-
-        let lang = module.info.language
-        let speechLang = lang.hasPrefix("en") ? "en-US" : lang
-        return VerseRangeSpeechPayload(text: trimmedText, language: speechLang)
+        guard let service = speakService, let context = makeSpeechContext() else { return }
+        speechCoordinator.speakCurrentChapter(service: service, context: context)
     }
 
     /**
@@ -841,152 +725,57 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      are temporarily disabled during text extraction.
      */
     private func speakVerseRange(startOrdinal: Int, endOrdinal: Int) {
-        guard let service = speakService,
-              let payload = speechPayloadForVerseRange(startOrdinal: startOrdinal, endOrdinal: endOrdinal) else {
-            return
-        }
-
-        service.currentTitle = "\(currentBook) \(currentChapter)"
-        service.currentSubtitle = activeModuleName
-        service.speak(text: payload.text, language: payload.language)
+        guard let service = speakService, let context = makeSpeechContext() else { return }
+        speechCoordinator.speakVerseRange(
+            startOrdinal: startOrdinal,
+            endOrdinal: endOrdinal,
+            service: service,
+            context: context
+        )
     }
 
     /**
      Speak a specific verse range repeatedly for Android memorization-loop parity.
      */
     private func speakMemorizationLoopRange(startOrdinal: Int, endOrdinal: Int) {
-        guard let service = speakService,
-              let payload = speechPayloadForVerseRange(startOrdinal: startOrdinal, endOrdinal: endOrdinal) else {
-            return
-        }
-
-        service.currentTitle = "\(currentBook) \(currentChapter)"
-        service.currentSubtitle = activeModuleName
-        service.speakMemorizationLoop(text: payload.text, language: payload.language)
+        guard let service = speakService, let context = makeSpeechContext() else { return }
+        speechCoordinator.speakMemorizationLoopRange(
+            startOrdinal: startOrdinal,
+            endOrdinal: endOrdinal,
+            service: service,
+            context: context
+        )
     }
 
-    // MARK: - TTS Word Highlighting
+    /**
+     Builds the speech collaborator context from the controller's current reader state.
 
-    /// Handle a word being spoken — highlight it in the WebView.
-    private func handleWordSpoken(word: String, range: NSRange) {
-        let charOffset = range.location
-        logger.info("handleWordSpoken: '\(word)' offset=\(charOffset)")
-
-        // Find which verse this character offset falls in
-        var targetOrdinal: Int?
-        var offsetInVerse: Int = 0
-        for entry in speakVerseOffsets {
-            if charOffset >= entry.startOffset && charOffset < entry.endOffset {
-                targetOrdinal = entry.ordinal
-                offsetInVerse = charOffset - entry.startOffset
-                break
+     The context captures only the dependencies required for speech extraction and highlight
+     emission. Closures capture the controller or bridge weakly so `SpeakService` callbacks do not
+     retain the reader controller after the pane is dismissed.
+     */
+    private func makeSpeechContext() -> BibleReaderSpeechContext? {
+        guard let module = activeModule else { return nil }
+        return BibleReaderSpeechContext(
+            module: module,
+            swordManager: swordManager,
+            currentBook: currentBook,
+            currentChapter: currentChapter,
+            activeModuleName: activeModuleName,
+            displaySettings: displaySettings,
+            osisBookId: { [weak self] bookName in
+                self?.osisBookId(for: bookName) ?? BibleReaderController.osisBookId(for: bookName)
+            },
+            parseVerseKey: { [weak self] key in
+                self?.parseVerseKey(key)
+            },
+            verseOrdinal: { [weak self] osisBookId, chapter, verse in
+                self?.verseOrdinal(osisBookId: osisBookId, chapter: chapter, verse: verse)
+            },
+            evaluateJavaScript: { [weak bridge] js in
+                bridge?.webView?.evaluateJavaScript(js)
             }
-        }
-
-        guard let ordinal = targetOrdinal else { return }
-
-        // Escape the word for safe JS string
-        let escapedWord = word
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "'", with: "\\'")
-
-        let scrollNeeded = ordinal != currentHighlightedOrdinal
-        currentHighlightedOrdinal = ordinal
-
-        // Use data-ordinal attribute to find verse elements (matches Vue.js Verse.vue template)
-        // Pass offsetInVerse so JS can find the correct occurrence of duplicate words
-        let js = """
-        (function() {
-            // Clean up previous word highlight (unwrap span, restore text)
-            var prev = document.getElementById('speaking-word');
-            if (prev) {
-                var p = prev.parentNode;
-                if (p) {
-                    p.replaceChild(document.createTextNode(prev.textContent || ''), prev);
-                    p.normalize();
-                }
-            }
-
-            // Update verse highlight
-            var oldVerse = document.querySelector('.speaking-verse');
-            if (oldVerse) oldVerse.classList.remove('speaking-verse');
-
-            var verse = document.querySelector('[data-ordinal="\(ordinal)"]');
-            if (!verse) return;
-            verse.classList.add('speaking-verse');
-
-            // Search for the word in text nodes of this verse.
-            // Use offsetInVerse to find the correct occurrence when a word
-            // appears multiple times (e.g. "called" in "God called...he called").
-            var word = '\(escapedWord)';
-            if (!word || word.length === 0) return;
-            var targetOffset = \(offsetInVerse);
-
-            var walker = document.createTreeWalker(verse, NodeFilter.SHOW_TEXT, null);
-            var node;
-            var cumOffset = 0;
-            var bestNode = null, bestIdx = -1, bestDist = Infinity;
-
-            while (node = walker.nextNode()) {
-                var text = node.nodeValue;
-                var searchFrom = 0;
-                while (true) {
-                    var idx = text.indexOf(word, searchFrom);
-                    if (idx === -1) break;
-                    var globalPos = cumOffset + idx;
-                    var dist = Math.abs(globalPos - targetOffset);
-                    if (dist < bestDist) {
-                        bestDist = dist;
-                        bestNode = node;
-                        bestIdx = idx;
-                    }
-                    searchFrom = idx + 1;
-                }
-                cumOffset += text.length;
-            }
-
-            if (bestNode && bestIdx >= 0) {
-                try {
-                    var range = document.createRange();
-                    range.setStart(bestNode, bestIdx);
-                    range.setEnd(bestNode, bestIdx + word.length);
-                    var span = document.createElement('span');
-                    span.id = 'speaking-word';
-                    range.surroundContents(span);
-                } catch(e) {}
-
-                if (\(scrollNeeded ? "true" : "false")) {
-                    var sw = document.getElementById('speaking-word');
-                    if (sw) sw.scrollIntoView({behavior: 'smooth', block: 'center'});
-                }
-            }
-        })();
-        """
-        DispatchQueue.main.async { [weak self] in
-            self?.bridge.webView?.evaluateJavaScript(js)
-        }
-    }
-
-    /// Clear all TTS highlights from the WebView.
-    private func clearSpeakHighlight() {
-        currentHighlightedOrdinal = nil
-        let js = """
-        (function() {
-            var prev = document.getElementById('speaking-word');
-            if (prev) {
-                var p = prev.parentNode;
-                if (p) {
-                    p.replaceChild(document.createTextNode(prev.textContent || ''), prev);
-                    p.normalize();
-                }
-            }
-            var v = document.querySelector('.speaking-verse');
-            if (v) v.classList.remove('speaking-verse');
-        })();
-        """
-        DispatchQueue.main.async { [weak self] in
-            self?.bridge.webView?.evaluateJavaScript(js)
-        }
+        )
     }
 
     /// Switch to a different installed Bible module.
