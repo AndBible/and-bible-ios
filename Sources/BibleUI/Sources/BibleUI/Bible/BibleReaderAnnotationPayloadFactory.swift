@@ -39,6 +39,22 @@ struct BibleReaderAnnotationPayloadFactory {
     private let unlabeledLabelID: String
 
     /**
+     Normalizes Swift hash values into the non-negative `hashCode` shape expected by BibleView.
+
+     The bridge already used `abs(id.hashValue)` for StudyPad DOM keys, so this preserves that
+     contract for all ordinary values while handling `Int.min`, whose absolute value cannot be
+     represented and would otherwise trap at runtime.
+
+     - Parameter hashValue: Swift hash value produced for a bridge identifier.
+     - Returns: A non-negative hash code, mapping `Int.min` to `Int.max`.
+     - Side effects: None.
+     - Failure modes: None; specifically avoids the `abs(Int.min)` overflow trap.
+     */
+    static func normalizedBridgeHashCode(from hashValue: Int) -> Int {
+        hashValue == Int.min ? Int.max : abs(hashValue)
+    }
+
+    /**
      Creates a bookmark and StudyPad payload factory for the current reader state.
 
      - Parameters:
@@ -113,7 +129,7 @@ struct BibleReaderAnnotationPayloadFactory {
      */
     func genericBookmarkJSONForStudyPad(_ bookmark: GenericBookmark) -> GenericBookmarkData {
         let id = bookmark.id.uuidString
-        let hashCode = abs(id.hashValue)
+        let hashCode = Self.normalizedBridgeHashCode(from: id.hashValue)
         let createdAt = bridgeTimestampMilliseconds(bookmark.createdAt)
         let lastUpdated = bridgeTimestampMilliseconds(bookmark.lastUpdatedOn)
         let noteText = bookmark.notes?.notes ?? ""
@@ -167,7 +183,7 @@ struct BibleReaderAnnotationPayloadFactory {
      */
     func studyPadEntryJSON(_ entry: StudyPadTextEntry) -> StudyPadTextItemData {
         let id = entry.id.uuidString
-        let hashCode = abs(id.hashValue)
+        let hashCode = Self.normalizedBridgeHashCode(from: id.hashValue)
         let labelId = BookmarkLabelSerializationSupport.liveLabelIDString(for: entry.label) ?? ""
         let text = entry.textEntry?.text ?? ""
         return StudyPadTextItemData(
@@ -273,7 +289,7 @@ struct BibleReaderAnnotationPayloadFactory {
      */
     private func bibleBookmarkJSON(_ bookmark: BibleBookmark, editAction: EditActionData?) -> BibleBookmarkData {
         let id = bookmark.id.uuidString
-        let hashCode = abs(id.hashValue)
+        let hashCode = Self.normalizedBridgeHashCode(from: id.hashValue)
         let createdAt = bridgeTimestampMilliseconds(bookmark.createdAt)
         let lastUpdated = bridgeTimestampMilliseconds(bookmark.lastUpdatedOn)
         let noteText = bookmark.notes?.notes ?? ""

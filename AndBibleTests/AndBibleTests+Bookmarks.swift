@@ -19,6 +19,35 @@ import struct SwiftUI.Color
 
 extension AndBibleTests {
     /**
+     Verifies that bridge hash-code normalization preserves the existing non-negative StudyPad DOM
+     key contract without trapping on Swift's one unrepresentable absolute value.
+     *
+     * Setup:
+     * - calls the pure annotation payload helper directly with representative positive, negative,
+     *   zero, and `Int.min` values because `String.hashValue` is process-randomized and cannot
+     *   deterministically produce the overflow edge.
+     *
+     * Expected result:
+     * - ordinary values match the previous `abs(hashValue)` semantics
+     * - `Int.min` maps to a non-negative sentinel instead of crashing
+     *
+     * Failure meaning:
+     * - StudyPad/bookmark bridge payloads could either drift from their existing hash semantics or
+     *   still crash while building Vue DOM identifiers for a rare hash value.
+     *
+     * Side effects: None.
+     */
+    func testBridgeHashCodeNormalizationAvoidsIntMinOverflow() {
+        XCTAssertEqual(BibleReaderAnnotationPayloadFactory.normalizedBridgeHashCode(from: 12), 12)
+        XCTAssertEqual(BibleReaderAnnotationPayloadFactory.normalizedBridgeHashCode(from: -12), 12)
+        XCTAssertEqual(BibleReaderAnnotationPayloadFactory.normalizedBridgeHashCode(from: 0), 0)
+        XCTAssertEqual(
+            BibleReaderAnnotationPayloadFactory.normalizedBridgeHashCode(from: Int.min),
+            Int.max
+        )
+    }
+
+    /**
      Verifies that bookmark-label serialization falls back to the synthetic unlabeled payload when
      a relationship still points at a deleted in-memory label object.
      *

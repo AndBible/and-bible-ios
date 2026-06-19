@@ -53,7 +53,8 @@ struct BibleReaderSpeechContext {
  - evaluates JavaScript in the reader web view through the supplied closure
 
  Failure modes:
- - returns without starting speech when required module text or verse ordinals cannot be resolved
+ - returns without starting speech when required module text cannot be resolved
+ - may speak unhighlighted partial text if verse ordinal resolution stops before the chapter ends
  - restores temporarily disabled SWORD options with `defer` before returning from extraction paths
  */
 final class BibleReaderSpeechCoordinator {
@@ -81,8 +82,9 @@ final class BibleReaderSpeechCoordinator {
        - context: Current reader/module state needed to build text and emit highlights.
      - Side effects: Updates speech service metadata and callbacks, mutates highlight offset state,
        temporarily toggles SWORD markup options, and starts playback.
-     - Failure modes: Returns without speaking when the chapter cannot produce non-empty speech
-       offsets or when verse ordinals cannot be resolved.
+     - Failure modes: Returns without speaking when the chapter cannot produce non-empty speech text;
+       if ordinal resolution stops early, any already extracted text can still be spoken without
+       later verse highlights.
      */
     func speakCurrentChapter(service: SpeakService, context: BibleReaderSpeechContext) {
         let osisBookId = context.osisBookId(context.currentBook)
@@ -303,7 +305,7 @@ final class BibleReaderSpeechCoordinator {
         evaluateJavaScript: @escaping (String) -> Void
     ) {
         let charOffset = range.location
-        speechLogger.info("handleWordSpoken: '\(word)' offset=\(charOffset)")
+        speechLogger.debug("handleWordSpoken: '\(word)' offset=\(charOffset)")
 
         var targetOrdinal: Int?
         var offsetInVerse: Int = 0
