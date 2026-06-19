@@ -601,7 +601,8 @@ public final class RemoteSyncInitialBackupUploadService {
                 );
                 CREATE TABLE BibleBookmarkNotes (
                     bookmarkId BLOB NOT NULL PRIMARY KEY,
-                    notes TEXT NOT NULL
+                    notes TEXT NOT NULL,
+                    contentType TEXT DEFAULT NULL
                 );
                 CREATE TABLE BibleBookmarkToLabel (
                     bookmarkId BLOB NOT NULL,
@@ -630,7 +631,8 @@ public final class RemoteSyncInitialBackupUploadService {
                 );
                 CREATE TABLE GenericBookmarkNotes (
                     bookmarkId BLOB NOT NULL PRIMARY KEY,
-                    notes TEXT NOT NULL
+                    notes TEXT NOT NULL,
+                    contentType TEXT DEFAULT NULL
                 );
                 CREATE TABLE GenericBookmarkToLabel (
                     bookmarkId BLOB NOT NULL,
@@ -644,7 +646,8 @@ public final class RemoteSyncInitialBackupUploadService {
                     id BLOB NOT NULL PRIMARY KEY,
                     labelId BLOB NOT NULL,
                     orderNumber INTEGER NOT NULL,
-                    indentLevel INTEGER NOT NULL DEFAULT 0
+                    indentLevel INTEGER NOT NULL DEFAULT 0,
+                    contentType TEXT DEFAULT NULL
                 );
                 CREATE TABLE StudyPadTextEntryText (
                     studyPadTextEntryId BLOB NOT NULL PRIMARY KEY,
@@ -1572,7 +1575,7 @@ public final class RemoteSyncInitialBackupUploadService {
         tableName: String,
         in database: OpaquePointer
     ) throws {
-        let sql = "INSERT INTO \(tableName) (bookmarkId, notes) VALUES (?, ?)"
+        let sql = "INSERT INTO \(tableName) (bookmarkId, notes, contentType) VALUES (?, ?, ?)"
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK, let statement else {
             throw RemoteSyncInitialBackupUploadError.invalidSQLiteDatabase
@@ -1581,6 +1584,7 @@ public final class RemoteSyncInitialBackupUploadService {
 
         bindUUIDBlob(row.bookmarkID, to: statement, index: 1)
         bindText(row.notes, to: statement, index: 2)
+        bindOptionalText(row.contentType, to: statement, index: 3)
         guard sqlite3_step(statement) == SQLITE_DONE else {
             throw RemoteSyncInitialBackupUploadError.invalidSQLiteDatabase
         }
@@ -1668,7 +1672,7 @@ public final class RemoteSyncInitialBackupUploadService {
        - throws `RemoteSyncInitialBackupUploadError.invalidSQLiteDatabase` when SQLite rejects prepare, bind, or step work
      */
     private func insertStudyPadEntryRow(_ row: RemoteSyncAndroidStudyPadEntry, in database: OpaquePointer) throws {
-        let sql = "INSERT INTO StudyPadTextEntry (id, labelId, orderNumber, indentLevel) VALUES (?, ?, ?, ?)"
+        let sql = "INSERT INTO StudyPadTextEntry (id, labelId, orderNumber, indentLevel, contentType) VALUES (?, ?, ?, ?, ?)"
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK, let statement else {
             throw RemoteSyncInitialBackupUploadError.invalidSQLiteDatabase
@@ -1679,6 +1683,7 @@ public final class RemoteSyncInitialBackupUploadService {
         bindUUIDBlob(row.labelID, to: statement, index: 2)
         sqlite3_bind_int(statement, 3, Int32(row.orderNumber))
         sqlite3_bind_int(statement, 4, Int32(row.indentLevel))
+        bindOptionalText(row.contentType, to: statement, index: 5)
         guard sqlite3_step(statement) == SQLITE_DONE else {
             throw RemoteSyncInitialBackupUploadError.invalidSQLiteDatabase
         }

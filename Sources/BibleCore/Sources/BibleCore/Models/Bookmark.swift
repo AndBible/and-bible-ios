@@ -197,7 +197,9 @@ public final class BibleBookmark {
  Stores the note body for a `BibleBookmark` in a separate entity.
 
  The split keeps bookmark list queries lighter because note text does not need to be loaded
- unless the caller explicitly requests it.
+ unless the caller explicitly requests it. `contentType` mirrors Android's nullable
+ `TextContentType` column so legacy rows can continue inheriting the current app setting while
+ newly saved rows preserve whether their note text is HTML or Markdown.
  */
 @Model
 public final class BibleBookmarkNotes {
@@ -210,16 +212,23 @@ public final class BibleBookmarkNotes {
     /// User-authored note text associated with the bookmark.
     public var notes: String
 
+    /// Optional Android `TextContentType` raw value (`HTML` or `MARKDOWN`) for the note body.
+    public var contentType: String?
+
     /**
      Creates a note payload for a Bible bookmark.
 
      - Parameters:
        - bookmarkId: Identifier of the owning bookmark.
        - notes: Stored note body.
+       - contentType: Optional Android `TextContentType` raw value; invalid non-nil row values are
+         stored as `nil` so they keep Android's nullable inheritance semantics instead of becoming
+         the app default.
      */
-    public init(bookmarkId: UUID, notes: String = "") {
+    public init(bookmarkId: UUID, notes: String = "", contentType: String? = nil) {
         self.bookmarkId = bookmarkId
         self.notes = notes
+        self.contentType = AppPreferenceValueNormalizer.notesContentTypeRow(contentType)
     }
 }
 
@@ -364,7 +373,8 @@ public final class GenericBookmark {
  Stores the note body for a `GenericBookmark` in a separate entity.
 
  Splitting the note payload keeps generic-bookmark list queries lighter until the caller needs
- the note body.
+ the note body. The nullable `contentType` field mirrors Android so imported or synced notes
+ retain the editor/rendering mode that was active when the note was first created.
  */
 @Model
 public final class GenericBookmarkNotes {
@@ -377,16 +387,23 @@ public final class GenericBookmarkNotes {
     /// User-authored note text associated with the bookmark.
     public var notes: String
 
+    /// Optional Android `TextContentType` raw value (`HTML` or `MARKDOWN`) for the note body.
+    public var contentType: String?
+
     /**
      Creates a note payload for a generic bookmark.
 
      - Parameters:
        - bookmarkId: Identifier of the owning bookmark.
        - notes: Stored note body.
+       - contentType: Optional Android `TextContentType` raw value; invalid non-nil row values are
+         stored as `nil` so they keep Android's nullable inheritance semantics instead of becoming
+         the app default.
      */
-    public init(bookmarkId: UUID, notes: String = "") {
+    public init(bookmarkId: UUID, notes: String = "", contentType: String? = nil) {
         self.bookmarkId = bookmarkId
         self.notes = notes
+        self.contentType = AppPreferenceValueNormalizer.notesContentTypeRow(contentType)
     }
 }
 

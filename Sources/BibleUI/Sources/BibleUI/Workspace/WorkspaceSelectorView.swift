@@ -18,7 +18,7 @@ import BibleCore
 
  Side effects:
  - selecting a row switches and persists the active workspace, then dismisses the sheet
- - sheet-backed prompts create, rename, or clone workspaces through `WorkspaceStore`
+ - selector-owned prompts create, rename, or clone workspaces through `WorkspaceStore`
  - swipe deletion, context-menu deletion, and move actions mutate persisted workspace state
  */
 public struct WorkspaceSelectorView: View {
@@ -79,37 +79,44 @@ public struct WorkspaceSelectorView: View {
     }
 
     /**
-     Builds the workspace list, management alerts, and toolbar actions.
+     Builds the workspace list, selector-owned name prompt, and toolbar actions.
      */
     public var body: some View {
-        List {
-            if workspaces.isEmpty {
-                Section {
-                    VStack(spacing: 8) {
-                        Text(String(localized: "workspace_no_workspaces"))
-                            .foregroundStyle(dialogSecondaryText)
-                        Text(String(localized: "workspace_create_first"))
-                            .font(.caption)
+        ZStack {
+            List {
+                if workspaces.isEmpty {
+                    Section {
+                        VStack(spacing: 8) {
+                            Text(String(localized: "workspace_no_workspaces"))
+                                .foregroundStyle(dialogSecondaryText)
+                            Text(String(localized: "workspace_create_first"))
+                                .font(.caption)
+                                .foregroundStyle(dialogSecondaryText)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical)
+                    }
+                    .listRowBackground(dialogBackground)
+                } else {
+                    Section {
+                        ForEach(workspaces) { workspace in
+                            workspaceSelectionButton(workspace)
+                        }
+                        .onDelete(perform: deleteWorkspaces)
+                        .onMove(perform: moveWorkspaces)
+                    } header: {
+                        Text(String(localized: "workspaces"))
                             .foregroundStyle(dialogSecondaryText)
                     }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical)
-                }
-                .listRowBackground(dialogBackground)
-            } else {
-                Section {
-                    ForEach(workspaces) { workspace in
-                        workspaceSelectionButton(workspace)
-                    }
-                    .onDelete(perform: deleteWorkspaces)
-                    .onMove(perform: moveWorkspaces)
-                } header: {
-                    Text(String(localized: "workspaces"))
-                        .foregroundStyle(dialogSecondaryText)
                 }
             }
+            .accessibilityIdentifier("workspaceSelectorScreen")
+            .disabled(workspacePrompt != nil)
+
+            if let prompt = workspacePrompt {
+                workspacePromptOverlay(prompt)
+            }
         }
-        .accessibilityIdentifier("workspaceSelectorScreen")
         .navigationTitle(String(localized: "workspaces"))
         .scrollContentBackground(.hidden)
         .background(dialogBackground.ignoresSafeArea())
@@ -119,32 +126,52 @@ public struct WorkspaceSelectorView: View {
         .toolbarBackground(.visible, for: .navigationBar)
         #endif
         .toolbar {
-            ToolbarItem(placement: .cancellationAction) {
-                Button(String(localized: "done")) { dismiss() }
-                    .accessibilityIdentifier("workspaceSelectorDoneButton")
-            }
-            ToolbarItemGroup(placement: .primaryAction) {
-                EditButton()
-                Button(String(localized: "add"), systemImage: "plus") {
-                    prepareCreate()
+            if workspacePrompt == nil {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(String(localized: "done")) { dismiss() }
+                        .accessibilityIdentifier("workspaceSelectorDoneButton")
                 }
-                .accessibilityIdentifier("workspaceSelectorAddButton")
+                ToolbarItemGroup(placement: .primaryAction) {
+                    EditButton()
+                    Button(String(localized: "add"), systemImage: "plus") {
+                        prepareCreate()
+                    }
+                    .accessibilityIdentifier("workspaceSelectorAddButton")
+                }
             }
         }
-        .sheet(item: $workspacePrompt, onDismiss: resetWorkspacePrompt) { prompt in
-            NavigationStack {
-                WorkspaceNamePromptView(
-                    prompt: prompt,
-                    name: $workspacePromptName,
-                    onCancel: dismissWorkspacePrompt,
-                    onConfirm: { submitWorkspacePrompt(prompt) }
-                )
-            }
-            .tint(dialogAccent)
-            #if os(iOS)
-            .presentationDetents([.medium])
-            #endif
+    }
+
+    /**
+     Builds the selector-owned transient prompt overlay for workspace name entry.
+     *
+     * Android shows create, rename, and clone from `WorkspaceSelectorActivity` using an
+     * `AlertDialog` rather than launching another activity. This overlay keeps the same ownership
+     * model on iOS and avoids presenting a second SwiftUI sheet from inside the selector sheet.
+     *
+     * - Parameter prompt: Workspace action currently awaiting a name.
+     * - Returns: A dimmed modal overlay containing the workspace name prompt.
+     * - Side effects:
+     *   - prompt buttons call the supplied cancel or confirm handlers
+     *   - underlying selector rows are visually present but disabled while the prompt is active
+     * - Failure modes: This helper cannot fail.
+     */
+    private func workspacePromptOverlay(_ prompt: WorkspaceNamePrompt) -> some View {
+        ZStack {
+            Color.black.opacity(colorScheme == .dark ? 0.52 : 0.32)
+                .ignoresSafeArea()
+                .accessibilityHidden(true)
+
+            WorkspaceNamePromptView(
+                prompt: prompt,
+                name: $workspacePromptName,
+                onCancel: dismissWorkspacePrompt,
+                onConfirm: { submitWorkspacePrompt(prompt) }
+            )
+            .padding(.horizontal, 24)
+            .frame(maxWidth: 420)
         }
+        .zIndex(1)
     }
 
     /**
@@ -258,7 +285,7 @@ public struct WorkspaceSelectorView: View {
      *
      * - Side effects:
      *   - resets the shared prompt draft
-     *   - presents the create-workspace prompt sheet
+     *   - presents the create-workspace prompt dialog
      * - Failure modes: This helper cannot fail.
      */
     private func prepareCreate() {
@@ -272,7 +299,7 @@ public struct WorkspaceSelectorView: View {
      * - Parameter workspace: Workspace that should be renamed.
      * - Side effects:
      *   - stores the selected workspace in local prompt state
-     *   - pre-fills the rename field and presents the rename prompt sheet
+     *   - pre-fills the rename field and presents the rename prompt dialog
      * - Failure modes: This helper cannot fail.
      */
     private func prepareRename(for workspace: Workspace) {
@@ -286,7 +313,7 @@ public struct WorkspaceSelectorView: View {
      * - Parameter workspace: Workspace that should be deep-cloned.
      * - Side effects:
      *   - stores the selected workspace in local prompt state
-     *   - pre-fills the clone field and presents the clone prompt sheet
+     *   - pre-fills the clone field and presents the clone prompt dialog
      * - Failure modes: This helper cannot fail.
      */
     private func prepareClone(for workspace: Workspace) {
@@ -298,7 +325,7 @@ public struct WorkspaceSelectorView: View {
      Dismisses the active workspace prompt and clears its draft state.
      *
      * - Side effects:
-     *   - closes the presented prompt sheet
+     *   - closes the presented prompt dialog
      *   - resets the shared draft name
      * - Failure modes: This helper cannot fail.
      */
@@ -308,22 +335,11 @@ public struct WorkspaceSelectorView: View {
     }
 
     /**
-     Clears the shared prompt draft after sheet dismissal.
-     *
-     * - Side effects:
-     *   - resets the prompt draft text after interactive or programmatic dismissal
-     * - Failure modes: This helper cannot fail.
-     */
-    private func resetWorkspacePrompt() {
-        workspacePromptName = ""
-    }
-
-    /**
      Commits the active workspace prompt action using the current shared draft name.
      *
      * - Parameter prompt: Prompt action being confirmed.
      * - Side effects:
-     *   - dismisses the prompt sheet before mutating workspace state
+     *   - dismisses the prompt dialog before mutating workspace state
      *   - routes the current draft name into create, rename, or clone flows
      * - Failure modes:
      *   - returns without mutation when the current draft name is empty
@@ -429,7 +445,7 @@ public struct WorkspaceSelectorView: View {
     }
 }
 
-/// Supported workspace-name prompt actions shown from the selector sheet.
+/// Supported workspace-name prompt actions shown from the selector dialog.
 private enum WorkspaceNamePrompt: Identifiable {
     case create
     case rename(Workspace)
@@ -467,7 +483,25 @@ private enum WorkspaceNamePrompt: Identifiable {
     }
 }
 
-/// Sheet-backed workspace prompt used for create, rename, and clone flows on iOS.
+/**
+ Selector-owned workspace prompt used for create, rename, and clone flows on iOS.
+
+ The prompt mirrors Android's `WorkspaceSelectorActivity` `AlertDialog`: it appears above the
+ selector, accepts a single workspace name, and delegates all mutations to the selector through
+ explicit cancel and confirm closures. It owns only local focus and presentation styling.
+
+ Inputs:
+ - `prompt` supplies the title and confirm button label
+ - `name` is the editable draft shared with the selector
+ - `onCancel` and `onConfirm` perform prompt dismissal or workspace mutation
+
+ Side effects:
+ - focuses the name field when the prompt appears
+ - invokes the supplied closures from buttons or text-field submission
+
+ Failure modes:
+ - disables confirmation while the draft name is empty
+ */
 private struct WorkspaceNamePromptView: View {
     @Environment(\.colorScheme) private var colorScheme
 
@@ -508,53 +542,64 @@ private struct WorkspaceNamePromptView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text(String(localized: "name"))
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(dialogSecondaryText)
-
-            TextField(String(localized: "name"), text: $name)
-                .textInputAutocapitalization(.words)
-                .submitLabel(.done)
-                .focused($isNameFieldFocused)
+            Text(prompt.title)
+                .font(.headline)
                 .foregroundStyle(dialogPrimaryText)
-                .tint(dialogAccent)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 12)
-                .background(fieldBackground, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .stroke(fieldBorder, lineWidth: 1)
-                )
-                .accessibilityIdentifier("workspaceNamePromptTextField")
-                .onSubmit {
-                    guard canConfirm else { return }
-                    onConfirm()
-                }
 
-            Spacer(minLength: 0)
-        }
-        .padding(24)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(dialogBackground.ignoresSafeArea())
-        .accessibilityIdentifier("workspaceNamePromptScreen")
-        .navigationTitle(prompt.title)
-        .tint(dialogAccent)
-        #if os(iOS)
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbarBackground(dialogBackground, for: .navigationBar)
-        .toolbarBackground(.visible, for: .navigationBar)
-        #endif
-        .toolbar {
-            ToolbarItem(placement: .cancellationAction) {
-                Button(String(localized: "cancel"), action: onCancel)
-                    .accessibilityIdentifier("workspaceNamePromptCancelButton")
+            VStack(alignment: .leading, spacing: 6) {
+                Text(String(localized: "name"))
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(dialogSecondaryText)
+
+                TextField(String(localized: "name"), text: $name)
+                    .textInputAutocapitalization(.words)
+                    .submitLabel(.done)
+                    .focused($isNameFieldFocused)
+                    .foregroundStyle(dialogPrimaryText)
+                    .tint(dialogAccent)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 12)
+                    .background(fieldBackground, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .stroke(fieldBorder, lineWidth: 1)
+                    )
+                    .accessibilityIdentifier("workspaceNamePromptTextField")
+                    .onSubmit {
+                        guard canConfirm else { return }
+                        onConfirm()
+                    }
             }
-            ToolbarItem(placement: .confirmationAction) {
+
+            HStack(spacing: 12) {
+                Spacer()
+
+                Button(String(localized: "cancel"), action: onCancel)
+                    .foregroundStyle(dialogAccent)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
+                    .contentShape(Rectangle())
+                    .accessibilityIdentifier("workspaceNamePromptCancelButton")
+
                 Button(prompt.confirmTitle, action: onConfirm)
                     .disabled(!canConfirm)
+                    .foregroundStyle(canConfirm ? dialogAccent : dialogSecondaryText.opacity(0.6))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
+                    .contentShape(Rectangle())
                     .accessibilityIdentifier("workspaceNamePromptConfirmButton")
             }
         }
+        .padding(20)
+        .background(dialogBackground, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(fieldBorder.opacity(0.65), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(colorScheme == .dark ? 0.45 : 0.18), radius: 20, y: 8)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("workspaceNamePromptScreen")
+        .tint(dialogAccent)
         .task {
             await MainActor.run {
                 isNameFieldFocused = true

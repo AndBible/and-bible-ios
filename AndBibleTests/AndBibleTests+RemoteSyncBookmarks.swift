@@ -117,7 +117,7 @@ extension AndBibleTests {
                 )
             ],
             bibleNotes: [
-                .init(bookmarkID: bibleBookmarkID, notes: "Bible note")
+                .init(bookmarkID: bibleBookmarkID, notes: "Bible note", contentType: "MARKDOWN")
             ],
             bibleLinks: [
                 .init(bookmarkID: bibleBookmarkID, labelID: userLabelID, orderNumber: 2, indentLevel: 1, expandContent: false)
@@ -137,13 +137,13 @@ extension AndBibleTests {
                 )
             ],
             genericNotes: [
-                .init(bookmarkID: genericBookmarkID, notes: "Generic note")
+                .init(bookmarkID: genericBookmarkID, notes: "Generic note", contentType: "HTML")
             ],
             genericLinks: [
                 .init(bookmarkID: genericBookmarkID, labelID: userLabelID, orderNumber: 1, indentLevel: 0, expandContent: true)
             ],
             studyPadEntries: [
-                .init(id: studyPadEntryID, labelID: userLabelID, orderNumber: 4, indentLevel: 2)
+                .init(id: studyPadEntryID, labelID: userLabelID, orderNumber: 4, indentLevel: 2, contentType: "MARKDOWN")
             ],
             studyPadTexts: [
                 .init(entryID: studyPadEntryID, text: "Study text")
@@ -163,15 +163,128 @@ extension AndBibleTests {
         XCTAssertEqual(snapshot.bibleBookmarks.count, 1)
         XCTAssertEqual(snapshot.bibleBookmarks[0].id, bibleBookmarkID)
         XCTAssertEqual(snapshot.bibleBookmarks[0].notes, "Bible note")
+        XCTAssertEqual(snapshot.bibleBookmarks[0].notesContentType, "MARKDOWN")
         XCTAssertEqual(snapshot.bibleBookmarks[0].primaryLabelID, speakLabelID)
         XCTAssertEqual(snapshot.bibleBookmarks[0].labelLinks, [
             .init(labelID: userLabelID, orderNumber: 2, indentLevel: 1, expandContent: false)
         ])
         XCTAssertEqual(snapshot.genericBookmarks.count, 1)
         XCTAssertEqual(snapshot.genericBookmarks[0].notes, "Generic note")
+        XCTAssertEqual(snapshot.genericBookmarks[0].notesContentType, "HTML")
         XCTAssertEqual(snapshot.studyPadEntries, [
-            .init(id: studyPadEntryID, labelID: userLabelID, orderNumber: 4, indentLevel: 2, text: "Study text")
+            .init(id: studyPadEntryID, labelID: userLabelID, orderNumber: 4, indentLevel: 2, contentType: "MARKDOWN", text: "Study text")
         ])
+    }
+
+    /**
+     Verifies that bookmark restore remains backward-compatible with Android bookmark databases
+     created before note rows and StudyPad entries gained nullable content-type metadata.
+
+     The fixture emits the legacy schema without `contentType` columns. The expected result is that
+     restore succeeds, preserves note text, and exposes nil content types so callers can apply the
+     global notes-content-type fallback. A failure here means older Android backups or patch
+     databases would be rejected or misread after adding Markdown-note parity.
+     */
+    func testRemoteSyncBookmarkRestoreReadsLegacyAndroidSnapshotWithoutContentTypeColumns() throws {
+        let service = RemoteSyncBookmarkRestoreService()
+        let labelID = UUID(uuidString: "d2000000-0000-0000-0000-000000000010")!
+        let bookmarkID = UUID(uuidString: "d2000000-0000-0000-0000-000000000020")!
+        let studyPadEntryID = UUID(uuidString: "d2000000-0000-0000-0000-000000000030")!
+
+        let databaseURL = try makeAndroidBookmarksDatabase(
+            labels: [
+                .init(id: labelID, name: "Legacy", colour: Int(Int32(bitPattern: 0xFF00FF00)))
+            ],
+            bibleBookmarks: [
+                .init(
+                    id: bookmarkID,
+                    kjvOrdinalStart: 10,
+                    kjvOrdinalEnd: 10,
+                    ordinalStart: 10,
+                    ordinalEnd: 10,
+                    createdAt: Date(timeIntervalSince1970: 1_700_000_000),
+                    primaryLabelID: labelID,
+                    lastUpdatedOn: Date(timeIntervalSince1970: 1_700_000_100)
+                )
+            ],
+            bibleNotes: [
+                .init(bookmarkID: bookmarkID, notes: "Legacy note")
+            ],
+            studyPadEntries: [
+                .init(id: studyPadEntryID, labelID: labelID, orderNumber: 4, indentLevel: 2)
+            ],
+            studyPadTexts: [
+                .init(entryID: studyPadEntryID, text: "Legacy StudyPad")
+            ],
+            includeContentTypeColumns: false
+        )
+        defer { try? FileManager.default.removeItem(at: databaseURL) }
+
+        let snapshot = try service.readSnapshot(from: databaseURL)
+
+        XCTAssertEqual(snapshot.bibleBookmarks.count, 1)
+        XCTAssertEqual(snapshot.bibleBookmarks[0].notes, "Legacy note")
+        XCTAssertNil(snapshot.bibleBookmarks[0].notesContentType)
+        XCTAssertEqual(snapshot.studyPadEntries.count, 1)
+        XCTAssertEqual(snapshot.studyPadEntries[0].text, "Legacy StudyPad")
+        XCTAssertNil(snapshot.studyPadEntries[0].contentType)
+    }
+
+    /**
+     Verifies that Android bookmark restore treats invalid note content-type row values as invalid
+     database data rather than falling back to the global preference default.
+
+     Android Room reads `TextContentType` columns through `TextContentType.valueOf`, so only `HTML`,
+     `MARKDOWN`, and `NULL` are valid row values. The settings fallback helper is intentionally not
+     the row-validation contract; otherwise corrupted or future Android values would be silently
+     rendered as HTML on iOS.
+     */
+    func testRemoteSyncBookmarkRestoreRejectsInvalidTextContentTypeRows() throws {
+        let service = RemoteSyncBookmarkRestoreService()
+        let labelID = UUID(uuidString: "d2100000-0000-0000-0000-000000000010")!
+        let bookmarkID = UUID(uuidString: "d2100000-0000-0000-0000-000000000020")!
+        let studyPadEntryID = UUID(uuidString: "d2100000-0000-0000-0000-000000000030")!
+
+        let invalidNoteDatabaseURL = try makeAndroidBookmarksDatabase(
+            labels: [.init(id: labelID, name: "Invalid", colour: Int(Int32(bitPattern: 0xFF00FF00)))],
+            bibleBookmarks: [
+                .init(
+                    id: bookmarkID,
+                    kjvOrdinalStart: 10,
+                    kjvOrdinalEnd: 10,
+                    ordinalStart: 10,
+                    ordinalEnd: 10,
+                    createdAt: Date(timeIntervalSince1970: 1_700_000_000),
+                    primaryLabelID: labelID,
+                    lastUpdatedOn: Date(timeIntervalSince1970: 1_700_000_100)
+                )
+            ],
+            bibleNotes: [.init(bookmarkID: bookmarkID, notes: "Bad note", contentType: "PLAINTEXT")]
+        )
+        defer { try? FileManager.default.removeItem(at: invalidNoteDatabaseURL) }
+
+        XCTAssertThrowsError(try service.readSnapshot(from: invalidNoteDatabaseURL)) { error in
+            XCTAssertEqual(
+                String(describing: error),
+                #"invalidColumnValue(table: "BibleBookmarkNotes", column: "contentType")"#
+            )
+        }
+
+        let invalidStudyPadDatabaseURL = try makeAndroidBookmarksDatabase(
+            labels: [.init(id: labelID, name: "Invalid", colour: Int(Int32(bitPattern: 0xFF00FF00)))],
+            studyPadEntries: [
+                .init(id: studyPadEntryID, labelID: labelID, orderNumber: 1, indentLevel: 0, contentType: "PLAINTEXT")
+            ],
+            studyPadTexts: [.init(entryID: studyPadEntryID, text: "Bad StudyPad")]
+        )
+        defer { try? FileManager.default.removeItem(at: invalidStudyPadDatabaseURL) }
+
+        XCTAssertThrowsError(try service.readSnapshot(from: invalidStudyPadDatabaseURL)) { error in
+            XCTAssertEqual(
+                String(describing: error),
+                #"invalidColumnValue(table: "StudyPadTextEntry", column: "contentType")"#
+            )
+        }
     }
 
     func testRemoteSyncBookmarkRestoreReplacesLocalDataAndPreservesAndroidFidelity() throws {
@@ -224,7 +337,7 @@ extension AndBibleTests {
                 )
             ],
             bibleNotes: [
-                .init(bookmarkID: bibleBookmarkID, notes: "Bible note")
+                .init(bookmarkID: bibleBookmarkID, notes: "Bible note", contentType: "MARKDOWN")
             ],
             bibleLinks: [
                 .init(bookmarkID: bibleBookmarkID, labelID: userLabelID, orderNumber: 3, indentLevel: 1, expandContent: false),
@@ -248,13 +361,13 @@ extension AndBibleTests {
                 )
             ],
             genericNotes: [
-                .init(bookmarkID: genericBookmarkID, notes: "Generic note")
+                .init(bookmarkID: genericBookmarkID, notes: "Generic note", contentType: "HTML")
             ],
             genericLinks: [
                 .init(bookmarkID: genericBookmarkID, labelID: userLabelID, orderNumber: 1, indentLevel: 0, expandContent: true)
             ],
             studyPadEntries: [
-                .init(id: studyPadEntryID, labelID: userLabelID, orderNumber: 7, indentLevel: 2)
+                .init(id: studyPadEntryID, labelID: userLabelID, orderNumber: 7, indentLevel: 2, contentType: "MARKDOWN")
             ],
             studyPadTexts: [
                 .init(entryID: studyPadEntryID, text: "Study text")
@@ -294,6 +407,7 @@ extension AndBibleTests {
         XCTAssertEqual(bibleBookmarks[0].book, "Exodus")
         XCTAssertEqual(bibleBookmarks[0].primaryLabelId, Label.speakLabelId)
         XCTAssertEqual(bibleBookmarks[0].notes?.notes, "Bible note")
+        XCTAssertEqual(bibleBookmarks[0].notes?.contentType, "MARKDOWN")
         XCTAssertEqual(bibleBookmarks[0].playbackSettings?.bookId, "KJV")
         XCTAssertEqual(bibleBookmarks[0].type, "EXAMPLE")
         XCTAssertEqual(bibleBookmarks[0].customIcon, "star")
@@ -304,6 +418,7 @@ extension AndBibleTests {
         XCTAssertEqual(genericBookmarks[0].id, genericBookmarkID)
         XCTAssertEqual(genericBookmarks[0].primaryLabelId, Label.unlabeledId)
         XCTAssertEqual(genericBookmarks[0].notes?.notes, "Generic note")
+        XCTAssertEqual(genericBookmarks[0].notes?.contentType, "HTML")
         XCTAssertEqual(genericBookmarks[0].playbackSettings?.bookId, "MHC")
         XCTAssertEqual(genericBookmarks[0].customIcon, "link")
         XCTAssertEqual(genericBookmarks[0].editAction, EditAction(mode: .prepend, content: "Intro"))
@@ -327,6 +442,7 @@ extension AndBibleTests {
         XCTAssertEqual(studyPadEntries.count, 1)
         XCTAssertEqual(studyPadEntries[0].id, studyPadEntryID)
         XCTAssertEqual(studyPadEntries[0].label?.id, userLabelID)
+        XCTAssertEqual(studyPadEntries[0].contentType, "MARKDOWN")
         XCTAssertEqual(studyPadEntries[0].textEntry?.text, "Study text")
 
         let playbackStore = RemoteSyncBookmarkPlaybackSettingsStore(settingsStore: settingsStore)
@@ -516,7 +632,7 @@ extension AndBibleTests {
                 )
             ],
             bibleNotes: [
-                .init(bookmarkID: bibleBookmarkID, notes: "Old bible note")
+                .init(bookmarkID: bibleBookmarkID, notes: "Old bible note", contentType: "HTML")
             ],
             bibleLinks: [
                 .init(bookmarkID: bibleBookmarkID, labelID: remoteUserLabelID, orderNumber: 1, indentLevel: 0, expandContent: true)
@@ -537,13 +653,13 @@ extension AndBibleTests {
                 )
             ],
             genericNotes: [
-                .init(bookmarkID: genericBookmarkID, notes: "Old generic note")
+                .init(bookmarkID: genericBookmarkID, notes: "Old generic note", contentType: "HTML")
             ],
             genericLinks: [
                 .init(bookmarkID: genericBookmarkID, labelID: remoteUserLabelID, orderNumber: 2, indentLevel: 0, expandContent: true)
             ],
             studyPadEntries: [
-                .init(id: studyPadEntryID, labelID: remoteUserLabelID, orderNumber: 5, indentLevel: 1)
+                .init(id: studyPadEntryID, labelID: remoteUserLabelID, orderNumber: 5, indentLevel: 1, contentType: "HTML")
             ],
             studyPadTexts: [
                 .init(entryID: studyPadEntryID, text: "Old study text")
@@ -621,7 +737,7 @@ extension AndBibleTests {
                 )
             ],
             bibleNotes: [
-                .init(bookmarkID: bibleBookmarkID, notes: "Patched bible note")
+                .init(bookmarkID: bibleBookmarkID, notes: "Patched bible note", contentType: "MARKDOWN")
             ],
             bibleLinks: [
                 .init(bookmarkID: bibleBookmarkID, labelID: remoteSpeakID, orderNumber: 3, indentLevel: 0, expandContent: true)
@@ -641,6 +757,9 @@ extension AndBibleTests {
                     customIcon: "comment"
                 )
             ],
+            studyPadEntries: [
+                .init(id: studyPadEntryID, labelID: remoteUserLabelID, orderNumber: 6, indentLevel: 2, contentType: "MARKDOWN")
+            ],
             studyPadTexts: [
                 .init(entryID: studyPadEntryID, text: "Patched study text")
             ],
@@ -650,6 +769,7 @@ extension AndBibleTests {
                 .init(tableName: "BibleBookmarkNotes", entityID1: .blob(uuidBlob(bibleBookmarkID)), entityID2: .null(), type: .upsert, lastUpdated: 2_200, sourceDevice: "android-a"),
                 .init(tableName: "BibleBookmarkToLabel", entityID1: .blob(uuidBlob(bibleBookmarkID)), entityID2: .blob(uuidBlob(remoteSpeakID)), type: .upsert, lastUpdated: 2_300, sourceDevice: "android-a"),
                 .init(tableName: "GenericBookmark", entityID1: .blob(uuidBlob(genericBookmarkID)), entityID2: .null(), type: .upsert, lastUpdated: 2_400, sourceDevice: "android-a"),
+                .init(tableName: "StudyPadTextEntry", entityID1: .blob(uuidBlob(studyPadEntryID)), entityID2: .null(), type: .upsert, lastUpdated: 2_450, sourceDevice: "android-a"),
                 .init(tableName: "StudyPadTextEntryText", entityID1: .blob(uuidBlob(studyPadEntryID)), entityID2: .null(), type: .upsert, lastUpdated: 2_500, sourceDevice: "android-a"),
             ]
         )
@@ -670,7 +790,7 @@ extension AndBibleTests {
         )
 
         XCTAssertEqual(report.appliedPatchCount, 1)
-        XCTAssertEqual(report.appliedLogEntryCount, 6)
+        XCTAssertEqual(report.appliedLogEntryCount, 7)
         XCTAssertEqual(report.skippedLogEntryCount, 0)
         XCTAssertEqual(
             report.restoreReport,
@@ -691,6 +811,7 @@ extension AndBibleTests {
         XCTAssertEqual(bibleBookmarks.count, 1)
         XCTAssertEqual(bibleBookmarks[0].primaryLabelId, Label.speakLabelId)
         XCTAssertEqual(bibleBookmarks[0].notes?.notes, "Patched bible note")
+        XCTAssertEqual(bibleBookmarks[0].notes?.contentType, "MARKDOWN")
         XCTAssertEqual(
             Set(bibleBookmarks[0].bookmarkToLabels?.compactMap { $0.label?.id } ?? []),
             Set([remoteUserLabelID, Label.speakLabelId])
@@ -700,9 +821,14 @@ extension AndBibleTests {
         XCTAssertEqual(genericBookmarks.count, 1)
         XCTAssertEqual(genericBookmarks[0].primaryLabelId, Label.speakLabelId)
         XCTAssertEqual(genericBookmarks[0].customIcon, "comment")
+        XCTAssertEqual(genericBookmarks[0].notes?.notes, "Old generic note")
+        XCTAssertEqual(genericBookmarks[0].notes?.contentType, "HTML")
 
         let studyPadEntries = try modelContext.fetch(FetchDescriptor<StudyPadTextEntry>())
         XCTAssertEqual(studyPadEntries.count, 1)
+        XCTAssertEqual(studyPadEntries[0].orderNumber, 6)
+        XCTAssertEqual(studyPadEntries[0].indentLevel, 2)
+        XCTAssertEqual(studyPadEntries[0].contentType, "MARKDOWN")
         XCTAssertEqual(studyPadEntries[0].textEntry?.text, "Patched study text")
 
         XCTAssertEqual(
@@ -1057,7 +1183,7 @@ extension AndBibleTests {
                 )
             ],
             bibleNotes: [
-                .init(bookmarkID: bibleBookmarkID, notes: "Bible note")
+                .init(bookmarkID: bibleBookmarkID, notes: "Bible note", contentType: "MARKDOWN")
             ],
             bibleLinks: [
                 .init(bookmarkID: bibleBookmarkID, labelID: userLabelID, orderNumber: 2, indentLevel: 1, expandContent: false)
@@ -1077,13 +1203,13 @@ extension AndBibleTests {
                 )
             ],
             genericNotes: [
-                .init(bookmarkID: genericBookmarkID, notes: "Generic note")
+                .init(bookmarkID: genericBookmarkID, notes: "Generic note", contentType: "HTML")
             ],
             genericLinks: [
                 .init(bookmarkID: genericBookmarkID, labelID: userLabelID, orderNumber: 1, indentLevel: 0, expandContent: true)
             ],
             studyPadEntries: [
-                .init(id: studyPadEntryID, labelID: userLabelID, orderNumber: 4, indentLevel: 2)
+                .init(id: studyPadEntryID, labelID: userLabelID, orderNumber: 4, indentLevel: 2, contentType: "MARKDOWN")
             ],
             studyPadTexts: [
                 .init(entryID: studyPadEntryID, text: "Study text")
@@ -1182,12 +1308,15 @@ extension AndBibleTests {
         XCTAssertEqual(Set(snapshot.labels.map(\.name)), localLabelNames)
         XCTAssertEqual(snapshot.bibleBookmarks.count, 1)
         XCTAssertEqual(snapshot.bibleBookmarks[0].notes, "Bible note")
+        XCTAssertEqual(snapshot.bibleBookmarks[0].notesContentType, "MARKDOWN")
         XCTAssertEqual(snapshot.bibleBookmarks[0].labelLinks.count, 1)
         XCTAssertEqual(snapshot.genericBookmarks.count, 1)
         XCTAssertEqual(snapshot.genericBookmarks[0].notes, "Generic note")
+        XCTAssertEqual(snapshot.genericBookmarks[0].notesContentType, "HTML")
         XCTAssertEqual(snapshot.genericBookmarks[0].labelLinks.count, 1)
         XCTAssertEqual(snapshot.studyPadEntries.count, 1)
         XCTAssertEqual(snapshot.studyPadEntries[0].text, "Study text")
+        XCTAssertEqual(snapshot.studyPadEntries[0].contentType, "MARKDOWN")
     }
 
     /// Verifies that bookmark initial restore refreshes the outbound fingerprint baseline so later local deletes emit delete patches.
@@ -1343,7 +1472,7 @@ extension AndBibleTests {
                 )
             ],
             bibleNotes: [
-                .init(bookmarkID: bookmarkID, notes: "Initial note")
+                .init(bookmarkID: bookmarkID, notes: "Initial note", contentType: "MARKDOWN")
             ],
             logEntries: [
                 .init(
@@ -1485,6 +1614,7 @@ extension AndBibleTests {
         XCTAssertEqual(replayLabel.name, "Prayer renamed")
         let replayBookmark = try XCTUnwrap(try replayContext.fetch(FetchDescriptor<BibleBookmark>()).first(where: { $0.id == bookmarkID }))
         XCTAssertEqual(replayBookmark.notes?.notes, "Updated note")
+        XCTAssertEqual(replayBookmark.notes?.contentType, "MARKDOWN")
 
         let secondReport = try await uploadService.uploadPendingPatch(
             bootstrapState: RemoteSyncBootstrapState(deviceFolderID: "/org.andbible.ios-sync-bookmarks/ios-device"),

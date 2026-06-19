@@ -244,16 +244,18 @@ extension AndBibleUITests {
     /**
      Dismisses the software keyboard immediately after a known text-entry edit.
      *
-     This path is intentionally scoped to the focused field instead of `app.keyboards`. CI snapshot
-     stalls have occurred when the broad keyboard hierarchy is queried after the keyboard has already
-     disappeared, while field-scoped keyboard-focus checks remain bounded to the resolved input.
+     This path intentionally avoids `app.keyboards`, app-wide focused-field queries, and
+     element-scoped `hasKeyboardFocus` predicates. Hosted XCTest has wedged while resolving stale
+     SwiftUI text-field snapshots immediately after typing, so the helper uses the same stable
+     coordinate dismissal path as other no-query keyboard flows.
      *
      - Parameters:
-     *   - element: Text-entry control that just received keyboard input.
+     *   - element: Text-entry control that just received keyboard input. Kept for call-site clarity;
+     *     the helper does not query it after typing.
      *   - app: Running application under test.
      * - Side effects:
-     *   - sends a Return keystroke when the input still owns focus
-     *   - taps the software keyboard return-key region if the input remains focused afterward
+     *   - taps the software keyboard return-key region
+     *   - taps a stable non-control area near the top of the app window
      * - Failure modes:
      *   - silently leaves focus unchanged when the active control refuses to resign focus
      */
@@ -261,14 +263,11 @@ extension AndBibleUITests {
         _ element: XCUIElement,
         in app: XCUIApplication
     ) {
-        if waitForElementKeyboardFocus(element, timeout: 0.2) {
-            app.typeText(XCUIKeyboardKey.return.rawValue)
-            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-
-            if waitForElementKeyboardFocus(element, timeout: 0.2) {
-                app.coordinate(withNormalizedOffset: KeyboardDismissalCoordinate.softwareReturnKey).tap()
-            }
-        }
+        _ = element
+        app.coordinate(withNormalizedOffset: KeyboardDismissalCoordinate.softwareReturnKey).tap()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        dismissKeyboardIfPresent(in: app)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.2))
     }
 
     /**

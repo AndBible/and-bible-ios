@@ -2940,15 +2940,44 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         return true
     }
 
+    /**
+     Persists a bookmark note update from the web reader and emits the JavaScript bridge mutation event
+     from the stored row state.
+
+     - Parameters:
+       - bookmarkId: Identifier for either a Bible bookmark or generic bookmark note row.
+       - note: Raw note text supplied by the web editor. Whitespace-only text is delegated to the
+         bookmark service, which treats it as a delete to match Android bridge behavior.
+     - Returns: `true` when the service is available and the bridge payload could be serialized,
+       otherwise `false`.
+
+     Side effects:
+     - mutates bookmark note persistence through `BookmarkService`
+     - increments `myNotesMutationRevision`
+     - emits `bookmark_note_modified` to the embedded BibleView runtime
+
+     Failure modes:
+     - returns `false` without persistence when no bookmark service is configured
+     - returns `false` after persistence when JSON serialization unexpectedly fails
+     */
     @discardableResult
     private func saveBookmarkNoteAndNotify(bookmarkId: UUID, note: String?) -> Bool {
         guard let service = bookmarkService else { return false }
-        service.saveBibleBookmarkNote(bookmarkId: bookmarkId, note: note)
+        service.saveBibleBookmarkNote(
+            bookmarkId: bookmarkId,
+            note: note,
+            defaultContentType: currentNotesContentType()
+        )
         myNotesMutationRevision += 1
         let timestamp = Int(Date().timeIntervalSince1970 * 1000)
+        let bibleNote = service.bibleBookmark(id: bookmarkId)?.notes
+        let genericNote = service.genericBookmark(id: bookmarkId)?.notes
+        let savedNote = bibleNote?.notes ?? genericNote?.notes
+        let notesContentType = bibleNote?.contentType ?? genericNote?.contentType
         let payload: [String: Any] = [
             "id": bookmarkId.uuidString,
-            "notes": note ?? "",
+            "notes": savedNote ?? "",
+            "notesContentType": notesContentType ?? NSNull(),
             "lastUpdatedOn": timestamp,
         ]
         guard let data = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]),
@@ -3092,7 +3121,11 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             }
         }
 
-        guard let result = service.createStudyPadEntry(labelId: lblId, afterOrderNumber: afterOrder) else { return }
+        guard let result = service.createStudyPadEntry(
+            labelId: lblId,
+            afterOrderNumber: afterOrder,
+            contentType: currentNotesContentType()
+        ) else { return }
         let (entry, changedBtls, changedGbtls, changedEntries) = result
         studyPadMutationRevision += 1
 
@@ -7759,6 +7792,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             primaryLabelId: primaryLabelId,
             lastUpdatedOn: lastUpdated,
             notes: hasNote ? noteText : nil,
+            notesContentType: bookmark.notes?.contentType,
             hasNote: hasNote,
             wholeVerse: bookmark.wholeVerse,
             customIcon: bookmark.customIcon,
@@ -7827,6 +7861,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             hashCode: hashCode,
             labelId: labelId,
             text: text,
+            contentType: entry.contentType,
             orderNumber: entry.orderNumber,
             indentLevel: entry.indentLevel
         )
@@ -7963,6 +7998,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             primaryLabelId: primaryLabelId,
             lastUpdatedOn: lastUpdated,
             notes: hasNote ? noteText : nil,
+            notesContentType: bookmark.notes?.contentType,
             hasNote: hasNote,
             wholeVerse: bookmark.wholeVerse,
             customIcon: bookmark.customIcon,
@@ -8014,6 +8050,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             primaryLabelId: primaryLabelId,
             lastUpdatedOn: lastUpdated,
             notes: hasNote ? noteText : nil,
+            notesContentType: bookmark.notes?.contentType,
             hasNote: hasNote,
             wholeVerse: bookmark.wholeVerse,
             customIcon: bookmark.customIcon,
@@ -8436,6 +8473,17 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         settingsStore?.getString(key) ?? (AppPreferenceRegistry.stringDefault(for: key) ?? "")
     }
 
+    /**
+     Reads the Android-compatible global notes content type used for newly created note rows.
+
+     - Returns: `HTML` or `MARKDOWN` after applying the shared preference normalizer.
+     - Side effects: reads the active settings store.
+     - Failure modes: none; missing or invalid values fall back to Android's default `HTML`.
+     */
+    private func currentNotesContentType() -> String {
+        AppPreferenceValueNormalizer.notesContentType(appPreferenceString(.notesContentType))
+    }
+
     /// Reads a string-set parity preference and returns an empty array when unset.
     private func appPreferenceStringSet(_ key: AppPreferenceKey) -> [String] {
         settingsStore?.getStringSet(key) ?? []
@@ -8708,9 +8756,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
                 monochromeMode: appPreferenceBool(.monochromeMode),
                 disableAnimations: appPreferenceBool(.disableAnimations),
                 disableClickToEdit: appPreferenceBool(.disableClickToEdit),
-                notesContentType: AppPreferenceValueNormalizer.notesContentType(
-                    appPreferenceString(.notesContentType)
-                ),
+                notesContentType: currentNotesContentType(),
                 fontSizeMultiplier: fontSizeMultiplier,
                 enabledExperimentalFeatures: appPreferenceStringSet(.experimentalFeatures),
                 autoTrackReading: readingProgressSettings.autoTrackReading,

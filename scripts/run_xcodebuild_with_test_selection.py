@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
+import signal
 import shlex
 import subprocess
 from typing import Sequence
@@ -70,6 +72,32 @@ def create_argument_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def result_bundle_reports_passing_tests(result_bundle_path: str) -> bool:
+    """Return whether an xcresult bundle reports a completed passing test action."""
+    summary_command = [
+        "xcrun",
+        "xcresulttool",
+        "get",
+        "test-results",
+        "summary",
+        "--path",
+        result_bundle_path,
+        "--compact",
+    ]
+    completed = subprocess.run(
+        summary_command,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    summary = json.loads(completed.stdout)
+    return (
+        summary.get("result") == "Passed"
+        and summary.get("totalTestCount", 0) > 0
+        and summary.get("failedTests", 0) == 0
+    )
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the selected xcodebuild action."""
     parser = create_argument_parser()
@@ -89,7 +117,21 @@ def main(argv: Sequence[str] | None = None) -> int:
         action=args.action,
     )
     print("Running:", shlex.join(command))
-    subprocess.run(command, check=True)
+    try:
+        subprocess.run(command, check=True)
+    except subprocess.CalledProcessError as exc:
+        if args.action == "test-without-building" and exc.returncode == -signal.SIGSEGV:
+            try:
+                if result_bundle_reports_passing_tests(args.result_bundle_path):
+                    print(
+                        "xcodebuild terminated with SIGSEGV after the xcresult bundle "
+                        "reported all selected tests passed; treating this as an "
+                        "xcodebuild post-processing crash."
+                    )
+                    return 0
+            except (json.JSONDecodeError, subprocess.CalledProcessError):
+                pass
+        raise
     return 0
 
 
