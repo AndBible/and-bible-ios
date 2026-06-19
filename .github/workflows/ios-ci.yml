@@ -11,6 +11,7 @@ concurrency:
 env:
   XCODE_VERSION: "26.3"
   UI_TEST_MIN_SHARD_COUNT: "2"
+  UI_TEST_MAX_SHARD_COUNT: "4"
   UI_TEST_TARGET_SHARD_DURATION_SECONDS: "600"
   UI_TEST_TIMEOUT_MINUTES: "90"
   UI_TEST_TIMINGS_FILE: scripts/ui_test_timings.json
@@ -177,6 +178,7 @@ jobs:
           --timings-file "${UI_TEST_TIMINGS_FILE}"
           --shard-count "${UI_TEST_MIN_SHARD_COUNT}"
           --target-shard-duration-seconds "${UI_TEST_TARGET_SHARD_DURATION_SECONDS}"
+          --max-shard-count "${UI_TEST_MAX_SHARD_COUNT}"
           --timeout-minutes "${UI_TEST_TIMEOUT_MINUTES}"
           --github-output "${GITHUB_OUTPUT}"
 

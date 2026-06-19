@@ -488,8 +488,11 @@ extension AndBibleUITests {
      *   - line: Source line used for nested helper attribution.
      * - Returns: `true` when the production drawer becomes visible.
      * - Side effects:
-     *   - prefers XCTest's native tap path for the production navigation-drawer button, then falls
-     *     back to the sampled chrome coordinate when the hosted button is not yet hittable
+     *   - prefers the sampled production chrome coordinate before querying hittability because
+     *     hosted SwiftUI header buttons can expose an invalid XCTest activation point while the
+     *     actual reader chrome is already tappable
+     *   - falls back to XCTest's native tap path for the production navigation-drawer button when
+     *     coordinate sampling does not open the drawer
      *   - waits for drawer affordances to appear after each activation attempt
      * - Failure modes:
      *   - returns `false` when the drawer never appears before the local retry budget expires
@@ -505,6 +508,14 @@ extension AndBibleUITests {
         let drawerButton = unresolvedElement("readerNavigationDrawerButton", in: app)
 
         repeat {
+            if tapReaderNavigationDrawerChromeCoordinate(in: app),
+               waitForReaderNavigationDrawer(
+                   in: app,
+                   timeout: min(2, max(1, deadline.timeIntervalSinceNow))
+               ) {
+                return true
+            }
+
             if waitForElementToBecomeHittable(drawerButton, timeout: 0.5) {
                 drawerButton.tap()
                 if waitForReaderNavigationDrawer(
@@ -513,14 +524,6 @@ extension AndBibleUITests {
                 ) {
                     return true
                 }
-            }
-
-            if tapReaderNavigationDrawerChromeCoordinate(in: app),
-               waitForReaderNavigationDrawer(
-                   in: app,
-                   timeout: min(2, max(1, deadline.timeIntervalSinceNow))
-               ) {
-                return true
             }
             if waitForReaderNavigationDrawer(
                 in: app,
