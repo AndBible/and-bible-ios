@@ -19,18 +19,50 @@ def parse_test_selection_args(selection_text: str) -> list[str]:
 
 def build_xcodebuild_command(
     *,
-    project: str,
-    scheme: str,
-    configuration: str,
+    project: str | None,
+    scheme: str | None,
+    configuration: str | None,
     destination: str,
-    derived_data_path: str,
+    derived_data_path: str | None,
     result_bundle_path: str,
     code_signing_allowed: str,
     selection_args_text: str,
     action: str,
+    xctestrun_path: str | None = None,
 ) -> list[str]:
-    """Construct the full xcodebuild invocation."""
+    """Construct the full xcodebuild invocation for project or .xctestrun mode."""
     selection_args = parse_test_selection_args(selection_args_text)
+    if xctestrun_path is not None:
+        if action != "test-without-building":
+            raise ValueError("xctestrun_path can only be used with test-without-building.")
+        return [
+            "xcodebuild",
+            "-xctestrun",
+            xctestrun_path,
+            "-destination",
+            destination,
+            "-resultBundlePath",
+            result_bundle_path,
+            f"CODE_SIGNING_ALLOWED={code_signing_allowed}",
+            *selection_args,
+            action,
+        ]
+
+    required_project_args = {
+        "project": project,
+        "scheme": scheme,
+        "configuration": configuration,
+        "derived_data_path": derived_data_path,
+    }
+    missing_args = [name for name, value in required_project_args.items() if value is None]
+    if missing_args:
+        raise ValueError(
+            "project, scheme, configuration, and derived_data_path are required "
+            "when xctestrun_path is not provided. Missing: "
+            + ", ".join(missing_args)
+            + "."
+        )
+
     return [
         "xcodebuild",
         "-project",
@@ -56,14 +88,15 @@ def create_argument_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Run xcodebuild with newline-delimited test selection arguments."
     )
-    parser.add_argument("--project", required=True)
-    parser.add_argument("--scheme", required=True)
-    parser.add_argument("--configuration", required=True)
+    parser.add_argument("--project")
+    parser.add_argument("--scheme")
+    parser.add_argument("--configuration")
     parser.add_argument("--destination", required=True)
-    parser.add_argument("--derived-data-path", required=True)
+    parser.add_argument("--derived-data-path")
     parser.add_argument("--result-bundle-path", required=True)
     parser.add_argument("--test-selection-args")
     parser.add_argument("--code-signing-allowed", default="NO")
+    parser.add_argument("--xctestrun-path")
     parser.add_argument(
         "--action",
         required=True,
@@ -102,6 +135,33 @@ def main(argv: Sequence[str] | None = None) -> int:
     """Run the selected xcodebuild action."""
     parser = create_argument_parser()
     args = parser.parse_args(argv)
+    project_mode_args = (
+        ("--project", args.project),
+        ("--scheme", args.scheme),
+        ("--configuration", args.configuration),
+        ("--derived-data-path", args.derived_data_path),
+    )
+    if args.xctestrun_path is not None:
+        if args.action != "test-without-building":
+            parser.error("--xctestrun-path can only be used with --action test-without-building")
+        forbidden_args = [option for option, value in project_mode_args if value is not None]
+        if forbidden_args:
+            parser.error(
+                "the following arguments cannot be used with --xctestrun-path: "
+                + ", ".join(forbidden_args)
+            )
+    else:
+        missing_args = [
+            option
+            for option, value in project_mode_args
+            if value is None
+        ]
+        if missing_args:
+            parser.error(
+                "the following arguments are required without --xctestrun-path: "
+                + ", ".join(missing_args)
+            )
+
     selection_args_text = args.test_selection_args
     if selection_args_text is None:
         selection_args_text = os.environ.get("TEST_SELECTION_ARGS", "")
@@ -115,6 +175,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         code_signing_allowed=args.code_signing_allowed,
         selection_args_text=selection_args_text,
         action=args.action,
+        xctestrun_path=args.xctestrun_path,
     )
     print("Running:", shlex.join(command))
     try:
