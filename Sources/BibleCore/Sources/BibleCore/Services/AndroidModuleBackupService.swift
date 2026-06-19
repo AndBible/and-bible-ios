@@ -890,12 +890,22 @@ public final class AndroidModuleBackupService {
 
     /**
      Removes SWORD's module cache after installing files outside `ModuleRepository`.
+
+     Side effects:
+     - deletes `mods.d/modules-conf.cache` on a best-effort basis
+     - posts `SwordModuleStore.modulesDidChangeNotification` so open readers and Downloads can
+       rebuild stale `SwordManager` snapshots
+
+     Failure modes:
+     - cache deletion errors are intentionally ignored because the module files have already been
+       published and SWORD can recreate the cache on the next manager scan.
      */
     private func invalidateModuleCache() {
         let cacheURL = moduleDirectory
             .appendingPathComponent("mods.d", isDirectory: true)
             .appendingPathComponent("modules-conf.cache")
         try? fileManager.removeItem(at: cacheURL)
+        SwordModuleStore.notifyModulesDidChange()
     }
 
     /**

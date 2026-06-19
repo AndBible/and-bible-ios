@@ -30,6 +30,12 @@ rules explicit for changes in:
    expected search contract. Changing normalization rules is a parity change,
    not a local cleanup.
 
+   Strong's queries must also keep the indexed lexical-token path when an index
+   service is available. Android relies on JSword's indexed `strong` field for
+   find-all behavior; iOS should use raw-OSIS canonical tokens in
+   `SearchIndexService` and reserve direct SWORD entry-attribute scanning for
+   no-index-service fallback.
+
 4. Treat result selection as a reader-navigation contract, not only a search
    list affordance.
 
@@ -66,7 +72,7 @@ described in `regression-report.md` green, especially:
 - direct-launch query retention and index creation
 - scope rerun behavior
 - word-mode rerun behavior
-- Strong's normalization regressions
+- Strong's normalization and indexed lexical-token regressions
 - result selection navigation back into the reader
 
 If a change touches the still-partial multi-translation area, raise the bar and
@@ -75,7 +81,7 @@ add focused coverage rather than relying on the current subset alone.
 ## Current Automation Status
 
 - The repo currently has focused search UI coverage and targeted unit
-  regressions for Strong's normalization and bundled KJV hits.
+  regressions for Strong's normalization, indexed canonical tokens, and bundled KJV hits.
 - Current protection is a combination of:
   - search workflow tests in `AndBibleUITests`
   - Strong's search regressions in `AndBibleTests`

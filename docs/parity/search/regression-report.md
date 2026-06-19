@@ -1,6 +1,6 @@
 # SEARCH-702 Regression Report
 
-Date: 2026-05-15
+Date: 2026-06-18
 
 ## Scope
 
@@ -10,7 +10,7 @@ Regression verification for the current search parity surface, covering:
 - local index creation against bundled modules
 - scope and word-mode rerun semantics
 - multi-translation selection with grouped-result totals
-- Strong's normalization and bundled-module hit search
+- Strong's normalization, indexed lexical-token search, and bundled-module hit search
 - navigation from real search results back into the reader
 - local Android reference comparison for word modes and multi-translation result flow
 
@@ -38,6 +38,9 @@ Verification matrix:
 - `AndBibleTests/testParseVerseKeySupportsOsisFormat`
 - `AndBibleTests/testParseVerseKeySupportsOsisFormatWithSuffix`
 - `AndBibleTests/testStrongsSearchFindAllOccurrencesReturnsBundledKJVMatches`
+- `AndBibleTests/testStrongsSearchFindAllOccurrencesSupportsIntermediateZeroTrimVariant`
+- `AndBibleTests/testSearchIndexFindsCanonicalStrongsTokens`
+- `AndBibleTests/testSearchIndexReturnsTextHitsInCanonicalEntryOrder`
 
 ### UI
 
@@ -55,6 +58,7 @@ Verification matrix:
 - seeded query survives hydration into the visible Search screen
 - the harness can build a disposable index against bundled modules
 - the ready state reports non-zero bundled results for deterministic queries
+- indexed text results are emitted in canonical verse order for broad queries
 
 ### Search options
 
@@ -76,6 +80,8 @@ Verification matrix:
 - `H02022` normalization preserves both padded and unpadded lookup forms
 - decorated `lemma:strong:` input is accepted unchanged
 - bundled KJV Strong's searches return at least one real verse hit
+- KJV index creation stores canonical H00430/H0430 Strong's tokens from raw OSIS
+- indexed Strong's search returns Genesis 1:1 with cleaned snippet text
 
 ### Reader integration
 
@@ -84,8 +90,8 @@ Verification matrix:
 
 ## Historical Result And Current Interpretation
 
-Focused search validation was refreshed on 2026-05-15 after adding
-`testSearchMultiTranslationSelectionUpdatesGroupedTotals`.
+Focused Strong's validation was refreshed on 2026-06-18 after adding indexed
+canonical-token coverage for the H00430/H0430 KJV path.
 
 - unit: `6` tests, `0` failures
 - UI: `6` tests, `0` failures
@@ -100,7 +106,7 @@ This gives the search domain current regression evidence for:
 - word-mode mutation
 - multi-translation grouped totals
 - grouped-result navigation
-- Strong's normalization/hit search
+- Strong's normalization/indexed lexical-token hit search
 - result navigation into the reader
 
 ## Remaining Gap

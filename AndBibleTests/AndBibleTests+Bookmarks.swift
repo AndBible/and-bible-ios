@@ -19,6 +19,35 @@ import struct SwiftUI.Color
 
 extension AndBibleTests {
     /**
+     Verifies that bridge hash-code normalization preserves the existing non-negative StudyPad DOM
+     key contract without trapping on Swift's one unrepresentable absolute value.
+     *
+     * Setup:
+     * - calls the pure annotation payload helper directly with representative positive, negative,
+     *   zero, and `Int.min` values because `String.hashValue` is process-randomized and cannot
+     *   deterministically produce the overflow edge.
+     *
+     * Expected result:
+     * - ordinary values match the previous `abs(hashValue)` semantics
+     * - `Int.min` maps to a non-negative sentinel instead of crashing
+     *
+     * Failure meaning:
+     * - StudyPad/bookmark bridge payloads could either drift from their existing hash semantics or
+     *   still crash while building Vue DOM identifiers for a rare hash value.
+     *
+     * Side effects: None.
+     */
+    func testBridgeHashCodeNormalizationAvoidsIntMinOverflow() {
+        XCTAssertEqual(BibleReaderAnnotationPayloadFactory.normalizedBridgeHashCode(from: 12), 12)
+        XCTAssertEqual(BibleReaderAnnotationPayloadFactory.normalizedBridgeHashCode(from: -12), 12)
+        XCTAssertEqual(BibleReaderAnnotationPayloadFactory.normalizedBridgeHashCode(from: 0), 0)
+        XCTAssertEqual(
+            BibleReaderAnnotationPayloadFactory.normalizedBridgeHashCode(from: Int.min),
+            Int.max
+        )
+    }
+
+    /**
      Verifies that bookmark-label serialization falls back to the synthetic unlabeled payload when
      a relationship still points at a deleted in-memory label object.
      *
@@ -80,6 +109,61 @@ extension AndBibleTests {
         )
     }
 
+    /**
+     Verifies bookmark-list range text keeps JSword's same-chapter shorthand.
+     *
+     Android reconstructs a JSword `VerseRange` from stored ordinals and displays the range name.
+     For a range within one chapter, JSword emits `Book chapter:start-end`, so the iOS bookmark
+     list should not expand the repeated chapter or collapse a real multi-verse range.
+     */
+    func testBookmarkListVerseReferenceFormatsSameChapterRangeLikeJSword() {
+        let bookmark = BibleBookmark(
+            kjvOrdinalStart: 5,
+            kjvOrdinalEnd: 7,
+            ordinalStart: 5,
+            ordinalEnd: 7,
+            v11n: "KJVA"
+        )
+        bookmark.book = "Genesis"
+
+        let reference = BookmarkListView.verseReference(for: bookmark) { _, ordinal in
+            [
+                5: BookmarkListVerseReference(chapter: 1, verse: 5),
+                7: BookmarkListVerseReference(chapter: 1, verse: 7),
+            ][ordinal]
+        }
+
+        XCTAssertEqual(reference, "Genesis 1:5-7")
+    }
+
+    /**
+     Verifies bookmark-list range text preserves the end chapter when a stored ordinal range crosses
+     a chapter boundary.
+     *
+     JSword `VerseRange` names same-book cross-chapter ranges as `Book startChapter:startVerse-
+     endChapter:endVerse`. A failure here means two different ranges such as `Genesis 1:5-2:5` and
+     `Genesis 1:5` can be rendered ambiguously or collapsed in the iOS bookmark list.
+     */
+    func testBookmarkListVerseReferenceKeepsCrossChapterEndChapterLikeJSword() {
+        let bookmark = BibleBookmark(
+            kjvOrdinalStart: 5,
+            kjvOrdinalEnd: 45,
+            ordinalStart: 5,
+            ordinalEnd: 45,
+            v11n: "KJVA"
+        )
+        bookmark.book = "Genesis"
+
+        let reference = BookmarkListView.verseReference(for: bookmark) { _, ordinal in
+            [
+                5: BookmarkListVerseReference(chapter: 1, verse: 5),
+                45: BookmarkListVerseReference(chapter: 2, verse: 5),
+            ][ordinal]
+        }
+
+        XCTAssertEqual(reference, "Genesis 1:5-2:5")
+    }
+
     #if os(iOS)
     @MainActor
     func testReaderBookmarkBridgeUpdateEmitsTypedPayloadShape() throws {
@@ -115,6 +199,7 @@ extension AndBibleTests {
         let bookmarkObject = try XCTUnwrap(payload.first)
         XCTAssertEqual(bookmarkObject["type"] as? String, "bookmark")
         XCTAssertEqual(bookmarkObject["notes"] as? String, "Quoted \"note\"\nsecond line")
+        XCTAssertEqual(bookmarkObject["notesContentType"] as? String, "HTML")
         XCTAssertEqual(bookmarkObject["hasNote"] as? Bool, true)
         XCTAssertTrue(bookmarkObject["offsetRange"] is NSNull)
         XCTAssertTrue(bookmarkObject["primaryLabelId"] is NSNull)
@@ -131,6 +216,103 @@ extension AndBibleTests {
         XCTAssertEqual(relation["type"] as? String, "BibleBookmarkToLabel")
         XCTAssertEqual(relation["bookmarkId"] as? String, bookmark.id.uuidString)
         XCTAssertEqual(relation["labelId"] as? String, Label.unlabeledId.uuidString)
+    }
+
+    /**
+     Verifies bookmark bridge payloads derive range fields from the same ordinal-backed
+     JSword-style verse range Android serializes through `ClientBibleBookmark`.
+     *
+     Data dependencies:
+     * - copies the bundled KJV SWORD module into a temporary module path
+     * - creates one Bible bookmark that spans Genesis 1:31 through Genesis 2:2
+     *
+     * Failure modes:
+     * - throws if bundled KJV cannot be loaded or its ordinals cannot be resolved
+     * - fails if iOS collapses cross-chapter ranges to the start chapter, emits a non-JSword OSIS
+     *   ref, or omits verse text from the end chapter
+     */
+    @MainActor
+    func testReaderBookmarkBridgeUpdateEmitsJSwordCrossChapterRangePayload() throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let modulePath = try makeTemporaryBundledSwordPath()
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let container = try makeBookmarkRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        let bookmarkStore = BookmarkStore(modelContext: modelContext)
+        let bookmarkService = BookmarkService(store: bookmarkStore)
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        controller.bookmarkService = bookmarkService
+        let module = try XCTUnwrap(manager.module(named: controller.activeModuleName))
+        let startOrdinal = try XCTUnwrap(module.verseOrdinal(osisBookId: "Gen", chapter: 1, verse: 31))
+        let endOrdinal = try XCTUnwrap(module.verseOrdinal(osisBookId: "Gen", chapter: 2, verse: 2))
+
+        let bookmark = bookmarkService.addBibleBookmark(
+            bookInitials: "KJV",
+            startOrdinal: startOrdinal,
+            endOrdinal: endOrdinal,
+            wholeVerse: true
+        )
+        bookmark.book = "Genesis"
+
+        controller.refreshBookmarkInVueJS(bookmarkId: bookmark.id)
+
+        let payload = try XCTUnwrap(
+            bridgeEmissionPayload(from: recordedScripts(), event: "add_or_update_bookmarks") as? [[String: Any]]
+        )
+        let bookmarkObject = try XCTUnwrap(payload.first)
+        XCTAssertEqual(bookmarkObject["osisRef"] as? String, "Gen.1.31-Gen.2.2")
+        XCTAssertEqual(bookmarkObject["verseRange"] as? String, "Genesis 1:31-2:2")
+        XCTAssertEqual(bookmarkObject["verseRangeOnlyNumber"] as? String, "31-2")
+        XCTAssertEqual(bookmarkObject["verseRangeAbbreviated"] as? String, "Gen 1:31-2:2")
+
+        let fullText = try XCTUnwrap(bookmarkObject["fullText"] as? String)
+        XCTAssertTrue(
+            fullText.contains("the heavens and the earth were finished"),
+            "Expected bridge payload text to include Genesis 2:1 content; got: \(fullText)"
+        )
+    }
+
+    /**
+     Verifies StudyPad bookmark payloads use the same JSword-style cross-chapter range projection
+     as live bookmark update events.
+     *
+     Android serializes Study Pad bookmarks through the same `ClientBibleBookmark` DTO as bookmark
+     update events. A failure means iOS has reintroduced drift between equivalent bridge payloads.
+     */
+    @MainActor
+    func testReaderStudyPadDocumentBridgeEmissionUsesJSwordCrossChapterRangePayload() throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let container = try makeBookmarkRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        let bookmarkStore = BookmarkStore(modelContext: modelContext)
+        let bookmarkService = BookmarkService(store: bookmarkStore)
+        let controller = BibleReaderController(bridge: bridge)
+        controller.bookmarkService = bookmarkService
+
+        let label = bookmarkService.createLabel(name: "Cross Chapter", color: Label.defaultColor)
+        let bookmark = bookmarkService.addBibleBookmark(
+            bookInitials: "KJV",
+            startOrdinal: 31,
+            endOrdinal: 42,
+            wholeVerse: true
+        )
+        bookmark.book = "Genesis"
+        _ = bookmarkService.toggleLabel(bookmarkId: bookmark.id, labelId: label.id)
+
+        controller.bridgeDidSetClientReady(bridge)
+        let scriptCount = recordedScripts().count
+        controller.loadStudyPadDocument(labelId: label.id, bookmarkId: bookmark.id)
+        let studyPadScripts = Array(recordedScripts().dropFirst(scriptCount))
+
+        let payload = try XCTUnwrap(
+            bridgeEmissionPayload(from: studyPadScripts, event: "add_documents") as? [String: Any]
+        )
+        let bookmarks = try XCTUnwrap(payload["bookmarks"] as? [[String: Any]])
+        let bookmarkObject = try XCTUnwrap(bookmarks.first)
+        XCTAssertEqual(bookmarkObject["osisRef"] as? String, "Gen.1.31-Gen.2.2")
+        XCTAssertEqual(bookmarkObject["verseRange"] as? String, "Genesis 1:31-2:2")
+        XCTAssertEqual(bookmarkObject["verseRangeOnlyNumber"] as? String, "31-2")
+        XCTAssertEqual(bookmarkObject["verseRangeAbbreviated"] as? String, "Gen 1:31-2:2")
     }
 
     @MainActor
@@ -200,6 +382,7 @@ extension AndBibleTests {
         XCTAssertEqual(genericBookmarkObject["id"] as? String, genericBookmark.id.uuidString)
         XCTAssertEqual(genericBookmarkObject["type"] as? String, "generic-bookmark")
         XCTAssertEqual(genericBookmarkObject["notes"] as? String, "Generic \"note\"")
+        XCTAssertEqual(genericBookmarkObject["notesContentType"] as? String, "HTML")
         XCTAssertTrue(genericBookmarkObject["primaryLabelId"] is NSNull)
 
         let relationships = try XCTUnwrap(payload["bookmarkToLabels"] as? [[String: Any]])
@@ -211,6 +394,134 @@ extension AndBibleTests {
         let entryObject = try XCTUnwrap(entries.first)
         XCTAssertEqual(entryObject["id"] as? String, createdEntry.id.uuidString)
         XCTAssertEqual(entryObject["text"] as? String, "Entry with \"quotes\"\nand newline")
+        XCTAssertEqual(entryObject["contentType"] as? String, "HTML")
+    }
+
+    /**
+     Verifies the Android note-content default for bookmark notes saved below the bridge layer.
+     Android persists `HTML` when no explicit note content type exists, so iOS service saves must
+     produce an explicit `contentType` row instead of leaving notes format implicit forever.
+     *
+     * Data dependencies:
+     * - creates one Bible bookmark and one generic bookmark in an in-memory bookmark schema
+     *
+     * Side effects:
+     * - persists notes through `BookmarkService`
+     *
+     * Failure modes:
+     * - fails if either note row omits `contentType` or stores a non-Android value
+     */
+    func testBookmarkServicePersistsDefaultHTMLContentTypeForNewBookmarkNotes() throws {
+        let container = try makeBookmarkRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        let bookmarkService = BookmarkService(store: BookmarkStore(modelContext: modelContext))
+
+        let bibleBookmark = bookmarkService.addBibleBookmark(
+            bookInitials: "KJV",
+            startOrdinal: 1,
+            endOrdinal: 1,
+            wholeVerse: true
+        )
+        let genericBookmark = bookmarkService.addGenericBookmark(
+            bookInitials: "DICT",
+            key: "entry-key",
+            startOrdinal: 2,
+            endOrdinal: 2
+        )
+
+        bookmarkService.saveBibleBookmarkNote(bookmarkId: bibleBookmark.id, note: "Bible note")
+        bookmarkService.saveBibleBookmarkNote(bookmarkId: genericBookmark.id, note: "Generic note")
+
+        let bibleNote = try XCTUnwrap(try modelContext.fetch(FetchDescriptor<BibleBookmarkNotes>()).first)
+        let genericNote = try XCTUnwrap(try modelContext.fetch(FetchDescriptor<GenericBookmarkNotes>()).first)
+        XCTAssertEqual(bibleNote.contentType, "HTML")
+        XCTAssertEqual(genericNote.contentType, "HTML")
+    }
+
+    /**
+     Verifies that the reader bridge applies Android's global `notes_content_type` preference when
+     creating a new note row.
+     *
+     * Setup:
+     * - configures the controller settings store with `notes_content_type = MARKDOWN`
+     * - saves a note through the same delegate entry point used by the Vue bridge
+     *
+     * Expected result:
+     * - the persisted note row records `MARKDOWN`, making the note's renderer stable even if the
+     *   global preference changes later
+     *
+     * Failure meaning:
+     * - a failure means iOS is only rendering from the current global setting and is not preserving
+     *   Android-compatible per-note content type state
+     */
+    @MainActor
+    func testReaderSaveBookmarkNoteUsesConfiguredMarkdownContentTypeForNewNote() throws {
+        let container = try makeBookmarkRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        let bookmarkService = BookmarkService(store: BookmarkStore(modelContext: modelContext))
+        let settingsStore = try makeInMemorySettingsStore()
+        settingsStore.setString(.notesContentType, value: "MARKDOWN")
+        let controller = BibleReaderController(bridge: BibleBridge())
+        controller.bookmarkService = bookmarkService
+        controller.settingsStore = settingsStore
+
+        let bookmark = bookmarkService.addBibleBookmark(
+            bookInitials: "KJV",
+            startOrdinal: 1,
+            endOrdinal: 1,
+            wholeVerse: true
+        )
+
+        controller.bridge(BibleBridge(), saveBookmarkNote: bookmark.id.uuidString, note: "**Markdown** note")
+
+        let bibleNote = try XCTUnwrap(try modelContext.fetch(FetchDescriptor<BibleBookmarkNotes>()).first)
+        XCTAssertEqual(bibleNote.contentType, "MARKDOWN")
+    }
+
+    /**
+     Verifies Android bridge parity for notes cleared to whitespace-only text.
+
+     Android's `BibleJavascriptInterface.saveBookmarkNote` trims only to decide whether a save should
+     become `null`; whitespace-only bookmark and generic notes therefore delete the detached note row
+     rather than persisting a blank row with a content type. This exercises the iOS reader delegate
+     path so the web editor, bridge, and service cannot drift from that behavior.
+     */
+    @MainActor
+    func testReaderSaveBookmarkNoteDeletesWhitespaceOnlyNotesLikeAndroidBridge() throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let container = try makeBookmarkRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        let bookmarkService = BookmarkService(store: BookmarkStore(modelContext: modelContext))
+        let controller = BibleReaderController(bridge: bridge)
+        controller.bookmarkService = bookmarkService
+
+        let bibleBookmark = bookmarkService.addBibleBookmark(
+            bookInitials: "KJV",
+            startOrdinal: 1,
+            endOrdinal: 1,
+            wholeVerse: true
+        )
+        let genericBookmark = bookmarkService.addGenericBookmark(
+            bookInitials: "DICT",
+            key: "entry-key",
+            startOrdinal: 2,
+            endOrdinal: 2
+        )
+        bookmarkService.saveBibleBookmarkNote(bookmarkId: bibleBookmark.id, note: "Bible note")
+        bookmarkService.saveBibleBookmarkNote(bookmarkId: genericBookmark.id, note: "Generic note")
+
+        controller.bridge(BibleBridge(), saveBookmarkNote: bibleBookmark.id.uuidString, note: " \n\t ")
+        controller.bridge(BibleBridge(), saveBookmarkNote: genericBookmark.id.uuidString, note: " \n\t ")
+
+        XCTAssertTrue(try modelContext.fetch(FetchDescriptor<BibleBookmarkNotes>()).isEmpty)
+        XCTAssertTrue(try modelContext.fetch(FetchDescriptor<GenericBookmarkNotes>()).isEmpty)
+
+        let payload = try XCTUnwrap(
+            bridgeEmissionPayload(from: recordedScripts(), event: "bookmark_note_modified") as? [String: Any]
+        )
+        XCTAssertEqual(payload["id"] as? String, bibleBookmark.id.uuidString)
+        XCTAssertEqual(payload["notes"] as? String, "")
+        XCTAssertTrue(payload["notesContentType"] is NSNull)
     }
     #endif
 
@@ -574,6 +885,7 @@ extension AndBibleTests {
             bookmarkService.createStudyPadEntry(labelId: label.id, afterOrderNumber: -1)
         )
         XCTAssertEqual(creation.0.orderNumber, 0)
+        XCTAssertEqual(creation.0.contentType, "HTML")
 
         let updateService = BookmarkService(store: BookmarkStore(modelContext: modelContext))
         updateService.updateStudyPadTextEntryText(id: creation.0.id, text: "Updated StudyPad note")

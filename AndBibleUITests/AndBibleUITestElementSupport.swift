@@ -334,19 +334,33 @@ extension AndBibleUITests {
     }
 
     /**
-     Returns workspace-name prompt text-field candidates without probing arbitrary fields.
-
-     The production workspace prompt exports a text-field identifier. The candidate list therefore
-     stays bounded to that identifier and localized field-title fallbacks; it deliberately avoids
-     prompt-root descendant scans and app-wide focused-field queries because those can wedge XCTest
-     snapshot resolution on hosted simulators.
+     Returns observable workspace-name prompt container candidates.
+     *
+     * - Parameter app: Running application under test.
+     * - Returns: The SwiftUI accessibility container used by the custom workspace-name prompt.
+     * - Side effects: none.
+     * - Failure modes:
+     *   This helper cannot fail; callers decide whether absence is expected. It intentionally avoids
+     *   absent table, collection, and scroll containers because hosted XCTest can stall while proving
+     *   those broad SwiftUI queries do not exist before it reaches the real prompt node.
      */
-    func workspaceNamePromptTextFieldCandidates(in app: XCUIApplication) -> [XCUIElement] {
-        let identifier = "workspaceNamePromptTextField"
-        let identifierCandidates = [
-            app.textFields[identifier].firstMatch,
+    func workspaceNamePromptScreenCandidates(in app: XCUIApplication) -> [XCUIElement] {
+        let identifier = "workspaceNamePromptScreen"
+        return [
             app.otherElements[identifier].firstMatch,
         ]
+    }
+
+    /**
+     Returns workspace-name prompt text-field candidates without probing arbitrary fields.
+
+     SwiftUI can expose the workspace prompt field by its visible title while custom identifier
+     text-field queries intermittently wedge XCTest snapshot resolution on hosted simulators. The
+     candidate list therefore stays bounded to title lookups and scoped title fallbacks; it
+     deliberately avoids prompt-root descendant scans, app-wide focused-field queries, and the
+     custom-id text-field lookup that can stall before the prompt has fully settled.
+     */
+    func workspaceNamePromptTextFieldCandidates(in app: XCUIApplication) -> [XCUIElement] {
         let titledCandidates = ["Name", "name"].flatMap { title in
             [
                 app.textFields[title].firstMatch,
@@ -355,7 +369,7 @@ extension AndBibleUITests {
                 app.scrollViews.textFields[title].firstMatch,
             ]
         }
-        return identifierCandidates + titledCandidates
+        return titledCandidates
     }
 
     /// Returns workspace-name prompt buttons without walking the custom sheet hierarchy.
@@ -724,7 +738,9 @@ extension AndBibleUITests {
                 app.scrollViews[identifier].firstMatch,
                 app.otherElements[identifier].firstMatch,
             ]
-        case "historyScreen", "readingPlanListScreen", "availablePlansScreen", "workspaceNamePromptScreen":
+        case "workspaceNamePromptScreen":
+            return workspaceNamePromptScreenCandidates(in: app)
+        case "historyScreen", "readingPlanListScreen", "availablePlansScreen":
             return [
                 app.tables[identifier].firstMatch,
                 app.collectionViews[identifier].firstMatch,

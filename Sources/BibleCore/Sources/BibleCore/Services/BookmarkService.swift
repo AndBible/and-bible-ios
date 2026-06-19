@@ -12,6 +12,38 @@ public final class BookmarkService {
     private let store: BookmarkStore
 
     /**
+     Normalizes nullable note content-type inputs to Android's accepted `TextContentType` values.
+
+     - Parameter contentType: Optional raw value from settings, bridge calls, or restored rows.
+     - Returns: `HTML` or `MARKDOWN`, falling back to Android's default `HTML`.
+     - Side effects: none.
+     - Failure modes: none; invalid values are intentionally coerced by the app preference normalizer.
+     */
+    private static func normalizedNotesContentType(_ contentType: String?) -> String {
+        AppPreferenceValueNormalizer.notesContentType(contentType ?? "HTML")
+    }
+
+    /**
+     Checks whether a bridge note payload should be persisted instead of deleting the note row.
+
+     Android's JavaScript bridge converts `null` and trim-empty strings to a deleted bookmark note,
+     but it preserves the original text for nonblank payloads. Matching that contract keeps iOS from
+     retaining invisible notes that Android would remove while avoiding unintended whitespace edits
+     for user-authored content.
+
+     - Parameter note: Optional note payload from reader JavaScript, tests, or service callers.
+     - Returns: `true` when the payload has at least one non-whitespace/newline character.
+     - Side effects: none.
+     - Failure modes: This helper cannot fail.
+     */
+    private static func shouldPersistNote(_ note: String?) -> Bool {
+        guard let note else {
+            return false
+        }
+        return !note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    /**
      Creates a bookmark service backed by the given persistence store.
      - Parameter store: Store responsible for all bookmark, label, and StudyPad persistence.
      */
@@ -71,16 +103,38 @@ public final class BookmarkService {
         return bookmark
     }
 
-    /// Save or update a bookmark note (Bible or generic).
-    public func saveBibleBookmarkNote(bookmarkId: UUID, note: String?) {
+    /**
+     Saves, updates, or removes a bookmark note for Bible and generic bookmarks.
+
+     - Parameters:
+       - bookmarkId: Identifier of the Bible or generic bookmark whose note should change.
+       - note: New note body. `nil` or whitespace-only text deletes the detached note row.
+       - defaultContentType: Current global notes-content-type setting used only when creating a
+         row or backfilling a legacy row that has no stored type.
+     - Side effects: mutates SwiftData bookmark/note rows and saves the backing context.
+     - Failure modes: returns without side effects when no matching bookmark exists; store save
+       failures are handled by `BookmarkStore.saveChanges`.
+     */
+    public func saveBibleBookmarkNote(
+        bookmarkId: UUID,
+        note: String?,
+        defaultContentType: String = "HTML"
+    ) {
+        let normalizedDefaultContentType = Self.normalizedNotesContentType(defaultContentType)
         // Try Bible bookmark first
         if let bookmark = store.bibleBookmark(id: bookmarkId) {
-            if let note, !note.isEmpty {
+            if let note, Self.shouldPersistNote(note) {
                 if let existing = bookmark.notes ?? store.bibleBookmarkNotes(bookmarkId: bookmarkId) {
                     bookmark.notes = existing
                     existing.notes = note
+                    existing.contentType = existing.contentType.map(Self.normalizedNotesContentType)
+                        ?? normalizedDefaultContentType
                 } else {
-                    let notes = BibleBookmarkNotes(bookmarkId: bookmarkId, notes: note)
+                    let notes = BibleBookmarkNotes(
+                        bookmarkId: bookmarkId,
+                        notes: note,
+                        contentType: normalizedDefaultContentType
+                    )
                     bookmark.notes = notes
                 }
             } else {
@@ -97,12 +151,18 @@ public final class BookmarkService {
 
         // Try generic bookmark
         if let bookmark = store.genericBookmark(id: bookmarkId) {
-            if let note, !note.isEmpty {
+            if let note, Self.shouldPersistNote(note) {
                 if let existing = bookmark.notes ?? store.genericBookmarkNotes(bookmarkId: bookmarkId) {
                     bookmark.notes = existing
                     existing.notes = note
+                    existing.contentType = existing.contentType.map(Self.normalizedNotesContentType)
+                        ?? normalizedDefaultContentType
                 } else {
-                    let notes = GenericBookmarkNotes(bookmarkId: bookmarkId, notes: note)
+                    let notes = GenericBookmarkNotes(
+                        bookmarkId: bookmarkId,
+                        notes: note,
+                        contentType: normalizedDefaultContentType
+                    )
                     bookmark.notes = notes
                 }
             } else {
@@ -458,7 +518,8 @@ public final class BookmarkService {
     @discardableResult
     public func createStudyPadEntry(
         labelId: UUID,
-        afterOrderNumber: Int
+        afterOrderNumber: Int,
+        contentType: String = "HTML"
     ) -> (StudyPadTextEntry, [BibleBookmarkToLabel], [GenericBookmarkToLabel], [StudyPadTextEntry])? {
         guard let label = store.label(id: labelId) else { return nil }
 
@@ -468,7 +529,11 @@ public final class BookmarkService {
         let bumped = incrementOrderNumbers(labelId: labelId, fromOrder: newOrder, excludingEntryId: nil)
 
         // Create the entry
-        let entry = StudyPadTextEntry(orderNumber: newOrder, indentLevel: 0)
+        let entry = StudyPadTextEntry(
+            orderNumber: newOrder,
+            indentLevel: 0,
+            contentType: Self.normalizedNotesContentType(contentType)
+        )
         entry.label = label
         store.insert(entry)
 

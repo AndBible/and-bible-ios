@@ -18,7 +18,15 @@
 <template>
   <div :style="parentStyle" class="editable-text">
     <div class="editor-container" :class="{constraintDisplayHeight}" v-if="editMode">
+      <MarkdownTextEditor
+          v-if="isMarkdown"
+          :text="editText || ''"
+          :content-accessibility-label="editorAccessibilityLabel"
+          @save="textChanged"
+          @close="editMode = false"
+      />
       <TextEditor
+          v-else
           :text="editText || ''"
           :content-accessibility-label="editorAccessibilityLabel"
           @save="textChanged"
@@ -29,7 +37,7 @@
       <div
           v-if="editText"
           class="notes-display"
-          :class="{constraintDisplayHeight}"
+          :class="{constraintDisplayHeight, 'markdown-notes': isMarkdown}"
           :role="displayAccessibilityLabel ? 'button' : undefined"
           :tabindex="displayAccessibilityLabel ? 0 : undefined"
           :aria-label="displayAccessibilityLabel"
@@ -38,7 +46,7 @@
           @keydown.enter.prevent="handleKeyboardEdit"
           @keydown.space.prevent="handleKeyboardEdit"
       >
-        <div v-html="editText"/>
+        <div v-html="displayHtml"/>
       </div>
       <div class="placeholder" v-else-if="showPlaceholder" @click="handleClicks">
         <slot>
@@ -54,12 +62,29 @@ let cancelOpen = () => {}
 </script>
 
 <script lang="ts" setup>
-import {inject, ref, watch} from "vue";
+/**
+ * Displays and edits bookmark or StudyPad note text using Android-compatible content-type routing.
+ *
+ * @param text - Stored note text, either HTML or Markdown source depending on `contentType`.
+ * @param contentType - Optional Android `TextContentType`; nil falls back to global settings.
+ * @fires save - Emitted with the stored source text after editor saves.
+ * @fires opened - Emitted when editing starts.
+ * @fires closed - Emitted when editing closes, with the current source text.
+ * @remarks Explicit `HTML` and `MARKDOWN` row values always win over the global default so mixed
+ * note collections render consistently across Android and iOS.
+ */
+import {computed, inject, ref, watch} from "vue";
 import TextEditor from "@/components/TextEditor.vue";
+import MarkdownTextEditor from "@/components/MarkdownTextEditor.vue";
 import {useCommon} from "@/composables";
-import {exportModeKey} from "@/types/constants";
+import {appSettingsKey, exportModeKey} from "@/types/constants";
 import {Nullable} from "@/types/common";
+import {TextContentType} from "@/types/client-objects";
+import {Marked} from "marked";
+import DOMPurify from "dompurify";
+import {PURIFY_CONFIG} from "@/composables/slot-html-content";
 
+const markdownParser = new Marked({breaks: true, gfm: true});
 
 const emit = defineEmits(["closed", "save", "opened"]);
 const props = withDefaults(defineProps<{
@@ -71,6 +96,7 @@ const props = withDefaults(defineProps<{
     disableClickToEdit?: boolean
     displayAccessibilityLabel?: string
     editorAccessibilityLabel?: string
+    contentType?: Nullable<TextContentType>
 }>(), {
     editDirectly: false,
     showPlaceholder: false,
@@ -83,7 +109,17 @@ const props = withDefaults(defineProps<{
 const editMode = ref<boolean>(props.editDirectly);
 const parentStyle = ref(`--max-height: ${props.maxEditorHeight}; font-family: var(--font-family); font-size: var(--font-size);`);
 const editText = ref(props.text);
+const appSettings = inject(appSettingsKey)!;
 const exportMode = inject(exportModeKey, ref(false));
+const isMarkdown = computed(() =>
+    props.contentType === "MARKDOWN" ||
+    (props.contentType == null && appSettings.notesContentType === "MARKDOWN")
+);
+const displayHtml = computed(() => {
+    const text = editText.value || "";
+    if (!isMarkdown.value) return text;
+    return DOMPurify.sanitize(markdownParser.parse(text) as string, PURIFY_CONFIG);
+});
 
 function cancelFunc() {
     editMode.value = false;
@@ -188,7 +224,9 @@ defineExpose({editMode});
 }
 </style>
 <style lang="scss">
-div.pell-content, .pell-content div, .notes-display div {
+@use "@/lib/markdown-render" as md;
+
+div.pell-content, .pell-content div, .notes-display:not(.markdown-notes) div {
   margin-top: 5px;
 }
 
@@ -210,5 +248,21 @@ div.pell-content, .pell-content div, .notes-display div {
 
 .editable-text .placeholder {
   padding: 15px;
+}
+
+.markdown-notes {
+  @include md.markdown-content;
+}
+
+.night .markdown-notes {
+  @include md.markdown-content-night;
+}
+
+.monochrome .markdown-notes {
+  @include md.markdown-content-monochrome;
+}
+
+.monochrome.night .markdown-notes {
+  @include md.markdown-content-monochrome-night;
 }
 </style>
