@@ -1256,258 +1256,135 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     // MARK: - Dictionary/GenBook/Map Content Loading
 
     /**
+     Clears transient reader state before replacing the visible document with auxiliary content.
+
+     Dictionary, general-book, and map loads should leave My Notes, StudyPad, editing, and selection
+     state the same way the previous inline implementations did. Keeping this reset in the
+     controller preserves ownership of reader state while allowing the auxiliary loader to share the
+     document-emission workflow.
+     */
+    private func resetAuxiliaryContentState() {
+        showingMyNotes = false
+        showingStudyPad = false
+        activeStudyPadLabelId = nil
+        activeStudyPadLabelName = nil
+        editingInWebView = false
+        hasActiveSelection = false
+        selectedText = ""
+    }
+
+    /**
+     Creates the auxiliary content loader for the current bridge and payload factory.
+
+     - Returns: A loader configured with bridge emission, document JSON, rendered-state, and
+       background callbacks for this controller instance.
+     - Side effects: None during construction. The returned loader mutates state only through the
+       explicit closures supplied here.
+     - Failure modes: None during construction.
+     */
+    private func auxiliaryContentLoader() -> BibleReaderAuxiliaryContentLoader {
+        BibleReaderAuxiliaryContentLoader(
+            bridge: bridge,
+            documentPayloadFactory: documentPayloadFactory(),
+            resetReaderState: { [self] in
+                resetAuxiliaryContentState()
+            },
+            setRenderedContentState: { [self] category, moduleName, book, key in
+                setRenderedContentState(
+                    category: category,
+                    moduleName: moduleName,
+                    book: book,
+                    key: key
+                )
+            },
+            applyNightModeBackground: { [self] in
+                applyNightModeBackground()
+            }
+        )
+    }
+
+    /**
      Load a dictionary entry and display it in the WebView.
      Uses renderText() since dictionary entries are typically HTML-formatted definitions.
      */
     public func loadDictionaryEntry(key: String? = nil) {
-        showingMyNotes = false
-        showingStudyPad = false
-        activeStudyPadLabelId = nil
-        activeStudyPadLabelName = nil
-        editingInWebView = false
-        hasActiveSelection = false
-        selectedText = ""
-
-        guard let module = activeDictionaryModule else {
-            bridge.emit(event: "clear_document")
-            let xml = "<div><title type=\"x-gen\">No Dictionary</title><div type=\"paragraph\"><p>No dictionary module is selected. Download one from the module browser.</p></div></div>"
-            guard let document = buildDocumentJSON(
-                osisBookId: "Dict", bookName: "Dictionary", chapter: 1, verseCount: 1,
-                isNT: false, xml: xml, bookCategory: "DICTIONARY", bookInitials: "none"
-            ) else { return }
-            bridge.emit(event: "add_documents", data: document)
-            bridge.emit(event: "setup_content", data: "{\"jumpToOrdinal\":null,\"jumpToAnchor\":null,\"jumpToId\":null,\"topOffset\":0,\"bottomOffset\":0}")
-            setRenderedContentState(
+        auxiliaryContentLoader().loadModuleEntry(
+            BibleReaderAuxiliaryModuleEntryRequest(
                 category: .dictionary,
+                module: activeDictionaryModule,
                 moduleName: activeDictionaryModuleName,
-                book: "Dictionary",
-                key: "none"
+                requestedKey: key,
+                currentKey: currentDictionaryKey,
+                osisBookId: "Dict",
+                fallbackBookName: "Dictionary",
+                bookCategory: DocumentCategory.dictionary.rawValue,
+                noModuleTitle: "No Dictionary",
+                noModuleMessage: "No dictionary module is selected. Download one from the module browser.",
+                noSelectionMessage: "Select an entry from the key browser to view its definition.",
+                noContentNoun: "definition",
+                persistResolvedKey: { [self] entryKey in
+                    currentDictionaryKey = entryKey
+                    if let pm = activeWindow?.pageManager {
+                        pm.dictionaryKey = entryKey
+                        onPersistState?()
+                    }
+                }
             )
-            applyNightModeBackground()
-            return
-        }
-
-        let entryKey = key ?? currentDictionaryKey
-        guard let entryKey else {
-            // No key selected yet — show prompt
-            bridge.emit(event: "clear_document")
-            let moduleName = activeDictionaryModuleName ?? "Dictionary"
-            let xml = "<div><title type=\"x-gen\">\(moduleName)</title><div type=\"paragraph\"><p>Select an entry from the key browser to view its definition.</p></div></div>"
-            guard let document = buildDocumentJSON(
-                osisBookId: "Dict", bookName: moduleName, chapter: 1, verseCount: 1,
-                isNT: false, xml: xml, bookCategory: "DICTIONARY", bookInitials: moduleName
-            ) else { return }
-            bridge.emit(event: "add_documents", data: document)
-            bridge.emit(event: "setup_content", data: "{\"jumpToOrdinal\":null,\"jumpToAnchor\":null,\"jumpToId\":null,\"topOffset\":0,\"bottomOffset\":0}")
-            setRenderedContentState(
-                category: .dictionary,
-                moduleName: moduleName,
-                book: moduleName,
-                key: "none"
-            )
-            applyNightModeBackground()
-            return
-        }
-
-        currentDictionaryKey = entryKey
-        module.setKey(entryKey)
-        let text = module.renderText()
-        let moduleName = activeDictionaryModuleName ?? "Dictionary"
-
-        // Persist key
-        if let pm = activeWindow?.pageManager {
-            pm.dictionaryKey = entryKey
-            onPersistState?()
-        }
-
-        let xml: String
-        if text.isEmpty {
-            xml = "<div><title type=\"x-gen\">\(entryKey)</title><div type=\"paragraph\"><p>No definition available for \"\(entryKey)\" in \(moduleName).</p></div></div>"
-        } else {
-            // Wrap rendered HTML in OSIS-like structure for Vue.js
-            xml = "<div><title type=\"x-gen\">\(entryKey)</title><div type=\"paragraph\">\(text)</div></div>"
-        }
-
-        bridge.emit(event: "clear_document")
-        guard let document = buildDocumentJSON(
-            osisBookId: "Dict", bookName: entryKey, chapter: 1, verseCount: 1,
-            isNT: false, xml: xml, bookCategory: "DICTIONARY", bookInitials: moduleName
-        ) else { return }
-        bridge.emit(event: "add_documents", data: document)
-        bridge.emit(event: "setup_content", data: "{\"jumpToOrdinal\":null,\"jumpToAnchor\":null,\"jumpToId\":null,\"topOffset\":0,\"bottomOffset\":0}")
-        setRenderedContentState(
-            category: .dictionary,
-            moduleName: moduleName,
-            book: entryKey,
-            key: entryKey
         )
-        applyNightModeBackground()
     }
 
     /// Load a general book entry and display it in the WebView.
     public func loadGeneralBookEntry(key: String? = nil) {
-        showingMyNotes = false
-        showingStudyPad = false
-        activeStudyPadLabelId = nil
-        activeStudyPadLabelName = nil
-        editingInWebView = false
-        hasActiveSelection = false
-        selectedText = ""
-
-        guard let module = activeGeneralBookModule else {
-            bridge.emit(event: "clear_document")
-            let xml = "<div><title type=\"x-gen\">No General Book</title><div type=\"paragraph\"><p>No general book module is selected. Download one from the module browser.</p></div></div>"
-            guard let document = buildDocumentJSON(
-                osisBookId: "GenBook", bookName: "General Book", chapter: 1, verseCount: 1,
-                isNT: false, xml: xml, bookCategory: "GENERAL_BOOK", bookInitials: "none"
-            ) else { return }
-            bridge.emit(event: "add_documents", data: document)
-            bridge.emit(event: "setup_content", data: "{\"jumpToOrdinal\":null,\"jumpToAnchor\":null,\"jumpToId\":null,\"topOffset\":0,\"bottomOffset\":0}")
-            setRenderedContentState(
+        auxiliaryContentLoader().loadModuleEntry(
+            BibleReaderAuxiliaryModuleEntryRequest(
                 category: .generalBook,
+                module: activeGeneralBookModule,
                 moduleName: activeGeneralBookModuleName,
-                book: "General Book",
-                key: "none"
+                requestedKey: key,
+                currentKey: currentGeneralBookKey,
+                osisBookId: "GenBook",
+                fallbackBookName: "General Book",
+                bookCategory: DocumentCategory.generalBook.rawValue,
+                noModuleTitle: "No General Book",
+                noModuleMessage: "No general book module is selected. Download one from the module browser.",
+                noSelectionMessage: "Select an entry from the key browser to view its content.",
+                noContentNoun: "content",
+                persistResolvedKey: { [self] entryKey in
+                    currentGeneralBookKey = entryKey
+                    if let pm = activeWindow?.pageManager {
+                        pm.generalBookKey = entryKey
+                        onPersistState?()
+                    }
+                }
             )
-            applyNightModeBackground()
-            return
-        }
-
-        let entryKey = key ?? currentGeneralBookKey
-        guard let entryKey else {
-            bridge.emit(event: "clear_document")
-            let moduleName = activeGeneralBookModuleName ?? "General Book"
-            let xml = "<div><title type=\"x-gen\">\(moduleName)</title><div type=\"paragraph\"><p>Select an entry from the key browser to view its content.</p></div></div>"
-            guard let document = buildDocumentJSON(
-                osisBookId: "GenBook", bookName: moduleName, chapter: 1, verseCount: 1,
-                isNT: false, xml: xml, bookCategory: "GENERAL_BOOK", bookInitials: moduleName
-            ) else { return }
-            bridge.emit(event: "add_documents", data: document)
-            bridge.emit(event: "setup_content", data: "{\"jumpToOrdinal\":null,\"jumpToAnchor\":null,\"jumpToId\":null,\"topOffset\":0,\"bottomOffset\":0}")
-            setRenderedContentState(
-                category: .generalBook,
-                moduleName: moduleName,
-                book: moduleName,
-                key: "none"
-            )
-            applyNightModeBackground()
-            return
-        }
-
-        currentGeneralBookKey = entryKey
-        module.setKey(entryKey)
-        let text = module.renderText()
-        let moduleName = activeGeneralBookModuleName ?? "General Book"
-
-        if let pm = activeWindow?.pageManager {
-            pm.generalBookKey = entryKey
-            onPersistState?()
-        }
-
-        let xml: String
-        if text.isEmpty {
-            xml = "<div><title type=\"x-gen\">\(entryKey)</title><div type=\"paragraph\"><p>No content available for \"\(entryKey)\" in \(moduleName).</p></div></div>"
-        } else {
-            xml = "<div><title type=\"x-gen\">\(entryKey)</title><div type=\"paragraph\">\(text)</div></div>"
-        }
-
-        bridge.emit(event: "clear_document")
-        guard let document = buildDocumentJSON(
-            osisBookId: "GenBook", bookName: entryKey, chapter: 1, verseCount: 1,
-            isNT: false, xml: xml, bookCategory: "GENERAL_BOOK", bookInitials: moduleName
-        ) else { return }
-        bridge.emit(event: "add_documents", data: document)
-        bridge.emit(event: "setup_content", data: "{\"jumpToOrdinal\":null,\"jumpToAnchor\":null,\"jumpToId\":null,\"topOffset\":0,\"bottomOffset\":0}")
-        setRenderedContentState(
-            category: .generalBook,
-            moduleName: moduleName,
-            book: entryKey,
-            key: entryKey
         )
-        applyNightModeBackground()
     }
 
     /// Load a map entry and display it in the WebView.
     public func loadMapEntry(key: String? = nil) {
-        showingMyNotes = false
-        showingStudyPad = false
-        activeStudyPadLabelId = nil
-        activeStudyPadLabelName = nil
-        editingInWebView = false
-        hasActiveSelection = false
-        selectedText = ""
-
-        guard let module = activeMapModule else {
-            bridge.emit(event: "clear_document")
-            let xml = "<div><title type=\"x-gen\">No Map</title><div type=\"paragraph\"><p>No map module is selected. Download one from the module browser.</p></div></div>"
-            guard let document = buildDocumentJSON(
-                osisBookId: "Map", bookName: "Map", chapter: 1, verseCount: 1,
-                isNT: false, xml: xml, bookCategory: "MAP", bookInitials: "none"
-            ) else { return }
-            bridge.emit(event: "add_documents", data: document)
-            bridge.emit(event: "setup_content", data: "{\"jumpToOrdinal\":null,\"jumpToAnchor\":null,\"jumpToId\":null,\"topOffset\":0,\"bottomOffset\":0}")
-            setRenderedContentState(
+        auxiliaryContentLoader().loadModuleEntry(
+            BibleReaderAuxiliaryModuleEntryRequest(
                 category: .map,
+                module: activeMapModule,
                 moduleName: activeMapModuleName,
-                book: "Map",
-                key: "none"
+                requestedKey: key,
+                currentKey: currentMapKey,
+                osisBookId: "Map",
+                fallbackBookName: "Map",
+                bookCategory: DocumentCategory.map.rawValue,
+                noModuleTitle: "No Map",
+                noModuleMessage: "No map module is selected. Download one from the module browser.",
+                noSelectionMessage: "Select an entry from the key browser to view the map.",
+                noContentNoun: "content",
+                persistResolvedKey: { [self] entryKey in
+                    currentMapKey = entryKey
+                    if let pm = activeWindow?.pageManager {
+                        pm.mapKey = entryKey
+                        onPersistState?()
+                    }
+                }
             )
-            applyNightModeBackground()
-            return
-        }
-
-        let entryKey = key ?? currentMapKey
-        guard let entryKey else {
-            bridge.emit(event: "clear_document")
-            let moduleName = activeMapModuleName ?? "Map"
-            let xml = "<div><title type=\"x-gen\">\(moduleName)</title><div type=\"paragraph\"><p>Select an entry from the key browser to view the map.</p></div></div>"
-            guard let document = buildDocumentJSON(
-                osisBookId: "Map", bookName: moduleName, chapter: 1, verseCount: 1,
-                isNT: false, xml: xml, bookCategory: "MAP", bookInitials: moduleName
-            ) else { return }
-            bridge.emit(event: "add_documents", data: document)
-            bridge.emit(event: "setup_content", data: "{\"jumpToOrdinal\":null,\"jumpToAnchor\":null,\"jumpToId\":null,\"topOffset\":0,\"bottomOffset\":0}")
-            setRenderedContentState(
-                category: .map,
-                moduleName: moduleName,
-                book: moduleName,
-                key: "none"
-            )
-            applyNightModeBackground()
-            return
-        }
-
-        currentMapKey = entryKey
-        module.setKey(entryKey)
-        let text = module.renderText()
-        let moduleName = activeMapModuleName ?? "Map"
-
-        if let pm = activeWindow?.pageManager {
-            pm.mapKey = entryKey
-            onPersistState?()
-        }
-
-        let xml: String
-        if text.isEmpty {
-            xml = "<div><title type=\"x-gen\">\(entryKey)</title><div type=\"paragraph\"><p>No content available for \"\(entryKey)\" in \(moduleName).</p></div></div>"
-        } else {
-            xml = "<div><title type=\"x-gen\">\(entryKey)</title><div type=\"paragraph\">\(text)</div></div>"
-        }
-
-        bridge.emit(event: "clear_document")
-        guard let document = buildDocumentJSON(
-            osisBookId: "Map", bookName: entryKey, chapter: 1, verseCount: 1,
-            isNT: false, xml: xml, bookCategory: "MAP", bookInitials: moduleName
-        ) else { return }
-        bridge.emit(event: "add_documents", data: document)
-        bridge.emit(event: "setup_content", data: "{\"jumpToOrdinal\":null,\"jumpToAnchor\":null,\"jumpToId\":null,\"topOffset\":0,\"bottomOffset\":0}")
-        setRenderedContentState(
-            category: .map,
-            moduleName: moduleName,
-            book: entryKey,
-            key: entryKey
         )
-        applyNightModeBackground()
     }
 
     // MARK: - EPUB Support
@@ -1633,51 +1510,25 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
     /**
      Build document JSON for EPUB content with isNativeHtml: true.
-     Uses JSONSerialization for correct escaping of all special characters in HTML content.
-     IMPORTANT: Uses type "osis" (not "bible") because OsisDocument.vue passes isNativeHtml
-     to OsisFragment, whereas BibleDocument.vue does not — without this, the EPUB HTML
-     would go through OSIS template conversion and render as blank.
+
+     The controller remains the orchestration boundary for selecting the active EPUB section, while
+     `BibleReaderDocumentPayloadFactory` owns the Vue document schema and serialization details.
+
+     - Parameters:
+       - bookName: Visible EPUB section title.
+       - bookInitials: Parent EPUB title used as document initials.
+       - content: Rewritten EPUB XHTML/HTML loaded from the EPUB index.
+     - Returns: Serialized Vue document JSON, or `{}` when serialization fails.
+     - Side effects: None directly; failures are logged by the payload factory.
+     - Failure modes: Returns `{}` if the payload cannot be serialized, preserving the legacy
+       controller behavior for malformed native HTML payloads.
      */
     private func buildEpubDocumentJSON(bookName: String, bookInitials: String, content: String) -> String {
-        let doc: [String: Any] = [
-            "id": "doc-1",
-            "type": "osis",
-            "osisFragment": [
-                "xml": content,
-                "key": "epub",
-                "keyName": bookName,
-                "v11n": "KJVA",
-                "bookCategory": "GENERAL_BOOK",
-                "bookInitials": bookInitials,
-                "bookAbbreviation": "Epub",
-                "osisRef": "epub",
-                "isNewTestament": false,
-                "features": [String: Any](),
-                "hasStrongs": false,
-                "ordinalRange": [0, 0],
-                "language": "en",
-                "direction": "ltr"
-            ] as [String: Any],
-            "bookInitials": bookInitials,
-            "bookCategory": "GENERAL_BOOK",
-            "bookAbbreviation": "Epub",
-            "bookName": bookName,
-            "key": "epub",
-            "v11n": "KJVA",
-            "osisRef": "epub",
-            "annotateRef": "",
-            "genericBookmarks": [Any](),
-            "ordinalRange": [0, 0],
-            "isNativeHtml": true,
-            "highlightedOrdinalRange": NSNull()
-        ]
-
-        guard let data = try? JSONSerialization.data(withJSONObject: doc, options: [.sortedKeys]),
-              let json = String(data: data, encoding: .utf8) else {
-            logger.error("Failed to serialize EPUB document JSON")
-            return "{}"
-        }
-        return json
+        documentPayloadFactory().epubDocumentJSON(
+            bookName: bookName,
+            bookInitials: bookInitials,
+            content: content
+        )
     }
 
     /// Return the active module name for a given category.
@@ -7963,6 +7814,57 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     }
 
     /**
+     Creates the document payload factory for the controller's current reader state.
+
+     `BibleReaderDocumentPayloadFactory` owns bridge JSON assembly; this method supplies the
+     controller-owned dependencies it needs for the current render pass. The factory receives
+     closures instead of the controller so it cannot mutate navigation, modal, bridge, or
+     persistence state outside the document payload contract.
+
+     - Returns: A factory configured with active module initials, Strong's capability, bookmark
+       projection, JSword/SWORD ordinal resolution, reading progress, and memorization progress.
+     - Side effects: None during construction. The returned factory may read controller services
+       through closures while serializing a document.
+     - Failure modes: Missing optional stores resolve to empty progress data; Bible ordinal lookup
+       failures are reported by the factory as `nil` document payloads.
+     */
+    private func documentPayloadFactory() -> BibleReaderDocumentPayloadFactory {
+        BibleReaderDocumentPayloadFactory(
+            activeModuleName: activeModuleName,
+            hasStrongs: hasStrongs,
+            bookmarkPayload: { [self] bookmark in
+                buildBookmarkJSON(bookmark)
+            },
+            chapterOrdinalRange: { [self] book, chapter, verseCount in
+                chapterOrdinalRange(book: book, chapter: chapter, verseCount: verseCount)
+            },
+            kjvBookOrdinal: { [self] book in
+                kjvBookOrdinal(for: book)
+            },
+            chapterReadCount: { [readingProgressStore] kjvBookOrdinal, chapter in
+                readingProgressStore?.chapterReadCount(
+                    kjvBookOrdinal: kjvBookOrdinal,
+                    chapter: chapter
+                )
+            },
+            memorizedOrdinals: { [memorizationProgressStore] bookInitials, startOrdinal, endOrdinal in
+                memorizationProgressStore?.memorizedOrdinals(
+                    bookInitials: bookInitials,
+                    startOrdinal: startOrdinal,
+                    endOrdinal: endOrdinal
+                ) ?? []
+            },
+            targetOrdinals: { [memorizationProgressStore] bookInitials, startOrdinal, endOrdinal in
+                memorizationProgressStore?.targetOrdinals(
+                    bookInitials: bookInitials,
+                    startOrdinal: startOrdinal,
+                    endOrdinal: endOrdinal
+                ) ?? []
+            }
+        )
+    }
+
+    /**
      Wraps chapter XML and bookmark metadata in the document JSON format expected by Vue.js.
 
      - Parameters:
@@ -8000,99 +7902,24 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
                                    documentKey: String? = nil,
                                    keyName: String? = nil,
                                    ordinalRangeOverride: [Int]? = nil) -> String? {
-        let key = documentKey ?? "\(osisBookId).\(chapter)"
-        let displayKeyName = keyName ?? "\(bookName) \(chapter)"
-        let documentOrdinalRange: [Int]
-        if let ordinalRangeOverride {
-            documentOrdinalRange = ordinalRangeOverride
-        } else if bookCategory == DocumentCategory.bible.rawValue {
-            guard let range = chapterOrdinalRange(book: bookName, chapter: chapter, verseCount: verseCount) else {
-                logger.error("Failed to resolve Bible document range for \(osisBookId, privacy: .public).\(chapter)")
-                return nil
-            }
-            documentOrdinalRange = [range.start, range.end]
-        } else {
-            documentOrdinalRange = [0, 0]
-        }
-        let ordinalStart = documentOrdinalRange.first ?? 0
-        let ordinalEnd = documentOrdinalRange.last ?? ordinalStart
-        let initials = bookInitials ?? activeModuleName
-
-        func jsonObject<T: Encodable>(from value: T) -> Any? {
-            guard let data = try? bridgeEncoder.encode(value) else { return nil }
-            return try? JSONSerialization.jsonObject(with: data)
-        }
-
-        func osisFragmentObject(xml: String, ordinalRange: [Int], keySuffix: String) -> [String: Any] {
-            [
-                "xml": xml,
-                "key": keySuffix,
-                "keyName": displayKeyName,
-                "v11n": "KJVA",
-                "bookCategory": bookCategory,
-                "bookInitials": initials,
-                "bookAbbreviation": osisBookId,
-                "osisRef": key,
-                "isNewTestament": isNT,
-                "features": [String: Any](),
-                "hasStrongs": hasStrongs,
-                "ordinalRange": ordinalRange,
-                "language": "en",
-                "direction": "ltr",
-            ]
-        }
-
-        let bookmarkObjects = bookmarks.compactMap { jsonObject(from: buildBookmarkJSON($0)) }
-        let chapterReadCount = readingProgressStore.flatMap { store -> Int? in
-            guard bookCategory == "BIBLE",
-                  let kjvBookOrdinal = kjvBookOrdinal(for: bookName) else {
-                return nil
-            }
-            return store.chapterReadCount(kjvBookOrdinal: kjvBookOrdinal, chapter: chapter)
-        }
-
-        var doc: [String: Any] = [
-            "id": "doc-1",
-            "type": "bible",
-            "osisFragment": osisFragmentObject(xml: xml, ordinalRange: documentOrdinalRange, keySuffix: key),
-            "bookInitials": initials,
-            "bookCategory": bookCategory,
-            "bookAbbreviation": osisBookId,
-            "bookName": bookName,
-            "key": key,
-            "v11n": "KJVA",
-            "osisRef": key,
-            "annotateRef": "",
-            "genericBookmarks": [Any](),
-            "ordinalRange": documentOrdinalRange,
-            "isNativeHtml": false,
-            "bookmarks": bookmarkObjects,
-            "bibleBookName": bookName,
-            "addChapter": addChapter,
-            "chapterNumber": chapter,
-            "originalOrdinalRange": originalOrdinalRange ?? NSNull(),
-            "memorizedOrdinals": memorizationProgressStore?.memorizedOrdinals(
-                bookInitials: initials,
-                startOrdinal: ordinalStart,
-                endOrdinal: ordinalEnd
-            ) ?? [],
-            "targetOrdinals": memorizationProgressStore?.targetOrdinals(
-                bookInitials: initials,
-                startOrdinal: ordinalStart,
-                endOrdinal: ordinalEnd
-            ) ?? [],
-        ]
-        if let chapterReadCount {
-            doc["chapterReadCount"] = chapterReadCount
-        }
-
-        guard let data = try? JSONSerialization.data(withJSONObject: doc, options: [.sortedKeys]),
-              let json = String(data: data, encoding: .utf8) else {
-            logger.error("Failed to serialize document JSON for \(osisBookId, privacy: .public) \(chapter)")
-            return nil
-        }
-
-        return json
+        documentPayloadFactory().documentJSON(
+            BibleReaderDocumentPayloadRequest(
+                osisBookId: osisBookId,
+                bookName: bookName,
+                chapter: chapter,
+                verseCount: verseCount,
+                isNewTestament: isNT,
+                xml: xml,
+                bookmarks: bookmarks,
+                bookCategory: bookCategory,
+                bookInitials: bookInitials,
+                addChapter: addChapter,
+                originalOrdinalRange: originalOrdinalRange,
+                documentKey: documentKey,
+                keyName: keyName,
+                ordinalRangeOverride: ordinalRangeOverride
+            )
+        )
     }
 
     // MARK: - Genesis 1 Real Content
