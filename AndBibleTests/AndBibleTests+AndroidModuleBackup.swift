@@ -1,5 +1,6 @@
 import XCTest
 @testable import BibleCore
+import SwordKit
 
 extension AndBibleTests {
     /**
@@ -143,6 +144,40 @@ extension AndBibleTests {
             try String(contentsOf: moduleRoot.appendingPathComponent("modules/texts/rawtext/kjv/ot"), encoding: .utf8),
             "Genesis content"
         )
+    }
+
+    /**
+     Verifies that file-backed Android module backup restore announces the installed-module store
+     change immediately after publishing SWORD files.
+
+     Setup:
+     - writes a valid Android `.abmd.zip` fixture to disk
+     - observes the module-store change notification that open reader and downloads views use to
+       rebuild stale `SwordManager` snapshots
+
+     Expected result:
+     - restore posts a visible module-store change after successful file publication
+
+     Failure meaning:
+     - restored modules can remain hidden in already-open UI surfaces until app restart, because
+       SWORD's disk cache was invalidated without notifying long-lived in-memory module caches.
+     */
+    func testAndroidModuleBackupRestoreFromFileURLNotifiesModuleStoreChange() throws {
+        let moduleRoot = try makeTemporaryAndroidModuleBackupRoot()
+        let service = AndroidModuleBackupService(moduleDirectory: moduleRoot)
+        let archiveData = try makeAndroidModuleBackupArchiveData(entries: [
+            ("mods.d/esv.conf", makeAndroidModuleBackupConf(moduleName: "ESV")),
+            ("modules/texts/rawtext/esv/ot", Data("Genesis content".utf8)),
+        ])
+        let archiveURL = try writeTemporaryAndroidModuleBackupArchive(archiveData)
+        let notificationExpectation = expectation(
+            forNotification: SwordModuleStore.modulesDidChangeNotification,
+            object: nil
+        )
+
+        _ = try service.restoreArchive(fromArchiveAt: archiveURL)
+
+        wait(for: [notificationExpectation], timeout: 0.2)
     }
 
     /**

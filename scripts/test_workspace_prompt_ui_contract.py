@@ -16,11 +16,11 @@ class WorkspacePromptUITestContractTests(unittest.TestCase):
     """Guards the CI-stable workspace prompt lookup path used by UI tests."""
 
     def test_workspace_prompt_open_waits_for_prompt_surface_before_field_queries(self) -> None:
-        """The create flow waits for the prompt surface before resolving the editable field.
+        """The create flow waits for prompt-owned controls before falling back to field resolution.
 
-        The failing CI shard showed app-wide text-field queries could hang while the prompt was
-        absent. A failure here means the UI test can regress to broad field lookup before proving
-        the product prompt opened.
+        The failing CI shard showed generic prompt-surface lookup could hang when it used the wrong
+        container types. The opener should prefer prompt-owned buttons and the prompt surface before
+        using the editable field as a final readiness signal.
         """
         source = (
             REPO_ROOT / "AndBibleUITests" / "AndBibleUITestListSupport.swift"
@@ -29,15 +29,18 @@ class WorkspacePromptUITestContractTests(unittest.TestCase):
         open_prompt_end = source.index("func requireWorkspaceNamePromptField(", open_prompt_start)
         open_prompt_body = source[open_prompt_start:open_prompt_end]
 
-        self.assertIn("workspaceNamePromptScreenCandidates(in: app)", open_prompt_body)
-        self.assertNotIn('"workspaceNamePromptTextField"', open_prompt_body)
+        self.assertIn('"workspaceNamePromptConfirmButton"', open_prompt_body)
+        self.assertIn('"workspaceNamePromptCancelButton"', open_prompt_body)
+        self.assertIn('"workspaceNamePromptScreen"', open_prompt_body)
+        self.assertIn('"workspaceNamePromptTextField"', open_prompt_body)
 
-    def test_workspace_prompt_field_candidates_avoid_app_wide_name_fallbacks(self) -> None:
-        """The prompt field lookup stays scoped to the visible workspace-name prompt.
+    def test_workspace_prompt_field_candidates_avoid_custom_identifier_and_focus_queries(self) -> None:
+        """The prompt field lookup stays on title candidates instead of custom identifier queries.
 
         Android presents create/rename/clone as an `AlertDialog` with an `EditText` from
-        `WorkspaceSelectorActivity`; iOS must first find the equivalent prompt container, then
-        its text field. A failure here means the lookup can wander into unrelated `Name` fields.
+        `WorkspaceSelectorActivity`; iOS exposes the equivalent SwiftUI text field most reliably
+        through its visible title. A failure here means the lookup can regress to the custom
+        accessibility identifier or focused-descendant scans that can stall hosted XCTest.
         """
         source = (
             REPO_ROOT / "AndBibleUITests" / "AndBibleUITestElementSupport.swift"
@@ -46,11 +49,13 @@ class WorkspacePromptUITestContractTests(unittest.TestCase):
         candidates_end = source.index("func workspaceNamePromptButtonCandidates", candidates_start)
         candidates_body = source[candidates_start:candidates_end]
 
-        self.assertIn("workspaceNamePromptScreenCandidates(in: app)", candidates_body)
-        self.assertNotIn('app.textFields["Name"]', candidates_body)
-        self.assertNotIn("app.collectionViews.textFields", candidates_body)
-        self.assertNotIn("app.tables.textFields", candidates_body)
-        self.assertNotIn("app.scrollViews.textFields", candidates_body)
+        self.assertIn('["Name", "name"]', candidates_body)
+        self.assertIn("app.textFields[title].firstMatch", candidates_body)
+        self.assertNotIn('let identifier = "workspaceNamePromptTextField"', candidates_body)
+        self.assertNotIn("workspaceNamePromptScreenCandidates(in: app)", candidates_body)
+        self.assertNotIn("hasKeyboardFocus", candidates_body)
+        self.assertNotIn("descendants(matching: .any)", candidates_body)
+        self.assertNotIn("prompt.textFields", candidates_body)
 
     def test_workspace_prompt_screen_uses_prompt_specific_container_lookup(self) -> None:
         """The prompt surface lookup must not ask XCTest to resolve absent scroll/list containers.

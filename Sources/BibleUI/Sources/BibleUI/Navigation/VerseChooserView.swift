@@ -15,7 +15,7 @@ public struct VerseChooserView: View {
     /// One-based chapter number currently being selected within.
     let chapter: Int
 
-    /// Number of verses available for this chapter in the active module.
+    /// Number of verses available for this chapter in the active module; zero renders no choices.
     let verseCount: Int
 
     /// Callback invoked with the chosen one-based verse number.
@@ -42,16 +42,18 @@ public struct VerseChooserView: View {
         ScrollView {
             let columns = [GridItem(.adaptive(minimum: 44), spacing: 6)]
             LazyVGrid(columns: columns, spacing: 6) {
-                ForEach(1...max(verseCount, 1), id: \.self) { verse in
-                    Button(action: { onSelect(verse) }) {
-                        Text("\(verse)")
-                            .font(.callout.monospacedDigit())
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 10)
-                            .background(.quaternary)
-                            .clipShape(RoundedRectangle(cornerRadius: 4))
+                if verseCount > 0 {
+                    ForEach(1...verseCount, id: \.self) { verse in
+                        Button(action: { onSelect(verse) }) {
+                            Text("\(verse)")
+                                .font(.callout.monospacedDigit())
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 10)
+                                .background(.quaternary)
+                                .clipShape(RoundedRectangle(cornerRadius: 4))
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
                 }
             }
             .padding()

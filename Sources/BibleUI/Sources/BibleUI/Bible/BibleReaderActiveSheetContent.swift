@@ -75,6 +75,9 @@ struct BibleReaderActiveSheetContent: View {
                     },
                     onOpenStudyPad: { labelId in
                         controller?.loadStudyPadDocument(labelId: labelId)
+                    },
+                    bibleOrdinalResolver: { book, ordinal in
+                        controller?.bookmarkListVerseReference(book: book, ordinal: ordinal)
                     }
                 )
             }
