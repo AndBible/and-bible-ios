@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import pathlib
+import json
 import os
+import signal
+import subprocess
 import sys
 import unittest
 from unittest import mock
@@ -14,6 +17,7 @@ from run_xcodebuild_with_test_selection import (
     build_xcodebuild_command,
     main,
     parse_test_selection_args,
+    result_bundle_reports_passing_tests,
 )
 
 
@@ -145,6 +149,196 @@ class MainTests(unittest.TestCase):
             ],
             check=True,
         )
+
+    @mock.patch("run_xcodebuild_with_test_selection.subprocess.run")
+    def test_main_treats_sigsegv_after_passing_result_bundle_as_success(
+        self,
+        run_mock: mock.Mock,
+    ) -> None:
+        passing_summary = {
+            "result": "Passed",
+            "totalTestCount": 4,
+            "passedTests": 4,
+            "failedTests": 0,
+        }
+        run_mock.side_effect = [
+            subprocess.CalledProcessError(
+                returncode=-signal.SIGSEGV,
+                cmd=["xcodebuild", "test-without-building"],
+            ),
+            subprocess.CompletedProcess(
+                args=["xcrun", "xcresulttool"],
+                returncode=0,
+                stdout=json.dumps(passing_summary),
+                stderr="",
+            ),
+        ]
+
+        exit_code = main(
+            [
+                "--project",
+                "AndBible.xcodeproj",
+                "--scheme",
+                "AndBible",
+                "--configuration",
+                "Debug",
+                "--destination",
+                "id=DEVICE",
+                "--derived-data-path",
+                ".derivedData",
+                "--result-bundle-path",
+                ".artifacts/AndBibleTests-ui.xcresult",
+                "--action",
+                "test-without-building",
+            ]
+        )
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(run_mock.call_count, 2)
+        self.assertEqual(
+            run_mock.call_args_list[1].args[0],
+            [
+                "xcrun",
+                "xcresulttool",
+                "get",
+                "test-results",
+                "summary",
+                "--path",
+                ".artifacts/AndBibleTests-ui.xcresult",
+                "--compact",
+            ],
+        )
+        self.assertEqual(
+            run_mock.call_args_list[1].kwargs,
+            {"check": True, "capture_output": True, "text": True},
+        )
+
+    @mock.patch("run_xcodebuild_with_test_selection.subprocess.run")
+    def test_main_reraises_sigsegv_when_result_bundle_reports_failures(
+        self,
+        run_mock: mock.Mock,
+    ) -> None:
+        failing_summary = {
+            "result": "Failed",
+            "totalTestCount": 4,
+            "passedTests": 3,
+            "failedTests": 1,
+        }
+        run_mock.side_effect = [
+            subprocess.CalledProcessError(
+                returncode=-signal.SIGSEGV,
+                cmd=["xcodebuild", "test-without-building"],
+            ),
+            subprocess.CompletedProcess(
+                args=["xcrun", "xcresulttool"],
+                returncode=0,
+                stdout=json.dumps(failing_summary),
+                stderr="",
+            ),
+        ]
+
+        with self.assertRaises(subprocess.CalledProcessError):
+            main(
+                [
+                    "--project",
+                    "AndBible.xcodeproj",
+                    "--scheme",
+                    "AndBible",
+                    "--configuration",
+                    "Debug",
+                    "--destination",
+                    "id=DEVICE",
+                    "--derived-data-path",
+                    ".derivedData",
+                    "--result-bundle-path",
+                    ".artifacts/AndBibleTests-ui.xcresult",
+                    "--action",
+                    "test-without-building",
+                ]
+            )
+
+    @mock.patch("run_xcodebuild_with_test_selection.subprocess.run")
+    def test_main_reraises_original_sigsegv_when_result_bundle_is_unreadable(
+        self,
+        run_mock: mock.Mock,
+    ) -> None:
+        xcodebuild_error = subprocess.CalledProcessError(
+            returncode=-signal.SIGSEGV,
+            cmd=["xcodebuild", "test-without-building"],
+        )
+        run_mock.side_effect = [
+            xcodebuild_error,
+            subprocess.CalledProcessError(
+                returncode=1,
+                cmd=["xcrun", "xcresulttool"],
+            ),
+        ]
+
+        with self.assertRaises(subprocess.CalledProcessError) as raised:
+            main(
+                [
+                    "--project",
+                    "AndBible.xcodeproj",
+                    "--scheme",
+                    "AndBible",
+                    "--configuration",
+                    "Debug",
+                    "--destination",
+                    "id=DEVICE",
+                    "--derived-data-path",
+                    ".derivedData",
+                    "--result-bundle-path",
+                    ".artifacts/AndBibleTests-ui.xcresult",
+                    "--action",
+                    "test-without-building",
+                ]
+            )
+
+        self.assertIs(raised.exception, xcodebuild_error)
+
+
+class ResultBundleSummaryTests(unittest.TestCase):
+    @mock.patch("run_xcodebuild_with_test_selection.subprocess.run")
+    def test_result_bundle_reports_passing_tests_requires_passed_nonempty_bundle(
+        self,
+        run_mock: mock.Mock,
+    ) -> None:
+        run_mock.return_value = subprocess.CompletedProcess(
+            args=["xcrun", "xcresulttool"],
+            returncode=0,
+            stdout=json.dumps(
+                {
+                    "result": "Passed",
+                    "totalTestCount": 4,
+                    "passedTests": 4,
+                    "failedTests": 0,
+                }
+            ),
+            stderr="",
+        )
+
+        self.assertTrue(result_bundle_reports_passing_tests("result.xcresult"))
+
+    @mock.patch("run_xcodebuild_with_test_selection.subprocess.run")
+    def test_result_bundle_reports_passing_tests_rejects_empty_passed_bundle(
+        self,
+        run_mock: mock.Mock,
+    ) -> None:
+        run_mock.return_value = subprocess.CompletedProcess(
+            args=["xcrun", "xcresulttool"],
+            returncode=0,
+            stdout=json.dumps(
+                {
+                    "result": "Passed",
+                    "totalTestCount": 0,
+                    "passedTests": 0,
+                    "failedTests": 0,
+                }
+            ),
+            stderr="",
+        )
+
+        self.assertFalse(result_bundle_reports_passing_tests("result.xcresult"))
 
 
 if __name__ == "__main__":

@@ -334,6 +334,24 @@ extension AndBibleUITests {
     }
 
     /**
+     Returns observable workspace-name prompt container candidates.
+     *
+     * - Parameter app: Running application under test.
+     * - Returns: The SwiftUI accessibility container used by the custom workspace-name prompt.
+     * - Side effects: none.
+     * - Failure modes:
+     *   This helper cannot fail; callers decide whether absence is expected. It intentionally avoids
+     *   absent table, collection, and scroll containers because hosted XCTest can stall while proving
+     *   those broad SwiftUI queries do not exist before it reaches the real prompt node.
+     */
+    func workspaceNamePromptScreenCandidates(in app: XCUIApplication) -> [XCUIElement] {
+        let identifier = "workspaceNamePromptScreen"
+        return [
+            app.otherElements[identifier].firstMatch,
+        ]
+    }
+
+    /**
      Returns workspace-name prompt text-field candidates without probing arbitrary fields.
 
      SwiftUI can expose the workspace prompt field by its visible title while custom identifier
@@ -720,7 +738,9 @@ extension AndBibleUITests {
                 app.scrollViews[identifier].firstMatch,
                 app.otherElements[identifier].firstMatch,
             ]
-        case "historyScreen", "readingPlanListScreen", "availablePlansScreen", "workspaceNamePromptScreen":
+        case "workspaceNamePromptScreen":
+            return workspaceNamePromptScreenCandidates(in: app)
+        case "historyScreen", "readingPlanListScreen", "availablePlansScreen":
             return [
                 app.tables[identifier].firstMatch,
                 app.collectionViews[identifier].firstMatch,

@@ -505,7 +505,7 @@ extension AndBibleUITests {
         _ = openSearch(in: app)
         let searchField = requireSearchInput(in: app, timeout: 10)
         replaceText(in: searchField, with: "noah", placeholderHints: ["Search Bible text", "Search Bible", "Search"])
-        dismissKeyboardAfterFocusedTextEntry(searchField, in: app)
+        dismissSearchFieldFocusIfNeeded(in: app)
         waitForSearchQuery("noah", in: app, timeout: 20)
 
         let noahResultIdentifier = "searchResultRow::Genesis_6_8"

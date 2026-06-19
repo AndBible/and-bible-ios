@@ -298,6 +298,8 @@ public struct BibleBookmarkData: Codable, Sendable {
     public var lastUpdatedOn: Int
     /// Optional user-authored note.
     public var notes: String?
+    /// Optional Android `TextContentType` raw value for `notes`; nil means inherit app setting.
+    public var notesContentType: String?
     /// Precomputed note-presence flag for cheap client rendering.
     public var hasNote: Bool
     /// Whether the bookmark should highlight whole verses rather than offsets.
@@ -340,6 +342,7 @@ public struct BibleBookmarkData: Codable, Sendable {
         primaryLabelId: IdType?,
         lastUpdatedOn: Int,
         notes: String?,
+        notesContentType: String?,
         hasNote: Bool,
         wholeVerse: Bool,
         customIcon: String?,
@@ -368,6 +371,7 @@ public struct BibleBookmarkData: Codable, Sendable {
         self.primaryLabelId = primaryLabelId
         self.lastUpdatedOn = lastUpdatedOn
         self.notes = notes
+        self.notesContentType = notesContentType
         self.hasNote = hasNote
         self.wholeVerse = wholeVerse
         self.customIcon = customIcon
@@ -406,6 +410,7 @@ public struct BibleBookmarkData: Codable, Sendable {
         try container.encodeNullable(primaryLabelId, forKey: .primaryLabelId)
         try container.encode(lastUpdatedOn, forKey: .lastUpdatedOn)
         try container.encodeNullable(notes, forKey: .notes)
+        try container.encodeNullable(notesContentType, forKey: .notesContentType)
         try container.encode(hasNote, forKey: .hasNote)
         try container.encode(wholeVerse, forKey: .wholeVerse)
         try container.encodeNullable(customIcon, forKey: .customIcon)
@@ -454,6 +459,8 @@ public struct GenericBookmarkData: Codable, Sendable {
     public var lastUpdatedOn: Int
     /// Optional user-authored note.
     public var notes: String?
+    /// Optional Android `TextContentType` raw value for `notes`; nil means inherit app setting.
+    public var notesContentType: String?
     /// Precomputed note-presence flag for cheap client rendering.
     public var hasNote: Bool
     /// Whether the bookmark should highlight the whole range rather than offsets.
@@ -488,6 +495,7 @@ public struct GenericBookmarkData: Codable, Sendable {
         primaryLabelId: IdType?,
         lastUpdatedOn: Int,
         notes: String?,
+        notesContentType: String?,
         hasNote: Bool,
         wholeVerse: Bool,
         customIcon: String?,
@@ -512,6 +520,7 @@ public struct GenericBookmarkData: Codable, Sendable {
         self.primaryLabelId = primaryLabelId
         self.lastUpdatedOn = lastUpdatedOn
         self.notes = notes
+        self.notesContentType = notesContentType
         self.hasNote = hasNote
         self.wholeVerse = wholeVerse
         self.customIcon = customIcon
@@ -546,6 +555,7 @@ public struct GenericBookmarkData: Codable, Sendable {
         try container.encodeNullable(primaryLabelId, forKey: .primaryLabelId)
         try container.encode(lastUpdatedOn, forKey: .lastUpdatedOn)
         try container.encodeNullable(notes, forKey: .notes)
+        try container.encodeNullable(notesContentType, forKey: .notesContentType)
         try container.encode(hasNote, forKey: .hasNote)
         try container.encode(wholeVerse, forKey: .wholeVerse)
         try container.encodeNullable(customIcon, forKey: .customIcon)
@@ -570,6 +580,8 @@ public struct StudyPadTextItemData: Codable, Sendable {
     public var labelId: IdType
     /// Rich-text or HTML payload stored in the entry.
     public var text: String
+    /// Optional Android `TextContentType` raw value for `text`; nil means inherit app setting.
+    public var contentType: String?
     /// Ordering index within the parent label.
     public var orderNumber: Int
     /// Nesting depth within the StudyPad tree.
@@ -582,6 +594,7 @@ public struct StudyPadTextItemData: Codable, Sendable {
         hashCode: Int,
         labelId: IdType,
         text: String,
+        contentType: String?,
         orderNumber: Int,
         indentLevel: Int
     ) {
@@ -590,8 +603,28 @@ public struct StudyPadTextItemData: Codable, Sendable {
         self.hashCode = hashCode
         self.labelId = labelId
         self.text = text
+        self.contentType = contentType
         self.orderNumber = orderNumber
         self.indentLevel = indentLevel
+    }
+
+    /**
+     Encodes the StudyPad text item with Android/Vue nullable keys preserved.
+
+     - Parameter encoder: Destination encoder for bridge JSON.
+     - Side effects: writes this StudyPad entry into the encoder.
+     - Failure modes: rethrows encoder failures.
+     */
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(type, forKey: .type)
+        try container.encode(hashCode, forKey: .hashCode)
+        try container.encode(labelId, forKey: .labelId)
+        try container.encode(text, forKey: .text)
+        try container.encodeNullable(contentType, forKey: .contentType)
+        try container.encode(orderNumber, forKey: .orderNumber)
+        try container.encode(indentLevel, forKey: .indentLevel)
     }
 }
 

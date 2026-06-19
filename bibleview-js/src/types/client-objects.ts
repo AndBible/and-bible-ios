@@ -100,6 +100,7 @@ export type BaseBookmark = {
     readonly primaryLabelId: IdType
     lastUpdatedOn: number
     notes: Nullable<string>
+    notesContentType: Nullable<TextContentType>
     hasNote: boolean
     wholeVerse: boolean
     customIcon: Nullable<string>
@@ -153,6 +154,7 @@ export type StudyPadTextItem = {
     readonly type: "journal"
     readonly labelId: IdType
     text: string
+    contentType: Nullable<TextContentType>
     orderNumber: number
     indentLevel: number
     new?: boolean

@@ -709,7 +709,7 @@ extension AndBibleTests {
                 ),
             ],
             bibleNotes: [
-                .init(bookmarkID: remoteBookmarkID, notes: "Android note"),
+                .init(bookmarkID: remoteBookmarkID, notes: "Android note", contentType: "MARKDOWN"),
             ],
             bibleLinks: [
                 .init(bookmarkID: remoteBookmarkID, labelID: remoteLabelID, orderNumber: 0, indentLevel: 0, expandContent: false),
@@ -748,6 +748,7 @@ extension AndBibleTests {
         XCTAssertEqual(bookmarks.count, 1)
         XCTAssertEqual(bookmarks.first?.id, remoteBookmarkID)
         XCTAssertEqual(bookmarks.first?.notes?.notes, "Android note")
+        XCTAssertEqual(bookmarks.first?.notes?.contentType, "MARKDOWN")
 
         XCTAssertFalse(remoteSettingsStore.isSyncEnabled(for: .bookmarks))
         XCTAssertEqual(syncStateStore.bootstrapState(for: .bookmarks), RemoteSyncBootstrapState())
@@ -996,12 +997,12 @@ extension AndBibleTests {
      - then imports an Android backup containing one duplicate bookmark and one new bookmark
 
      Expected result:
-     - duplicate local rows keep their local note content
-     - new backup rows are added
+     - duplicate local rows keep their local note content and note content type
+     - new backup rows are added with their Android note content type
 
      Failure meaning:
      - iOS Import would drift from Android's `INSERT OR IGNORE` semantics by overwriting local rows
-       or skipping valid backup rows.
+       or skipping valid backup rows, including Android's nullable note `TextContentType`.
      */
     func testAndroidDatabaseBackupImportBookmarksKeepsExistingRowsAndAddsMissingRows() throws {
         let container = try makeBookmarkRestoreModelContainer()
@@ -1017,7 +1018,8 @@ extension AndBibleTests {
                 labelID: labelID,
                 bookmarks: [
                     (existingBookmarkID, 20, "Local note"),
-                ]
+                ],
+                noteContentType: "MARKDOWN"
             )
         )
         _ = try service.apply(
@@ -1033,7 +1035,8 @@ extension AndBibleTests {
                 bookmarks: [
                     (existingBookmarkID, 20, "Backup replacement"),
                     (newBookmarkID, 21, "Backup addition"),
-                ]
+                ],
+                noteContentType: "HTML"
             )
         )
         _ = try service.apply(
@@ -1046,7 +1049,9 @@ extension AndBibleTests {
         let bookmarks = try modelContext.fetch(FetchDescriptor<BibleBookmark>())
         XCTAssertEqual(Set(bookmarks.map(\.id)), Set([existingBookmarkID, newBookmarkID]))
         XCTAssertEqual(bookmarks.first { $0.id == existingBookmarkID }?.notes?.notes, "Local note")
+        XCTAssertEqual(bookmarks.first { $0.id == existingBookmarkID }?.notes?.contentType, "MARKDOWN")
         XCTAssertEqual(bookmarks.first { $0.id == newBookmarkID }?.notes?.notes, "Backup addition")
+        XCTAssertEqual(bookmarks.first { $0.id == newBookmarkID }?.notes?.contentType, "HTML")
     }
 
     /**
@@ -2499,13 +2504,15 @@ extension AndBibleTests {
      - Parameters:
        - labelID: Android label ID linked to every generated bookmark.
        - bookmarks: Tuples of bookmark ID, verse ordinal, and note text.
+       - noteContentType: Optional Android note `TextContentType` assigned to every generated note.
      - Returns: Raw ZIP archive bytes with Android manifest and `db/bookmarks.sqlite3`.
      - Side effects: writes a temporary SQLite database through `makeAndroidBookmarksDatabase`.
      - Failure modes: Rethrows SQLite fixture and ZIP construction failures.
      */
     private func makeAndroidBookmarkOnlyBackupData(
         labelID: UUID,
-        bookmarks: [(id: UUID, ordinal: Int, note: String)]
+        bookmarks: [(id: UUID, ordinal: Int, note: String)],
+        noteContentType: String? = nil
     ) throws -> Data {
         let databaseURL = try makeAndroidBookmarksDatabase(
             labels: [
@@ -2524,7 +2531,7 @@ extension AndBibleTests {
                 )
             },
             bibleNotes: bookmarks.map {
-                .init(bookmarkID: $0.id, notes: $0.note)
+                .init(bookmarkID: $0.id, notes: $0.note, contentType: noteContentType)
             },
             bibleLinks: bookmarks.map {
                 .init(bookmarkID: $0.id, labelID: labelID, orderNumber: $0.ordinal, indentLevel: 0, expandContent: false)

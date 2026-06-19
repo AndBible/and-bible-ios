@@ -882,9 +882,12 @@ extension AndBibleUITests {
      *   - timeout: Maximum number of seconds to wait before failing.
      * - Side effects:
      *   - reveals Search controls before querying stable word-mode identifiers
-     *   - dismisses text-field focus only after stable control lookup fails
+     *   - dismisses text-field focus before each activation attempt
+     *   - verifies the compact Search state export after each tap and retries when hosted
+     *     simulators synthesize a segmented-control tap without changing the selected mode
      * - Failure modes:
-     *   - fails if the requested mode control never appears on Search within the timeout
+     *   - fails if the requested mode control never appears or never updates the exported
+     *     Search word mode within the timeout
      */
     func tapSearchWordMode(
         _ label: String,
@@ -892,42 +895,79 @@ extension AndBibleUITests {
         timeout: TimeInterval = 10
     ) {
         let deadline = Date().addingTimeInterval(timeout)
+        guard let expectedToken = searchWordModeToken(forVisibleLabel: label) else {
+            XCTFail("Expected Search mode button '\(label)' to map to a stable word-mode token.")
+            return
+        }
+        let expectedStateToken = "wordMode=\(expectedToken)"
+
+        func isExpectedWordModeSelected() -> Bool {
+            searchStateCandidateValues(in: app).contains { value in
+                value.contains("state=ready")
+                    && value.contains("searching=false")
+                    && value.contains(expectedStateToken)
+            }
+        }
+
+        func waitForExpectedWordModeActivation(until activationDeadline: Date) -> Bool {
+            repeat {
+                if isExpectedWordModeSelected() {
+                    return true
+                }
+                RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+            } while Date() < activationDeadline
+            return isExpectedWordModeSelected()
+        }
 
         repeat {
+            if isExpectedWordModeSelected() {
+                return
+            }
+            dismissSearchFieldFocusIfNeeded(in: app)
             revealSearchControls(in: app)
             let searchScreen = unresolvedElement("searchScreen", in: app)
 
-            if let token = searchWordModeToken(forVisibleLabel: label) {
-                let identifier = "searchWordModeButton::\(token)"
-                let identifierCandidates = [
-                    searchScreen.buttons[identifier].firstMatch,
-                    searchScreen.otherElements[identifier].firstMatch,
-                    searchScreen.segmentedControls["searchWordModePicker"].buttons[label].firstMatch,
-                    searchScreen.segmentedControls.buttons[label].firstMatch,
-                    app.buttons[identifier].firstMatch,
-                    app.otherElements[identifier].firstMatch,
-                    app.segmentedControls["searchWordModePicker"].buttons[label].firstMatch,
-                    app.segmentedControls.buttons[label].firstMatch,
-                ]
-                for candidate in identifierCandidates where candidate.exists || candidate.waitForExistence(timeout: 0.2) {
-                    tapElementReliably(candidate, timeout: timeout)
+            let identifier = "searchWordModeButton::\(expectedToken)"
+            let identifierCandidates = [
+                searchScreen.buttons[identifier].firstMatch,
+                searchScreen.otherElements[identifier].firstMatch,
+                searchScreen.segmentedControls["searchWordModePicker"].buttons[label].firstMatch,
+                searchScreen.segmentedControls.buttons[label].firstMatch,
+                app.buttons[identifier].firstMatch,
+                app.otherElements[identifier].firstMatch,
+                app.segmentedControls["searchWordModePicker"].buttons[label].firstMatch,
+                app.segmentedControls.buttons[label].firstMatch,
+            ]
+            if let candidate = identifierCandidates.first(where: {
+                ($0.exists || $0.waitForExistence(timeout: 0.2))
+                    && waitForElementToBecomeHittable($0, timeout: 0.5)
+            }) {
+                tapElementReliably(candidate, timeout: min(2, max(0.5, deadline.timeIntervalSinceNow)))
+                if waitForExpectedWordModeActivation(until: min(Date().addingTimeInterval(2), deadline)) {
                     return
                 }
+                continue
             }
 
             if let segmentIndex = searchWordModeSegmentIndex(forVisibleLabel: label),
                let picker = [
                    searchScreen.segmentedControls["searchWordModePicker"].firstMatch,
                    searchScreen.otherElements["searchWordModePicker"].firstMatch,
-               ].first(where: { $0.exists || $0.waitForExistence(timeout: 0.2) })
+               ].first(where: {
+                   ($0.exists || $0.waitForExistence(timeout: 0.2))
+                       && !$0.frame.isEmpty
+               })
             {
                 tapSegmentedControlSegment(
                     picker,
                     index: segmentIndex,
                     segmentCount: SearchWordModeControl.segmentCount,
-                    timeout: timeout
+                    timeout: min(2, max(0.5, deadline.timeIntervalSinceNow))
                 )
-                return
+                if waitForExpectedWordModeActivation(until: min(Date().addingTimeInterval(2), deadline)) {
+                    return
+                }
+                continue
             }
 
             let fallbackCandidates = [
@@ -936,16 +976,28 @@ extension AndBibleUITests {
                 app.segmentedControls.buttons[label].firstMatch,
                 app.buttons[label].firstMatch,
             ]
-            for candidate in fallbackCandidates where candidate.exists || candidate.waitForExistence(timeout: 0.2) {
-                tapElementReliably(candidate, timeout: timeout)
-                return
+            if let candidate = fallbackCandidates.first(where: {
+                ($0.exists || $0.waitForExistence(timeout: 0.2))
+                    && waitForElementToBecomeHittable($0, timeout: 0.5)
+            }) {
+                tapElementReliably(candidate, timeout: min(2, max(0.5, deadline.timeIntervalSinceNow)))
+                if waitForExpectedWordModeActivation(until: min(Date().addingTimeInterval(2), deadline)) {
+                    return
+                }
+                continue
             }
 
-            dismissSearchFieldFocusIfNeeded(in: app)
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         } while Date() < deadline
 
-        XCTFail("Expected Search mode button '\(label)' to exist within \(timeout) seconds.")
+        let finalValues = searchStateCandidateValues(in: app)
+        if finalValues.contains(where: { $0.contains(expectedStateToken) }) {
+            return
+        }
+        let lastValue = finalValues.isEmpty ? "nil" : finalValues.joined(separator: " || ")
+        XCTFail(
+            "Expected Search mode button '\(label)' to select '\(expectedStateToken)' within \(timeout) seconds; last Search state was '\(lastValue)'."
+        )
     }
 
     /**
@@ -1045,25 +1097,33 @@ extension AndBibleUITests {
     /**
      Moves focus away from the active Search field so the lower Search option rows can surface.
 
-     This helper intentionally avoids `app.keyboards`. Hosted CI has timed out while resolving the
-     broad keyboard hierarchy after SwiftUI already dismissed the keyboard, while the Search input's
-     `hasKeyboardFocus` predicate remains bounded to one known field.
+     This helper intentionally avoids resolving `app.keyboards` or the Search text field unless a
+     compact Search state token first proves focus is active. Hosted CI has timed out while resolving
+     both broad keyboard queries and stale SwiftUI text-field snapshots after the field already lost
+     focus.
      *
      * - Parameter app: Running application under test.
      * - Side effects:
-     *   - uses one visible keyboard dismissal action when the Search field still owns focus
-     *     after query submission
+     *   - submits the focused field through the keyboard bridge, then tries coordinate and option
+     *     control fallbacks only when the Search state export reports `searchFieldFocused=true`
      * - Failure modes:
      *   - silently leaves focus unchanged when no keyboard dismissal action is available
      */
     func dismissSearchFieldFocusIfNeeded(in app: XCUIApplication) {
-        guard let searchField = resolveVisibleSearchInput(in: app, waitTimeout: 0.2),
-              waitForElementKeyboardFocus(searchField, timeout: 0.2) else {
+        guard searchFieldFocusIsActive(in: app) else {
             return
         }
 
+        app.typeText(XCUIKeyboardKey.return.rawValue)
+        guard !waitForSearchFieldFocusToClear(in: app, timeout: 1.5) else {
+            return
+        }
+        app.coordinate(withNormalizedOffset: KeyboardDismissalCoordinate.softwareReturnKey).tap()
+        guard !waitForSearchFieldFocusToClear(in: app, timeout: 0.5) else {
+            return
+        }
         dismissKeyboardIfPresent(in: app)
-        guard waitForElementKeyboardFocus(searchField, timeout: 0.2) else {
+        guard !waitForSearchFieldFocusToClear(in: app, timeout: 0.5) else {
             return
         }
         let searchScreen = unresolvedElement("searchScreen", in: app)
@@ -1076,6 +1136,9 @@ extension AndBibleUITests {
         ]
         for candidate in dismissalCandidates where candidate.exists && !candidate.frame.isEmpty {
             tapElementReliably(candidate, timeout: 5)
+            if waitForSearchFieldFocusToClear(in: app, timeout: 0.5) {
+                return
+            }
             return
         }
 
@@ -1090,7 +1153,73 @@ extension AndBibleUITests {
                 segmentCount: SearchWordModeControl.segmentCount,
                 timeout: 5
             )
+            _ = waitForSearchFieldFocusToClear(in: app, timeout: 0.5)
         }
+    }
+
+    /**
+     Reads the Search field focus state from the compact UI-test state export.
+
+     The focus state is part of the Search screen contract because option controls can be obscured by
+     the keyboard, but probing `searchQueryField.exists` has repeatedly wedged XCTest snapshots in CI.
+     Keeping the decision on the state export lets controls that are already unfocused proceed without
+     touching the text-field hierarchy at all.
+     *
+     * - Parameter app: Running application under test.
+     * - Returns: `true` when the Search export reports `searchFieldFocused=true`.
+     * - Side effects: none.
+     * - Failure modes: returns `false` when Search has not exported state yet.
+     */
+    func searchFieldFocusIsActive(in app: XCUIApplication) -> Bool {
+        searchFieldFocusState(in: app) == true
+    }
+
+    /**
+     Resolves the Search field focus token from the compact UI-test state export.
+
+     - Parameter app: Running application under test.
+     - Returns: `true` for `searchFieldFocused=true`, `false` for `searchFieldFocused=false`, or
+       `nil` when Search has not exported either token.
+     - Side effects: none.
+     - Failure modes: returns `nil` when the Search state export is temporarily absent.
+     */
+    func searchFieldFocusState(in app: XCUIApplication) -> Bool? {
+        for value in searchStateCandidateValues(in: app) {
+            if value.contains("searchFieldFocused=true") {
+                return true
+            }
+            if value.contains("searchFieldFocused=false") {
+                return false
+            }
+        }
+        return nil
+    }
+
+    /**
+     Waits for the compact Search state export to report that text-field focus has cleared.
+
+     - Parameters:
+       - app: Running application under test.
+       - timeout: Maximum number of seconds to poll the Search state export.
+     - Returns: `true` when an exported Search state explicitly reports
+       `searchFieldFocused=false`.
+     - Side effects: none.
+     - Failure modes: returns `false` when the state export continues reporting focused input until
+       timeout or becomes temporarily unavailable.
+     */
+    func waitForSearchFieldFocusToClear(
+        in app: XCUIApplication,
+        timeout: TimeInterval
+    ) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            if searchFieldFocusState(in: app) == false {
+                return true
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        } while Date() < deadline
+
+        return searchFieldFocusState(in: app) == false
     }
 
     /**

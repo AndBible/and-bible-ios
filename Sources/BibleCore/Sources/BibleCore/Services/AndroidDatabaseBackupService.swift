@@ -1795,6 +1795,7 @@ public final class AndroidDatabaseBackupService {
                 labelID: importedLabelIDMap[entry.labelID] ?? entry.labelID,
                 orderNumber: entry.orderNumber,
                 indentLevel: entry.indentLevel,
+                contentType: entry.contentType,
                 text: entry.text
             )
         }
@@ -1835,6 +1836,7 @@ public final class AndroidDatabaseBackupService {
             endOffset: bookmark.endOffset,
             primaryLabelID: bookmark.primaryLabelID.map { labelIDMap[$0] ?? $0 },
             notes: bookmark.notes,
+            notesContentType: bookmark.notesContentType,
             lastUpdatedOn: bookmark.lastUpdatedOn,
             wholeVerse: bookmark.wholeVerse,
             type: bookmark.type,
@@ -1876,6 +1878,7 @@ public final class AndroidDatabaseBackupService {
             endOffset: bookmark.endOffset,
             primaryLabelID: bookmark.primaryLabelID.map { labelIDMap[$0] ?? $0 },
             notes: bookmark.notes,
+            notesContentType: bookmark.notesContentType,
             lastUpdatedOn: bookmark.lastUpdatedOn,
             wholeVerse: bookmark.wholeVerse,
             playbackSettingsJSON: bookmark.playbackSettingsJSON,
@@ -1920,6 +1923,7 @@ public final class AndroidDatabaseBackupService {
             endOffset: local.endOffset,
             primaryLabelID: local.primaryLabelID ?? imported.primaryLabelID,
             notes: local.notes ?? imported.notes,
+            notesContentType: local.notesContentType ?? imported.notesContentType,
             lastUpdatedOn: local.lastUpdatedOn,
             wholeVerse: local.wholeVerse,
             type: local.type,
@@ -1954,6 +1958,7 @@ public final class AndroidDatabaseBackupService {
             endOffset: local.endOffset,
             primaryLabelID: local.primaryLabelID ?? imported.primaryLabelID,
             notes: local.notes ?? imported.notes,
+            notesContentType: local.notesContentType ?? imported.notesContentType,
             lastUpdatedOn: local.lastUpdatedOn,
             wholeVerse: local.wholeVerse,
             playbackSettingsJSON: local.playbackSettingsJSON ?? imported.playbackSettingsJSON,

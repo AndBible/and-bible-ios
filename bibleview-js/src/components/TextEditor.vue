@@ -221,7 +221,7 @@ const {sprintf} = useCommon();
 .pell-content {
   @extend .visible-scrollbar;
   max-height: calc(var(--max-height) - #{pell.$pell-button-height} - 2 * #{pell.$pell-content-padding});
-  height: inherit;
+  overflow-y: auto;
   padding: 0 7px 5px 7px;
   z-index: 1;
   position: relative;

@@ -170,6 +170,7 @@ extension AndBibleTests {
         let bookmarkObject = try XCTUnwrap(payload.first)
         XCTAssertEqual(bookmarkObject["type"] as? String, "bookmark")
         XCTAssertEqual(bookmarkObject["notes"] as? String, "Quoted \"note\"\nsecond line")
+        XCTAssertEqual(bookmarkObject["notesContentType"] as? String, "HTML")
         XCTAssertEqual(bookmarkObject["hasNote"] as? Bool, true)
         XCTAssertTrue(bookmarkObject["offsetRange"] is NSNull)
         XCTAssertTrue(bookmarkObject["primaryLabelId"] is NSNull)
@@ -352,6 +353,7 @@ extension AndBibleTests {
         XCTAssertEqual(genericBookmarkObject["id"] as? String, genericBookmark.id.uuidString)
         XCTAssertEqual(genericBookmarkObject["type"] as? String, "generic-bookmark")
         XCTAssertEqual(genericBookmarkObject["notes"] as? String, "Generic \"note\"")
+        XCTAssertEqual(genericBookmarkObject["notesContentType"] as? String, "HTML")
         XCTAssertTrue(genericBookmarkObject["primaryLabelId"] is NSNull)
 
         let relationships = try XCTUnwrap(payload["bookmarkToLabels"] as? [[String: Any]])
@@ -363,6 +365,134 @@ extension AndBibleTests {
         let entryObject = try XCTUnwrap(entries.first)
         XCTAssertEqual(entryObject["id"] as? String, createdEntry.id.uuidString)
         XCTAssertEqual(entryObject["text"] as? String, "Entry with \"quotes\"\nand newline")
+        XCTAssertEqual(entryObject["contentType"] as? String, "HTML")
+    }
+
+    /**
+     Verifies the Android note-content default for bookmark notes saved below the bridge layer.
+     Android persists `HTML` when no explicit note content type exists, so iOS service saves must
+     produce an explicit `contentType` row instead of leaving notes format implicit forever.
+     *
+     * Data dependencies:
+     * - creates one Bible bookmark and one generic bookmark in an in-memory bookmark schema
+     *
+     * Side effects:
+     * - persists notes through `BookmarkService`
+     *
+     * Failure modes:
+     * - fails if either note row omits `contentType` or stores a non-Android value
+     */
+    func testBookmarkServicePersistsDefaultHTMLContentTypeForNewBookmarkNotes() throws {
+        let container = try makeBookmarkRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        let bookmarkService = BookmarkService(store: BookmarkStore(modelContext: modelContext))
+
+        let bibleBookmark = bookmarkService.addBibleBookmark(
+            bookInitials: "KJV",
+            startOrdinal: 1,
+            endOrdinal: 1,
+            wholeVerse: true
+        )
+        let genericBookmark = bookmarkService.addGenericBookmark(
+            bookInitials: "DICT",
+            key: "entry-key",
+            startOrdinal: 2,
+            endOrdinal: 2
+        )
+
+        bookmarkService.saveBibleBookmarkNote(bookmarkId: bibleBookmark.id, note: "Bible note")
+        bookmarkService.saveBibleBookmarkNote(bookmarkId: genericBookmark.id, note: "Generic note")
+
+        let bibleNote = try XCTUnwrap(try modelContext.fetch(FetchDescriptor<BibleBookmarkNotes>()).first)
+        let genericNote = try XCTUnwrap(try modelContext.fetch(FetchDescriptor<GenericBookmarkNotes>()).first)
+        XCTAssertEqual(bibleNote.contentType, "HTML")
+        XCTAssertEqual(genericNote.contentType, "HTML")
+    }
+
+    /**
+     Verifies that the reader bridge applies Android's global `notes_content_type` preference when
+     creating a new note row.
+     *
+     * Setup:
+     * - configures the controller settings store with `notes_content_type = MARKDOWN`
+     * - saves a note through the same delegate entry point used by the Vue bridge
+     *
+     * Expected result:
+     * - the persisted note row records `MARKDOWN`, making the note's renderer stable even if the
+     *   global preference changes later
+     *
+     * Failure meaning:
+     * - a failure means iOS is only rendering from the current global setting and is not preserving
+     *   Android-compatible per-note content type state
+     */
+    @MainActor
+    func testReaderSaveBookmarkNoteUsesConfiguredMarkdownContentTypeForNewNote() throws {
+        let container = try makeBookmarkRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        let bookmarkService = BookmarkService(store: BookmarkStore(modelContext: modelContext))
+        let settingsStore = try makeInMemorySettingsStore()
+        settingsStore.setString(.notesContentType, value: "MARKDOWN")
+        let controller = BibleReaderController(bridge: BibleBridge())
+        controller.bookmarkService = bookmarkService
+        controller.settingsStore = settingsStore
+
+        let bookmark = bookmarkService.addBibleBookmark(
+            bookInitials: "KJV",
+            startOrdinal: 1,
+            endOrdinal: 1,
+            wholeVerse: true
+        )
+
+        controller.bridge(BibleBridge(), saveBookmarkNote: bookmark.id.uuidString, note: "**Markdown** note")
+
+        let bibleNote = try XCTUnwrap(try modelContext.fetch(FetchDescriptor<BibleBookmarkNotes>()).first)
+        XCTAssertEqual(bibleNote.contentType, "MARKDOWN")
+    }
+
+    /**
+     Verifies Android bridge parity for notes cleared to whitespace-only text.
+
+     Android's `BibleJavascriptInterface.saveBookmarkNote` trims only to decide whether a save should
+     become `null`; whitespace-only bookmark and generic notes therefore delete the detached note row
+     rather than persisting a blank row with a content type. This exercises the iOS reader delegate
+     path so the web editor, bridge, and service cannot drift from that behavior.
+     */
+    @MainActor
+    func testReaderSaveBookmarkNoteDeletesWhitespaceOnlyNotesLikeAndroidBridge() throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let container = try makeBookmarkRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        let bookmarkService = BookmarkService(store: BookmarkStore(modelContext: modelContext))
+        let controller = BibleReaderController(bridge: bridge)
+        controller.bookmarkService = bookmarkService
+
+        let bibleBookmark = bookmarkService.addBibleBookmark(
+            bookInitials: "KJV",
+            startOrdinal: 1,
+            endOrdinal: 1,
+            wholeVerse: true
+        )
+        let genericBookmark = bookmarkService.addGenericBookmark(
+            bookInitials: "DICT",
+            key: "entry-key",
+            startOrdinal: 2,
+            endOrdinal: 2
+        )
+        bookmarkService.saveBibleBookmarkNote(bookmarkId: bibleBookmark.id, note: "Bible note")
+        bookmarkService.saveBibleBookmarkNote(bookmarkId: genericBookmark.id, note: "Generic note")
+
+        controller.bridge(BibleBridge(), saveBookmarkNote: bibleBookmark.id.uuidString, note: " \n\t ")
+        controller.bridge(BibleBridge(), saveBookmarkNote: genericBookmark.id.uuidString, note: " \n\t ")
+
+        XCTAssertTrue(try modelContext.fetch(FetchDescriptor<BibleBookmarkNotes>()).isEmpty)
+        XCTAssertTrue(try modelContext.fetch(FetchDescriptor<GenericBookmarkNotes>()).isEmpty)
+
+        let payload = try XCTUnwrap(
+            bridgeEmissionPayload(from: recordedScripts(), event: "bookmark_note_modified") as? [String: Any]
+        )
+        XCTAssertEqual(payload["id"] as? String, bibleBookmark.id.uuidString)
+        XCTAssertEqual(payload["notes"] as? String, "")
+        XCTAssertTrue(payload["notesContentType"] is NSNull)
     }
     #endif
 
@@ -726,6 +856,7 @@ extension AndBibleTests {
             bookmarkService.createStudyPadEntry(labelId: label.id, afterOrderNumber: -1)
         )
         XCTAssertEqual(creation.0.orderNumber, 0)
+        XCTAssertEqual(creation.0.contentType, "HTML")
 
         let updateService = BookmarkService(store: BookmarkStore(modelContext: modelContext))
         updateService.updateStudyPadTextEntryText(id: creation.0.id, text: "Updated StudyPad note")

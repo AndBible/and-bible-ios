@@ -145,6 +145,7 @@ struct BibleReaderAnnotationPayloadFactory {
             primaryLabelId: primaryLabelId,
             lastUpdatedOn: lastUpdated,
             notes: hasNote ? noteText : nil,
+            notesContentType: bookmark.notes?.contentType,
             hasNote: hasNote,
             wholeVerse: bookmark.wholeVerse,
             customIcon: bookmark.customIcon,
@@ -175,6 +176,7 @@ struct BibleReaderAnnotationPayloadFactory {
             hashCode: hashCode,
             labelId: labelId,
             text: text,
+            contentType: entry.contentType,
             orderNumber: entry.orderNumber,
             indentLevel: entry.indentLevel
         )
@@ -310,6 +312,7 @@ struct BibleReaderAnnotationPayloadFactory {
             primaryLabelId: primaryLabelId,
             lastUpdatedOn: lastUpdated,
             notes: hasNote ? noteText : nil,
+            notesContentType: bookmark.notes?.contentType,
             hasNote: hasNote,
             wholeVerse: bookmark.wholeVerse,
             customIcon: bookmark.customIcon,

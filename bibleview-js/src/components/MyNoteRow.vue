@@ -65,6 +65,7 @@
       <EditableText
           ref="editor"
           :text="bookmark.notes"
+          :content-type="bookmark.notesContentType"
           :display-accessibility-label="myNotesEditAccessibilityLabel"
           :editor-accessibility-label="myNotesEditorAccessibilityLabel"
           @save="save"

@@ -334,7 +334,18 @@ public struct SearchView: View {
         }
     }
 
-    /// Deterministic XCUITest summary of the current search screen state.
+    /**
+     Deterministic XCUITest summary of the current Search screen state.
+
+     The UI harness reads this compact value instead of walking volatile SwiftUI search-field and
+     result-list hierarchies while searches rerun.
+
+     - Returns: A semicolon-delimited state string containing lifecycle, query, result, option, and
+       focus tokens.
+     - Side effects: none.
+     - Failure modes: This computed export cannot fail; missing or renamed tokens break only the
+       UI-test contract that consumes the value.
+     */
     private var searchAccessibilityValue: String {
         let stateToken: String = switch viewState {
         case .checkingIndex: "checkingIndex"
@@ -342,7 +353,7 @@ public struct SearchView: View {
         case .creatingIndex: "creatingIndex"
         case .ready: "ready"
         }
-        let baseState = "state=\(stateToken);query=\(query);searching=\(isSearching);results=\(results.count);scope=\(searchScopeToken(for: scopeOption));wordMode=\(searchWordModeToken(for: wordMode));\(searchAccessibilityTranslationPickerToken)"
+        let baseState = "state=\(stateToken);query=\(query);searching=\(isSearching);results=\(results.count);scope=\(searchScopeToken(for: scopeOption));wordMode=\(searchWordModeToken(for: wordMode));searchFieldFocused=\(isSearchFieldFocused);\(searchAccessibilityTranslationPickerToken)"
         guard UITestRuntimeConfiguration.enablesDetailedAccessibilityExports else {
             return baseState
         }
