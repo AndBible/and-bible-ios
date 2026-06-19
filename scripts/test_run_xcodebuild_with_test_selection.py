@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 import pathlib
 import json
 import os
@@ -235,6 +236,34 @@ class MainTests(unittest.TestCase):
             ],
             check=True,
         )
+
+    @mock.patch("run_xcodebuild_with_test_selection.subprocess.run")
+    def test_main_rejects_xctestrun_path_for_build_for_testing_before_running_xcodebuild(
+        self,
+        run_mock: mock.Mock,
+    ) -> None:
+        """Protect .xctestrun mode from silently falling back to project-mode builds."""
+        with mock.patch("sys.stderr", new_callable=io.StringIO) as stderr:
+            with self.assertRaises(SystemExit) as raised:
+                main(
+                    [
+                        "--xctestrun-path",
+                        ".derivedData/Build/Products/AndBible_iphonesimulator.xctestrun",
+                        "--destination",
+                        "id=DEVICE",
+                        "--result-bundle-path",
+                        ".artifacts/AndBibleTests-ui-reuse.xcresult",
+                        "--action",
+                        "build-for-testing",
+                    ]
+                )
+
+        self.assertEqual(raised.exception.code, 2)
+        self.assertIn(
+            "--xctestrun-path can only be used with --action test-without-building",
+            stderr.getvalue(),
+        )
+        run_mock.assert_not_called()
 
     @mock.patch("run_xcodebuild_with_test_selection.subprocess.run")
     def test_main_treats_sigsegv_after_passing_result_bundle_as_success(
