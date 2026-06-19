@@ -721,6 +721,45 @@ extension AndBibleTests {
     }
 
     /**
+     Verifies the public reader bridge emits Android's StudyPad deletion payload as a JavaScript
+     string instead of a raw UUID token.
+     *
+     * Android parity source:
+     * - `BibleView.onEvent(StudyPadTextEntryDeleted)` calls
+     *   `bibleView.emit("delete_study_pad_text_entry", "${event.studyPadTextEntryId}")`, making
+     *   the second JavaScript argument a quoted string.
+     *
+     * Expected result:
+     * - deleting a StudyPad journal through `BibleReaderController` emits
+     *   `delete_study_pad_text_entry` with a JSON string payload containing the deleted entry id.
+     *
+     * Failure meaning:
+     * - the bridge emitted an invalid raw UUID expression or otherwise drifted from Android's
+     *   StudyPad delete event contract, leaving the Vue client unable to consume the deletion.
+     */
+    @MainActor
+    func testReaderStudyPadDeleteBridgeEmitsAndroidStringPayload() throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let container = try makeBookmarkRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        let bookmarkService = BookmarkService(store: BookmarkStore(modelContext: modelContext))
+        let controller = BibleReaderController(bridge: bridge)
+        controller.bookmarkService = bookmarkService
+        let label = bookmarkService.createLabel(name: "Study", color: Label.defaultColor)
+        let entry = try XCTUnwrap(
+            bookmarkService.createStudyPadEntry(labelId: label.id, afterOrderNumber: -1)
+        ).0
+
+        controller.bridge(bridge, deleteStudyPadEntry: entry.id.uuidString)
+
+        let payload = try XCTUnwrap(
+            bridgeEmissionPayload(from: recordedScripts(), event: "delete_study_pad_text_entry") as? String
+        )
+        XCTAssertEqual(payload, entry.id.uuidString)
+        XCTAssertNil(bookmarkService.studyPadEntry(id: entry.id))
+    }
+
+    /**
      Verifies the Android note-content default for bookmark notes saved below the bridge layer.
      Android persists `HTML` when no explicit note content type exists, so iOS service saves must
      produce an explicit `contentType` row instead of leaving notes format implicit forever.

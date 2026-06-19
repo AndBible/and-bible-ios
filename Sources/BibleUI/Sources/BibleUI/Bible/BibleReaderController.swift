@@ -7315,7 +7315,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         case .studyPadUpdated(let payload):
             bridge.emit(event: "add_or_update_study_pad", data: payload)
         case .studyPadTextEntryDeleted(let id):
-            bridge.emit(event: "delete_study_pad_text_entry", data: id.uuidString)
+            bridge.emitEncoded(event: "delete_study_pad_text_entry", data: id.uuidString)
         case .bookmarkToLabelUpdated(let payload):
             bridge.emit(event: "add_or_update_bookmark_to_label", data: payload)
         }
