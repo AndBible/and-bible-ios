@@ -91,6 +91,24 @@ class BuildXcodebuildCommandTests(unittest.TestCase):
         self.assertEqual(command[-1], "build-for-testing")
         self.assertNotIn("", command)
 
+    def test_build_xcodebuild_command_reports_missing_project_mode_inputs(self) -> None:
+        """Keep CI wrapper failures actionable when project-mode arguments are omitted."""
+        with self.assertRaisesRegex(
+            ValueError,
+            "Missing: scheme, derived_data_path",
+        ):
+            build_xcodebuild_command(
+                project="AndBible.xcodeproj",
+                scheme=None,
+                configuration="Debug",
+                destination="id=DEVICE",
+                derived_data_path=None,
+                result_bundle_path=".artifacts/AndBibleBuild-unit.xcresult",
+                code_signing_allowed="NO",
+                selection_args_text="",
+                action="build-for-testing",
+            )
+
     def test_build_xcodebuild_command_uses_xctestrun_without_project_build_inputs(self) -> None:
         """Protect the reusable-build mode from accidentally invoking a project build."""
         command = build_xcodebuild_command(

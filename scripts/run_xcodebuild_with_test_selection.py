@@ -58,7 +58,9 @@ def build_xcodebuild_command(
     if missing_args:
         raise ValueError(
             "project, scheme, configuration, and derived_data_path are required "
-            "when xctestrun_path is not provided."
+            "when xctestrun_path is not provided. Missing: "
+            + ", ".join(missing_args)
+            + "."
         )
 
     return [
