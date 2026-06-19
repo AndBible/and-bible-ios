@@ -115,6 +115,7 @@ class IOSCIUIShardGuardrailsTests(unittest.TestCase):
         self.assertIn("andbible-ui-build-products-${{ github.run_id }}", producer)
         self.assertIn(".derivedData/Build/Products", stage_run)
         self.assertIn("*.xctestrun", stage_run)
+        self.assertNotIn("mapfile", stage_run)
         self.assertIn(".build/debug/UITestFixtureTool", stage_run)
         self.assertIn("tar -czf .artifacts/ui-build-product-reuse.tar.gz", stage_run)
         self.assertIn("andbible-ui-build-products-${{ github.run_id }}", consumer)
@@ -124,6 +125,7 @@ class IOSCIUIShardGuardrailsTests(unittest.TestCase):
             consumer,
         )
         self.assertIn("--xctestrun-path", consumer_run)
+        self.assertNotIn("mapfile", consumer_run)
         self.assertIn("--action test-without-building", consumer_run)
         self.assertNotIn("--action build-for-testing", consumer_run)
 

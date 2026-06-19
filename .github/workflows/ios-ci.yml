@@ -387,7 +387,10 @@ jobs:
             exit 1
           fi
 
-          mapfile -t xctestrun_files < <(find "${products_path}" -maxdepth 1 -name "*.xctestrun" -print)
+          xctestrun_files=()
+          while IFS= read -r xctestrun_file; do
+            xctestrun_files+=("${xctestrun_file}")
+          done < <(find "${products_path}" -maxdepth 1 -name "*.xctestrun" -print)
           if [[ "${#xctestrun_files[@]}" -ne 1 ]]; then
             echo "Expected exactly one .xctestrun in ${products_path}; found ${#xctestrun_files[@]}."
             printf '%s\n' "${xctestrun_files[@]}"
@@ -499,7 +502,10 @@ jobs:
             exit 1
           fi
 
-          mapfile -t xctestrun_files < <(find "${products_path}" -maxdepth 1 -name "*.xctestrun" -print)
+          xctestrun_files=()
+          while IFS= read -r xctestrun_file; do
+            xctestrun_files+=("${xctestrun_file}")
+          done < <(find "${products_path}" -maxdepth 1 -name "*.xctestrun" -print)
           if [[ "${#xctestrun_files[@]}" -ne 1 ]]; then
             echo "Expected exactly one restored .xctestrun in ${products_path}; found ${#xctestrun_files[@]}."
             printf '%s\n' "${xctestrun_files[@]}"
