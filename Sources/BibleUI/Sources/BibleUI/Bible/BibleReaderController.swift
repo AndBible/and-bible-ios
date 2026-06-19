@@ -2733,47 +2733,14 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      */
     public func bridge(_ bridge: BibleBridge, createNewStudyPadEntry labelId: String, entryType: String, afterEntryId: String) {
         logger.info("Create StudyPad entry type=\(entryType) after \(afterEntryId) in label \(labelId)")
-        guard let service = bookmarkService,
-              let lblId = UUID(uuidString: labelId) else { return }
-
-        // Determine the order number after which to insert, based on entry type
-        var afterOrder = -1
-        if let afterUUID = UUID(uuidString: afterEntryId) {
-            switch entryType {
-            case "bookmark":
-                // afterEntryId is a BibleBookmark ID — look up its BTL order
-                if let btl = service.bibleBookmarkToLabel(bookmarkId: afterUUID, labelId: lblId) {
-                    afterOrder = btl.orderNumber
-                }
-            case "generic-bookmark":
-                // afterEntryId is a GenericBookmark ID — look up its BTL order
-                if let gbtl = service.genericBookmarkToLabel(bookmarkId: afterUUID, labelId: lblId) {
-                    afterOrder = gbtl.orderNumber
-                }
-            case "journal":
-                // afterEntryId is a StudyPadTextEntry ID
-                if let afterEntry = service.studyPadEntry(id: afterUUID) {
-                    afterOrder = afterEntry.orderNumber
-                }
-            default:
-                // "none" or unknown — insert at beginning
-                afterOrder = -1
-            }
-        }
-
-        guard let result = service.createStudyPadEntry(
-            labelId: lblId,
-            afterOrderNumber: afterOrder,
-            contentType: currentNotesContentType()
-        ) else { return }
-        let (entry, changedBtls, changedGbtls, changedEntries) = result
-        studyPadMutationRevision += 1
-
-        emitStudyPadOrderEvent(
-            newEntry: entry,
-            changedBibleBtls: changedBtls,
-            changedGenericBtls: changedGbtls,
-            changedEntries: changedEntries
+        guard let coordinator = studyPadActionCoordinator() else { return }
+        applyStudyPadActionResult(
+            coordinator.createNewStudyPadEntry(
+                labelId: labelId,
+                entryType: entryType,
+                afterEntryId: afterEntryId
+            ),
+            bridge: bridge
         )
         applyUITestStudyPadCreatedNoteTextIfNeeded()
     }
@@ -2783,23 +2750,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      */
     public func bridge(_ bridge: BibleBridge, deleteStudyPadEntry studyPadId: String) {
         logger.info("Delete StudyPad entry: \(studyPadId)")
-        guard let service = bookmarkService,
-              let uuid = UUID(uuidString: studyPadId) else { return }
-
-        guard let result = service.deleteStudyPadEntry(id: uuid) else { return }
-        let (deletedId, _, changedBtls, changedGbtls, changedEntries) = result
-        studyPadMutationRevision += 1
-
-        // Emit delete event
-        bridge.emit(event: "delete_study_pad_text_entry", data: "\"\(deletedId.uuidString)\"")
-
-        // Emit reorder event with new order numbers
-        emitStudyPadOrderEvent(
-            newEntry: nil,
-            changedBibleBtls: changedBtls,
-            changedGenericBtls: changedGbtls,
-            changedEntries: changedEntries
-        )
+        guard let coordinator = studyPadActionCoordinator() else { return }
+        applyStudyPadActionResult(coordinator.deleteStudyPadEntry(studyPadId), bridge: bridge)
     }
 
     /**
@@ -2807,29 +2759,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      */
     public func bridge(_ bridge: BibleBridge, updateStudyPadTextEntry data: String) {
         logger.info("Update StudyPad text entry metadata")
-        guard let service = bookmarkService,
-              let jsonData = data.data(using: .utf8),
-              let dict = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any],
-              let idStr = dict["id"] as? String,
-              let uuid = UUID(uuidString: idStr) else { return }
-
-        let orderNumber = dict["orderNumber"] as? Int
-        let indentLevel = dict["indentLevel"] as? Int
-        service.updateStudyPadTextEntry(id: uuid, orderNumber: orderNumber, indentLevel: indentLevel)
-        studyPadMutationRevision += 1
-
-        // Emit update back to Vue.js
-        if let entry = service.studyPadEntry(id: uuid) {
-            bridge.emit(
-                event: "add_or_update_study_pad",
-                data: StudyPadUpdatePayload(
-                    studyPadTextEntry: buildStudyPadEntryJSON(entry),
-                    bookmarkToLabelsOrdered: [],
-                    genericBookmarkToLabelsOrdered: [],
-                    studyPadItemsOrdered: []
-                )
-            )
-        }
+        guard let coordinator = studyPadActionCoordinator() else { return }
+        applyStudyPadActionResult(coordinator.updateStudyPadTextEntry(data: data), bridge: bridge)
     }
 
     /**
@@ -2837,10 +2768,11 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      */
     public func bridge(_ bridge: BibleBridge, updateStudyPadTextEntryText id: String, text: String) {
         logger.info("Update StudyPad entry text: \(id)")
-        guard let service = bookmarkService,
-              let uuid = UUID(uuidString: id) else { return }
-        service.updateStudyPadTextEntryText(id: uuid, text: text)
-        studyPadMutationRevision += 1
+        guard let coordinator = studyPadActionCoordinator() else { return }
+        applyStudyPadActionResult(
+            coordinator.updateStudyPadTextEntryText(id: id, text: text),
+            bridge: bridge
+        )
     }
 
     /**
@@ -2848,38 +2780,10 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      */
     public func bridge(_ bridge: BibleBridge, updateOrderNumber labelId: String, data: String) {
         logger.info("Update order numbers for label \(labelId)")
-        guard let service = bookmarkService,
-              let lblId = UUID(uuidString: labelId),
-              let jsonData = data.data(using: .utf8),
-              let dict = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any] else { return }
-
-        // Parse the three order arrays: {bookmarkToLabels: [{first, second}], genericBookmarkToLabels: [...], studyPadTextEntries: [...]}
-        let bibleOrders = parsePairArray(dict["bookmarkToLabels"])
-        let genericOrders = parsePairArray(dict["genericBookmarkToLabels"])
-        let entryOrdersRaw = parsePairArray(dict["studyPadTextEntries"])
-        let entryOrders = entryOrdersRaw.map { (entryId: $0.bookmarkId, orderNumber: $0.orderNumber) }
-
-        service.updateOrderNumbers(
-            labelId: lblId,
-            bibleBookmarkOrders: bibleOrders,
-            genericBookmarkOrders: genericOrders,
-            studyPadEntryOrders: entryOrders
-        )
-        studyPadMutationRevision += 1
-
-        // Emit updated order numbers back to Vue.js
-        let btls = service.bibleBookmarkToLabels(labelId: lblId)
-        let gbtls = service.genericBookmarkToLabels(labelId: lblId)
-        let entries = service.studyPadEntries(labelId: lblId)
-
-        bridge.emit(
-            event: "add_or_update_study_pad",
-            data: StudyPadUpdatePayload(
-                studyPadTextEntry: nil,
-                bookmarkToLabelsOrdered: btls.compactMap { buildBibleBookmarkToLabelJSON($0) },
-                genericBookmarkToLabelsOrdered: gbtls.compactMap { buildGenericBookmarkToLabelJSON($0) },
-                studyPadItemsOrdered: entries.map { buildStudyPadEntryJSON($0) }
-            )
+        guard let coordinator = studyPadActionCoordinator() else { return }
+        applyStudyPadActionResult(
+            coordinator.updateOrderNumber(labelId: labelId, data: data),
+            bridge: bridge
         )
     }
 
@@ -2888,27 +2792,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      */
     public func bridge(_ bridge: BibleBridge, updateBookmarkToLabel data: String) {
         logger.info("Update BibleBookmarkToLabel")
-        guard let service = bookmarkService,
-              let jsonData = data.data(using: .utf8),
-              let dict = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any],
-              let bmIdStr = dict["bookmarkId"] as? String,
-              let lblIdStr = dict["labelId"] as? String,
-              let bmId = UUID(uuidString: bmIdStr),
-              let lblId = UUID(uuidString: lblIdStr) else { return }
-
-        service.updateBibleBookmarkToLabel(
-            bookmarkId: bmId,
-            labelId: lblId,
-            orderNumber: dict["orderNumber"] as? Int,
-            indentLevel: dict["indentLevel"] as? Int,
-            expandContent: dict["expandContent"] as? Bool
-        )
-
-        // Emit update
-        if let btl = service.bibleBookmarkToLabel(bookmarkId: bmId, labelId: lblId) {
-            guard let btlPayload = buildBibleBookmarkToLabelJSON(btl) else { return }
-            bridge.emit(event: "add_or_update_bookmark_to_label", data: btlPayload)
-        }
+        guard let coordinator = studyPadActionCoordinator() else { return }
+        applyStudyPadActionResult(coordinator.updateBookmarkToLabel(data: data), bridge: bridge)
     }
 
     /**
@@ -2916,27 +2801,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      */
     public func bridge(_ bridge: BibleBridge, updateGenericBookmarkToLabel data: String) {
         logger.info("Update GenericBookmarkToLabel")
-        guard let service = bookmarkService,
-              let jsonData = data.data(using: .utf8),
-              let dict = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any],
-              let bmIdStr = dict["bookmarkId"] as? String,
-              let lblIdStr = dict["labelId"] as? String,
-              let bmId = UUID(uuidString: bmIdStr),
-              let lblId = UUID(uuidString: lblIdStr) else { return }
-
-        service.updateGenericBookmarkToLabel(
-            bookmarkId: bmId,
-            labelId: lblId,
-            orderNumber: dict["orderNumber"] as? Int,
-            indentLevel: dict["indentLevel"] as? Int,
-            expandContent: dict["expandContent"] as? Bool
-        )
-
-        // Emit update
-        if let gbtl = service.genericBookmarkToLabel(bookmarkId: bmId, labelId: lblId) {
-            guard let gbtlPayload = buildGenericBookmarkToLabelJSON(gbtl) else { return }
-            bridge.emit(event: "add_or_update_bookmark_to_label", data: gbtlPayload)
-        }
+        guard let coordinator = studyPadActionCoordinator() else { return }
+        applyStudyPadActionResult(coordinator.updateGenericBookmarkToLabel(data: data), bridge: bridge)
     }
 
     /**
@@ -7376,21 +7242,22 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
     // MARK: - StudyPad Event Helpers
 
-    /// Emit a StudyPad order event to Vue.js after create/delete/reorder.
-    private func emitStudyPadOrderEvent(
-        newEntry: StudyPadTextEntry?,
-        changedBibleBtls: [BibleBookmarkToLabel],
-        changedGenericBtls: [GenericBookmarkToLabel],
-        changedEntries: [StudyPadTextEntry]
-    ) {
-        bridge.emit(
-            event: "add_or_update_study_pad",
-            data: StudyPadUpdatePayload(
-                studyPadTextEntry: newEntry.map { buildStudyPadEntryJSON($0) },
-                bookmarkToLabelsOrdered: changedBibleBtls.compactMap { buildBibleBookmarkToLabelJSON($0) },
-                genericBookmarkToLabelsOrdered: changedGenericBtls.compactMap { buildGenericBookmarkToLabelJSON($0) },
-                studyPadItemsOrdered: changedEntries.map { buildStudyPadEntryJSON($0) }
-            )
+    /**
+     Creates the coordinator that owns StudyPad bridge action mutation rules.
+
+     - Returns: A coordinator bound to the current bookmark service and reader payload context, or
+       `nil` when bookmark persistence is not available.
+     - Side effects: None during construction; returned coordinator methods mutate persistence.
+     - Failure modes: Returns `nil` rather than accepting StudyPad actions without persistence.
+     */
+    private func studyPadActionCoordinator() -> BibleReaderStudyPadActionCoordinator? {
+        guard let bookmarkService else { return nil }
+        return BibleReaderStudyPadActionCoordinator(
+            bookmarkService: bookmarkService,
+            payloadFactory: annotationPayloadFactory(),
+            currentNotesContentType: { [weak self] in
+                self?.currentNotesContentType() ?? "HTML"
+            }
         )
     }
 
@@ -7410,14 +7277,47 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         }
     }
 
-    /// Parse [{first: "uuid", second: orderNumber}, ...] from Vue.js updateOrderNumber data.
-    private func parsePairArray(_ value: Any?) -> [(bookmarkId: UUID, orderNumber: Int)] {
-        guard let array = value as? [[String: Any]] else { return [] }
-        return array.compactMap { dict in
-            guard let first = dict["first"] as? String,
-                  let second = dict["second"] as? Int,
-                  let uuid = UUID(uuidString: first) else { return nil }
-            return (uuid, second)
+    /**
+     Applies a coordinated StudyPad action result to controller-owned state and the active bridge.
+
+     - Parameters:
+       - result: Mutation result produced by `BibleReaderStudyPadActionCoordinator`.
+       - bridge: Bridge instance associated with the delegate callback being handled.
+     - Side effects: may advance `studyPadMutationRevision` and emits JavaScript events.
+     - Failure modes: Encoding failures inside `BibleBridge.emit` are swallowed by the bridge.
+     */
+    private func applyStudyPadActionResult(
+        _ result: BibleReaderStudyPadActionResult,
+        bridge: BibleBridge
+    ) {
+        if result.incrementsStudyPadRevision {
+            studyPadMutationRevision += 1
+        }
+        for event in result.events {
+            emitStudyPadActionEvent(event, bridge: bridge)
+        }
+    }
+
+    /**
+     Emits one StudyPad action event into Vue.js.
+
+     - Parameters:
+       - event: Typed event produced by the StudyPad action coordinator.
+       - bridge: Bridge instance associated with the delegate callback being handled.
+     - Side effects: Sends JavaScript to the web client.
+     - Failure modes: Encoding failures inside `BibleBridge.emit` are swallowed by the bridge.
+     */
+    private func emitStudyPadActionEvent(
+        _ event: BibleReaderStudyPadActionEvent,
+        bridge: BibleBridge
+    ) {
+        switch event {
+        case .studyPadUpdated(let payload):
+            bridge.emit(event: "add_or_update_study_pad", data: payload)
+        case .studyPadTextEntryDeleted(let id):
+            bridge.emitEncoded(event: "delete_study_pad_text_entry", data: id.uuidString)
+        case .bookmarkToLabelUpdated(let payload):
+            bridge.emit(event: "add_or_update_bookmark_to_label", data: payload)
         }
     }
 
