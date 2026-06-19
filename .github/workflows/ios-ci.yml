@@ -22,6 +22,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       required_checks_only: ${{ steps.classify.outputs.required_checks_only }}
+      run_ui_build_product_reuse_experiment: ${{ steps.classify.outputs.run_ui_build_product_reuse_experiment }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -55,12 +56,18 @@ jobs:
           fi
 
           required_checks_only=true
+          run_ui_build_product_reuse_experiment=false
           if [[ "${#changed_files[@]}" -eq 0 ]]; then
             required_checks_only=false
           fi
 
           for path in "${changed_files[@]}"; do
             echo "changed: ${path}"
+            case "${path}" in
+              .github/workflows/ios-ci.yml)
+                run_ui_build_product_reuse_experiment=true
+                ;;
+            esac
             case "${path}" in
               docs/*|*.md|.github/workflows/ios-ci.yml)
                 ;;
@@ -72,6 +79,8 @@ jobs:
 
           echo "required_checks_only=${required_checks_only}"
           echo "required_checks_only=${required_checks_only}" >> "${GITHUB_OUTPUT}"
+          echo "run_ui_build_product_reuse_experiment=${run_ui_build_product_reuse_experiment}"
+          echo "run_ui_build_product_reuse_experiment=${run_ui_build_product_reuse_experiment}" >> "${GITHUB_OUTPUT}"
 
       - name: Setup Python
         uses: actions/setup-python@v6
@@ -257,6 +266,320 @@ jobs:
           if-no-files-found: error
           retention-days: 1
           overwrite: true
+
+  ios-ui-build-product-reuse-producer:
+    name: UI Build Product Reuse Producer
+    runs-on: macos-15
+    if: >-
+      ${{
+        needs.repo-standards.outputs.run_ui_build_product_reuse_experiment == 'true' ||
+        contains(github.event.pull_request.labels.*.name, 'ci:ui-build-reuse')
+      }}
+    needs:
+      - repo-standards
+      - localization-guardrails
+    timeout-minutes: 60
+    env:
+      DERIVED_DATA_PATH: .derivedData
+      BUILD_PRODUCTS_ARTIFACT_ROOT: .artifacts/ui-build-product-reuse
+      BUILD_XCRESULT_BUNDLE_PATH: .artifacts/AndBibleBuild-ui-build-product-reuse.xcresult
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Select Xcode version
+        uses: maxim-lobanov/setup-xcode@v1.6.0
+        with:
+          xcode-version: ${{ env.XCODE_VERSION }}
+
+      - name: Restore SwiftPM and build caches
+        uses: actions/cache@v5
+        with:
+          path: |
+            .derivedData/SourcePackages
+            ~/Library/Caches/org.swift.swiftpm
+            ~/.swiftpm
+          key: ${{ runner.os }}-xcode-${{ env.XCODE_VERSION }}-spm-${{ hashFiles('Package.swift', 'AndBible.xcodeproj/project.pbxproj') }}
+          restore-keys: |
+            ${{ runner.os }}-xcode-${{ env.XCODE_VERSION }}-spm-
+
+      - name: Restore libsword build cache
+        uses: actions/cache@v5
+        with:
+          path: |
+            libsword/sword-src
+            libsword/build
+            libsword/libsword.xcframework
+          key: ${{ runner.os }}-xcode-${{ env.XCODE_VERSION }}-libsword-hosttool-${{ hashFiles('libsword/build-ios.sh') }}
+          restore-keys: |
+            ${{ runner.os }}-xcode-${{ env.XCODE_VERSION }}-libsword-hosttool-
+
+      - name: Show Xcode version
+        run: xcodebuild -version
+
+      - name: Ensure iOS simulator runtime is available
+        run: |
+          if xcrun simctl list runtimes available | grep -Fq 'iOS '; then
+            echo "An iOS simulator runtime is already installed."
+          else
+            echo "No iOS simulator runtime was found; downloading it for the selected Xcode."
+            xcodebuild -downloadPlatform iOS
+          fi
+
+      - name: Ensure libsword build prerequisites
+        run: |
+          if ! command -v cmake >/dev/null 2>&1; then
+            brew install cmake
+          fi
+          if ! command -v svn >/dev/null 2>&1; then
+            brew install subversion
+          fi
+
+      - name: Build libsword XCFramework
+        working-directory: libsword
+        env:
+          INCLUDE_MACOS_SLICE: "1"
+        run: |
+          if [ -f libsword.xcframework/macos-arm64_x86_64/libsword.a ] && [ -f libsword.xcframework/ios-arm64/libsword.a ] && [ -f libsword.xcframework/ios-arm64_x86_64-simulator/libsword.a ]; then
+            echo "Using cached libsword.xcframework"
+          else
+            ./build-ios.sh
+          fi
+
+      - name: Resolve iOS simulator destination
+        id: simulator
+        run: >-
+          python3 scripts/resolve_ios_simulator_destination.py
+          --project AndBible.xcodeproj
+          --scheme AndBible
+          --create-dedicated-device
+          --device-name-prefix "AndBible CI UI Reuse Producer"
+
+      - name: Boot selected simulator
+        run: >-
+          python3 scripts/wait_for_simulator_boot.py
+          --simulator-id "${{ steps.simulator.outputs.simulator_id }}"
+          --timeout-seconds 300
+
+      - name: Build for testing
+        run: |
+          mkdir -p .artifacts
+          python3 -u scripts/run_xcodebuild_with_test_selection.py \
+            --project AndBible.xcodeproj \
+            --scheme AndBible \
+            --configuration Debug \
+            --destination "${{ steps.simulator.outputs.destination }}" \
+            --derived-data-path "${DERIVED_DATA_PATH}" \
+            --result-bundle-path "${BUILD_XCRESULT_BUNDLE_PATH}" \
+            --code-signing-allowed NO \
+            --action build-for-testing
+
+      - name: Build host-side UI fixture tool
+        run: swift build --package-path . --product UITestFixtureTool
+
+      - name: Stage reusable UI build products
+        run: |
+          set -euo pipefail
+
+          products_path="${DERIVED_DATA_PATH}/Build/Products"
+          if [[ ! -d "${products_path}" ]]; then
+            echo "Expected Xcode build products at ${products_path}."
+            exit 1
+          fi
+
+          mapfile -t xctestrun_files < <(find "${products_path}" -maxdepth 1 -name "*.xctestrun" -print)
+          if [[ "${#xctestrun_files[@]}" -ne 1 ]]; then
+            echo "Expected exactly one .xctestrun in ${products_path}; found ${#xctestrun_files[@]}."
+            printf '%s\n' "${xctestrun_files[@]}"
+            exit 1
+          fi
+
+          if [[ ! -x .build/debug/UITestFixtureTool ]]; then
+            echo "Expected host-side UI fixture tool at .build/debug/UITestFixtureTool."
+            exit 1
+          fi
+
+          rm -rf "${BUILD_PRODUCTS_ARTIFACT_ROOT}"
+          mkdir -p "${BUILD_PRODUCTS_ARTIFACT_ROOT}/.derivedData/Build"
+          mkdir -p "${BUILD_PRODUCTS_ARTIFACT_ROOT}/.build/debug"
+          ditto "${products_path}" "${BUILD_PRODUCTS_ARTIFACT_ROOT}/.derivedData/Build/Products"
+          ditto ".build/debug/UITestFixtureTool" "${BUILD_PRODUCTS_ARTIFACT_ROOT}/.build/debug/UITestFixtureTool"
+
+          echo "Staged reusable Xcode products:"
+          find "${BUILD_PRODUCTS_ARTIFACT_ROOT}/.derivedData/Build/Products" -maxdepth 2 -print | sort
+          echo "Staged host fixture tool:"
+          ls -l "${BUILD_PRODUCTS_ARTIFACT_ROOT}/.build/debug/UITestFixtureTool"
+
+          tar -czf .artifacts/ui-build-product-reuse.tar.gz -C "${BUILD_PRODUCTS_ARTIFACT_ROOT}" .
+          ls -lh .artifacts/ui-build-product-reuse.tar.gz
+
+      - name: Upload reusable UI build products
+        id: upload_reusable_ui_build_products
+        continue-on-error: true
+        uses: actions/upload-artifact@v6
+        with:
+          name: andbible-ui-build-products-${{ github.run_id }}
+          path: .artifacts/ui-build-product-reuse.tar.gz
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Retry upload reusable UI build products
+        if: steps.upload_reusable_ui_build_products.outcome == 'failure'
+        uses: actions/upload-artifact@v6
+        with:
+          name: andbible-ui-build-products-${{ github.run_id }}
+          path: .artifacts/ui-build-product-reuse.tar.gz
+          if-no-files-found: error
+          retention-days: 1
+          overwrite: true
+
+      - name: Upload reuse producer xcodebuild result bundle
+        id: upload_reuse_producer_xcresult
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v6
+        with:
+          name: andbible-xcresult-${{ github.run_id }}-ui-reuse-producer
+          path: .artifacts/*.xcresult
+          if-no-files-found: warn
+          include-hidden-files: true
+          retention-days: 14
+
+      - name: Retry upload reuse producer xcodebuild result bundle
+        if: always() && steps.upload_reuse_producer_xcresult.outcome == 'failure'
+        uses: actions/upload-artifact@v6
+        with:
+          name: andbible-xcresult-${{ github.run_id }}-ui-reuse-producer
+          path: .artifacts/*.xcresult
+          if-no-files-found: warn
+          include-hidden-files: true
+          retention-days: 14
+          overwrite: true
+
+      - name: Delete dedicated simulator
+        if: always() && steps.simulator.outputs.simulator_created == 'true'
+        run: xcrun simctl delete "${{ steps.simulator.outputs.simulator_id }}"
+
+  ios-ui-build-product-reuse-consumer:
+    name: UI Build Product Reuse Consumer
+    runs-on: macos-15
+    needs:
+      - ios-ui-build-product-reuse-producer
+    timeout-minutes: 30
+    env:
+      DERIVED_DATA_PATH: .derivedData
+      TEST_XCRESULT_BUNDLE_PATH: .artifacts/AndBibleTests-ui-build-product-reuse.xcresult
+      TEST_SELECTION_ARGS: |-
+        -only-testing:AndBibleUITests/AndBibleUITests/testAboutScreenOpensFromReaderMenu
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Select Xcode version
+        uses: maxim-lobanov/setup-xcode@v1.6.0
+        with:
+          xcode-version: ${{ env.XCODE_VERSION }}
+
+      - name: Download reusable UI build products
+        uses: actions/download-artifact@v5
+        with:
+          name: andbible-ui-build-products-${{ github.run_id }}
+          path: .artifacts/reuse-download
+
+      - name: Verify restored UI build products
+        id: restored_products
+        run: |
+          set -euo pipefail
+
+          tar -xzf .artifacts/reuse-download/ui-build-product-reuse.tar.gz -C .
+
+          products_path="${DERIVED_DATA_PATH}/Build/Products"
+          if [[ ! -d "${products_path}" ]]; then
+            echo "Expected restored Xcode build products at ${products_path}."
+            exit 1
+          fi
+
+          mapfile -t xctestrun_files < <(find "${products_path}" -maxdepth 1 -name "*.xctestrun" -print)
+          if [[ "${#xctestrun_files[@]}" -ne 1 ]]; then
+            echo "Expected exactly one restored .xctestrun in ${products_path}; found ${#xctestrun_files[@]}."
+            printf '%s\n' "${xctestrun_files[@]}"
+            exit 1
+          fi
+
+          if [[ ! -f .build/debug/UITestFixtureTool ]]; then
+            echo "Expected restored host-side UI fixture tool at .build/debug/UITestFixtureTool."
+            exit 1
+          fi
+          chmod +x .build/debug/UITestFixtureTool
+
+          echo "xctestrun_path=${xctestrun_files[0]}" >> "${GITHUB_OUTPUT}"
+          echo "Restored reusable Xcode products:"
+          find "${products_path}" -maxdepth 2 -print | sort
+
+      - name: Ensure iOS simulator runtime is available
+        run: |
+          if xcrun simctl list runtimes available | grep -Fq 'iOS '; then
+            echo "An iOS simulator runtime is already installed."
+          else
+            echo "No iOS simulator runtime was found; downloading it for the selected Xcode."
+            xcodebuild -downloadPlatform iOS
+          fi
+
+      - name: Resolve iOS simulator destination
+        id: simulator
+        run: >-
+          python3 scripts/resolve_ios_simulator_destination.py
+          --project AndBible.xcodeproj
+          --scheme AndBible
+          --create-dedicated-device
+          --device-name-prefix "AndBible CI UI Reuse Consumer"
+
+      - name: Boot selected simulator
+        run: >-
+          python3 scripts/wait_for_simulator_boot.py
+          --simulator-id "${{ steps.simulator.outputs.simulator_id }}"
+          --timeout-seconds 300
+
+      - name: Run reused UI build products without rebuilding
+        env:
+          UITEST_FIXTURE_TOOL_PATH: ${{ github.workspace }}/.build/debug/UITestFixtureTool
+          UITEST_BUNDLE_ID: org.andbible.ios
+          UITEST_SIMULATOR_ID: ${{ steps.simulator.outputs.simulator_id }}
+        run: |
+          mkdir -p .artifacts
+          python3 -u scripts/run_xcodebuild_with_test_selection.py \
+            --xctestrun-path "${{ steps.restored_products.outputs.xctestrun_path }}" \
+            --destination "${{ steps.simulator.outputs.destination }}" \
+            --result-bundle-path "${TEST_XCRESULT_BUNDLE_PATH}" \
+            --code-signing-allowed NO \
+            --action test-without-building
+
+      - name: Upload reuse consumer xcodebuild result bundle
+        id: upload_reuse_consumer_xcresult
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v6
+        with:
+          name: andbible-xcresult-${{ github.run_id }}-ui-reuse-consumer
+          path: .artifacts/*.xcresult
+          if-no-files-found: warn
+          include-hidden-files: true
+          retention-days: 14
+
+      - name: Retry upload reuse consumer xcodebuild result bundle
+        if: always() && steps.upload_reuse_consumer_xcresult.outcome == 'failure'
+        uses: actions/upload-artifact@v6
+        with:
+          name: andbible-xcresult-${{ github.run_id }}-ui-reuse-consumer
+          path: .artifacts/*.xcresult
+          if-no-files-found: warn
+          include-hidden-files: true
+          retention-days: 14
+          overwrite: true
+
+      - name: Delete dedicated simulator
+        if: always() && steps.simulator.outputs.simulator_created == 'true'
+        run: xcrun simctl delete "${{ steps.simulator.outputs.simulator_id }}"
 
   ios-simulator-unit-tests:
     name: Unit Tests (Simulator)

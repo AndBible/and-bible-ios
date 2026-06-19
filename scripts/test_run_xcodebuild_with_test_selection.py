@@ -91,6 +91,37 @@ class BuildXcodebuildCommandTests(unittest.TestCase):
         self.assertEqual(command[-1], "build-for-testing")
         self.assertNotIn("", command)
 
+    def test_build_xcodebuild_command_uses_xctestrun_without_project_build_inputs(self) -> None:
+        """Protect the reusable-build mode from accidentally invoking a project build."""
+        command = build_xcodebuild_command(
+            project=None,
+            scheme=None,
+            configuration=None,
+            destination="id=DEVICE",
+            derived_data_path=None,
+            result_bundle_path=".artifacts/AndBibleTests-ui-reuse.xcresult",
+            code_signing_allowed="NO",
+            selection_args_text="-only-testing:AndBibleUITests/AndBibleUITests/testAboutScreenOpensFromReaderMenu",
+            action="test-without-building",
+            xctestrun_path=".derivedData/Build/Products/AndBible_iphonesimulator.xctestrun",
+        )
+
+        self.assertEqual(
+            command,
+            [
+                "xcodebuild",
+                "-xctestrun",
+                ".derivedData/Build/Products/AndBible_iphonesimulator.xctestrun",
+                "-destination",
+                "id=DEVICE",
+                "-resultBundlePath",
+                ".artifacts/AndBibleTests-ui-reuse.xcresult",
+                "CODE_SIGNING_ALLOWED=NO",
+                "-only-testing:AndBibleUITests/AndBibleUITests/testAboutScreenOpensFromReaderMenu",
+                "test-without-building",
+            ],
+        )
+
 
 class MainTests(unittest.TestCase):
     @mock.patch("run_xcodebuild_with_test_selection.subprocess.run")
@@ -145,6 +176,43 @@ class MainTests(unittest.TestCase):
                 "CODE_SIGNING_ALLOWED=NO",
                 "-only-testing:AndBibleUITests/AndBibleUITests/testOne",
                 "-only-testing:AndBibleUITests/AndBibleUITests/testTwo",
+                "test-without-building",
+            ],
+            check=True,
+        )
+
+    @mock.patch("run_xcodebuild_with_test_selection.subprocess.run")
+    def test_main_accepts_xctestrun_path_for_test_without_building(
+        self,
+        run_mock: mock.Mock,
+    ) -> None:
+        """Protect CI's restored-product path while preserving selection parsing and SIGSEGV handling."""
+        exit_code = main(
+            [
+                "--xctestrun-path",
+                ".derivedData/Build/Products/AndBible_iphonesimulator.xctestrun",
+                "--destination",
+                "id=DEVICE",
+                "--result-bundle-path",
+                ".artifacts/AndBibleTests-ui-reuse.xcresult",
+                "--test-selection-args=-only-testing:AndBibleUITests/AndBibleUITests/testAboutScreenOpensFromReaderMenu",
+                "--action",
+                "test-without-building",
+            ]
+        )
+
+        self.assertEqual(exit_code, 0)
+        run_mock.assert_called_once_with(
+            [
+                "xcodebuild",
+                "-xctestrun",
+                ".derivedData/Build/Products/AndBible_iphonesimulator.xctestrun",
+                "-destination",
+                "id=DEVICE",
+                "-resultBundlePath",
+                ".artifacts/AndBibleTests-ui-reuse.xcresult",
+                "CODE_SIGNING_ALLOWED=NO",
+                "-only-testing:AndBibleUITests/AndBibleUITests/testAboutScreenOpensFromReaderMenu",
                 "test-without-building",
             ],
             check=True,
