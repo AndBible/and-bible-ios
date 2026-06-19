@@ -189,11 +189,7 @@ extension AndBibleUITests {
                 return prompt.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.52))
             case "workspaceNamePromptTextField":
                 guard let prompt = firstExistingElement(
-                    [
-                        app.collectionViews["workspaceNamePromptScreen"].firstMatch,
-                        app.scrollViews["workspaceNamePromptScreen"].firstMatch,
-                        app.otherElements["workspaceNamePromptScreen"].firstMatch,
-                    ],
+                    workspaceNamePromptScreenCandidates(in: app),
                     timeout: 0.2
                 ),
                     elementFrameIsUsable(prompt.frame) else {
@@ -525,7 +521,8 @@ extension AndBibleUITests {
      Returns the visible native prompt container used by the create-label flow.
 
      - Parameter app: Running application under test.
-     - Returns: The title-matched alert/sheet used by the create-label prompt.
+     - Returns: The title-matched alert/sheet used by the create-label prompt, or the current
+       native prompt surface when SwiftUI has exposed the text field but not the alert title.
      - Side effects: none.
      - Failure modes: returns `nil` when XCTest cannot observe a presented prompt.
      */
@@ -534,6 +531,8 @@ extension AndBibleUITests {
             [
                 app.alerts["New Label"].firstMatch,
                 app.sheets["New Label"].firstMatch,
+                app.alerts.firstMatch,
+                app.sheets.firstMatch,
             ],
             timeout: 0.2
         )
@@ -1938,12 +1937,12 @@ extension AndBibleUITests {
      *   - timeout: Maximum time to keep resolving and revealing the form.
      *   - file: Source file used for XCTest failure attribution.
      *   - line: Source line used for XCTest failure attribution.
-     * - Returns: The resolved button once XCTest reports a hittable activation point.
+     * - Returns: The resolved button once it is visible inside the Sync Settings viewport.
      * - Side effects:
      *   - scrolls Sync Settings lower content until the requested button materializes as a native
-     *     button and becomes hittable
+     *     button inside the visible form viewport
      * - Failure modes:
-     *   - records an XCTest failure if the button never appears or never becomes hittable
+     *   - records an XCTest failure if the button never appears or never becomes visible
      */
     func requireReachableSyncSettingsButton(
         _ identifier: String,
@@ -1952,6 +1951,13 @@ extension AndBibleUITests {
         file: StaticString = #filePath,
         line: UInt = #line
     ) -> XCUIElement {
+        let syncScreen = requireElement(
+            "syncSettingsScreen",
+            in: app,
+            timeout: min(timeout, 5),
+            file: file,
+            line: line
+        )
         let deadline = Date().addingTimeInterval(timeout)
         var lastCandidate = app.buttons[identifier].firstMatch
 
@@ -1959,7 +1965,7 @@ extension AndBibleUITests {
             let button = app.buttons[identifier].firstMatch
             if button.exists {
                 lastCandidate = button
-                if waitForElementToBecomeHittable(button, timeout: 0.5) {
+                if isElementVisible(button, within: syncScreen) {
                     return button
                 }
             }
@@ -1975,8 +1981,8 @@ extension AndBibleUITests {
             line: line
         )
         XCTAssertTrue(
-            waitForElementToBecomeHittable(lastCandidate, timeout: 1),
-            "Expected Sync Settings button '\(identifier)' to become hittable within \(timeout) seconds.",
+            isElementVisible(lastCandidate, within: syncScreen),
+            "Expected Sync Settings button '\(identifier)' to become visible within \(timeout) seconds.",
             file: file,
             line: line
         )
@@ -2009,8 +2015,9 @@ extension AndBibleUITests {
      *   - file: Source file used for XCTest failure attribution.
      *   - line: Source line used for XCTest failure attribution.
      * - Side effects:
-     *   - scrolls the Sync Settings form until the real test-connection button is reachable
-     *   - taps the button and polls the compact Sync Settings export until the remote status changes
+     *   - scrolls the Sync Settings form until the real test-connection button is visible
+     *   - taps the visible button and polls the compact Sync Settings export until the remote
+     *     status changes
      * - Failure modes:
      *   - records an XCTest failure if the button never drives the exported remote status away
      *     from `idle`
@@ -2038,7 +2045,7 @@ extension AndBibleUITests {
                 return
             }
 
-            tapElementReliably(button, timeout: 5, file: file, line: line)
+            tapElementReliably(button, timeout: 1, file: file, line: line)
 
             let settleDeadline = Date().addingTimeInterval(2)
             repeat {

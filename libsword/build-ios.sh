@@ -50,6 +50,8 @@ echo ""
 run_svn_with_retry() {
     local DESCRIPTION="$1"
     shift
+    local CLEANUP_FUNCTION="$1"
+    shift
     local ATTEMPT=1
     local MAX_ATTEMPTS=3
 
@@ -64,9 +66,23 @@ run_svn_with_retry() {
         fi
 
         echo "WARNING: ${DESCRIPTION} failed on attempt ${ATTEMPT}; retrying..."
+        "${CLEANUP_FUNCTION}"
         ATTEMPT=$((ATTEMPT + 1))
         sleep 5
     done
+}
+
+cleanup_sword_working_copy_for_retry() {
+    if [ -d "${SWORD_SRC}/.svn" ]; then
+        svn cleanup "${SWORD_SRC}" || true
+    fi
+}
+
+reset_failed_sword_checkout_for_retry() {
+    cleanup_sword_working_copy_for_retry
+    if [ -d "${SWORD_SRC}" ]; then
+        rm -rf "${SWORD_SRC}"
+    fi
 }
 
 # --- Step 1: Get SWORD Source ---
@@ -79,6 +95,7 @@ if [ ! -d "${SWORD_SRC}" ]; then
     if command -v svn &>/dev/null; then
         run_svn_with_retry \
             "svn checkout ${SWORD_SVN_URL}@${SWORD_SVN_REVISION}" \
+            reset_failed_sword_checkout_for_retry \
             svn checkout -r "${SWORD_SVN_REVISION}" "${SWORD_SVN_URL}" "${SWORD_SRC}" --depth infinity
     else
         echo "ERROR: svn not found. Install with: brew install subversion"
@@ -91,6 +108,7 @@ else
         echo ">>> Updating SWORD source to revision ${SWORD_SVN_REVISION}"
         run_svn_with_retry \
             "svn update ${SWORD_SRC} to ${SWORD_SVN_REVISION}" \
+            cleanup_sword_working_copy_for_retry \
             svn update -r "${SWORD_SVN_REVISION}" "${SWORD_SRC}"
     else
         echo "ERROR: svn not found. Install with: brew install subversion"

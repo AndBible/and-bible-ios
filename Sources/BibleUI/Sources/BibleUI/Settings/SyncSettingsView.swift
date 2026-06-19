@@ -46,6 +46,9 @@ public struct SyncSettingsView: View {
     /// User-entered or persisted NextCloud/WebDAV server root URL.
     @State private var serverURL = ""
 
+    /// Last server URL accepted by Android-style edit validation and eligible for persistence.
+    @State private var lastCommittedServerURL = ""
+
     /// User-entered or persisted NextCloud/WebDAV username.
     @State private var username = ""
 
@@ -82,6 +85,9 @@ public struct SyncSettingsView: View {
     /// Last successfully completed confirmation branch exported only for UI-test assertions.
     @State private var lastRemoteConfirmationAction: String?
 
+    /// Currently focused inline NextCloud credential field, used to mirror Android edit commits.
+    @FocusState private var focusedNextCloudCredentialField: NextCloudCredentialField?
+
     /**
      Represents the last manual WebDAV connection-test result shown in the status section.
 
@@ -93,6 +99,18 @@ public struct SyncSettingsView: View {
 
         /// The most recent connection test failed with a human-readable message.
         case failure(String)
+    }
+
+    /**
+     Focusable inline credential fields that should apply Android preference-edit behavior.
+
+     Android's `EditTextPreference` validates and either accepts or rejects values when the edit
+     dialog commits. iOS renders these settings inline, so focus transitions and submit actions are
+     the equivalent commit boundary.
+     */
+    private enum NextCloudCredentialField: Hashable {
+        /// NextCloud/WebDAV server root URL.
+        case serverURL
     }
 
     /**
@@ -183,6 +201,26 @@ public struct SyncSettingsView: View {
             remoteSettingsStore.selectedBackend = newValue
             remoteConnectionStatus = nil
         }
+        .onChange(of: focusedNextCloudCredentialField) { oldValue, newValue in
+            if oldValue == .serverURL, newValue != .serverURL {
+                _ = validateNextCloudServerURLAfterEditing()
+            }
+        }
+        #if os(iOS)
+        .toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                if focusedNextCloudCredentialField == .serverURL {
+                    Spacer()
+                    Button(String(localized: "ok")) {
+                        if validateNextCloudServerURLAfterEditing() {
+                            focusedNextCloudCredentialField = nil
+                        }
+                    }
+                    .accessibilityIdentifier("syncNextCloudServerURLCommitButton")
+                }
+            }
+        }
+        #endif
         .alert(
             String(localized: "cloud_sync_title"),
             isPresented: Binding(
@@ -392,9 +430,16 @@ public struct SyncSettingsView: View {
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .multilineTextAlignment(.trailing)
+                        .focused($focusedNextCloudCredentialField, equals: .serverURL)
+                        .onSubmit {
+                            if validateNextCloudServerURLAfterEditing() {
+                                focusedNextCloudCredentialField = nil
+                            }
+                        }
                         .accessibilityIdentifier("syncNextCloudServerURLField")
                         #if os(iOS)
                         .textContentType(.URL)
+                        .submitLabel(.done)
                         #endif
                 } label: {
                     syncSettingsRowLabel(
@@ -459,14 +504,21 @@ public struct SyncSettingsView: View {
                         await testRemoteConnection()
                     }
                 } label: {
-                    syncSettingsButtonLabel(
+                    syncSettingsRowLabel(
                         SyncSettingsPresentation.syncInfo,
                         title: String(localized: "test_connection"),
-                        isEnabled: !isTestingConnection,
-                        accessibilityIdentifier: "syncNextCloudTestConnectionButton"
+                        isEnabled: !isTestingConnection
                     )
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
                 .disabled(isTestingConnection)
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel(String(localized: "test_connection"))
+                .accessibilityIdentifier("syncNextCloudTestConnectionButton")
 
                 LabeledContent {
                     remoteStatusView
@@ -602,34 +654,6 @@ public struct SyncSettingsView: View {
             icon: row.icon,
             isEnabled: isEnabled
         )
-    }
-
-    /**
-     Builds an Android-backed label for action rows that must remain discoverable in UI tests.
-
-     SwiftUI can expose disabled custom `Button` labels differently than string-backed buttons.
-     Applying the identifier to the combined label preserves the existing UI-test contract while
-     leaving the button itself as the interactive control when it is enabled.
-
-     - Parameters:
-       - row: Android sync-settings presentation row that supplies icon metadata.
-       - title: Primary row title.
-       - isEnabled: Whether the row should render with enabled or disabled emphasis.
-       - accessibilityIdentifier: Stable identifier already used by UI automation.
-     - Returns: Combined row label with button traits and the supplied accessibility identifier.
-     - Side effects: Renders an image from the module bundle when `row` has catalog metadata.
-     - Failure modes: Missing icon metadata simply keeps the row aligned without an icon.
-     */
-    private func syncSettingsButtonLabel(
-        _ row: SyncSettingsPresentation.Row,
-        title: String,
-        isEnabled: Bool = true,
-        accessibilityIdentifier: String
-    ) -> some View {
-        syncSettingsRowLabel(row, title: title, isEnabled: isEnabled)
-            .accessibilityElement(children: .combine)
-            .accessibilityAddTraits(.isButton)
-            .accessibilityIdentifier(accessibilityIdentifier)
     }
 
     /**
@@ -953,6 +977,7 @@ public struct SyncSettingsView: View {
         if UITestRuntimeConfiguration.remoteSyncBootstrapScenario == .adoptExisting {
             selectedBackend = .nextCloud
             serverURL = "https://example.invalid/remote.php/dav/files/ui-test"
+            lastCommittedServerURL = serverURL
             username = "ui-test"
             password = "ui-test"
             folderPath = ""
@@ -969,8 +994,11 @@ public struct SyncSettingsView: View {
 
         if let configuration = remoteSettingsStore.loadWebDAVConfiguration() {
             serverURL = configuration.serverURL
+            lastCommittedServerURL = configuration.serverURL
             username = configuration.username
             folderPath = configuration.folderPath ?? ""
+        } else {
+            lastCommittedServerURL = serverURL
         }
         password = remoteSettingsStore.webDAVPassword() ?? ""
         remoteCategoryEnabled = Dictionary(
@@ -996,6 +1024,9 @@ public struct SyncSettingsView: View {
     private func persistRemoteSettings() {
         let store = remoteSettingsStore
         store.selectedBackend = selectedBackend
+        guard isAndroidValidNextCloudServerURL(serverURL) else {
+            return
+        }
         try? store.saveWebDAVConfiguration(
             WebDAVSyncConfiguration(
                 serverURL: serverURL,
@@ -1004,6 +1035,77 @@ public struct SyncSettingsView: View {
             ),
             password: password
         )
+        lastCommittedServerURL = serverURL
+    }
+
+    /**
+     Applies Android's server URL edit-validation behavior to the inline iOS field.
+
+     Android validates `cloud_sync_server_url` from `serverUrlPref.setOnPreferenceChangeListener`
+     and rejects malformed edits before they are written to preferences. iOS uses an inline
+     `TextField`, so submit and focus-loss events call this method as the equivalent commit boundary.
+
+     - Returns: `true` when the edit was accepted and persisted, otherwise `false`.
+     - Side effects:
+     - invalid URLs update the transient remote status and present the same localized error dialog
+     - valid URLs clear stale connection-test status and persist the current remote settings
+
+     Failure modes:
+     - local persistence failures are still swallowed by `persistRemoteSettings()`, matching the
+       existing settings-save behavior
+     */
+    @discardableResult
+    private func validateNextCloudServerURLAfterEditing() -> Bool {
+        guard selectedBackend == .nextCloud else {
+            return true
+        }
+
+        let invalidURLMessage = String(localized: "invalid_url_message")
+        if serverURL == lastCommittedServerURL,
+           remoteConnectionStatus == .failure(invalidURLMessage)
+        {
+            return false
+        }
+        guard isAndroidValidNextCloudServerURL(serverURL) else {
+            remoteConnectionStatus = .failure(invalidURLMessage)
+            remoteSyncErrorMessage = invalidURLMessage
+            serverURL = lastCommittedServerURL
+            return false
+        }
+
+        remoteConnectionStatus = nil
+        persistRemoteSettings()
+        return true
+    }
+
+    /**
+     Checks the NextCloud server URL with the same structural rules Android applies before saving.
+
+     Android requires a syntactically valid HTTP(S) URL, rejects whitespace, and prevents users from
+     saving a `/login` page URL instead of the server root. Username and password are intentionally
+     not part of this check because Android validates the server preference independently.
+
+     - Parameter candidate: User-entered server URL.
+     - Returns: `true` when the URL may be saved to WebDAV settings.
+     - Side effects: none.
+     - Failure modes: This helper cannot fail.
+     */
+    private func isAndroidValidNextCloudServerURL(_ candidate: String) -> Bool {
+        let trimmedCandidate = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedCandidate.isEmpty else {
+            return false
+        }
+        guard trimmedCandidate.rangeOfCharacter(from: .whitespacesAndNewlines) == nil else {
+            return false
+        }
+        guard let components = URLComponents(string: trimmedCandidate),
+              let scheme = components.scheme?.lowercased(),
+              scheme == "http" || scheme == "https",
+              components.host?.isEmpty == false
+        else {
+            return false
+        }
+        return !trimmedCandidate.hasSuffix("/login")
     }
 
     /**

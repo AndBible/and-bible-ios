@@ -267,6 +267,21 @@ extension AndBibleTests {
         XCTAssertEqual(modules.first?.sourceName, "Example MyBible")
     }
 
+    /**
+     Verifies that MyBible package installs and uninstalls publish installed-module mutations.
+
+     Setup:
+     - installs a real fixture MyBible SQLite package through the repository download path
+     - removes the same module through the shared uninstall API
+     - observes the module-store notification consumed by open reader and Downloads snapshots
+
+     Expected result:
+     - both the successful install and successful uninstall announce that installed modules changed
+
+     Failure meaning:
+     - MyBible modules can appear or disappear on disk while already-open UI lists keep stale module
+       state until app restart or an unrelated refresh.
+     */
     func testModuleRepositoryInstallsAndUninstallsMyBiblePackage() async throws {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -351,6 +366,21 @@ extension AndBibleTests {
         )
 
         _ = try await repository.refreshCatalog(for: source)
+        let notificationExpectation = expectation(
+            description: "MyBible install and uninstall publish module-store changes"
+        )
+        notificationExpectation.expectedFulfillmentCount = 2
+        let notificationObserver = NotificationCenter.default.addObserver(
+            forName: SwordModuleStore.modulesDidChangeNotification,
+            object: nil,
+            queue: nil
+        ) { _ in
+            notificationExpectation.fulfill()
+        }
+        defer {
+            NotificationCenter.default.removeObserver(notificationObserver)
+        }
+
         try await repository.installModule(named: "MyBible-finrk_SQLite3", from: source)
 
         let installed = repository.loadInstalledMyBibleModules()
@@ -375,6 +405,7 @@ extension AndBibleTests {
         try repository.uninstallModule(named: "MyBible-finrk_SQLite3")
         XCTAssertFalse(FileManager.default.fileExists(atPath: moduleDir.path))
         XCTAssertTrue(repository.loadInstalledMyBibleModules().isEmpty)
+        await fulfillment(of: [notificationExpectation], timeout: 0.2)
     }
 
     func testModuleRepositoryInstallsDeflatedMyBiblePackage() async throws {
@@ -535,6 +566,67 @@ extension AndBibleTests {
             try Data(contentsOf: swordDir.appendingPathComponent("modules/texts/rawtext/finrk/ot")),
             moduleData
         )
+    }
+
+    /**
+     Verifies that local SWORD ZIP installation announces the installed-module store mutation.
+
+     Setup:
+     - builds an Android-compatible data-descriptor ZIP package
+     - installs it through `ModuleRepository.installFromZip(at:)`, the same storage path used by
+       Files/Settings SWORD ZIP imports
+     - observes the shared module-store notification consumed by open reader and Downloads views
+
+     Expected result:
+     - a successful ZIP install posts the module-store change notification once files are published
+
+     Failure meaning:
+     - newly imported modules can remain absent from already-open UI caches until app restart or a
+       coincidental Downloads sheet refresh.
+     */
+    func testModuleRepositoryInstallFromZipNotifiesModuleStoreChange() throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let swordDir = tempDir.appendingPathComponent("sword", isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let conf = Data(
+            """
+            [FINRK]
+            Description=Finnish RK
+            Category=Biblical Texts
+            Lang=fi
+            ModDrv=RawText
+            DataPath=./modules/texts/rawtext/finrk/
+            Version=1.0
+            InstallSize=1
+            """.utf8
+        )
+        let moduleData = Data("genesis-through-revelation".utf8)
+        let zipData = try makeModuleRepositoryZipWithDataDescriptors([
+            (
+                name: "mods.d/finrk.conf",
+                body: conf,
+                compressedBody: makeModuleRepositoryRawDeflateData(conf)
+            ),
+            (
+                name: "modules/texts/rawtext/finrk/ot",
+                body: moduleData,
+                compressedBody: makeModuleRepositoryRawDeflateData(moduleData)
+            ),
+        ])
+        let archiveURL = tempDir.appendingPathComponent("FinRK.zip")
+        try zipData.write(to: archiveURL)
+        let repository = ModuleRepository(basePath: tempDir.path, swordPath: swordDir.path)
+        let notificationExpectation = expectation(
+            forNotification: SwordModuleStore.modulesDidChangeNotification,
+            object: nil
+        )
+
+        _ = try repository.installFromZip(at: archiveURL)
+
+        wait(for: [notificationExpectation], timeout: 0.2)
     }
 
     func testModuleRepositoryDownloadFailsWithoutInstalledMarkerWhenRequiredFileFails() async throws {
@@ -1784,10 +1876,10 @@ extension AndBibleTests {
     private func seedSearchIndexFixture(moduleName: String, db: OpaquePointer?) throws {
         let escapedModuleName = moduleName.replacingOccurrences(of: "'", with: "''")
         let sql = """
-        INSERT INTO verse_fts (verse_key, plain_text, module_name)
-        VALUES ('Genesis 1:1', 'created', '\(escapedModuleName)');
+        INSERT INTO verse_fts (verse_key, plain_text, module_name, entry_order)
+        VALUES ('Genesis 1:1', 'created', '\(escapedModuleName)', 0);
         INSERT INTO indexed_modules (module_name, verse_count, indexed_at, schema_version)
-        VALUES ('\(escapedModuleName)', 1, datetime('now'), 1);
+        VALUES ('\(escapedModuleName)', 1, datetime('now'), \(SearchIndexService.currentSchemaVersion));
         """
         guard sqlite3_exec(db, sql, nil, nil, nil) == SQLITE_OK else {
             throw SearchIndexFixtureError.writeFailed

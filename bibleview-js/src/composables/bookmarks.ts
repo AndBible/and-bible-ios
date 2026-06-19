@@ -304,10 +304,16 @@ export function useGlobalBookmarks(config: Config) {
     });
 
     setupEventBusListener("bookmark_note_modified",
-        ({id, notes, lastUpdatedOn}: { id: IdType, notes: string, lastUpdatedOn: number }) => {
+        ({id, notes, notesContentType, lastUpdatedOn}: {
+            id: IdType,
+            notes: string,
+            notesContentType: BaseBookmark["notesContentType"],
+            lastUpdatedOn: number
+        }) => {
             const b = bookmarks.get(id);
             if (b) {
                 b.notes = notes;
+                b.notesContentType = notesContentType;
                 b.hasNote = !!notes;
                 b.lastUpdatedOn = lastUpdatedOn
             }

@@ -12,7 +12,7 @@ public struct ChapterChooserView: View {
     /// User-visible book name shown in the navigation title.
     let bookName: String
 
-    /// Number of chapters available for this book in the active module.
+    /// Number of chapters available for this book in the active module; zero renders no choices.
     let chapterCount: Int
 
     /// Callback invoked with the chosen one-based chapter number.
@@ -37,16 +37,18 @@ public struct ChapterChooserView: View {
         ScrollView {
             let columns = [GridItem(.adaptive(minimum: 50), spacing: 8)]
             LazyVGrid(columns: columns, spacing: 8) {
-                ForEach(1...max(chapterCount, 1), id: \.self) { chapter in
-                    Button(action: { onSelect(chapter) }) {
-                        Text("\(chapter)")
-                            .font(.body.monospacedDigit())
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 12)
-                            .background(.quaternary)
-                            .clipShape(RoundedRectangle(cornerRadius: 6))
+                if chapterCount > 0 {
+                    ForEach(1...chapterCount, id: \.self) { chapter in
+                        Button(action: { onSelect(chapter) }) {
+                            Text("\(chapter)")
+                                .font(.body.monospacedDigit())
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 12)
+                                .background(.quaternary)
+                                .clipShape(RoundedRectangle(cornerRadius: 6))
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
                 }
             }
             .padding()

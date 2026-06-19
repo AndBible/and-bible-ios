@@ -16,12 +16,14 @@
  */
 
 import {resolveIcon, useBookmarks, useGlobalBookmarks, verseHighlighting} from "@/composables/bookmarks";
-import {ref} from "vue";
+import {defineComponent, nextTick, ref} from "vue";
 import Color from "color";
 import {useConfig} from "@/composables/config";
 import {abbreviated} from "@/utils";
 import {customIconMap} from "@/composables/fontawesome";
 import { describe, it, expect, beforeEach } from 'vitest'
+import {mount} from "@vue/test-utils";
+import {emit} from "@/eventbus";
 
 window.bibleViewDebug = {}
 
@@ -337,6 +339,70 @@ describe("useBookmark tests", () => {
 
     });
 
+});
+
+describe("bookmark note event updates", () => {
+    /**
+     * Protects the native-to-JS note save event contract used by Android and iOS.
+     *
+     * The component wrapper is required because `useGlobalBookmarks` registers event listeners in
+     * Vue lifecycle hooks. A passing test proves `bookmark_note_modified` updates both note text and
+     * nullable Android note `TextContentType`; otherwise a saved Markdown note would immediately
+     * render as the wrong format until a full bookmark reload.
+     */
+    it("updates notesContentType from bookmark_note_modified events", async () => {
+        let globalBookmarks;
+        const Component = defineComponent({
+            setup() {
+                const {config} = useConfig(ref("bible"));
+                globalBookmarks = useGlobalBookmarks(config);
+                globalBookmarks.updateBookmarks([{
+                    id: "bookmark-1",
+                    hashCode: 1,
+                    ordinalRange: [10, 10],
+                    offsetRange: null,
+                    labels: [],
+                    bookInitials: "KJV",
+                    bookName: "Genesis",
+                    bookAbbreviation: "Gen",
+                    createdAt: 1,
+                    text: "",
+                    fullText: "",
+                    bookmarkToLabels: [],
+                    primaryLabelId: null,
+                    lastUpdatedOn: 1,
+                    notes: "old",
+                    notesContentType: "HTML",
+                    hasNote: true,
+                    wholeVerse: true,
+                    customIcon: null,
+                    editAction: {mode: null, content: null},
+                    type: "bookmark",
+                    osisRef: "Gen.1.1",
+                    originalOrdinalRange: [10, 10],
+                    verseRange: "Genesis 1:1",
+                    verseRangeOnlyNumber: "1:1",
+                    verseRangeAbbreviated: "Gen 1:1",
+                    v11n: "KJV",
+                    osisFragment: null,
+                }]);
+                return () => null;
+            },
+        });
+        const wrapper = mount(Component);
+
+        emit("bookmark_note_modified", {
+            id: "bookmark-1",
+            notes: "**new**",
+            notesContentType: "MARKDOWN",
+            lastUpdatedOn: 2,
+        });
+        await nextTick();
+
+        expect(globalBookmarks.bookmarkMap.get("bookmark-1").notes).toBe("**new**");
+        expect(globalBookmarks.bookmarkMap.get("bookmark-1").notesContentType).toBe("MARKDOWN");
+        wrapper.unmount();
+    });
 });
 
 describe("marker visibility tests", () => {

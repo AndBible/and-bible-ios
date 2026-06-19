@@ -542,6 +542,11 @@ public struct ModuleBrowserView: View {
                 reloadRepositorySources()
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: SwordModuleStore.modulesDidChangeNotification)) { _ in
+            Task { @MainActor in
+                refreshInstalledList()
+            }
+        }
     }
 
     // MARK: - Row Views
@@ -1407,15 +1412,20 @@ public struct ModuleBrowserView: View {
     }
 
     /**
-     Reloads locally installed modules from the active `SwordManager`.
+     Reloads locally installed modules from a fresh `SwordManager`.
 
      Side effects:
+     - rebuilds `swordManager` so SWORD rescans module files after installs, restores, or uninstalls
      - replaces the local `installedModules` array when a manager is available
 
      Failure modes:
-     - returns without mutating state when `swordManager` has not been initialized yet
+     - returns without mutating state when a new `SwordManager` cannot be created and no previous
+       manager is available
      */
     private func refreshInstalledList() {
+        if let mgr = SwordManager() {
+            swordManager = mgr
+        }
         guard let mgr = swordManager else { return }
         installedModules = mgr.installedModules() + repository.loadInstalledMyBibleModules()
     }

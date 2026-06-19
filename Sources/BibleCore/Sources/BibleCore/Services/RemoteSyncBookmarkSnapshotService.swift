@@ -14,18 +14,25 @@ public struct RemoteSyncCurrentBookmarkNoteRow: Sendable, Equatable, Codable {
     /// Raw detached note payload stored in the Android note table.
     public let notes: String
 
+    /// Optional Android `TextContentType` raw value stored beside the detached note payload.
+    public let contentType: String?
+
     /**
      Creates one Android-shaped current bookmark-note row.
 
      - Parameters:
        - bookmarkID: Android bookmark identifier that owns the detached note row.
        - notes: Raw detached note payload stored in the Android note table.
+       - contentType: Optional Android `TextContentType` raw value for the detached note payload;
+         invalid non-nil row values are represented as `nil` so they keep Android inheritance
+         semantics instead of becoming the app default.
      - Side effects: none.
      - Failure modes: This initializer cannot fail.
      */
-    public init(bookmarkID: UUID, notes: String) {
+    public init(bookmarkID: UUID, notes: String, contentType: String? = nil) {
         self.bookmarkID = bookmarkID
         self.notes = notes
+        self.contentType = AppPreferenceValueNormalizer.notesContentTypeRow(contentType)
     }
 }
 
@@ -259,8 +266,8 @@ public final class RemoteSyncBookmarkSnapshotService {
             .sorted(by: sortStudyPadEntries)
         let studyPadTexts = ((try? modelContext.fetch(FetchDescriptor<StudyPadTextEntryText>())) ?? [])
 
-        let bibleNotesByBookmarkID = Dictionary(uniqueKeysWithValues: bibleNotes.map { ($0.bookmarkId, $0.notes) })
-        let genericNotesByBookmarkID = Dictionary(uniqueKeysWithValues: genericNotes.map { ($0.bookmarkId, $0.notes) })
+        let bibleNotesByBookmarkID = Dictionary(uniqueKeysWithValues: bibleNotes.map { ($0.bookmarkId, $0) })
+        let genericNotesByBookmarkID = Dictionary(uniqueKeysWithValues: genericNotes.map { ($0.bookmarkId, $0) })
         let studyPadTextsByEntryID = Dictionary(uniqueKeysWithValues: studyPadTexts.map { ($0.studyPadTextEntryId, $0.text) })
 
         var labelRowsByKey: [String: RemoteSyncAndroidLabel] = [:]
@@ -331,7 +338,8 @@ public final class RemoteSyncBookmarkSnapshotService {
                 startOffset: bookmark.startOffset,
                 endOffset: bookmark.endOffset,
                 primaryLabelID: primaryLabelID,
-                notes: bibleNotesByBookmarkID[bookmark.id],
+                notes: bibleNotesByBookmarkID[bookmark.id]?.notes,
+                notesContentType: bibleNotesByBookmarkID[bookmark.id]?.contentType,
                 lastUpdatedOn: bookmark.lastUpdatedOn,
                 wholeVerse: bookmark.wholeVerse,
                 type: bookmark.type,
@@ -349,7 +357,11 @@ public final class RemoteSyncBookmarkSnapshotService {
             fingerprintsByKey[key] = Self.fingerprintHex(for: row)
 
             if let notes = row.notes {
-                let noteRow = RemoteSyncCurrentBookmarkNoteRow(bookmarkID: row.id, notes: notes)
+                let noteRow = RemoteSyncCurrentBookmarkNoteRow(
+                    bookmarkID: row.id,
+                    notes: notes,
+                    contentType: row.notesContentType
+                )
                 let noteKey = logEntryStore.key(
                     for: .bookmarks,
                     tableName: "BibleBookmarkNotes",
@@ -407,7 +419,8 @@ public final class RemoteSyncBookmarkSnapshotService {
                 startOffset: bookmark.startOffset,
                 endOffset: bookmark.endOffset,
                 primaryLabelID: primaryLabelID,
-                notes: genericNotesByBookmarkID[bookmark.id],
+                notes: genericNotesByBookmarkID[bookmark.id]?.notes,
+                notesContentType: genericNotesByBookmarkID[bookmark.id]?.contentType,
                 lastUpdatedOn: bookmark.lastUpdatedOn,
                 wholeVerse: bookmark.wholeVerse,
                 playbackSettingsJSON: playbackJSON,
@@ -425,7 +438,11 @@ public final class RemoteSyncBookmarkSnapshotService {
             fingerprintsByKey[key] = Self.fingerprintHex(for: row)
 
             if let notes = row.notes {
-                let noteRow = RemoteSyncCurrentBookmarkNoteRow(bookmarkID: row.id, notes: notes)
+                let noteRow = RemoteSyncCurrentBookmarkNoteRow(
+                    bookmarkID: row.id,
+                    notes: notes,
+                    contentType: row.notesContentType
+                )
                 let noteKey = logEntryStore.key(
                     for: .bookmarks,
                     tableName: "GenericBookmarkNotes",
@@ -465,6 +482,7 @@ public final class RemoteSyncBookmarkSnapshotService {
                 labelID: remoteLabelID,
                 orderNumber: entry.orderNumber,
                 indentLevel: entry.indentLevel,
+                contentType: entry.contentType,
                 text: studyPadTextsByEntryID[entry.id] ?? ""
             )
             let key = logEntryStore.key(
