@@ -50,6 +50,27 @@ def workflow_step_run_block(workflow_text: str, step_name: str) -> str:
     raise AssertionError(f"Unable to find run block for workflow step {step_name!r}.")
 
 
+def workflow_step_block(workflow_text: str, step_name: str) -> str:
+    """Return the raw YAML block for one named GitHub Actions step."""
+    lines = workflow_text.splitlines()
+    step_pattern = re.compile(rf"^(\s*)-\s+name:\s+{re.escape(step_name)}\s*$")
+
+    for index, line in enumerate(lines):
+        step_match = step_pattern.match(line)
+        if step_match is None:
+            continue
+
+        step_indent = len(step_match.group(1))
+        step_lines = [line]
+        for step_line in lines[index + 1 :]:
+            if step_line.startswith(" " * step_indent + "- name:"):
+                break
+            step_lines.append(step_line)
+        return "\n".join(step_lines)
+
+    raise AssertionError(f"Unable to find workflow step {step_name!r}.")
+
+
 def workflow_job_block(workflow_text: str, job_name: str) -> str:
     """Return the raw YAML block for one top-level workflow job."""
     lines = workflow_text.splitlines()
@@ -128,6 +149,25 @@ class IOSCIUIShardGuardrailsTests(unittest.TestCase):
         self.assertNotIn("mapfile", consumer_run)
         self.assertIn("--action test-without-building", consumer_run)
         self.assertNotIn("--action build-for-testing", consumer_run)
+
+    def test_ios_ci_reuse_product_upload_retry_fails_producer_when_required_artifact_is_missing(
+        self,
+    ) -> None:
+        """Protect required reusable-product uploads from becoming downstream artifact errors."""
+        workflow_text = (REPO_ROOT / ".github/workflows/ios-ci.yml").read_text(encoding="utf-8")
+        producer = workflow_job_block(workflow_text, "ios-ui-build-product-reuse-producer")
+        upload_step = workflow_step_block(producer, "Upload reusable UI build products")
+        retry_step = workflow_step_block(producer, "Retry upload reusable UI build products")
+
+        self.assertIn("id: upload_reusable_ui_build_products", upload_step)
+        self.assertIn("continue-on-error: true", upload_step)
+        self.assertIn("andbible-ui-build-products-${{ github.run_id }}", upload_step)
+        self.assertIn(
+            "if: steps.upload_reusable_ui_build_products.outcome == 'failure'",
+            retry_step,
+        )
+        self.assertIn("andbible-ui-build-products-${{ github.run_id }}", retry_step)
+        self.assertNotIn("continue-on-error", retry_step)
 
 
 if __name__ == "__main__":
