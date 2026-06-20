@@ -470,7 +470,8 @@ public final class BibleBridge: NSObject, WKScriptMessageHandler {
         switch method {
         case "console", "jsLog", "reportModalState", "reportInputFocus",
              "setClientReady", "saveState", "setLimitAmbiguousModalSize",
-             "selectionCleared", "setEditing", "scrolledToOrdinal":
+             "selectionCleared", "setEditing", "scrolledToOrdinal",
+             "requestMoreToBeginning", "requestMoreToEnd":
             break
         default:
             onAnyMessage?()

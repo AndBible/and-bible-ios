@@ -125,14 +125,14 @@ extension AndBibleTests {
     }
 
     /**
-     Protects the Android-parity focus contract for passive scroll telemetry.
+     Protects the Android-parity focus contract for passive scroll maintenance messages.
 
-     Android treats `scrolledToOrdinal` as visible-position feedback from the web document, while
-     native touch/drag callbacks decide which pane is active. The setup registers an interaction
-     observer on the bridge and dispatches the passive scroll message followed by an active
-     selection message. The expected result is that scroll telemetry remains handled without
-     invoking the focus observer; a failure means synchronized secondary panes can steal focus
-     before the reader controller can suppress rebroadcast.
+     Android treats visible-position and infinite-scroll callbacks from the web document as
+     document maintenance, while native touch/drag callbacks decide which pane is active. The
+     setup registers an interaction observer on the bridge and dispatches passive scroll messages
+     followed by an active selection message. The expected result is that scroll maintenance
+     remains handled without invoking the focus observer; a failure means synchronized secondary
+     panes can steal focus before the reader controller can suppress rebroadcast.
      */
     func testScrolledToOrdinalBridgeMessageDoesNotReportInteraction() {
         let bridge = BibleBridge()
@@ -142,6 +142,8 @@ extension AndBibleTests {
         }
 
         XCTAssertEqual(bridge.dispatchMessage(method: "scrolledToOrdinal", args: ["Gen.1", 1, false]), .handled)
+        XCTAssertEqual(bridge.dispatchMessage(method: "requestMoreToBeginning", args: [41]), .handled)
+        XCTAssertEqual(bridge.dispatchMessage(method: "requestMoreToEnd", args: [42]), .handled)
         XCTAssertEqual(interactionCount, 0)
 
         XCTAssertEqual(bridge.dispatchMessage(method: "selectionChanged", args: ["In the beginning"]), .handled)
