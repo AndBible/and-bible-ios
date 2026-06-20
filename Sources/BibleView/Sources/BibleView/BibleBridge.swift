@@ -1097,14 +1097,9 @@ public final class BibleBridge: NSObject, WKScriptMessageHandler {
         if Thread.isMainThread {
             return execute()
         } else {
-            guard javaScriptEvaluationObserver != nil || webView != nil else {
-                NSLog("BRIDGE-JS: webView is nil! Cannot evaluate: %@", String(js.prefix(200)))
-                return false
+            return DispatchQueue.main.sync {
+                execute()
             }
-            DispatchQueue.main.async {
-                _ = execute()
-            }
-            return true
         }
     }
 

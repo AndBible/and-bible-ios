@@ -46,20 +46,21 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     private(set) var currentVerse: Int = 1
     private var clientReady = false
     /**
-     Ordinals for synchronized scroll requests that this pane initiated from another source pane.
+     Latest ordinal for a synchronized scroll request that this pane received from another source pane.
 
-     `scrollToOrdinal(_:)` records the target ordinal after successfully emitting to Vue. The next
-     matching `didScrollToOrdinal` callback is then treated as secondary-window feedback: the pane
-     state is updated, but the callback does not focus the pane or rebroadcast to `WindowManager`.
+     `scrollToOrdinal(_:)` records the latest target ordinal after successfully emitting to Vue.
+     The next matching `didScrollToOrdinal` callback is then treated as secondary-window feedback:
+     the pane state is updated, but the callback does not focus the pane or rebroadcast to
+     `WindowManager`.
 
      Side effects:
-     - values are inserted by sync-origin native scroll requests and removed by matching or stale
-       scroll callbacks
+     - value is replaced by each delivered sync-origin native scroll request
+     - value is cleared by matching or stale scroll callbacks
 
      Failure modes:
      - a nonmatching callback clears stale pending values and is treated as user-origin scroll
      */
-    private var pendingSynchronizedScrollOrdinals: Set<Int> = []
+    private var pendingSynchronizedScrollOrdinal: Int?
 
     /// Whether the WebView is currently showing the My Notes document (vs Bible text).
     private(set) var showingMyNotes = false
@@ -2096,8 +2097,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
      Side effects:
      - emits `scroll_to_verse` to the Vue reader
-     - records `ordinal` as a pending synchronized scroll acknowledgement only when the bridge
-       dispatches the emit
+     - records `ordinal` as the latest pending synchronized scroll acknowledgement only when the
+       bridge dispatches the emit
 
      Failure modes:
      - if the web view is not attached, `BibleBridge` logs the failed JavaScript evaluation and no
@@ -2107,7 +2108,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      */
     public func scrollToOrdinal(_ ordinal: Int) {
         if bridge.emit(event: "scroll_to_verse", data: "{\"ordinal\":\(ordinal),\"now\":false}") {
-            pendingSynchronizedScrollOrdinals.insert(ordinal)
+            pendingSynchronizedScrollOrdinal = ordinal
         }
     }
 
@@ -2119,21 +2120,20 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
        `false`.
 
      Side effects:
-     - removes the matched pending ordinal
-     - clears all pending ordinals when a nonmatching callback arrives, treating those requests as
-       stale so later user scrolls are not suppressed
+     - clears the matched pending ordinal
+     - clears a stale pending ordinal when a nonmatching callback arrives, treating that callback as
+       user-origin so later scrolls are not suppressed
 
      Failure modes:
      - returns `false` when no sync-origin scroll is pending or when the callback ordinal does not
        match the pending synchronized scroll target
      */
     private func consumePendingSynchronizedScroll(ordinal: Int) -> Bool {
-        guard !pendingSynchronizedScrollOrdinals.isEmpty else { return false }
-        guard pendingSynchronizedScrollOrdinals.contains(ordinal) else {
-            pendingSynchronizedScrollOrdinals.removeAll()
+        guard let pendingOrdinal = pendingSynchronizedScrollOrdinal else { return false }
+        pendingSynchronizedScrollOrdinal = nil
+        guard pendingOrdinal == ordinal else {
             return false
         }
-        pendingSynchronizedScrollOrdinals.remove(ordinal)
         return true
     }
 

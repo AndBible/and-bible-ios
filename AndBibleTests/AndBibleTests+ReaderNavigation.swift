@@ -1982,9 +1982,11 @@ extension AndBibleTests {
      Android posts a secondary scroll event to synced inactive windows and does not let the web
      client's resulting visible-verse callback become a new source window. The setup creates two
      synchronized panes, keeps the first pane active, then asks the second pane's controller to
-     perform a sync-origin scroll. The expected result is that the second pane updates its visible
-     verse state without focusing itself or rebroadcasting through `WindowManager`; a failure means
-     synced panes can ping-pong until a document boundary.
+     perform two sync-origin scrolls before acknowledging the latest. The expected result is that
+     the second pane updates its visible verse state without focusing itself or rebroadcasting
+     through `WindowManager`, while the older pending ordinal does not suppress a later real user
+     callback; a failure means synced panes can ping-pong until a document boundary or stale sync
+     requests can hide user-origin scrolling.
      */
     @MainActor
     func testSynchronizedScrollCallbackDoesNotRefocusOrRebroadcastTargetPane() throws {
@@ -1996,6 +1998,7 @@ extension AndBibleTests {
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
         let module = try XCTUnwrap(manager.module(named: controller.activeModuleName))
         let ordinal = try XCTUnwrap(module.verseOrdinal(osisBookId: "Gen", chapter: 1, verse: 5))
+        let olderOrdinal = try XCTUnwrap(module.verseOrdinal(osisBookId: "Gen", chapter: 1, verse: 4))
         let container = try makeWorkspaceModelContainer()
         let context = ModelContext(container)
         let workspaceStore = WorkspaceStore(modelContext: context)
@@ -2021,15 +2024,30 @@ extension AndBibleTests {
             rebroadcast.fulfill()
         }
 
+        controller.scrollToOrdinal(olderOrdinal)
         controller.scrollToOrdinal(ordinal)
-        XCTAssertEqual(emittedScripts.count, 1)
-        XCTAssertTrue(emittedScripts[0].contains("scroll_to_verse"))
+        XCTAssertEqual(emittedScripts.count, 2)
+        XCTAssertTrue(emittedScripts.allSatisfy { $0.contains("scroll_to_verse") })
         controller.bridge(bridge, didScrollToOrdinal: ordinal, key: "Gen.1", atChapterTop: false)
 
         XCTAssertEqual(windowManager.activeWindow?.id, sourceWindow.id)
         XCTAssertEqual(controller.currentVerse, 5)
         XCTAssertEqual(targetWindow.pageManager?.bibleVerseNo, 5)
         wait(for: [rebroadcast], timeout: 0.35)
+
+        let laterUserBroadcast = expectation(description: "older sync ordinal does not remain pending")
+        windowManager.onSyncVerseChanged = { sourceWindow, sourceOrdinal, key in
+            XCTAssertEqual(sourceWindow.id, targetWindow.id)
+            XCTAssertEqual(sourceOrdinal, olderOrdinal)
+            XCTAssertEqual(key, "Gen.1")
+            laterUserBroadcast.fulfill()
+        }
+
+        controller.bridge(bridge, didScrollToOrdinal: olderOrdinal, key: "Gen.1", atChapterTop: false)
+
+        XCTAssertEqual(windowManager.activeWindow?.id, targetWindow.id)
+        XCTAssertEqual(controller.currentVerse, 4)
+        wait(for: [laterUserBroadcast], timeout: 1.0)
     }
 
     /**
