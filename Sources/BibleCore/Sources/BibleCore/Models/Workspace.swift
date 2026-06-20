@@ -12,17 +12,17 @@ import SwiftData
  */
 @Model
 public final class Workspace {
-    /// Unique identifier mirrored from Android's workspace IdType contract.
-    @Attribute(.unique) public var id: UUID
+    /// Stable identifier mirrored from Android's workspace IdType contract.
+    public var id: UUID = UUID()
 
     /// User-visible workspace name shown in workspace pickers and headers.
-    public var name: String
+    public var name: String = ""
 
     /// Optional summary text describing the workspace contents for list UI.
     public var contentsText: String?
 
     /// Zero-based display order among all persisted workspaces.
-    public var orderNumber: Int
+    public var orderNumber: Int = 0
 
     /// Workspace-scoped text display overrides inherited by windows that do not override them.
     public var textDisplaySettings: TextDisplaySettings?
