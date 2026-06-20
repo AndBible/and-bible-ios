@@ -957,7 +957,28 @@ extension AndBibleTests {
 
         XCTAssertTrue(overlaySource.contains("ReaderPassageChooserOverlay"))
         XCTAssertFalse(overlaySource.contains("ReaderSideDrawerOverlay"))
-        XCTAssertTrue(overlaySource.contains("onCancel: dismissBookChooser"))
+        XCTAssertFalse(overlaySource.contains("onCancel: dismissBookChooser"))
+    }
+
+    /**
+     Verifies the passage chooser overlay does not expose an unused cancellation API.
+
+     Dismissal belongs to `BookChooserView` through its explicit back button callback. Keeping a dead
+     `onCancel` parameter on the overlay makes the reader shell look like it handles cancellation
+     while the value is never read, so future call sites can drift into false safety.
+     */
+    func testReaderPassageChooserOverlayDoesNotExposeDeadCancellationAPI() throws {
+        let testFileURL = URL(fileURLWithPath: #filePath)
+        let repoRoot = testFileURL
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let overlayURL = repoRoot.appendingPathComponent(
+            "Sources/BibleUI/Sources/BibleUI/Bible/ReaderPassageChooserOverlay.swift"
+        )
+
+        let source = try String(contentsOf: overlayURL, encoding: .utf8)
+
+        XCTAssertFalse(source.contains("onCancel"))
     }
 
     /**
@@ -1013,11 +1034,12 @@ extension AndBibleTests {
     }
 
     /**
-     Verifies reader-hosted passage choosers capture progress snapshots once per presentation.
+     Verifies reader-hosted passage choosers store progress snapshots once per presentation.
 
      Reading and memorization snapshots decode persisted store payloads. The chooser progress
-     closures run for many grid cells, so they should close over a prebuilt progress context instead
-     of re-reading those snapshots from `BibleReaderView` on every cell render.
+     closures run for many grid cells, and `BibleReaderView` can re-render while a chooser is open.
+     The reader should therefore store a captured context at presentation time instead of rebuilding
+     it from computed properties during unrelated renders.
      */
     func testReaderPassageChooserProgressProvidersCaptureSnapshotsOnce() throws {
         let testFileURL = URL(fileURLWithPath: #filePath)
@@ -1030,8 +1052,14 @@ extension AndBibleTests {
 
         let source = try String(contentsOf: readerViewURL, encoding: .utf8)
         let contextOccurrences = source.components(separatedBy: "let progressContext = passageChooserProgressContext").count - 1
+        let captureOccurrences = source.components(separatedBy: "passageChooserProgressContext = makePassageChooserProgressContext()").count - 1
 
+        XCTAssertTrue(source.contains("@State private var passageChooserProgressContext = PassageChooserProgressContext.empty"))
+        XCTAssertTrue(source.contains("private func makePassageChooserProgressContext() -> PassageChooserProgressContext"))
+        XCTAssertFalse(source.contains("private var passageChooserProgressContext: PassageChooserProgressContext"))
         XCTAssertEqual(contextOccurrences, 2)
+        XCTAssertEqual(captureOccurrences, 2)
+        XCTAssertTrue(source.contains("passageChooserProgressContext = .empty"))
         XCTAssertFalse(source.contains("passageBookProgress(for: book)"))
         XCTAssertFalse(source.contains("passageChapterProgress(for: book, chapter: chapter)"))
         XCTAssertFalse(source.contains("passageVerseProgress(for: book, chapter: chapter, verse: verse)"))

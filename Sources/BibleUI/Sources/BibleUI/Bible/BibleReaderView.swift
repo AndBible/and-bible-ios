@@ -178,6 +178,9 @@ public struct BibleReaderView: View {
     /// Presents the book/chapter/verse chooser flow for the focused controller.
     @State private var showBookChooser = false
 
+    /// Snapshot-backed chooser progress context captured when the chooser is presented.
+    @State private var passageChooserProgressContext = PassageChooserProgressContext.empty
+
     /// Presents the full-text search sheet for the focused module.
     @State private var showSearch = false
 
@@ -715,7 +718,7 @@ public struct BibleReaderView: View {
         )) {
             crossReferenceSheetContent
         }
-        .sheet(isPresented: $showRefChooser) {
+        .sheet(isPresented: $showRefChooser, onDismiss: resetPassageChooserProgressContext) {
             refChooserSheetContent
         }
         // MARK: - Keyboard Shortcuts (iPad/Mac)
@@ -833,7 +836,7 @@ public struct BibleReaderView: View {
      - Side effects: Reads the active pane's reading and memorization progress stores once.
      - Failure modes: Missing controller/store data is represented by `nil` snapshots.
      */
-    private var passageChooserProgressContext: PassageChooserProgressContext {
+    private func makePassageChooserProgressContext() -> PassageChooserProgressContext {
         PassageChooserProgressContext(
             readingSnapshot: passageReadingProgressSnapshot,
             memorizationSnapshot: passageMemorizationProgressSnapshot,
@@ -1428,6 +1431,7 @@ public struct BibleReaderView: View {
     /// Presents the book chooser for the pane that initiated the navigation.
     private func presentBookChooser(from windowId: UUID? = nil) {
         setPanePresentationTarget(windowId)
+        passageChooserProgressContext = makePassageChooserProgressContext()
         showReaderNavigationDrawer = false
         showReaderOverflowMenu = false
         showBookChooser = true
@@ -1436,6 +1440,12 @@ public struct BibleReaderView: View {
     /// Closes the book chooser without changing the current pane target.
     private func dismissBookChooser() {
         showBookChooser = false
+        resetPassageChooserProgressContext()
+    }
+
+    /// Releases stored chooser progress snapshots after the passage chooser closes.
+    private func resetPassageChooserProgressContext() {
+        passageChooserProgressContext = .empty
     }
 
     // MARK: - Modal Routing
@@ -2014,6 +2024,7 @@ public struct BibleReaderView: View {
             onRefChooserDialog: { completion in
                 // Present book chooser and return OSIS ref
                 setPanePresentationTarget(window.id)
+                passageChooserProgressContext = makePassageChooserProgressContext()
                 refChooserCompletion = completion
                 showRefChooser = true
             },
@@ -2271,7 +2282,7 @@ public struct BibleReaderView: View {
 
     /// Full-screen dark chooser panel for Android-style passage selection.
     private var bookChooserDrawerOverlay: some View {
-        ReaderPassageChooserOverlay(onCancel: dismissBookChooser) {
+        ReaderPassageChooserOverlay {
             bookChooserDrawerContent
                 .accessibilityIdentifier("passageChooserDrawer")
         }
@@ -3330,6 +3341,13 @@ public struct BibleReaderView: View {
  Android-compatible calculations to `PassageGridProgressCalculator`.
  */
 private struct PassageChooserProgressContext {
+    /// Empty context used before a chooser presentation captures active pane snapshots.
+    static let empty = PassageChooserProgressContext(
+        readingSnapshot: nil,
+        memorizationSnapshot: nil,
+        activeBookInitials: ""
+    )
+
     /// Current reading progress snapshot for the active pane, if available.
     let readingSnapshot: ReadingProgressSnapshot?
 

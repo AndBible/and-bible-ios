@@ -117,7 +117,7 @@ public struct VerseChooserView: View {
                     }
                 }
                 .frame(width: metrics.gridWidth)
-                .padding(PassageGridMetrics.horizontalPadding)
+                .padding(.horizontal, PassageGridMetrics.horizontalPadding)
                 .frame(maxWidth: .infinity)
             }
         }

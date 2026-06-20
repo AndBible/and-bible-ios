@@ -341,6 +341,39 @@ extension AndBibleTests {
     }
 
     /**
+     Verifies chooser grids apply their shared outer inset horizontally only.
+
+     `PassageGridMetrics.horizontalPadding` is part of the square-cell width calculation. Applying
+     it to every edge adds unrelated vertical spacing and makes the metric contract misleading, so
+     each Android-style chooser grid should use it only for leading and trailing padding.
+     */
+    func testPassageGridViewsApplyHorizontalOnlyOuterPadding() throws {
+        let testFileURL = URL(fileURLWithPath: #filePath)
+        let repoRoot = testFileURL
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let relativePaths = [
+            "Sources/BibleUI/Sources/BibleUI/Navigation/BookChooserView.swift",
+            "Sources/BibleUI/Sources/BibleUI/Navigation/ChapterChooserView.swift",
+            "Sources/BibleUI/Sources/BibleUI/Navigation/VerseChooserView.swift"
+        ]
+
+        for relativePath in relativePaths {
+            let sourceURL = repoRoot.appendingPathComponent(relativePath)
+            let source = try String(contentsOf: sourceURL, encoding: .utf8)
+
+            XCTAssertTrue(
+                source.contains(".padding(.horizontal, PassageGridMetrics.horizontalPadding)"),
+                relativePath
+            )
+            XCTAssertFalse(
+                source.contains(".padding(PassageGridMetrics.horizontalPadding)"),
+                relativePath
+            )
+        }
+    }
+
+    /**
      Verifies the book chooser title follows Android's activity-title workspace suffix.
 
      Android `GridChoosePassageBook.onCreate` appends `SharedActivityState.currentWorkspaceName` to
