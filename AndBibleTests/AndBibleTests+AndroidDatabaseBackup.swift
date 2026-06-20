@@ -40,6 +40,34 @@ extension AndBibleTests {
     }
 
     /**
+     Verifies KJVA verse ordinal lookup uses cached JSword-derived offsets.
+
+     The passage chooser progress bars resolve KJVA ranges for many visible cells. The values must
+     still match Android/JSword exactly, but lookup should not repeatedly walk the full KJVA table
+     while SwiftUI renders book, chapter, and verse grids.
+     */
+    func testJSwordKJVAVersificationUsesPrecomputedOrdinalIndexForProgressRendering() throws {
+        let testFileURL = URL(fileURLWithPath: #filePath)
+        let repoRoot = testFileURL
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let sourceURL = repoRoot.appendingPathComponent(
+            "Sources/BibleCore/Sources/BibleCore/Services/JSwordKJVAVersification.swift"
+        )
+        let source = try String(contentsOf: sourceURL, encoding: .utf8)
+        let ordinalFunctionStart = try XCTUnwrap(source.range(of: "public static func verseOrdinal("))
+        let ordinalFunctionEnd = try XCTUnwrap(
+            source.range(of: "public static func verseOrdinalRange(osisId: String, chapter: Int)", range: ordinalFunctionStart.upperBound..<source.endIndex)
+        )
+        let ordinalFunctionSource = source[ordinalFunctionStart.lowerBound..<ordinalFunctionEnd.lowerBound]
+
+        XCTAssertTrue(source.contains("private static let ordinalIndexByBookIndex"))
+        XCTAssertFalse(ordinalFunctionSource.contains("JSwordKJVAVersificationData.bookTable.enumerated()"))
+        XCTAssertEqual(JSwordKJVAVersification.verseOrdinal(osisId: "Gen", chapter: 1, verse: 1), 4)
+        XCTAssertEqual(JSwordKJVAVersification.verseOrdinal(osisId: "Rev", chapter: 22, verse: 21), 38_272)
+    }
+
+    /**
      Verifies that iOS reads Android `.abdb.zip` archives by database file discovery and exposes
      both restorable and unsupported database sections.
 
