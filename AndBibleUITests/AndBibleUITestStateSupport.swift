@@ -749,13 +749,13 @@ extension AndBibleUITests {
             return
         }
 
+        let lastObservedBeforeFinalRead = lastObservedValue
         if let finalValue = valueProvider() {
-            lastObservedValue = finalValue
             if success(finalValue) {
                 return
             }
             let elapsed = String(format: "%.2f", Date().timeIntervalSince(startedAt))
-            let lastObservedState = lastObservedValue ?? "<none>"
+            let lastObservedState = lastObservedBeforeFinalRead ?? "<none>"
             XCTFail(
                 "\(failureDescription(finalValue)) Semantic wait '\(name)' ended with \(result) "
                     + "after elapsed=\(elapsed)s; final observed state='\(finalValue)'; "
@@ -768,7 +768,7 @@ extension AndBibleUITests {
         } else {
             let missingValue = "<missing \(name)>"
             let elapsed = String(format: "%.2f", Date().timeIntervalSince(startedAt))
-            let lastObservedState = lastObservedValue ?? "<none>"
+            let lastObservedState = lastObservedBeforeFinalRead ?? "<none>"
             XCTFail(
                 "\(failureDescription(missingValue)) Semantic wait '\(name)' ended with \(result) "
                     + "after elapsed=\(elapsed)s; final observed state='\(missingValue)'; "

@@ -93,6 +93,20 @@ class SemanticWaitGuardrailsTests(unittest.TestCase):
         self.assertIn("final observed state", body)
         self.assertIn("last observed state", body)
         self.assertRegex(body, re.compile(r"valueProvider\(\)[\s\S]*success\(finalValue\)"))
+        self.assertRegex(
+            body,
+            re.compile(
+                r"let\s+lastObservedBeforeFinalRead\s*=\s*lastObservedValue"
+                r"[\s\S]*if\s+let\s+finalValue\s*=\s*valueProvider\(\)"
+            ),
+        )
+        self.assertRegex(
+            body,
+            re.compile(
+                r"let\s+lastObservedState\s*=\s*lastObservedBeforeFinalRead\s*\?\?\s*\"<none>\""
+            ),
+        )
+        self.assertNotIn("lastObservedValue = finalValue", body)
 
     def test_representative_pure_observation_waits_use_shared_helper(self) -> None:
         """Keep migrated value/state waits on the shared XCTest-backed helper."""
