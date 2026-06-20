@@ -381,6 +381,44 @@ extension AndBibleTests {
         XCTAssertTrue(String(describing: type(of: view)).contains("BibleReaderToolbarActions"))
     }
 
+    /**
+     Verifies Android-style toolbar popups share the same trailing menu rail.
+
+     The Bible quick selector is triggered by the Bible toolbar icon, but Android presents toolbar
+     popup menus from the trailing app-bar region. The selector therefore uses the trigger for
+     vertical placement only and pins its right edge to the same trailing rail as the overflow menu.
+     A failure means the selector can drift toward the middle of the reader on compact screens.
+     */
+    func testReaderToolbarPopupPlacementPinsQuickSelectorToTrailingMenuRail() {
+        let containerSize = CGSize(width: 393, height: 852)
+        let safeAreaInsets = EdgeInsets(top: 59, leading: 0, bottom: 34, trailing: 0)
+        let bibleTrigger = CGRect(x: 292, y: 182, width: 24, height: 22)
+        let overflowTrigger = CGRect(x: 360, y: 182, width: 24, height: 22)
+        let quickSelectorWidth: CGFloat = 232
+        let overflowMenuWidth: CGFloat = 236
+
+        let quickPlacement = ReaderToolbarPopupPlacement.trailingToolbarPopup(
+            containerSize: containerSize,
+            safeAreaInsets: safeAreaInsets,
+            triggerRect: bibleTrigger,
+            popupWidth: quickSelectorWidth
+        )
+        let overflowPlacement = ReaderToolbarPopupPlacement.trailingToolbarPopup(
+            containerSize: containerSize,
+            safeAreaInsets: safeAreaInsets,
+            triggerRect: overflowTrigger,
+            popupWidth: overflowMenuWidth
+        )
+
+        XCTAssertEqual(quickPlacement.offset.width + quickSelectorWidth, 385, accuracy: 0.001)
+        XCTAssertEqual(
+            quickPlacement.offset.width + quickSelectorWidth,
+            overflowPlacement.offset.width + overflowMenuWidth,
+            accuracy: 0.001
+        )
+        XCTAssertEqual(quickPlacement.offset.height, bibleTrigger.maxY + 6, accuracy: 0.001)
+    }
+
     func testBibleReaderOverflowMenuBuildsWithBibleDisplayOptions() {
         let state = BibleReaderOverflowMenuState(
             isFullScreen: false,

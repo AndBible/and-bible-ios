@@ -2237,15 +2237,12 @@ public struct BibleReaderView: View {
         GeometryReader { proxy in
             let buttonRect = anchor.map { proxy[$0] }
             let width = min(proxy.size.width - 16, CGFloat(236))
-            let leadingInset: CGFloat = 8
-            let trailingInset: CGFloat = 8
-            let resolvedRightEdge = buttonRect?.maxX ?? (proxy.size.width - trailingInset)
-            let resolvedBottomEdge = buttonRect?.maxY ?? (proxy.safeAreaInsets.top + 38)
-            let x = min(
-                max(leadingInset, resolvedRightEdge - width),
-                proxy.size.width - width - trailingInset
+            let placement = ReaderToolbarPopupPlacement.trailingToolbarPopup(
+                containerSize: proxy.size,
+                safeAreaInsets: proxy.safeAreaInsets,
+                triggerRect: buttonRect,
+                popupWidth: width
             )
-            let y = max(proxy.safeAreaInsets.top + 6, resolvedBottomEdge + 6)
 
             ZStack(alignment: .topLeading) {
                 Color.black.opacity(0.001)
@@ -2262,7 +2259,7 @@ public struct BibleReaderView: View {
                             .strokeBorder(Color.black.opacity(colorScheme == .dark ? 0.45 : 0.12), lineWidth: 1)
                     )
                     .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.32 : 0.18), radius: 14, y: 6)
-                    .offset(x: x, y: y)
+                    .offset(x: placement.offset.width, y: placement.offset.height)
                     .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .topTrailing)))
             }
         }
@@ -2278,15 +2275,12 @@ public struct BibleReaderView: View {
                 activeModuleName: currentBibleQuickSelectorModuleName(for: controller)
             )
             let width = min(max(proxy.size.width * 0.42, 156), min(proxy.size.width - 16, 232))
-            let leadingInset: CGFloat = 8
-            let trailingInset: CGFloat = 8
-            let resolvedRightEdge = buttonRect?.maxX ?? (proxy.size.width - trailingInset)
-            let resolvedBottomEdge = buttonRect?.maxY ?? (proxy.safeAreaInsets.top + 38)
-            let x = min(
-                max(leadingInset, resolvedRightEdge - width),
-                proxy.size.width - width - trailingInset
+            let placement = ReaderToolbarPopupPlacement.trailingToolbarPopup(
+                containerSize: proxy.size,
+                safeAreaInsets: proxy.safeAreaInsets,
+                triggerRect: buttonRect,
+                popupWidth: width
             )
-            let y = max(proxy.safeAreaInsets.top + 6, resolvedBottomEdge + 6)
 
             ZStack(alignment: .topLeading) {
                 Color.black.opacity(0.001)
@@ -2310,7 +2304,7 @@ public struct BibleReaderView: View {
                             .strokeBorder(Color.black.opacity(colorScheme == .dark ? 0.45 : 0.12), lineWidth: 1)
                     )
                     .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.32 : 0.18), radius: 14, y: 6)
-                    .offset(x: x, y: y)
+                    .offset(x: placement.offset.width, y: placement.offset.height)
                     .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .topTrailing)))
                 }
             }
