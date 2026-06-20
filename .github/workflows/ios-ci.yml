@@ -446,7 +446,7 @@ jobs:
           path: .artifacts/*.xcresult
           if-no-files-found: warn
           include-hidden-files: true
-          retention-days: 1
+          retention-days: 14
 
       - name: Retry upload reuse producer xcodebuild result bundle
         if: always() && steps.upload_reuse_producer_xcresult.outcome == 'failure'
@@ -456,7 +456,7 @@ jobs:
           path: .artifacts/*.xcresult
           if-no-files-found: warn
           include-hidden-files: true
-          retention-days: 1
+          retention-days: 14
           overwrite: true
 
       - name: Delete dedicated simulator
@@ -568,7 +568,7 @@ jobs:
           path: .artifacts/*.xcresult
           if-no-files-found: warn
           include-hidden-files: true
-          retention-days: 1
+          retention-days: 14
 
       - name: Retry upload reuse consumer xcodebuild result bundle
         if: always() && steps.upload_reuse_consumer_xcresult.outcome == 'failure'
@@ -578,7 +578,7 @@ jobs:
           path: .artifacts/*.xcresult
           if-no-files-found: warn
           include-hidden-files: true
-          retention-days: 1
+          retention-days: 14
           overwrite: true
 
       - name: Delete dedicated simulator
@@ -729,7 +729,7 @@ jobs:
           path: .artifacts/*.xcresult
           if-no-files-found: warn
           include-hidden-files: true
-          retention-days: 1
+          retention-days: 14
 
       - name: Retry upload xcodebuild test result bundle
         if: always() && needs.repo-standards.outputs.required_checks_only != 'true' && steps.upload_unit_xcresult.outcome == 'failure'
@@ -739,7 +739,7 @@ jobs:
           path: .artifacts/*.xcresult
           if-no-files-found: warn
           include-hidden-files: true
-          retention-days: 1
+          retention-days: 14
           overwrite: true
 
       - name: Delete dedicated simulator
@@ -901,7 +901,7 @@ jobs:
           path: .artifacts/*.xcresult
           if-no-files-found: warn
           include-hidden-files: true
-          retention-days: 1
+          retention-days: 14
 
       - name: Retry upload xcodebuild test result bundle
         if: always() && needs.repo-standards.outputs.required_checks_only != 'true' && steps.upload_ui_xcresult.outcome == 'failure'
@@ -911,7 +911,7 @@ jobs:
           path: .artifacts/*.xcresult
           if-no-files-found: warn
           include-hidden-files: true
-          retention-days: 1
+          retention-days: 14
           overwrite: true
 
       - name: Delete dedicated simulator

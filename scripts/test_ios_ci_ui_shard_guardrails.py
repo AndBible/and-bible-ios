@@ -114,32 +114,36 @@ def upload_artifact_steps(workflow_text: str) -> list[tuple[int, str]]:
     return steps
 
 
+def upload_step_scalar(step_text: str, key: str) -> str:
+    """Returns one scalar `with:` value from an upload-artifact step."""
+    match = re.search(rf"^\s+{re.escape(key)}:\s+(.+?)\s*$", step_text, re.MULTILINE)
+    if match is None:
+        raise AssertionError(f"Expected upload-artifact step to declare {key!r}.\n{step_text}")
+    return match.group(1)
+
+
 class IOSCIUIShardGuardrailsTests(unittest.TestCase):
     """Checks the workflow-level guardrail around dynamic UI shard counts."""
 
-    def test_ios_ci_upload_artifact_steps_retention_is_one_day(self) -> None:
-        """Keep CI artifacts short-lived so test bundles do not accumulate storage churn."""
+    def test_ios_ci_upload_artifact_retention_matches_artifact_type(self) -> None:
+        """Keep build products short-lived while retaining diagnostic result bundles."""
         workflow_text = (REPO_ROOT / ".github/workflows/ios-ci.yml").read_text(encoding="utf-8")
 
         upload_steps = upload_artifact_steps(workflow_text)
         for line_number, step_text in upload_steps:
-            self.assertIn(
-                1,
-                [
-                    int(match.group(1))
-                    for match in re.finditer(
-                        r"^\s+retention-days:\s+(\d+)\s*$",
-                        step_text,
-                        re.MULTILINE,
-                    )
-                ],
-                f"Expected upload-artifact step near line {line_number} to retain artifacts for one day.",
+            path = upload_step_scalar(step_text, "path")
+            retention_days = int(upload_step_scalar(step_text, "retention-days"))
+            expected_retention_days = 14 if ".xcresult" in path else 1
+            self.assertEqual(
+                expected_retention_days,
+                retention_days,
+                f"Unexpected upload-artifact retention near line {line_number} for path {path!r}.",
             )
 
         self.assertGreater(len(upload_steps), 0, "Expected the workflow to contain upload-artifact steps.")
 
     def test_upload_artifact_retention_guardrail_handles_name_less_steps(self) -> None:
-        """Ensure the retention guardrail also catches valid `- uses:` upload steps."""
+        """Ensure the retention guardrail classifies valid `- uses:` upload steps."""
         workflow_text = """
 name: demo
 jobs:
@@ -148,7 +152,12 @@ jobs:
       - uses: actions/upload-artifact@v6
         with:
           name: result
-          path: output.txt
+          path: .artifacts/*.xcresult
+          retention-days: 14
+      - uses: actions/upload-artifact@v6
+        with:
+          name: build-product
+          path: build-products.tar.gz
           retention-days: 1
       - name: Later step
         run: true
@@ -156,8 +165,11 @@ jobs:
 
         upload_steps = upload_artifact_steps(workflow_text)
 
-        self.assertEqual(1, len(upload_steps))
-        self.assertIn("retention-days: 1", upload_steps[0][1])
+        self.assertEqual(2, len(upload_steps))
+        self.assertEqual(".artifacts/*.xcresult", upload_step_scalar(upload_steps[0][1], "path"))
+        self.assertEqual("14", upload_step_scalar(upload_steps[0][1], "retention-days"))
+        self.assertEqual("build-products.tar.gz", upload_step_scalar(upload_steps[1][1], "path"))
+        self.assertEqual("1", upload_step_scalar(upload_steps[1][1], "retention-days"))
 
     def test_ios_ci_passes_max_shard_count_to_ui_shard_planner(self) -> None:
         workflow_text = (REPO_ROOT / ".github/workflows/ios-ci.yml").read_text(encoding="utf-8")
