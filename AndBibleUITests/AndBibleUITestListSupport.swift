@@ -310,7 +310,7 @@ extension AndBibleUITests {
         waitForResolvedSemanticState(
             named: "bookmarkListStateExport",
             timeout: timeout,
-            valueProvider: { resolvedBookmarkListStateValue(in: app) },
+            valueProvider: { self.resolvedBookmarkListStateValue(in: app) },
             success: { $0.contains(token) },
             failureDescription: { finalValue in
                 "Expected element 'bookmarkListStateExport' to contain token '\(token)' within \(timeout) seconds. Final value: '\(finalValue)'."
@@ -338,7 +338,7 @@ extension AndBibleUITests {
         waitForResolvedSemanticState(
             named: "bookmarkListStateExport",
             timeout: timeout,
-            valueProvider: { resolvedBookmarkListStateValue(in: app) },
+            valueProvider: { self.resolvedBookmarkListStateValue(in: app) },
             success: { !$0.contains(token) },
             missingCountsAsSuccess: true,
             failureDescription: { _ in
@@ -368,7 +368,7 @@ extension AndBibleUITests {
         waitForResolvedSemanticState(
             named: "readingPlanListStateExport",
             timeout: timeout,
-            valueProvider: { resolvedReadingPlanListStateValue(in: app) },
+            valueProvider: { self.resolvedReadingPlanListStateValue(in: app) },
             success: { $0.contains(token) },
             failureDescription: { finalValue in
                 "Expected element 'readingPlanListStateExport' to contain token '\(token)' within \(timeout) seconds. Final value: '\(finalValue)'."
@@ -385,7 +385,7 @@ extension AndBibleUITests {
         waitForResolvedSemanticState(
             named: "readingPlanListStateExport",
             timeout: timeout,
-            valueProvider: { resolvedReadingPlanListStateValue(in: app) },
+            valueProvider: { self.resolvedReadingPlanListStateValue(in: app) },
             success: { !$0.contains(token) },
             missingCountsAsSuccess: true,
             failureDescription: { _ in
@@ -403,7 +403,7 @@ extension AndBibleUITests {
         waitForResolvedSemanticState(
             named: "availablePlansStateExport",
             timeout: timeout,
-            valueProvider: { resolvedAvailablePlansStateValue(in: app) },
+            valueProvider: { self.resolvedAvailablePlansStateValue(in: app) },
             success: { $0.contains(token) },
             failureDescription: { finalValue in
                 "Expected element 'availablePlansStateExport' to contain token '\(token)' within \(timeout) seconds. Final value: '\(finalValue)'."
@@ -504,7 +504,7 @@ extension AndBibleUITests {
         waitForResolvedSemanticState(
             named: "labelManagerStateExport",
             timeout: timeout,
-            valueProvider: { resolvedLabelManagerStateValue(in: app) },
+            valueProvider: { self.resolvedLabelManagerStateValue(in: app) },
             success: { $0.contains(token) },
             failureDescription: { finalValue in
                 "Expected element 'labelManagerStateExport' to contain token '\(token)' within \(timeout) seconds. Final value: '\(finalValue)'."
@@ -521,7 +521,7 @@ extension AndBibleUITests {
         waitForResolvedSemanticState(
             named: "labelManagerStateExport",
             timeout: timeout,
-            valueProvider: { resolvedLabelManagerStateValue(in: app) },
+            valueProvider: { self.resolvedLabelManagerStateValue(in: app) },
             success: { !$0.contains(token) },
             missingCountsAsSuccess: true,
             failureDescription: { _ in
@@ -541,8 +541,8 @@ extension AndBibleUITests {
      *   - file: Source file used for XCTest failure attribution.
      *   - line: Source line used for XCTest failure attribution.
      * - Side effects:
-     *   - polls the bookmark-list accessibility export until all requested row tokens appear in
-     *     the requested sequence
+     *   - samples the bookmark-list accessibility export through the shared semantic-state waiter
+     *     until all requested row tokens appear in the requested sequence
      * - Failure modes:
      *   - records an XCTest failure if the bookmark-list export never reaches the requested order
      */
@@ -554,18 +554,14 @@ extension AndBibleUITests {
         line: UInt = #line
     ) {
         let orderedTokens = orderedReferenceTokens.map(bookmarkListRowStateToken)
-        let deadline = Date().addingTimeInterval(timeout)
-        repeat {
-            if let state = resolvedBookmarkListStateValue(in: app),
-               bookmarkListRowsAppearInOrder(orderedTokens, within: state) {
-                return
-            }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-        } while Date() < deadline
-
-        let finalState = resolvedBookmarkListStateValue(in: app) ?? "nil"
-        XCTFail(
-            "Expected bookmark-list rows \(orderedReferenceTokens) to appear in order within \(timeout) seconds; last state was '\(finalState)'.",
+        waitForResolvedSemanticState(
+            named: "bookmarkListStateExport",
+            timeout: timeout,
+            valueProvider: { self.resolvedBookmarkListStateValue(in: app) },
+            success: { self.bookmarkListRowsAppearInOrder(orderedTokens, within: $0) },
+            failureDescription: { finalState in
+                "Expected bookmark-list rows \(orderedReferenceTokens) to appear in order within \(timeout) seconds; last state was '\(finalState)'."
+            },
             file: file,
             line: line
         )

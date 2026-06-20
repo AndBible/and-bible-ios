@@ -33,7 +33,7 @@ extension AndBibleUITests {
      *   - file: Source file used for XCTest failure attribution.
      *   - line: Source line used for XCTest failure attribution.
      * - Side effects:
-     *   - repeatedly re-queries the live XCUI hierarchy for the requested identifier
+     *   - samples the live accessibility value through the shared semantic-state waiter
      *   - records an XCTest failure when the value never reaches the expected state before timeout
      * - Failure modes:
      *   - fails when the element disappears or its accessibility value never reaches the requested
@@ -47,21 +47,14 @@ extension AndBibleUITests {
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
-        let deadline = Date().addingTimeInterval(timeout)
-        repeat {
-            if let currentValue = resolvedElementSemanticText(identifier, in: app),
-               currentValue == expectedValue
-            {
-                return
-            }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-        } while Date() < deadline
-
-        let finalValue = resolvedElementSemanticText(identifier, in: app) ?? "<missing>"
-        XCTAssertEqual(
-            finalValue,
-            expectedValue,
-            "Expected element '\(identifier)' to reach value '\(expectedValue)' within \(timeout) seconds.",
+        waitForResolvedSemanticState(
+            named: identifier,
+            timeout: timeout,
+            valueProvider: { self.resolvedElementSemanticText(identifier, in: app) },
+            success: { $0 == expectedValue },
+            failureDescription: { finalValue in
+                "Expected element '\(identifier)' to reach value '\(expectedValue)' within \(timeout) seconds. Final value: '\(finalValue)'."
+            },
             file: file,
             line: line
         )
@@ -78,8 +71,7 @@ extension AndBibleUITests {
      *   - file: Source file used for XCTest failure attribution.
      *   - line: Source line used for XCTest failure attribution.
      * - Side effects:
-     *   - repeatedly re-queries the live XCUI hierarchy until the requested token appears in the
-     *     element value or label
+     *   - samples the live accessibility value through the shared semantic-state waiter
      * - Failure modes:
      *   - fails when the element disappears or never reports the requested token before timeout
      */
@@ -91,20 +83,14 @@ extension AndBibleUITests {
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
-        let deadline = Date().addingTimeInterval(timeout)
-        repeat {
-            if let currentValue = resolvedElementSemanticText(identifier, in: app),
-               currentValue.contains(expectedToken)
-            {
-                return
-            }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-        } while Date() < deadline
-
-        let finalValue = resolvedElementSemanticText(identifier, in: app) ?? "<missing>"
-        XCTAssertTrue(
-            finalValue.contains(expectedToken),
-            "Expected element '\(identifier)' to contain token '\(expectedToken)' within \(timeout) seconds. Final value: '\(finalValue)'.",
+        waitForResolvedSemanticState(
+            named: identifier,
+            timeout: timeout,
+            valueProvider: { self.resolvedElementSemanticText(identifier, in: app) },
+            success: { $0.contains(expectedToken) },
+            failureDescription: { finalValue in
+                "Expected element '\(identifier)' to contain token '\(expectedToken)' within \(timeout) seconds. Final value: '\(finalValue)'."
+            },
             file: file,
             line: line
         )
@@ -121,8 +107,7 @@ extension AndBibleUITests {
      *   - file: Source file used for XCTest failure attribution.
      *   - line: Source line used for XCTest failure attribution.
      * - Side effects:
-     *   - repeatedly re-queries the live XCUI hierarchy until the requested token disappears from
-     *     the element value and label
+     *   - samples the live accessibility value through the shared semantic-state waiter
      * - Failure modes:
      *   - fails when the element disappears or keeps reporting the token after the timeout
      */
@@ -134,22 +119,15 @@ extension AndBibleUITests {
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
-        let deadline = Date().addingTimeInterval(timeout)
-        repeat {
-            if let currentValue = resolvedElementSemanticText(identifier, in: app) {
-                if !currentValue.contains(unexpectedToken) {
-                    return
-                }
-            } else {
-                return
-            }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-        } while Date() < deadline
-
-        let finalValue = resolvedElementSemanticText(identifier, in: app) ?? "<missing>"
-        XCTAssertFalse(
-            finalValue.contains(unexpectedToken),
-            "Expected element '\(identifier)' to stop containing '\(unexpectedToken)' within \(timeout) seconds.",
+        waitForResolvedSemanticState(
+            named: identifier,
+            timeout: timeout,
+            valueProvider: { self.resolvedElementSemanticText(identifier, in: app) },
+            success: { !$0.contains(unexpectedToken) },
+            missingCountsAsSuccess: true,
+            failureDescription: { finalValue in
+                "Expected element '\(identifier)' to stop containing '\(unexpectedToken)' within \(timeout) seconds. Final value: '\(finalValue)'."
+            },
             file: file,
             line: line
         )
