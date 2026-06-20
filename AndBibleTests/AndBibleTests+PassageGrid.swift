@@ -79,6 +79,27 @@ extension AndBibleTests {
     }
 
     /**
+     Verifies checkable passage chooser menu rows expose their state to accessibility.
+
+     The Android-style overflow popup renders checkbox rows visually. iOS VoiceOver and UI tests
+     need the same state as an accessibility value, using the existing app convention for checkable
+     menu rows: `on` when checked and `off` when unchecked.
+     */
+    func testPassageChooserMenuRowsExposeCheckedStateAccessibilityValue() throws {
+        let testFileURL = URL(fileURLWithPath: #filePath)
+        let repoRoot = testFileURL
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let sourceURL = repoRoot.appendingPathComponent(
+            "Sources/BibleUI/Sources/BibleUI/Navigation/BookChooserView.swift"
+        )
+
+        let source = try String(contentsOf: sourceURL, encoding: .utf8)
+
+        XCTAssertTrue(source.contains(".accessibilityValue(isChecked(entry.option) ? \"on\" : \"off\")"))
+    }
+
+    /**
      Verifies iOS uses Android/JSword short book labels instead of SWORD abbreviations.
 
      The Android chooser calls `versification.getShortName(book)`, producing labels like `2 Ki`,

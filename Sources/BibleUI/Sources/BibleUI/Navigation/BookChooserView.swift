@@ -550,6 +550,7 @@ private struct PassageChooserOverflowMenuPopup: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(localizedTitle(for: entry))
+                .accessibilityValue(isChecked(entry.option) ? "on" : "off")
                 .accessibilityIdentifier("passageChooserMenu.\(entry.localizationKey)")
             }
         }
