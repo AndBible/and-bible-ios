@@ -17,7 +17,199 @@ import WebKit
 import struct SwiftUI.Color
 #endif
 
+private enum TestStartupContainerError: LocalizedError {
+    case cloudKitModelRejected
+
+    var errorDescription: String? {
+        "CloudKit model validation failed"
+    }
+}
+
 extension AndBibleTests {
+    /**
+     Verifies the synced SwiftData schema itself satisfies CloudKit startup validation.
+
+     The crash fallback prevents a bad CloudKit schema from taking the whole app down, but the
+     feature contract is stronger: when the user enables iCloud sync, the CloudKit-backed
+     `AndBible` store should load instead of immediately falling back to local storage. This test
+     constructs the same split cloud/local model set as app startup with isolated store names.
+     Failure means the model still contains CloudKit-forbidden constraints, missing relationship
+     inverses, or required attributes without declaration-level defaults.
+     */
+    func testICloudSwiftDataSchemaLoadsWithCloudKitConfiguration() throws {
+        let cloudModels: [any PersistentModel.Type] = [
+            Workspace.self,
+            Window.self,
+            PageManager.self,
+            HistoryItem.self,
+            BibleBookmark.self,
+            BibleBookmarkNotes.self,
+            BibleBookmarkToLabel.self,
+            GenericBookmark.self,
+            GenericBookmarkNotes.self,
+            GenericBookmarkToLabel.self,
+            Label.self,
+            StudyPadTextEntry.self,
+            StudyPadTextEntryText.self,
+            MyDocument.self,
+            MyDocumentPage.self,
+            MyDocumentPageContent.self,
+            AiPageCacheEntry.self,
+            ReadingPlan.self,
+            ReadingPlanDay.self,
+        ]
+        let localModels: [any PersistentModel.Type] = [
+            Repository.self,
+            Setting.self,
+        ]
+        let schema = Schema(cloudModels + localModels)
+        let storeSuffix = UUID().uuidString
+        let temporaryDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AndBibleCloudCompatibility-\(storeSuffix)", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: temporaryDirectory,
+            withIntermediateDirectories: true
+        )
+        defer {
+            try? FileManager.default.removeItem(at: temporaryDirectory)
+        }
+        let cloudConfig = ModelConfiguration(
+            "AndBibleCloudCompatibility-\(storeSuffix)",
+            schema: Schema(cloudModels),
+            url: temporaryDirectory.appendingPathComponent("AndBibleCloud.store"),
+            cloudKitDatabase: .private("iCloud.org.andbible.ios")
+        )
+        let localConfig = ModelConfiguration(
+            "LocalCompatibility-\(storeSuffix)",
+            schema: Schema(localModels),
+            url: temporaryDirectory.appendingPathComponent("AndBibleLocal.store"),
+            cloudKitDatabase: .none
+        )
+
+        _ = try ModelContainer(for: schema, configurations: [cloudConfig, localConfig])
+        XCTAssertEqual(ReadingPlanDay().dayNumber, 1)
+    }
+
+    /**
+     Protects startup recovery when the persisted iCloud toggle points app launch at a
+     CloudKit-backed SwiftData container that cannot load.
+
+     The issue-196 crash happened before any view rendered because `AndBibleApp` treated the
+     CloudKit container failure as fatal. The recovery contract is that startup retries the same
+     store locally, clears the persisted iCloud toggle so the next launch does not repeat the
+     crash loop, and reports that the effective runtime mode is local-only.
+     */
+    func testICloudStartupRecoveryFallsBackToLocalContainerAndDisablesCrashLoopPreference() throws {
+        let defaultsName = "org.andbible.tests.icloud-startup-recovery.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: defaultsName))
+        defer {
+            defaults.removePersistentDomain(forName: defaultsName)
+        }
+
+        let syncEnabledKey = "icloud_sync_enabled"
+        defaults.set(true, forKey: syncEnabledKey)
+        var loadAttempts: [String] = []
+
+        let result: ICloudModelContainerStartupRecovery.Result<String> = try ICloudModelContainerStartupRecovery.loadContainer(
+            iCloudEnabled: true,
+            defaults: defaults,
+            syncEnabledKey: syncEnabledKey,
+            loadCloudKitContainer: {
+                loadAttempts.append("cloud")
+                throw TestStartupContainerError.cloudKitModelRejected
+            },
+            loadLocalContainer: {
+                loadAttempts.append("local")
+                return "local-container"
+            }
+        )
+
+        XCTAssertEqual(result.container, "local-container")
+        XCTAssertEqual(loadAttempts, ["cloud", "local"])
+        XCTAssertFalse(result.effectiveICloudEnabled)
+        XCTAssertTrue(result.didRecoverFromCloudKitFailure)
+        XCTAssertEqual(result.cloudKitLoadErrorDescription, "CloudKit model validation failed")
+        XCTAssertFalse(defaults.bool(forKey: syncEnabledKey))
+    }
+
+    /**
+     Verifies the normal CloudKit startup path preserves the persisted iCloud toggle.
+
+     The issue-196 recovery must stay limited to failed CloudKit startup. A successful
+     CloudKit-backed container load remains the effective runtime mode and must not rewrite the
+     bootstrap preference.
+     */
+    func testICloudStartupRecoveryKeepsICloudEnabledWhenCloudKitContainerLoads() throws {
+        let defaultsName = "org.andbible.tests.icloud-startup-success.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: defaultsName))
+        defer {
+            defaults.removePersistentDomain(forName: defaultsName)
+        }
+
+        let syncEnabledKey = "icloud_sync_enabled"
+        defaults.set(true, forKey: syncEnabledKey)
+        var loadAttempts: [String] = []
+
+        let result: ICloudModelContainerStartupRecovery.Result<String> = try ICloudModelContainerStartupRecovery.loadContainer(
+            iCloudEnabled: true,
+            defaults: defaults,
+            syncEnabledKey: syncEnabledKey,
+            loadCloudKitContainer: {
+                loadAttempts.append("cloud")
+                return "cloud-container"
+            },
+            loadLocalContainer: {
+                loadAttempts.append("local")
+                return "local-container"
+            }
+        )
+
+        XCTAssertEqual(result.container, "cloud-container")
+        XCTAssertEqual(loadAttempts, ["cloud"])
+        XCTAssertTrue(result.effectiveICloudEnabled)
+        XCTAssertFalse(result.didRecoverFromCloudKitFailure)
+        XCTAssertTrue(defaults.bool(forKey: syncEnabledKey))
+    }
+
+    /**
+     Verifies local-only startup never probes CloudKit or mutates the iCloud bootstrap toggle.
+
+     This guards Android-parity sync behavior from being coupled to the iOS-only recovery path:
+     local startup should remain a plain local container open with the existing preference left
+     untouched unless an actual CloudKit failure was recovered.
+     */
+    func testICloudStartupRecoveryUsesLocalContainerWhenICloudDisabled() throws {
+        let defaultsName = "org.andbible.tests.icloud-startup-local.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: defaultsName))
+        defer {
+            defaults.removePersistentDomain(forName: defaultsName)
+        }
+
+        let syncEnabledKey = "icloud_sync_enabled"
+        defaults.set(false, forKey: syncEnabledKey)
+        var loadAttempts: [String] = []
+
+        let result: ICloudModelContainerStartupRecovery.Result<String> = try ICloudModelContainerStartupRecovery.loadContainer(
+            iCloudEnabled: false,
+            defaults: defaults,
+            syncEnabledKey: syncEnabledKey,
+            loadCloudKitContainer: {
+                loadAttempts.append("cloud")
+                return "cloud-container"
+            },
+            loadLocalContainer: {
+                loadAttempts.append("local")
+                return "local-container"
+            }
+        )
+
+        XCTAssertEqual(result.container, "local-container")
+        XCTAssertEqual(loadAttempts, ["local"])
+        XCTAssertFalse(result.effectiveICloudEnabled)
+        XCTAssertFalse(result.didRecoverFromCloudKitFailure)
+        XCTAssertFalse(defaults.bool(forKey: syncEnabledKey))
+    }
+
     func testRemoteSyncSettingsStoreDefaultsToICloudWhenBackendMissing() throws {
         let settingsStore = try makeInMemorySettingsStore()
         let secretStore = InMemorySecretStore()

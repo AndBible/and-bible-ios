@@ -11,35 +11,35 @@ import SwiftData
  */
 @Model
 public final class Window {
-    /// Unique identifier used for persistence and cross-entity references.
-    @Attribute(.unique) public var id: UUID
+    /// Stable identifier used for persistence and cross-entity references.
+    public var id: UUID = UUID()
 
     /// Parent workspace that owns this window.
     public var workspace: Workspace?
 
     /// Enables synchronized navigation and scroll behavior with peer windows in the same group.
-    public var isSynchronized: Bool
+    public var isSynchronized: Bool = true
 
     /// Keeps the window fixed in the layout when the user switches other panes or documents.
-    public var isPinMode: Bool
+    public var isPinMode: Bool = false
 
     /// Marks this window as the dedicated links/cross-reference destination.
-    public var isLinksWindow: Bool
+    public var isLinksWindow: Bool = false
 
     /// Zero-based display order within the parent workspace.
-    public var orderNumber: Int
+    public var orderNumber: Int = 0
 
     /// Optional explicit target window for link routing inside the workspace.
     public var targetLinksWindowId: UUID?
 
     /// Integer sync group identifier used by synchronized scrolling/navigation features.
-    public var syncGroup: Int
+    public var syncGroup: Int = 0
 
     /// Relative split-view weight used to size the pane compared with sibling windows.
-    public var layoutWeight: Float
+    public var layoutWeight: Float = 1.0
 
     /// Serialized layout mode string consumed by the workspace layout engine.
-    public var layoutState: String
+    public var layoutState: String = "split"
 
     /// 1:1 page-state record for the current document/category selections in this window.
     @Relationship(deleteRule: .cascade, inverse: \PageManager.window)
@@ -92,8 +92,8 @@ public final class Window {
  */
 @Model
 public final class PageManager {
-    /// Unique identifier that mirrors the owning window's identifier for the intended 1:1 link.
-    @Attribute(.unique) public var id: UUID
+    /// Stable identifier that mirrors the owning window's identifier for the intended 1:1 link.
+    public var id: UUID = UUID()
 
     /// Back-reference to the owning window.
     public var window: Window?
@@ -144,7 +144,7 @@ public final class PageManager {
     public var epubHref: String?
 
     /// Raw category name that identifies which of the persisted category states is active.
-    public var currentCategoryName: String
+    public var currentCategoryName: String = "bible"
 
     /// Window-scoped text display overrides applied before workspace/app defaults.
     public var textDisplaySettings: TextDisplaySettings?
@@ -178,19 +178,19 @@ public final class PageManager {
 @Model
 public final class HistoryItem {
     /// Unique identifier for the navigation snapshot.
-    public var id: UUID
+    public var id: UUID = UUID()
 
     /// Owning window that uses this row for back/forward navigation.
     public var window: Window?
 
     /// Timestamp captured when the history row was recorded.
-    public var createdAt: Date
+    public var createdAt: Date = Date()
 
     /// Module initials that were active at this history checkpoint.
-    public var document: String
+    public var document: String = ""
 
     /// Persisted document key or reference for the checkpoint.
-    public var key: String
+    public var key: String = ""
 
     /// Optional anchor ordinal used to restore scroll position more precisely.
     public var anchorOrdinal: Int?

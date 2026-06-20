@@ -14,17 +14,17 @@ import SwiftData
  */
 @Model
 public final class StudyPadTextEntry {
-    /// Unique identifier used for SwiftData identity and 1:1 text payload linkage.
-    @Attribute(.unique) public var id: UUID
+    /// Stable identifier used for SwiftData identity and 1:1 text payload linkage.
+    public var id: UUID = UUID()
 
     /// Parent label that owns this StudyPad entry; deleting the label removes the entry.
     public var label: Label?
 
     /// Zero-based display order within the label's StudyPad outline.
-    public var orderNumber: Int
+    public var orderNumber: Int = 0
 
     /// Hierarchy depth used by the StudyPad outline renderer.
-    public var indentLevel: Int
+    public var indentLevel: Int = 0
 
     /// Optional Android `TextContentType` raw value (`HTML` or `MARKDOWN`) for the text payload.
     public var contentType: String?
@@ -69,13 +69,13 @@ public final class StudyPadTextEntry {
 @Model
 public final class StudyPadTextEntryText {
     /// Mirrors the parent entry identifier to enforce the intended 1:1 relationship.
-    @Attribute(.unique) public var studyPadTextEntryId: UUID
+    public var studyPadTextEntryId: UUID = UUID()
 
     /// Back-reference to the owning StudyPad entry.
     public var entry: StudyPadTextEntry?
 
     /// Serialized note body shown in the StudyPad editor and renderer.
-    public var text: String
+    public var text: String = ""
 
     /**
      Creates the text payload entity for a StudyPad entry.

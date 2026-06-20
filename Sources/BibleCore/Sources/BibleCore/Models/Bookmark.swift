@@ -95,23 +95,23 @@ public enum BookmarkSortOrder: String, Codable, Sendable {
  */
 @Model
 public final class BibleBookmark {
-    /// Unique identifier used for persistence, label linking, and sync reconciliation.
-    @Attribute(.unique) public var id: UUID
+    /// Stable identifier used for persistence, label linking, and sync reconciliation.
+    public var id: UUID = UUID()
 
     /// Start ordinal normalized into KJVA versification for cross-module queries.
-    public var kjvOrdinalStart: Int
+    public var kjvOrdinalStart: Int = 0
 
     /// End ordinal normalized into KJVA versification for cross-module queries.
-    public var kjvOrdinalEnd: Int
+    public var kjvOrdinalEnd: Int = 0
 
     /// Start ordinal in the originating module's own versification.
-    public var ordinalStart: Int
+    public var ordinalStart: Int = 0
 
     /// End ordinal in the originating module's own versification.
-    public var ordinalEnd: Int
+    public var ordinalEnd: Int = 0
 
     /// Raw versification identifier for the originating module.
-    public var v11n: String
+    public var v11n: String = "KJVA"
 
     /// Optional book name captured at creation time for display and legacy lookup paths.
     public var book: String?
@@ -120,7 +120,7 @@ public final class BibleBookmark {
     public var playbackSettings: PlaybackSettings?
 
     /// Creation timestamp used by sorting and export flows.
-    public var createdAt: Date
+    public var createdAt: Date = Date()
 
     /// Character offset recorded for the start of a sub-verse selection, if any.
     public var startOffset: Int?
@@ -132,10 +132,10 @@ public final class BibleBookmark {
     public var primaryLabelId: UUID?
 
     /// Timestamp of the last bookmark mutation.
-    public var lastUpdatedOn: Date
+    public var lastUpdatedOn: Date = Date()
 
     /// Indicates whether the bookmark covers a whole verse instead of a text span.
-    public var wholeVerse: Bool
+    public var wholeVerse: Bool = true
 
     /// Optional raw bookmark type string used by specialized features.
     public var type: String?
@@ -204,13 +204,13 @@ public final class BibleBookmark {
 @Model
 public final class BibleBookmarkNotes {
     /// Identifier mirroring the owning bookmark for the intended 1:1 relationship.
-    @Attribute(.unique) public var bookmarkId: UUID
+    public var bookmarkId: UUID = UUID()
 
     /// Back-reference to the owning Bible bookmark.
     public var bookmark: BibleBookmark?
 
     /// User-authored note text associated with the bookmark.
-    public var notes: String
+    public var notes: String = ""
 
     /// Optional Android `TextContentType` raw value (`HTML` or `MARKDOWN`) for the note body.
     public var contentType: String?
@@ -247,13 +247,13 @@ public final class BibleBookmarkToLabel {
     public var label: Label?
 
     /// Display order within label-focused lists and StudyPad views.
-    public var orderNumber: Int
+    public var orderNumber: Int = -1
 
     /// Nesting level used by label/StudyPad outline rendering.
-    public var indentLevel: Int
+    public var indentLevel: Int = 0
 
     /// Whether child content for this row is expanded in StudyPad-like views.
-    public var expandContent: Bool
+    public var expandContent: Bool = true
 
     /**
      Creates a Bible bookmark-to-label junction row.
@@ -283,23 +283,23 @@ public final class BibleBookmarkToLabel {
  */
 @Model
 public final class GenericBookmark {
-    /// Unique identifier used for persistence, label linking, and sync reconciliation.
-    @Attribute(.unique) public var id: UUID
+    /// Stable identifier used for persistence, label linking, and sync reconciliation.
+    public var id: UUID = UUID()
 
     /// Canonical document key or OSIS-style reference for the bookmarked entry.
-    public var key: String
+    public var key: String = ""
 
     /// Module initials for the bookmarked document.
-    public var bookInitials: String
+    public var bookInitials: String = ""
 
     /// Creation timestamp used by sorting and export flows.
-    public var createdAt: Date
+    public var createdAt: Date = Date()
 
     /// Start ordinal within the target document, or `0` when unavailable.
-    public var ordinalStart: Int
+    public var ordinalStart: Int = 0
 
     /// End ordinal within the target document, or `0` when unavailable.
-    public var ordinalEnd: Int
+    public var ordinalEnd: Int = 0
 
     /// Inclusive character offset at the start of a partial selection, if any.
     public var startOffset: Int?
@@ -311,10 +311,10 @@ public final class GenericBookmark {
     public var primaryLabelId: UUID?
 
     /// Timestamp of the last bookmark mutation.
-    public var lastUpdatedOn: Date
+    public var lastUpdatedOn: Date = Date()
 
     /// Indicates whether the bookmark covers the entire keyed entry instead of a text span.
-    public var wholeVerse: Bool
+    public var wholeVerse: Bool = true
 
     /// Optional text-to-speech playback metadata for this bookmark.
     public var playbackSettings: PlaybackSettings?
@@ -379,13 +379,13 @@ public final class GenericBookmark {
 @Model
 public final class GenericBookmarkNotes {
     /// Identifier mirroring the owning bookmark for the intended 1:1 relationship.
-    @Attribute(.unique) public var bookmarkId: UUID
+    public var bookmarkId: UUID = UUID()
 
     /// Back-reference to the owning generic bookmark.
     public var bookmark: GenericBookmark?
 
     /// User-authored note text associated with the bookmark.
-    public var notes: String
+    public var notes: String = ""
 
     /// Optional Android `TextContentType` raw value (`HTML` or `MARKDOWN`) for the note body.
     public var contentType: String?
@@ -422,13 +422,13 @@ public final class GenericBookmarkToLabel {
     public var label: Label?
 
     /// Display order within label-focused lists and StudyPad views.
-    public var orderNumber: Int
+    public var orderNumber: Int = -1
 
     /// Nesting level used by label/StudyPad outline rendering.
-    public var indentLevel: Int
+    public var indentLevel: Int = 0
 
     /// Whether child content for this row is expanded in StudyPad-like views.
-    public var expandContent: Bool
+    public var expandContent: Bool = true
 
     /**
      Creates a generic bookmark-to-label junction row.

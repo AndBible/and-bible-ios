@@ -12,26 +12,26 @@ import SwiftData
  */
 @Model
 public final class ReadingPlan {
-    /// Unique identifier used for SwiftData identity and sync-safe plan references.
-    @Attribute(.unique) public var id: UUID
+    /// Stable identifier used for SwiftData identity and sync-safe plan references.
+    public var id: UUID = UUID()
 
     /// Stable plan code used to map this record back to a bundled or imported definition.
-    public var planCode: String
+    public var planCode: String = ""
 
     /// User-visible plan name captured at start time for display in history and progress UI.
-    public var planName: String
+    public var planName: String = ""
 
     /// Date the user started the plan; used to compute expected day progression.
-    public var startDate: Date
+    public var startDate: Date = Date()
 
     /// Persisted current-day field retained for parity/backup flows; new plans initialize it to `0`.
-    public var currentDay: Int
+    public var currentDay: Int = 0
 
     /// Total number of day rows the plan definition expects.
-    public var totalDays: Int
+    public var totalDays: Int = 365
 
     /// Marks whether the plan should be treated as the actively followed plan.
-    public var isActive: Bool
+    public var isActive: Bool = true
 
     /// Child day rows that store readings and completion state for each plan day.
     @Relationship(deleteRule: .cascade, inverse: \ReadingPlanDay.plan)
@@ -76,23 +76,23 @@ public final class ReadingPlan {
  */
 @Model
 public final class ReadingPlanDay {
-    /// Unique identifier used for SwiftData identity and day-level updates.
-    @Attribute(.unique) public var id: UUID
+    /// Stable identifier used for SwiftData identity and day-level updates.
+    public var id: UUID = UUID()
 
     /// Parent plan that owns this day row.
     public var plan: ReadingPlan?
 
     /// One-based day number within the parent plan definition.
-    public var dayNumber: Int
+    public var dayNumber: Int = 1
 
     /// Marks whether the user has completed this day's readings.
-    public var isCompleted: Bool
+    public var isCompleted: Bool = false
 
     /// Timestamp recorded when the day was marked complete; nil means incomplete.
     public var completedDate: Date?
 
     /// Canonical reading assignment string, typically semicolon-separated Bible references.
-    public var readings: String
+    public var readings: String = ""
 
     /**
      Creates a reading plan day record.
@@ -105,7 +105,7 @@ public final class ReadingPlanDay {
      */
     public init(
         id: UUID = UUID(),
-        dayNumber: Int = 0,
+        dayNumber: Int = 1,
         isCompleted: Bool = false,
         readings: String = ""
     ) {

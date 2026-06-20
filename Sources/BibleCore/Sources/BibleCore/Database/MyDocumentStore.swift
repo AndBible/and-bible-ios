@@ -93,7 +93,12 @@ public final class MyDocumentStore {
      */
     public func document(initials: String) -> MyDocument? {
         var descriptor = FetchDescriptor<MyDocument>(
-            predicate: #Predicate { $0.initials == initials }
+            predicate: #Predicate { $0.initials == initials },
+            sortBy: [
+                SortDescriptor(\.createdAt),
+                SortDescriptor(\.updatedAt),
+                SortDescriptor(\.name),
+            ]
         )
         descriptor.fetchLimit = 1
         return try? modelContext.fetch(descriptor).first
@@ -290,9 +295,19 @@ public final class MyDocumentStore {
     /**
      Inserts a My Documents graph and saves immediately.
      */
-    public func insert(_ document: MyDocument) {
+    @discardableResult
+    public func insert(_ document: MyDocument) -> Bool {
+        guard !hasDocument(initials: document.initials, excluding: document.id) else {
+            return false
+        }
         modelContext.insert(document)
-        save()
+        do {
+            try modelContext.save()
+            return true
+        } catch {
+            modelContext.rollback()
+            return false
+        }
     }
 
     /**
@@ -300,5 +315,23 @@ public final class MyDocumentStore {
      */
     public func save() {
         try? modelContext.save()
+    }
+
+    /**
+     Checks whether another persisted My Documents row already owns the supplied bridge initials.
+
+     `MyDocument.initials` must stay unique for Android-compatible bridge resolution and remote
+     backup export, but CloudKit-backed SwiftData stores cannot use a store-level unique
+     constraint. This helper preserves the uniqueness contract at the app layer before new local
+     rows are inserted.
+     */
+    private func hasDocument(initials: String, excluding documentID: UUID) -> Bool {
+        var descriptor = FetchDescriptor<MyDocument>(
+            predicate: #Predicate {
+                $0.initials == initials && $0.id != documentID
+            }
+        )
+        descriptor.fetchLimit = 1
+        return ((try? modelContext.fetch(descriptor)) ?? []).isEmpty == false
     }
 }

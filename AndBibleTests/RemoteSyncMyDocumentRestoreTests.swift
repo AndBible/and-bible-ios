@@ -9,6 +9,28 @@ import SwiftData
 private let myDocumentRestoreSQLiteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
 final class RemoteSyncMyDocumentRestoreTests: XCTestCase {
+    /**
+     Verifies local My Documents insertion keeps Android bridge initials unique after
+     removing SwiftData's CloudKit-incompatible unique constraint.
+
+     The bridge resolves documents by initials, so allowing two local documents with the same
+     initials would make reader actions nondeterministic and later Android-compatible exports
+     fail against their unique initials index. The store should reject the duplicate before it
+     reaches SwiftData persistence.
+     */
+    func testMyDocumentStoreRejectsDuplicateInitials() throws {
+        let container = try makeModelContainer()
+        let modelContext = ModelContext(container)
+        let store = MyDocumentStore(modelContext: modelContext)
+
+        XCTAssertTrue(store.insert(MyDocument(name: "First", initials: "MYDOC")))
+        XCTAssertFalse(store.insert(MyDocument(name: "Duplicate", initials: "MYDOC")))
+
+        let documents = try modelContext.fetch(FetchDescriptor<MyDocument>())
+        XCTAssertEqual(documents.map(\.name), ["First"])
+        XCTAssertEqual(store.document(initials: "MYDOC")?.name, "First")
+    }
+
     func testRemoteSyncMyDocumentRestoreReplacesLocalGraphAndPreservesAIContext() throws {
         let container = try makeModelContainer()
         let modelContext = ModelContext(container)
@@ -144,6 +166,46 @@ final class RemoteSyncMyDocumentRestoreTests: XCTestCase {
                     "MyDocumentPage.id=\(orphanPageID.uuidString) missing MyDocument"
                 ])
             )
+        }
+
+        let documents = try modelContext.fetch(FetchDescriptor<MyDocument>())
+        XCTAssertEqual(documents.map(\.initials), ["EXISTING"])
+    }
+
+    /**
+     Verifies staged Android My Documents rows cannot introduce duplicate bridge initials.
+
+     CloudKit does not allow SwiftData to keep `MyDocument.initials` as a store-level unique
+     constraint, but Android bridge lookup and remote backup uploads still require one document
+     per initials value. Invalid remote data must be rejected before the restore deletes current
+     local rows so the app remains on a deterministic, exportable graph.
+     */
+    func testRemoteSyncMyDocumentRestoreRejectsDuplicateInitialsWithoutMutation() throws {
+        let container = try makeModelContainer()
+        let modelContext = ModelContext(container)
+        let existingDocument = MyDocument(name: "Existing", initials: "EXISTING")
+        modelContext.insert(existingDocument)
+        try modelContext.save()
+
+        let firstDocumentID = UUID(uuidString: "e1000000-0000-0000-0000-000000000001")!
+        let secondDocumentID = UUID(uuidString: "e1000000-0000-0000-0000-000000000002")!
+        let databaseURL = try makeAndroidMyDocumentsDatabase(
+            documents: [
+                .init(id: firstDocumentID, name: "First", initials: "DUP"),
+                .init(id: secondDocumentID, name: "Second", initials: "DUP"),
+            ],
+            pages: [],
+            pageContents: [],
+            aiPageCacheEntries: []
+        )
+        defer { try? FileManager.default.removeItem(at: databaseURL) }
+
+        let service = RemoteSyncMyDocumentRestoreService()
+        let snapshot = try service.readSnapshot(from: databaseURL)
+        XCTAssertThrowsError(
+            try service.replaceLocalMyDocuments(from: snapshot, modelContext: modelContext)
+        ) { error in
+            XCTAssertEqual(error as? RemoteSyncMyDocumentRestoreError, .duplicateInitials(["DUP"]))
         }
 
         let documents = try modelContext.fetch(FetchDescriptor<MyDocument>())

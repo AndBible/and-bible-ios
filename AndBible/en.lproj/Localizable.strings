@@ -577,6 +577,7 @@
 /* iCloud Sync */
 "icloud_sync" = "iCloud Sync";
 "icloud_sync_enabled" = "Enable iCloud Sync";
+"icloud_startup_recovery_message" = "iCloud sync could not be started, so sync was turned off and AndBible opened your local data.";
 "icloud_sync_description" = "Sync bookmarks, labels, workspaces, reading plans, and notes across your devices via iCloud. Requires an iCloud account.";
 "sync_status" = "Status";
 "status" = "Status";

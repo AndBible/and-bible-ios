@@ -22,6 +22,9 @@ public enum RemoteSyncMyDocumentRestoreError: Error, Equatable {
     /// One Android UUID-like blob could not be converted into an iOS `UUID`.
     case invalidIdentifierBlob(table: String, column: String)
 
+    /// One staged Android backup would create duplicate bridge initials.
+    case duplicateInitials([String])
+
     /// One required staged column was missing or contained an unusable value.
     case invalidColumnValue(table: String, column: String)
 
@@ -261,6 +264,10 @@ public final class RemoteSyncMyDocumentRestoreService {
         if !snapshot.orphanReferences.isEmpty {
             throw RemoteSyncMyDocumentRestoreError.orphanReferences(snapshot.orphanReferences)
         }
+        let duplicateInitials = Self.duplicateInitials(in: snapshot.documents)
+        if !duplicateInitials.isEmpty {
+            throw RemoteSyncMyDocumentRestoreError.duplicateInitials(duplicateInitials)
+        }
 
         let existingCacheEntries = try modelContext.fetch(FetchDescriptor<AiPageCacheEntry>())
         let existingContents = try modelContext.fetch(FetchDescriptor<MyDocumentPageContent>())
@@ -365,6 +372,31 @@ public final class RemoteSyncMyDocumentRestoreService {
             restoredContentCount: snapshot.pageContents.count,
             restoredAIPageCacheEntryCount: snapshot.aiPageCacheEntries.count
         )
+    }
+
+    /**
+     Returns staged My Documents initials that would violate Android bridge uniqueness.
+
+     Android exposes each My Document as a generated general-book module and keeps `initials`
+     unique. iOS must preserve that contract at import time because CloudKit-backed SwiftData
+     stores cannot use a native unique constraint on the synced model attribute.
+
+     - Parameter documents: Android-shaped My Documents rows decoded from restore or patch data.
+     - Returns: Sorted duplicate initials values; empty when the staged rows are unique.
+     - Side effects: none.
+     - Failure modes: This helper cannot fail.
+     */
+    private static func duplicateInitials(in documents: [RemoteSyncAndroidMyDocument]) -> [String] {
+        var seen: Set<String> = []
+        var duplicates: Set<String> = []
+        for document in documents {
+            if seen.contains(document.initials) {
+                duplicates.insert(document.initials)
+            } else {
+                seen.insert(document.initials)
+            }
+        }
+        return duplicates.sorted()
     }
 
     private static func orphanReferences(
