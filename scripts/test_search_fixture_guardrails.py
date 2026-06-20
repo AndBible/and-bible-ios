@@ -56,6 +56,34 @@ class SearchFixtureGuardrailsTests(unittest.TestCase):
             self.assertIn(f'"{scenario}"', support_source)
         self.assertIn("allowsRuntimeIndexCreation: !isSeededSearchFixtureScenario", support_source)
 
+    def test_search_open_path_preserves_call_site_failure_attribution(self) -> None:
+        """Ensure seeded fixture failures point at the invoking Search UI test."""
+        support_source = (
+            REPO_ROOT / "AndBibleUITests/AndBibleUITestSearchSupport.swift"
+        ).read_text(encoding="utf-8")
+
+        self.assertRegex(
+            support_source,
+            re.compile(
+                r"func openSearch\(\s*in app: XCUIApplication,\s*"
+                r"file: StaticString = #filePath,\s*line: UInt = #line",
+                re.DOTALL,
+            ),
+        )
+        open_search_body = re.search(
+            r"func openSearch\([\s\S]+?\n    }\n\n    /// Reuses",
+            support_source,
+        )
+        self.assertIsNotNone(open_search_body)
+        body = open_search_body.group(0)
+        for expected_snippet in [
+            "resolveFixtureScenario(\n            environment: ProcessInfo.processInfo.environment,\n            file: file,\n            line: line",
+            "file: file,\n                line: line\n            )",
+            "tapReaderSearchEntry(in: app, timeout: 15, file: file, line: line)",
+            "requireSearchScreen(in: app, timeout: 20, file: file, line: line)",
+        ]:
+            self.assertIn(expected_snippet, body)
+
     def test_search_readiness_failure_reports_final_state_and_needs_index_history(self) -> None:
         """Keep readiness failures actionable when seeded indexes are missing or stale."""
         support_source = (

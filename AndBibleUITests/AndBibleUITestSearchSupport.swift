@@ -21,7 +21,10 @@ extension AndBibleUITests {
      runtime index-creation coverage should use a non-seeded fixture path and test that workflow
      explicitly.
 
-     - Parameter app: Running application under test.
+     - Parameters:
+       - app: Running application under test.
+       - file: Source file used for XCTest failure attribution.
+       - line: Source line used for XCTest failure attribution.
      - Returns: The visible Search root element after the readiness contract is satisfied.
      - Side effects:
        - presents Search from the seeded launch route or reader action surface
@@ -31,9 +34,15 @@ extension AndBibleUITests {
        - records an XCTest failure when Search does not present or does not become interactive
        - records an XCTest failure when a seeded Search fixture exposes `state=needsIndex`
      */
-    func openSearch(in app: XCUIApplication) -> XCUIElement {
+    func openSearch(
+        in app: XCUIApplication,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) -> XCUIElement {
         let fixtureScenario = resolveFixtureScenario(
-            environment: ProcessInfo.processInfo.environment
+            environment: ProcessInfo.processInfo.environment,
+            file: file,
+            line: line
         )
         let isSeededSearchFixtureScenario = fixtureScenario.map {
             seededSearchFixtureScenarios.contains($0)
@@ -45,18 +54,22 @@ extension AndBibleUITests {
                 on: prePresentedSearch,
                 in: app,
                 timeout: 120,
-                allowsRuntimeIndexCreation: !isSeededSearchFixtureScenario
+                allowsRuntimeIndexCreation: !isSeededSearchFixtureScenario,
+                file: file,
+                line: line
             )
             return prePresentedSearch
         }
 
-        tapReaderSearchEntry(in: app, timeout: 15)
-        let searchScreen = requireSearchScreen(in: app, timeout: 20)
+        tapReaderSearchEntry(in: app, timeout: 15, file: file, line: line)
+        let searchScreen = requireSearchScreen(in: app, timeout: 20, file: file, line: line)
         waitForSearchInteractionReady(
             on: searchScreen,
             in: app,
             timeout: 120,
-            allowsRuntimeIndexCreation: !isSeededSearchFixtureScenario
+            allowsRuntimeIndexCreation: !isSeededSearchFixtureScenario,
+            file: file,
+            line: line
         )
         return searchScreen
     }
