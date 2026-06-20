@@ -446,6 +446,31 @@ extension AndBibleTests {
         XCTAssertEqual(placement.maximumHeight, 600, accuracy: 0.001)
     }
 
+    /**
+     Verifies toolbar popup placement stays inside horizontal safe areas.
+
+     Android anchors popup menus to app-bar controls that are already laid out inside system insets.
+     The iOS shared popup placement therefore needs to include horizontal safe-area insets when
+     computing the trailing rail, especially in landscape where notches and system regions can
+     consume non-zero leading or trailing space.
+     */
+    func testReaderToolbarPopupPlacementRespectsHorizontalSafeAreas() {
+        let containerSize = CGSize(width: 852, height: 393)
+        let safeAreaInsets = EdgeInsets(top: 0, leading: 59, bottom: 21, trailing: 47)
+        let trigger = CGRect(x: 760, y: 42, width: 24, height: 22)
+        let popupWidth: CGFloat = 236
+
+        let placement = ReaderToolbarPopupPlacement.trailingToolbarPopup(
+            containerSize: containerSize,
+            safeAreaInsets: safeAreaInsets,
+            triggerRect: trigger,
+            popupWidth: popupWidth
+        )
+
+        XCTAssertEqual(placement.offset.width, 561, accuracy: 0.001)
+        XCTAssertEqual(placement.offset.width + popupWidth, 797, accuracy: 0.001)
+    }
+
     func testBibleReaderOverflowMenuBuildsWithBibleDisplayOptions() {
         let state = BibleReaderOverflowMenuState(
             isFullScreen: false,

@@ -31,7 +31,7 @@ struct ReaderToolbarPopupPlacement: Equatable {
        the trigger bottom, falling back to a toolbar-height estimate when the trigger is unavailable,
        plus the remaining visible height available to scrollable popup content.
      - Side effects: none.
-     - Failure modes: none; oversized widths are clamped to the available horizontal space.
+     - Failure modes: none; oversized widths are clamped to the safe horizontal space.
      */
     static func trailingToolbarPopup(
         containerSize: CGSize,
@@ -43,13 +43,15 @@ struct ReaderToolbarPopupPlacement: Equatable {
         verticalGap: CGFloat = 6,
         bottomInset: CGFloat = 8
     ) -> ReaderToolbarPopupPlacement {
-        let availableWidth = max(0, containerSize.width - leadingInset - trailingInset)
+        let resolvedLeadingInset = safeAreaInsets.leading + leadingInset
+        let resolvedTrailingInset = safeAreaInsets.trailing + trailingInset
+        let availableWidth = max(0, containerSize.width - resolvedLeadingInset - resolvedTrailingInset)
         let width = min(max(0, popupWidth), availableWidth)
-        let trailingRightEdge = containerSize.width - trailingInset
+        let trailingRightEdge = containerSize.width - resolvedTrailingInset
         let fallbackBottomEdge = safeAreaInsets.top + 38
         let resolvedBottomEdge = triggerRect?.maxY ?? fallbackBottomEdge
-        let maximumX = max(leadingInset, containerSize.width - width - trailingInset)
-        let x = min(max(leadingInset, trailingRightEdge - width), maximumX)
+        let maximumX = max(resolvedLeadingInset, containerSize.width - width - resolvedTrailingInset)
+        let x = min(max(resolvedLeadingInset, trailingRightEdge - width), maximumX)
         let y = max(safeAreaInsets.top + verticalGap, resolvedBottomEdge + verticalGap)
         let maximumHeight = max(0, containerSize.height - y - safeAreaInsets.bottom - bottomInset)
 
