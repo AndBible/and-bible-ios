@@ -872,8 +872,8 @@ extension AndBibleTests {
         bookmarkService.saveBibleBookmarkNote(bookmarkId: bibleBookmark.id, note: "Bible note")
         bookmarkService.saveBibleBookmarkNote(bookmarkId: genericBookmark.id, note: "Generic note")
 
-        controller.bridge(BibleBridge(), saveBookmarkNote: bibleBookmark.id.uuidString, note: " \n\t ")
-        controller.bridge(BibleBridge(), saveBookmarkNote: genericBookmark.id.uuidString, note: " \n\t ")
+        controller.bridge(bridge, saveBookmarkNote: bibleBookmark.id.uuidString, note: " \n\t ")
+        controller.bridge(bridge, saveBookmarkNote: genericBookmark.id.uuidString, note: " \n\t ")
 
         XCTAssertTrue(try modelContext.fetch(FetchDescriptor<BibleBookmarkNotes>()).isEmpty)
         XCTAssertTrue(try modelContext.fetch(FetchDescriptor<GenericBookmarkNotes>()).isEmpty)
@@ -884,6 +884,121 @@ extension AndBibleTests {
         XCTAssertEqual(payload["id"] as? String, bibleBookmark.id.uuidString)
         XCTAssertEqual(payload["notes"] as? String, "")
         XCTAssertTrue(payload["notesContentType"] is NSNull)
+    }
+
+    /**
+     Verifies the bookmark action collaborator applies Android's auto-label creation contract.
+
+     Android `BibleView.makeBookmark` assigns both `autoAssignLabels` and `autoAssignPrimaryLabel`,
+     then opens the bookmark label modal only when there are no initial labels or notes are requested.
+     This protects the extraction from preserving the old iOS-only behavior where auto-assigned
+     bookmarks still opened the label modal and never received the configured primary label.
+     */
+    @MainActor
+    func testBookmarkActionCoordinatorAppliesAndroidAutoAssignPrimaryLabelAndSuppressesLabelModal() throws {
+        let container = try makeBookmarkRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        let bookmarkService = BookmarkService(store: BookmarkStore(modelContext: modelContext))
+        let assignedLabel = bookmarkService.createLabel(name: "Assigned")
+        let primaryLabel = bookmarkService.createLabel(name: "Primary")
+        let coordinator = makeBookmarkActionCoordinator(bookmarkService: bookmarkService)
+        let workspaceSettings = WorkspaceSettings(
+            autoAssignLabels: [assignedLabel.id, primaryLabel.id],
+            autoAssignPrimaryLabel: primaryLabel.id,
+            studyPadCursors: [assignedLabel.id: 7]
+        )
+
+        let result = coordinator.addOrUpdateBibleBookmark(
+            bookInitials: "KJV",
+            startOrdinal: 1,
+            endOrdinal: 1,
+            addNote: false,
+            wholeVerse: true,
+            workspaceSettings: workspaceSettings
+        )
+
+        let bookmark = try XCTUnwrap(bookmarkService.bookmarks(for: 1, endOrdinal: 1, book: "Genesis").first)
+        XCTAssertEqual(bookmark.primaryLabelId, primaryLabel.id)
+        XCTAssertNotNil(bookmarkService.bibleBookmarkToLabel(bookmarkId: bookmark.id, labelId: assignedLabel.id))
+        XCTAssertEqual(result.updatedWorkspaceSettings?.studyPadCursors[assignedLabel.id], 1)
+        XCTAssertTrue(result.requiresPersistState)
+
+        guard case .bookmarksUpdated(let payloads) = result.events.first else {
+            return XCTFail("Expected add_or_update_bookmarks event")
+        }
+        XCTAssertEqual(payloads.first?.id, bookmark.id.uuidString)
+        XCTAssertFalse(
+            result.events.contains { event in
+                if case .bookmarkClicked = event { return true }
+                return false
+            },
+            "Android does not open the label modal when auto labels are already assigned and notes were not requested."
+        )
+    }
+
+    /**
+     Verifies primary-label changes reject Android's reserved unlabelled system label.
+
+     Android `BibleJavascriptInterface.setAsPrimaryLabel` returns before mutation when the selected
+     label is the synthetic unlabelled label. The extracted iOS collaborator must not preserve the
+     previous drift where any valid UUID could become `primaryLabelId`.
+     */
+    @MainActor
+    func testBookmarkActionCoordinatorRejectsUnlabeledPrimaryLabelLikeAndroidBridge() throws {
+        let container = try makeBookmarkRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        let bookmarkService = BookmarkService(store: BookmarkStore(modelContext: modelContext))
+        let coordinator = makeBookmarkActionCoordinator(bookmarkService: bookmarkService)
+        let bookmark = bookmarkService.addBibleBookmark(
+            bookInitials: "KJV",
+            startOrdinal: 1,
+            endOrdinal: 1,
+            wholeVerse: true
+        )
+
+        let result = coordinator.setPrimaryLabel(
+            bookmarkId: bookmark.id.uuidString,
+            labelId: Label.unlabeledId.uuidString
+        )
+
+        XCTAssertNil(bookmarkService.bibleBookmark(id: bookmark.id)?.primaryLabelId)
+        XCTAssertTrue(result.events.isEmpty)
+        XCTAssertNil(result.recentLabelId)
+    }
+
+    /**
+     Verifies whole-verse bridge edits keep Android's text-range guard.
+
+     Android refuses to turn off whole-verse rendering when a bookmark has no text range, because
+     there is no partial selection to restore. This test exercises both the guarded no-op and the
+     allowed mutation once offsets exist.
+     */
+    @MainActor
+    func testBookmarkActionCoordinatorRejectsWholeVerseOffWithoutTextRangeLikeAndroidBridge() throws {
+        let container = try makeBookmarkRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        let bookmarkService = BookmarkService(store: BookmarkStore(modelContext: modelContext))
+        let coordinator = makeBookmarkActionCoordinator(bookmarkService: bookmarkService)
+        let bookmark = bookmarkService.addBibleBookmark(
+            bookInitials: "KJV",
+            startOrdinal: 1,
+            endOrdinal: 1,
+            wholeVerse: true
+        )
+
+        let rejected = coordinator.setBookmarkWholeVerse(bookmarkId: bookmark.id.uuidString, value: false)
+        XCTAssertTrue(bookmarkService.bibleBookmark(id: bookmark.id)?.wholeVerse ?? false)
+        XCTAssertTrue(rejected.events.isEmpty)
+
+        bookmark.startOffset = 3
+        bookmark.endOffset = 8
+        let accepted = coordinator.setBookmarkWholeVerse(bookmarkId: bookmark.id.uuidString, value: false)
+
+        XCTAssertFalse(bookmarkService.bibleBookmark(id: bookmark.id)?.wholeVerse ?? true)
+        guard case .bookmarksUpdated(let payloads) = accepted.events.first else {
+            return XCTFail("Expected whole-verse mutation to re-emit the updated bookmark")
+        }
+        XCTAssertEqual(payloads.first?.wholeVerse, false)
     }
 
     /**
@@ -902,6 +1017,32 @@ extension AndBibleTests {
                 bookList: [],
                 unlabeledLabelID: Label.unlabeledId.uuidString
             ),
+            currentNotesContentType: { notesContentType }
+        )
+    }
+
+    /**
+     Builds the proposed bookmark action coordinator with production payload projection.
+
+     The helper intentionally mirrors the controller seam: the coordinator owns bookmark mutation
+     rules while the test supplies the same annotation payload factory the reader would use. A compile
+     failure here means the extraction seam has not been implemented yet; assertion failures mean the
+     seam exists but no longer matches Android's bridge contract.
+     */
+    private func makeBookmarkActionCoordinator(
+        bookmarkService: BookmarkService,
+        notesContentType: String = "HTML"
+    ) -> BibleReaderBookmarkActionCoordinator {
+        BibleReaderBookmarkActionCoordinator(
+            bookmarkService: bookmarkService,
+            payloadFactory: BibleReaderAnnotationPayloadFactory(
+                currentBook: "Genesis",
+                activeModuleName: "KJV",
+                activeModule: nil,
+                bookList: [],
+                unlabeledLabelID: Label.unlabeledId.uuidString
+            ),
+            currentBook: "Genesis",
             currentNotesContentType: { notesContentType }
         )
     }
