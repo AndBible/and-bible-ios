@@ -687,7 +687,10 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      - if the module cannot be resolved, logs a warning and leaves controller/page state unchanged
      - if the resolved module is not a Bible, logs a warning and leaves controller/page state
        unchanged
+     - Important: Main-actor isolated because successful switches can mutate SwiftUI-observed reader
+       state and synchronously emit WebView bridge updates through `loadCurrentContent()`.
      */
+    @MainActor
     public func switchBibleDocument(to moduleName: String) {
         guard let mgr = swordManager,
               let mod = mgr.module(named: moduleName) else {

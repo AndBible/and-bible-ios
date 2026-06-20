@@ -1222,6 +1222,7 @@ extension AndBibleTests {
      Bible category on the pane's `PageManager`, rather than maintaining separate quick-selector
      state.
      */
+    @MainActor
     func testBibleQuickModuleSelectorSelectionUsesControllerSwitchPathAndPersistsPaneDocument() throws {
         let (bridge, _) = makeRecordingBridge()
         let modulePath = try makeTemporaryBundledSwordPath()
@@ -1312,6 +1313,7 @@ extension AndBibleTests {
      unchanged. A failure means an accidental non-Bible caller can corrupt pane state by forcing the
      reader into Bible mode with a commentary/dictionary module name.
      */
+    @MainActor
     func testBibleDocumentSwitchRejectsNonBibleModulesWithoutStateMutation() throws {
         let (bridge, _) = makeRecordingBridge()
         let modulePath = try makeTemporaryBundledSwordPath()
