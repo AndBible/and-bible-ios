@@ -685,11 +685,17 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      - reloads the visible reader document once when the JavaScript client is ready
      Failure modes:
      - if the module cannot be resolved, logs a warning and leaves controller/page state unchanged
+     - if the resolved module is not a Bible, logs a warning and leaves controller/page state
+       unchanged
      */
     public func switchBibleDocument(to moduleName: String) {
         guard let mgr = swordManager,
               let mod = mgr.module(named: moduleName) else {
             logger.warning("Cannot switch to Bible document \(moduleName) — not found")
+            return
+        }
+        guard mod.info.category == .bible else {
+            logger.warning("Cannot switch to Bible document \(moduleName) — category \(mod.info.category.rawValue)")
             return
         }
         activeModule = mod

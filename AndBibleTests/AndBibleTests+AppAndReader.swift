@@ -1248,6 +1248,43 @@ extension AndBibleTests {
     }
 
     /**
+     Protects the controller-level Bible switch API from accepting non-Bible modules.
+
+     The quick selector and module picker currently pass Bible-filtered rows, but
+     `BibleReaderController.switchBibleDocument(to:)` is public controller API and mirrors Android's
+     current-document transition only for Bible documents. A non-Bible SWORD module must therefore
+     leave the active Bible, document category, PageManager state, and persistence callbacks
+     unchanged. A failure means an accidental non-Bible caller can corrupt pane state by forcing the
+     reader into Bible mode with a commentary/dictionary module name.
+     */
+    func testBibleDocumentSwitchRejectsNonBibleModulesWithoutStateMutation() throws {
+        let (bridge, _) = makeRecordingBridge()
+        let modulePath = try makeTemporaryBundledSwordPath()
+        try seedEmptyRawCommentaryModule(in: modulePath)
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        let window = Window()
+        let pageManager = PageManager(id: window.id)
+        window.pageManager = pageManager
+        controller.activeWindow = window
+        controller.switchCategory(to: .commentary)
+        let baselineCategory = controller.currentCategory
+        let baselineBibleModuleName = controller.activeModuleName
+        let baselineBibleDocument = pageManager.bibleDocument
+        let baselineCategoryName = pageManager.currentCategoryName
+        var persistCount = 0
+        controller.onPersistState = { persistCount += 1 }
+
+        controller.switchBibleDocument(to: "UITestComm")
+
+        XCTAssertEqual(controller.currentCategory, baselineCategory)
+        XCTAssertEqual(controller.activeModuleName, baselineBibleModuleName)
+        XCTAssertEqual(pageManager.bibleDocument, baselineBibleDocument)
+        XCTAssertEqual(pageManager.currentCategoryName, baselineCategoryName)
+        XCTAssertEqual(persistCount, 0)
+    }
+
+    /**
      Guards the reader coordinator against regressing to the iOS sheet for the quick-menu path.
 
      The coordinator state is intentionally private, so this source-level test checks the routing
