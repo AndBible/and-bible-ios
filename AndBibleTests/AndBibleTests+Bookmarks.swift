@@ -1381,6 +1381,84 @@ extension AndBibleTests {
     }
 
     /**
+     Verifies the extracted accessibility snapshot factory owns My Notes and StudyPad export assembly
+     without depending on `BibleReaderController`.
+     *
+     * Setup:
+     * - creates in-memory bookmark storage with one Bible note and one StudyPad text entry
+     * - supplies explicit ordinal and verse-reference closures matching the reader's current chapter
+     *
+     * Expected result:
+     * - My Notes exports the visible note reference, revision, and sanitized note token
+     * - StudyPad exports the visible label, revision, entry count, and sanitized text token
+     *
+     * Failure meaning:
+     * - UI automation state export has leaked back into controller-specific behavior or no longer
+     *   matches the compact token contract consumed by reader UI tests.
+     */
+    func testAccessibilitySnapshotFactoryBuildsMyNotesAndStudyPadState() throws {
+        let container = try makeBookmarkRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        let bookmarkStore = BookmarkStore(modelContext: modelContext)
+        let bookmarkService = BookmarkService(store: bookmarkStore)
+        let noteOrdinal = (119 - 1) * 40 + 3
+        let noteBookmark = BibleBookmark(
+            kjvOrdinalStart: noteOrdinal,
+            kjvOrdinalEnd: noteOrdinal,
+            ordinalStart: noteOrdinal,
+            ordinalEnd: noteOrdinal,
+            v11n: "KJVA"
+        )
+        noteBookmark.book = "Psalms"
+        modelContext.insert(noteBookmark)
+        try modelContext.save()
+        bookmarkService.saveBibleBookmarkNote(bookmarkId: noteBookmark.id, note: "Line=One;Two|Three")
+
+        let label = bookmarkService.createLabel(name: "Study=Pad;One", color: Label.defaultColor)
+        let createdEntry = try XCTUnwrap(bookmarkService.createStudyPadEntry(labelId: label.id, afterOrderNumber: -1))
+        bookmarkService.updateStudyPadTextEntryText(id: createdEntry.0.id, text: "Entry|One,Two")
+
+        let factory = BibleReaderAccessibilitySnapshotFactory(
+            bookmarkService: bookmarkService,
+            currentBook: "Psalms",
+            currentChapter: 119,
+            showingMyNotes: true,
+            showingStudyPad: true,
+            editingInWebView: true,
+            myNotesMutationRevision: 7,
+            studyPadMutationRevision: 8,
+            activeStudyPadLabelId: label.id,
+            activeStudyPadLabelName: label.name,
+            rowLimit: 2,
+            chapterOrdinalRange: { (start: noteOrdinal - 2, end: noteOrdinal + 2, verseCount: 5) },
+            verseReference: { _, ordinal in
+                VerseKeyReference(
+                    osisBookId: "Ps",
+                    chapter: 119,
+                    verse: ordinal - ((119 - 1) * 40),
+                    ordinal: ordinal
+                )
+            }
+        )
+
+        let myNotesSnapshot = factory.myNotesAccessibilitySnapshot()
+        XCTAssertTrue(myNotesSnapshot.isVisible)
+        XCTAssertTrue(myNotesSnapshot.isEditing)
+        XCTAssertEqual(myNotesSnapshot.revision, 7)
+        XCTAssertEqual(myNotesSnapshot.totalCount, 1)
+        XCTAssertEqual(myNotesSnapshot.rowReferenceTokens, ["Psalms_119_3"])
+        XCTAssertEqual(myNotesSnapshot.noteTokens.map(\.encodedValue), ["|Psalms_119_3=Line_One_Two_Three|"])
+
+        let studyPadSnapshot = factory.studyPadAccessibilitySnapshot()
+        XCTAssertTrue(studyPadSnapshot.isVisible)
+        XCTAssertTrue(studyPadSnapshot.isEditing)
+        XCTAssertEqual(studyPadSnapshot.revision, 8)
+        XCTAssertEqual(studyPadSnapshot.labelToken, "Study_Pad_One")
+        XCTAssertEqual(studyPadSnapshot.textEntryCount, 1)
+        XCTAssertEqual(studyPadSnapshot.textTokens.map(\.encodedValue), ["|0=Entry_One_Two|"])
+    }
+
+    /**
      Verifies that creating and editing one StudyPad entry persists its text payload in the backing
      SwiftData rows.
      *
