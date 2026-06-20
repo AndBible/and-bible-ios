@@ -11,6 +11,29 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 SEEDED_SEARCH_FIXTURES = {"search-indexed", "search-multi-translation"}
 
 
+def swift_function_body(source: str, name: str) -> str:
+    """Return a Swift function body from a source string for contract checks."""
+    match = re.search(rf"\bfunc\s+{re.escape(name)}\b", source)
+    if match is None:
+        raise AssertionError(f"Expected Swift function {name} to exist.")
+
+    brace_index = source.find("{", match.end())
+    if brace_index == -1:
+        raise AssertionError(f"Expected Swift function {name} to have a body.")
+
+    depth = 0
+    for index in range(brace_index, len(source)):
+        char = source[index]
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return source[brace_index + 1 : index]
+
+    raise AssertionError(f"Expected Swift function {name} body to close.")
+
+
 class SearchFixtureGuardrailsTests(unittest.TestCase):
     """Protects Search UI tests from silently falling back to runtime index creation."""
 
@@ -54,7 +77,8 @@ class SearchFixtureGuardrailsTests(unittest.TestCase):
         self.assertIn("seededSearchFixtureScenarios", support_source)
         for scenario in SEEDED_SEARCH_FIXTURES:
             self.assertIn(f'"{scenario}"', support_source)
-        self.assertIn("allowsRuntimeIndexCreation: !isSeededSearchFixtureScenario", support_source)
+        self.assertIn("let allowsRuntimeIndexCreation = !isSeededSearchFixtureScenario", support_source)
+        self.assertIn("allowsRuntimeIndexCreation: allowsRuntimeIndexCreation", support_source)
 
     def test_search_open_path_preserves_call_site_failure_attribution(self) -> None:
         """Ensure seeded fixture failures point at the invoking Search UI test."""
@@ -82,11 +106,70 @@ class SearchFixtureGuardrailsTests(unittest.TestCase):
 
         readiness_calls = re.findall(
             r"waitForSearchInteractionReady\([\s\S]*?"
-            r"allowsRuntimeIndexCreation:\s*!isSeededSearchFixtureScenario,\s*"
+            r"allowsRuntimeIndexCreation:\s*allowsRuntimeIndexCreation,\s*"
             r"file:\s*file,\s*line:\s*line\s*\)",
             support_source,
         )
         self.assertEqual(2, len(readiness_calls))
+
+    def test_seeded_open_search_readiness_uses_reduced_budget(self) -> None:
+        """Ensure normal seeded Search tests no longer inherit index-creation timeouts."""
+        support_source = (
+            REPO_ROOT / "AndBibleUITests/AndBibleUITestSearchSupport.swift"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("seededSearchReadinessTimeout", support_source)
+        self.assertIn("runtimeSearchIndexReadinessTimeout", support_source)
+        self.assertRegex(
+            support_source,
+            re.compile(r"seededSearchReadinessTimeout:\s*TimeInterval\s*=\s*20\b"),
+        )
+        self.assertRegex(
+            support_source,
+            re.compile(r"runtimeSearchIndexReadinessTimeout:\s*TimeInterval\s*=\s*120\b"),
+        )
+
+        open_search_body = swift_function_body(support_source, "openSearch")
+        normalized_open_search_body = re.sub(r"\s+", " ", open_search_body)
+        self.assertIn(
+            "let allowsRuntimeIndexCreation = !isSeededSearchFixtureScenario",
+            normalized_open_search_body,
+        )
+        self.assertIn(
+            "let readinessTimeout = searchReadinessTimeout( "
+            "allowsRuntimeIndexCreation: allowsRuntimeIndexCreation "
+            ")",
+            normalized_open_search_body,
+        )
+        self.assertNotRegex(open_search_body, re.compile(r"timeout:\s*120\b"))
+        readiness_calls = re.findall(
+            r"waitForSearchInteractionReady\([\s\S]*?"
+            r"timeout:\s*readinessTimeout,[\s\S]*?"
+            r"allowsRuntimeIndexCreation:\s*allowsRuntimeIndexCreation,\s*"
+            r"file:\s*file,\s*line:\s*line\s*\)",
+            open_search_body,
+        )
+        self.assertEqual(2, len(readiness_calls))
+
+    def test_search_state_waits_use_shared_semantic_wait_helper(self) -> None:
+        """Keep Search's pure state waits on one shared diagnostic helper."""
+        support_source = (
+            REPO_ROOT / "AndBibleUITests/AndBibleUITestSearchSupport.swift"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("func waitForSearchSemanticState", support_source)
+        for function_name in [
+            "waitForSearchState",
+            "waitForSearchResultCount",
+            "waitForSearchSelectedModules",
+            "waitForSearchResultRow",
+        ]:
+            body = swift_function_body(support_source, function_name)
+            self.assertIn(
+                "waitForSearchSemanticState",
+                body,
+                f"{function_name} must use the shared Search state waiter.",
+            )
 
     def test_search_readiness_failure_reports_final_state_and_needs_index_history(self) -> None:
         """Keep readiness failures actionable when seeded indexes are missing or stale."""
@@ -97,6 +180,7 @@ class SearchFixtureGuardrailsTests(unittest.TestCase):
         self.assertIn("observedNeedsIndex", support_source)
         self.assertIn("last Search state", support_source)
         self.assertIn("state=needsIndex observed", support_source)
+        self.assertIn("index creation requested", support_source)
         self.assertIn("Create-index prompt observed", support_source)
 
         needs_index_branch = re.search(
