@@ -79,7 +79,7 @@ public enum ICloudModelContainerStartupRecovery {
                 container: container,
                 effectiveICloudEnabled: false,
                 didRecoverFromCloudKitFailure: true,
-                cloudKitLoadErrorDescription: String(describing: cloudKitError)
+                cloudKitLoadErrorDescription: cloudKitError.localizedDescription
             )
         }
     }

@@ -17,8 +17,12 @@ import WebKit
 import struct SwiftUI.Color
 #endif
 
-private enum TestStartupContainerError: Error {
+private enum TestStartupContainerError: LocalizedError {
     case cloudKitModelRejected
+
+    var errorDescription: String? {
+        "CloudKit model validation failed"
+    }
 }
 
 extension AndBibleTests {
@@ -60,6 +64,7 @@ extension AndBibleTests {
         XCTAssertEqual(loadAttempts, ["cloud", "local"])
         XCTAssertFalse(result.effectiveICloudEnabled)
         XCTAssertTrue(result.didRecoverFromCloudKitFailure)
+        XCTAssertEqual(result.cloudKitLoadErrorDescription, "CloudKit model validation failed")
         XCTAssertFalse(defaults.bool(forKey: syncEnabledKey))
     }
 
