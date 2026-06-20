@@ -1541,8 +1541,7 @@ public struct BibleReaderView: View {
     private func selectBibleQuickModule(_ module: ModuleInfo, controller: BibleReaderController?) {
         guard let controller else { return }
         dismissBibleQuickSelector()
-        controller.switchModule(to: module.name)
-        controller.switchCategory(to: .bible)
+        controller.switchBibleDocument(to: module.name)
     }
 
     // MARK: - Modal Routing
@@ -3144,8 +3143,7 @@ public struct BibleReaderView: View {
         case .none:
             return
         case .switchDirectly(let nextName):
-            controller.switchModule(to: nextName)
-            controller.switchCategory(to: .bible)
+            controller.switchBibleDocument(to: nextName)
         case .showPopup:
             presentBibleQuickSelector(controller)
         }
@@ -3175,8 +3173,7 @@ public struct BibleReaderView: View {
             modules: controller.installedBibleModules,
             activeName: controller.activeModuleName
         ) { nextName in
-            controller.switchModule(to: nextName)
-            controller.switchCategory(to: .bible)
+            controller.switchBibleDocument(to: nextName)
         }
     }
 

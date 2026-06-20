@@ -1163,8 +1163,9 @@ extension AndBibleTests {
 
      Android's popup selection calls the same current-document switch path used elsewhere in the
      reader. iOS should likewise route selected quick-menu modules through
-     `BibleReaderController.switchModule(to:)` and persist the chosen Bible document on the pane's
-     `PageManager`, rather than maintaining separate quick-selector state.
+     `BibleReaderController.switchBibleDocument(to:)` and persist the chosen Bible document plus
+     Bible category on the pane's `PageManager`, rather than maintaining separate quick-selector
+     state.
      */
     func testBibleQuickModuleSelectorSelectionUsesControllerSwitchPathAndPersistsPaneDocument() throws {
         let (bridge, _) = makeRecordingBridge()
@@ -1190,12 +1191,60 @@ extension AndBibleTests {
             return
         }
 
-        controller.switchModule(to: selectedModuleName)
-        controller.switchCategory(to: .bible)
+        controller.switchBibleDocument(to: selectedModuleName)
 
         XCTAssertEqual(controller.activeModuleName, "WEB")
         XCTAssertEqual(pageManager.bibleDocument, "WEB")
         XCTAssertEqual(pageManager.currentCategoryName, DocumentCategory.bible.pageManagerKey)
+    }
+
+    /**
+     Protects Android's atomic current-document switch behavior for Bible quick selections.
+
+     Android `MainBibleActivity.menuForDocs` delegates selected Bible rows to
+     `CurrentPageManager.setCurrentDocument(book)`, which updates the active document and page
+     category as one transition. iOS must not first reload the current non-Bible category and then
+     reload the selected Bible, because that creates unnecessary WebView work and visible flicker.
+     */
+    @MainActor
+    func testBibleDocumentSwitchFromCommentaryReloadsSelectedBibleOnce() throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let modulePath = try makeTemporaryBundledSwordPath()
+        try seedBibleAliasModule(
+            named: "WEB",
+            description: "World English Bible",
+            in: modulePath
+        )
+        try seedEmptyRawCommentaryModule(in: modulePath)
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        let window = Window()
+        let pageManager = PageManager(id: window.id)
+        window.pageManager = pageManager
+        controller.activeWindow = window
+        controller.switchCategory(to: .commentary)
+        controller.bridgeDidSetClientReady(bridge)
+        let baselineScriptCount = recordedScripts().count
+        var persistCount = 0
+        controller.onPersistState = { persistCount += 1 }
+
+        controller.switchBibleDocument(to: "WEB")
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.2))
+
+        let addDocumentScripts = recordedScripts()
+            .dropFirst(baselineScriptCount)
+            .filter { $0.contains("emit('add_documents'") }
+        XCTAssertEqual(addDocumentScripts.count, 1)
+        let payload = try XCTUnwrap(
+            bridgeEmissionPayload(from: Array(addDocumentScripts), event: "add_documents") as? [String: Any]
+        )
+        XCTAssertEqual(payload["bookCategory"] as? String, "BIBLE")
+        XCTAssertEqual(payload["bookInitials"] as? String, "WEB")
+        XCTAssertEqual(controller.currentCategory, .bible)
+        XCTAssertEqual(controller.activeModuleName, "WEB")
+        XCTAssertEqual(pageManager.bibleDocument, "WEB")
+        XCTAssertEqual(pageManager.currentCategoryName, DocumentCategory.bible.pageManagerKey)
+        XCTAssertEqual(persistCount, 1)
     }
 
     /**
