@@ -896,7 +896,7 @@ extension AndBibleUITests {
         waitForResolvedSemanticState(
             named: "readerRenderedContentState",
             timeout: timeout,
-            valueProvider: { readerRenderedContentStateValue(in: app) },
+            valueProvider: { self.readerRenderedContentStateValue(in: app) },
             success: { $0.contains(token) },
             failureDescription: { finalValue in
                 "Expected My Notes state to contain '\(token)' within \(timeout) seconds. Final value: '\(finalValue)'."
@@ -919,7 +919,7 @@ extension AndBibleUITests {
         waitForResolvedSemanticState(
             named: "readerRenderedContentState",
             timeout: timeout,
-            valueProvider: { readerRenderedContentStateValue(in: app) },
+            valueProvider: { self.readerRenderedContentStateValue(in: app) },
             success: { $0.contains("myNotesVisible=true") && $0.contains(token) },
             failureDescription: { finalValue in
                 "Expected visible My Notes state to contain '\(token)' within \(timeout) seconds. Final value: '\(finalValue)'."
@@ -942,7 +942,7 @@ extension AndBibleUITests {
         waitForResolvedSemanticState(
             named: "readerRenderedContentState",
             timeout: timeout,
-            valueProvider: { readerRenderedContentStateValue(in: app) },
+            valueProvider: { self.readerRenderedContentStateValue(in: app) },
             success: { state in
                 state.contains("myNotesVisible=true")
                     && (state.contains("myNotesEditing=true") || state.contains(marker))
@@ -1058,7 +1058,7 @@ extension AndBibleUITests {
         waitForResolvedSemanticState(
             named: "readerRenderedContentState",
             timeout: timeout,
-            valueProvider: { readerRenderedContentStateValue(in: app) },
+            valueProvider: { self.readerRenderedContentStateValue(in: app) },
             success: { !$0.contains(token) },
             failureDescription: { finalValue in
                 "Expected My Notes state to stop containing '\(token)' within \(timeout) seconds. Final value: '\(finalValue)'."
@@ -1081,7 +1081,7 @@ extension AndBibleUITests {
         waitForResolvedSemanticState(
             named: "readerRenderedContentState",
             timeout: timeout,
-            valueProvider: { readerRenderedContentStateValue(in: app) },
+            valueProvider: { self.readerRenderedContentStateValue(in: app) },
             success: { $0.contains("myNotesVisible=true") && !$0.contains(token) },
             failureDescription: { finalValue in
                 "Expected visible My Notes state to stop containing '\(token)' within \(timeout) seconds. Final value: '\(finalValue)'."
@@ -1257,7 +1257,7 @@ extension AndBibleUITests {
         waitForResolvedSemanticState(
             named: "readerRenderedContentState",
             timeout: timeout,
-            valueProvider: { readerRenderedContentStateValue(in: app) },
+            valueProvider: { self.readerRenderedContentStateValue(in: app) },
             success: { $0.contains("studyPadVisible=true") && $0.contains(token) },
             failureDescription: { finalValue in
                 "Expected visible StudyPad state to contain '\(token)' within \(timeout) seconds. Final value: '\(finalValue)'."
