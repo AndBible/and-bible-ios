@@ -919,12 +919,6 @@ public struct BibleReaderView: View {
                 panePresentationController?.navigateTo(book: book, chapter: chapter, verse: verse)
             }
         }
-        #if os(iOS)
-        .toolbar(.visible, for: .navigationBar)
-        .toolbarBackground(PassageChooserSurfacePalette.toolbarBackground.swiftUIColor, for: .navigationBar)
-        .toolbarBackground(.visible, for: .navigationBar)
-        .toolbarColorScheme(.dark, for: .navigationBar)
-        #endif
         .preferredColorScheme(.dark)
         .background(PassageChooserSurfacePalette.background.swiftUIColor.ignoresSafeArea())
     }

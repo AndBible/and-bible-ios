@@ -984,14 +984,14 @@ extension AndBibleTests {
     }
 
     /**
-     Verifies the drawer-hosted passage chooser restores its own navigation bar.
+     Verifies the drawer-hosted passage chooser does not depend on native navigation bars.
 
-     `BibleReaderView` hides the reader navigation bar so the custom Android-style header can own
-     the reading screen chrome. The passage chooser is now hosted as a child drawer in that same
-     hierarchy, so it must explicitly make its nested navigation bar visible or the Android chooser
-     title and Cancel action disappear. Failure means the drawer can slide in with only the grid.
+     Android's chooser activity owns its visible app bar as chooser content. `BibleReaderView`
+     hides native navigation chrome for the reader, so the reader-hosted chooser must not try to
+     recover by forcing a nested SwiftUI navigation bar visible. Failure means the app can regress
+     to a brittle host-level toolbar that disappears under the reader shell.
      */
-    func testPassageChooserDrawerMakesNavigationBarVisibleInsideReader() throws {
+    func testPassageChooserDrawerDoesNotDependOnNativeNavigationBarInsideReader() throws {
         let testFileURL = URL(fileURLWithPath: #filePath)
         let repoRoot = testFileURL
             .deletingLastPathComponent()
@@ -1008,7 +1008,8 @@ extension AndBibleTests {
 
         let drawerSource = source[drawerStart.lowerBound..<nextSection.lowerBound]
 
-        XCTAssertTrue(drawerSource.contains(".toolbar(.visible, for: .navigationBar)"))
+        XCTAssertTrue(drawerSource.contains("BookChooserView("))
+        XCTAssertFalse(drawerSource.contains(".toolbar(.visible, for: .navigationBar)"))
     }
 
     #if os(iOS)

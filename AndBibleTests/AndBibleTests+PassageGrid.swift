@@ -360,6 +360,30 @@ extension AndBibleTests {
     }
 
     /**
+     Verifies the Android chooser app bar is owned by the chooser content itself.
+
+     `BibleReaderView` hides native navigation chrome for the custom reader toolbar, and iOS can fail
+     to render a nested native `NavigationStack` toolbar from the reader overlay. Android's chooser
+     activity owns a visible app bar containing the back button, title, and top-right overflow menu,
+     so iOS must render that app bar explicitly inside `BookChooserView`.
+     */
+    func testPassageChooserOwnsExplicitAndroidAppBar() throws {
+        let testFileURL = URL(fileURLWithPath: #filePath)
+        let repoRoot = testFileURL
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let chooserViewURL = repoRoot.appendingPathComponent(
+            "Sources/BibleUI/Sources/BibleUI/Navigation/BookChooserView.swift"
+        )
+
+        let source = try String(contentsOf: chooserViewURL, encoding: .utf8)
+
+        XCTAssertTrue(source.contains("PassageChooserAppBar("))
+        XCTAssertTrue(source.contains(".toolbar(.hidden, for: .navigationBar)"))
+        XCTAssertFalse(source.contains("ToolbarItem(placement: .navigation)"))
+    }
+
+    /**
      Verifies chooser progress fractions follow Android's JSword KJVA semantics.
 
      Android computes book reading progress from distinct read KJVA chapters in the active cycle,

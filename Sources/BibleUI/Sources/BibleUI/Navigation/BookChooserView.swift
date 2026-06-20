@@ -143,55 +143,21 @@ public struct BookChooserView: View {
     }
 
     /**
-     Builds the current chooser step: book grid, chapter grid, or verse grid.
+     Builds the Android-style chooser shell and current selection step.
      */
     public var body: some View {
-        Group {
-            if let book = selectedBook {
-                if navigateToVerse, let chapter = selectedChapter {
-                    VerseChooserView(
-                        bookName: book.name,
-                        osisBookId: book.osisId,
-                        chapter: chapter,
-                        verseCount: verseCountProvider(book, chapter) ?? 0,
-                        currentVerse: currentVerseForSelectedContext(book: book, chapter: chapter),
-                        rowOrder: chooserOptions.rowOrder,
-                        progressProvider: { verse in
-                            chooserOptions.showProgressBars
-                                ? verseProgressProvider(book, chapter, verse)
-                                : .none
-                        }
-                    ) { verse in
-                        onSelect(book.name, chapter, verse)
-                    }
-                } else {
-                    ChapterChooserView(
-                        bookName: book.name,
-                        osisBookId: book.osisId,
-                        chapterCount: book.chapterCount,
-                        currentChapter: currentChapterForSelectedBook(book),
-                        rowOrder: chooserOptions.rowOrder,
-                        progressProvider: { chapter in
-                            chooserOptions.showProgressBars
-                                ? chapterProgressProvider(book, chapter)
-                                : .none
-                        }
-                    ) { chapter in
-                        if navigateToVerse {
-                            selectedChapter = chapter
-                        } else {
-                            onSelect(book.name, chapter, nil)
-                        }
-                    }
+        VStack(spacing: 0) {
+            PassageChooserAppBar(
+                title: navigationTitle,
+                showsOverflowButton: selectedBook == nil,
+                onBack: navigateBackOrCancel,
+                onOverflow: {
+                    isChooserMenuPresented.toggle()
                 }
-            } else {
-                bookGrid
-            }
+            )
+
+            chooserStep
         }
-        .navigationTitle(navigationTitle)
-        #if os(iOS)
-        .navigationBarTitleDisplayMode(.inline)
-        #endif
         .background(PassageChooserSurfacePalette.background.swiftUIColor.ignoresSafeArea())
         .preferredColorScheme(.dark)
         .tint(.white)
@@ -199,25 +165,56 @@ public struct BookChooserView: View {
         .overlay(alignment: .topTrailing) {
             chooserOptionsPopupOverlay
         }
-        .toolbar {
-            ToolbarItem(placement: .navigation) {
-                Button(action: navigateBackOrCancel) {
-                    Image(systemName: "chevron.left")
-                        .font(.title3.weight(.semibold))
-                }
-                .accessibilityLabel(String(localized: "back", defaultValue: "Back"))
-            }
-            if selectedBook == nil {
-                ToolbarItem(placement: .primaryAction) {
-                    chooserOptionsMenuButton
-                }
-            }
-        }
         #if os(iOS)
-        .toolbarBackground(PassageChooserSurfacePalette.toolbarBackground.swiftUIColor, for: .navigationBar)
-        .toolbarBackground(.visible, for: .navigationBar)
-        .toolbarColorScheme(.dark, for: .navigationBar)
+        .toolbar(.hidden, for: .navigationBar)
         #endif
+    }
+
+    /**
+     Builds the current chooser step: book grid, chapter grid, or verse grid.
+     */
+    @ViewBuilder
+    private var chooserStep: some View {
+        if let book = selectedBook {
+            if navigateToVerse, let chapter = selectedChapter {
+                VerseChooserView(
+                    bookName: book.name,
+                    osisBookId: book.osisId,
+                    chapter: chapter,
+                    verseCount: verseCountProvider(book, chapter) ?? 0,
+                    currentVerse: currentVerseForSelectedContext(book: book, chapter: chapter),
+                    rowOrder: chooserOptions.rowOrder,
+                    progressProvider: { verse in
+                        chooserOptions.showProgressBars
+                            ? verseProgressProvider(book, chapter, verse)
+                            : .none
+                    }
+                ) { verse in
+                    onSelect(book.name, chapter, verse)
+                }
+            } else {
+                ChapterChooserView(
+                    bookName: book.name,
+                    osisBookId: book.osisId,
+                    chapterCount: book.chapterCount,
+                    currentChapter: currentChapterForSelectedBook(book),
+                    rowOrder: chooserOptions.rowOrder,
+                    progressProvider: { chapter in
+                        chooserOptions.showProgressBars
+                            ? chapterProgressProvider(book, chapter)
+                            : .none
+                    }
+                ) { chapter in
+                    if navigateToVerse {
+                        selectedChapter = chapter
+                    } else {
+                        onSelect(book.name, chapter, nil)
+                    }
+                }
+            }
+        } else {
+            bookGrid
+        }
     }
 
     /**
@@ -255,19 +252,6 @@ public struct BookChooserView: View {
         }
     }
 
-    /// Android overflow button for chooser ordering, labels, grouping, and progress options.
-    private var chooserOptionsMenuButton: some View {
-        Button {
-            isChooserMenuPresented.toggle()
-        } label: {
-            Image(systemName: "ellipsis")
-                .rotationEffect(.degrees(90))
-                .font(.title3.weight(.semibold))
-        }
-        .accessibilityLabel(String(localized: "more_options", defaultValue: "More options"))
-        .accessibilityIdentifier("passageChooserOverflowButton")
-    }
-
     /**
      Draws Android's dark popup menu over the book grid.
 
@@ -291,7 +275,7 @@ public struct BookChooserView: View {
                         isChooserMenuPresented = false
                     }
                     .frame(width: min(max(proxy.size.width - 16, 260), 340))
-                    .padding(.top, 8)
+                    .padding(.top, PassageChooserAppBar.height + 8)
                     .padding(.trailing, 8)
                 }
             }
@@ -447,6 +431,75 @@ public struct BookChooserView: View {
             return nil
         }
         return currentVerse
+    }
+}
+
+/**
+ Android-style app bar owned by the passage chooser content.
+
+ Android's book/chapter/verse chooser uses activity-owned chrome with a back arrow, changing title,
+ and a top-right menu only on the book grid. Rendering this as chooser content avoids depending on
+ iOS navigation bars that the reader shell intentionally hides for its custom toolbar.
+ */
+private struct PassageChooserAppBar: View {
+    /// Fixed Material toolbar height used by Android's passage chooser activity.
+    static let height: CGFloat = 56
+
+    /// Current chooser title, including workspace suffix on the book step.
+    let title: String
+
+    /// Whether the Android overflow menu should be available for the current chooser step.
+    let showsOverflowButton: Bool
+
+    /// Back action for stepping back within the chooser or closing it from the book grid.
+    let onBack: () -> Void
+
+    /// Action that toggles Android's chooser option popup.
+    let onOverflow: () -> Void
+
+    /// Renders the chooser-owned app bar.
+    var body: some View {
+        HStack(spacing: 8) {
+            Button(action: onBack) {
+                Image(systemName: "arrow.left")
+                    .font(.system(size: 24, weight: .semibold))
+                    .frame(width: 52, height: Self.height)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(String(localized: "back", defaultValue: "Back"))
+            .accessibilityIdentifier("passageChooserBackButton")
+
+            Text(title)
+                .font(.system(size: 24, weight: .semibold))
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .foregroundStyle(Color.white)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityIdentifier("passageChooserTitle")
+
+            if showsOverflowButton {
+                Button(action: onOverflow) {
+                    Image(systemName: "ellipsis")
+                        .rotationEffect(.degrees(90))
+                        .font(.system(size: 24, weight: .semibold))
+                        .frame(width: 52, height: Self.height)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(String(localized: "more_options", defaultValue: "More options"))
+                .accessibilityIdentifier("passageChooserOverflowButton")
+            } else {
+                Color.clear
+                    .frame(width: 52, height: Self.height)
+                    .accessibilityHidden(true)
+            }
+        }
+        .padding(.horizontal, 4)
+        .frame(height: Self.height)
+        .foregroundStyle(Color.white)
+        .background(PassageChooserSurfacePalette.toolbarBackground.swiftUIColor)
+        .accessibilityIdentifier("passageChooserAppBar")
     }
 }
 
