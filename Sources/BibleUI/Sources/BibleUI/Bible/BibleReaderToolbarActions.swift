@@ -201,6 +201,7 @@ struct BibleReaderToolbarActions<OverflowButton: View>: View {
                 .onTapGesture(perform: onBibleTap)
                 .onLongPressGesture(perform: onBibleLongPress)
                 .allowsHitTesting(moduleActionsEnabled)
+                .accessibilityHidden(!moduleActionsEnabled)
                 .anchorPreference(key: ReaderBibleToolbarButtonBoundsPreferenceKey.self, value: .bounds) { $0 }
 
             commentaryToolbarIcon
@@ -213,6 +214,7 @@ struct BibleReaderToolbarActions<OverflowButton: View>: View {
                 .onTapGesture(perform: onCommentaryTap)
                 .onLongPressGesture(perform: onCommentaryLongPress)
                 .allowsHitTesting(moduleActionsEnabled)
+                .accessibilityHidden(!moduleActionsEnabled)
 
             if showWorkspace {
                 Button(action: onShowWorkspaces) {
