@@ -961,21 +961,47 @@ public final class BibleBridge: NSObject, WKScriptMessageHandler {
     }
 
     /**
-     Emits an event into the Vue.js client without waiting for a response.
+     Emits a raw JSON event into the Vue.js client without waiting for a response.
 
-     Native code uses events such as `set_config`, `set_document`, and `update_bookmarks` to push
-     refreshed state into the already-loaded client.
+     Native code uses this overload when it already has a complete JSON expression, such as a
+     rendered document payload or `null`. Call `emitEncoded(event:data:)` when the payload is a
+     Swift value that still needs JSON encoding, including scalar `String` values.
+
+     - Parameters:
+       - event: Vue event name passed to `bibleView.emit`.
+       - data: Raw JavaScript/JSON expression to pass as the second `bibleView.emit` argument.
+     - Side effects: Evaluates JavaScript in the attached web view or recording observer.
+     - Failure modes: JavaScript runtime failures are caught in the generated wrapper and reported
+       through the bridge console message path.
      */
     public func emit(event: String, data: String = "null") {
         let js = "try { void bibleView.emit('\(event)', \(data)); } catch(e) { window.webkit.messageHandlers.bibleView.postMessage({method:'console',args:['BRIDGE','JS EMIT ERROR in \(event): ' + e.message + ' ' + e.stack]}); }"
         evaluateJavaScript(js)
     }
 
-    /// Encodes an event payload as JSON and emits it to Vue.js.
-    public func emit<T: Encodable>(event: String, data: T) {
+    /**
+     Encodes a Swift event payload as JSON and emits it to Vue.js.
+
+     This method is intentionally distinct from the raw `String` overload so callers can encode
+     scalar string payloads as JSON string literals instead of accidentally interpolating them as
+     JavaScript source.
+
+     - Parameters:
+       - event: Vue event name passed to `bibleView.emit`.
+       - data: Encodable Swift payload to serialize as the second `bibleView.emit` argument.
+     - Side effects: Evaluates JavaScript in the attached web view or recording observer.
+     - Failure modes: Silently returns when JSON encoding fails; JavaScript runtime failures are
+       caught in the generated wrapper and reported through the bridge console message path.
+     */
+    public func emitEncoded<T: Encodable>(event: String, data: T) {
         guard let jsonData = try? bridgeEncoder.encode(data),
               let json = String(data: jsonData, encoding: .utf8) else { return }
         emit(event: event, data: json)
+    }
+
+    /// Encodes an event payload as JSON and emits it to Vue.js.
+    public func emit<T: Encodable>(event: String, data: T) {
+        emitEncoded(event: event, data: data)
     }
 
     /**

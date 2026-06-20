@@ -233,16 +233,6 @@ def provision_simulator(
     ) if simulator_id else None
 
 
-def find_candidate_by_simulator_id(
-    candidates: list[tuple[str, str, str]],
-    simulator_id: str,
-) -> tuple[str, str, str] | None:
-    for candidate in candidates:
-        if candidate[2] == simulator_id:
-            return candidate
-    return None
-
-
 def write_github_output(
     output_path: Path,
     destination: str,
@@ -273,6 +263,42 @@ def print_resolved_output(
     print(f"device_name={device_name}")
     print(f"os_version={os_version}")
     print(f"simulator_created={'true' if simulator_created else 'false'}")
+
+
+def emit_selected_simulator(
+    github_output: str | None,
+    name: str,
+    os_version: str,
+    simulator_id: str,
+    *,
+    simulator_created: bool,
+) -> None:
+    """Emit the selected simulator metadata for local and GitHub Actions callers.
+
+    The resolver produces a concrete simulator UDID and records the destination
+    shape consumed by later xcodebuild and simctl steps. When github_output is
+    supplied this appends to that file; otherwise it prints the same key/value
+    payload to stdout. File append errors are intentionally allowed to propagate
+    because CI cannot safely continue without these step outputs.
+    """
+    destination = f"id={simulator_id}"
+    print(f"Selected simulator: {name} (iOS {os_version})")
+
+    if github_output:
+        write_github_output(
+            Path(github_output),
+            destination,
+            name,
+            os_version,
+            simulator_created=simulator_created,
+        )
+    else:
+        print_resolved_output(
+            destination,
+            name,
+            os_version,
+            simulator_created=simulator_created,
+        )
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -309,7 +335,15 @@ def main(argv: list[str] | None = None) -> int:
             device_name_prefix=args.device_name_prefix,
         )
         if created_simulator:
-            time.sleep(args.delay_seconds)
+            simulator_id, name, os_version = created_simulator
+            emit_selected_simulator(
+                args.github_output,
+                name,
+                os_version,
+                simulator_id,
+                simulator_created=True,
+            )
+            return 0
 
     candidates, output_text = discover_candidates(
         project=args.project,
@@ -335,36 +369,14 @@ def main(argv: list[str] | None = None) -> int:
         print(output_text)
         return 1
 
-    selected_candidate = None
-    if created_simulator is not None:
-        selected_candidate = find_candidate_by_simulator_id(candidates, created_simulator[0])
-        if selected_candidate is None:
-            print(
-                "Created simulator did not appear in xcodebuild -showdestinations output; "
-                "using the created simulator directly."
-            )
-            selected_candidate = created_simulator[1], created_simulator[2], created_simulator[0]
-
-    name, os_version, simulator_id = selected_candidate or choose_candidate(candidates)
-    destination = f"id={simulator_id}"
-
-    print(f"Selected simulator: {name} (iOS {os_version})")
-
-    if args.github_output:
-        write_github_output(
-            Path(args.github_output),
-            destination,
-            name,
-            os_version,
-            simulator_created=created_simulator is not None,
-        )
-    else:
-        print_resolved_output(
-            destination,
-            name,
-            os_version,
-            simulator_created=created_simulator is not None,
-        )
+    name, os_version, simulator_id = choose_candidate(candidates)
+    emit_selected_simulator(
+        args.github_output,
+        name,
+        os_version,
+        simulator_id,
+        simulator_created=created_simulator is not None,
+    )
     return 0
 
 
