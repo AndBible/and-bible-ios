@@ -70,19 +70,23 @@ class SearchFixtureGuardrailsTests(unittest.TestCase):
                 re.DOTALL,
             ),
         )
-        open_search_body = re.search(
-            r"func openSearch\([\s\S]+?\n    }\n\n    /// Reuses",
+        for expected_pattern in [
+            r"resolveFixtureScenario\(\s*environment:\s*ProcessInfo\.processInfo\.environment,"
+            r"\s*file:\s*file,\s*line:\s*line\s*\)",
+            r"tapReaderSearchEntry\(\s*in:\s*app,\s*timeout:\s*15,\s*file:\s*file,"
+            r"\s*line:\s*line\s*\)",
+            r"requireSearchScreen\(\s*in:\s*app,\s*timeout:\s*20,\s*file:\s*file,"
+            r"\s*line:\s*line\s*\)",
+        ]:
+            self.assertRegex(support_source, re.compile(expected_pattern, re.DOTALL))
+
+        readiness_calls = re.findall(
+            r"waitForSearchInteractionReady\([\s\S]*?"
+            r"allowsRuntimeIndexCreation:\s*!isSeededSearchFixtureScenario,\s*"
+            r"file:\s*file,\s*line:\s*line\s*\)",
             support_source,
         )
-        self.assertIsNotNone(open_search_body)
-        body = open_search_body.group(0)
-        for expected_snippet in [
-            "resolveFixtureScenario(\n            environment: ProcessInfo.processInfo.environment,\n            file: file,\n            line: line",
-            "file: file,\n                line: line\n            )",
-            "tapReaderSearchEntry(in: app, timeout: 15, file: file, line: line)",
-            "requireSearchScreen(in: app, timeout: 20, file: file, line: line)",
-        ]:
-            self.assertIn(expected_snippet, body)
+        self.assertEqual(2, len(readiness_calls))
 
     def test_search_readiness_failure_reports_final_state_and_needs_index_history(self) -> None:
         """Keep readiness failures actionable when seeded indexes are missing or stale."""
