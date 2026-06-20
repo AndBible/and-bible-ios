@@ -16,6 +16,33 @@ struct ReaderToolbarPopupPlacement: Equatable {
     let maximumHeight: CGFloat
 
     /**
+     Bounds a toolbar popup width to the currently visible overlay space.
+
+     SwiftUI can report transient zero or near-zero geometry during presentation and rotation
+     transitions. Popup callers use this value for both placement and `.frame(width:)`, so the
+     returned width is clamped before layout receives it.
+
+     - Parameters:
+       - containerWidth: Full overlay coordinate-space width.
+       - preferredWidth: Width the popup would use when enough horizontal space exists.
+       - maximumWidth: Maximum Android-style popup width for the concrete menu.
+       - horizontalMargin: Combined leading/trailing margin reserved outside the popup.
+     - Returns: A non-negative width no larger than the preferred width, maximum width, or
+       available container width after margins.
+     - Side effects: none.
+     - Failure modes: none; negative or undersized geometry is clamped to zero.
+     */
+    static func boundedWidth(
+        containerWidth: CGFloat,
+        preferredWidth: CGFloat,
+        maximumWidth: CGFloat,
+        horizontalMargin: CGFloat = 16
+    ) -> CGFloat {
+        let availableWidth = max(0, containerWidth - horizontalMargin)
+        return min(max(0, preferredWidth), min(max(0, maximumWidth), availableWidth))
+    }
+
+    /**
      Resolves the top-leading offset for a trailing toolbar popup.
 
      - Parameters:

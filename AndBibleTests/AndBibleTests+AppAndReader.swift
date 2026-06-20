@@ -471,6 +471,44 @@ extension AndBibleTests {
         XCTAssertEqual(placement.offset.width + popupWidth, 797, accuracy: 0.001)
     }
 
+    /**
+     Verifies toolbar popup width calculation cannot feed negative dimensions into SwiftUI layout.
+
+     SwiftUI may report transient zero-width geometry during popup presentation or device rotation.
+     The reader uses the bounded width for both placement and `.frame(width:)`, so the shared width
+     helper must clamp undersized containers to zero while preserving normal Android-style popup
+     sizing when enough space exists.
+     */
+    func testReaderToolbarPopupWidthClampHandlesTransientNarrowGeometry() {
+        XCTAssertEqual(
+            ReaderToolbarPopupPlacement.boundedWidth(
+                containerWidth: 0,
+                preferredWidth: 236,
+                maximumWidth: 236
+            ),
+            0,
+            accuracy: 0.001
+        )
+        XCTAssertEqual(
+            ReaderToolbarPopupPlacement.boundedWidth(
+                containerWidth: 8,
+                preferredWidth: 236,
+                maximumWidth: 236
+            ),
+            0,
+            accuracy: 0.001
+        )
+        XCTAssertEqual(
+            ReaderToolbarPopupPlacement.boundedWidth(
+                containerWidth: 393,
+                preferredWidth: max(CGFloat(393) * 0.42, 156),
+                maximumWidth: 232
+            ),
+            CGFloat(165.06),
+            accuracy: 0.001
+        )
+    }
+
     func testBibleReaderOverflowMenuBuildsWithBibleDisplayOptions() {
         let state = BibleReaderOverflowMenuState(
             isFullScreen: false,

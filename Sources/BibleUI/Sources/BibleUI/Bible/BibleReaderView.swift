@@ -2360,7 +2360,11 @@ public struct BibleReaderView: View {
     private func readerOverflowMenuOverlay(anchor: Anchor<CGRect>?) -> some View {
         GeometryReader { proxy in
             let buttonRect = anchor.map { proxy[$0] }
-            let width = min(proxy.size.width - 16, CGFloat(236))
+            let width = ReaderToolbarPopupPlacement.boundedWidth(
+                containerWidth: proxy.size.width,
+                preferredWidth: 236,
+                maximumWidth: 236
+            )
             let placement = ReaderToolbarPopupPlacement.trailingToolbarPopup(
                 containerSize: proxy.size,
                 safeAreaInsets: proxy.safeAreaInsets,
@@ -2395,7 +2399,11 @@ public struct BibleReaderView: View {
             let buttonRect = anchor.map { proxy[$0] }
             let targetWindowId = bibleQuickModuleSelectorTargetWindowId
             let rows = bibleQuickModuleSelectorRows
-            let width = min(max(proxy.size.width * 0.42, 156), min(proxy.size.width - 16, 232))
+            let width = ReaderToolbarPopupPlacement.boundedWidth(
+                containerWidth: proxy.size.width,
+                preferredWidth: max(proxy.size.width * 0.42, 156),
+                maximumWidth: 232
+            )
             let placement = ReaderToolbarPopupPlacement.trailingToolbarPopup(
                 containerSize: proxy.size,
                 safeAreaInsets: proxy.safeAreaInsets,
