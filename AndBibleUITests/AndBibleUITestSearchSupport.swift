@@ -10,6 +10,12 @@ private let seededSearchFixtureScenarios: Set<String> = [
     "search-multi-translation",
 ]
 
+/// Maximum Search readiness wait for fixture-seeded Search UI tests.
+private let seededSearchReadinessTimeout: TimeInterval = 20
+
+/// Maximum Search readiness wait for workflows that intentionally create an index at runtime.
+private let runtimeSearchIndexReadinessTimeout: TimeInterval = 120
+
 extension AndBibleUITests {
     /**
      Opens Search and waits for it to become interactive under the current fixture contract.
@@ -47,14 +53,18 @@ extension AndBibleUITests {
         let isSeededSearchFixtureScenario = fixtureScenario.map {
             seededSearchFixtureScenarios.contains($0)
         } ?? false
+        let allowsRuntimeIndexCreation = !isSeededSearchFixtureScenario
+        let readinessTimeout = searchReadinessTimeout(
+            allowsRuntimeIndexCreation: allowsRuntimeIndexCreation
+        )
 
         if app.launchArguments.contains("-UITEST_SEARCH_QUERY"),
            let prePresentedSearch = waitForSearchScreenIfAlreadySeeded(in: app, timeout: 10) {
             waitForSearchInteractionReady(
                 on: prePresentedSearch,
                 in: app,
-                timeout: 120,
-                allowsRuntimeIndexCreation: !isSeededSearchFixtureScenario,
+                timeout: readinessTimeout,
+                allowsRuntimeIndexCreation: allowsRuntimeIndexCreation,
                 file: file,
                 line: line
             )
@@ -66,12 +76,32 @@ extension AndBibleUITests {
         waitForSearchInteractionReady(
             on: searchScreen,
             in: app,
-            timeout: 120,
-            allowsRuntimeIndexCreation: !isSeededSearchFixtureScenario,
+            timeout: readinessTimeout,
+            allowsRuntimeIndexCreation: allowsRuntimeIndexCreation,
             file: file,
             line: line
         )
         return searchScreen
+    }
+
+    /**
+     Selects the Search readiness budget for the current index lifecycle contract.
+
+     Normal Search UI tests launch with seeded `search-indexed` fixtures and should only need the
+     same short readiness budget used by the follow-up Search assertions. A longer budget remains
+     available for explicit runtime index-creation coverage so that fixture-backed tests do not hide
+     regressions behind Android-incompatible automatic indexing.
+
+     - Parameter allowsRuntimeIndexCreation: Whether the current workflow may create a missing
+       Search index at runtime.
+     - Returns: The readiness timeout to pass to `waitForSearchInteractionReady`.
+     - Side effects: none.
+     - Failure modes: This helper cannot fail.
+     */
+    func searchReadinessTimeout(allowsRuntimeIndexCreation: Bool) -> TimeInterval {
+        allowsRuntimeIndexCreation
+            ? runtimeSearchIndexReadinessTimeout
+            : seededSearchReadinessTimeout
     }
 
     /// Reuses a Search sheet that the app auto-presented from a launch-seeded UI-test query.
@@ -200,6 +230,45 @@ extension AndBibleUITests {
     }
 
     /**
+     Waits for the compact Search state export through the shared semantic-state waiter.
+
+     Search publishes a deterministic `searchStateExport` value for UI tests. This helper keeps
+     Search-specific callers on one observation path while preserving each caller's predicate and
+     failure wording.
+
+     - Parameters:
+       - app: Running application under test.
+       - timeout: Maximum time to wait before failing.
+       - success: Predicate that must match the exported Search state.
+       - failureDescription: Closure that formats the failure message from the final observed
+         Search state.
+       - file: Source file used for XCTest failure attribution.
+       - line: Source line used for XCTest failure attribution.
+     - Side effects:
+       - polls the shared Search accessibility export through `waitForResolvedSemanticState`
+     - Failure modes:
+       - records an XCTest failure with the final Search state when the predicate never matches
+     */
+    func waitForSearchSemanticState(
+        in app: XCUIApplication,
+        timeout: TimeInterval,
+        success: (String) -> Bool,
+        failureDescription: (String) -> String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        waitForResolvedSemanticState(
+            named: "searchStateExport",
+            timeout: timeout,
+            valueProvider: { resolvedSearchStateValue(in: app) },
+            success: success,
+            failureDescription: failureDescription,
+            file: file,
+            line: line
+        )
+    }
+
+    /**
      Waits for Search to become interactive and optionally triggers runtime index creation.
      *
      * - Parameters:
@@ -233,10 +302,12 @@ extension AndBibleUITests {
         var observedNeedsIndex = lastState.contains("state=needsIndex")
         var observedCreatePrompt = false
         func failSeededFixtureReadiness() {
+            let indexCreationRequested = observedNeedsIndex || observedCreatePrompt
             XCTFail(
                 "Expected seeded Search fixture to be ready without runtime index creation; "
                     + "last Search state was '\(lastState)'; "
                     + "state=needsIndex observed=\(observedNeedsIndex); "
+                    + "index creation requested=\(indexCreationRequested); "
                     + "Create-index prompt observed=\(observedCreatePrompt).",
                 file: file,
                 line: line
@@ -278,10 +349,12 @@ extension AndBibleUITests {
             RunLoop.current.run(until: Date().addingTimeInterval(0.5))
         }
 
+        let indexCreationRequested = observedNeedsIndex || observedCreatePrompt
         XCTFail(
             "Expected Search to become interactive within \(timeout) seconds; "
                 + "last Search state was '\(lastState)'; "
                 + "state=needsIndex observed=\(observedNeedsIndex); "
+                + "index creation requested=\(indexCreationRequested); "
                 + "Create-index prompt observed=\(observedCreatePrompt).",
             file: file,
             line: line
@@ -308,28 +381,17 @@ extension AndBibleUITests {
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
-        func matches(_ value: String) -> Bool {
-            value.contains("state=ready")
-                && value.contains("searching=false")
-                && value.contains(token)
-        }
-
-        let deadline = Date().addingTimeInterval(timeout)
-        repeat {
-            if searchStateCandidateValues(in: app).contains(where: matches) {
-                return
-            }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.25))
-        } while Date() < deadline
-
-        let finalValues = searchStateCandidateValues(in: app)
-        if finalValues.contains(where: matches) {
-            return
-        }
-
-        let lastValue = finalValues.isEmpty ? "nil" : finalValues.joined(separator: " || ")
-        XCTFail(
-            "Expected Search state to contain '\(token)' within \(timeout) seconds; last value was '\(lastValue)'.",
+        waitForSearchSemanticState(
+            in: app,
+            timeout: timeout,
+            success: {
+                $0.contains("state=ready")
+                    && $0.contains("searching=false")
+                    && $0.contains(token)
+            },
+            failureDescription: {
+                "Expected Search state to contain '\(token)' within \(timeout) seconds; last value was '\($0)'."
+            },
             file: file,
             line: line
         )
@@ -353,21 +415,17 @@ extension AndBibleUITests {
         in app: XCUIApplication,
         timeout: TimeInterval
     ) {
-        let deadline = Date().addingTimeInterval(timeout)
-        repeat {
-            if let value = resolvedSearchStateValue(in: app),
-               value.contains("state=ready"),
-               value.contains("searching=false"),
-               let count = searchResultCount(from: value),
-               count >= minimumCount {
-                return
+        waitForSearchSemanticState(
+            in: app,
+            timeout: timeout,
+            success: {
+                $0.contains("state=ready")
+                    && $0.contains("searching=false")
+                    && (searchResultCount(from: $0) ?? -1) >= minimumCount
+            },
+            failureDescription: {
+                "Expected Search to report at least \(minimumCount) results within \(timeout) seconds; last value was '\($0)'."
             }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.25))
-        } while Date() < deadline
-
-        let lastValue = resolvedSearchStateValue(in: app) ?? "nil"
-        XCTFail(
-            "Expected Search to report at least \(minimumCount) results within \(timeout) seconds; last value was '\(lastValue)'."
         )
     }
 
@@ -400,21 +458,17 @@ extension AndBibleUITests {
         line: UInt = #line,
         predicate: (Set<String>) -> Bool
     ) {
-        let deadline = Date().addingTimeInterval(timeout)
-        repeat {
-            if let value = resolvedSearchStateValue(in: app),
-               value.contains("state=ready"),
-               value.contains("searching=false"),
-               let modules = searchSelectedModules(from: value),
-               predicate(modules) {
-                return
-            }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.25))
-        } while Date() < deadline
-
-        let lastValue = resolvedSearchStateValue(in: app) ?? "nil"
-        XCTFail(
-            "Expected Search selected modules to match \(description) within \(timeout) seconds; last value was '\(lastValue)'.",
+        waitForSearchSemanticState(
+            in: app,
+            timeout: timeout,
+            success: {
+                $0.contains("state=ready")
+                    && $0.contains("searching=false")
+                    && searchSelectedModules(from: $0).map(predicate) == true
+            },
+            failureDescription: {
+                "Expected Search selected modules to match \(description) within \(timeout) seconds; last value was '\($0)'."
+            },
             file: file,
             line: line
         )
@@ -1372,24 +1426,18 @@ extension AndBibleUITests {
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
-        let deadline = Date().addingTimeInterval(timeout)
         let rowToken = "|\(identifier)|"
-
-        repeat {
-            if let value = resolvedSearchStateValue(in: app),
-               value.contains("state=ready"),
-               value.contains("searching=false"),
-               value.contains(rowToken) == shouldExist {
-                return
-            }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-        } while Date() < deadline
-
-        let finalValue = resolvedSearchStateValue(in: app) ?? ""
-        XCTAssertEqual(
-            finalValue.contains(rowToken),
-            shouldExist,
-            "Expected Search result '\(identifier)' existence to become \(shouldExist) within \(timeout) seconds. Final Search state: '\(finalValue)'.",
+        waitForSearchSemanticState(
+            in: app,
+            timeout: timeout,
+            success: {
+                $0.contains("state=ready")
+                    && $0.contains("searching=false")
+                    && $0.contains(rowToken) == shouldExist
+            },
+            failureDescription: {
+                "Expected Search result '\(identifier)' existence to become \(shouldExist) within \(timeout) seconds. Final Search state: '\($0)'."
+            },
             file: file,
             line: line
         )
