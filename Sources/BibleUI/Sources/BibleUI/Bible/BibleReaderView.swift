@@ -178,6 +178,9 @@ public struct BibleReaderView: View {
     /// Presents the book/chapter/verse chooser flow for the focused controller.
     @State private var showBookChooser = false
 
+    /// Snapshot-backed chooser progress context captured when the chooser is presented.
+    @State private var passageChooserProgressContext = PassageChooserProgressContext.empty
+
     /// Presents the full-text search sheet for the focused module.
     @State private var showSearch = false
 
@@ -598,6 +601,9 @@ public struct BibleReaderView: View {
             if showReaderNavigationDrawer {
                 readerNavigationDrawerOverlay
             }
+            if showBookChooser {
+                bookChooserDrawerOverlay
+            }
         }
         .overlayPreferenceValue(ReaderOverflowButtonBoundsPreferenceKey.self) { anchor in
             if showReaderOverflowMenu {
@@ -606,6 +612,7 @@ public struct BibleReaderView: View {
         }
         .animation(.easeInOut(duration: 0.25), value: toastMessage)
         .animation(.easeInOut(duration: 0.2), value: showReaderNavigationDrawer)
+        .animation(.easeInOut(duration: 0.2), value: showBookChooser)
         .animation(.easeInOut(duration: 0.16), value: showReaderOverflowMenu)
         .background {
             readerSceneMetricsBackground
@@ -634,9 +641,6 @@ public struct BibleReaderView: View {
         }
         #endif
         .preferredColorScheme(preferredColorSchemeOverride)
-        .sheet(isPresented: $showBookChooser) {
-            bookChooserSheetContent
-        }
         .sheet(isPresented: $showSearch, onDismiss: { searchInitialQuery = "" }) {
             searchSheetContent
         }
@@ -714,7 +718,7 @@ public struct BibleReaderView: View {
         )) {
             crossReferenceSheetContent
         }
-        .sheet(isPresented: $showRefChooser) {
+        .sheet(isPresented: $showRefChooser, onDismiss: resetPassageChooserProgressContext) {
             refChooserSheetContent
         }
         // MARK: - Keyboard Shortcuts (iPad/Mac)
@@ -805,12 +809,53 @@ public struct BibleReaderView: View {
         }
     }
 
-    /// Book chooser sheet used by toolbar and tab-bar navigation commands.
-    private var bookChooserSheetContent: some View {
-        NavigationStack {
+    /// Workspace name shown in reader-hosted passage chooser titles.
+    private var activePassageChooserWorkspaceName: String? {
+        panePresentationTargetWindow?.workspace?.name ?? windowManager.activeWorkspace?.name
+    }
+
+    /// Active module initials used to match Android/iOS memorization progress ranges.
+    private var passageProgressBookInitials: String {
+        panePresentationController?.activeModuleName ?? ""
+    }
+
+    /// Snapshot of active pane reading progress for chooser progress bars.
+    private var passageReadingProgressSnapshot: ReadingProgressSnapshot? {
+        panePresentationController?.readingProgressStore?.snapshot()
+    }
+
+    /// Snapshot of active pane memorization progress for chooser progress bars.
+    private var passageMemorizationProgressSnapshot: MemorizationProgressSnapshot? {
+        panePresentationController?.memorizationProgressStore?.snapshot()
+    }
+
+    /**
+     Creates the immutable progress context used by one passage chooser presentation.
+
+     - Returns: Snapshot-backed progress calculator inputs for the active pane.
+     - Side effects: Reads the active pane's reading and memorization progress stores once.
+     - Failure modes: Missing controller/store data is represented by `nil` snapshots.
+     */
+    private func makePassageChooserProgressContext() -> PassageChooserProgressContext {
+        PassageChooserProgressContext(
+            readingSnapshot: passageReadingProgressSnapshot,
+            memorizationSnapshot: passageMemorizationProgressSnapshot,
+            activeBookInitials: passageProgressBookInitials
+        )
+    }
+
+    /// Book chooser content used by toolbar and tab-bar navigation commands.
+    private var bookChooserDrawerContent: some View {
+        let progressContext = passageChooserProgressContext
+
+        return NavigationStack {
             BookChooserView(
                 books: panePresentationController?.bookList ?? BibleReaderController.defaultBooks,
                 navigateToVerse: navigateToVersePref,
+                currentBook: panePresentationController?.currentBook,
+                currentChapter: panePresentationController?.currentChapter,
+                currentVerse: panePresentationController?.currentVerse,
+                workspaceName: activePassageChooserWorkspaceName,
                 verseCountProvider: { book, chapter in
                     guard let panePresentationController else {
                         return BibleReaderController.verseCount(for: book.name, chapter: chapter)
@@ -819,12 +864,24 @@ public struct BibleReaderView: View {
                         book: book.name,
                         chapter: chapter
                     )
-                }
+                },
+                bookProgressProvider: { book in
+                    progressContext.bookProgress(for: book)
+                },
+                chapterProgressProvider: { book, chapter in
+                    progressContext.chapterProgress(for: book, chapter: chapter)
+                },
+                verseProgressProvider: { book, chapter, verse in
+                    progressContext.verseProgress(for: book, chapter: chapter, verse: verse)
+                },
+                onCancel: dismissBookChooser
             ) { book, chapter, verse in
                 dismissBookChooser()
                 panePresentationController?.navigateTo(book: book, chapter: chapter, verse: verse)
             }
         }
+        .preferredColorScheme(.dark)
+        .background(PassageChooserSurfacePalette.background.swiftUIColor.ignoresSafeArea())
     }
 
     /// Search sheet seeded from toolbar, keyboard, or Android-compatible link routing.
@@ -1005,8 +1062,34 @@ public struct BibleReaderView: View {
 
     /// Reference chooser sheet used by web-modal callbacks.
     private var refChooserSheetContent: some View {
-        NavigationStack {
-            BookChooserView(books: panePresentationController?.bookList ?? BibleReaderController.defaultBooks) { book, chapter, _ in
+        let progressContext = passageChooserProgressContext
+
+        return NavigationStack {
+            BookChooserView(
+                books: panePresentationController?.bookList ?? BibleReaderController.defaultBooks,
+                currentBook: panePresentationController?.currentBook,
+                currentChapter: panePresentationController?.currentChapter,
+                currentVerse: panePresentationController?.currentVerse,
+                workspaceName: activePassageChooserWorkspaceName,
+                verseCountProvider: { book, chapter in
+                    guard let panePresentationController else {
+                        return BibleReaderController.verseCount(for: book.name, chapter: chapter)
+                    }
+                    return panePresentationController.verseCountForActiveModule(
+                        book: book.name,
+                        chapter: chapter
+                    )
+                },
+                bookProgressProvider: { book in
+                    progressContext.bookProgress(for: book)
+                },
+                chapterProgressProvider: { book, chapter in
+                    progressContext.chapterProgress(for: book, chapter: chapter)
+                },
+                verseProgressProvider: { book, chapter, verse in
+                    progressContext.verseProgress(for: book, chapter: chapter, verse: verse)
+                }
+            ) { book, chapter, _ in
                 showRefChooser = false
                 let osisId = panePresentationController?.osisBookId(for: book) ?? BibleReaderController.osisBookId(for: book)
                 refChooserCompletion?("\(osisId).\(chapter)")
@@ -1348,12 +1431,21 @@ public struct BibleReaderView: View {
     /// Presents the book chooser for the pane that initiated the navigation.
     private func presentBookChooser(from windowId: UUID? = nil) {
         setPanePresentationTarget(windowId)
+        passageChooserProgressContext = makePassageChooserProgressContext()
+        showReaderNavigationDrawer = false
+        showReaderOverflowMenu = false
         showBookChooser = true
     }
 
     /// Closes the book chooser without changing the current pane target.
     private func dismissBookChooser() {
         showBookChooser = false
+        resetPassageChooserProgressContext()
+    }
+
+    /// Releases stored chooser progress snapshots after the passage chooser closes.
+    private func resetPassageChooserProgressContext() {
+        passageChooserProgressContext = .empty
     }
 
     // MARK: - Modal Routing
@@ -1932,6 +2024,7 @@ public struct BibleReaderView: View {
             onRefChooserDialog: { completion in
                 // Present book chooser and return OSIS ref
                 setPanePresentationTarget(window.id)
+                passageChooserProgressContext = makePassageChooserProgressContext()
                 refChooserCompletion = completion
                 showRefChooser = true
             },
@@ -2173,22 +2266,25 @@ public struct BibleReaderView: View {
 
     /// Full-screen dimmer plus left drawer panel mirroring Android's main navigation drawer.
     private var readerNavigationDrawerOverlay: some View {
-        GeometryReader { proxy in
-            ZStack(alignment: .leading) {
-                Color.black.opacity(0.28)
-                    .ignoresSafeArea()
-                    .contentShape(Rectangle())
-                    .onTapGesture { dismissReaderNavigationDrawer() }
-                    .accessibilityIdentifier("readerNavigationDrawerDismissArea")
+        ReaderSideDrawerOverlay(
+            colorScheme: colorScheme,
+            dismissAreaIdentifier: "readerNavigationDrawerDismissArea",
+            onDismiss: dismissReaderNavigationDrawer
+        ) { width in
+            BibleReaderNavigationDrawer(
+                width: width,
+                colorScheme: colorScheme,
+                versionText: readerNavigationDrawerVersionText,
+                onAction: handleReaderNavigationDrawerAction
+            )
+        }
+    }
 
-                BibleReaderNavigationDrawer(
-                    width: min(306, max(252, proxy.size.width * 0.756)),
-                    colorScheme: colorScheme,
-                    versionText: readerNavigationDrawerVersionText,
-                    onAction: handleReaderNavigationDrawerAction
-                )
-                    .transition(.move(edge: .leading))
-            }
+    /// Full-screen dark chooser panel for Android-style passage selection.
+    private var bookChooserDrawerOverlay: some View {
+        ReaderPassageChooserOverlay {
+            bookChooserDrawerContent
+                .accessibilityIdentifier("passageChooserDrawer")
         }
     }
 
@@ -3234,6 +3330,91 @@ public struct BibleReaderView: View {
         tiltScrollService.start()
     }
     #endif
+}
+
+/**
+ Snapshot-backed passage chooser progress context.
+
+ `BibleReaderView` builds this once when presenting Android-style passage chooser content. The grid
+ may ask for progress many times while SwiftUI renders or re-renders cells, so this type keeps the
+ persisted reading and memorization snapshots stable for that presentation and delegates the actual
+ Android-compatible calculations to `PassageGridProgressCalculator`.
+ */
+private struct PassageChooserProgressContext {
+    /// Empty context used before a chooser presentation captures active pane snapshots.
+    static let empty = PassageChooserProgressContext(
+        readingSnapshot: nil,
+        memorizationSnapshot: nil,
+        activeBookInitials: ""
+    )
+
+    /// Current reading progress snapshot for the active pane, if available.
+    let readingSnapshot: ReadingProgressSnapshot?
+
+    /// Current memorization progress snapshot for the active pane, if available.
+    let memorizationSnapshot: MemorizationProgressSnapshot?
+
+    /// Active module initials used to match Android/iOS memorization rows.
+    let activeBookInitials: String
+
+    /**
+     Computes book-level progress from the captured snapshots.
+
+     - Parameter book: Visible book cell from the active module's book list.
+     - Returns: Android-compatible reading and memorization progress.
+     - Side effects: none.
+     - Failure modes: Missing snapshots or unsupported books produce empty progress.
+     */
+    func bookProgress(for book: BookInfo) -> PassageGridProgress {
+        PassageGridProgressCalculator.bookProgress(
+            book: book,
+            readingSnapshot: readingSnapshot,
+            memorizationSnapshot: memorizationSnapshot,
+            activeBookInitials: activeBookInitials
+        )
+    }
+
+    /**
+     Computes chapter-level progress from the captured snapshots.
+
+     - Parameters:
+       - book: Selected book from the active module's book list.
+       - chapter: One-based chapter number.
+     - Returns: Android-compatible reading and memorization progress.
+     - Side effects: none.
+     - Failure modes: Missing snapshots or unsupported chapters produce empty progress.
+     */
+    func chapterProgress(for book: BookInfo, chapter: Int) -> PassageGridProgress {
+        PassageGridProgressCalculator.chapterProgress(
+            book: book,
+            chapter: chapter,
+            readingSnapshot: readingSnapshot,
+            memorizationSnapshot: memorizationSnapshot,
+            activeBookInitials: activeBookInitials
+        )
+    }
+
+    /**
+     Computes verse-level progress from the captured snapshots.
+
+     - Parameters:
+       - book: Selected book from the active module's book list.
+       - chapter: One-based chapter number.
+       - verse: One-based verse number.
+     - Returns: Android-compatible reading and memorization progress.
+     - Side effects: none.
+     - Failure modes: Missing snapshots or unsupported verses produce empty progress.
+     */
+    func verseProgress(for book: BookInfo, chapter: Int, verse: Int) -> PassageGridProgress {
+        PassageGridProgressCalculator.verseProgress(
+            book: book,
+            chapter: chapter,
+            verse: verse,
+            readingSnapshot: readingSnapshot,
+            memorizationSnapshot: memorizationSnapshot,
+            activeBookInitials: activeBookInitials
+        )
+    }
 }
 
 /**

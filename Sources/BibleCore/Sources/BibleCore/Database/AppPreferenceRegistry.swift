@@ -25,6 +25,10 @@ public enum AppPreferenceKey: String, CaseIterable, Sendable {
     case disableTwoStepBookmarking = "disable_two_step_bookmarking"
     case bibleViewSwipeMode = "bible_view_swipe_mode"
     case volumeKeysScroll = "volume_keys_scroll"
+    case bookGridLeftToRight = "book_grid_ltr"
+    case bookGridGroupByCategory = "book_grid_group_by_category"
+    case bookGridShowLongName = "book_grid_show_long_name"
+    case bookGridShowProgress = "book_grid_show_progress"
 
     // Look & feel
     case nightModePref3 = "night_mode_pref3"
@@ -297,6 +301,34 @@ public enum AppPreferenceRegistry {
             valueType: .bool,
             defaultValue: "true",
             androidReference: "settings.xml:104"
+        ),
+        .bookGridLeftToRight: .init(
+            key: .bookGridLeftToRight,
+            storage: .swiftData,
+            valueType: .bool,
+            defaultValue: "false",
+            androidReference: "GridChoosePassageBook.kt:147,192-200,349"
+        ),
+        .bookGridGroupByCategory: .init(
+            key: .bookGridGroupByCategory,
+            storage: .swiftData,
+            valueType: .bool,
+            defaultValue: "false",
+            androidReference: "GridChoosePassageBook.kt:148,203-212,350"
+        ),
+        .bookGridShowLongName: .init(
+            key: .bookGridShowLongName,
+            storage: .swiftData,
+            valueType: .bool,
+            defaultValue: "false",
+            androidReference: "GridChoosePassageBook.kt:149,215-221,351"
+        ),
+        .bookGridShowProgress: .init(
+            key: .bookGridShowProgress,
+            storage: .swiftData,
+            valueType: .bool,
+            defaultValue: "true",
+            androidReference: "GridChoosePassageBook.kt:95-100,171,224-230,352"
         ),
         .nightModePref3: .init(
             key: .nightModePref3,
