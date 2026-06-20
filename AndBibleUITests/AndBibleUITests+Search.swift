@@ -225,6 +225,16 @@ extension AndBibleUITests {
     }
 
     /**
+     Search fixture contract for normal UI workflows.
+
+     `scripts/ui_test_fixture_manifest.json` maps these Search tests to the `search-indexed` or
+     `search-multi-translation` scenarios. Those scenarios seed `search_indexes.sqlite` before app
+     launch, so the app should detect the selected modules as already indexed. Normal Search tests
+     must not enter `state=needsIndex`; runtime index-creation coverage belongs in a separate test
+     and fixture path so it cannot hide seeded-fixture regressions.
+     */
+
+    /**
      Verifies that Search preserves a seeded initial query typed through the real UI.
      *
      * - Side effects:
