@@ -1977,6 +1977,113 @@ extension AndBibleTests {
     }
 
     /**
+     Protects Android's secondary-window synchronized scroll contract.
+
+     Android posts a secondary scroll event to synced inactive windows and does not let the web
+     client's resulting visible-verse callback become a new source window. The setup creates two
+     synchronized panes, keeps the first pane active, then asks the second pane's controller to
+     perform a sync-origin scroll. The expected result is that the second pane updates its visible
+     verse state without focusing itself or rebroadcasting through `WindowManager`; a failure means
+     synced panes can ping-pong until a document boundary.
+     */
+    @MainActor
+    func testSynchronizedScrollCallbackDoesNotRefocusOrRebroadcastTargetPane() throws {
+        let bridge = BibleBridge()
+        var emittedScripts: [String] = []
+        bridge.javaScriptEvaluationObserver = { emittedScripts.append($0) }
+        let modulePath = try makeTemporaryBundledSwordPath()
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        let module = try XCTUnwrap(manager.module(named: controller.activeModuleName))
+        let ordinal = try XCTUnwrap(module.verseOrdinal(osisBookId: "Gen", chapter: 1, verse: 5))
+        let container = try makeWorkspaceModelContainer()
+        let context = ModelContext(container)
+        let workspaceStore = WorkspaceStore(modelContext: context)
+        let windowManager = WindowManager(workspaceStore: workspaceStore)
+        let workspace = workspaceStore.createWorkspace(name: "Synchronized Scroll")
+        let sourceWindow = try XCTUnwrap(workspaceStore.windows(workspaceId: workspace.id).first)
+        windowManager.setActiveWorkspace(workspace)
+        let targetWindow = try XCTUnwrap(windowManager.addWindow(from: sourceWindow))
+        sourceWindow.isSynchronized = true
+        sourceWindow.syncGroup = 0
+        targetWindow.isSynchronized = true
+        targetWindow.syncGroup = 0
+        windowManager.activeWindow = sourceWindow
+        controller.activeWindow = targetWindow
+        controller.windowManagerRef = windowManager
+        controller.navigateTo(book: "Genesis", chapter: 1, verse: 1)
+        controller.onInteraction = {
+            windowManager.activeWindow = targetWindow
+        }
+        let rebroadcast = expectation(description: "sync-origin scroll must not rebroadcast")
+        rebroadcast.isInverted = true
+        windowManager.onSyncVerseChanged = { _, _, _ in
+            rebroadcast.fulfill()
+        }
+
+        controller.scrollToOrdinal(ordinal)
+        XCTAssertEqual(emittedScripts.count, 1)
+        XCTAssertTrue(emittedScripts[0].contains("scroll_to_verse"))
+        controller.bridge(bridge, didScrollToOrdinal: ordinal, key: "Gen.1", atChapterTop: false)
+
+        XCTAssertEqual(windowManager.activeWindow?.id, sourceWindow.id)
+        XCTAssertEqual(controller.currentVerse, 5)
+        XCTAssertEqual(targetWindow.pageManager?.bibleVerseNo, 5)
+        wait(for: [rebroadcast], timeout: 0.35)
+    }
+
+    /**
+     Protects user-origin synchronized scrolling while suppressing only secondary feedback.
+
+     Android still treats a real scroll in a synchronized pane as the new source window. The setup
+     mirrors the secondary-scroll regression fixture but leaves the bridge detached before an
+     attempted native sync scroll, proving a failed emit does not arm stale suppression. The
+     expected result is that the pane focuses itself and emits one sync event through
+     `WindowManager`; a failure means the feedback-loop guard has disabled real synchronized
+     scrolling rather than separating source and target callbacks.
+     */
+    @MainActor
+    func testUserScrollCallbackStillFocusesAndBroadcastsSynchronizedPane() throws {
+        let bridge = BibleBridge()
+        let modulePath = try makeTemporaryBundledSwordPath()
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        let module = try XCTUnwrap(manager.module(named: controller.activeModuleName))
+        let ordinal = try XCTUnwrap(module.verseOrdinal(osisBookId: "Gen", chapter: 1, verse: 5))
+        let container = try makeWorkspaceModelContainer()
+        let context = ModelContext(container)
+        let workspaceStore = WorkspaceStore(modelContext: context)
+        let windowManager = WindowManager(workspaceStore: workspaceStore)
+        let workspace = workspaceStore.createWorkspace(name: "User Scroll")
+        let firstWindow = try XCTUnwrap(workspaceStore.windows(workspaceId: workspace.id).first)
+        windowManager.setActiveWorkspace(workspace)
+        let scrolledWindow = try XCTUnwrap(windowManager.addWindow(from: firstWindow))
+        scrolledWindow.isSynchronized = true
+        scrolledWindow.syncGroup = 0
+        windowManager.activeWindow = firstWindow
+        controller.activeWindow = scrolledWindow
+        controller.windowManagerRef = windowManager
+        controller.navigateTo(book: "Genesis", chapter: 1, verse: 1)
+        controller.onInteraction = {
+            windowManager.activeWindow = scrolledWindow
+        }
+        let broadcast = expectation(description: "user-origin scroll rebroadcasts")
+        windowManager.onSyncVerseChanged = { sourceWindow, sourceOrdinal, key in
+            XCTAssertEqual(sourceWindow.id, scrolledWindow.id)
+            XCTAssertEqual(sourceOrdinal, ordinal)
+            XCTAssertEqual(key, "Gen.1")
+            broadcast.fulfill()
+        }
+
+        controller.scrollToOrdinal(ordinal)
+        controller.bridge(bridge, didScrollToOrdinal: ordinal, key: "Gen.1", atChapterTop: false)
+
+        XCTAssertEqual(windowManager.activeWindow?.id, scrolledWindow.id)
+        XCTAssertEqual(controller.currentVerse, 5)
+        wait(for: [broadcast], timeout: 1.0)
+    }
+
+    /**
      Protects chapter-change scroll persistence against synthetic ordinal arithmetic.
 
      The document key tells the native reader which chapter is visible, but the verse number must

@@ -65,10 +65,23 @@ extension AndBibleTests {
     func testBridgeEmitUsesFireAndForgetJavaScript() {
         let (bridge, recordedScripts) = makeRecordingBridge()
 
-        bridge.emit(event: "set_config", data: #"{"theme":"light"}"#)
+        XCTAssertTrue(bridge.emit(event: "set_config", data: #"{"theme":"light"}"#))
 
         let script = recordedScripts().first ?? ""
         XCTAssertTrue(script.contains("void bibleView.emit('set_config'"))
+    }
+
+    /**
+     Verifies raw bridge emits expose whether JavaScript was actually dispatched.
+
+     The synchronized-scroll feedback guard uses this delivery signal to avoid suppressing later
+     real user scrolls after a detached bridge failed to receive `scroll_to_verse`.
+     */
+    @MainActor
+    func testBridgeEmitReportsDetachedDispatchFailure() {
+        let bridge = BibleBridge()
+
+        XCTAssertFalse(bridge.emit(event: "set_config", data: #"{"theme":"light"}"#))
     }
 
     /**

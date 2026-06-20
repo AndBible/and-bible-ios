@@ -45,6 +45,21 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     private(set) var currentChapter: Int = 1
     private(set) var currentVerse: Int = 1
     private var clientReady = false
+    /**
+     Ordinals for synchronized scroll requests that this pane initiated from another source pane.
+
+     `scrollToOrdinal(_:)` records the target ordinal after successfully emitting to Vue. The next
+     matching `didScrollToOrdinal` callback is then treated as secondary-window feedback: the pane
+     state is updated, but the callback does not focus the pane or rebroadcast to `WindowManager`.
+
+     Side effects:
+     - values are inserted by sync-origin native scroll requests and removed by matching or stale
+       scroll callbacks
+
+     Failure modes:
+     - a nonmatching callback clears stale pending values and is treated as user-origin scroll
+     */
+    private var pendingSynchronizedScrollOrdinals: Set<Int> = []
 
     /// Whether the WebView is currently showing the My Notes document (vs Bible text).
     private(set) var showingMyNotes = false
@@ -2012,12 +2027,17 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
        - key: Verse/document key string such as `Gen.1.5` used to infer chapter changes.
 
      Side effects:
-     - marks the pane as interacted-with, updates scroll-restoration state, persists chapter/book
-       changes to the page manager, and notifies the window manager for synchronized scrolling
+     - marks the pane as interacted-with only for user-origin scrolls
+     - updates scroll-restoration state and persists chapter/book changes to the page manager
+     - notifies the window manager for synchronized scrolling only when the callback did not
+       acknowledge a sync-origin programmatic scroll
      */
     public func bridge(_ bridge: BibleBridge, didScrollToOrdinal ordinal: Int, key: String, atChapterTop: Bool) {
-        // Focus-on-interaction: scrolling in a pane makes it the active window
-        onInteraction?()
+        let acknowledgedSynchronizedScroll = consumePendingSynchronizedScroll(ordinal: ordinal)
+        if !acknowledgedSynchronizedScroll {
+            // Focus-on-interaction: scrolling in a pane makes it the active window
+            onInteraction?()
+        }
         // Track scroll position for restoration.
         lastScrollTarget = atChapterTop ? .chapterTop : .ordinal(ordinal)
 
@@ -2064,14 +2084,57 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         }
 
         // Notify WindowManager for synchronized scrolling
-        if let window = activeWindow {
+        if !acknowledgedSynchronizedScroll, let window = activeWindow {
             windowManagerRef?.notifyVerseChanged(sourceWindow: window, ordinal: ordinal, key: key)
         }
     }
 
-    /// Scroll the WebView to a specific verse ordinal (for sync from another window).
+    /**
+     Scrolls this pane's WebView to a verse ordinal as a synchronized secondary-window update.
+
+     - Parameter ordinal: SWORD/JSword ordinal to bring near the viewport top.
+
+     Side effects:
+     - emits `scroll_to_verse` to the Vue reader
+     - records `ordinal` as a pending synchronized scroll acknowledgement only when the bridge
+       dispatches the emit
+
+     Failure modes:
+     - if the web view is not attached, `BibleBridge` logs the failed JavaScript evaluation and no
+       pending acknowledgement is recorded
+     - if no scroll callback is produced, the pending ordinal remains until a future nonmatching
+       callback clears it
+     */
     public func scrollToOrdinal(_ ordinal: Int) {
-        bridge.emit(event: "scroll_to_verse", data: "{\"ordinal\":\(ordinal),\"now\":false}")
+        if bridge.emit(event: "scroll_to_verse", data: "{\"ordinal\":\(ordinal),\"now\":false}") {
+            pendingSynchronizedScrollOrdinals.insert(ordinal)
+        }
+    }
+
+    /**
+     Consumes a pending synchronized-scroll acknowledgement for a web-visible ordinal callback.
+
+     - Parameter ordinal: Ordinal reported by the web client after a scroll position change.
+     - Returns: `true` when `ordinal` matches a pending synchronized scroll request; otherwise
+       `false`.
+
+     Side effects:
+     - removes the matched pending ordinal
+     - clears all pending ordinals when a nonmatching callback arrives, treating those requests as
+       stale so later user scrolls are not suppressed
+
+     Failure modes:
+     - returns `false` when no sync-origin scroll is pending or when the callback ordinal does not
+       match the pending synchronized scroll target
+     */
+    private func consumePendingSynchronizedScroll(ordinal: Int) -> Bool {
+        guard !pendingSynchronizedScrollOrdinals.isEmpty else { return false }
+        guard pendingSynchronizedScrollOrdinals.contains(ordinal) else {
+            pendingSynchronizedScrollOrdinals.removeAll()
+            return false
+        }
+        pendingSynchronizedScrollOrdinals.remove(ordinal)
+        return true
     }
 
     /**

@@ -124,6 +124,30 @@ extension AndBibleTests {
         XCTAssertEqual(bridge.dispatchMessage(method: "missingMethod", args: []), .unhandled)
     }
 
+    /**
+     Protects the Android-parity focus contract for passive scroll telemetry.
+
+     Android treats `scrolledToOrdinal` as visible-position feedback from the web document, while
+     native touch/drag callbacks decide which pane is active. The setup registers an interaction
+     observer on the bridge and dispatches the passive scroll message followed by an active
+     selection message. The expected result is that scroll telemetry remains handled without
+     invoking the focus observer; a failure means synchronized secondary panes can steal focus
+     before the reader controller can suppress rebroadcast.
+     */
+    func testScrolledToOrdinalBridgeMessageDoesNotReportInteraction() {
+        let bridge = BibleBridge()
+        var interactionCount = 0
+        bridge.onAnyMessage = {
+            interactionCount += 1
+        }
+
+        XCTAssertEqual(bridge.dispatchMessage(method: "scrolledToOrdinal", args: ["Gen.1", 1, false]), .handled)
+        XCTAssertEqual(interactionCount, 0)
+
+        XCTAssertEqual(bridge.dispatchMessage(method: "selectionChanged", args: ["In the beginning"]), .handled)
+        XCTAssertEqual(interactionCount, 1)
+    }
+
     func testSpeakServiceMemorizationLoopRepeatsUntilStopped() {
         let synthesizer = FakeSpeechSynthesizer()
         let service = SpeakService(synthesizer: synthesizer)

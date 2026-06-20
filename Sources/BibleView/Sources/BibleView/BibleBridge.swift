@@ -470,7 +470,7 @@ public final class BibleBridge: NSObject, WKScriptMessageHandler {
         switch method {
         case "console", "jsLog", "reportModalState", "reportInputFocus",
              "setClientReady", "saveState", "setLimitAmbiguousModalSize",
-             "selectionCleared", "setEditing":
+             "selectionCleared", "setEditing", "scrolledToOrdinal":
             break
         default:
             onAnyMessage?()
@@ -970,13 +970,16 @@ public final class BibleBridge: NSObject, WKScriptMessageHandler {
      - Parameters:
        - event: Vue event name passed to `bibleView.emit`.
        - data: Raw JavaScript/JSON expression to pass as the second `bibleView.emit` argument.
+     - Returns: `true` when JavaScript was queued for an attached web view or recording observer.
      - Side effects: Evaluates JavaScript in the attached web view or recording observer.
      - Failure modes: JavaScript runtime failures are caught in the generated wrapper and reported
-       through the bridge console message path.
+       through the bridge console message path; returns `false` when no web view or observer is
+       attached.
      */
-    public func emit(event: String, data: String = "null") {
+    @discardableResult
+    public func emit(event: String, data: String = "null") -> Bool {
         let js = "try { void bibleView.emit('\(event)', \(data)); } catch(e) { window.webkit.messageHandlers.bibleView.postMessage({method:'console',args:['BRIDGE','JS EMIT ERROR in \(event): ' + e.message + ' ' + e.stack]}); }"
-        evaluateJavaScript(js)
+        return evaluateJavaScript(js)
     }
 
     /**
@@ -1072,27 +1075,36 @@ public final class BibleBridge: NSObject, WKScriptMessageHandler {
         evaluateJavaScript("window.__activeLanguages__ = '\(json)';")
     }
 
-    private func evaluateJavaScript(_ js: String) {
-        let execute = { [weak self] in
+    @discardableResult
+    private func evaluateJavaScript(_ js: String) -> Bool {
+        let execute = { [weak self] () -> Bool in
             if let observer = self?.javaScriptEvaluationObserver {
                 observer(js)
-                return
+                return true
             }
             guard let webView = self?.webView else {
                 NSLog("BRIDGE-JS: webView is nil! Cannot evaluate: %@", String(js.prefix(200)))
-                return
+                return false
             }
             webView.evaluateJavaScript(js) { _, error in
                 if let error {
                     NSLog("BRIDGE-JS ERROR: %@ for JS: %@", error.localizedDescription, String(js.prefix(200)))
                 }
             }
+            return true
         }
 
         if Thread.isMainThread {
-            execute()
+            return execute()
         } else {
-            DispatchQueue.main.async(execute: execute)
+            guard javaScriptEvaluationObserver != nil || webView != nil else {
+                NSLog("BRIDGE-JS: webView is nil! Cannot evaluate: %@", String(js.prefix(200)))
+                return false
+            }
+            DispatchQueue.main.async {
+                _ = execute()
+            }
+            return true
         }
     }
 
