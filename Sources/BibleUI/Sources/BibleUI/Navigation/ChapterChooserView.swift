@@ -60,14 +60,19 @@ public struct ChapterChooserView: View {
                 orientation: orientation
             )
             let slots = layout.displaySlots(for: chapters)
+            let columnCount = max(layout.columns, 1)
+            let metrics = PassageGridMetrics.squareCells(
+                availableWidth: proxy.size.width,
+                columns: columnCount
+            )
             let columns = Array(
-                repeating: GridItem(.flexible(minimum: 0), spacing: 4),
-                count: max(layout.columns, 1)
+                repeating: GridItem(.fixed(metrics.cellSide), spacing: PassageGridMetrics.spacing),
+                count: columnCount
             )
             let categoryColor = PassageBookCategory.category(forOsisId: resolvedOsisBookId).color
 
             ScrollView {
-                LazyVGrid(columns: columns, spacing: 4) {
+                LazyVGrid(columns: columns, spacing: PassageGridMetrics.spacing) {
                     ForEach(Array(slots.enumerated()), id: \.offset) { _, chapter in
                         if let chapter {
                             PassageGridButton(
@@ -80,18 +85,20 @@ public struct ChapterChooserView: View {
                                     categoryColor: categoryColor
                                 ),
                                 font: .body.monospacedDigit().weight(.semibold),
-                                minHeight: 36
+                                cellSide: metrics.cellSide
                             ) {
                                 onSelect(chapter)
                             }
                         } else {
                             Color.clear
-                                .frame(minHeight: 36)
+                                .frame(width: metrics.cellSide, height: metrics.cellSide)
                                 .accessibilityHidden(true)
                         }
                     }
                 }
-                .padding(12)
+                .frame(width: metrics.gridWidth)
+                .padding(PassageGridMetrics.horizontalPadding)
+                .frame(maxWidth: .infinity)
             }
         }
         .navigationTitle(bookName)

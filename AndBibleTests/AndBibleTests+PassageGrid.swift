@@ -150,4 +150,42 @@ extension AndBibleTests {
         XCTAssertTrue(slots.contains { $0?.osisId == "Tob" })
         XCTAssertEqual(PassageBookCategory.category(forOsisId: "Tob").color, .other)
     }
+
+    /**
+     Verifies iOS derives square cell dimensions from Android's matrix columns.
+
+     Android gives every `TableRow` and every cell the same weighted width/height within the
+     calculated matrix. The SwiftUI grid should therefore size each button with the same width and
+     height instead of keeping Android rows/columns but rendering wide rectangular buttons.
+     */
+    func testPassageGridMetricsDeriveSquareCellSideFromAvailableWidth() {
+        let metrics = PassageGridMetrics.squareCells(
+            availableWidth: 393,
+            columns: 6,
+            spacing: 4,
+            horizontalPadding: 12
+        )
+
+        XCTAssertEqual(metrics.cellSide, 58.166, accuracy: 0.001)
+        XCTAssertEqual(metrics.gridWidth, 369, accuracy: 0.001)
+    }
+
+    /**
+     Verifies the book chooser title follows Android's activity-title workspace suffix.
+
+     Android `GridChoosePassageBook.onCreate` appends `SharedActivityState.currentWorkspaceName` to
+     the chooser title. The iOS picker should use the same user-facing contract and omit the suffix
+     only when there is no usable workspace name. Failure means the drawer may no longer identify
+     which workspace the navigation target belongs to.
+     */
+    func testPassageChooserTitleAppendsWorkspaceNameLikeAndroid() {
+        XCTAssertEqual(
+            PassageChooserTitle.bookSelectionTitle(baseTitle: "Choose Book", workspaceName: "Workspace 1"),
+            "Choose Book (Workspace 1)"
+        )
+        XCTAssertEqual(
+            PassageChooserTitle.bookSelectionTitle(baseTitle: "Choose Book", workspaceName: "   "),
+            "Choose Book"
+        )
+    }
 }

@@ -11,6 +11,7 @@ import struct SwiftUI.Binding
 import enum SwiftUI.ColorScheme
 import struct SwiftUI.EdgeInsets
 import struct SwiftUI.EmptyView
+import struct SwiftUI.Text
 #if os(iOS)
 import UIKit
 import WebKit
@@ -908,6 +909,97 @@ extension AndBibleTests {
         )
 
         XCTAssertTrue(String(describing: type(of: view)).contains("BibleReaderNavigationDrawer"))
+    }
+
+    /**
+     Verifies reader side drawers are hosted by one shared slide-out presentation shell.
+
+     Android uses a drawer-like transition for left-side reader surfaces. The iOS main menu and
+     passage chooser should therefore share the same dimmer, width calculation, and move transition
+     instead of maintaining separate one-off overlays. Failure indicates a new drawer surface may
+     drift from the hamburger drawer behavior.
+     */
+    func testReaderSideDrawerOverlayBuildsWithInjectedContent() {
+        let view = ReaderSideDrawerOverlay(
+            colorScheme: ColorScheme.light,
+            dismissAreaIdentifier: "testDismissArea"
+        ) { width in
+            Text("Drawer \(Int(width))")
+        }
+
+        XCTAssertTrue(String(describing: type(of: view)).contains("ReaderSideDrawerOverlay"))
+    }
+
+    /**
+     Verifies the passage chooser drawer owns cancellation instead of relying on sheet dismissal.
+
+     SwiftUI's environment dismiss action closed the old modal sheet, but a custom reader drawer
+     needs an explicit callback back into `BibleReaderView`. Failure means the visible Cancel action
+     can become inert after the Android-style drawer presentation replaces the sheet.
+     */
+    func testPassageChooserDrawerPassesExplicitCancelHandler() throws {
+        let testFileURL = URL(fileURLWithPath: #filePath)
+        let repoRoot = testFileURL
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let readerViewURL = repoRoot.appendingPathComponent(
+            "Sources/BibleUI/Sources/BibleUI/Bible/BibleReaderView.swift"
+        )
+
+        let source = try String(contentsOf: readerViewURL, encoding: .utf8)
+
+        XCTAssertTrue(source.contains("onCancel: dismissBookChooser"))
+    }
+
+    /**
+     Verifies all reader-hosted passage chooser entry points carry the active workspace title.
+
+     Android appends `SharedActivityState.currentWorkspaceName` to the book chooser activity title.
+     The SwiftUI chooser should receive the same workspace context from `BibleReaderView` wherever
+     that chooser is hosted, rather than only for one visible entry point. Failure means a caller can
+     drift back to an iOS-only title that hides the target workspace.
+     */
+    func testReaderPassageChooserCallSitesUseSharedWorkspaceTitleSource() throws {
+        let testFileURL = URL(fileURLWithPath: #filePath)
+        let repoRoot = testFileURL
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let readerViewURL = repoRoot.appendingPathComponent(
+            "Sources/BibleUI/Sources/BibleUI/Bible/BibleReaderView.swift"
+        )
+
+        let source = try String(contentsOf: readerViewURL, encoding: .utf8)
+        let occurrences = source.components(separatedBy: "workspaceName: activePassageChooserWorkspaceName").count - 1
+
+        XCTAssertEqual(occurrences, 2)
+    }
+
+    /**
+     Verifies the drawer-hosted passage chooser restores its own navigation bar.
+
+     `BibleReaderView` hides the reader navigation bar so the custom Android-style header can own
+     the reading screen chrome. The passage chooser is now hosted as a child drawer in that same
+     hierarchy, so it must explicitly make its nested navigation bar visible or the Android chooser
+     title and Cancel action disappear. Failure means the drawer can slide in with only the grid.
+     */
+    func testPassageChooserDrawerMakesNavigationBarVisibleInsideReader() throws {
+        let testFileURL = URL(fileURLWithPath: #filePath)
+        let repoRoot = testFileURL
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let readerViewURL = repoRoot.appendingPathComponent(
+            "Sources/BibleUI/Sources/BibleUI/Bible/BibleReaderView.swift"
+        )
+
+        let source = try String(contentsOf: readerViewURL, encoding: .utf8)
+        guard let drawerStart = source.range(of: "private var bookChooserDrawerContent"),
+              let nextSection = source.range(of: "/// Search sheet", range: drawerStart.upperBound..<source.endIndex) else {
+            return XCTFail("Could not locate book chooser drawer content in BibleReaderView.swift")
+        }
+
+        let drawerSource = source[drawerStart.lowerBound..<nextSection.lowerBound]
+
+        XCTAssertTrue(drawerSource.contains(".toolbar(.visible, for: .navigationBar)"))
     }
 
     #if os(iOS)

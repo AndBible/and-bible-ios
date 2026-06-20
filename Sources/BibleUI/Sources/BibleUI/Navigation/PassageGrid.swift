@@ -306,11 +306,85 @@ struct PassageGridLayout: Equatable, Sendable {
 }
 
 /**
+ Android-compatible sizing metrics for passage selector cells.
+
+ Android `ButtonGrid` gives each table row and each cell equal weight, so a visible cell occupies
+ the same width and height inside the calculated matrix. SwiftUI grids do not infer that contract
+ from row/column counts, so callers use this value object to derive a fixed square side from the
+ available drawer or sheet width.
+ */
+struct PassageGridMetrics: Equatable, Sendable {
+    /// Width and height for every rendered grid cell.
+    let cellSide: CGFloat
+
+    /// Total width occupied by all fixed-width columns and inter-column spacing.
+    let gridWidth: CGFloat
+
+    /// Android-compatible spacing between cells.
+    static let spacing: CGFloat = 4
+
+    /// Horizontal inset around the grid, matching the existing selector padding.
+    static let horizontalPadding: CGFloat = 12
+
+    /**
+     Derives fixed square cell dimensions from an available container width.
+
+     - Parameters:
+       - availableWidth: Width available to the selector content before grid padding is applied.
+       - columns: Android layout column count. Values below one are clamped to one.
+       - spacing: Space between neighboring cells.
+       - horizontalPadding: Leading and trailing padding reserved around the grid.
+     - Returns: Square cell side and total grid width. Widths clamp at zero when the container is
+       too small, so SwiftUI never receives negative frame dimensions.
+     */
+    static func squareCells(
+        availableWidth: CGFloat,
+        columns: Int,
+        spacing: CGFloat = Self.spacing,
+        horizontalPadding: CGFloat = Self.horizontalPadding
+    ) -> PassageGridMetrics {
+        let columnCount = max(columns, 1)
+        let availableGridWidth = max(0, availableWidth - (horizontalPadding * 2))
+        let totalSpacing = spacing * CGFloat(max(columnCount - 1, 0))
+        let cellSide = max(0, (availableGridWidth - totalSpacing) / CGFloat(columnCount))
+        let gridWidth = (cellSide * CGFloat(columnCount)) + totalSpacing
+
+        return PassageGridMetrics(cellSide: cellSide, gridWidth: gridWidth)
+    }
+}
+
+/**
+ Android-compatible title formatting for the passage chooser.
+
+ `GridChoosePassageBook` appends `SharedActivityState.currentWorkspaceName` to the activity title,
+ while chapter and verse steps use the selected book/chapter titles. Keeping the formatter separate
+ from SwiftUI view state makes the Android parity rule testable without rendering a navigation bar.
+ */
+enum PassageChooserTitle {
+    /**
+     Builds the book-selection title used for the first chooser step.
+
+     - Parameters:
+       - baseTitle: Localized base title, usually Android/iOS "Choose Book".
+       - workspaceName: Active workspace name. Whitespace-only values are ignored.
+     - Returns: `baseTitle (workspaceName)` when a workspace is known, otherwise `baseTitle`.
+     */
+    static func bookSelectionTitle(baseTitle: String, workspaceName: String?) -> String {
+        guard let workspaceName = workspaceName?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !workspaceName.isEmpty else {
+            return baseTitle
+        }
+
+        return "\(baseTitle) (\(workspaceName))"
+    }
+}
+
+/**
  Shared passage-grid button with Android colors and stable accessibility metadata.
 
- The view is deliberately small and rectangular like Android's selector buttons; it avoids
- platform-specific card styling while still using SwiftUI text sizing to keep abbreviations and
- numbers readable across compact iPhone and iPad sheet sizes.
+ The view is deliberately plain like Android's selector buttons; it avoids platform-specific card
+ styling while using a fixed square frame derived from Android's row/column matrix so book,
+ chapter, and verse cells do not drift into iOS-specific rectangular controls.
  */
 struct PassageGridButton: View {
     /// Visible label rendered in the button.
@@ -328,8 +402,8 @@ struct PassageGridButton: View {
     /// Label font tuned by selector type.
     let font: Font
 
-    /// Minimum button height in points.
-    let minHeight: CGFloat
+    /// Fixed square width and height for the button.
+    let cellSide: CGFloat
 
     /// Action invoked when the button is tapped.
     let action: () -> Void
@@ -341,8 +415,8 @@ struct PassageGridButton: View {
                 .font(font)
                 .lineLimit(1)
                 .minimumScaleFactor(0.65)
-                .frame(maxWidth: .infinity, minHeight: minHeight)
                 .padding(.horizontal, 2)
+                .frame(width: cellSide, height: cellSide)
                 .background(
                     RoundedRectangle(cornerRadius: 3)
                         .fill(palette.background.swiftUIColor)

@@ -598,6 +598,9 @@ public struct BibleReaderView: View {
             if showReaderNavigationDrawer {
                 readerNavigationDrawerOverlay
             }
+            if showBookChooser {
+                bookChooserDrawerOverlay
+            }
         }
         .overlayPreferenceValue(ReaderOverflowButtonBoundsPreferenceKey.self) { anchor in
             if showReaderOverflowMenu {
@@ -606,6 +609,7 @@ public struct BibleReaderView: View {
         }
         .animation(.easeInOut(duration: 0.25), value: toastMessage)
         .animation(.easeInOut(duration: 0.2), value: showReaderNavigationDrawer)
+        .animation(.easeInOut(duration: 0.2), value: showBookChooser)
         .animation(.easeInOut(duration: 0.16), value: showReaderOverflowMenu)
         .background {
             readerSceneMetricsBackground
@@ -634,9 +638,6 @@ public struct BibleReaderView: View {
         }
         #endif
         .preferredColorScheme(preferredColorSchemeOverride)
-        .sheet(isPresented: $showBookChooser) {
-            bookChooserSheetContent
-        }
         .sheet(isPresented: $showSearch, onDismiss: { searchInitialQuery = "" }) {
             searchSheetContent
         }
@@ -805,8 +806,13 @@ public struct BibleReaderView: View {
         }
     }
 
-    /// Book chooser sheet used by toolbar and tab-bar navigation commands.
-    private var bookChooserSheetContent: some View {
+    /// Workspace name shown in reader-hosted passage chooser titles.
+    private var activePassageChooserWorkspaceName: String? {
+        panePresentationTargetWindow?.workspace?.name ?? windowManager.activeWorkspace?.name
+    }
+
+    /// Book chooser content used by toolbar and tab-bar navigation commands.
+    private var bookChooserDrawerContent: some View {
         NavigationStack {
             BookChooserView(
                 books: panePresentationController?.bookList ?? BibleReaderController.defaultBooks,
@@ -814,6 +820,7 @@ public struct BibleReaderView: View {
                 currentBook: panePresentationController?.currentBook,
                 currentChapter: panePresentationController?.currentChapter,
                 currentVerse: panePresentationController?.currentVerse,
+                workspaceName: activePassageChooserWorkspaceName,
                 verseCountProvider: { book, chapter in
                     guard let panePresentationController else {
                         return BibleReaderController.verseCount(for: book.name, chapter: chapter)
@@ -822,12 +829,16 @@ public struct BibleReaderView: View {
                         book: book.name,
                         chapter: chapter
                     )
-                }
+                },
+                onCancel: dismissBookChooser
             ) { book, chapter, verse in
                 dismissBookChooser()
                 panePresentationController?.navigateTo(book: book, chapter: chapter, verse: verse)
             }
         }
+        #if os(iOS)
+        .toolbar(.visible, for: .navigationBar)
+        #endif
     }
 
     /// Search sheet seeded from toolbar, keyboard, or Android-compatible link routing.
@@ -1013,7 +1024,8 @@ public struct BibleReaderView: View {
                 books: panePresentationController?.bookList ?? BibleReaderController.defaultBooks,
                 currentBook: panePresentationController?.currentBook,
                 currentChapter: panePresentationController?.currentChapter,
-                currentVerse: panePresentationController?.currentVerse
+                currentVerse: panePresentationController?.currentVerse,
+                workspaceName: activePassageChooserWorkspaceName
             ) { book, chapter, _ in
                 showRefChooser = false
                 let osisId = panePresentationController?.osisBookId(for: book) ?? BibleReaderController.osisBookId(for: book)
@@ -1356,6 +1368,8 @@ public struct BibleReaderView: View {
     /// Presents the book chooser for the pane that initiated the navigation.
     private func presentBookChooser(from windowId: UUID? = nil) {
         setPanePresentationTarget(windowId)
+        showReaderNavigationDrawer = false
+        showReaderOverflowMenu = false
         showBookChooser = true
     }
 
@@ -2181,22 +2195,29 @@ public struct BibleReaderView: View {
 
     /// Full-screen dimmer plus left drawer panel mirroring Android's main navigation drawer.
     private var readerNavigationDrawerOverlay: some View {
-        GeometryReader { proxy in
-            ZStack(alignment: .leading) {
-                Color.black.opacity(0.28)
-                    .ignoresSafeArea()
-                    .contentShape(Rectangle())
-                    .onTapGesture { dismissReaderNavigationDrawer() }
-                    .accessibilityIdentifier("readerNavigationDrawerDismissArea")
+        ReaderSideDrawerOverlay(
+            colorScheme: colorScheme,
+            dismissAreaIdentifier: "readerNavigationDrawerDismissArea",
+            onDismiss: dismissReaderNavigationDrawer
+        ) { width in
+            BibleReaderNavigationDrawer(
+                width: width,
+                colorScheme: colorScheme,
+                versionText: readerNavigationDrawerVersionText,
+                onAction: handleReaderNavigationDrawerAction
+            )
+        }
+    }
 
-                BibleReaderNavigationDrawer(
-                    width: min(306, max(252, proxy.size.width * 0.756)),
-                    colorScheme: colorScheme,
-                    versionText: readerNavigationDrawerVersionText,
-                    onAction: handleReaderNavigationDrawerAction
-                )
-                    .transition(.move(edge: .leading))
-            }
+    /// Full-screen dimmer plus left drawer panel for Android-style passage selection.
+    private var bookChooserDrawerOverlay: some View {
+        ReaderSideDrawerOverlay(
+            colorScheme: colorScheme,
+            dismissAreaIdentifier: "passageChooserDrawerDismissArea",
+            onDismiss: dismissBookChooser
+        ) { _ in
+            bookChooserDrawerContent
+                .accessibilityIdentifier("passageChooserDrawer")
         }
     }
 
