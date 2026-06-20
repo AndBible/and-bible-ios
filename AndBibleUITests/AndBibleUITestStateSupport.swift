@@ -714,7 +714,8 @@ extension AndBibleUITests {
      * - Side effects:
      *   - polls a dedicated state export on the main run loop until the predicate succeeds
      * - Failure modes:
-     *   - records an XCTest failure if the predicate never succeeds before the timeout expires
+     *   - records an XCTest failure if the predicate never succeeds before the timeout expires,
+     *     after one final state read for deadline-edge updates
      */
     func waitForResolvedSemanticState(
         named name: String,
@@ -738,8 +739,16 @@ extension AndBibleUITests {
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         } while Date() < deadline
 
-        let finalValue = valueProvider() ?? "<missing \(name)>"
-        XCTFail(failureDescription(finalValue), file: file, line: line)
+        if let finalValue = valueProvider() {
+            if success(finalValue) {
+                return
+            }
+            XCTFail(failureDescription(finalValue), file: file, line: line)
+        } else if missingCountsAsSuccess {
+            return
+        } else {
+            XCTFail(failureDescription("<missing \(name)>"), file: file, line: line)
+        }
     }
 
     /**

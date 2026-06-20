@@ -540,9 +540,10 @@ extension AndBibleUITests {
      *
      * - Side effects:
      *   - launches the app directly into Search with one deterministic Strong's query
-     *   - lets Search create the bundled KJV index when missing, then waits for non-zero results
+     *   - uses the seeded `search-indexed` fixture so normal Search coverage does not create an
+     *     index at runtime
      * - Failure modes:
-     *   - fails if Search never reaches the ready state for the Strong's query after index setup
+     *   - fails if Search never reaches the ready state for the seeded Strong's query
      *   - fails if the bundled Strong's-capable Bible still reports zero indexed lexical matches
      */
     func testSearchDirectLaunchStrongsQueryReturnsBundledResults() {
