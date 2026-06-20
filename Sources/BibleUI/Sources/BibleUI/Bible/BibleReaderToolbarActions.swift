@@ -1,5 +1,30 @@
 import SwiftUI
 
+/**
+ Captures the Bible toolbar trigger bounds so Android-style popups can anchor to the button.
+
+ The reader view consumes this preference when presenting the quick Bible selector. It carries only
+ layout geometry, does not mutate state, and falls back to the previous anchor if SwiftUI reports no
+ newer value during a reduction pass.
+ */
+struct ReaderBibleToolbarButtonBoundsPreferenceKey: PreferenceKey {
+    /// No toolbar button anchor is known until the Bible toolbar icon publishes one.
+    static var defaultValue: Anchor<CGRect>?
+
+    /**
+     Stores the newest non-nil toolbar anchor emitted by SwiftUI preference propagation.
+
+     - Parameters:
+       - value: Previously captured anchor, if any.
+       - nextValue: Deferred provider for the next anchor candidate.
+     - Side effects: Mutates `value` with the latest available anchor.
+     - Failure modes: none; nil candidates leave the previous anchor intact.
+     */
+    static func reduce(value: inout Anchor<CGRect>?, nextValue: () -> Anchor<CGRect>?) {
+        value = nextValue() ?? value
+    }
+}
+
 /// Width-collapsible accessory buttons that compete for toolbar space ahead of workspaces.
 enum BibleReaderToolbarAccessoryButton {
     case search
@@ -170,6 +195,7 @@ struct BibleReaderToolbarActions<OverflowButton: View>: View {
                 .accessibilityAddTraits(.isButton)
                 .onTapGesture(perform: onBibleTap)
                 .onLongPressGesture(perform: onBibleLongPress)
+                .anchorPreference(key: ReaderBibleToolbarButtonBoundsPreferenceKey.self, value: .bounds) { $0 }
 
             commentaryToolbarIcon
                 .foregroundStyle(toolbarIconColor(isActive: isCommentaryActive))

@@ -889,6 +889,252 @@ extension AndBibleTests {
         XCTAssertNil(BibleReaderModulePicker.documentCategory(for: .unknown))
     }
 
+    /**
+     Protects Android `MainBibleActivity.menuForDocs` parity for the Bible toolbar quick menu.
+
+     Android sorts quick-menu entries by language code and then book abbreviation, renders labels as
+     abbreviation plus language code in parentheses, and disables the current document instead of
+     re-selecting it. This test uses the pure presentation contract so future UI refactors cannot
+     accidentally restore the old iOS full-sheet semantics or sort by localized description.
+     */
+    func testBibleQuickModuleSelectorRowsMirrorAndroidOrderingLabelsAndDisabledCurrentDocument() {
+        let modules = [
+            ModuleInfo(name: "WEB", description: "World English Bible", category: .bible, language: "en"),
+            ModuleInfo(name: "FinRK", description: "Finnish Revised Version", category: .bible, language: "fi"),
+            ModuleInfo(name: "AB", description: "Another Bible", category: .bible, language: "en")
+        ]
+
+        let rows = BibleReaderQuickModuleSelectorPresentation.rows(
+            for: modules,
+            activeModuleName: "WEB"
+        )
+
+        XCTAssertEqual(rows.map(\.module.name), ["AB", "WEB", "FinRK"])
+        XCTAssertEqual(rows.map(\.title), ["AB (en)", "WEB (en)", "FinRK (fi)"])
+        XCTAssertEqual(rows.map(\.isEnabled), [true, false, true])
+    }
+
+    /**
+     Protects Android's exactly-two-document shortcut in `menuForDocs`.
+
+     When only two Bible modules are available, Android switches directly to the other document and
+     does not show a popup. The iOS toolbar action must keep that shortcut while replacing only the
+     three-or-more path with the compact quick selector.
+     */
+    func testBibleQuickModuleSelectorActionMirrorsAndroidTwoDocumentShortcut() {
+        let modules = [
+            ModuleInfo(name: "KJV", description: "King James Version", category: .bible, language: "en"),
+            ModuleInfo(name: "WEB", description: "World English Bible", category: .bible, language: "en")
+        ]
+
+        let action = BibleReaderQuickModuleSelectorPresentation.action(
+            for: modules,
+            activeModuleName: "KJV"
+        )
+
+        XCTAssertEqual(action, .switchDirectly("WEB"))
+    }
+
+    /**
+     Protects Android's popup threshold in `menuForDocs`.
+
+     Three or more Bible modules must show the compact anchored quick selector, not the full
+     document picker sheet. The sorted rows are part of the action payload so the UI layer cannot
+     accidentally diverge from Android ordering while still showing a popup.
+     */
+    func testBibleQuickModuleSelectorActionShowsPopupForMoreThanTwoModules() {
+        let modules = [
+            ModuleInfo(name: "WEB", description: "World English Bible", category: .bible, language: "en"),
+            ModuleInfo(name: "FinRK", description: "Finnish Revised Version", category: .bible, language: "fi"),
+            ModuleInfo(name: "AB", description: "Another Bible", category: .bible, language: "en")
+        ]
+
+        let action = BibleReaderQuickModuleSelectorPresentation.action(
+            for: modules,
+            activeModuleName: "WEB"
+        )
+
+        XCTAssertEqual(
+            action,
+            .showPopup([
+                BibleReaderQuickModuleSelectorPresentation.Row(
+                    module: modules[2],
+                    title: "AB (en)",
+                    isEnabled: true
+                ),
+                BibleReaderQuickModuleSelectorPresentation.Row(
+                    module: modules[0],
+                    title: "WEB (en)",
+                    isEnabled: false
+                ),
+                BibleReaderQuickModuleSelectorPresentation.Row(
+                    module: modules[1],
+                    title: "FinRK (fi)",
+                    isEnabled: true
+                )
+            ])
+        )
+    }
+
+    /**
+     Protects Android's non-two-document popup rule for single available Bible modules.
+
+     Android only special-cases exactly two documents. With one available Bible it still shows the
+     popup, and if the current document is not that Bible then the row remains enabled so the toolbar
+     can switch from commentary or another category back to Bible mode.
+     */
+    func testBibleQuickModuleSelectorActionShowsPopupForSingleModuleWhenBibleIsNotCurrentDocument() {
+        let modules = [
+            ModuleInfo(name: "KJV", description: "King James Version", category: .bible, language: "en")
+        ]
+
+        let action = BibleReaderQuickModuleSelectorPresentation.action(
+            for: modules,
+            activeModuleName: nil
+        )
+
+        XCTAssertEqual(
+            action,
+            .showPopup([
+                BibleReaderQuickModuleSelectorPresentation.Row(
+                    module: modules[0],
+                    title: "KJV (en)",
+                    isEnabled: true
+                )
+            ])
+        )
+    }
+
+    /**
+     Protects the quick selector's selected-row side effect contract.
+
+     Android's popup selection calls the same current-document switch path used elsewhere in the
+     reader. iOS should likewise route selected quick-menu modules through
+     `BibleReaderController.switchModule(to:)` and persist the chosen Bible document on the pane's
+     `PageManager`, rather than maintaining separate quick-selector state.
+     */
+    func testBibleQuickModuleSelectorSelectionUsesControllerSwitchPathAndPersistsPaneDocument() throws {
+        let (bridge, _) = makeRecordingBridge()
+        let modulePath = try makeTemporaryBundledSwordPath()
+        try seedBibleAliasModule(
+            named: "WEB",
+            description: "World English Bible",
+            in: modulePath
+        )
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        let window = Window()
+        let pageManager = PageManager(id: window.id)
+        window.pageManager = pageManager
+        controller.activeWindow = window
+
+        let action = BibleReaderQuickModuleSelectorPresentation.action(
+            for: controller.installedBibleModules,
+            activeModuleName: controller.activeModuleName
+        )
+        guard case .switchDirectly(let selectedModuleName) = action else {
+            XCTFail("Expected Android's exactly-two-module shortcut to select the alternate Bible.")
+            return
+        }
+
+        controller.switchModule(to: selectedModuleName)
+        controller.switchCategory(to: .bible)
+
+        XCTAssertEqual(controller.activeModuleName, "WEB")
+        XCTAssertEqual(pageManager.bibleDocument, "WEB")
+        XCTAssertEqual(pageManager.currentCategoryName, DocumentCategory.bible.pageManagerKey)
+    }
+
+    /**
+     Guards the reader coordinator against regressing to the iOS sheet for the quick-menu path.
+
+     The coordinator state is intentionally private, so this source-level test checks the routing
+     contract at the function boundary: Android's `menuForDocs` equivalent must route to the quick
+     selector and the toolbar button must publish anchor geometry for an in-reader popup. A failure
+     means the user-visible selector likely drifted back toward the old full-sheet behavior.
+     */
+    func testBibleToolbarMenuRoutesThroughAnchoredQuickSelectorInsteadOfSheet() throws {
+        let readerSource = try bibleUISource(named: "BibleReaderView.swift")
+        let toolbarSource = try bibleUISource(named: "BibleReaderToolbarActions.swift")
+        let menuActionSource = try extractFunction(
+            named: "performBibleMenuAction",
+            from: readerSource
+        )
+
+        XCTAssertTrue(menuActionSource.contains("presentBibleQuickSelector(controller)"))
+        XCTAssertFalse(menuActionSource.contains("performBibleChooserAction()"))
+        XCTAssertTrue(readerSource.contains("ReaderBibleToolbarButtonBoundsPreferenceKey"))
+        XCTAssertTrue(
+            toolbarSource.contains(
+                ".anchorPreference(key: ReaderBibleToolbarButtonBoundsPreferenceKey.self"
+            )
+        )
+    }
+
+    /**
+     Loads a Bible reader UI source file for source-level contract tests.
+
+     Source assertions are used only where SwiftUI coordinator state is intentionally private and a
+     pure behavior test cannot observe the routing boundary. The helper derives the path from the
+     current test bundle so it works in local and CI checkouts without hard-coded absolute paths.
+     */
+    private func bibleUISource(named fileName: String) throws -> String {
+        let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        let repositoryRoot = testsDirectory.deletingLastPathComponent()
+        let sourceURL = repositoryRoot
+            .appendingPathComponent("Sources")
+            .appendingPathComponent("BibleUI")
+            .appendingPathComponent("Sources")
+            .appendingPathComponent("BibleUI")
+            .appendingPathComponent("Bible")
+            .appendingPathComponent(fileName)
+        return try String(contentsOf: sourceURL, encoding: .utf8)
+    }
+
+    /**
+     Extracts one Swift function body from a source file for a focused source-contract assertion.
+
+     The scanner balances braces after the named function declaration instead of checking arbitrary
+     file-wide fragments, which keeps the tests tied to the specific behavior boundary they protect.
+     */
+    private func extractFunction(named functionName: String, from source: String) throws -> String {
+        guard let functionRange = source.range(of: "func \(functionName)") else {
+            throw NSError(
+                domain: "AndBibleTests",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "Function \(functionName) not found"]
+            )
+        }
+        guard let openingBrace = source[functionRange.lowerBound...].firstIndex(of: "{") else {
+            throw NSError(
+                domain: "AndBibleTests",
+                code: 2,
+                userInfo: [NSLocalizedDescriptionKey: "Function \(functionName) has no body"]
+            )
+        }
+
+        var depth = 0
+        var current = openingBrace
+        while current < source.endIndex {
+            let character = source[current]
+            if character == "{" {
+                depth += 1
+            } else if character == "}" {
+                depth -= 1
+                if depth == 0 {
+                    return String(source[functionRange.lowerBound...current])
+                }
+            }
+            current = source.index(after: current)
+        }
+
+        throw NSError(
+            domain: "AndBibleTests",
+            code: 3,
+            userInfo: [NSLocalizedDescriptionKey: "Function \(functionName) body was not balanced"]
+        )
+    }
+
     func testBibleReaderSpeakMiniPlayerBuildsWithSpeakService() {
         let view = BibleReaderSpeakMiniPlayer(
             speakService: SpeakService(),
