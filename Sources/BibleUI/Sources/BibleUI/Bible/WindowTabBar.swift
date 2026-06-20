@@ -301,13 +301,7 @@ struct WindowTabBar: View {
      */
     private func renderedContentTabState(for window: Window) -> RenderedContentTabState? {
         guard let ctrl = windowManager.controllers[window.id] as? BibleReaderController else { return nil }
-        let tokens = Dictionary(uniqueKeysWithValues: ctrl.renderedContentState
-            .split(separator: ";")
-            .compactMap { part -> (String, String)? in
-                let pieces = part.split(separator: "=", maxSplits: 1).map(String.init)
-                guard pieces.count == 2 else { return nil }
-                return (pieces[0], pieces[1])
-            })
+        let tokens = BibleReaderRenderedContentState.tokens(from: ctrl.renderedContentState)
 
         guard let category = tokens["category"],
               category != "none",
