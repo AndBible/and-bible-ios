@@ -375,6 +375,58 @@ extension AndBibleTests {
     }
 
     /**
+     Verifies UI-test seeded Search fixtures satisfy the app's index-readiness checks.
+
+     The fixture tool writes deterministic `search-indexed` and `search-multi-translation`
+     metadata directly into `search_indexes.sqlite` before the app launches. SearchView decides
+     whether to prompt `state=needsIndex` through `SearchIndexService.hasIndex` and
+     `hasStrongsIndex`, so this test anchors that fixture schema to the same app-side readiness
+     contract instead of only checking that rows exist.
+
+     - Setup: Creates an isolated SQLite search-index database with KJV text/Strong's rows and
+       UITESTWEB text rows matching the seeded fixture shape.
+     - Expected result: KJV and UITESTWEB do not need indexing, and KJV is Strong's-ready.
+     - Failure meaning: Normal Search UI tests can fall back to runtime index creation despite the
+       fixture claiming to be preseeded.
+     - Side effects: Creates and removes one temporary SQLite database.
+     */
+    func testSeededSearchFixtureMetadataSatisfiesSearchIndexReadiness() async throws {
+        let databaseURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("search-fixture-readiness-\(UUID().uuidString).sqlite")
+        defer { try? FileManager.default.removeItem(at: databaseURL) }
+
+        let service = SearchIndexService(databasePath: databaseURL.path)
+        try await service.performIndexMutationForTesting { db in
+            let sql = """
+            INSERT INTO verse_fts (verse_key, plain_text, module_name, entry_order)
+            VALUES
+                ('Genesis 1:2', 'And the Spirit of God moved upon the face of the waters.', 'KJV', 0),
+                ('Matthew 1:1', 'The book of the generation of Jesus Christ.', 'KJV', 1),
+                ('Genesis 6:8', 'But Noah found grace in the eyes of the Lord.', 'KJV', 2),
+                ('Genesis 1:2', 'The earth was formless and empty.', 'UITESTWEB', 0),
+                ('John 3:16', 'For God so loved the world.', 'UITESTWEB', 1);
+            INSERT INTO verse_strongs (module_name, token, verse_key, entry_order)
+            VALUES ('KJV', 'H0430', 'Genesis 1:1', 0);
+            INSERT INTO indexed_modules (module_name, verse_count, indexed_at, schema_version)
+            VALUES
+                ('KJV', 3, datetime('now'), \(SearchIndexService.currentSchemaVersion)),
+                ('UITESTWEB', 2, datetime('now'), \(SearchIndexService.currentSchemaVersion));
+            """
+            guard sqlite3_exec(db, sql, nil, nil, nil) == SQLITE_OK else {
+                let message = sqlite3_errmsg(db).map { String(cString: $0) } ?? "SQLite write failed"
+                throw NSError(domain: "SearchIndexFixture", code: 1, userInfo: [
+                    NSLocalizedDescriptionKey: message
+                ])
+            }
+        }
+
+        XCTAssertTrue(service.hasIndex(for: "KJV"))
+        XCTAssertTrue(service.hasStrongsIndex(for: "KJV"))
+        XCTAssertTrue(service.hasIndex(for: "UITESTWEB"))
+        XCTAssertEqual(service.modulesNeedingIndex(from: ["KJV", "UITESTWEB"]), [])
+    }
+
+    /**
      Verifies indexed text search emits hits in Android-style canonical verse order.
 
      Android groups Lucene hits by verse and sorts scripture results by book, chapter, and verse

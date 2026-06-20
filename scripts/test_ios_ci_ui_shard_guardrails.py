@@ -93,6 +93,37 @@ def workflow_job_block(workflow_text: str, job_name: str) -> str:
 class IOSCIUIShardGuardrailsTests(unittest.TestCase):
     """Checks the workflow-level guardrail around dynamic UI shard counts."""
 
+    def test_ios_ci_upload_artifact_steps_retention_is_one_day(self) -> None:
+        """Keep CI artifacts short-lived so test bundles do not accumulate storage churn."""
+        workflow_text = (REPO_ROOT / ".github/workflows/ios-ci.yml").read_text(encoding="utf-8")
+        upload_step_pattern = re.compile(r"^(\s*)uses:\s+actions/upload-artifact@v\d+\s*$")
+        upload_count = 0
+
+        lines = workflow_text.splitlines()
+        for index, line in enumerate(lines):
+            upload_match = upload_step_pattern.match(line)
+            if upload_match is None:
+                continue
+
+            upload_count += 1
+            step_indent = len(upload_match.group(1))
+            step_lines: list[str] = []
+            for step_line in lines[index + 1 :]:
+                if step_line.startswith(" " * (step_indent - 2) + "- name:"):
+                    break
+                step_lines.append(step_line)
+
+            self.assertIn(
+                1,
+                [
+                    int(match.group(1))
+                    for match in re.finditer(r"^\s+retention-days:\s+(\d+)\s*$", "\n".join(step_lines), re.MULTILINE)
+                ],
+                f"Expected upload-artifact step near line {index + 1} to retain artifacts for one day.",
+            )
+
+        self.assertGreater(upload_count, 0, "Expected the workflow to contain upload-artifact steps.")
+
     def test_ios_ci_passes_max_shard_count_to_ui_shard_planner(self) -> None:
         workflow_text = (REPO_ROOT / ".github/workflows/ios-ci.yml").read_text(encoding="utf-8")
         shard_plan_run = workflow_step_run_block(workflow_text, "Generate UI shard matrix")

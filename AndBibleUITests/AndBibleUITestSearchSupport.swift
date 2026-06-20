@@ -5,17 +5,59 @@ import XCTest
 import UIKit
 #endif
 
+private let seededSearchFixtureScenarios: Set<String> = [
+    "search-indexed",
+    "search-multi-translation",
+]
+
 extension AndBibleUITests {
+    /**
+     Opens Search and waits for it to become interactive under the current fixture contract.
+
+     Normal Search UI tests use the `search-indexed` and `search-multi-translation` fixture
+     scenarios from `scripts/ui_test_fixture_manifest.json`. Those scenarios must be detected by
+     the app as already indexed and must not enter `state=needsIndex`; otherwise the test is hiding
+     a fixture regression behind runtime index creation and long readiness waits. Intentional
+     runtime index-creation coverage should use a non-seeded fixture path and test that workflow
+     explicitly.
+
+     - Parameter app: Running application under test.
+     - Returns: The visible Search root element after the readiness contract is satisfied.
+     - Side effects:
+       - presents Search from the seeded launch route or reader action surface
+       - polls Search's accessibility state until the screen is ready
+       - fails immediately for seeded Search fixtures if Search asks to create an index
+     - Failure modes:
+       - records an XCTest failure when Search does not present or does not become interactive
+       - records an XCTest failure when a seeded Search fixture exposes `state=needsIndex`
+     */
     func openSearch(in app: XCUIApplication) -> XCUIElement {
+        let fixtureScenario = resolveFixtureScenario(
+            environment: ProcessInfo.processInfo.environment
+        )
+        let isSeededSearchFixtureScenario = fixtureScenario.map {
+            seededSearchFixtureScenarios.contains($0)
+        } ?? false
+
         if app.launchArguments.contains("-UITEST_SEARCH_QUERY"),
            let prePresentedSearch = waitForSearchScreenIfAlreadySeeded(in: app, timeout: 10) {
-            waitForSearchInteractionReady(on: prePresentedSearch, in: app, timeout: 120)
+            waitForSearchInteractionReady(
+                on: prePresentedSearch,
+                in: app,
+                timeout: 120,
+                allowsRuntimeIndexCreation: !isSeededSearchFixtureScenario
+            )
             return prePresentedSearch
         }
 
         tapReaderSearchEntry(in: app, timeout: 15)
         let searchScreen = requireSearchScreen(in: app, timeout: 20)
-        waitForSearchInteractionReady(on: searchScreen, in: app, timeout: 120)
+        waitForSearchInteractionReady(
+            on: searchScreen,
+            in: app,
+            timeout: 120,
+            allowsRuntimeIndexCreation: !isSeededSearchFixtureScenario
+        )
         return searchScreen
     }
 
@@ -145,41 +187,64 @@ extension AndBibleUITests {
     }
 
     /**
-     Waits for Search to become interactive and triggers index creation when the screen reports
-     that the active module needs one.
+     Waits for Search to become interactive and optionally triggers runtime index creation.
      *
      * - Parameters:
      *   - searchScreen: Search root element exporting deterministic state in its accessibility
      *     value.
      *   - app: Running application under test.
      *   - timeout: Maximum number of seconds to wait before failing.
+     *   - allowsRuntimeIndexCreation: Whether this workflow is allowed to tap the runtime index
+     *     creation prompt when Search reports `state=needsIndex`.
      *   - file: Source file used for XCTest failure attribution.
      *   - line: Source line used for XCTest failure attribution.
      * - Side effects:
      *   - polls the Search accessibility value until it reports `state=ready`
-     *   - taps the visible `Create` button when Search reports `state=needsIndex`
+     *   - taps the visible `Create` button only when runtime index creation is allowed
      * - Failure modes:
      *   - records an XCTest failure if Search never becomes interactive within the timeout window
+     *   - records an XCTest failure immediately when runtime index creation is disallowed and
+     *     Search reports `state=needsIndex` or exposes the Create-index prompt, including which
+     *     signal was observed
      */
     func waitForSearchInteractionReady(
         on searchScreen: XCUIElement,
         in app: XCUIApplication,
         timeout: TimeInterval,
+        allowsRuntimeIndexCreation: Bool = true,
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
         let deadline = Date().addingTimeInterval(timeout)
+        var lastState = resolvedSearchStateValue(in: app) ?? (searchScreen.value as? String ?? "nil")
+        var observedNeedsIndex = lastState.contains("state=needsIndex")
+        var observedCreatePrompt = false
 
         while Date() < deadline {
             let state = resolvedSearchStateValue(in: app) ?? (searchScreen.value as? String ?? "")
+            if !state.isEmpty {
+                lastState = state
+            }
             if state.contains("state=ready") {
                 return
             }
             let createButton = resolveSearchCreateIndexButton(in: app)
-            if state.contains("state=needsIndex")
-                || createButton.exists
-                || createButton.waitForExistence(timeout: 0.2)
-            {
+            let sawNeedsIndex = state.contains("state=needsIndex")
+            let sawCreatePrompt = createButton.exists || createButton.waitForExistence(timeout: 0.2)
+            if sawNeedsIndex || sawCreatePrompt {
+                observedNeedsIndex = observedNeedsIndex || sawNeedsIndex
+                observedCreatePrompt = observedCreatePrompt || sawCreatePrompt
+                if !allowsRuntimeIndexCreation {
+                    XCTFail(
+                        "Expected seeded Search fixture to be ready without runtime index creation; "
+                            + "last Search state was '\(lastState)'; "
+                            + "state=needsIndex observed=\(observedNeedsIndex); "
+                            + "Create-index prompt observed=\(observedCreatePrompt).",
+                        file: file,
+                        line: line
+                    )
+                    return
+                }
                 tapElementReliably(createButton, timeout: 10, file: file, line: line)
                 continue
             }
@@ -187,7 +252,10 @@ extension AndBibleUITests {
         }
 
         XCTFail(
-            "Expected Search to become interactive within \(timeout) seconds.",
+            "Expected Search to become interactive within \(timeout) seconds; "
+                + "last Search state was '\(lastState)'; "
+                + "state=needsIndex observed=\(observedNeedsIndex); "
+                + "Create-index prompt observed=\(observedCreatePrompt).",
             file: file,
             line: line
         )
