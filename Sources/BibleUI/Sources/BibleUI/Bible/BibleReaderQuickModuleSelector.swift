@@ -42,9 +42,6 @@ struct BibleReaderQuickModuleSelectorPresentation {
          */
         static func == (lhs: Row, rhs: Row) -> Bool {
             lhs.module.name == rhs.module.name &&
-                lhs.module.description == rhs.module.description &&
-                lhs.module.category == rhs.module.category &&
-                lhs.module.language == rhs.module.language &&
                 lhs.title == rhs.title &&
                 lhs.isEnabled == rhs.isEnabled
         }

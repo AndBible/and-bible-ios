@@ -1006,6 +1006,39 @@ extension AndBibleTests {
     }
 
     /**
+     Protects the quick-selector row equality contract used by presentation tests.
+
+     Row equality should cover only visible and behavior-significant fields: selected module name,
+     rendered title, and enabled state. Metadata such as description, category, or language is
+     normalized into the title before rendering and should not make tests fail when behavior is
+     unchanged.
+     */
+    func testBibleQuickModuleSelectorRowEqualityIgnoresNonVisibleModuleMetadata() {
+        let lhs = BibleReaderQuickModuleSelectorPresentation.Row(
+            module: ModuleInfo(
+                name: "KJV",
+                description: "King James Version",
+                category: .bible,
+                language: "en"
+            ),
+            title: "KJV (en)",
+            isEnabled: true
+        )
+        let rhs = BibleReaderQuickModuleSelectorPresentation.Row(
+            module: ModuleInfo(
+                name: "KJV",
+                description: "Different catalog description",
+                category: .commentary,
+                language: "fi"
+            ),
+            title: "KJV (en)",
+            isEnabled: true
+        )
+
+        XCTAssertEqual(lhs, rhs)
+    }
+
+    /**
      Protects long quick-selector lists from becoming unscrollable off-screen stacks.
 
      Users can install dozens of Bible modules. Android renders those entries through a popup menu
