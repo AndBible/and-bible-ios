@@ -1,0 +1,128 @@
+#!/usr/bin/env bash
+# Archive the iOS app and upload it to App Store Connect / TestFlight.
+#
+# The App Store Connect API key is GPG-encrypted (to the developer's YubiKey).
+# Apple's uploader (Transporter/altool, invoked by xcodebuild) requires the key
+# as a file on disk, so we decrypt it onto a RAM-backed volume and eject it on
+# exit. This avoids writing the plaintext key to the normal filesystem; it is
+# not an absolute guarantee, since macOS can still page memory to swap or capture
+# it in a crash dump.
+#
+# Secrets are NOT stored in this script. Provide them via the environment:
+#   ASC_KEY_ID=<keyid> ASC_ISSUER_ID=<uuid> ./scripts/upload-testflight.sh
+# The encrypted key lives outside the repo (default: ~/.appstoreconnect/...).
+set -euo pipefail
+
+PROJECT="AndBible.xcodeproj"
+SCHEME="AndBible"
+KEY_ID="${ASC_KEY_ID:?Set ASC_KEY_ID to the App Store Connect API key ID}"
+ISSUER_ID="${ASC_ISSUER_ID:?Set ASC_ISSUER_ID to the App Store Connect API issuer UUID}"
+ENC_KEY="${ASC_KEY_GPG:-$HOME/.appstoreconnect/private_keys/AuthKey_${KEY_ID}.p8.gpg}"
+ARCHIVE="build/AndBible.xcarchive"
+EXPORT_DIR="build/export"
+EXPORT_OPTS="build/ExportOptions.plist"
+INFOPLIST="AndBible/Info.plist"
+SIGNING_XCCONFIG="Config/Secrets.xcconfig.local"
+
+[ -f "$ENC_KEY" ] || { echo "Encrypted key not found: $ENC_KEY" >&2; exit 1; }
+
+# Resolve the Apple Developer team. Kept out of the repo to match the signing
+# setup (DEVELOPMENT_TEAM lives in the gitignored local xcconfig): prefer an
+# explicit env override, otherwise read it from the local signing xcconfig.
+TEAM_ID="${ASC_TEAM_ID:-${DEVELOPMENT_TEAM:-}}"
+if [ -z "$TEAM_ID" ] && [ -f "$SIGNING_XCCONFIG" ]; then
+	TEAM_ID="$(sed -n 's/^[[:space:]]*DEVELOPMENT_TEAM[[:space:]]*=[[:space:]]*//p' "$SIGNING_XCCONFIG" | tr -d '[:space:]')"
+fi
+[ -n "$TEAM_ID" ] || {
+	echo "Could not resolve the Apple Developer team. Set ASC_TEAM_ID or DEVELOPMENT_TEAM in $SIGNING_XCCONFIG." >&2
+	exit 1
+}
+
+# 1) RAM-backed volume for the decrypted key (auto-ejected on exit). hdiutil pads
+#    the device node with trailing spaces/tabs — trim it, or diskutil can't find
+#    the disk. Register cleanup immediately after attaching so a later failure
+#    never leaves the RAM disk mounted.
+RAM_DEV="$(hdiutil attach -nomount ram://40960 | tr -d '[:space:]')"   # ~20 MB
+INFOPLIST_BAK=""
+cleanup() {
+	# Restore the original Info.plist byte-for-byte. PlistBuddy reorders keys on
+	# write, so restoring a saved copy (not re-setting the version) keeps the tree
+	# clean.
+	[ -n "$INFOPLIST_BAK" ] && [ -f "$INFOPLIST_BAK" ] && mv -f "$INFOPLIST_BAK" "$INFOPLIST"
+	if [ -n "${RAM_DEV:-}" ]; then
+		hdiutil detach "$RAM_DEV" >/dev/null 2>&1 || diskutil eject "$RAM_DEV" >/dev/null 2>&1 || true
+	fi
+}
+trap cleanup EXIT
+
+# Unique mount point so concurrent runs (or a stale /Volumes/asckey) can't collide.
+VOLUME_NAME="asckey-$$"
+diskutil erasevolume HFS+ "$VOLUME_NAME" "$RAM_DEV" >/dev/null
+KEYDIR="/Volumes/$VOLUME_NAME"
+[ -d "$KEYDIR" ] || { echo "RAM disk mount not found: $KEYDIR" >&2; exit 1; }
+
+KEYFILE="$KEYDIR/AuthKey_${KEY_ID}.p8"
+# Create the file and lock its permissions BEFORE any plaintext is written, so the
+# decrypted key is never even momentarily readable by other users. The `>` redirect
+# truncates the existing file without changing its mode, so 600 is preserved.
+touch "$KEYFILE"
+chmod 600 "$KEYFILE"
+echo ">> Decrypting API key onto RAM disk (YubiKey PIN + touch may be required)…"
+gpg --quiet --decrypt "$ENC_KEY" > "$KEYFILE"
+
+# 2) Generate export options with the locally resolved team (kept out of the repo).
+mkdir -p "$(dirname "$EXPORT_OPTS")"
+cat > "$EXPORT_OPTS" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>method</key>
+	<string>app-store-connect</string>
+	<key>destination</key>
+	<string>upload</string>
+	<key>teamID</key>
+	<string>${TEAM_ID}</string>
+	<key>uploadSymbols</key>
+	<true/>
+	<!-- Automatic (cloud) signing: the Admin App Store Connect API key creates and
+	     downloads the iOS Distribution certificate and App Store provisioning
+	     profile on demand. Requires xcodebuild -allowProvisioningUpdates. -->
+	<key>signingStyle</key>
+	<string>automatic</string>
+</dict>
+</plist>
+PLIST
+
+# 3) Archive (iOS only — no Mac Catalyst). Set REUSE_ARCHIVE=1 to skip and reuse
+#    an existing archive (handy when iterating on the export/upload step).
+if [ "${REUSE_ARCHIVE:-0}" = "1" ] && [ -d "$ARCHIVE" ]; then
+	echo ">> Reusing existing archive: $ARCHIVE"
+else
+	# Unique, increasing build number (UTC YYYY.MMDD.HHMM). Back up the original
+	# plist first; cleanup restores it on exit so the working tree stays clean and
+	# successive uploads never collide.
+	INFOPLIST_BAK="build/Info.plist.orig"
+	cp "$INFOPLIST" "$INFOPLIST_BAK"
+	BUILD_NUMBER="$(date -u '+%Y.%m%d.%H%M')"
+	/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" "$INFOPLIST"
+	echo ">> Archiving (build $BUILD_NUMBER)…"
+	xcodebuild -project "$PROJECT" -scheme "$SCHEME" \
+		-sdk iphoneos -destination 'generic/platform=iOS' \
+		-archivePath "$ARCHIVE" -allowProvisioningUpdates \
+		clean archive
+fi
+
+# 4) Export + upload to App Store Connect.
+echo ">> Exporting and uploading…"
+rm -rf "$EXPORT_DIR"
+xcodebuild -exportArchive \
+	-archivePath "$ARCHIVE" \
+	-exportOptionsPlist "$EXPORT_OPTS" \
+	-exportPath "$EXPORT_DIR" \
+	-allowProvisioningUpdates \
+	-authenticationKeyPath "$KEYFILE" \
+	-authenticationKeyID "$KEY_ID" \
+	-authenticationKeyIssuerID "$ISSUER_ID"
+
+echo ">> Done. Build uploaded to App Store Connect (TestFlight processing)."
