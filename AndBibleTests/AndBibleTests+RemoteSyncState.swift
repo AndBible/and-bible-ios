@@ -27,6 +27,60 @@ private enum TestStartupContainerError: LocalizedError {
 
 extension AndBibleTests {
     /**
+     Verifies the synced SwiftData schema itself satisfies CloudKit startup validation.
+
+     The crash fallback prevents a bad CloudKit schema from taking the whole app down, but the
+     feature contract is stronger: when the user enables iCloud sync, the CloudKit-backed
+     `AndBible` store should load instead of immediately falling back to local storage. This test
+     constructs the same split cloud/local model set as app startup with isolated store names.
+     Failure means the model still contains CloudKit-forbidden constraints, missing relationship
+     inverses, or required attributes without declaration-level defaults.
+     */
+    func testICloudSwiftDataSchemaLoadsWithCloudKitConfiguration() throws {
+        let cloudModels: [any PersistentModel.Type] = [
+            Workspace.self,
+            Window.self,
+            PageManager.self,
+            HistoryItem.self,
+            BibleBookmark.self,
+            BibleBookmarkNotes.self,
+            BibleBookmarkToLabel.self,
+            GenericBookmark.self,
+            GenericBookmarkNotes.self,
+            GenericBookmarkToLabel.self,
+            Label.self,
+            StudyPadTextEntry.self,
+            StudyPadTextEntryText.self,
+            MyDocument.self,
+            MyDocumentPage.self,
+            MyDocumentPageContent.self,
+            AiPageCacheEntry.self,
+            ReadingPlan.self,
+            ReadingPlanDay.self,
+        ]
+        let localModels: [any PersistentModel.Type] = [
+            Repository.self,
+            Setting.self,
+        ]
+        let schema = Schema(cloudModels + localModels)
+        let storeSuffix = UUID().uuidString
+        let cloudConfig = ModelConfiguration(
+            "AndBibleCloudCompatibility-\(storeSuffix)",
+            schema: Schema(cloudModels),
+            isStoredInMemoryOnly: false,
+            cloudKitDatabase: .private("iCloud.org.andbible.ios")
+        )
+        let localConfig = ModelConfiguration(
+            "LocalCompatibility-\(storeSuffix)",
+            schema: Schema(localModels),
+            isStoredInMemoryOnly: false,
+            cloudKitDatabase: .none
+        )
+
+        _ = try ModelContainer(for: schema, configurations: [cloudConfig, localConfig])
+    }
+
+    /**
      Protects startup recovery when the persisted iCloud toggle points app launch at a
      CloudKit-backed SwiftData container that cannot load.
 
