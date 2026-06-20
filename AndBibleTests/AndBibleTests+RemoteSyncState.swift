@@ -64,16 +64,25 @@ extension AndBibleTests {
         ]
         let schema = Schema(cloudModels + localModels)
         let storeSuffix = UUID().uuidString
+        let temporaryDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AndBibleCloudCompatibility-\(storeSuffix)", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: temporaryDirectory,
+            withIntermediateDirectories: true
+        )
+        defer {
+            try? FileManager.default.removeItem(at: temporaryDirectory)
+        }
         let cloudConfig = ModelConfiguration(
             "AndBibleCloudCompatibility-\(storeSuffix)",
             schema: Schema(cloudModels),
-            isStoredInMemoryOnly: false,
+            url: temporaryDirectory.appendingPathComponent("AndBibleCloud.store"),
             cloudKitDatabase: .private("iCloud.org.andbible.ios")
         )
         let localConfig = ModelConfiguration(
             "LocalCompatibility-\(storeSuffix)",
             schema: Schema(localModels),
-            isStoredInMemoryOnly: false,
+            url: temporaryDirectory.appendingPathComponent("AndBibleLocal.store"),
             cloudKitDatabase: .none
         )
 
