@@ -223,6 +223,9 @@ public struct BibleReaderView: View {
     /// Rows resolved by the Android-parity quick-selector contract for the active popup instance.
     @State private var bibleQuickModuleSelectorRows: [BibleReaderQuickModuleSelectorPresentation.Row] = []
 
+    /// Window that owns the active Bible quick selector, kept separate from modal routing state.
+    @State private var bibleQuickModuleSelectorTargetWindowId: UUID?
+
     /// Presents the Android-style left navigation drawer from the reader header.
     @State private var showReaderNavigationDrawer = false
 
@@ -313,12 +316,6 @@ public struct BibleReaderView: View {
     /// Preference controlling whether the floating fullscreen reference capsule is hidden.
     @State private var hideBibleReferenceOverlayPref =
         AppPreferenceRegistry.boolDefault(for: .hideBibleReferenceOverlay) ?? false
-
-    /// Suppresses the tap handler that SwiftUI fires after a completed Bible-button long press.
-    @State private var suppressBibleTapAfterLongPress = false
-
-    /// Suppresses the tap handler that SwiftUI fires after a completed commentary-button long press.
-    @State private var suppressCommentaryTapAfterLongPress = false
 
     /// Tracks whether fullscreen was last entered by the double-tap gesture instead of scrolling.
     @State private var lastFullScreenByDoubleTap = false
@@ -1509,7 +1506,9 @@ public struct BibleReaderView: View {
         let targetWindowId = windowManager.controllers.first { _, registeredController in
             (registeredController as? BibleReaderController) === controller
         }?.key
-        setPanePresentationTarget(targetWindowId ?? windowManager.activeWindow?.id)
+        let resolvedTargetWindowId = targetWindowId ?? windowManager.activeWindow?.id
+        setPanePresentationTarget(resolvedTargetWindowId)
+        bibleQuickModuleSelectorTargetWindowId = resolvedTargetWindowId
         bibleQuickModuleSelectorRows = rows
         showReaderOverflowMenu = false
         showReaderNavigationDrawer = false
@@ -1520,6 +1519,7 @@ public struct BibleReaderView: View {
     private func dismissBibleQuickSelector() {
         showBibleQuickModuleSelector = false
         bibleQuickModuleSelectorRows = []
+        bibleQuickModuleSelectorTargetWindowId = nil
     }
 
     /**
@@ -1569,7 +1569,8 @@ public struct BibleReaderView: View {
        mode so the selection persists through the controller's normal document-switching path.
      - Failure modes: If the controller is no longer available, the selection is ignored.
      */
-    private func selectBibleQuickModule(_ module: ModuleInfo, controller: BibleReaderController?) {
+    private func selectBibleQuickModule(_ module: ModuleInfo, targetWindowId: UUID?) {
+        let controller = controller(for: targetWindowId)
         dismissBibleQuickSelector()
         guard let controller else { return }
         controller.switchBibleDocument(to: module.name)
@@ -2392,7 +2393,7 @@ public struct BibleReaderView: View {
     private func bibleQuickModuleSelectorOverlay(anchor: Anchor<CGRect>?) -> some View {
         GeometryReader { proxy in
             let buttonRect = anchor.map { proxy[$0] }
-            let controller = panePresentationController
+            let targetWindowId = bibleQuickModuleSelectorTargetWindowId
             let rows = bibleQuickModuleSelectorRows
             let width = min(max(proxy.size.width * 0.42, 156), min(proxy.size.width - 16, 232))
             let placement = ReaderToolbarPopupPlacement.trailingToolbarPopup(
@@ -2415,7 +2416,7 @@ public struct BibleReaderView: View {
                         colorScheme: colorScheme,
                         maximumHeight: placement.maximumHeight,
                         onSelect: { module in
-                            selectBibleQuickModule(module, controller: controller)
+                            selectBibleQuickModule(module, targetWindowId: targetWindowId)
                         }
                     )
                     .frame(width: width, alignment: .topLeading)
@@ -2714,25 +2715,15 @@ public struct BibleReaderView: View {
             },
             onApplyStrongsMode: { mode in applyStrongsMode(mode) },
             onBibleTap: {
-                if suppressBibleTapAfterLongPress {
-                    suppressBibleTapAfterLongPress = false
-                    return
-                }
                 handleBibleToolbarTap(controller)
             },
             onBibleLongPress: {
-                suppressBibleTapAfterLongPress = true
                 handleBibleToolbarLongPress(controller)
             },
             onCommentaryTap: {
-                if suppressCommentaryTapAfterLongPress {
-                    suppressCommentaryTapAfterLongPress = false
-                    return
-                }
                 handleCommentaryToolbarTap(controller)
             },
             onCommentaryLongPress: {
-                suppressCommentaryTapAfterLongPress = true
                 handleCommentaryToolbarLongPress(controller)
             },
             onShowWorkspaces: { presentReaderSheet(.workspaces, from: windowManager.activeWindow?.id) }

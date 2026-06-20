@@ -1067,10 +1067,10 @@ extension AndBibleTests {
         XCTAssertTrue(String(describing: type(of: view.body)).contains("ScrollView"))
         let selectorSource = try bibleUISource(named: "BibleReaderQuickModuleSelector.swift")
         XCTAssertTrue(selectorSource.contains("LazyVStack(alignment: .leading, spacing: 0)"))
-        XCTAssertTrue(selectorSource.contains(".onTapGesture"))
-        XCTAssertTrue(selectorSource.contains(".accessibilityAddTraits(.isButton)"))
-        XCTAssertTrue(selectorSource.contains(".accessibilityAction"))
-        XCTAssertFalse(selectorSource.contains("Button {"))
+        XCTAssertTrue(selectorSource.contains("Button {"))
+        XCTAssertTrue(selectorSource.contains(".buttonStyle(.plain)"))
+        XCTAssertTrue(selectorSource.contains(".disabled(!row.isEnabled)"))
+        XCTAssertFalse(selectorSource.contains("            VStack(alignment: .leading, spacing: 0)"))
     }
 
     /**
@@ -1298,9 +1298,12 @@ extension AndBibleTests {
      quick-selector rows into the popup, the toolbar button must publish anchor geometry for an
      in-reader popup, and module actions must be disabled until the focused pane controller exists,
      including accessibility exposure. Row selection must also dismiss the popup before checking
-     whether the captured controller still exists. A failure means the user-visible selector likely
-     drifted back toward the old full-sheet behavior, can accept taps before the Android-equivalent
-     document state is available, or can leave a stale popup onscreen after pane teardown.
+     whether the captured controller still exists. Bible/commentary toolbar gestures must dispatch
+     tap or long-press exclusively so Android's quick-menu and full-chooser paths cannot both fire
+     for one press. A failure means the user-visible selector likely drifted back toward the old
+     full-sheet behavior, can accept taps before the Android-equivalent document state is available,
+     can leave a stale popup onscreen after pane teardown, or can fire both selector paths from one
+     toolbar gesture.
      */
     func testBibleToolbarMenuRoutesThroughAnchoredQuickSelectorInsteadOfSheet() throws {
         let readerSource = try bibleUISource(named: "BibleReaderView.swift")
@@ -1318,7 +1321,12 @@ extension AndBibleTests {
         XCTAssertTrue(menuActionSource.contains("presentBibleQuickSelector(controller, rows: rows)"))
         XCTAssertFalse(menuActionSource.contains("performBibleChooserAction()"))
         XCTAssertTrue(readerSource.contains("@State private var bibleQuickModuleSelectorRows"))
+        XCTAssertTrue(readerSource.contains("@State private var bibleQuickModuleSelectorTargetWindowId"))
+        XCTAssertTrue(readerSource.contains("bibleQuickModuleSelectorTargetWindowId = resolvedTargetWindowId"))
+        XCTAssertTrue(readerSource.contains("bibleQuickModuleSelectorTargetWindowId = nil"))
         XCTAssertTrue(readerSource.contains("let rows = bibleQuickModuleSelectorRows"))
+        XCTAssertTrue(readerSource.contains("let targetWindowId = bibleQuickModuleSelectorTargetWindowId"))
+        XCTAssertTrue(readerSource.contains("selectBibleQuickModule(module, targetWindowId: targetWindowId)"))
         XCTAssertTrue(readerSource.contains("moduleActionsEnabled: controller != nil"))
         XCTAssertTrue(readerSource.contains("ReaderBibleToolbarButtonBoundsPreferenceKey"))
         XCTAssertTrue(
@@ -1327,14 +1335,16 @@ extension AndBibleTests {
             )
         )
         XCTAssertTrue(toolbarSource.contains(".disabled(!moduleActionsEnabled)"))
-        XCTAssertEqual(
-            toolbarSource.components(separatedBy: ".accessibilityHidden(!moduleActionsEnabled)")
-                .count - 1,
-            2
-        )
+        XCTAssertFalse(toolbarSource.contains(".simultaneousGesture(LongPressGesture"))
+        XCTAssertTrue(toolbarSource.contains("LongPressGesture().exclusively(before: TapGesture())"))
+        XCTAssertFalse(readerSource.contains("suppressBibleTapAfterLongPress"))
+        XCTAssertFalse(readerSource.contains("suppressCommentaryTapAfterLongPress"))
+        XCTAssertEqual(toolbarSource.components(separatedBy: "moduleToolbarAction(").count - 1, 2)
+        XCTAssertTrue(toolbarSource.contains(".accessibilityHidden(!moduleActionsEnabled)"))
+        XCTAssertTrue(selectionSource.contains("let controller = controller(for: targetWindowId)"))
+        let resolveIndex = try XCTUnwrap(selectionSource.range(of: "let controller = controller(for: targetWindowId)")?.lowerBound)
         let dismissIndex = try XCTUnwrap(selectionSource.range(of: "dismissBibleQuickSelector()")?.lowerBound)
-        let guardIndex = try XCTUnwrap(selectionSource.range(of: "guard let controller else { return }")?.lowerBound)
-        XCTAssertLessThan(dismissIndex, guardIndex)
+        XCTAssertLessThan(resolveIndex, dismissIndex)
     }
 
     /**

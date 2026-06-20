@@ -213,11 +213,11 @@ struct BibleReaderQuickModuleSelector: View {
     }
 
     /**
-     Renders one Android popup-menu row without installing a competing button drag recognizer.
+     Renders one Android popup-menu row as a real control inside the scrollable menu.
 
-     Android popup rows are tap targets inside a scrollable menu. The SwiftUI row therefore uses a
-     passive text surface with explicit tap and accessibility actions so vertical drags continue to
-     belong to the parent `ScrollView` when dozens of installed Bibles are present.
+     Android popup rows are tap targets inside a scrollable menu. The SwiftUI row keeps a real
+     `Button` for reliable activation and XCTest hit handling while the parent `LazyVStack` and
+     bounded `ScrollView` preserve reachability for long installed-module lists.
 
      - Parameter row: Presentation row to render.
      - Returns: A tappable row for enabled modules or an inert current-module row.
@@ -225,27 +225,25 @@ struct BibleReaderQuickModuleSelector: View {
      - Failure modes: Disabled rows ignore tap and accessibility activation.
      */
     private func selectorRow(_ row: BibleReaderQuickModuleSelectorPresentation.Row) -> some View {
-        Text(row.title)
-            .font(.system(size: 15))
-            .lineLimit(1)
-            .foregroundStyle(row.isEnabled ? Color.primary : Color.secondary)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 16)
-            .frame(height: Self.rowHeight, alignment: .center)
-            .contentShape(Rectangle())
-            .opacity(row.isEnabled ? 1 : 0.48)
-            .onTapGesture {
-                guard row.isEnabled else { return }
-                onSelect(row.module)
-            }
-            .accessibilityIdentifier("readerBibleQuickSelectorRow_\(row.module.name)")
-            .accessibilityValue(row.isEnabled ? "available" : "current")
-            .accessibilityAddTraits(.isButton)
-            .disabled(!row.isEnabled)
-            .accessibilityAction {
-                guard row.isEnabled else { return }
-                onSelect(row.module)
-            }
+        Button {
+            guard row.isEnabled else { return }
+            onSelect(row.module)
+        } label: {
+            Text(row.title)
+                .font(.system(size: 15))
+                .lineLimit(1)
+                .foregroundStyle(row.isEnabled ? Color.primary : Color.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 16)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(height: Self.rowHeight, alignment: .center)
+        .contentShape(Rectangle())
+        .buttonStyle(.plain)
+        .disabled(!row.isEnabled)
+        .opacity(row.isEnabled ? 1 : 0.48)
+        .accessibilityIdentifier("readerBibleQuickSelectorRow_\(row.module.name)")
+        .accessibilityValue(row.isEnabled ? "available" : "current")
     }
 
     /// Intrinsic height of the rendered row stack before viewport clipping.

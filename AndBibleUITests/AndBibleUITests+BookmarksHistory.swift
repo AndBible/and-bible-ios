@@ -147,7 +147,21 @@ extension AndBibleUITests {
 
         tapElementReliably(requireElement("readerBibleToolbarButton", in: app, timeout: 10), timeout: 10)
         if waitForAnyElement(["readerBibleQuickSelector"], in: app, timeout: 3) != nil {
+            let quickSelector = requireElement("readerBibleQuickSelector", in: app, timeout: 10)
             let kjvQuickRow = requireElement("readerBibleQuickSelectorRow_KJV", in: app, timeout: 10)
+            XCTAssertEqual(
+                kjvQuickRow.value as? String,
+                "available",
+                "KJV quick-selector row must remain selectable when returning from commentary."
+            )
+            for _ in 0..<8 where !isElementVisible(kjvQuickRow, within: quickSelector) {
+                quickSelector.swipeUp()
+                RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+            }
+            XCTAssertTrue(
+                isElementVisible(kjvQuickRow, within: quickSelector),
+                "Expected quick selector to scroll until KJV is visible."
+            )
             tapElementReliably(kjvQuickRow, timeout: 10)
         } else if waitForAnyElement(["modulePickerScreen"], in: app, timeout: 3) != nil {
             if let kjvRow = resolvedElement("modulePickerRow::KJV", in: app) {
