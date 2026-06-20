@@ -348,6 +348,46 @@ extension AndBibleTests {
         }
     }
 
+    /**
+     Verifies the shared rendered-content token contract used by the reader, bottom tab labels, and
+     compact UI-test state export.
+     *
+     * Setup:
+     * - constructs a dictionary rendered-content state with delimiter characters in display fields
+     *
+     * Expected result:
+     * - encoding preserves the existing semicolon-separated field order and sanitizes delimiter
+     *   characters the same way the controller did inline
+     * - parsing returns the same key/value tokens so non-controller consumers do not duplicate token
+     *   parsing logic
+     *
+     * Failure meaning:
+     * - reader rendered-content state consumers have drifted from the controller's accessibility and
+     *   tab-display contract.
+     */
+    func testRenderedContentStateBuildsAndParsesSharedTokens() {
+        let state = BibleReaderRenderedContentState(
+            category: .dictionary,
+            moduleName: "Strongs=Hebrew;Primary",
+            book: "H00430|lemma",
+            chapter: nil,
+            key: "H00430,entry\nselected"
+        )
+
+        XCTAssertEqual(
+            state.encodedValue,
+            "category=dictionary;module=Strongs_Hebrew_Primary;book=H00430_lemma;chapter=none;key=H00430_entry selected"
+        )
+
+        let tokens = BibleReaderRenderedContentState.tokens(from: state.encodedValue)
+        XCTAssertEqual(tokens["category"], "dictionary")
+        XCTAssertEqual(tokens["module"], "Strongs_Hebrew_Primary")
+        XCTAssertEqual(tokens["book"], "H00430_lemma")
+        XCTAssertEqual(tokens["chapter"], "none")
+        XCTAssertEqual(tokens["key"], "H00430_entry selected")
+        XCTAssertEqual(BibleReaderRenderedContentState.empty.encodedValue, BibleReaderController.emptyRenderedContentState)
+    }
+
     func testDoubleTapFullscreenPreferenceGateControlsNativeToggleRequest() throws {
         let bridge = BibleBridge()
         let controller = BibleReaderController(bridge: bridge)
