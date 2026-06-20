@@ -1254,15 +1254,20 @@ extension AndBibleTests {
      contract at the function boundary: Android's `menuForDocs` equivalent must route the resolved
      quick-selector rows into the popup, the toolbar button must publish anchor geometry for an
      in-reader popup, and module actions must be disabled until the focused pane controller exists,
-     including accessibility exposure. A failure means the user-visible selector likely drifted back
-     toward the old full-sheet behavior or can accept taps before the Android-equivalent document
-     state is available.
+     including accessibility exposure. Row selection must also dismiss the popup before checking
+     whether the captured controller still exists. A failure means the user-visible selector likely
+     drifted back toward the old full-sheet behavior, can accept taps before the Android-equivalent
+     document state is available, or can leave a stale popup onscreen after pane teardown.
      */
     func testBibleToolbarMenuRoutesThroughAnchoredQuickSelectorInsteadOfSheet() throws {
         let readerSource = try bibleUISource(named: "BibleReaderView.swift")
         let toolbarSource = try bibleUISource(named: "BibleReaderToolbarActions.swift")
         let menuActionSource = try extractFunction(
             named: "performBibleMenuAction",
+            from: readerSource
+        )
+        let selectionSource = try extractFunction(
+            named: "selectBibleQuickModule",
             from: readerSource
         )
 
@@ -1284,6 +1289,9 @@ extension AndBibleTests {
                 .count - 1,
             2
         )
+        let dismissIndex = try XCTUnwrap(selectionSource.range(of: "dismissBibleQuickSelector()")?.lowerBound)
+        let guardIndex = try XCTUnwrap(selectionSource.range(of: "guard let controller else { return }")?.lowerBound)
+        XCTAssertLessThan(dismissIndex, guardIndex)
     }
 
     /**

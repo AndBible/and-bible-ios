@@ -1549,8 +1549,8 @@ public struct BibleReaderView: View {
      - Failure modes: If the controller is no longer available, the selection is ignored.
      */
     private func selectBibleQuickModule(_ module: ModuleInfo, controller: BibleReaderController?) {
-        guard let controller else { return }
         dismissBibleQuickSelector()
+        guard let controller else { return }
         controller.switchBibleDocument(to: module.name)
     }
 
