@@ -61,6 +61,24 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      - a nonmatching callback clears stale pending values and is treated as user-origin scroll
      */
     private var pendingSynchronizedScrollOrdinal: Int?
+    /**
+     Latest synchronized-scroll target received before the Vue reader reports `clientReady`.
+
+     Android updates the inactive window's verse key even when the secondary WebView cannot yet be
+     scrolled, then lets the next content load land on that key. iOS mirrors that by updating native
+     state immediately but delaying feedback suppression until `bridgeDidSetClientReady(_:)`
+     replays content into a mounted Vue client.
+
+     Side effects:
+     - replaced by newer pre-ready sync requests
+     - promoted to `pendingSynchronizedScrollOrdinal` during client-ready content replay
+     - cleared when any real scroll callback arrives first
+
+     Failure modes:
+     - if the ready replay never produces scroll telemetry, the promoted pending ordinal is cleared
+       by the next nonmatching callback through `consumePendingSynchronizedScroll(ordinal:)`
+     */
+    private var pendingClientReadySynchronizedScrollOrdinal: Int?
 
     /// Whether the WebView is currently showing the My Notes document (vs Bible text).
     private(set) var showingMyNotes = false
@@ -1820,11 +1838,16 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     public func bridgeDidSetClientReady(_ bridge: BibleBridge) {
         logger.info("Client ready, sending initial content")
         clientReady = true
+        let deferredSynchronizedScrollOrdinal = pendingClientReadySynchronizedScrollOrdinal
+        pendingClientReadySynchronizedScrollOrdinal = nil
         loadRecentLabels()
         applyNightModeBackground()
         updateActiveLanguages()
         bridge.emit(event: "set_config", data: buildConfigJSON())
         reloadVisibleDocumentAfterClientReady()
+        if let deferredSynchronizedScrollOrdinal {
+            pendingSynchronizedScrollOrdinal = deferredSynchronizedScrollOrdinal
+        }
     }
 
     /**
@@ -2036,6 +2059,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     public func bridge(_ bridge: BibleBridge, didScrollToOrdinal ordinal: Int, key: String, atChapterTop: Bool) {
         let acknowledgedSynchronizedScroll = consumePendingSynchronizedScroll(ordinal: ordinal)
         if !acknowledgedSynchronizedScroll {
+            pendingClientReadySynchronizedScrollOrdinal = nil
             // Focus-on-interaction: scrolling in a pane makes it the active window
             onInteraction?()
         }
@@ -2096,19 +2120,55 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      - Parameter ordinal: SWORD/JSword ordinal to bring near the viewport top.
 
      Side effects:
+     - updates this pane's native visible verse state so pre-ready content replay lands on the
+       synchronized target, matching Android's inactive-window key update
      - emits `scroll_to_verse` to the Vue reader
      - records `ordinal` as the latest pending synchronized scroll acknowledgement only when the
-       bridge dispatches the emit
+       Vue client is ready and the bridge dispatches the emit
 
      Failure modes:
-     - if the web view is not attached, `BibleBridge` logs the failed JavaScript evaluation and no
-       pending acknowledgement is recorded
+     - if the Vue client is not ready, no bridge event is emitted; the ordinal is deferred until
+       `bridgeDidSetClientReady(_:)` replays the native content state
+     - if the web view is not attached after client-ready, `BibleBridge` logs the failed JavaScript
+       evaluation and no pending acknowledgement is recorded
      - if no scroll callback is produced, the pending ordinal remains until a future nonmatching
        callback clears it
      */
     public func scrollToOrdinal(_ ordinal: Int) {
+        applySynchronizedScrollPosition(ordinal: ordinal)
+        guard clientReady else {
+            pendingClientReadySynchronizedScrollOrdinal = ordinal
+            return
+        }
+        pendingClientReadySynchronizedScrollOrdinal = nil
         if bridge.emit(event: "scroll_to_verse", data: "{\"ordinal\":\(ordinal),\"now\":false}") {
             pendingSynchronizedScrollOrdinal = ordinal
+        }
+    }
+
+    /**
+     Updates native pane state for a synchronized secondary scroll without treating it as focus input.
+
+     - Parameter ordinal: SWORD/JSword ordinal received from the source synchronized pane.
+
+     Side effects:
+     - updates `currentChapter`, `currentVerse`, and the active `PageManager` Bible position when the
+       ordinal resolves in the current book
+     - schedules normal visible-verse persistence so workspace state follows Android's inactive key
+       synchronization
+
+     Failure modes:
+     - invalid ordinals or ordinals that cannot be resolved by the active module leave state unchanged
+     */
+    private func applySynchronizedScrollPosition(ordinal: Int) {
+        guard let reference = verseReference(book: currentBook, ordinal: ordinal) else { return }
+        currentChapter = reference.chapter
+        currentVerse = reference.verse
+
+        if let pm = activeWindow?.pageManager {
+            pm.bibleChapterNo = reference.chapter
+            pm.bibleVerseNo = reference.verse
+            persistVisibleVerseState(immediate: false)
         }
     }
 
@@ -2131,6 +2191,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     private func consumePendingSynchronizedScroll(ordinal: Int) -> Bool {
         guard let pendingOrdinal = pendingSynchronizedScrollOrdinal else { return false }
         pendingSynchronizedScrollOrdinal = nil
+        pendingClientReadySynchronizedScrollOrdinal = nil
         guard pendingOrdinal == ordinal else {
             return false
         }

@@ -2015,6 +2015,8 @@ extension AndBibleTests {
         controller.activeWindow = targetWindow
         controller.windowManagerRef = windowManager
         controller.navigateTo(book: "Genesis", chapter: 1, verse: 1)
+        controller.bridgeDidSetClientReady(bridge)
+        emittedScripts.removeAll()
         controller.onInteraction = {
             windowManager.activeWindow = targetWindow
         }
@@ -2048,6 +2050,74 @@ extension AndBibleTests {
         XCTAssertEqual(windowManager.activeWindow?.id, targetWindow.id)
         XCTAssertEqual(controller.currentVerse, 4)
         wait(for: [laterUserBroadcast], timeout: 1.0)
+    }
+
+    /**
+     Protects synchronized scrolling across the native/WebView bootstrap boundary.
+
+     Android updates the inactive window's verse key before attempting a secondary visible scroll, so
+     a rebuilding target pane lands on the synchronized verse when its content is replayed without
+     becoming the new source window. This fixture attaches a recording bridge before
+     `clientReady`, sends a sync scroll, and verifies iOS does not queue `scroll_to_verse` into an
+     unmounted Vue listener while still suppressing the replay-induced `scrolledToOrdinal`
+     callback. A failure means iOS can either drop the target pane position or treat a bootstrap
+     replay as a user-origin sync source.
+     */
+    @MainActor
+    func testSynchronizedScrollBeforeClientReadyReplaysWithoutRefocusOrRebroadcast() throws {
+        let bridge = BibleBridge()
+        var emittedScripts: [String] = []
+        bridge.javaScriptEvaluationObserver = { emittedScripts.append($0) }
+        let modulePath = try makeTemporaryBundledSwordPath()
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        let module = try XCTUnwrap(manager.module(named: controller.activeModuleName))
+        let ordinal = try XCTUnwrap(module.verseOrdinal(osisBookId: "Gen", chapter: 1, verse: 5))
+        let container = try makeWorkspaceModelContainer()
+        let context = ModelContext(container)
+        let workspaceStore = WorkspaceStore(modelContext: context)
+        let windowManager = WindowManager(workspaceStore: workspaceStore)
+        let workspace = workspaceStore.createWorkspace(name: "Pre-Ready Sync")
+        let sourceWindow = try XCTUnwrap(workspaceStore.windows(workspaceId: workspace.id).first)
+        windowManager.setActiveWorkspace(workspace)
+        let targetWindow = try XCTUnwrap(windowManager.addWindow(from: sourceWindow))
+        sourceWindow.isSynchronized = true
+        sourceWindow.syncGroup = 0
+        targetWindow.isSynchronized = true
+        targetWindow.syncGroup = 0
+        windowManager.activeWindow = sourceWindow
+        controller.activeWindow = targetWindow
+        controller.windowManagerRef = windowManager
+        controller.navigateTo(book: "Genesis", chapter: 1, verse: 1)
+        controller.onInteraction = {
+            windowManager.activeWindow = targetWindow
+        }
+        let rebroadcast = expectation(description: "ready replay must not rebroadcast")
+        rebroadcast.isInverted = true
+        windowManager.onSyncVerseChanged = { _, _, _ in
+            rebroadcast.fulfill()
+        }
+
+        controller.scrollToOrdinal(ordinal)
+
+        XCTAssertEqual(controller.currentVerse, 5)
+        XCTAssertEqual(targetWindow.pageManager?.bibleVerseNo, 5)
+        XCTAssertFalse(emittedScripts.contains { $0.contains("scroll_to_verse") })
+
+        controller.bridgeDidSetClientReady(bridge)
+
+        XCTAssertFalse(emittedScripts.contains { $0.contains("scroll_to_verse") })
+        XCTAssertTrue(
+            emittedScripts.contains {
+                $0.contains("setup_content") && $0.contains("\"jumpToOrdinal\":\(ordinal)")
+            }
+        )
+        controller.bridge(bridge, didScrollToOrdinal: ordinal, key: "Gen.1", atChapterTop: false)
+
+        XCTAssertEqual(windowManager.activeWindow?.id, sourceWindow.id)
+        XCTAssertEqual(controller.currentVerse, 5)
+        XCTAssertEqual(targetWindow.pageManager?.bibleVerseNo, 5)
+        wait(for: [rebroadcast], timeout: 0.35)
     }
 
     /**
