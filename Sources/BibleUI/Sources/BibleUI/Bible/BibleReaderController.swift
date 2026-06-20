@@ -13,85 +13,6 @@ import AppKit
 
 private let logger = Logger(subsystem: "org.andbible", category: "BibleReaderController")
 
-struct MyNotesAccessibilityNoteToken: Equatable {
-    let referenceToken: String
-    let noteToken: String
-
-    var encodedValue: String {
-        "|\(referenceToken)=\(noteToken)|"
-    }
-}
-
-struct MyNotesAccessibilitySnapshot: Equatable {
-    let isVisible: Bool
-    let isEditing: Bool
-    let revision: Int
-    let totalCount: Int
-    let rowReferenceTokens: [String]
-    let noteTokens: [MyNotesAccessibilityNoteToken]
-
-    static let empty = MyNotesAccessibilitySnapshot(
-        isVisible: false,
-        isEditing: false,
-        revision: 0,
-        totalCount: 0,
-        rowReferenceTokens: [],
-        noteTokens: []
-    )
-
-    var encodedValue: String {
-        let rowTokens = rowReferenceTokens.map { "|\($0)|" }.joined(separator: ",")
-        let notes = noteTokens.map(\.encodedValue).joined(separator: ",")
-        return [
-            "myNotesVisible=\(isVisible)",
-            "myNotesEditing=\(isEditing)",
-            "myNotesRevision=\(revision)",
-            "myNotesCount=\(totalCount)",
-            "myNotesRows=\(rowTokens)",
-            "myNotesNotes=\(notes)",
-        ].joined(separator: ";")
-    }
-}
-
-struct StudyPadAccessibilityTextToken: Equatable {
-    let orderNumber: Int
-    let textToken: String
-
-    var encodedValue: String {
-        "|\(orderNumber)=\(textToken)|"
-    }
-}
-
-struct StudyPadAccessibilitySnapshot: Equatable {
-    let isVisible: Bool
-    let isEditing: Bool
-    let revision: Int
-    let labelToken: String
-    let textEntryCount: Int
-    let textTokens: [StudyPadAccessibilityTextToken]
-
-    static let empty = StudyPadAccessibilitySnapshot(
-        isVisible: false,
-        isEditing: false,
-        revision: 0,
-        labelToken: "none",
-        textEntryCount: 0,
-        textTokens: []
-    )
-
-    var encodedValue: String {
-        let texts = textTokens.map(\.encodedValue).joined(separator: ",")
-        return [
-            "studyPadVisible=\(isVisible)",
-            "studyPadEditing=\(isEditing)",
-            "studyPadRevision=\(revision)",
-            "studyPadLabel=\(labelToken)",
-            "studyPadTextEntryCount=\(textEntryCount)",
-            "studyPadTexts=\(texts)",
-        ].joined(separator: ";")
-    }
-}
-
 /**
  Coordinates BibleView bridge events, SWORD content loading, and native presentation callbacks.
 
@@ -201,7 +122,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     private(set) var currentEpubTitle: String?
 
     /// Stable summary of the last content payload emitted to the reader WebView.
-    static let emptyRenderedContentState = "category=none;module=none;book=none;chapter=none;key=none"
+    static let emptyRenderedContentState = BibleReaderRenderedContentState.empty.encodedValue
     private static let issueTrackerURLString = "https://github.com/AndBible/and-bible/issues"
     private(set) var renderedContentState: String = BibleReaderController.emptyRenderedContentState
     /// Transient document that should be replayed once the Vue client has finished bootstrapping.
@@ -248,16 +169,6 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
         /// Optional rendered module token.
         let renderedModuleName: String?
-    }
-
-    /// Escapes semantically important content-state tokens for accessibility export and tests.
-    private static func contentStateToken(_ raw: String?) -> String {
-        (raw ?? "none")
-            .replacingOccurrences(of: ";", with: "_")
-            .replacingOccurrences(of: ",", with: "_")
-            .replacingOccurrences(of: "|", with: "_")
-            .replacingOccurrences(of: "=", with: "_")
-            .replacingOccurrences(of: "\n", with: " ")
     }
 
     /**
@@ -380,52 +291,36 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         chapterOrdinalRange(book: currentBook, chapter: currentChapter)
     }
 
-    /// Notes with non-empty payloads that belong to the currently visible chapter.
-    private func currentChapterMyNotesBookmarks() -> [BibleBookmark] {
-        guard let service = bookmarkService,
-              let range = currentChapterOrdinalRange() else { return [] }
-        return service.bookmarks(for: range.start, endOrdinal: range.end, book: currentBook)
-            .filter { bookmark in
-                guard let note = bookmark.notes?.notes else { return false }
-                return !note.isEmpty
+    /// Snapshot factory that owns compact UI-test state assembly while the controller supplies state.
+    private func accessibilitySnapshotFactory() -> BibleReaderAccessibilitySnapshotFactory {
+        BibleReaderAccessibilitySnapshotFactory(
+            bookmarkService: bookmarkService,
+            currentBook: currentBook,
+            currentChapter: currentChapter,
+            showingMyNotes: showingMyNotes,
+            showingStudyPad: showingStudyPad,
+            editingInWebView: editingInWebView,
+            myNotesMutationRevision: myNotesMutationRevision,
+            studyPadMutationRevision: studyPadMutationRevision,
+            activeStudyPadLabelId: activeStudyPadLabelId,
+            activeStudyPadLabelName: activeStudyPadLabelName,
+            chapterOrdinalRange: { [self] in
+                currentChapterOrdinalRange()
+            },
+            verseReference: { [self] book, ordinal in
+                verseReference(book: book, ordinal: ordinal)
             }
-            .sorted {
-                if $0.ordinalStart != $1.ordinalStart {
-                    return $0.ordinalStart < $1.ordinalStart
-                }
-                return $0.createdAt < $1.createdAt
-            }
+        )
     }
 
-    /// Stable row token for the My Notes accessibility export.
-    private func myNotesReferenceToken(for bookmark: BibleBookmark) -> String {
-        let startReference = verseReference(book: currentBook, ordinal: bookmark.ordinalStart)
-        let endReference = verseReference(book: currentBook, ordinal: bookmark.ordinalEnd)
-        let startVerse = startReference?.verse ?? 1
-        let endVerse = max(startVerse, endReference?.verse ?? startVerse)
-        let verseToken = startVerse == endVerse ? "\(startVerse)" : "\(startVerse)_\(endVerse)"
-        let chapter = startReference?.chapter ?? currentChapter
-        return "\(Self.contentStateToken(currentBook))_\(chapter)_\(verseToken)"
+    /// Notes with non-empty payloads that belong to the currently visible chapter.
+    private func currentChapterMyNotesBookmarks() -> [BibleBookmark] {
+        accessibilitySnapshotFactory().currentChapterMyNotesBookmarks()
     }
 
     /// Typed My Notes state used to produce compact UI-test accessibility exports.
     var myNotesAccessibilitySnapshot: MyNotesAccessibilitySnapshot {
-        let bookmarks = currentChapterMyNotesBookmarks()
-        let exportedBookmarks = bookmarks.prefix(UITestRuntimeConfiguration.detailedAccessibilityRowTokenLimit)
-        let noteTokens = exportedBookmarks.map { bookmark in
-            MyNotesAccessibilityNoteToken(
-                referenceToken: myNotesReferenceToken(for: bookmark),
-                noteToken: Self.contentStateToken(bookmark.notes?.notes)
-            )
-        }
-        return MyNotesAccessibilitySnapshot(
-            isVisible: showingMyNotes,
-            isEditing: editingInWebView,
-            revision: myNotesMutationRevision,
-            totalCount: bookmarks.count,
-            rowReferenceTokens: noteTokens.map(\.referenceToken),
-            noteTokens: noteTokens
-        )
+        accessibilitySnapshotFactory().myNotesAccessibilitySnapshot()
     }
 
     /// Compact My Notes state used by UI tests after opening the real visible My Notes document.
@@ -435,35 +330,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
     /// Typed StudyPad state used to produce compact UI-test accessibility exports.
     var studyPadAccessibilitySnapshot: StudyPadAccessibilitySnapshot {
-        guard showingStudyPad,
-              let labelId = activeStudyPadLabelId,
-              let service = bookmarkService else {
-            return StudyPadAccessibilitySnapshot(
-                isVisible: showingStudyPad,
-                isEditing: editingInWebView,
-                revision: studyPadMutationRevision,
-                labelToken: Self.contentStateToken(activeStudyPadLabelName),
-                textEntryCount: 0,
-                textTokens: []
-            )
-        }
-
-        let entries = service.studyPadEntries(labelId: labelId)
-        let exportedEntries = entries.prefix(UITestRuntimeConfiguration.detailedAccessibilityRowTokenLimit)
-        let textTokens = exportedEntries.map { entry in
-            StudyPadAccessibilityTextToken(
-                orderNumber: entry.orderNumber,
-                textToken: Self.contentStateToken(entry.textEntry?.text)
-            )
-        }
-        return StudyPadAccessibilitySnapshot(
-            isVisible: showingStudyPad,
-            isEditing: editingInWebView,
-            revision: studyPadMutationRevision,
-            labelToken: Self.contentStateToken(activeStudyPadLabelName),
-            textEntryCount: entries.count,
-            textTokens: textTokens
-        )
+        accessibilitySnapshotFactory().studyPadAccessibilitySnapshot()
     }
 
     /// Compact StudyPad state used by UI tests after opening the real visible StudyPad document.
@@ -483,13 +350,13 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             activeMyDocumentBookInitials = nil
             activeMyDocumentPageKey = nil
         }
-        renderedContentState = [
-            "category=\(category.pageManagerKey)",
-            "module=\(Self.contentStateToken(moduleName))",
-            "book=\(Self.contentStateToken(book))",
-            "chapter=\(chapter.map(String.init) ?? "none")",
-            "key=\(Self.contentStateToken(key))",
-        ].joined(separator: ";")
+        renderedContentState = BibleReaderRenderedContentState(
+            category: category,
+            moduleName: moduleName,
+            book: book,
+            chapter: chapter,
+            key: key
+        ).encodedValue
     }
 
     /// Whether the current module has Strong's numbers (matching Android CurrentPageManager.hasStrongs).
@@ -2028,13 +1895,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      - Side effects: None.
      */
     private func renderedContentStateTokens() -> [String: String] {
-        Dictionary(uniqueKeysWithValues: renderedContentState
-            .split(separator: ";")
-            .compactMap { part -> (String, String)? in
-                let pieces = part.split(separator: "=", maxSplits: 1).map(String.init)
-                guard pieces.count == 2 else { return nil }
-                return (pieces[0], pieces[1])
-            })
+        BibleReaderRenderedContentState.tokens(from: renderedContentState)
     }
 
     /**
