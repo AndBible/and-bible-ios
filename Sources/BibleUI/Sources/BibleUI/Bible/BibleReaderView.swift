@@ -811,65 +811,6 @@ public struct BibleReaderView: View {
         panePresentationTargetWindow?.workspace?.name ?? windowManager.activeWorkspace?.name
     }
 
-    /**
-     Computes Android-compatible book progress for the passage chooser.
-
-     - Parameter book: Visible book cell from the active module's book list.
-     - Returns: Reading and memorization fractions derived from active pane snapshots.
-     - Side effects: Reads local progress stores through the active pane controller.
-     - Failure modes: Missing controller/store data produces empty progress.
-     */
-    private func passageBookProgress(for book: BookInfo) -> PassageGridProgress {
-        PassageGridProgressCalculator.bookProgress(
-            book: book,
-            readingSnapshot: passageReadingProgressSnapshot,
-            memorizationSnapshot: passageMemorizationProgressSnapshot,
-            activeBookInitials: passageProgressBookInitials
-        )
-    }
-
-    /**
-     Computes Android-compatible chapter progress for the passage chooser.
-
-     - Parameters:
-       - book: Selected book from the active module's book list.
-       - chapter: One-based chapter number.
-     - Returns: Reading and memorization fractions derived from active pane snapshots.
-     - Side effects: Reads local progress stores through the active pane controller.
-     - Failure modes: Missing controller/store data produces empty progress.
-     */
-    private func passageChapterProgress(for book: BookInfo, chapter: Int) -> PassageGridProgress {
-        PassageGridProgressCalculator.chapterProgress(
-            book: book,
-            chapter: chapter,
-            readingSnapshot: passageReadingProgressSnapshot,
-            memorizationSnapshot: passageMemorizationProgressSnapshot,
-            activeBookInitials: passageProgressBookInitials
-        )
-    }
-
-    /**
-     Computes Android-compatible verse progress for the passage chooser.
-
-     - Parameters:
-       - book: Selected book from the active module's book list.
-       - chapter: One-based chapter number.
-       - verse: One-based verse number.
-     - Returns: Reading and memorization fractions derived from active pane snapshots.
-     - Side effects: Reads local progress stores through the active pane controller.
-     - Failure modes: Missing controller/store data produces empty progress.
-     */
-    private func passageVerseProgress(for book: BookInfo, chapter: Int, verse: Int) -> PassageGridProgress {
-        PassageGridProgressCalculator.verseProgress(
-            book: book,
-            chapter: chapter,
-            verse: verse,
-            readingSnapshot: passageReadingProgressSnapshot,
-            memorizationSnapshot: passageMemorizationProgressSnapshot,
-            activeBookInitials: passageProgressBookInitials
-        )
-    }
-
     /// Active module initials used to match Android/iOS memorization progress ranges.
     private var passageProgressBookInitials: String {
         panePresentationController?.activeModuleName ?? ""
@@ -885,9 +826,26 @@ public struct BibleReaderView: View {
         panePresentationController?.memorizationProgressStore?.snapshot()
     }
 
+    /**
+     Creates the immutable progress context used by one passage chooser presentation.
+
+     - Returns: Snapshot-backed progress calculator inputs for the active pane.
+     - Side effects: Reads the active pane's reading and memorization progress stores once.
+     - Failure modes: Missing controller/store data is represented by `nil` snapshots.
+     */
+    private var passageChooserProgressContext: PassageChooserProgressContext {
+        PassageChooserProgressContext(
+            readingSnapshot: passageReadingProgressSnapshot,
+            memorizationSnapshot: passageMemorizationProgressSnapshot,
+            activeBookInitials: passageProgressBookInitials
+        )
+    }
+
     /// Book chooser content used by toolbar and tab-bar navigation commands.
     private var bookChooserDrawerContent: some View {
-        NavigationStack {
+        let progressContext = passageChooserProgressContext
+
+        return NavigationStack {
             BookChooserView(
                 books: panePresentationController?.bookList ?? BibleReaderController.defaultBooks,
                 navigateToVerse: navigateToVersePref,
@@ -905,13 +863,13 @@ public struct BibleReaderView: View {
                     )
                 },
                 bookProgressProvider: { book in
-                    passageBookProgress(for: book)
+                    progressContext.bookProgress(for: book)
                 },
                 chapterProgressProvider: { book, chapter in
-                    passageChapterProgress(for: book, chapter: chapter)
+                    progressContext.chapterProgress(for: book, chapter: chapter)
                 },
                 verseProgressProvider: { book, chapter, verse in
-                    passageVerseProgress(for: book, chapter: chapter, verse: verse)
+                    progressContext.verseProgress(for: book, chapter: chapter, verse: verse)
                 },
                 onCancel: dismissBookChooser
             ) { book, chapter, verse in
@@ -1101,7 +1059,9 @@ public struct BibleReaderView: View {
 
     /// Reference chooser sheet used by web-modal callbacks.
     private var refChooserSheetContent: some View {
-        NavigationStack {
+        let progressContext = passageChooserProgressContext
+
+        return NavigationStack {
             BookChooserView(
                 books: panePresentationController?.bookList ?? BibleReaderController.defaultBooks,
                 currentBook: panePresentationController?.currentBook,
@@ -1118,13 +1078,13 @@ public struct BibleReaderView: View {
                     )
                 },
                 bookProgressProvider: { book in
-                    passageBookProgress(for: book)
+                    progressContext.bookProgress(for: book)
                 },
                 chapterProgressProvider: { book, chapter in
-                    passageChapterProgress(for: book, chapter: chapter)
+                    progressContext.chapterProgress(for: book, chapter: chapter)
                 },
                 verseProgressProvider: { book, chapter, verse in
-                    passageVerseProgress(for: book, chapter: chapter, verse: verse)
+                    progressContext.verseProgress(for: book, chapter: chapter, verse: verse)
                 }
             ) { book, chapter, _ in
                 showRefChooser = false
@@ -3359,6 +3319,84 @@ public struct BibleReaderView: View {
         tiltScrollService.start()
     }
     #endif
+}
+
+/**
+ Snapshot-backed passage chooser progress context.
+
+ `BibleReaderView` builds this once when presenting Android-style passage chooser content. The grid
+ may ask for progress many times while SwiftUI renders or re-renders cells, so this type keeps the
+ persisted reading and memorization snapshots stable for that presentation and delegates the actual
+ Android-compatible calculations to `PassageGridProgressCalculator`.
+ */
+private struct PassageChooserProgressContext {
+    /// Current reading progress snapshot for the active pane, if available.
+    let readingSnapshot: ReadingProgressSnapshot?
+
+    /// Current memorization progress snapshot for the active pane, if available.
+    let memorizationSnapshot: MemorizationProgressSnapshot?
+
+    /// Active module initials used to match Android/iOS memorization rows.
+    let activeBookInitials: String
+
+    /**
+     Computes book-level progress from the captured snapshots.
+
+     - Parameter book: Visible book cell from the active module's book list.
+     - Returns: Android-compatible reading and memorization progress.
+     - Side effects: none.
+     - Failure modes: Missing snapshots or unsupported books produce empty progress.
+     */
+    func bookProgress(for book: BookInfo) -> PassageGridProgress {
+        PassageGridProgressCalculator.bookProgress(
+            book: book,
+            readingSnapshot: readingSnapshot,
+            memorizationSnapshot: memorizationSnapshot,
+            activeBookInitials: activeBookInitials
+        )
+    }
+
+    /**
+     Computes chapter-level progress from the captured snapshots.
+
+     - Parameters:
+       - book: Selected book from the active module's book list.
+       - chapter: One-based chapter number.
+     - Returns: Android-compatible reading and memorization progress.
+     - Side effects: none.
+     - Failure modes: Missing snapshots or unsupported chapters produce empty progress.
+     */
+    func chapterProgress(for book: BookInfo, chapter: Int) -> PassageGridProgress {
+        PassageGridProgressCalculator.chapterProgress(
+            book: book,
+            chapter: chapter,
+            readingSnapshot: readingSnapshot,
+            memorizationSnapshot: memorizationSnapshot,
+            activeBookInitials: activeBookInitials
+        )
+    }
+
+    /**
+     Computes verse-level progress from the captured snapshots.
+
+     - Parameters:
+       - book: Selected book from the active module's book list.
+       - chapter: One-based chapter number.
+       - verse: One-based verse number.
+     - Returns: Android-compatible reading and memorization progress.
+     - Side effects: none.
+     - Failure modes: Missing snapshots or unsupported verses produce empty progress.
+     */
+    func verseProgress(for book: BookInfo, chapter: Int, verse: Int) -> PassageGridProgress {
+        PassageGridProgressCalculator.verseProgress(
+            book: book,
+            chapter: chapter,
+            verse: verse,
+            readingSnapshot: readingSnapshot,
+            memorizationSnapshot: memorizationSnapshot,
+            activeBookInitials: activeBookInitials
+        )
+    }
 }
 
 /**

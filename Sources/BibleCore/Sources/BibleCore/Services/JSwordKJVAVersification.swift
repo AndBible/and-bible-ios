@@ -63,6 +63,36 @@ public enum JSwordKJVAVersification {
         return result
     }()
 
+    /// Cached KJVA ordinal offsets by source table index.
+    private static let ordinalIndexByBookIndex: [Int: JSwordKJVAOrdinalBookIndex] = {
+        var result: [Int: JSwordKJVAOrdinalBookIndex] = [:]
+        var ordinal = 0
+        ordinal += 1 // INTRO_OT book-introduction ordinal.
+
+        for (index, book) in JSwordKJVAVersificationData.bookTable.enumerated() {
+            if index == firstNewTestamentTableIndex {
+                ordinal += 1 // INTRO_NT book-introduction ordinal.
+            }
+
+            ordinal += 1 // Current book chapter-0 introduction ordinal.
+            var chapterStartOrdinals: [Int] = []
+            chapterStartOrdinals.reserveCapacity(book.chapterVerseCounts.count)
+
+            for lastVerse in book.chapterVerseCounts {
+                ordinal += 1 // Current chapter verse-0 introduction ordinal.
+                chapterStartOrdinals.append(ordinal + 1)
+                ordinal += lastVerse
+            }
+
+            result[index] = JSwordKJVAOrdinalBookIndex(
+                book: book,
+                chapterStartOrdinals: chapterStartOrdinals
+            )
+        }
+
+        return result
+    }()
+
     /**
      Checks whether an ordinal is addressable by JSword `SystemKJVA`.
 
@@ -177,35 +207,17 @@ public enum JSwordKJVAVersification {
     public static func verseOrdinal(osisId: String, chapter: Int, verse: Int) -> Int? {
         guard chapter > 0,
               verse > 0,
-              let targetIndex = bookIndexByOsisId[osisId] else {
+              let targetIndex = bookIndexByOsisId[osisId],
+              let ordinalIndex = ordinalIndexByBookIndex[targetIndex],
+              chapter <= ordinalIndex.book.chapterVerseCounts.count else {
             return nil
         }
 
-        var ordinal = 0
-        ordinal += 1 // INTRO_OT book-introduction ordinal.
-
-        for (index, book) in JSwordKJVAVersificationData.bookTable.enumerated() {
-            if index == firstNewTestamentTableIndex {
-                ordinal += 1 // INTRO_NT book-introduction ordinal.
-            }
-
-            ordinal += 1 // Current book chapter-0 introduction ordinal.
-
-            for (chapterIndex, lastVerse) in book.chapterVerseCounts.enumerated() {
-                ordinal += 1 // Current chapter verse-0 introduction ordinal.
-
-                if index == targetIndex, chapterIndex + 1 == chapter {
-                    guard verse <= lastVerse else {
-                        return nil
-                    }
-                    return ordinal + verse
-                }
-
-                ordinal += lastVerse
-            }
+        let lastVerse = ordinalIndex.book.chapterVerseCounts[chapter - 1]
+        guard verse <= lastVerse else {
+            return nil
         }
-
-        return nil
+        return ordinalIndex.chapterStartOrdinals[chapter - 1] + verse - 1
     }
 
     /**
@@ -219,11 +231,15 @@ public enum JSwordKJVAVersification {
      - Failure modes: Unknown ids and out-of-range chapters return `nil`.
      */
     public static func verseOrdinalRange(osisId: String, chapter: Int) -> ClosedRange<Int>? {
-        guard let lastVerse = verseCount(osisId: osisId, chapter: chapter),
-              let start = verseOrdinal(osisId: osisId, chapter: chapter, verse: 1),
-              let end = verseOrdinal(osisId: osisId, chapter: chapter, verse: lastVerse) else {
+        guard chapter > 0,
+              let targetIndex = bookIndexByOsisId[osisId],
+              let ordinalIndex = ordinalIndexByBookIndex[targetIndex],
+              chapter <= ordinalIndex.book.chapterVerseCounts.count else {
             return nil
         }
+        let lastVerse = ordinalIndex.book.chapterVerseCounts[chapter - 1]
+        let start = ordinalIndex.chapterStartOrdinals[chapter - 1]
+        let end = start + lastVerse - 1
         return start...end
     }
 
@@ -236,12 +252,14 @@ public enum JSwordKJVAVersification {
      - Failure modes: Unknown ids or books without chapters return `nil`.
      */
     public static func verseOrdinalRange(osisId: String) -> ClosedRange<Int>? {
-        guard let lastChapter = lastChapter(osisId: osisId),
-              let lastVerse = verseCount(osisId: osisId, chapter: lastChapter),
-              let start = verseOrdinal(osisId: osisId, chapter: 1, verse: 1),
-              let end = verseOrdinal(osisId: osisId, chapter: lastChapter, verse: lastVerse) else {
+        guard let targetIndex = bookIndexByOsisId[osisId],
+              let ordinalIndex = ordinalIndexByBookIndex[targetIndex],
+              let start = ordinalIndex.chapterStartOrdinals.first,
+              let lastChapterStart = ordinalIndex.chapterStartOrdinals.last,
+              let lastVerse = ordinalIndex.book.chapterVerseCounts.last else {
             return nil
         }
+        let end = lastChapterStart + lastVerse - 1
         return start...end
     }
 
@@ -259,4 +277,13 @@ public enum JSwordKJVAVersification {
         }
         return JSwordKJVAVersificationData.bookTable[index]
     }
+}
+
+/// Cached per-book KJVA ordinal offsets derived from JSword's `SystemKJVA` table.
+private struct JSwordKJVAOrdinalBookIndex: Sendable {
+    /// Source book row used for chapter and verse bounds checks.
+    let book: JSwordKJVABookData
+
+    /// One-based verse-1 ordinal for each real chapter in the book.
+    let chapterStartOrdinals: [Int]
 }

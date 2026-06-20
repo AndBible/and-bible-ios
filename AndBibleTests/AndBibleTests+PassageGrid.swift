@@ -468,6 +468,33 @@ extension AndBibleTests {
     }
 
     /**
+     Verifies book reading progress aggregates read chapters in one pass.
+
+     Android progress is chapter-based for book cells. SwiftUI can re-render visible cells often, so
+     the iOS calculator should preserve the same distinct-chapter behavior without allocating
+     filter/map intermediates before building the chapter set.
+     */
+    func testPassageGridBookProgressUsesSinglePassReadingChapterAggregation() throws {
+        let testFileURL = URL(fileURLWithPath: #filePath)
+        let repoRoot = testFileURL
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let sourceURL = repoRoot.appendingPathComponent(
+            "Sources/BibleUI/Sources/BibleUI/Navigation/PassageGrid.swift"
+        )
+        let source = try String(contentsOf: sourceURL, encoding: .utf8)
+        let bookProgressStart = try XCTUnwrap(source.range(of: "static func bookProgress("))
+        let bookProgressEnd = try XCTUnwrap(
+            source.range(of: "static func chapterProgress(", range: bookProgressStart.upperBound..<source.endIndex)
+        )
+        let bookProgressSource = source[bookProgressStart.lowerBound..<bookProgressEnd.lowerBound]
+
+        XCTAssertTrue(bookProgressSource.contains("var readChapters = Set<Int>()"))
+        XCTAssertFalse(bookProgressSource.contains(".filter { row in"))
+        XCTAssertFalse(bookProgressSource.contains(".map(\\.chapter)"))
+    }
+
+    /**
      Verifies memorization progress counts unique KJVA ordinals from merged Android ranges.
 
      Android memorization data can contain overlapping neutral and module-scoped ranges. The grid

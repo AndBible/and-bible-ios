@@ -846,16 +846,14 @@ enum PassageGridProgressCalculator {
         let readingFraction: Double
         if let readingSnapshot, chapterCount > 0 {
             let cycle = currentReadingCycle(in: readingSnapshot)
-            let readChapters = Set(
-                readingSnapshot.history
-                    .filter { row in
-                        row.kjvBookOrdinal == kjvBookOrdinal &&
-                            row.cycle == cycle &&
-                            row.chapter > 0 &&
-                            row.chapter <= chapterCount
-                    }
-                    .map(\.chapter)
-            )
+            var readChapters = Set<Int>()
+            for row in readingSnapshot.history
+                where row.kjvBookOrdinal == kjvBookOrdinal &&
+                row.cycle == cycle &&
+                row.chapter > 0 &&
+                row.chapter <= chapterCount {
+                readChapters.insert(row.chapter)
+            }
             readingFraction = Double(readChapters.count) / Double(chapterCount)
         } else {
             readingFraction = 0

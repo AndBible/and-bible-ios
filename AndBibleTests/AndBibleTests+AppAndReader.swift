@@ -1012,6 +1012,31 @@ extension AndBibleTests {
         XCTAssertFalse(drawerSource.contains(".toolbar(.visible, for: .navigationBar)"))
     }
 
+    /**
+     Verifies reader-hosted passage choosers capture progress snapshots once per presentation.
+
+     Reading and memorization snapshots decode persisted store payloads. The chooser progress
+     closures run for many grid cells, so they should close over a prebuilt progress context instead
+     of re-reading those snapshots from `BibleReaderView` on every cell render.
+     */
+    func testReaderPassageChooserProgressProvidersCaptureSnapshotsOnce() throws {
+        let testFileURL = URL(fileURLWithPath: #filePath)
+        let repoRoot = testFileURL
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let readerViewURL = repoRoot.appendingPathComponent(
+            "Sources/BibleUI/Sources/BibleUI/Bible/BibleReaderView.swift"
+        )
+
+        let source = try String(contentsOf: readerViewURL, encoding: .utf8)
+        let contextOccurrences = source.components(separatedBy: "let progressContext = passageChooserProgressContext").count - 1
+
+        XCTAssertEqual(contextOccurrences, 2)
+        XCTAssertFalse(source.contains("passageBookProgress(for: book)"))
+        XCTAssertFalse(source.contains("passageChapterProgress(for: book, chapter: chapter)"))
+        XCTAssertFalse(source.contains("passageVerseProgress(for: book, chapter: chapter, verse: verse)"))
+    }
+
     #if os(iOS)
     func testWindowingControlPolicyUsesMinimalStyleOnlyOnIPad() {
         XCTAssertTrue(
