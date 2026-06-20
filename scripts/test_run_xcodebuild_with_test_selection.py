@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 import pathlib
 import json
 import os
@@ -91,6 +92,55 @@ class BuildXcodebuildCommandTests(unittest.TestCase):
         self.assertEqual(command[-1], "build-for-testing")
         self.assertNotIn("", command)
 
+    def test_build_xcodebuild_command_reports_missing_project_mode_inputs(self) -> None:
+        """Keep CI wrapper failures actionable when project-mode arguments are omitted."""
+        with self.assertRaisesRegex(
+            ValueError,
+            "Missing: scheme, derived_data_path",
+        ):
+            build_xcodebuild_command(
+                project="AndBible.xcodeproj",
+                scheme=None,
+                configuration="Debug",
+                destination="id=DEVICE",
+                derived_data_path=None,
+                result_bundle_path=".artifacts/AndBibleBuild-unit.xcresult",
+                code_signing_allowed="NO",
+                selection_args_text="",
+                action="build-for-testing",
+            )
+
+    def test_build_xcodebuild_command_uses_xctestrun_without_project_build_inputs(self) -> None:
+        """Protect the reusable-build mode from accidentally invoking a project build."""
+        command = build_xcodebuild_command(
+            project=None,
+            scheme=None,
+            configuration=None,
+            destination="id=DEVICE",
+            derived_data_path=None,
+            result_bundle_path=".artifacts/AndBibleTests-ui-reuse.xcresult",
+            code_signing_allowed="NO",
+            selection_args_text="-only-testing:AndBibleUITests/AndBibleUITests/testAboutScreenOpensFromReaderMenu",
+            action="test-without-building",
+            xctestrun_path=".derivedData/Build/Products/AndBible_iphonesimulator.xctestrun",
+        )
+
+        self.assertEqual(
+            command,
+            [
+                "xcodebuild",
+                "-xctestrun",
+                ".derivedData/Build/Products/AndBible_iphonesimulator.xctestrun",
+                "-destination",
+                "id=DEVICE",
+                "-resultBundlePath",
+                ".artifacts/AndBibleTests-ui-reuse.xcresult",
+                "CODE_SIGNING_ALLOWED=NO",
+                "-only-testing:AndBibleUITests/AndBibleUITests/testAboutScreenOpensFromReaderMenu",
+                "test-without-building",
+            ],
+        )
+
 
 class MainTests(unittest.TestCase):
     @mock.patch("run_xcodebuild_with_test_selection.subprocess.run")
@@ -149,6 +199,103 @@ class MainTests(unittest.TestCase):
             ],
             check=True,
         )
+
+    @mock.patch("run_xcodebuild_with_test_selection.subprocess.run")
+    def test_main_accepts_xctestrun_path_for_test_without_building(
+        self,
+        run_mock: mock.Mock,
+    ) -> None:
+        """Protect CI's restored-product path while preserving selection parsing and SIGSEGV handling."""
+        exit_code = main(
+            [
+                "--xctestrun-path",
+                ".derivedData/Build/Products/AndBible_iphonesimulator.xctestrun",
+                "--destination",
+                "id=DEVICE",
+                "--result-bundle-path",
+                ".artifacts/AndBibleTests-ui-reuse.xcresult",
+                "--test-selection-args=-only-testing:AndBibleUITests/AndBibleUITests/testAboutScreenOpensFromReaderMenu",
+                "--action",
+                "test-without-building",
+            ]
+        )
+
+        self.assertEqual(exit_code, 0)
+        run_mock.assert_called_once_with(
+            [
+                "xcodebuild",
+                "-xctestrun",
+                ".derivedData/Build/Products/AndBible_iphonesimulator.xctestrun",
+                "-destination",
+                "id=DEVICE",
+                "-resultBundlePath",
+                ".artifacts/AndBibleTests-ui-reuse.xcresult",
+                "CODE_SIGNING_ALLOWED=NO",
+                "-only-testing:AndBibleUITests/AndBibleUITests/testAboutScreenOpensFromReaderMenu",
+                "test-without-building",
+            ],
+            check=True,
+        )
+
+    @mock.patch("run_xcodebuild_with_test_selection.subprocess.run")
+    def test_main_rejects_xctestrun_path_for_build_for_testing_before_running_xcodebuild(
+        self,
+        run_mock: mock.Mock,
+    ) -> None:
+        """Protect .xctestrun mode from silently falling back to project-mode builds."""
+        with mock.patch("sys.stderr", new_callable=io.StringIO) as stderr:
+            with self.assertRaises(SystemExit) as raised:
+                main(
+                    [
+                        "--xctestrun-path",
+                        ".derivedData/Build/Products/AndBible_iphonesimulator.xctestrun",
+                        "--destination",
+                        "id=DEVICE",
+                        "--result-bundle-path",
+                        ".artifacts/AndBibleTests-ui-reuse.xcresult",
+                        "--action",
+                        "build-for-testing",
+                    ]
+                )
+
+        self.assertEqual(raised.exception.code, 2)
+        self.assertIn(
+            "--xctestrun-path can only be used with --action test-without-building",
+            stderr.getvalue(),
+        )
+        run_mock.assert_not_called()
+
+    @mock.patch("run_xcodebuild_with_test_selection.subprocess.run")
+    def test_main_rejects_project_mode_inputs_with_xctestrun_path_before_running_xcodebuild(
+        self,
+        run_mock: mock.Mock,
+    ) -> None:
+        """Keep .xctestrun mode command shape unambiguous for CI reuse jobs."""
+        with mock.patch("sys.stderr", new_callable=io.StringIO) as stderr:
+            with self.assertRaises(SystemExit) as raised:
+                main(
+                    [
+                        "--xctestrun-path",
+                        ".derivedData/Build/Products/AndBible_iphonesimulator.xctestrun",
+                        "--project",
+                        "AndBible.xcodeproj",
+                        "--scheme",
+                        "AndBible",
+                        "--destination",
+                        "id=DEVICE",
+                        "--result-bundle-path",
+                        ".artifacts/AndBibleTests-ui-reuse.xcresult",
+                        "--action",
+                        "test-without-building",
+                    ]
+                )
+
+        self.assertEqual(raised.exception.code, 2)
+        self.assertIn(
+            "the following arguments cannot be used with --xctestrun-path: --project, --scheme",
+            stderr.getvalue(),
+        )
+        run_mock.assert_not_called()
 
     @mock.patch("run_xcodebuild_with_test_selection.subprocess.run")
     def test_main_treats_sigsegv_after_passing_result_bundle_as_success(

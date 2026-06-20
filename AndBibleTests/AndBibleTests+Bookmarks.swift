@@ -398,6 +398,368 @@ extension AndBibleTests {
     }
 
     /**
+     Verifies the extracted StudyPad bridge action boundary creates a new journal row using
+     Android's `BibleJavascriptInterface.createNewStudyPadEntry` insertion semantics.
+     *
+     * Setup:
+     * - creates one label and one Bible bookmark-to-label row in an in-memory bookmark store
+     * - sets the referenced bookmark row to order `3`, matching Android's lookup of the row after
+     *   which the new StudyPad entry should be inserted
+     *
+     * Expected result:
+     * - the coordinator inserts the new journal at order `4`
+     * - the emitted `add_or_update_study_pad` payload carries the new journal and no unrelated
+     *   reorder arrays
+     *
+     * Failure meaning:
+     * - iOS either diverged from Android's bridge insertion rule or the refactor moved bridge event
+     *   construction into a broad refresh shortcut instead of preserving the event contract.
+     */
+    func testStudyPadActionCoordinatorCreatesEntryAfterBibleBookmarkLikeAndroidBridge() throws {
+        let container = try makeBookmarkRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        let bookmarkService = BookmarkService(store: BookmarkStore(modelContext: modelContext))
+        let label = bookmarkService.createLabel(name: "Study", color: Label.defaultColor)
+        let bookmark = bookmarkService.addBibleBookmark(
+            bookInitials: "KJV",
+            startOrdinal: 1,
+            endOrdinal: 1,
+            wholeVerse: true
+        )
+        _ = bookmarkService.toggleLabel(bookmarkId: bookmark.id, labelId: label.id)
+        bookmarkService.updateBibleBookmarkToLabel(
+            bookmarkId: bookmark.id,
+            labelId: label.id,
+            orderNumber: 3,
+            indentLevel: 1,
+            expandContent: true
+        )
+        let coordinator = makeStudyPadActionCoordinator(
+            bookmarkService: bookmarkService,
+            notesContentType: "MARKDOWN"
+        )
+
+        let result = coordinator.createNewStudyPadEntry(
+            labelId: label.id.uuidString,
+            entryType: "bookmark",
+            afterEntryId: bookmark.id.uuidString
+        )
+
+        XCTAssertTrue(result.incrementsStudyPadRevision)
+        XCTAssertEqual(result.events.count, 1)
+        guard case .studyPadUpdated(let payload) = try XCTUnwrap(result.events.first) else {
+            return XCTFail("Expected add_or_update_study_pad event")
+        }
+        let entry = try XCTUnwrap(payload.studyPadTextEntry)
+        XCTAssertEqual(entry.type, "journal")
+        XCTAssertEqual(entry.labelId, label.id.uuidString)
+        XCTAssertEqual(entry.orderNumber, 4)
+        XCTAssertEqual(entry.contentType, "MARKDOWN")
+        XCTAssertTrue(payload.bookmarkToLabelsOrdered.isEmpty)
+        XCTAssertTrue(payload.genericBookmarkToLabelsOrdered.isEmpty)
+        XCTAssertTrue(payload.studyPadItemsOrdered.isEmpty)
+        XCTAssertEqual(bookmarkService.studyPadEntries(labelId: label.id).first?.orderNumber, 4)
+    }
+
+    /**
+     Verifies StudyPad drag/drop reordering accepts the exact payload keys emitted by the shared
+     BibleView client and parsed by Android.
+     *
+     * Android parity source:
+     * - `app/bibleview-js/src/composables/android.ts` sends `bookmarks`, `genericBookmarks`, and
+     *   `studyPadTextItems`
+     * - `BibleJavascriptInterface.updateOrderNumber` deserializes those three keys before calling
+     *   `BookmarkControl.updateOrderNumbers`
+     *
+     * Expected result:
+     * - the coordinator persists all three order updates and emits Android's
+     *   `add_or_update_study_pad` reorder payload with the updated ordered rows.
+     *
+     * Failure meaning:
+     * - iOS is preserving an iOS-only reorder payload shape that the shared web client does not
+     *   send, leaving StudyPad drag/drop broken or dependent on accidental compatibility.
+     */
+    func testStudyPadActionCoordinatorReordersUsingAndroidPayloadKeys() throws {
+        let container = try makeBookmarkRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        let bookmarkService = BookmarkService(store: BookmarkStore(modelContext: modelContext))
+        let label = bookmarkService.createLabel(name: "Study", color: Label.defaultColor)
+        let bibleBookmark = bookmarkService.addBibleBookmark(
+            bookInitials: "KJV",
+            startOrdinal: 1,
+            endOrdinal: 1,
+            wholeVerse: true
+        )
+        let genericBookmark = bookmarkService.addGenericBookmark(
+            bookInitials: "DICT",
+            key: "entry-key",
+            startOrdinal: 2,
+            endOrdinal: 2
+        )
+        _ = bookmarkService.toggleLabel(bookmarkId: bibleBookmark.id, labelId: label.id)
+        _ = bookmarkService.toggleLabel(bookmarkId: genericBookmark.id, labelId: label.id)
+        let entry = try XCTUnwrap(
+            bookmarkService.createStudyPadEntry(labelId: label.id, afterOrderNumber: -1)
+        ).0
+        let coordinator = makeStudyPadActionCoordinator(bookmarkService: bookmarkService)
+        let data = """
+        {
+            "bookmarks": [{"first": "\(bibleBookmark.id.uuidString)", "second": 2}],
+            "genericBookmarks": [{"first": "\(genericBookmark.id.uuidString)", "second": 1}],
+            "studyPadTextItems": [{"first": "\(entry.id.uuidString)", "second": 0}]
+        }
+        """
+
+        let result = coordinator.updateOrderNumber(labelId: label.id.uuidString, data: data)
+
+        XCTAssertTrue(result.incrementsStudyPadRevision)
+        XCTAssertEqual(result.events.count, 1)
+        guard case .studyPadUpdated(let payload) = try XCTUnwrap(result.events.first) else {
+            return XCTFail("Expected add_or_update_study_pad event")
+        }
+        XCTAssertNil(payload.studyPadTextEntry)
+        XCTAssertEqual(payload.bookmarkToLabelsOrdered.first?.bookmarkId, bibleBookmark.id.uuidString)
+        XCTAssertEqual(payload.bookmarkToLabelsOrdered.first?.orderNumber, 2)
+        XCTAssertEqual(payload.genericBookmarkToLabelsOrdered.first?.bookmarkId, genericBookmark.id.uuidString)
+        XCTAssertEqual(payload.genericBookmarkToLabelsOrdered.first?.orderNumber, 1)
+        XCTAssertEqual(payload.studyPadItemsOrdered.first?.id, entry.id.uuidString)
+        XCTAssertEqual(payload.studyPadItemsOrdered.first?.orderNumber, 0)
+        XCTAssertEqual(
+            bookmarkService.bibleBookmarkToLabel(bookmarkId: bibleBookmark.id, labelId: label.id)?.orderNumber,
+            2
+        )
+        XCTAssertEqual(
+            bookmarkService.genericBookmarkToLabel(bookmarkId: genericBookmark.id, labelId: label.id)?.orderNumber,
+            1
+        )
+        XCTAssertEqual(bookmarkService.studyPadEntry(id: entry.id)?.orderNumber, 0)
+    }
+
+    /**
+     Verifies StudyPad text edits return Android's changed-entry update event.
+     *
+     * Android parity source:
+     * - `BookmarkControl.updateStudyPadTextEntryText` upserts the text row and posts
+     *   `StudyPadOrderEvent` with the changed `StudyPadTextEntryWithText`
+     * - `BibleView.onEvent(StudyPadOrderEvent)` emits `add_or_update_study_pad`
+     *
+     * Expected result:
+     * - the coordinator persists the text and returns one StudyPad update event containing the
+     *   changed journal row
+     *
+     * Failure meaning:
+     * - iOS has restored its previous silent text-update path, which can leave other StudyPad views
+     *   or event-driven client state stale compared with Android.
+     */
+    func testStudyPadActionCoordinatorUpdatesTextLikeAndroidBridge() throws {
+        let container = try makeBookmarkRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        let bookmarkService = BookmarkService(store: BookmarkStore(modelContext: modelContext))
+        let label = bookmarkService.createLabel(name: "Study", color: Label.defaultColor)
+        let entry = try XCTUnwrap(
+            bookmarkService.createStudyPadEntry(labelId: label.id, afterOrderNumber: -1)
+        ).0
+        let coordinator = makeStudyPadActionCoordinator(bookmarkService: bookmarkService)
+
+        let result = coordinator.updateStudyPadTextEntryText(
+            id: entry.id.uuidString,
+            text: "Updated StudyPad text"
+        )
+
+        XCTAssertTrue(result.incrementsStudyPadRevision)
+        XCTAssertEqual(result.events.count, 1)
+        guard case .studyPadUpdated(let payload) = try XCTUnwrap(result.events.first) else {
+            return XCTFail("Expected add_or_update_study_pad event")
+        }
+        XCTAssertEqual(payload.studyPadTextEntry?.id, entry.id.uuidString)
+        XCTAssertEqual(payload.studyPadTextEntry?.text, "Updated StudyPad text")
+        XCTAssertEqual(bookmarkService.studyPadEntry(id: entry.id)?.textEntry?.text, "Updated StudyPad text")
+    }
+
+    /**
+     Verifies stale StudyPad text edits do not create detached text rows.
+     *
+     * Android parity source:
+     * - `BookmarkControl.updateStudyPadTextEntryText` updates the text table for an existing
+     *   StudyPad entry and then emits the changed entry; a stale id does not become a new visible
+     *   StudyPad row
+     *
+     * Expected result:
+     * - the coordinator returns no bridge event and does not insert an orphan
+     *   `StudyPadTextEntryText` row when the journal row is missing
+     *
+     * Failure meaning:
+     * - iOS accepted stale bridge state as persistent detached data, which can later surface as
+     *   backup/restore or sync drift outside Android's visible StudyPad model.
+     */
+    func testStudyPadActionCoordinatorIgnoresStaleTextUpdateWithoutDetachedRow() throws {
+        let container = try makeBookmarkRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        let bookmarkService = BookmarkService(store: BookmarkStore(modelContext: modelContext))
+        let coordinator = makeStudyPadActionCoordinator(bookmarkService: bookmarkService)
+        let staleId = UUID()
+
+        let result = coordinator.updateStudyPadTextEntryText(
+            id: staleId.uuidString,
+            text: "Detached text"
+        )
+
+        XCTAssertFalse(result.incrementsStudyPadRevision)
+        XCTAssertTrue(result.events.isEmpty)
+        let texts = try modelContext.fetch(FetchDescriptor<StudyPadTextEntryText>())
+        XCTAssertTrue(texts.isEmpty)
+    }
+
+    /**
+     Verifies StudyPad bookmark relationship edits preserve Android's distinct
+     `BookmarkToLabelAddedOrUpdatedEvent` bridge path.
+     *
+     * Setup:
+     * - creates one Bible bookmark-to-label relation and sends the same JSON object produced by
+     *   `android.updateStudyPadEntry` in the shared BibleView client
+     *
+     * Expected result:
+     * - the coordinator mutates only that relationship and returns one
+     *   `add_or_update_bookmark_to_label` event
+     *
+     * Failure meaning:
+     * - iOS has collapsed relationship edits into a generic StudyPad refresh, drifting from the
+     *   Android event split and making future ordering/text regressions harder to isolate.
+     */
+    func testStudyPadActionCoordinatorUpdatesBookmarkToLabelLikeAndroidBridge() throws {
+        let container = try makeBookmarkRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        let bookmarkService = BookmarkService(store: BookmarkStore(modelContext: modelContext))
+        let label = bookmarkService.createLabel(name: "Study", color: Label.defaultColor)
+        let bookmark = bookmarkService.addBibleBookmark(
+            bookInitials: "KJV",
+            startOrdinal: 1,
+            endOrdinal: 1,
+            wholeVerse: true
+        )
+        _ = bookmarkService.toggleLabel(bookmarkId: bookmark.id, labelId: label.id)
+        let coordinator = makeStudyPadActionCoordinator(bookmarkService: bookmarkService)
+        let data = """
+        {
+            "bookmarkId": "\(bookmark.id.uuidString)",
+            "labelId": "\(label.id.uuidString)",
+            "orderNumber": 5,
+            "indentLevel": 2,
+            "expandContent": false
+        }
+        """
+
+        let result = coordinator.updateBookmarkToLabel(data: data)
+
+        XCTAssertFalse(result.incrementsStudyPadRevision)
+        XCTAssertEqual(result.events.count, 1)
+        guard case .bookmarkToLabelUpdated(let payload) = try XCTUnwrap(result.events.first) else {
+            return XCTFail("Expected add_or_update_bookmark_to_label event")
+        }
+        XCTAssertEqual(payload.type, "BibleBookmarkToLabel")
+        XCTAssertEqual(payload.bookmarkId, bookmark.id.uuidString)
+        XCTAssertEqual(payload.labelId, label.id.uuidString)
+        XCTAssertEqual(payload.orderNumber, 5)
+        XCTAssertEqual(payload.indentLevel, 2)
+        XCTAssertEqual(payload.expandContent, false)
+    }
+
+    /**
+     Verifies the public reader bridge path accepts the StudyPad reorder payload emitted by the
+     shared BibleView client.
+     *
+     * Android parity source:
+     * - `app/bibleview-js/src/composables/android.ts` sends `bookmarks`, `genericBookmarks`, and
+     *   `studyPadTextItems` to `window.android.updateOrderNumber`
+     *
+     * Expected result:
+     * - `BibleReaderController` delegates the action to the StudyPad coordinator, persists the new
+     *   order, and emits `add_or_update_study_pad` with the changed relationship row
+     *
+     * Failure meaning:
+     * - the extraction left the user-facing bridge on the old iOS-only key names even if the
+     *   collaborator itself understands Android's payload.
+     */
+    @MainActor
+    func testReaderStudyPadUpdateOrderNumberBridgeAcceptsAndroidPayloadKeys() throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let container = try makeBookmarkRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        let bookmarkService = BookmarkService(store: BookmarkStore(modelContext: modelContext))
+        let controller = BibleReaderController(bridge: bridge)
+        controller.bookmarkService = bookmarkService
+        let label = bookmarkService.createLabel(name: "Study", color: Label.defaultColor)
+        let bookmark = bookmarkService.addBibleBookmark(
+            bookInitials: "KJV",
+            startOrdinal: 1,
+            endOrdinal: 1,
+            wholeVerse: true
+        )
+        _ = bookmarkService.toggleLabel(bookmarkId: bookmark.id, labelId: label.id)
+        let data = """
+        {
+            "bookmarks": [{"first": "\(bookmark.id.uuidString)", "second": 6}],
+            "genericBookmarks": [],
+            "studyPadTextItems": []
+        }
+        """
+
+        controller.bridge(bridge, updateOrderNumber: label.id.uuidString, data: data)
+
+        let payload = try XCTUnwrap(
+            bridgeEmissionPayload(from: recordedScripts(), event: "add_or_update_study_pad") as? [String: Any]
+        )
+        XCTAssertTrue(payload["studyPadTextEntry"] is NSNull)
+        let relationships = try XCTUnwrap(payload["bookmarkToLabelsOrdered"] as? [[String: Any]])
+        let relationship = try XCTUnwrap(relationships.first)
+        XCTAssertEqual(relationship["bookmarkId"] as? String, bookmark.id.uuidString)
+        XCTAssertEqual(relationship["orderNumber"] as? Int, 6)
+        XCTAssertEqual(
+            bookmarkService.bibleBookmarkToLabel(bookmarkId: bookmark.id, labelId: label.id)?.orderNumber,
+            6
+        )
+    }
+
+    /**
+     Verifies the public reader bridge emits Android's StudyPad deletion payload as a JavaScript
+     string instead of a raw UUID token.
+     *
+     * Android parity source:
+     * - `BibleView.onEvent(StudyPadTextEntryDeleted)` calls
+     *   `bibleView.emit("delete_study_pad_text_entry", "${event.studyPadTextEntryId}")`, making
+     *   the second JavaScript argument a quoted string.
+     *
+     * Expected result:
+     * - deleting a StudyPad journal through `BibleReaderController` emits
+     *   `delete_study_pad_text_entry` with a JSON string payload containing the deleted entry id.
+     *
+     * Failure meaning:
+     * - the bridge emitted an invalid raw UUID expression or otherwise drifted from Android's
+     *   StudyPad delete event contract, leaving the Vue client unable to consume the deletion.
+     */
+    @MainActor
+    func testReaderStudyPadDeleteBridgeEmitsAndroidStringPayload() throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let container = try makeBookmarkRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        let bookmarkService = BookmarkService(store: BookmarkStore(modelContext: modelContext))
+        let controller = BibleReaderController(bridge: bridge)
+        controller.bookmarkService = bookmarkService
+        let label = bookmarkService.createLabel(name: "Study", color: Label.defaultColor)
+        let entry = try XCTUnwrap(
+            bookmarkService.createStudyPadEntry(labelId: label.id, afterOrderNumber: -1)
+        ).0
+
+        controller.bridge(bridge, deleteStudyPadEntry: entry.id.uuidString)
+
+        let payload = try XCTUnwrap(
+            bridgeEmissionPayload(from: recordedScripts(), event: "delete_study_pad_text_entry") as? String
+        )
+        XCTAssertEqual(payload, entry.id.uuidString)
+        XCTAssertNil(bookmarkService.studyPadEntry(id: entry.id))
+    }
+
+    /**
      Verifies the Android note-content default for bookmark notes saved below the bridge layer.
      Android persists `HTML` when no explicit note content type exists, so iOS service saves must
      produce an explicit `contentType` row instead of leaving notes format implicit forever.
@@ -510,8 +872,8 @@ extension AndBibleTests {
         bookmarkService.saveBibleBookmarkNote(bookmarkId: bibleBookmark.id, note: "Bible note")
         bookmarkService.saveBibleBookmarkNote(bookmarkId: genericBookmark.id, note: "Generic note")
 
-        controller.bridge(BibleBridge(), saveBookmarkNote: bibleBookmark.id.uuidString, note: " \n\t ")
-        controller.bridge(BibleBridge(), saveBookmarkNote: genericBookmark.id.uuidString, note: " \n\t ")
+        controller.bridge(bridge, saveBookmarkNote: bibleBookmark.id.uuidString, note: " \n\t ")
+        controller.bridge(bridge, saveBookmarkNote: genericBookmark.id.uuidString, note: " \n\t ")
 
         XCTAssertTrue(try modelContext.fetch(FetchDescriptor<BibleBookmarkNotes>()).isEmpty)
         XCTAssertTrue(try modelContext.fetch(FetchDescriptor<GenericBookmarkNotes>()).isEmpty)
@@ -522,6 +884,167 @@ extension AndBibleTests {
         XCTAssertEqual(payload["id"] as? String, bibleBookmark.id.uuidString)
         XCTAssertEqual(payload["notes"] as? String, "")
         XCTAssertTrue(payload["notesContentType"] is NSNull)
+    }
+
+    /**
+     Verifies the bookmark action collaborator applies Android's auto-label creation contract.
+
+     Android `BibleView.makeBookmark` assigns both `autoAssignLabels` and `autoAssignPrimaryLabel`,
+     then opens the bookmark label modal only when there are no initial labels or notes are requested.
+     This protects the extraction from preserving the old iOS-only behavior where auto-assigned
+     bookmarks still opened the label modal and never received the configured primary label.
+     */
+    @MainActor
+    func testBookmarkActionCoordinatorAppliesAndroidAutoAssignPrimaryLabelAndSuppressesLabelModal() throws {
+        let container = try makeBookmarkRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        let bookmarkService = BookmarkService(store: BookmarkStore(modelContext: modelContext))
+        let assignedLabel = bookmarkService.createLabel(name: "Assigned")
+        let primaryLabel = bookmarkService.createLabel(name: "Primary")
+        let coordinator = makeBookmarkActionCoordinator(bookmarkService: bookmarkService)
+        let workspaceSettings = WorkspaceSettings(
+            autoAssignLabels: [assignedLabel.id, primaryLabel.id],
+            autoAssignPrimaryLabel: primaryLabel.id,
+            studyPadCursors: [assignedLabel.id: 7]
+        )
+
+        let result = coordinator.addOrUpdateBibleBookmark(
+            bookInitials: "KJV",
+            startOrdinal: 1,
+            endOrdinal: 1,
+            addNote: false,
+            wholeVerse: true,
+            workspaceSettings: workspaceSettings
+        )
+
+        let bookmark = try XCTUnwrap(bookmarkService.bookmarks(for: 1, endOrdinal: 1, book: "Genesis").first)
+        XCTAssertEqual(bookmark.primaryLabelId, primaryLabel.id)
+        XCTAssertNotNil(bookmarkService.bibleBookmarkToLabel(bookmarkId: bookmark.id, labelId: assignedLabel.id))
+        XCTAssertEqual(result.updatedWorkspaceSettings?.studyPadCursors[assignedLabel.id], 1)
+        XCTAssertTrue(result.requiresPersistState)
+
+        guard case .bookmarksUpdated(let payloads) = result.events.first else {
+            return XCTFail("Expected add_or_update_bookmarks event")
+        }
+        XCTAssertEqual(payloads.first?.id, bookmark.id.uuidString)
+        XCTAssertFalse(
+            result.events.contains { event in
+                if case .bookmarkClicked = event { return true }
+                return false
+            },
+            "Android does not open the label modal when auto labels are already assigned and notes were not requested."
+        )
+    }
+
+    /**
+     Verifies primary-label changes reject Android's reserved unlabelled system label.
+
+     Android `BibleJavascriptInterface.setAsPrimaryLabel` returns before mutation when the selected
+     label is the synthetic unlabelled label. The extracted iOS collaborator must not preserve the
+     previous drift where any valid UUID could become `primaryLabelId`.
+     */
+    @MainActor
+    func testBookmarkActionCoordinatorRejectsUnlabeledPrimaryLabelLikeAndroidBridge() throws {
+        let container = try makeBookmarkRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        let bookmarkService = BookmarkService(store: BookmarkStore(modelContext: modelContext))
+        let coordinator = makeBookmarkActionCoordinator(bookmarkService: bookmarkService)
+        let bookmark = bookmarkService.addBibleBookmark(
+            bookInitials: "KJV",
+            startOrdinal: 1,
+            endOrdinal: 1,
+            wholeVerse: true
+        )
+
+        let result = coordinator.setPrimaryLabel(
+            bookmarkId: bookmark.id.uuidString,
+            labelId: Label.unlabeledId.uuidString
+        )
+
+        XCTAssertNil(bookmarkService.bibleBookmark(id: bookmark.id)?.primaryLabelId)
+        XCTAssertTrue(result.events.isEmpty)
+        XCTAssertNil(result.recentLabelId)
+    }
+
+    /**
+     Verifies whole-verse bridge edits keep Android's text-range guard.
+
+     Android refuses to turn off whole-verse rendering when a bookmark has no text range, because
+     there is no partial selection to restore. This test exercises both the guarded no-op and the
+     allowed mutation once offsets exist.
+     */
+    @MainActor
+    func testBookmarkActionCoordinatorRejectsWholeVerseOffWithoutTextRangeLikeAndroidBridge() throws {
+        let container = try makeBookmarkRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        let bookmarkService = BookmarkService(store: BookmarkStore(modelContext: modelContext))
+        let coordinator = makeBookmarkActionCoordinator(bookmarkService: bookmarkService)
+        let bookmark = bookmarkService.addBibleBookmark(
+            bookInitials: "KJV",
+            startOrdinal: 1,
+            endOrdinal: 1,
+            wholeVerse: true
+        )
+
+        let rejected = coordinator.setBookmarkWholeVerse(bookmarkId: bookmark.id.uuidString, value: false)
+        XCTAssertTrue(bookmarkService.bibleBookmark(id: bookmark.id)?.wholeVerse ?? false)
+        XCTAssertTrue(rejected.events.isEmpty)
+
+        bookmark.startOffset = 3
+        bookmark.endOffset = 8
+        let accepted = coordinator.setBookmarkWholeVerse(bookmarkId: bookmark.id.uuidString, value: false)
+
+        XCTAssertFalse(bookmarkService.bibleBookmark(id: bookmark.id)?.wholeVerse ?? true)
+        guard case .bookmarksUpdated(let payloads) = accepted.events.first else {
+            return XCTFail("Expected whole-verse mutation to re-emit the updated bookmark")
+        }
+        XCTAssertEqual(payloads.first?.wholeVerse, false)
+    }
+
+    /**
+     Builds the proposed StudyPad action coordinator with production payload projection.
+     */
+    private func makeStudyPadActionCoordinator(
+        bookmarkService: BookmarkService,
+        notesContentType: String = "HTML"
+    ) -> BibleReaderStudyPadActionCoordinator {
+        BibleReaderStudyPadActionCoordinator(
+            bookmarkService: bookmarkService,
+            payloadFactory: BibleReaderAnnotationPayloadFactory(
+                currentBook: "Genesis",
+                activeModuleName: "KJV",
+                activeModule: nil,
+                bookList: [],
+                unlabeledLabelID: Label.unlabeledId.uuidString
+            ),
+            currentNotesContentType: { notesContentType }
+        )
+    }
+
+    /**
+     Builds the proposed bookmark action coordinator with production payload projection.
+
+     The helper intentionally mirrors the controller seam: the coordinator owns bookmark mutation
+     rules while the test supplies the same annotation payload factory the reader would use. A compile
+     failure here means the extraction seam has not been implemented yet; assertion failures mean the
+     seam exists but no longer matches Android's bridge contract.
+     */
+    private func makeBookmarkActionCoordinator(
+        bookmarkService: BookmarkService,
+        notesContentType: String = "HTML"
+    ) -> BibleReaderBookmarkActionCoordinator {
+        BibleReaderBookmarkActionCoordinator(
+            bookmarkService: bookmarkService,
+            payloadFactory: BibleReaderAnnotationPayloadFactory(
+                currentBook: "Genesis",
+                activeModuleName: "KJV",
+                activeModule: nil,
+                bookList: [],
+                unlabeledLabelID: Label.unlabeledId.uuidString
+            ),
+            currentBook: "Genesis",
+            currentNotesContentType: { notesContentType }
+        )
     }
     #endif
 
