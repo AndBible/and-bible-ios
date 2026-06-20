@@ -34,7 +34,7 @@ struct ReaderSideDrawerOverlay<DrawerContent: View>: View {
     init(
         colorScheme: ColorScheme,
         dismissAreaIdentifier: String,
-        onDismiss: @escaping () -> Void = {},
+        onDismiss: @escaping () -> Void,
         @ViewBuilder drawerContent: @escaping (CGFloat) -> DrawerContent
     ) {
         self.colorScheme = colorScheme

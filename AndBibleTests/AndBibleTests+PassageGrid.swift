@@ -442,4 +442,35 @@ extension AndBibleTests {
         XCTAssertEqual(verseProgress.readingFraction, 1.0, accuracy: 0.0001)
         XCTAssertEqual(verseProgress.memorizationFraction, 1.0, accuracy: 0.0001)
     }
+
+    /**
+     Verifies memorization progress counts unique KJVA ordinals from merged Android ranges.
+
+     Android memorization data can contain overlapping neutral and module-scoped ranges. The grid
+     should count their union, ignore other modules, and avoid treating repeated ordinals as extra
+     progress.
+     */
+    func testPassageGridProgressMergesOverlappingMemorizationRanges() throws {
+        let genesis = try XCTUnwrap(BibleReaderController.defaultBooks.first { $0.osisId == "Gen" })
+        let genesisStart = try XCTUnwrap(JSwordKJVAVersification.verseOrdinal(osisId: "Gen", chapter: 1, verse: 1))
+
+        let memorizationSnapshot = MemorizationProgressSnapshot(
+            memorizedRanges: [
+                MemorizationProgressRange(bookInitials: "", startOrdinal: genesisStart, endOrdinal: genesisStart + 9),
+                MemorizationProgressRange(bookInitials: "KJV", startOrdinal: genesisStart + 4, endOrdinal: genesisStart + 14),
+                MemorizationProgressRange(bookInitials: "KJV", startOrdinal: genesisStart + 15, endOrdinal: genesisStart + 19),
+                MemorizationProgressRange(bookInitials: "ESV", startOrdinal: genesisStart + 20, endOrdinal: genesisStart + 30),
+            ]
+        )
+
+        let chapterProgress = PassageGridProgressCalculator.chapterProgress(
+            book: genesis,
+            chapter: 1,
+            readingSnapshot: nil,
+            memorizationSnapshot: memorizationSnapshot,
+            activeBookInitials: "KJV"
+        )
+
+        XCTAssertEqual(chapterProgress.memorizationFraction, 20.0 / 31.0, accuracy: 0.0001)
+    }
 }

@@ -925,7 +925,8 @@ extension AndBibleTests {
     func testReaderSideDrawerOverlayBuildsWithInjectedContent() {
         let view = ReaderSideDrawerOverlay(
             colorScheme: ColorScheme.light,
-            dismissAreaIdentifier: "testDismissArea"
+            dismissAreaIdentifier: "testDismissArea",
+            onDismiss: {}
         ) { width in
             Text("Drawer \(Int(width))")
         }

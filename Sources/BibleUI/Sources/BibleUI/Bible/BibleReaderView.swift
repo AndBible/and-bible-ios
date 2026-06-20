@@ -1113,7 +1113,25 @@ public struct BibleReaderView: View {
                 currentBook: panePresentationController?.currentBook,
                 currentChapter: panePresentationController?.currentChapter,
                 currentVerse: panePresentationController?.currentVerse,
-                workspaceName: activePassageChooserWorkspaceName
+                workspaceName: activePassageChooserWorkspaceName,
+                verseCountProvider: { book, chapter in
+                    guard let panePresentationController else {
+                        return BibleReaderController.verseCount(for: book.name, chapter: chapter)
+                    }
+                    return panePresentationController.verseCountForActiveModule(
+                        book: book.name,
+                        chapter: chapter
+                    )
+                },
+                bookProgressProvider: { book in
+                    passageBookProgress(for: book)
+                },
+                chapterProgressProvider: { book, chapter in
+                    passageChapterProgress(for: book, chapter: chapter)
+                },
+                verseProgressProvider: { book, chapter, verse in
+                    passageVerseProgress(for: book, chapter: chapter, verse: verse)
+                }
             ) { book, chapter, _ in
                 showRefChooser = false
                 let osisId = panePresentationController?.osisBookId(for: book) ?? BibleReaderController.osisBookId(for: book)

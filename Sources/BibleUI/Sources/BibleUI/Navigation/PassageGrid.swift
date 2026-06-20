@@ -1022,18 +1022,46 @@ enum PassageGridProgressCalculator {
             return 0
         }
 
-        var ordinals = Set<Int>()
+        var intersections: [ClosedRange<Int>] = []
         for range in snapshot.memorizedRanges where matches(range, activeBookInitials: activeBookInitials) {
             let start = max(range.startOrdinal, queryRange.lowerBound)
             let end = min(range.endOrdinal, queryRange.upperBound)
             guard start <= end else {
                 continue
             }
-            for ordinal in start...end {
-                ordinals.insert(ordinal)
+            intersections.append(start...end)
+        }
+        return mergedOrdinalCount(in: intersections)
+    }
+
+    /**
+     Counts unique ordinals represented by possibly overlapping or adjacent ranges.
+
+     Android stores memorized passages as ranges, so progress can be counted from merged intervals
+     without allocating one value per verse ordinal. Adjacent ranges are merged because their covered
+     ordinal count is equivalent and avoids unnecessary segment churn.
+    */
+    private static func mergedOrdinalCount(in ranges: [ClosedRange<Int>]) -> Int {
+        let sortedRanges = ranges.sorted(by: { $0.lowerBound < $1.lowerBound })
+        guard let first = sortedRanges.first else {
+            return 0
+        }
+
+        var count = 0
+        var currentStart = first.lowerBound
+        var currentEnd = first.upperBound
+
+        for range in sortedRanges.dropFirst() {
+            if range.lowerBound <= currentEnd + 1 {
+                currentEnd = max(currentEnd, range.upperBound)
+            } else {
+                count += currentEnd - currentStart + 1
+                currentStart = range.lowerBound
+                currentEnd = range.upperBound
             }
         }
-        return ordinals.count
+
+        return count + currentEnd - currentStart + 1
     }
 
     /**
