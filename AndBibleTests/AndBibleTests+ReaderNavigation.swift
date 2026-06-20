@@ -2152,6 +2152,7 @@ extension AndBibleTests {
         controller.activeWindow = scrolledWindow
         controller.windowManagerRef = windowManager
         controller.navigateTo(book: "Genesis", chapter: 1, verse: 1)
+        controller.bridgeDidSetClientReady(bridge)
         controller.onInteraction = {
             windowManager.activeWindow = scrolledWindow
         }
