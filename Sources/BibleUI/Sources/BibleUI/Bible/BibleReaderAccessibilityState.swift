@@ -81,17 +81,16 @@ struct BibleReaderRenderedContentState: Equatable {
      - Parameter encodedValue: Token string produced by `encodedValue` or a legacy controller value.
      - Returns: Dictionary of parsed key/value pairs.
      - Side effects: None.
-     - Failure modes: Malformed fields are ignored; duplicate keys keep Swift's dictionary behavior
-       from the previous inline implementation.
+     - Failure modes: Malformed fields are ignored; duplicate keys keep the last valid value.
      */
     static func tokens(from encodedValue: String) -> [String: String] {
-        Dictionary(uniqueKeysWithValues: encodedValue
-            .split(separator: ";")
-            .compactMap { part -> (String, String)? in
-                let pieces = part.split(separator: "=", maxSplits: 1).map(String.init)
-                guard pieces.count == 2 else { return nil }
-                return (pieces[0], pieces[1])
-            })
+        var tokens: [String: String] = [:]
+        for part in encodedValue.split(separator: ";") {
+            let pieces = part.split(separator: "=", maxSplits: 1).map(String.init)
+            guard pieces.count == 2 else { continue }
+            tokens[pieces[0]] = pieces[1]
+        }
+        return tokens
     }
 }
 

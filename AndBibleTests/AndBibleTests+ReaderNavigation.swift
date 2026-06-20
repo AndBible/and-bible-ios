@@ -386,6 +386,13 @@ extension AndBibleTests {
         XCTAssertEqual(tokens["chapter"], "none")
         XCTAssertEqual(tokens["key"], "H00430_entry selected")
         XCTAssertEqual(BibleReaderRenderedContentState.empty.encodedValue, BibleReaderController.emptyRenderedContentState)
+
+        let duplicateTokens = BibleReaderRenderedContentState.tokens(
+            from: "category=bible;module=KJV;module=ESV;malformed;book=Genesis"
+        )
+        XCTAssertEqual(duplicateTokens["category"], "bible")
+        XCTAssertEqual(duplicateTokens["module"], "ESV")
+        XCTAssertEqual(duplicateTokens["book"], "Genesis")
     }
 
     func testDoubleTapFullscreenPreferenceGateControlsNativeToggleRequest() throws {
