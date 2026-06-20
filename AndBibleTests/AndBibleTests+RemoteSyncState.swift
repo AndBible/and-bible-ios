@@ -87,6 +87,7 @@ extension AndBibleTests {
         )
 
         _ = try ModelContainer(for: schema, configurations: [cloudConfig, localConfig])
+        XCTAssertEqual(ReadingPlanDay().dayNumber, 1)
     }
 
     /**

@@ -83,7 +83,7 @@ public final class ReadingPlanDay {
     public var plan: ReadingPlan?
 
     /// One-based day number within the parent plan definition.
-    public var dayNumber: Int = 0
+    public var dayNumber: Int = 1
 
     /// Marks whether the user has completed this day's readings.
     public var isCompleted: Bool = false
@@ -105,7 +105,7 @@ public final class ReadingPlanDay {
      */
     public init(
         id: UUID = UUID(),
-        dayNumber: Int = 0,
+        dayNumber: Int = 1,
         isCompleted: Bool = false,
         readings: String = ""
     ) {
