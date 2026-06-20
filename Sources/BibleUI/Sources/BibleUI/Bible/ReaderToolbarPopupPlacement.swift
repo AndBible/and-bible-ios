@@ -12,6 +12,9 @@ struct ReaderToolbarPopupPlacement: Equatable {
     /// Top-leading overlay offset used by SwiftUI's `.offset` modifier.
     let offset: CGSize
 
+    /// Maximum visible popup height below the toolbar trigger and above the bottom safe area.
+    let maximumHeight: CGFloat
+
     /**
      Resolves the top-leading offset for a trailing toolbar popup.
 
@@ -23,8 +26,10 @@ struct ReaderToolbarPopupPlacement: Equatable {
        - leadingInset: Minimum leading screen inset for very narrow containers.
        - trailingInset: Trailing inset for the shared app-bar popup rail.
        - verticalGap: Gap between the trigger bottom and popup top.
+       - bottomInset: Minimum gap above the bottom safe area for scrollable popup content.
      - Returns: A placement whose right edge is pinned to the trailing rail and whose top follows
-       the trigger bottom, falling back to a toolbar-height estimate when the trigger is unavailable.
+       the trigger bottom, falling back to a toolbar-height estimate when the trigger is unavailable,
+       plus the remaining visible height available to scrollable popup content.
      - Side effects: none.
      - Failure modes: none; oversized widths are clamped to the available horizontal space.
      */
@@ -35,7 +40,8 @@ struct ReaderToolbarPopupPlacement: Equatable {
         popupWidth: CGFloat,
         leadingInset: CGFloat = 8,
         trailingInset: CGFloat = 8,
-        verticalGap: CGFloat = 6
+        verticalGap: CGFloat = 6,
+        bottomInset: CGFloat = 8
     ) -> ReaderToolbarPopupPlacement {
         let availableWidth = max(0, containerSize.width - leadingInset - trailingInset)
         let width = min(max(0, popupWidth), availableWidth)
@@ -45,7 +51,11 @@ struct ReaderToolbarPopupPlacement: Equatable {
         let maximumX = max(leadingInset, containerSize.width - width - trailingInset)
         let x = min(max(leadingInset, trailingRightEdge - width), maximumX)
         let y = max(safeAreaInsets.top + verticalGap, resolvedBottomEdge + verticalGap)
+        let maximumHeight = max(0, containerSize.height - y - safeAreaInsets.bottom - bottomInset)
 
-        return ReaderToolbarPopupPlacement(offset: CGSize(width: x, height: y))
+        return ReaderToolbarPopupPlacement(
+            offset: CGSize(width: x, height: y),
+            maximumHeight: maximumHeight
+        )
     }
 }

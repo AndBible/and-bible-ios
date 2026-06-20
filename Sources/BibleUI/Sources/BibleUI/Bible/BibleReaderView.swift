@@ -2386,6 +2386,7 @@ public struct BibleReaderView: View {
                     BibleReaderQuickModuleSelector(
                         rows: rows,
                         colorScheme: colorScheme,
+                        maximumHeight: placement.maximumHeight,
                         onSelect: { module in
                             selectBibleQuickModule(module, controller: controller)
                         }

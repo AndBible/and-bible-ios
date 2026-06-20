@@ -130,6 +130,12 @@ struct BibleReaderQuickModuleSelectorPresentation {
  Android's disabled `PopupMenu` item instead of disappearing.
  */
 struct BibleReaderQuickModuleSelector: View {
+    /// Fixed compact menu row height used to keep viewport calculations deterministic.
+    private static let rowHeight: CGFloat = 44
+
+    /// Divider contribution between adjacent rows in the compact popup.
+    private static let dividerHeight: CGFloat = 1
+
     /**
      Sorted rows to render in Android quick-selector order.
 
@@ -147,12 +153,43 @@ struct BibleReaderQuickModuleSelector: View {
     let colorScheme: ColorScheme
 
     /**
+     Maximum visible height available to the selector popup.
+
+     The toolbar overlay computes this from the trigger position and safe areas. Long module lists
+     scroll within this height so installed Bibles remain reachable instead of expanding off-screen.
+     */
+    let maximumHeight: CGFloat
+
+    /**
      Selection callback for enabled rows.
 
      - Side effects: The parent is expected to dismiss the popup and switch the pane's Bible module.
      - Failure modes: Disabled rows never call this closure.
      */
     let onSelect: (ModuleInfo) -> Void
+
+    /**
+     Creates a stateless quick-selector popup renderer.
+
+     - Parameters:
+       - rows: Sorted Android-parity rows to render.
+       - colorScheme: Current app color scheme used for the popup surface.
+       - maximumHeight: Visible viewport for the popup; long lists scroll within this height.
+       - onSelect: Callback invoked only for enabled module rows.
+     - Side effects: none at initialization; row taps later invoke `onSelect`.
+     - Failure modes: none; empty rows produce a zero-height popup body.
+     */
+    init(
+        rows: [BibleReaderQuickModuleSelectorPresentation.Row],
+        colorScheme: ColorScheme,
+        maximumHeight: CGFloat = .infinity,
+        onSelect: @escaping (ModuleInfo) -> Void
+    ) {
+        self.rows = rows
+        self.colorScheme = colorScheme
+        self.maximumHeight = maximumHeight
+        self.onSelect = onSelect
+    }
 
     /**
      Renders the compact quick selector rows.
@@ -162,35 +199,48 @@ struct BibleReaderQuickModuleSelector: View {
      - Failure modes: none; empty rows produce an empty popup body.
      */
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
-                if index > 0 {
-                    Divider()
+        ScrollView(.vertical, showsIndicators: contentHeight > popupHeight) {
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
+                    if index > 0 {
+                        Divider()
+                    }
+                    Button {
+                        guard row.isEnabled else { return }
+                        onSelect(row.module)
+                    } label: {
+                        Text(row.title)
+                            .font(.system(size: 15))
+                            .lineLimit(1)
+                            .foregroundStyle(row.isEnabled ? Color.primary : Color.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 16)
+                            .frame(height: Self.rowHeight, alignment: .center)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!row.isEnabled)
+                    .opacity(row.isEnabled ? 1 : 0.48)
+                    .accessibilityIdentifier("readerBibleQuickSelectorRow_\(row.module.name)")
+                    .accessibilityValue(row.isEnabled ? "available" : "current")
                 }
-                Button {
-                    guard row.isEnabled else { return }
-                    onSelect(row.module)
-                } label: {
-                    Text(row.title)
-                        .font(.system(size: 15))
-                        .lineLimit(1)
-                        .foregroundStyle(row.isEnabled ? Color.primary : Color.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 12)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .disabled(!row.isEnabled)
-                .opacity(row.isEnabled ? 1 : 0.48)
-                .accessibilityIdentifier("readerBibleQuickSelectorRow_\(row.module.name)")
-                .accessibilityValue(row.isEnabled ? "available" : "current")
             }
         }
-        .fixedSize(horizontal: false, vertical: true)
+        .frame(height: popupHeight)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("readerBibleQuickSelector")
         .background(menuBackground)
+    }
+
+    /// Intrinsic height of the rendered row stack before viewport clipping.
+    private var contentHeight: CGFloat {
+        guard !rows.isEmpty else { return 0 }
+        return CGFloat(rows.count) * Self.rowHeight + CGFloat(rows.count - 1) * Self.dividerHeight
+    }
+
+    /// Height applied to the scroll container after respecting the available toolbar viewport.
+    private var popupHeight: CGFloat {
+        min(contentHeight, max(0, maximumHeight))
     }
 
     /// Popup surface color matching the existing Android-style reader overflow menu.

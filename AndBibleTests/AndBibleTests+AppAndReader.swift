@@ -424,6 +424,28 @@ extension AndBibleTests {
         XCTAssertEqual(quickPlacement.offset.height, bibleTrigger.maxY + 6, accuracy: 0.001)
     }
 
+    /**
+     Verifies toolbar popups expose a bounded viewport height for long Android-style menus.
+
+     Android's `PopupMenu` remains scrollable when many installed modules are available. The iOS
+     quick selector must therefore receive a finite height between the toolbar trigger and the
+     bottom safe area instead of expanding its full row stack off-screen.
+     */
+    func testReaderToolbarPopupPlacementBoundsQuickSelectorHeightToVisibleViewport() {
+        let containerSize = CGSize(width: 393, height: 852)
+        let safeAreaInsets = EdgeInsets(top: 59, leading: 0, bottom: 34, trailing: 0)
+        let bibleTrigger = CGRect(x: 292, y: 182, width: 24, height: 22)
+
+        let placement = ReaderToolbarPopupPlacement.trailingToolbarPopup(
+            containerSize: containerSize,
+            safeAreaInsets: safeAreaInsets,
+            triggerRect: bibleTrigger,
+            popupWidth: 232
+        )
+
+        XCTAssertEqual(placement.maximumHeight, 600, accuracy: 0.001)
+    }
+
     func testBibleReaderOverflowMenuBuildsWithBibleDisplayOptions() {
         let state = BibleReaderOverflowMenuState(
             isFullScreen: false,
@@ -956,6 +978,35 @@ extension AndBibleTests {
         XCTAssertEqual(rows.map(\.module.name), ["AB", "WEB", "FinRK"])
         XCTAssertEqual(rows.map(\.title), ["AB (en)", "WEB (en)", "FinRK (fi)"])
         XCTAssertEqual(rows.map(\.isEnabled), [true, false, true])
+    }
+
+    /**
+     Protects long quick-selector lists from becoming unscrollable off-screen stacks.
+
+     Users can install dozens of Bible modules. Android renders those entries through a popup menu
+     that can scroll; the SwiftUI parity renderer must likewise be backed by a scroll container so
+     all available modules can be reached without falling back to the full iOS sheet.
+     */
+    func testBibleQuickModuleSelectorUsesScrollContainerForLongInstalledModuleLists() {
+        let rows = (0..<60).map { index in
+            BibleReaderQuickModuleSelectorPresentation.Row(
+                module: ModuleInfo(
+                    name: String(format: "MOD%02d", index),
+                    description: "Module \(index)",
+                    category: .bible,
+                    language: "en"
+                ),
+                title: String(format: "MOD%02d (en)", index),
+                isEnabled: true
+            )
+        }
+        let view = BibleReaderQuickModuleSelector(
+            rows: rows,
+            colorScheme: .light,
+            onSelect: { _ in }
+        )
+
+        XCTAssertTrue(String(describing: type(of: view.body)).contains("ScrollView"))
     }
 
     /**
