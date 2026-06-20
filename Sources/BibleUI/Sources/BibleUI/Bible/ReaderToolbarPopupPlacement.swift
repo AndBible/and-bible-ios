@@ -24,21 +24,27 @@ struct ReaderToolbarPopupPlacement: Equatable {
 
      - Parameters:
        - containerWidth: Full overlay coordinate-space width.
+       - safeAreaInsets: Safe-area insets reported by the overlay `GeometryProxy`.
        - preferredWidth: Width the popup would use when enough horizontal space exists.
        - maximumWidth: Maximum Android-style popup width for the concrete menu.
-       - horizontalMargin: Combined leading/trailing margin reserved outside the popup.
+       - leadingInset: Minimum leading screen inset for very narrow containers.
+       - trailingInset: Trailing inset for the shared app-bar popup rail.
      - Returns: A non-negative width no larger than the preferred width, maximum width, or
-       available container width after margins.
+       available container width after safe-area and toolbar popup margins.
      - Side effects: none.
      - Failure modes: none; negative or undersized geometry is clamped to zero.
      */
     static func boundedWidth(
         containerWidth: CGFloat,
+        safeAreaInsets: EdgeInsets = EdgeInsets(),
         preferredWidth: CGFloat,
         maximumWidth: CGFloat,
-        horizontalMargin: CGFloat = 16
+        leadingInset: CGFloat = 8,
+        trailingInset: CGFloat = 8
     ) -> CGFloat {
-        let availableWidth = max(0, containerWidth - horizontalMargin)
+        let resolvedLeadingInset = safeAreaInsets.leading + leadingInset
+        let resolvedTrailingInset = safeAreaInsets.trailing + trailingInset
+        let availableWidth = max(0, containerWidth - resolvedLeadingInset - resolvedTrailingInset)
         return min(max(0, preferredWidth), min(max(0, maximumWidth), availableWidth))
     }
 

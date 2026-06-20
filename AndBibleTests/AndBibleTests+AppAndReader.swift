@@ -476,8 +476,9 @@ extension AndBibleTests {
 
      SwiftUI may report transient zero-width geometry during popup presentation or device rotation.
      The reader uses the bounded width for both placement and `.frame(width:)`, so the shared width
-     helper must clamp undersized containers to zero while preserving normal Android-style popup
-     sizing when enough space exists.
+     helper must clamp undersized containers to zero, account for safe-area insets before SwiftUI
+     receives a frame width, and preserve normal Android-style popup sizing when enough space
+     exists.
      */
     func testReaderToolbarPopupWidthClampHandlesTransientNarrowGeometry() {
         XCTAssertEqual(
@@ -505,6 +506,16 @@ extension AndBibleTests {
                 maximumWidth: 232
             ),
             CGFloat(165.06),
+            accuracy: 0.001
+        )
+        XCTAssertEqual(
+            ReaderToolbarPopupPlacement.boundedWidth(
+                containerWidth: 200,
+                safeAreaInsets: EdgeInsets(top: 0, leading: 80, bottom: 0, trailing: 80),
+                preferredWidth: 236,
+                maximumWidth: 236
+            ),
+            24,
             accuracy: 0.001
         )
     }

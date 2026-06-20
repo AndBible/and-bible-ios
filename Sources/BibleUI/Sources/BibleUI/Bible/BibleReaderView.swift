@@ -2362,6 +2362,7 @@ public struct BibleReaderView: View {
             let buttonRect = anchor.map { proxy[$0] }
             let width = ReaderToolbarPopupPlacement.boundedWidth(
                 containerWidth: proxy.size.width,
+                safeAreaInsets: proxy.safeAreaInsets,
                 preferredWidth: 236,
                 maximumWidth: 236
             )
@@ -2401,6 +2402,7 @@ public struct BibleReaderView: View {
             let rows = bibleQuickModuleSelectorRows
             let width = ReaderToolbarPopupPlacement.boundedWidth(
                 containerWidth: proxy.size.width,
+                safeAreaInsets: proxy.safeAreaInsets,
                 preferredWidth: max(proxy.size.width * 0.42, 156),
                 maximumWidth: 232
             )
