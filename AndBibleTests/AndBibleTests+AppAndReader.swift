@@ -1045,7 +1045,7 @@ extension AndBibleTests {
      that can scroll; the SwiftUI parity renderer must likewise be backed by a scroll container so
      all available modules can be reached without falling back to the full iOS sheet.
      */
-    func testBibleQuickModuleSelectorUsesScrollContainerForLongInstalledModuleLists() {
+    func testBibleQuickModuleSelectorUsesScrollContainerForLongInstalledModuleLists() throws {
         let rows = (0..<60).map { index in
             BibleReaderQuickModuleSelectorPresentation.Row(
                 module: ModuleInfo(
@@ -1065,6 +1065,12 @@ extension AndBibleTests {
         )
 
         XCTAssertTrue(String(describing: type(of: view.body)).contains("ScrollView"))
+        let selectorSource = try bibleUISource(named: "BibleReaderQuickModuleSelector.swift")
+        XCTAssertTrue(selectorSource.contains("LazyVStack(alignment: .leading, spacing: 0)"))
+        XCTAssertTrue(selectorSource.contains(".onTapGesture"))
+        XCTAssertTrue(selectorSource.contains(".accessibilityAddTraits(.isButton)"))
+        XCTAssertTrue(selectorSource.contains(".accessibilityAction"))
+        XCTAssertFalse(selectorSource.contains("Button {"))
     }
 
     /**
@@ -1320,7 +1326,7 @@ extension AndBibleTests {
                 ".anchorPreference(key: ReaderBibleToolbarButtonBoundsPreferenceKey.self"
             )
         )
-        XCTAssertTrue(toolbarSource.contains(".allowsHitTesting(moduleActionsEnabled)"))
+        XCTAssertTrue(toolbarSource.contains(".disabled(!moduleActionsEnabled)"))
         XCTAssertEqual(
             toolbarSource.components(separatedBy: ".accessibilityHidden(!moduleActionsEnabled)")
                 .count - 1,

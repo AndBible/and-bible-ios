@@ -107,7 +107,8 @@ extension AndBibleUITests {
      *   - launches the baseline reader shell, creates two additional windows, and activates the
      *     third one
      *   - switches that third pane into commentary and then back into Bible using the real toolbar
-     *     document controls and, when needed, the real module picker
+     *     document controls and, when needed, the Android-parity quick selector or full module
+     *     picker
      *   - switches back to the first tab to confirm its rendered content never left `Genesis 1`
      * - Failure modes:
      *   - fails if the third window cannot be activated
@@ -145,7 +146,10 @@ extension AndBibleUITests {
         )
 
         tapElementReliably(requireElement("readerBibleToolbarButton", in: app, timeout: 10), timeout: 10)
-        if waitForAnyElement(["modulePickerScreen"], in: app, timeout: 3) != nil {
+        if waitForAnyElement(["readerBibleQuickSelector"], in: app, timeout: 3) != nil {
+            let kjvQuickRow = requireElement("readerBibleQuickSelectorRow_KJV", in: app, timeout: 10)
+            tapElementReliably(kjvQuickRow, timeout: 10)
+        } else if waitForAnyElement(["modulePickerScreen"], in: app, timeout: 3) != nil {
             if let kjvRow = resolvedElement("modulePickerRow::KJV", in: app) {
                 tapElementReliably(kjvRow, timeout: 10)
             } else {

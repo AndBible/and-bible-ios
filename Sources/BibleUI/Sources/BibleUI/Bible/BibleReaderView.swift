@@ -1539,6 +1539,27 @@ public struct BibleReaderView: View {
     }
 
     /**
+     Resolves the Bible document Android would switch back to from a non-Bible document mode.
+
+     Android's `DocumentControl.suggestedBible` returns the active window's current Bible document
+     when Bible is not the visible document type. iOS stores that same pane-scoped choice on
+     `PageManager.bibleDocument`; if it is absent or no longer installed, the installed Bible list
+     provides the same default fallback established when the reader is initialized.
+
+     - Parameter controller: Pane controller that owns the toolbar action.
+     - Returns: Installed Bible module abbreviation to show, or `nil` when no Bible module exists.
+     - Side effects: none.
+     - Failure modes: returns `nil` when the pane has no installed Bible modules.
+     */
+    private func suggestedBibleDocumentName(for controller: BibleReaderController) -> String? {
+        if let saved = controller.activeWindow?.pageManager?.bibleDocument,
+           controller.installedBibleModules.contains(where: { $0.name == saved }) {
+            return saved
+        }
+        return controller.installedBibleModules.first?.name
+    }
+
+    /**
      Applies a quick-selector Bible module choice to the captured pane.
 
      - Parameters:
@@ -3173,7 +3194,8 @@ public struct BibleReaderView: View {
     private func performBibleNextDocumentAction(_ controller: BibleReaderController?) {
         guard let controller else { return }
         if controller.currentCategory != .bible {
-            controller.switchCategory(to: .bible)
+            guard let moduleName = suggestedBibleDocumentName(for: controller) else { return }
+            controller.switchBibleDocument(to: moduleName)
             return
         }
         cycleToNextModule(

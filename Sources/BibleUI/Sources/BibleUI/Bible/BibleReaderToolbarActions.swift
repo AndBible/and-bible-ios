@@ -191,30 +191,32 @@ struct BibleReaderToolbarActions<OverflowButton: View>: View {
                 .accessibilityLabel(String(localized: "toggle_strongs_numbers"))
             }
 
-            bibleToolbarIcon
-                .foregroundStyle(toolbarIconColor(isActive: isBibleActive))
-                .opacity(moduleActionsEnabled ? 1 : 0.45)
-                .contentShape(Rectangle())
-                .accessibilityIdentifier("readerBibleToolbarButton")
-                .accessibilityLabel(String(localized: "bible"))
-                .accessibilityAddTraits(.isButton)
-                .onTapGesture(perform: onBibleTap)
-                .onLongPressGesture(perform: onBibleLongPress)
-                .allowsHitTesting(moduleActionsEnabled)
-                .accessibilityHidden(!moduleActionsEnabled)
-                .anchorPreference(key: ReaderBibleToolbarButtonBoundsPreferenceKey.self, value: .bounds) { $0 }
+            Button(action: onBibleTap) {
+                bibleToolbarIcon
+                    .foregroundStyle(toolbarIconColor(isActive: isBibleActive))
+                    .opacity(moduleActionsEnabled ? 1 : 0.45)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(!moduleActionsEnabled)
+            .accessibilityIdentifier("readerBibleToolbarButton")
+            .accessibilityLabel(String(localized: "bible"))
+            .accessibilityHidden(!moduleActionsEnabled)
+            .simultaneousGesture(LongPressGesture().onEnded { _ in onBibleLongPress() })
+            .anchorPreference(key: ReaderBibleToolbarButtonBoundsPreferenceKey.self, value: .bounds) { $0 }
 
-            commentaryToolbarIcon
-                .foregroundStyle(toolbarIconColor(isActive: isCommentaryActive))
-                .opacity(moduleActionsEnabled ? 1 : 0.45)
-                .contentShape(Rectangle())
-                .accessibilityIdentifier("readerCommentaryToolbarButton")
-                .accessibilityLabel(String(localized: "commentaries"))
-                .accessibilityAddTraits(.isButton)
-                .onTapGesture(perform: onCommentaryTap)
-                .onLongPressGesture(perform: onCommentaryLongPress)
-                .allowsHitTesting(moduleActionsEnabled)
-                .accessibilityHidden(!moduleActionsEnabled)
+            Button(action: onCommentaryTap) {
+                commentaryToolbarIcon
+                    .foregroundStyle(toolbarIconColor(isActive: isCommentaryActive))
+                    .opacity(moduleActionsEnabled ? 1 : 0.45)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(!moduleActionsEnabled)
+            .accessibilityIdentifier("readerCommentaryToolbarButton")
+            .accessibilityLabel(String(localized: "commentaries"))
+            .accessibilityHidden(!moduleActionsEnabled)
+            .simultaneousGesture(LongPressGesture().onEnded { _ in onCommentaryLongPress() })
 
             if showWorkspace {
                 Button(action: onShowWorkspaces) {
