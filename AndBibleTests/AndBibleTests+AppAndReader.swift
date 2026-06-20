@@ -365,6 +365,7 @@ extension AndBibleTests {
             strongsEnabled: true,
             isBibleActive: true,
             isCommentaryActive: false,
+            moduleActionsEnabled: true,
             onShowSearch: {},
             onShowSpeak: {},
             onApplyStrongsMode: { _ in },
@@ -1050,8 +1051,10 @@ extension AndBibleTests {
 
      The coordinator state is intentionally private, so this source-level test checks the routing
      contract at the function boundary: Android's `menuForDocs` equivalent must route to the quick
-     selector and the toolbar button must publish anchor geometry for an in-reader popup. A failure
-     means the user-visible selector likely drifted back toward the old full-sheet behavior.
+     selector, the toolbar button must publish anchor geometry for an in-reader popup, and module
+     actions must be disabled until the focused pane controller exists. A failure means the
+     user-visible selector likely drifted back toward the old full-sheet behavior or can accept taps
+     before the Android-equivalent document state is available.
      */
     func testBibleToolbarMenuRoutesThroughAnchoredQuickSelectorInsteadOfSheet() throws {
         let readerSource = try bibleUISource(named: "BibleReaderView.swift")
@@ -1063,12 +1066,14 @@ extension AndBibleTests {
 
         XCTAssertTrue(menuActionSource.contains("presentBibleQuickSelector(controller)"))
         XCTAssertFalse(menuActionSource.contains("performBibleChooserAction()"))
+        XCTAssertTrue(readerSource.contains("moduleActionsEnabled: controller != nil"))
         XCTAssertTrue(readerSource.contains("ReaderBibleToolbarButtonBoundsPreferenceKey"))
         XCTAssertTrue(
             toolbarSource.contains(
                 ".anchorPreference(key: ReaderBibleToolbarButtonBoundsPreferenceKey.self"
             )
         )
+        XCTAssertTrue(toolbarSource.contains(".allowsHitTesting(moduleActionsEnabled)"))
     }
 
     /**

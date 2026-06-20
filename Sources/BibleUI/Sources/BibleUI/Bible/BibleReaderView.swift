@@ -2583,6 +2583,7 @@ public struct BibleReaderView: View {
             strongsEnabled: strongsEnabled,
             isBibleActive: controller?.currentCategory == .bible,
             isCommentaryActive: controller?.currentCategory == .commentary,
+            moduleActionsEnabled: controller != nil,
             onShowSearch: { presentSearch(from: windowManager.activeWindow?.id) },
             onShowSpeak: {
                 speakLastUsed = Date().timeIntervalSince1970

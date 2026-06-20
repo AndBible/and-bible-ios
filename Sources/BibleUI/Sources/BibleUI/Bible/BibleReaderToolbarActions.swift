@@ -46,6 +46,8 @@ struct BibleReaderToolbarActions<OverflowButton: View>: View {
     private let strongsEnabled: Bool
     private let isBibleActive: Bool
     private let isCommentaryActive: Bool
+    /// Whether Bible/commentary document actions can accept gestures for the focused pane.
+    private let moduleActionsEnabled: Bool
     private let onShowSearch: () -> Void
     private let onShowSpeak: () -> Void
     private let onApplyStrongsMode: (Int) -> Void
@@ -65,6 +67,7 @@ struct BibleReaderToolbarActions<OverflowButton: View>: View {
         strongsEnabled: Bool,
         isBibleActive: Bool,
         isCommentaryActive: Bool,
+        moduleActionsEnabled: Bool,
         onShowSearch: @escaping () -> Void,
         onShowSpeak: @escaping () -> Void,
         onApplyStrongsMode: @escaping (Int) -> Void,
@@ -83,6 +86,7 @@ struct BibleReaderToolbarActions<OverflowButton: View>: View {
         self.strongsEnabled = strongsEnabled
         self.isBibleActive = isBibleActive
         self.isCommentaryActive = isCommentaryActive
+        self.moduleActionsEnabled = moduleActionsEnabled
         self.onShowSearch = onShowSearch
         self.onShowSpeak = onShowSpeak
         self.onApplyStrongsMode = onApplyStrongsMode
@@ -189,22 +193,26 @@ struct BibleReaderToolbarActions<OverflowButton: View>: View {
 
             bibleToolbarIcon
                 .foregroundStyle(toolbarIconColor(isActive: isBibleActive))
+                .opacity(moduleActionsEnabled ? 1 : 0.45)
                 .contentShape(Rectangle())
                 .accessibilityIdentifier("readerBibleToolbarButton")
                 .accessibilityLabel(String(localized: "bible"))
                 .accessibilityAddTraits(.isButton)
                 .onTapGesture(perform: onBibleTap)
                 .onLongPressGesture(perform: onBibleLongPress)
+                .allowsHitTesting(moduleActionsEnabled)
                 .anchorPreference(key: ReaderBibleToolbarButtonBoundsPreferenceKey.self, value: .bounds) { $0 }
 
             commentaryToolbarIcon
                 .foregroundStyle(toolbarIconColor(isActive: isCommentaryActive))
+                .opacity(moduleActionsEnabled ? 1 : 0.45)
                 .contentShape(Rectangle())
                 .accessibilityIdentifier("readerCommentaryToolbarButton")
                 .accessibilityLabel(String(localized: "commentaries"))
                 .accessibilityAddTraits(.isButton)
                 .onTapGesture(perform: onCommentaryTap)
                 .onLongPressGesture(perform: onCommentaryLongPress)
+                .allowsHitTesting(moduleActionsEnabled)
 
             if showWorkspace {
                 Button(action: onShowWorkspaces) {
