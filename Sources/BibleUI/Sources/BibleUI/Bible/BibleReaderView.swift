@@ -811,6 +811,9 @@ public struct BibleReaderView: View {
             BookChooserView(
                 books: panePresentationController?.bookList ?? BibleReaderController.defaultBooks,
                 navigateToVerse: navigateToVersePref,
+                currentBook: panePresentationController?.currentBook,
+                currentChapter: panePresentationController?.currentChapter,
+                currentVerse: panePresentationController?.currentVerse,
                 verseCountProvider: { book, chapter in
                     guard let panePresentationController else {
                         return BibleReaderController.verseCount(for: book.name, chapter: chapter)
@@ -1006,7 +1009,12 @@ public struct BibleReaderView: View {
     /// Reference chooser sheet used by web-modal callbacks.
     private var refChooserSheetContent: some View {
         NavigationStack {
-            BookChooserView(books: panePresentationController?.bookList ?? BibleReaderController.defaultBooks) { book, chapter, _ in
+            BookChooserView(
+                books: panePresentationController?.bookList ?? BibleReaderController.defaultBooks,
+                currentBook: panePresentationController?.currentBook,
+                currentChapter: panePresentationController?.currentChapter,
+                currentVerse: panePresentationController?.currentVerse
+            ) { book, chapter, _ in
                 showRefChooser = false
                 let osisId = panePresentationController?.osisBookId(for: book) ?? BibleReaderController.osisBookId(for: book)
                 refChooserCompletion?("\(osisId).\(chapter)")

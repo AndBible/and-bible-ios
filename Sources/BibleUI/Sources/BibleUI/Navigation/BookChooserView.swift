@@ -10,8 +10,14 @@ import SwordKit
  expanded canons surface their additional books automatically. Depending on `navigateToVerse`, the
  flow ends after chapter selection or adds a verse-selection step.
 
+ The grid layout and colors mirror Android's `GridChoosePassageBook` and `ButtonGrid` defaults:
+ standard 66-book canons render in a dense column-major portrait matrix, expanded canons use
+ Android's dynamic matrix, and the current passage is highlighted with its book category color.
+
  Data dependencies:
  - `books` is the module-specific canon and chapter metadata provided by the caller
+ - `currentBook`, `currentChapter`, and `currentVerse` are the reader's active location used only
+   for Android-compatible highlighting
  - `verseCountProvider` supplies module-specific `Versification.getLastVerse` equivalents when
    the chooser drills into verse selection; `nil` means the active module could not resolve the
    selected chapter and no synthetic verse list should be shown
@@ -28,6 +34,15 @@ public struct BookChooserView: View {
 
     /// Whether the flow should include a verse chooser after chapter selection.
     let navigateToVerse: Bool
+
+    /// Current reader book name, used to highlight the active book.
+    let currentBook: String?
+
+    /// Current reader chapter, used to highlight the active chapter in the active book.
+    let currentChapter: Int?
+
+    /// Current reader verse, used to highlight the active verse in the active chapter.
+    let currentVerse: Int?
 
     /// Provides the last verse number for a selected book/chapter.
     let verseCountProvider: (BookInfo, Int) -> Int?
@@ -50,6 +65,9 @@ public struct BookChooserView: View {
      - Parameters:
        - books: Book list from the active module's versification.
        - navigateToVerse: Whether the flow should include verse selection.
+       - currentBook: Current reader book name, used only for selector highlighting.
+       - currentChapter: Current reader chapter, used only for selector highlighting.
+       - currentVerse: Current reader verse, used only for selector highlighting.
        - verseCountProvider: Optional provider for module-specific chapter verse counts. A missing
          provider keeps existing no-module callers functional by falling back to the static
          compatibility table.
@@ -58,25 +76,21 @@ public struct BookChooserView: View {
     public init(
         books: [BookInfo],
         navigateToVerse: Bool = false,
+        currentBook: String? = nil,
+        currentChapter: Int? = nil,
+        currentVerse: Int? = nil,
         verseCountProvider: ((BookInfo, Int) -> Int?)? = nil,
         onSelect: @escaping (String, Int, Int?) -> Void
     ) {
         self.books = books
         self.navigateToVerse = navigateToVerse
+        self.currentBook = currentBook
+        self.currentChapter = currentChapter
+        self.currentVerse = currentVerse
         self.verseCountProvider = verseCountProvider ?? { book, chapter in
             BibleReaderController.verseCount(for: book.name, chapter: chapter)
         }
         self.onSelect = onSelect
-    }
-
-    /// Books tagged as Old Testament in the module-provided canon.
-    private var oldTestamentBooks: [BookInfo] {
-        books.filter { $0.testament == 1 }
-    }
-
-    /// Books tagged as New Testament in the module-provided canon.
-    private var newTestamentBooks: [BookInfo] {
-        books.filter { $0.testament == 2 }
     }
 
     /**
@@ -88,13 +102,20 @@ public struct BookChooserView: View {
                 if navigateToVerse, let chapter = selectedChapter {
                     VerseChooserView(
                         bookName: book.name,
+                        osisBookId: book.osisId,
                         chapter: chapter,
-                        verseCount: verseCountProvider(book, chapter) ?? 0
+                        verseCount: verseCountProvider(book, chapter) ?? 0,
+                        currentVerse: currentVerseForSelectedContext(book: book, chapter: chapter)
                     ) { verse in
                         onSelect(book.name, chapter, verse)
                     }
                 } else {
-                    ChapterChooserView(bookName: book.name, chapterCount: book.chapterCount) { chapter in
+                    ChapterChooserView(
+                        bookName: book.name,
+                        osisBookId: book.osisId,
+                        chapterCount: book.chapterCount,
+                        currentChapter: currentChapterForSelectedBook(book)
+                    ) { chapter in
                         if navigateToVerse {
                             selectedChapter = chapter
                         } else {
@@ -139,47 +160,91 @@ public struct BookChooserView: View {
         return selectedBook?.name ?? String(localized: "choose_book")
     }
 
-    /// Scrollable container for the testament-grouped book grid.
+    /// Scrollable container for the Android-aligned book grid.
     private var bookGrid: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 16) {
-                if !oldTestamentBooks.isEmpty {
-                    Section(String(localized: "old_testament")) {
-                        bookGridSection(books: oldTestamentBooks)
+        GeometryReader { proxy in
+            let orientation = PassageGridOrientation(size: proxy.size)
+            let layout = PassageGridLayout.androidDefault(
+                itemCount: books.count,
+                kind: .book,
+                orientation: orientation
+            )
+            let slots = layout.displaySlots(for: books)
+            let columns = Array(
+                repeating: GridItem(.flexible(minimum: 0), spacing: 4),
+                count: max(layout.columns, 1)
+            )
+
+            ScrollView {
+                LazyVGrid(columns: columns, spacing: 4) {
+                    ForEach(Array(slots.enumerated()), id: \.offset) { _, book in
+                        if let book {
+                            PassageGridButton(
+                                title: book.abbreviation,
+                                accessibilityLabel: book.name,
+                                accessibilityIdentifier: "passageBookCell.\(book.osisId)",
+                                palette: PassageGridCellPalette.bookPalette(
+                                    for: book,
+                                    currentOsisId: currentOsisBookId
+                                ),
+                                font: .subheadline.weight(.semibold),
+                                minHeight: 34
+                            ) {
+                                selectedBook = book
+                                selectedChapter = nil
+                            }
+                        } else {
+                            Color.clear
+                                .frame(minHeight: 34)
+                                .accessibilityHidden(true)
+                        }
                     }
                 }
-                if !newTestamentBooks.isEmpty {
-                    Section(String(localized: "new_testament")) {
-                        bookGridSection(books: newTestamentBooks)
-                    }
-                }
+                .padding(12)
             }
-            .padding()
         }
     }
 
     /**
-     Builds one adaptive grid section for the provided books.
+     Resolves the current reader OSIS id against the active module's book list.
 
-     - Parameter books: Books to render in this testament section.
+     - Returns: Current book OSIS id if it exists in the active module or static fallback table.
      */
-    private func bookGridSection(books: [BookInfo]) -> some View {
-        let columns = [GridItem(.adaptive(minimum: 100), spacing: 8)]
-        return LazyVGrid(columns: columns, spacing: 8) {
-            ForEach(books) { book in
-                Button(action: {
-                    selectedBook = book
-                    selectedChapter = nil
-                }) {
-                    Text(book.abbreviation)
-                        .font(.subheadline)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 8)
-                        .background(.quaternary)
-                        .clipShape(RoundedRectangle(cornerRadius: 6))
-                }
-                .buttonStyle(.plain)
-            }
+    private var currentOsisBookId: String? {
+        guard let currentBook else {
+            return nil
         }
+        if let book = books.first(where: { $0.name == currentBook || $0.osisId == currentBook }) {
+            return book.osisId
+        }
+        return BibleReaderController.osisBookId(for: currentBook)
+    }
+
+    /**
+     Returns the current chapter when the selected book matches the active reader book.
+
+     - Parameter book: Book currently selected in the chooser flow.
+     - Returns: Current chapter for matching books; otherwise `nil`.
+     */
+    private func currentChapterForSelectedBook(_ book: BookInfo) -> Int? {
+        guard book.osisId == currentOsisBookId else {
+            return nil
+        }
+        return currentChapter
+    }
+
+    /**
+     Returns the current verse when the selected book and chapter match the active reader context.
+
+     - Parameters:
+       - book: Book currently selected in the chooser flow.
+       - chapter: Chapter currently selected in the chooser flow.
+     - Returns: Current verse for matching book/chapter contexts; otherwise `nil`.
+     */
+    private func currentVerseForSelectedContext(book: BookInfo, chapter: Int) -> Int? {
+        guard book.osisId == currentOsisBookId, chapter == currentChapter else {
+            return nil
+        }
+        return currentVerse
     }
 }
