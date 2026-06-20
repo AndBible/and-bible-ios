@@ -232,6 +232,16 @@ extension AndBibleUITests {
         var lastState = resolvedSearchStateValue(in: app) ?? (searchScreen.value as? String ?? "nil")
         var observedNeedsIndex = lastState.contains("state=needsIndex")
         var observedCreatePrompt = false
+        func failSeededFixtureReadiness() {
+            XCTFail(
+                "Expected seeded Search fixture to be ready without runtime index creation; "
+                    + "last Search state was '\(lastState)'; "
+                    + "state=needsIndex observed=\(observedNeedsIndex); "
+                    + "Create-index prompt observed=\(observedCreatePrompt).",
+                file: file,
+                line: line
+            )
+        }
 
         while Date() < deadline {
             let state = resolvedSearchStateValue(in: app) ?? (searchScreen.value as? String ?? "")
@@ -241,21 +251,24 @@ extension AndBibleUITests {
             if state.contains("state=ready") {
                 return
             }
-            let createButton = resolveSearchCreateIndexButton(in: app)
             let sawNeedsIndex = state.contains("state=needsIndex")
-            let sawCreatePrompt = createButton.exists || createButton.waitForExistence(timeout: 0.2)
-            if sawNeedsIndex || sawCreatePrompt {
-                observedNeedsIndex = observedNeedsIndex || sawNeedsIndex
-                observedCreatePrompt = observedCreatePrompt || sawCreatePrompt
+            if sawNeedsIndex {
+                observedNeedsIndex = true
                 if !allowsRuntimeIndexCreation {
-                    XCTFail(
-                        "Expected seeded Search fixture to be ready without runtime index creation; "
-                            + "last Search state was '\(lastState)'; "
-                            + "state=needsIndex observed=\(observedNeedsIndex); "
-                            + "Create-index prompt observed=\(observedCreatePrompt).",
-                        file: file,
-                        line: line
-                    )
+                    failSeededFixtureReadiness()
+                    return
+                }
+                let createButton = resolveSearchCreateIndexButton(in: app)
+                tapElementReliably(createButton, timeout: 10, file: file, line: line)
+                continue
+            }
+
+            let createButton = resolveSearchCreateIndexButton(in: app)
+            let sawCreatePrompt = createButton.exists || createButton.waitForExistence(timeout: 0.2)
+            if sawCreatePrompt {
+                observedCreatePrompt = true
+                if !allowsRuntimeIndexCreation {
+                    failSeededFixtureReadiness()
                     return
                 }
                 tapElementReliably(createButton, timeout: 10, file: file, line: line)

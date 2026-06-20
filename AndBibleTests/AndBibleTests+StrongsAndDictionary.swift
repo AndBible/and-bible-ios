@@ -406,7 +406,7 @@ extension AndBibleTests {
                 ('Genesis 1:2', 'The earth was formless and empty.', 'UITESTWEB', 0),
                 ('John 3:16', 'For God so loved the world.', 'UITESTWEB', 1);
             INSERT INTO verse_strongs (module_name, token, verse_key, entry_order)
-            VALUES ('KJV', 'H0430', 'Genesis 1:1', 0);
+            VALUES ('KJV', 'H0430', 'Genesis 1:2', 0);
             INSERT INTO indexed_modules (module_name, verse_count, indexed_at, schema_version)
             VALUES
                 ('KJV', 3, datetime('now'), \(SearchIndexService.currentSchemaVersion)),

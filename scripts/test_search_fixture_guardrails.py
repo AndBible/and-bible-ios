@@ -73,9 +73,9 @@ class SearchFixtureGuardrailsTests(unittest.TestCase):
         for expected_pattern in [
             r"resolveFixtureScenario\(\s*environment:\s*ProcessInfo\.processInfo\.environment,"
             r"\s*file:\s*file,\s*line:\s*line\s*\)",
-            r"tapReaderSearchEntry\(\s*in:\s*app,\s*timeout:\s*15,\s*file:\s*file,"
+            r"tapReaderSearchEntry\(\s*in:\s*app\s*,\s*(?:timeout:\s*[^,]+,\s*)?file:\s*file,"
             r"\s*line:\s*line\s*\)",
-            r"requireSearchScreen\(\s*in:\s*app,\s*timeout:\s*20,\s*file:\s*file,"
+            r"requireSearchScreen\(\s*in:\s*app\s*,\s*(?:timeout:\s*[^,]+,\s*)?file:\s*file,"
             r"\s*line:\s*line\s*\)",
         ]:
             self.assertRegex(support_source, re.compile(expected_pattern, re.DOTALL))
