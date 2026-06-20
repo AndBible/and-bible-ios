@@ -220,6 +220,9 @@ public struct BibleReaderView: View {
     /// Presents Android's compact Bible-module quick selector anchored to the toolbar button.
     @State private var showBibleQuickModuleSelector = false
 
+    /// Rows resolved by the Android-parity quick-selector contract for the active popup instance.
+    @State private var bibleQuickModuleSelectorRows: [BibleReaderQuickModuleSelectorPresentation.Row] = []
+
     /// Presents the Android-style left navigation drawer from the reader header.
     @State private var showReaderNavigationDrawer = false
 
@@ -1491,17 +1494,23 @@ public struct BibleReaderView: View {
     /**
      Presents Android's Bible-toolbar quick selector for the focused pane.
 
-     - Parameter controller: Pane controller whose installed Bible module list should back the popup.
+     - Parameters:
+       - controller: Pane controller whose installed Bible module list should back the popup.
+       - rows: Android-parity rows resolved by the pure quick-selector presentation contract.
      - Side effects: Captures the active pane, closes competing reader popups, and shows the anchored
        quick selector overlay.
      - Failure modes: If the active pane cannot be identified, the popup still uses the focused
        controller fallback through `panePresentationController`.
      */
-    private func presentBibleQuickSelector(_ controller: BibleReaderController) {
+    private func presentBibleQuickSelector(
+        _ controller: BibleReaderController,
+        rows: [BibleReaderQuickModuleSelectorPresentation.Row]
+    ) {
         let targetWindowId = windowManager.controllers.first { _, registeredController in
             (registeredController as? BibleReaderController) === controller
         }?.key
         setPanePresentationTarget(targetWindowId ?? windowManager.activeWindow?.id)
+        bibleQuickModuleSelectorRows = rows
         showReaderOverflowMenu = false
         showReaderNavigationDrawer = false
         showBibleQuickModuleSelector = true
@@ -1510,6 +1519,7 @@ public struct BibleReaderView: View {
     /// Dismisses the Bible quick selector without changing the captured pane target.
     private func dismissBibleQuickSelector() {
         showBibleQuickModuleSelector = false
+        bibleQuickModuleSelectorRows = []
     }
 
     /**
@@ -2362,10 +2372,7 @@ public struct BibleReaderView: View {
         GeometryReader { proxy in
             let buttonRect = anchor.map { proxy[$0] }
             let controller = panePresentationController
-            let rows = BibleReaderQuickModuleSelectorPresentation.rows(
-                for: controller?.installedBibleModules ?? [],
-                activeModuleName: currentBibleQuickSelectorModuleName(for: controller)
-            )
+            let rows = bibleQuickModuleSelectorRows
             let width = min(max(proxy.size.width * 0.42, 156), min(proxy.size.width - 16, 232))
             let placement = ReaderToolbarPopupPlacement.trailingToolbarPopup(
                 containerSize: proxy.size,
@@ -3144,8 +3151,8 @@ public struct BibleReaderView: View {
             return
         case .switchDirectly(let nextName):
             controller.switchBibleDocument(to: nextName)
-        case .showPopup:
-            presentBibleQuickSelector(controller)
+        case .showPopup(let rows):
+            presentBibleQuickSelector(controller, rows: rows)
         }
     }
 

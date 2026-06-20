@@ -1251,12 +1251,12 @@ extension AndBibleTests {
      Guards the reader coordinator against regressing to the iOS sheet for the quick-menu path.
 
      The coordinator state is intentionally private, so this source-level test checks the routing
-     contract at the function boundary: Android's `menuForDocs` equivalent must route to the quick
-     selector, the toolbar button must publish anchor geometry for an in-reader popup, and module
-     actions must be disabled until the focused pane controller exists, including accessibility
-     exposure. A failure means the user-visible selector likely drifted back toward the old
-     full-sheet behavior or can accept taps before the Android-equivalent document state is
-     available.
+     contract at the function boundary: Android's `menuForDocs` equivalent must route the resolved
+     quick-selector rows into the popup, the toolbar button must publish anchor geometry for an
+     in-reader popup, and module actions must be disabled until the focused pane controller exists,
+     including accessibility exposure. A failure means the user-visible selector likely drifted back
+     toward the old full-sheet behavior or can accept taps before the Android-equivalent document
+     state is available.
      */
     func testBibleToolbarMenuRoutesThroughAnchoredQuickSelectorInsteadOfSheet() throws {
         let readerSource = try bibleUISource(named: "BibleReaderView.swift")
@@ -1266,8 +1266,11 @@ extension AndBibleTests {
             from: readerSource
         )
 
-        XCTAssertTrue(menuActionSource.contains("presentBibleQuickSelector(controller)"))
+        XCTAssertTrue(menuActionSource.contains("case .showPopup(let rows):"))
+        XCTAssertTrue(menuActionSource.contains("presentBibleQuickSelector(controller, rows: rows)"))
         XCTAssertFalse(menuActionSource.contains("performBibleChooserAction()"))
+        XCTAssertTrue(readerSource.contains("@State private var bibleQuickModuleSelectorRows"))
+        XCTAssertTrue(readerSource.contains("let rows = bibleQuickModuleSelectorRows"))
         XCTAssertTrue(readerSource.contains("moduleActionsEnabled: controller != nil"))
         XCTAssertTrue(readerSource.contains("ReaderBibleToolbarButtonBoundsPreferenceKey"))
         XCTAssertTrue(
