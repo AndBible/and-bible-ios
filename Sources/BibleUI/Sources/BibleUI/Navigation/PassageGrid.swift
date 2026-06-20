@@ -1,6 +1,7 @@
 // PassageGrid.swift - Android-aligned passage selector layout and palette
 
 import SwiftUI
+import BibleCore
 import SwordKit
 
 /**
@@ -47,18 +48,34 @@ enum PassageGridOrientation: Equatable, Sendable {
  SwiftUI `Color` is not equatable, so tests assert against this value type while views convert it
  to `Color` only at render time.
  */
-struct PassageGridRGBColor: Equatable, Sendable {
+public struct PassageGridRGBColor: Equatable, Sendable {
     /// Red component in the Android 0...255 range.
-    let red: Int
+    public let red: Int
 
     /// Green component in the Android 0...255 range.
-    let green: Int
+    public let green: Int
 
     /// Blue component in the Android 0...255 range.
-    let blue: Int
+    public let blue: Int
+
+    /**
+     Creates an RGB color token.
+
+     - Parameters:
+       - red: Red component in `0...255`.
+       - green: Green component in `0...255`.
+       - blue: Blue component in `0...255`.
+     - Side effects: none.
+     - Failure modes: Components are not clamped; callers should pass Android source values.
+     */
+    public init(red: Int, green: Int, blue: Int) {
+        self.red = red
+        self.green = green
+        self.blue = blue
+    }
 
     /// SwiftUI color used by the rendered selector cell.
-    var swiftUIColor: Color {
+    public var swiftUIColor: Color {
         Color(
             red: Double(red) / 255.0,
             green: Double(green) / 255.0,
@@ -68,6 +85,9 @@ struct PassageGridRGBColor: Equatable, Sendable {
 
     /// Android `Color.DKGRAY`.
     static let darkGray = PassageGridRGBColor(red: 0x44, green: 0x44, blue: 0x44)
+
+    /// Android black toolbar tint used by the fixed passage-chooser activity theme.
+    static let black = PassageGridRGBColor(red: 0x00, green: 0x00, blue: 0x00)
 
     /// Android default text color for unselected chapter and verse buttons.
     static let white = PassageGridRGBColor(red: 0xFF, green: 0xFF, blue: 0xFF)
@@ -110,6 +130,203 @@ struct PassageGridRGBColor: Equatable, Sendable {
 
     /// Android fallback color for books outside the canonical category ranges.
     static let other = acts
+
+    /// Android passage chooser activity background.
+    static let passageChooserBackground = PassageGridRGBColor(red: 0x30, green: 0x30, blue: 0x30)
+}
+
+/**
+ Fixed Android passage-chooser surface palette.
+
+ Android disables normal theme switching for `GridChoosePassageBook`, `GridChoosePassageChapter`,
+ and `GridChoosePassageVerse`; those activities keep a dark grid surface and black toolbar in both
+ day and night reader modes. The iOS chooser consumes this palette directly so it does not inherit
+ the surrounding reader theme.
+ */
+enum PassageChooserSurfacePalette {
+    /// Android `GridChoosePassageTheme` content background.
+    static let background = PassageGridRGBColor.passageChooserBackground
+
+    /// Android chooser action-bar background.
+    static let toolbarBackground = PassageGridRGBColor.black
+}
+
+/**
+ Android overflow-menu actions supported by the book chooser.
+
+ Each case corresponds to a checkable item in Android `choose_passage_book_menu.xml`. The enum is
+ intentionally separate from SwiftUI `Menu` construction so tests can verify Android state
+ transitions without rendering a platform menu.
+ */
+enum PassageChooserMenuOption: Hashable, Sendable {
+    /// Toggle alphabetical sort order.
+    case alphabeticalOrder
+
+    /// Toggle left-to-right row ordering.
+    case rowOrder
+
+    /// Toggle category grouping.
+    case groupByCategory
+
+    /// Toggle uppercase short name plus long description labels.
+    case showLongBookName
+
+    /// Toggle reading/memorization progress bars.
+    case showProgressBars
+}
+
+/**
+ Android book-chooser overflow menu row metadata.
+
+ Android defines the passage-chooser popup in `choose_passage_book_menu.xml`. Keeping the row order,
+ localization key, and fallback title as data lets the SwiftUI surface render an Android-style menu
+ without duplicating the menu contract in tests and view code.
+ */
+struct PassageChooserMenuEntry: Equatable, Identifiable, Sendable {
+    /// Android menu action represented by this row.
+    let option: PassageChooserMenuOption
+
+    /// Localization key shared with the Android preference/menu label.
+    let localizationKey: String
+
+    /// English fallback title used when no localized string is present.
+    let defaultTitle: String
+
+    /// Stable identity for SwiftUI row rendering.
+    var id: PassageChooserMenuOption {
+        option
+    }
+
+    /// Android `choose_passage_book_menu.xml` row order.
+    static let androidBookChooserOrder: [PassageChooserMenuEntry] = [
+        PassageChooserMenuEntry(
+            option: .alphabeticalOrder,
+            localizationKey: "sort_by_alphabetical",
+            defaultTitle: "Alphabetical order"
+        ),
+        PassageChooserMenuEntry(
+            option: .rowOrder,
+            localizationKey: "book_menu_sort_row_opt",
+            defaultTitle: "Order books horizontally"
+        ),
+        PassageChooserMenuEntry(
+            option: .groupByCategory,
+            localizationKey: "book_menu_group_by_category",
+            defaultTitle: "Group books by category"
+        ),
+        PassageChooserMenuEntry(
+            option: .showLongBookName,
+            localizationKey: "book_menu_show_long_book_name",
+            defaultTitle: "Show long book name"
+        ),
+        PassageChooserMenuEntry(
+            option: .showProgressBars,
+            localizationKey: "book_menu_show_progress_bars",
+            defaultTitle: "Show progress bars"
+        ),
+    ]
+}
+
+/**
+ Durable passage-chooser option state mirrored from Android `book_grid_*` settings.
+
+ Android persists these flags globally and applies additional state transitions when certain menu
+ rows are tapped. In particular, category grouping forces Bible-book order and horizontal row
+ order; alphabetical and row-order changes clear grouping without resetting long-name or progress
+ choices.
+ */
+struct PassageChooserOptions: Equatable, Sendable {
+    /// Android `NavigationControl.BIBLE_BOOK_SORT_ORDER` shared preference key.
+    private static let bibleBookSortOrderKey = "BibleBookSortOrder"
+
+    /// Whether books are sorted alphabetically before grid placement.
+    var alphabeticalOrder: Bool
+
+    /// Whether grid source items fill rows left-to-right instead of Android's portrait column order.
+    var rowOrder: Bool
+
+    /// Whether books are grouped by Android's broad category buckets with spacer cells between groups.
+    var groupByCategory: Bool
+
+    /// Whether book cells show Android's long-name two-line label.
+    var showLongBookName: Bool
+
+    /// Whether reading and memorization progress bars are drawn at the bottom of grid cells.
+    var showProgressBars: Bool
+
+    /// Android defaults from `GridChoosePassageBook`: row/order/category/long-name off, progress on.
+    static let androidDefault = PassageChooserOptions(
+        alphabeticalOrder: false,
+        rowOrder: false,
+        groupByCategory: false,
+        showLongBookName: false,
+        showProgressBars: true
+    )
+
+    /**
+     Loads passage chooser options from Android parity settings.
+
+     - Parameter settingsStore: Settings source bound to the current SwiftData context.
+     - Returns: Stored chooser options or Android defaults when no values have been persisted.
+     - Side effects: Reads SwiftData through `SettingsStore`.
+     - Failure modes: Missing or malformed booleans fall back through `AppPreferenceRegistry`.
+     */
+    static func from(settingsStore: SettingsStore) -> PassageChooserOptions {
+        PassageChooserOptions(
+            alphabeticalOrder: settingsStore.getString(Self.bibleBookSortOrderKey) == "ALPHABETICAL",
+            rowOrder: settingsStore.getBool(.bookGridLeftToRight),
+            groupByCategory: settingsStore.getBool(.bookGridGroupByCategory),
+            showLongBookName: settingsStore.getBool(.bookGridShowLongName),
+            showProgressBars: settingsStore.getBool(.bookGridShowProgress)
+        )
+    }
+
+    /**
+     Applies one Android overflow-menu action to the option state.
+
+     - Parameter option: Menu row selected by the user.
+     - Side effects: Mutates this value only; persistence is handled by `persist(to:)`.
+     - Failure modes: none.
+     */
+    mutating func apply(_ option: PassageChooserMenuOption) {
+        switch option {
+        case .alphabeticalOrder:
+            groupByCategory = false
+            alphabeticalOrder.toggle()
+        case .rowOrder:
+            groupByCategory = false
+            rowOrder.toggle()
+        case .groupByCategory:
+            alphabeticalOrder = false
+            rowOrder = true
+            groupByCategory.toggle()
+        case .showLongBookName:
+            showLongBookName.toggle()
+        case .showProgressBars:
+            showProgressBars.toggle()
+        }
+    }
+
+    /**
+     Persists options through Android-compatible `book_grid_*` keys.
+
+     Android stores alphabetical order in `NavigationControl.BIBLE_BOOK_SORT_ORDER`, while the
+     other chooser flags use `book_grid_*` keys. iOS writes the same durable keys so relaunches and
+     reset/import behavior are not tied to view-local state.
+     - Parameter settingsStore: Store receiving the durable option values.
+     - Side effects: Writes SwiftData via `SettingsStore`.
+     - Failure modes: `SettingsStore` save errors are swallowed by the store.
+     */
+    func persist(to settingsStore: SettingsStore) {
+        settingsStore.setString(
+            Self.bibleBookSortOrderKey,
+            value: alphabeticalOrder ? "ALPHABETICAL" : "BIBLE_BOOK"
+        )
+        settingsStore.setBool(.bookGridLeftToRight, value: rowOrder)
+        settingsStore.setBool(.bookGridGroupByCategory, value: groupByCategory)
+        settingsStore.setBool(.bookGridShowLongName, value: showLongBookName)
+        settingsStore.setBool(.bookGridShowProgress, value: showProgressBars)
+    }
 }
 
 /**
@@ -120,8 +337,11 @@ struct PassageGridRGBColor: Equatable, Sendable {
  the active module exposes.
  */
 struct PassageBookCategory: Equatable, Sendable {
-    /// Android group id for category sorting and future option support.
+    /// Android fine-grained `GroupA` id for category coloring.
     let group: Int
+
+    /// Android broad `GroupB` id used by the grouped-grid menu option.
+    let groupingBucket: Int
 
     /// Android category color.
     let color: PassageGridRGBColor
@@ -135,28 +355,206 @@ struct PassageBookCategory: Equatable, Sendable {
     static func category(forOsisId osisId: String) -> PassageBookCategory {
         switch osisId {
         case "Gen", "Exod", "Lev", "Num", "Deut":
-            PassageBookCategory(group: 0, color: .pentateuch)
+            PassageBookCategory(group: 0, groupingBucket: 1, color: .pentateuch)
         case "Josh", "Judg", "Ruth", "1Sam", "2Sam", "1Kgs", "2Kgs", "1Chr", "2Chr", "Ezra", "Neh", "Esth":
-            PassageBookCategory(group: 1, color: .history)
+            PassageBookCategory(group: 1, groupingBucket: 2, color: .history)
         case "Job", "Ps", "Prov", "Eccl", "Song":
-            PassageBookCategory(group: 2, color: .wisdom)
+            PassageBookCategory(group: 2, groupingBucket: 3, color: .wisdom)
         case "Isa", "Jer", "Lam", "Ezek", "Dan":
-            PassageBookCategory(group: 3, color: .majorProphets)
+            PassageBookCategory(group: 3, groupingBucket: 4, color: .majorProphets)
         case "Hos", "Joel", "Amos", "Obad", "Jonah", "Mic", "Nah", "Hab", "Zeph", "Hag", "Zech", "Mal":
-            PassageBookCategory(group: 4, color: .minorProphets)
+            PassageBookCategory(group: 4, groupingBucket: 5, color: .minorProphets)
         case "Matt", "Mark", "Luke", "John":
-            PassageBookCategory(group: 5, color: .gospel)
+            PassageBookCategory(group: 5, groupingBucket: 6, color: .gospel)
         case "Acts":
-            PassageBookCategory(group: 6, color: .acts)
+            PassageBookCategory(group: 6, groupingBucket: 6, color: .acts)
         case "Rom", "1Cor", "2Cor", "Gal", "Eph", "Phil", "Col", "1Thess", "2Thess", "1Tim", "2Tim", "Titus", "Phlm":
-            PassageBookCategory(group: 7, color: .pauline)
+            PassageBookCategory(group: 7, groupingBucket: 7, color: .pauline)
         case "Heb", "Jas", "1Pet", "2Pet", "1John", "2John", "3John", "Jude":
-            PassageBookCategory(group: 8, color: .generalEpistles)
+            PassageBookCategory(group: 8, groupingBucket: 8, color: .generalEpistles)
         case "Rev":
-            PassageBookCategory(group: 9, color: .revelation)
+            PassageBookCategory(group: 9, groupingBucket: 8, color: .revelation)
         default:
-            PassageBookCategory(group: 10, color: .other)
+            PassageBookCategory(group: 10, groupingBucket: 9, color: .other)
         }
+    }
+}
+
+/**
+ Android JSword book-label formatter.
+
+ Android renders `versification.getShortName(book)` in the grid, which differs from SWORD module
+ abbreviations for several books (`2 Ki`, `Psa`, `Act`, `Phile`, and similar labels). Long-name
+ mode uses the uppercase short name on the first line and the book description on the second line.
+ */
+enum PassageBookDisplayName {
+    /// Source-derived JSword short names by OSIS id.
+    private static let shortNamesByOsisId: [String: String] = [
+        "Gen": "Gen", "Exod": "Exo", "Lev": "Lev", "Num": "Num", "Deut": "Deu",
+        "Josh": "Jos", "Judg": "Judg", "Ruth": "Rut", "1Sam": "1 Sa", "2Sam": "2 Sa",
+        "1Kgs": "1 Ki", "2Kgs": "2 Ki", "1Chr": "1 Ch", "2Chr": "2 Ch", "Ezra": "Ezr",
+        "Neh": "Neh", "Esth": "Est", "Job": "Job", "Ps": "Psa", "Prov": "Pro",
+        "Eccl": "Ecc", "Song": "Song", "Isa": "Isa", "Jer": "Jer", "Lam": "Lam",
+        "Ezek": "Eze", "Dan": "Dan", "Hos": "Hos", "Joel": "Joe", "Amos": "Amo",
+        "Obad": "Obd", "Jonah": "Jon", "Mic": "Mic", "Nah": "Nah", "Hab": "Hab",
+        "Zeph": "Zep", "Hag": "Hag", "Zech": "Zec", "Mal": "Mal", "Matt": "Mat",
+        "Mark": "Mar", "Luke": "Luk", "John": "Joh", "Acts": "Act", "Rom": "Rom",
+        "1Cor": "1 Cor", "2Cor": "2 Cor", "Gal": "Gal", "Eph": "Eph", "Phil": "Phili",
+        "Col": "Col", "1Thess": "1 Th", "2Thess": "2 Th", "1Tim": "1 Tim",
+        "2Tim": "2 Tim", "Titus": "Tit", "Phlm": "Phile", "Heb": "Heb", "Jas": "Jam",
+        "1Pet": "1 Pe", "2Pet": "2 Pe", "1John": "1 Jo", "2John": "2 Jo",
+        "3John": "3 Jo", "Jude": "Jude", "Rev": "Rev",
+    ]
+
+    /**
+     Returns Android's short chooser label for a book.
+
+     - Parameter book: Module-provided book metadata.
+     - Returns: JSword short name when known, otherwise the module abbreviation as a safe fallback.
+     - Side effects: none.
+     - Failure modes: Unknown ids fall back to `book.abbreviation`.
+     */
+    static func shortName(for book: BookInfo) -> String {
+        shortNamesByOsisId[book.osisId] ?? book.abbreviation
+    }
+
+    /**
+     Returns the visible cell title for Android short-name or long-name mode.
+
+     - Parameters:
+       - book: Module-provided book metadata.
+       - showLongName: Whether Android's "Show long book name" option is enabled.
+     - Returns: One-line short label or two-line uppercase-short plus book name.
+     - Side effects: none.
+     - Failure modes: Unknown ids still render through the fallback abbreviation.
+     */
+    static func title(for book: BookInfo, showLongName: Bool) -> String {
+        let shortName = shortName(for: book)
+        guard showLongName else {
+            return shortName
+        }
+        return "\(shortName.uppercased())\n\(book.name)"
+    }
+}
+
+/**
+ Android book-ordering coordinator for the chooser grid.
+
+ The underlying `PassageGridLayout` knows Android's row/column matrix. This helper owns the
+ additional book-menu ordering options: alphabetical sorting, row ordering, and broad category
+ grouping with spacer cells at group boundaries.
+ */
+enum PassageBookOrdering {
+    /// Android grouped-grid maximum column count.
+    static let groupedColumnCount = 6
+
+    /**
+     Produces visual slots for the book grid under the active Android chooser options.
+
+     - Parameters:
+       - books: Module-provided book list in Bible-book order.
+       - options: Current persisted/session chooser options.
+       - orientation: Current visual orientation used by Android layout rules.
+     - Returns: Row-major visual slots, with `nil` placeholders for empty cells/spacers.
+     - Side effects: none.
+     - Failure modes: Empty input returns an empty array.
+     */
+    static func displaySlots(
+        for books: [BookInfo],
+        options: PassageChooserOptions,
+        orientation: PassageGridOrientation
+    ) -> [BookInfo?] {
+        guard !books.isEmpty else {
+            return []
+        }
+
+        if options.groupByCategory {
+            return groupedSlots(for: books)
+        }
+
+        let sortedBooks = options.alphabeticalOrder
+            ? books.sorted { lhs, rhs in
+                androidAlphabeticalSortKey(lhs) < androidAlphabeticalSortKey(rhs)
+            }
+            : books
+        let layout = PassageGridLayout.androidDefault(
+            itemCount: sortedBooks.count,
+            kind: .book,
+            orientation: orientation,
+            rowOrder: options.rowOrder
+        )
+        return layout.displaySlots(for: sortedBooks)
+    }
+
+    /**
+     Resolves the column count the rendered grid should use for the active options.
+
+     - Parameters:
+       - itemCount: Number of source books.
+       - options: Current chooser options.
+       - orientation: Current visual orientation.
+     - Returns: Android grouped-grid column count or the layout-derived count.
+     - Side effects: none.
+     - Failure modes: Counts below one are clamped by callers.
+     */
+    static func columnCount(
+        itemCount: Int,
+        options: PassageChooserOptions,
+        orientation: PassageGridOrientation
+    ) -> Int {
+        if options.groupByCategory {
+            return groupedColumnCount
+        }
+        return PassageGridLayout.androidDefault(
+            itemCount: itemCount,
+            kind: .book,
+            orientation: orientation,
+            rowOrder: options.rowOrder
+        ).columns
+    }
+
+    /**
+     Groups canonical books by Android `GroupB`, inserting spacer cells between groups.
+
+     Android's `ButtonGrid.addGroupedButtons` fills rows left-to-right, starts a new row when the
+     broad category changes, and pads the current row with empty cells before beginning the next
+     group.
+     */
+    private static func groupedSlots(for books: [BookInfo]) -> [BookInfo?] {
+        var slots: [BookInfo?] = []
+        var currentBucket: Int?
+
+        for book in books {
+            let bucket = PassageBookCategory.category(forOsisId: book.osisId).groupingBucket
+            if let currentBucket, currentBucket != bucket {
+                while !slots.count.isMultiple(of: groupedColumnCount) {
+                    slots.append(nil)
+                }
+            }
+            currentBucket = bucket
+            slots.append(book)
+        }
+
+        while !slots.count.isMultiple(of: groupedColumnCount) {
+            slots.append(nil)
+        }
+        return slots
+    }
+
+    /**
+     Builds Android's alphabetical comparator key.
+
+     Android sorts by localized JSword short names and moves leading digits to the end so `1 Cor`
+     sorts with Corinthians instead of before Acts. This mirrors that behavior with the current
+     locale-independent short labels available to iOS.
+     */
+    private static func androidAlphabeticalSortKey(_ book: BookInfo) -> String {
+        let name = PassageBookDisplayName.shortName(for: book).lowercased()
+        let nonDigits = name
+            .filter { !$0.isNumber }
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let digits = name.filter(\.isNumber)
+        return nonDigits + String(digits)
     }
 }
 
@@ -354,6 +752,306 @@ struct PassageGridMetrics: Equatable, Sendable {
 }
 
 /**
+ Android passage-grid progress fractions for one cell.
+
+ Android overlays reading progress in green and memorization progress in gold at the bottom of
+ book, chapter, and verse buttons. This value carries normalized fractions only; rendering remains
+ in `PassageGridButton` so tests can verify progress semantics without a UI surface.
+ */
+public struct PassageGridProgress: Equatable, Sendable {
+    /// Fraction of reading progress in `0...1`.
+    public let readingFraction: Double
+
+    /// Fraction of memorization progress in `0...1`.
+    public let memorizationFraction: Double
+
+    /// Android reading progress bar color without alpha.
+    public static let readingColor = PassageGridRGBColor(red: 0x4C, green: 0xAF, blue: 0x50)
+
+    /// Android memorization progress bar color without alpha.
+    public static let memorizationColor = PassageGridRGBColor(red: 0xFF, green: 0xD7, blue: 0x00)
+
+    /// Empty progress state used when progress bars are disabled or unavailable.
+    public static let none = PassageGridProgress(readingFraction: 0, memorizationFraction: 0)
+
+    /**
+     Creates clamped progress fractions.
+
+     - Parameters:
+       - readingFraction: Raw reading fraction; values outside `0...1` are clamped.
+       - memorizationFraction: Raw memorization fraction; values outside `0...1` are clamped.
+     - Returns: Normalized progress state.
+     - Side effects: none.
+     - Failure modes: Non-finite values are treated as zero.
+     */
+    public init(readingFraction: Double = 0, memorizationFraction: Double = 0) {
+        self.readingFraction = Self.clamped(readingFraction)
+        self.memorizationFraction = Self.clamped(memorizationFraction)
+    }
+
+    /// Whether either Android progress bar should be visible.
+    var hasProgress: Bool {
+        readingFraction > 0 || memorizationFraction > 0
+    }
+
+    /**
+     Clamps a raw fraction into Android progress-bar bounds.
+
+     - Parameter value: Candidate fraction.
+     - Returns: A finite value in `0...1`.
+     - Side effects: none.
+     - Failure modes: Non-finite values return zero.
+     */
+    private static func clamped(_ value: Double) -> Double {
+        guard value.isFinite else {
+            return 0
+        }
+        return min(1, max(0, value))
+    }
+}
+
+/**
+ Android KJVA-backed progress calculator for passage-grid cells.
+
+ `ProgressControl` on Android normalizes reading progress by JSword `BibleBook.ordinal()` and
+ memorization progress by JSword KJVA verse ordinals. This calculator mirrors those rules against
+ the iOS snapshots so rendered bars are not decorative or tied to SWORD's separate address space.
+ */
+enum PassageGridProgressCalculator {
+    /**
+     Computes book-level reading and memorization progress.
+
+     - Parameters:
+       - book: Module-provided book metadata.
+       - readingSnapshot: Current reading progress snapshot, if available.
+       - memorizationSnapshot: Current memorization progress snapshot, if available.
+       - activeBookInitials: Active module initials used to match module-scoped memorization rows.
+     - Returns: Android-compatible progress fractions for the book cell.
+     - Side effects: none.
+     - Failure modes: Unsupported books return `.none`.
+     */
+    static func bookProgress(
+        book: BookInfo,
+        readingSnapshot: ReadingProgressSnapshot?,
+        memorizationSnapshot: MemorizationProgressSnapshot?,
+        activeBookInitials: String
+    ) -> PassageGridProgress {
+        guard let kjvBookOrdinal = JSwordKJVAVersification.bibleBookOrdinal(forOsisId: book.osisId),
+              let chapterCount = JSwordKJVAVersification.lastChapter(osisId: book.osisId),
+              let verseCount = JSwordKJVAVersification.bookVerseCount(osisId: book.osisId),
+              let bookRange = JSwordKJVAVersification.verseOrdinalRange(osisId: book.osisId) else {
+            return .none
+        }
+
+        let readingFraction: Double
+        if let readingSnapshot, chapterCount > 0 {
+            let cycle = currentReadingCycle(in: readingSnapshot)
+            let readChapters = Set(
+                readingSnapshot.history
+                    .filter { row in
+                        row.kjvBookOrdinal == kjvBookOrdinal &&
+                            row.cycle == cycle &&
+                            row.chapter > 0 &&
+                            row.chapter <= chapterCount
+                    }
+                    .map(\.chapter)
+            )
+            readingFraction = Double(readChapters.count) / Double(chapterCount)
+        } else {
+            readingFraction = 0
+        }
+
+        let memorizationFraction = fractionOfMemorizedOrdinals(
+            in: bookRange,
+            verseCount: verseCount,
+            snapshot: memorizationSnapshot,
+            activeBookInitials: activeBookInitials
+        )
+        return PassageGridProgress(
+            readingFraction: readingFraction,
+            memorizationFraction: memorizationFraction
+        )
+    }
+
+    /**
+     Computes chapter-level reading and memorization progress.
+
+     Android marks a chapter as fully read when the active reading cycle has at least one matching
+     row and divides memorized ordinals by the KJVA verse count in that chapter.
+     */
+    static func chapterProgress(
+        book: BookInfo,
+        chapter: Int,
+        readingSnapshot: ReadingProgressSnapshot?,
+        memorizationSnapshot: MemorizationProgressSnapshot?,
+        activeBookInitials: String
+    ) -> PassageGridProgress {
+        guard let kjvBookOrdinal = JSwordKJVAVersification.bibleBookOrdinal(forOsisId: book.osisId),
+              let verseCount = JSwordKJVAVersification.verseCount(osisId: book.osisId, chapter: chapter),
+              let chapterRange = JSwordKJVAVersification.verseOrdinalRange(osisId: book.osisId, chapter: chapter) else {
+            return .none
+        }
+
+        let readingFraction: Double
+        if let readingSnapshot {
+            let cycle = currentReadingCycle(in: readingSnapshot)
+            readingFraction = readingSnapshot.history.contains { row in
+                row.kjvBookOrdinal == kjvBookOrdinal &&
+                    row.chapter == chapter &&
+                    row.cycle == cycle
+            } ? 1 : 0
+        } else {
+            readingFraction = 0
+        }
+
+        let memorizationFraction = fractionOfMemorizedOrdinals(
+            in: chapterRange,
+            verseCount: verseCount,
+            snapshot: memorizationSnapshot,
+            activeBookInitials: activeBookInitials
+        )
+        return PassageGridProgress(
+            readingFraction: readingFraction,
+            memorizationFraction: memorizationFraction
+        )
+    }
+
+    /**
+     Computes verse-level reading and memorization progress.
+
+     Android shows a full reading bar for every verse in a read chapter and a full memorization bar
+     when the exact KJVA verse ordinal is present in memorized ranges.
+     */
+    static func verseProgress(
+        book: BookInfo,
+        chapter: Int,
+        verse: Int,
+        readingSnapshot: ReadingProgressSnapshot?,
+        memorizationSnapshot: MemorizationProgressSnapshot?,
+        activeBookInitials: String
+    ) -> PassageGridProgress {
+        guard let kjvBookOrdinal = JSwordKJVAVersification.bibleBookOrdinal(forOsisId: book.osisId),
+              let ordinal = JSwordKJVAVersification.verseOrdinal(
+                osisId: book.osisId,
+                chapter: chapter,
+                verse: verse
+              ) else {
+            return .none
+        }
+
+        let readingFraction: Double
+        if let readingSnapshot {
+            let cycle = currentReadingCycle(in: readingSnapshot)
+            readingFraction = readingSnapshot.history.contains { row in
+                row.kjvBookOrdinal == kjvBookOrdinal &&
+                    row.chapter == chapter &&
+                    row.cycle == cycle
+            } ? 1 : 0
+        } else {
+            readingFraction = 0
+        }
+
+        let memorizationFraction = memorizedOrdinalCount(
+            in: ordinal...ordinal,
+            snapshot: memorizationSnapshot,
+            activeBookInitials: activeBookInitials
+        ) > 0 ? 1.0 : 0.0
+        return PassageGridProgress(
+            readingFraction: readingFraction,
+            memorizationFraction: memorizationFraction
+        )
+    }
+
+    /**
+     Resolves Android's active reading cycle fallback.
+
+     - Parameter snapshot: Reading progress snapshot.
+     - Returns: Explicit active cycle when set; otherwise the latest stored cycle or Android's `1`.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    private static func currentReadingCycle(in snapshot: ReadingProgressSnapshot) -> Int {
+        if snapshot.settings.activeCycle > 0 {
+            return snapshot.settings.activeCycle
+        }
+        return snapshot.history.map(\.cycle).max() ?? 1
+    }
+
+    /**
+     Converts memorized ordinal membership into a normalized progress fraction.
+
+     - Parameters:
+       - range: KJVA verse ordinal range being measured.
+       - verseCount: Number of real verses represented by the range.
+       - snapshot: Current memorization snapshot.
+       - activeBookInitials: Module initials used for module-scoped ranges.
+     - Returns: Memorized count divided by `verseCount`.
+     - Side effects: none.
+     - Failure modes: Missing snapshots or invalid counts return zero.
+     */
+    private static func fractionOfMemorizedOrdinals(
+        in range: ClosedRange<Int>,
+        verseCount: Int,
+        snapshot: MemorizationProgressSnapshot?,
+        activeBookInitials: String
+    ) -> Double {
+        guard verseCount > 0 else {
+            return 0
+        }
+        return Double(
+            memorizedOrdinalCount(
+                in: range,
+                snapshot: snapshot,
+                activeBookInitials: activeBookInitials
+            )
+        ) / Double(verseCount)
+    }
+
+    /**
+     Counts unique memorized KJVA ordinals that intersect a query range.
+
+     Android imports can store module-neutral ranges, while existing iOS bridge writes are
+     module-scoped. Matching accepts both empty `bookInitials` and the active module initials.
+     */
+    private static func memorizedOrdinalCount(
+        in queryRange: ClosedRange<Int>,
+        snapshot: MemorizationProgressSnapshot?,
+        activeBookInitials: String
+    ) -> Int {
+        guard let snapshot else {
+            return 0
+        }
+
+        var ordinals = Set<Int>()
+        for range in snapshot.memorizedRanges where matches(range, activeBookInitials: activeBookInitials) {
+            let start = max(range.startOrdinal, queryRange.lowerBound)
+            let end = min(range.endOrdinal, queryRange.upperBound)
+            guard start <= end else {
+                continue
+            }
+            for ordinal in start...end {
+                ordinals.insert(ordinal)
+            }
+        }
+        return ordinals.count
+    }
+
+    /**
+     Checks whether a stored memorization range applies to the active module.
+
+     - Parameters:
+       - range: Persisted memorization range.
+       - activeBookInitials: Active module initials.
+     - Returns: `true` for Android-imported module-neutral ranges and matching module-scoped rows.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    private static func matches(_ range: MemorizationProgressRange, activeBookInitials: String) -> Bool {
+        range.bookInitials.isEmpty || range.bookInitials == activeBookInitials
+    }
+}
+
+/**
  Android-compatible title formatting for the passage chooser.
 
  `GridChoosePassageBook` appends `SharedActivityState.currentWorkspaceName` to the activity title,
@@ -402,29 +1100,95 @@ struct PassageGridButton: View {
     /// Label font tuned by selector type.
     let font: Font
 
+    /// Android reading/memorization progress fractions for this cell.
+    let progress: PassageGridProgress
+
     /// Fixed square width and height for the button.
     let cellSide: CGFloat
 
     /// Action invoked when the button is tapped.
     let action: () -> Void
 
+    /**
+     Creates a fixed-size Android passage-grid button.
+
+     - Parameters:
+       - title: Visible text, either one-line short label or two-line long-name label.
+       - accessibilityLabel: VoiceOver label for the represented book/chapter/verse.
+       - accessibilityIdentifier: Stable UI-test identifier.
+       - palette: Android foreground/background colors.
+       - font: Text style for the selector type.
+       - progress: Optional Android reading/memorization progress overlays.
+       - cellSide: Fixed square side derived from the Android grid matrix.
+       - action: Tap handler.
+     - Side effects: none; the action is invoked only when the button is tapped.
+     - Failure modes: none.
+     */
+    init(
+        title: String,
+        accessibilityLabel: String,
+        accessibilityIdentifier: String,
+        palette: PassageGridCellPalette,
+        font: Font,
+        progress: PassageGridProgress = .none,
+        cellSide: CGFloat,
+        action: @escaping () -> Void
+    ) {
+        self.title = title
+        self.accessibilityLabel = accessibilityLabel
+        self.accessibilityIdentifier = accessibilityIdentifier
+        self.palette = palette
+        self.font = font
+        self.progress = progress
+        self.cellSide = cellSide
+        self.action = action
+    }
+
     /// Renders the Android-style selector button.
     var body: some View {
         Button(action: action) {
-            Text(title)
-                .font(font)
-                .lineLimit(1)
-                .minimumScaleFactor(0.65)
-                .padding(.horizontal, 2)
-                .frame(width: cellSide, height: cellSide)
-                .background(
-                    RoundedRectangle(cornerRadius: 3)
-                        .fill(palette.background.swiftUIColor)
-                )
-                .foregroundStyle(palette.foreground.swiftUIColor)
+            ZStack(alignment: .bottomLeading) {
+                RoundedRectangle(cornerRadius: 3)
+                    .fill(palette.background.swiftUIColor)
+
+                if progress.hasProgress {
+                    progressBars
+                }
+
+                Text(title)
+                    .font(font)
+                    .lineLimit(title.contains("\n") ? 2 : 1)
+                    .multilineTextAlignment(.center)
+                    .minimumScaleFactor(0.55)
+                    .padding(.horizontal, 2)
+                    .frame(width: cellSide, height: cellSide)
+                    .foregroundStyle(palette.foreground.swiftUIColor)
+            }
+            .frame(width: cellSide, height: cellSide)
+            .clipShape(RoundedRectangle(cornerRadius: 3))
         }
         .buttonStyle(.plain)
         .accessibilityLabel(accessibilityLabel)
         .accessibilityIdentifier(accessibilityIdentifier)
+    }
+
+    /// Android-style progress overlays anchored to the bottom of the button cell.
+    @ViewBuilder
+    private var progressBars: some View {
+        let barHeight: CGFloat = 4
+        let gap: CGFloat = 3
+
+        if progress.memorizationFraction > 0 {
+            Rectangle()
+                .fill(PassageGridProgress.memorizationColor.swiftUIColor.opacity(0.8))
+                .frame(width: cellSide * progress.memorizationFraction, height: barHeight)
+        }
+
+        if progress.readingFraction > 0 {
+            Rectangle()
+                .fill(PassageGridProgress.readingColor.swiftUIColor.opacity(0.8))
+                .frame(width: cellSide * progress.readingFraction, height: barHeight)
+                .padding(.bottom, progress.memorizationFraction > 0 ? barHeight + gap : 0)
+        }
     }
 }

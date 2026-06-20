@@ -6,8 +6,8 @@ import SwiftUI
  Grid-based chooser for selecting a specific verse after book and chapter selection.
 
  The verse count is supplied by the parent chooser and reflects the currently selected book and
- chapter in the active module. The grid layout and current-verse highlight mirror Android
- `GridChoosePassageVerse`.
+ chapter in the active module. The grid layout, row-order preference, progress overlays, and
+ current-verse highlight mirror Android `GridChoosePassageVerse`.
  */
 public struct VerseChooserView: View {
     /// User-visible book name shown in the navigation title.
@@ -25,6 +25,12 @@ public struct VerseChooserView: View {
     /// Current reader verse if this chooser is showing the active book and chapter.
     let currentVerse: Int?
 
+    /// Android row-order option shared with the book chooser menu.
+    let rowOrder: Bool
+
+    /// Provides Android KJVA progress for a one-based verse.
+    let progressProvider: (Int) -> PassageGridProgress
+
     /// Callback invoked with the chosen one-based verse number.
     let onSelect: (Int) -> Void
 
@@ -37,6 +43,8 @@ public struct VerseChooserView: View {
        - chapter: One-based chapter number for the current selection flow.
        - verseCount: Number of verses available in this chapter.
        - currentVerse: Current reader verse to highlight when the active chapter is selected.
+       - rowOrder: Android row-order option shared with book chooser settings.
+       - progressProvider: Optional Android KJVA progress provider for verse cells.
        - onSelect: Callback receiving the selected one-based verse number.
      */
     public init(
@@ -45,6 +53,8 @@ public struct VerseChooserView: View {
         chapter: Int,
         verseCount: Int,
         currentVerse: Int? = nil,
+        rowOrder: Bool = false,
+        progressProvider: ((Int) -> PassageGridProgress)? = nil,
         onSelect: @escaping (Int) -> Void
     ) {
         self.bookName = bookName
@@ -52,6 +62,8 @@ public struct VerseChooserView: View {
         self.chapter = chapter
         self.verseCount = verseCount
         self.currentVerse = currentVerse
+        self.rowOrder = rowOrder
+        self.progressProvider = progressProvider ?? { _ in .none }
         self.onSelect = onSelect
     }
 
@@ -63,7 +75,8 @@ public struct VerseChooserView: View {
             let layout = PassageGridLayout.androidDefault(
                 itemCount: verses.count,
                 kind: .number,
-                orientation: orientation
+                orientation: orientation,
+                rowOrder: rowOrder
             )
             let slots = layout.displaySlots(for: verses)
             let columnCount = max(layout.columns, 1)
@@ -91,6 +104,7 @@ public struct VerseChooserView: View {
                                     categoryColor: categoryColor
                                 ),
                                 font: .callout.monospacedDigit().weight(.semibold),
+                                progress: progressProvider(verse),
                                 cellSide: metrics.cellSide
                             ) {
                                 onSelect(verse)
@@ -108,6 +122,7 @@ public struct VerseChooserView: View {
             }
         }
         .navigationTitle("\(bookName) \(chapter)")
+        .background(PassageChooserSurfacePalette.background.swiftUIColor.ignoresSafeArea())
     }
 
     /// OSIS id used for Android category color resolution.

@@ -3,11 +3,10 @@ import SwiftUI
 /**
  Shared left-side drawer presentation shell for reader-owned drawer surfaces.
 
- Android presents the main reader drawer as a left-origin drawer with a dimmed reading surface.
- Passage selection is also a reader-owned navigation surface, so `BibleReaderView` uses this shell
- for both the hamburger drawer and the passage chooser instead of maintaining separate dimmer,
- width, background, and transition behavior. The shell owns presentation chrome and dismissal;
- caller content remains responsible for internal navigation and actions.
+ Android presents the main reader drawer as a left-origin drawer with a dimmed reading surface. The
+ passage chooser is a separate full-screen Android activity and uses `ReaderPassageChooserOverlay`
+ instead. This shell owns hamburger-drawer chrome and dismissal; caller content remains responsible
+ for internal navigation and actions.
  */
 struct ReaderSideDrawerOverlay<DrawerContent: View>: View {
     /// System color scheme available to callers that need scheme-aware drawer content.

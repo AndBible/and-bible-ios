@@ -21,7 +21,7 @@ import struct SwiftUI.Color
 extension AndBibleTests {
     func testAppPreferenceRegistryHasDefinitionForAllKeys() {
         let keys = AppPreferenceKey.allCases
-        XCTAssertEqual(keys.count, 36)
+        XCTAssertEqual(keys.count, 40)
         XCTAssertEqual(Set(keys).count, keys.count)
         XCTAssertEqual(AppPreferenceRegistry.definitions.count, keys.count)
 
@@ -39,6 +39,10 @@ extension AndBibleTests {
         XCTAssertEqual(AppPreferenceRegistry.intRange(for: .fontSizeMultiplier), 10...500)
         XCTAssertEqual(AppPreferenceRegistry.boolDefault(for: .openLinksInSpecialWindowPref), true)
         XCTAssertEqual(AppPreferenceRegistry.boolDefault(for: .enableBluetoothPref), true)
+        XCTAssertEqual(AppPreferenceRegistry.boolDefault(for: .bookGridLeftToRight), false)
+        XCTAssertEqual(AppPreferenceRegistry.boolDefault(for: .bookGridGroupByCategory), false)
+        XCTAssertEqual(AppPreferenceRegistry.boolDefault(for: .bookGridShowLongName), false)
+        XCTAssertEqual(AppPreferenceRegistry.boolDefault(for: .bookGridShowProgress), true)
     }
 
     func testNotesContentTypeNormalizerUsesAndroidSupportedValues() {
@@ -912,12 +916,11 @@ extension AndBibleTests {
     }
 
     /**
-     Verifies reader side drawers are hosted by one shared slide-out presentation shell.
+     Verifies the reader navigation drawer is hosted by the shared slide-out presentation shell.
 
-     Android uses a drawer-like transition for left-side reader surfaces. The iOS main menu and
-     passage chooser should therefore share the same dimmer, width calculation, and move transition
-     instead of maintaining separate one-off overlays. Failure indicates a new drawer surface may
-     drift from the hamburger drawer behavior.
+     Android's hamburger menu remains a narrow left drawer over a dimmed reader. Passage selection
+     is a separate full-screen chooser activity, so this shared shell should be reserved for the
+     hamburger drawer and similar left navigation surfaces only.
      */
     func testReaderSideDrawerOverlayBuildsWithInjectedContent() {
         let view = ReaderSideDrawerOverlay(
@@ -931,13 +934,13 @@ extension AndBibleTests {
     }
 
     /**
-     Verifies the passage chooser drawer owns cancellation instead of relying on sheet dismissal.
+     Verifies the passage chooser uses its Android-style full-screen shell.
 
-     SwiftUI's environment dismiss action closed the old modal sheet, but a custom reader drawer
-     needs an explicit callback back into `BibleReaderView`. Failure means the visible Cancel action
-     can become inert after the Android-style drawer presentation replaces the sheet.
+     Android presents book/chapter/verse selection as a full-screen dark chooser with its own
+     toolbar, not as the narrow hamburger drawer. Failure means iOS is artificially preserving a
+     platform-specific presentation that hides part of the picker behind the reader surface.
      */
-    func testPassageChooserDrawerPassesExplicitCancelHandler() throws {
+    func testPassageChooserUsesFullScreenChooserShell() throws {
         let testFileURL = URL(fileURLWithPath: #filePath)
         let repoRoot = testFileURL
             .deletingLastPathComponent()
@@ -947,8 +950,13 @@ extension AndBibleTests {
         )
 
         let source = try String(contentsOf: readerViewURL, encoding: .utf8)
+        let overlayStart = try XCTUnwrap(source.range(of: "private var bookChooserDrawerOverlay"))
+        let overlayEnd = try XCTUnwrap(source[overlayStart.lowerBound...].range(of: "private func dismissReaderNavigationDrawer"))
+        let overlaySource = String(source[overlayStart.lowerBound..<overlayEnd.lowerBound])
 
-        XCTAssertTrue(source.contains("onCancel: dismissBookChooser"))
+        XCTAssertTrue(overlaySource.contains("ReaderPassageChooserOverlay"))
+        XCTAssertFalse(overlaySource.contains("ReaderSideDrawerOverlay"))
+        XCTAssertTrue(overlaySource.contains("onCancel: dismissBookChooser"))
     }
 
     /**

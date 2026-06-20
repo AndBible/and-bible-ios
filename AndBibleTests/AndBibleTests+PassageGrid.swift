@@ -1,8 +1,113 @@
 import XCTest
+@testable import BibleCore
 @testable import BibleUI
 @testable import SwordKit
 
 extension AndBibleTests {
+    /**
+     Verifies the chooser option state machine mirrors Android's overflow-menu behavior.
+
+     Android's `GridChoosePassageBook` persists the row-order, category grouping, long-name, and
+     progress options under `book_grid_*` keys. Grouping forces Bible-book order and row order,
+     while alphabetical and row-order changes clear grouping without resetting unrelated options.
+     Failure means the iOS menu is only cosmetically similar and will drift from Android behavior.
+     */
+    func testPassageChooserOptionsMirrorAndroidMenuStateTransitions() {
+        var options = PassageChooserOptions.androidDefault
+
+        XCTAssertFalse(options.alphabeticalOrder)
+        XCTAssertFalse(options.rowOrder)
+        XCTAssertFalse(options.groupByCategory)
+        XCTAssertFalse(options.showLongBookName)
+        XCTAssertTrue(options.showProgressBars)
+
+        options.apply(.groupByCategory)
+        XCTAssertFalse(options.alphabeticalOrder)
+        XCTAssertTrue(options.rowOrder)
+        XCTAssertTrue(options.groupByCategory)
+
+        options.apply(.alphabeticalOrder)
+        XCTAssertTrue(options.alphabeticalOrder)
+        XCTAssertTrue(options.rowOrder)
+        XCTAssertFalse(options.groupByCategory)
+
+        options.apply(.rowOrder)
+        XCTAssertTrue(options.alphabeticalOrder)
+        XCTAssertFalse(options.rowOrder)
+        XCTAssertFalse(options.groupByCategory)
+
+        options.apply(.showLongBookName)
+        options.apply(.showProgressBars)
+        XCTAssertTrue(options.showLongBookName)
+        XCTAssertFalse(options.showProgressBars)
+    }
+
+    /**
+     Verifies iOS exposes Android's full passage-chooser overflow menu contract.
+
+     Android's top-right chooser menu includes sorting, row ordering, category grouping, long/short
+     book names, and progress bars in this order. Failure means the iOS popup may look present while
+     still omitting or reordering Android-visible behavior.
+     */
+    func testPassageChooserMenuEntriesMirrorAndroidOrderAndLabels() {
+        let entries = PassageChooserMenuEntry.androidBookChooserOrder
+
+        XCTAssertEqual(
+            entries.map(\.option),
+            [.alphabeticalOrder, .rowOrder, .groupByCategory, .showLongBookName, .showProgressBars]
+        )
+        XCTAssertEqual(
+            entries.map(\.localizationKey),
+            [
+                "sort_by_alphabetical",
+                "book_menu_sort_row_opt",
+                "book_menu_group_by_category",
+                "book_menu_show_long_book_name",
+                "book_menu_show_progress_bars",
+            ]
+        )
+        XCTAssertEqual(
+            entries.map(\.defaultTitle),
+            [
+                "Alphabetical order",
+                "Order books horizontally",
+                "Group books by category",
+                "Show long book name",
+                "Show progress bars",
+            ]
+        )
+    }
+
+    /**
+     Verifies iOS uses Android/JSword short book labels instead of SWORD abbreviations.
+
+     The Android chooser calls `versification.getShortName(book)`, producing labels like `2 Ki`,
+     `Psa`, `Act`, and `Phile`. The previous iOS grid used module abbreviations such as `2Kgs`,
+     `Ps`, `Acts`, and `Phlm`, so the two platforms did not present the same picker. Long-name mode
+     should follow Android's uppercase short-name plus description format.
+     */
+    func testPassageBookDisplayNamesMirrorAndroidShortAndLongNames() {
+        let expectations: [(osisId: String, shortName: String)] = [
+            ("2Kgs", "2 Ki"),
+            ("1Chr", "1 Ch"),
+            ("Ps", "Psa"),
+            ("Acts", "Act"),
+            ("Phil", "Phili"),
+            ("Phlm", "Phile"),
+            ("Jas", "Jam"),
+            ("1Pet", "1 Pe"),
+        ]
+
+        for expectation in expectations {
+            let book = try! XCTUnwrap(BibleReaderController.defaultBooks.first { $0.osisId == expectation.osisId })
+            XCTAssertEqual(PassageBookDisplayName.shortName(for: book), expectation.shortName, expectation.osisId)
+        }
+
+        let genesis = try! XCTUnwrap(BibleReaderController.defaultBooks.first { $0.osisId == "Gen" })
+        XCTAssertEqual(PassageBookDisplayName.title(for: genesis, showLongName: false), "Gen")
+        XCTAssertEqual(PassageBookDisplayName.title(for: genesis, showLongName: true), "GEN\nGenesis")
+    }
+
     /**
      Verifies that the 66-book portrait grid follows Android's default column-major layout.
 
@@ -46,6 +151,57 @@ extension AndBibleTests {
         XCTAssertFalse(layout.usesColumnMajorOrder)
         XCTAssertEqual(slots[0]?.osisId, "Gen")
         XCTAssertEqual(slots[1]?.osisId, "Exod")
+    }
+
+    /**
+     Verifies book ordering is driven by the Android overflow-menu options.
+
+     Android defaults to Bible-book order with portrait column-major placement. Alphabetical mode
+     sorts the source books but still uses the current row-order setting for visual placement. The
+     row-order option fills the visual row left-to-right, and category grouping inserts spacer cells
+     when the Android `GroupB` bucket changes. Failure means menu state is not actually controlling
+     the rendered grid, even if the menu rows appear.
+     */
+    func testPassageBookOrderingOptionsMirrorAndroidMenu() {
+        var defaultOptions = PassageChooserOptions.androidDefault
+        var slots = PassageBookOrdering.displaySlots(
+            for: BibleReaderController.defaultBooks,
+            options: defaultOptions,
+            orientation: .portrait
+        )
+        XCTAssertEqual(slots[0]?.osisId, "Gen")
+        XCTAssertEqual(slots[1]?.osisId, "2Kgs")
+        XCTAssertEqual(slots[6]?.osisId, "Exod")
+
+        defaultOptions.apply(.rowOrder)
+        slots = PassageBookOrdering.displaySlots(
+            for: BibleReaderController.defaultBooks,
+            options: defaultOptions,
+            orientation: .portrait
+        )
+        XCTAssertEqual(slots[0]?.osisId, "Gen")
+        XCTAssertEqual(slots[1]?.osisId, "Exod")
+
+        var groupedOptions = PassageChooserOptions.androidDefault
+        groupedOptions.apply(.groupByCategory)
+        let groupedSlots = PassageBookOrdering.displaySlots(
+            for: BibleReaderController.defaultBooks,
+            options: groupedOptions,
+            orientation: .portrait
+        )
+        XCTAssertEqual(groupedSlots.prefix(6).map { $0?.osisId }, ["Gen", "Exod", "Lev", "Num", "Deut", nil])
+        XCTAssertEqual(groupedSlots[6]?.osisId, "Josh")
+
+        var alphabeticalOptions = PassageChooserOptions.androidDefault
+        alphabeticalOptions.apply(.alphabeticalOrder)
+        let alphabeticalSlots = PassageBookOrdering.displaySlots(
+            for: BibleReaderController.defaultBooks,
+            options: alphabeticalOptions,
+            orientation: .portrait
+        )
+        XCTAssertEqual(alphabeticalSlots[0]?.osisId, "Acts")
+        XCTAssertEqual(alphabeticalSlots[6]?.osisId, "Amos")
+        XCTAssertEqual(alphabeticalSlots[1]?.osisId, "Esth")
     }
 
     /**
@@ -152,6 +308,20 @@ extension AndBibleTests {
     }
 
     /**
+     Verifies the passage chooser uses Android's fixed dark activity palette.
+
+     Android's chooser sets `allowThemeChange = false` and uses `GridChoosePassageTheme`, so the
+     picker remains a dark full-screen surface even when the reader itself is in day mode. Failure
+     means iOS can accidentally inherit the reader theme and diverge from the Android screenshots.
+     */
+    func testPassageChooserSurfacePaletteMirrorsAndroidFixedDarkTheme() {
+        XCTAssertEqual(PassageChooserSurfacePalette.background, PassageGridRGBColor(red: 0x30, green: 0x30, blue: 0x30))
+        XCTAssertEqual(PassageChooserSurfacePalette.toolbarBackground, PassageGridRGBColor(red: 0x00, green: 0x00, blue: 0x00))
+        XCTAssertEqual(PassageGridProgress.readingColor, PassageGridRGBColor(red: 0x4C, green: 0xAF, blue: 0x50))
+        XCTAssertEqual(PassageGridProgress.memorizationColor, PassageGridRGBColor(red: 0xFF, green: 0xD7, blue: 0x00))
+    }
+
+    /**
      Verifies iOS derives square cell dimensions from Android's matrix columns.
 
      Android gives every `TableRow` and every cell the same weighted width/height within the
@@ -187,5 +357,89 @@ extension AndBibleTests {
             PassageChooserTitle.bookSelectionTitle(baseTitle: "Choose Book", workspaceName: "   "),
             "Choose Book"
         )
+    }
+
+    /**
+     Verifies chooser progress fractions follow Android's JSword KJVA semantics.
+
+     Android computes book reading progress from distinct read KJVA chapters in the active cycle,
+     book memorization progress from memorized KJVA verse ordinals across the book, chapter progress
+     from the selected chapter's KJVA verse range, and verse progress as one full bar for a
+     memorized verse. Failure means the progress bars are decorative or tied to an iOS-only address
+     space rather than Android's `ProgressControl` behavior.
+     */
+    func testPassageGridProgressUsesAndroidKJVARanges() throws {
+        let genesis = try XCTUnwrap(BibleReaderController.defaultBooks.first { $0.osisId == "Gen" })
+        let genesisOrdinal = try XCTUnwrap(JSwordKJVAVersification.bibleBookOrdinal(forOsisId: "Gen"))
+        let genesisStart = try XCTUnwrap(JSwordKJVAVersification.verseOrdinal(osisId: "Gen", chapter: 1, verse: 1))
+        let genesisChapterOneEnd = try XCTUnwrap(JSwordKJVAVersification.verseOrdinal(osisId: "Gen", chapter: 1, verse: 31))
+
+        let readingSnapshot = ReadingProgressSnapshot(
+            history: [
+                ReadingProgressHistoryRow(
+                    bookInitials: "KJV",
+                    startOrdinal: genesisStart,
+                    kjvBookOrdinal: genesisOrdinal,
+                    chapter: 1,
+                    cycle: 3,
+                    readAt: 1,
+                    source: .manual
+                ),
+                ReadingProgressHistoryRow(
+                    bookInitials: "KJV",
+                    startOrdinal: genesisChapterOneEnd + 1,
+                    kjvBookOrdinal: genesisOrdinal,
+                    chapter: 2,
+                    cycle: 3,
+                    readAt: 2,
+                    source: .manual
+                ),
+                ReadingProgressHistoryRow(
+                    bookInitials: "KJV",
+                    startOrdinal: genesisStart,
+                    kjvBookOrdinal: genesisOrdinal,
+                    chapter: 1,
+                    cycle: 2,
+                    readAt: 3,
+                    source: .manual
+                ),
+            ],
+            settings: ReadingProgressSettingsSnapshot(activeCycle: 3)
+        )
+        let memorizationSnapshot = MemorizationProgressSnapshot(
+            memorizedRanges: [
+                MemorizationProgressRange(bookInitials: "", startOrdinal: genesisStart, endOrdinal: genesisStart + 2),
+            ]
+        )
+
+        let bookProgress = PassageGridProgressCalculator.bookProgress(
+            book: genesis,
+            readingSnapshot: readingSnapshot,
+            memorizationSnapshot: memorizationSnapshot,
+            activeBookInitials: "KJV"
+        )
+        XCTAssertEqual(bookProgress.readingFraction, 2.0 / 50.0, accuracy: 0.0001)
+        XCTAssertEqual(bookProgress.memorizationFraction, 3.0 / 1533.0, accuracy: 0.0001)
+
+        let chapterProgress = PassageGridProgressCalculator.chapterProgress(
+            book: genesis,
+            chapter: 1,
+            readingSnapshot: readingSnapshot,
+            memorizationSnapshot: memorizationSnapshot,
+            activeBookInitials: "KJV"
+        )
+        XCTAssertEqual(chapterProgress.readingFraction, 1.0, accuracy: 0.0001)
+        XCTAssertEqual(chapterProgress.memorizationFraction, 3.0 / 31.0, accuracy: 0.0001)
+
+        let verseProgress = PassageGridProgressCalculator.verseProgress(
+            book: genesis,
+            chapter: 1,
+            verse: 1,
+            readingSnapshot: readingSnapshot,
+            memorizationSnapshot: memorizationSnapshot,
+            activeBookInitials: "KJV"
+        )
+        XCTAssertEqual(verseProgress.readingFraction, 1.0, accuracy: 0.0001)
+        XCTAssertEqual(verseProgress.memorizationFraction, 1.0, accuracy: 0.0001)
     }
 }

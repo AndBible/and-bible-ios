@@ -811,6 +811,80 @@ public struct BibleReaderView: View {
         panePresentationTargetWindow?.workspace?.name ?? windowManager.activeWorkspace?.name
     }
 
+    /**
+     Computes Android-compatible book progress for the passage chooser.
+
+     - Parameter book: Visible book cell from the active module's book list.
+     - Returns: Reading and memorization fractions derived from active pane snapshots.
+     - Side effects: Reads local progress stores through the active pane controller.
+     - Failure modes: Missing controller/store data produces empty progress.
+     */
+    private func passageBookProgress(for book: BookInfo) -> PassageGridProgress {
+        PassageGridProgressCalculator.bookProgress(
+            book: book,
+            readingSnapshot: passageReadingProgressSnapshot,
+            memorizationSnapshot: passageMemorizationProgressSnapshot,
+            activeBookInitials: passageProgressBookInitials
+        )
+    }
+
+    /**
+     Computes Android-compatible chapter progress for the passage chooser.
+
+     - Parameters:
+       - book: Selected book from the active module's book list.
+       - chapter: One-based chapter number.
+     - Returns: Reading and memorization fractions derived from active pane snapshots.
+     - Side effects: Reads local progress stores through the active pane controller.
+     - Failure modes: Missing controller/store data produces empty progress.
+     */
+    private func passageChapterProgress(for book: BookInfo, chapter: Int) -> PassageGridProgress {
+        PassageGridProgressCalculator.chapterProgress(
+            book: book,
+            chapter: chapter,
+            readingSnapshot: passageReadingProgressSnapshot,
+            memorizationSnapshot: passageMemorizationProgressSnapshot,
+            activeBookInitials: passageProgressBookInitials
+        )
+    }
+
+    /**
+     Computes Android-compatible verse progress for the passage chooser.
+
+     - Parameters:
+       - book: Selected book from the active module's book list.
+       - chapter: One-based chapter number.
+       - verse: One-based verse number.
+     - Returns: Reading and memorization fractions derived from active pane snapshots.
+     - Side effects: Reads local progress stores through the active pane controller.
+     - Failure modes: Missing controller/store data produces empty progress.
+     */
+    private func passageVerseProgress(for book: BookInfo, chapter: Int, verse: Int) -> PassageGridProgress {
+        PassageGridProgressCalculator.verseProgress(
+            book: book,
+            chapter: chapter,
+            verse: verse,
+            readingSnapshot: passageReadingProgressSnapshot,
+            memorizationSnapshot: passageMemorizationProgressSnapshot,
+            activeBookInitials: passageProgressBookInitials
+        )
+    }
+
+    /// Active module initials used to match Android/iOS memorization progress ranges.
+    private var passageProgressBookInitials: String {
+        panePresentationController?.activeModuleName ?? ""
+    }
+
+    /// Snapshot of active pane reading progress for chooser progress bars.
+    private var passageReadingProgressSnapshot: ReadingProgressSnapshot? {
+        panePresentationController?.readingProgressStore?.snapshot()
+    }
+
+    /// Snapshot of active pane memorization progress for chooser progress bars.
+    private var passageMemorizationProgressSnapshot: MemorizationProgressSnapshot? {
+        panePresentationController?.memorizationProgressStore?.snapshot()
+    }
+
     /// Book chooser content used by toolbar and tab-bar navigation commands.
     private var bookChooserDrawerContent: some View {
         NavigationStack {
@@ -830,6 +904,15 @@ public struct BibleReaderView: View {
                         chapter: chapter
                     )
                 },
+                bookProgressProvider: { book in
+                    passageBookProgress(for: book)
+                },
+                chapterProgressProvider: { book, chapter in
+                    passageChapterProgress(for: book, chapter: chapter)
+                },
+                verseProgressProvider: { book, chapter, verse in
+                    passageVerseProgress(for: book, chapter: chapter, verse: verse)
+                },
                 onCancel: dismissBookChooser
             ) { book, chapter, verse in
                 dismissBookChooser()
@@ -838,7 +921,12 @@ public struct BibleReaderView: View {
         }
         #if os(iOS)
         .toolbar(.visible, for: .navigationBar)
+        .toolbarBackground(PassageChooserSurfacePalette.toolbarBackground.swiftUIColor, for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
+        .toolbarColorScheme(.dark, for: .navigationBar)
         #endif
+        .preferredColorScheme(.dark)
+        .background(PassageChooserSurfacePalette.background.swiftUIColor.ignoresSafeArea())
     }
 
     /// Search sheet seeded from toolbar, keyboard, or Android-compatible link routing.
@@ -2209,13 +2297,9 @@ public struct BibleReaderView: View {
         }
     }
 
-    /// Full-screen dimmer plus left drawer panel for Android-style passage selection.
+    /// Full-screen dark chooser panel for Android-style passage selection.
     private var bookChooserDrawerOverlay: some View {
-        ReaderSideDrawerOverlay(
-            colorScheme: colorScheme,
-            dismissAreaIdentifier: "passageChooserDrawerDismissArea",
-            onDismiss: dismissBookChooser
-        ) { _ in
+        ReaderPassageChooserOverlay(onCancel: dismissBookChooser) {
             bookChooserDrawerContent
                 .accessibilityIdentifier("passageChooserDrawer")
         }

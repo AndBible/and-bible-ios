@@ -1,6 +1,8 @@
 // BookChooserView.swift — Book selection grid
 
 import SwiftUI
+import BibleCore
+import SwiftData
 import SwordKit
 
 /**
@@ -22,6 +24,8 @@ import SwordKit
  - `verseCountProvider` supplies module-specific `Versification.getLastVerse` equivalents when
    the chooser drills into verse selection; `nil` means the active module could not resolve the
    selected chapter and no synthetic verse list should be shown
+ - `SettingsStore` supplies Android `BibleBookSortOrder` and `book_grid_*` option state
+ - progress providers supply Android KJVA reading/memorization fractions for visible grid cells
  - `onCancel` lets custom drawer presenters close their own presentation state; without it the view
    falls back to SwiftUI's environment dismiss action for sheet/navigation-stack hosts
 
@@ -29,6 +33,7 @@ import SwordKit
  - tapping a book mutates local selection state to advance to the chapter step
  - tapping a chapter may either complete the flow or advance to the verse step
  - tapping toolbar back actions resets the local step state without dismissing the chooser
+ - tapping overflow-menu rows persists Android-compatible chooser options in `SettingsStore`
  */
 public struct BookChooserView: View {
     /// Dynamic book list derived from the active module's versification.
@@ -52,6 +57,15 @@ public struct BookChooserView: View {
     /// Provides the last verse number for a selected book/chapter.
     let verseCountProvider: (BookInfo, Int) -> Int?
 
+    /// Provides Android KJVA progress for a book cell.
+    let bookProgressProvider: (BookInfo) -> PassageGridProgress
+
+    /// Provides Android KJVA progress for a chapter cell.
+    let chapterProgressProvider: (BookInfo, Int) -> PassageGridProgress
+
+    /// Provides Android KJVA progress for a verse cell.
+    let verseProgressProvider: (BookInfo, Int, Int) -> PassageGridProgress
+
     /// Optional explicit cancellation callback for non-sheet presentations.
     let onCancel: (() -> Void)?
 
@@ -64,8 +78,20 @@ public struct BookChooserView: View {
     /// Currently selected chapter when the verse step is active.
     @State private var selectedChapter: Int?
 
+    /// Android chooser overflow-menu state loaded from `SettingsStore`.
+    @State private var chooserOptions = PassageChooserOptions.androidDefault
+
+    /// Tracks first appearance so option state is not reloaded after in-view menu changes.
+    @State private var hasLoadedChooserOptions = false
+
+    /// Whether Android's book-chooser overflow popup is visible.
+    @State private var isChooserMenuPresented = false
+
     /// Dismiss action for canceling the chooser flow.
     @Environment(\.dismiss) private var dismiss
+
+    /// SwiftData context backing Android-compatible chooser option persistence.
+    @Environment(\.modelContext) private var modelContext
 
     /**
      Creates a book chooser for a specific module canon.
@@ -80,6 +106,9 @@ public struct BookChooserView: View {
        - verseCountProvider: Optional provider for module-specific chapter verse counts. A missing
          provider keeps existing no-module callers functional by falling back to the static
          compatibility table.
+       - bookProgressProvider: Optional provider for Android KJVA book-cell progress.
+       - chapterProgressProvider: Optional provider for Android KJVA chapter-cell progress.
+       - verseProgressProvider: Optional provider for Android KJVA verse-cell progress.
        - onCancel: Optional callback used by custom drawer hosts to close their presentation state.
        - onSelect: Callback receiving `(bookName, chapter, verse?)` when selection completes.
      */
@@ -91,6 +120,9 @@ public struct BookChooserView: View {
         currentVerse: Int? = nil,
         workspaceName: String? = nil,
         verseCountProvider: ((BookInfo, Int) -> Int?)? = nil,
+        bookProgressProvider: ((BookInfo) -> PassageGridProgress)? = nil,
+        chapterProgressProvider: ((BookInfo, Int) -> PassageGridProgress)? = nil,
+        verseProgressProvider: ((BookInfo, Int, Int) -> PassageGridProgress)? = nil,
         onCancel: (() -> Void)? = nil,
         onSelect: @escaping (String, Int, Int?) -> Void
     ) {
@@ -103,6 +135,9 @@ public struct BookChooserView: View {
         self.verseCountProvider = verseCountProvider ?? { book, chapter in
             BibleReaderController.verseCount(for: book.name, chapter: chapter)
         }
+        self.bookProgressProvider = bookProgressProvider ?? { _ in .none }
+        self.chapterProgressProvider = chapterProgressProvider ?? { _, _ in .none }
+        self.verseProgressProvider = verseProgressProvider ?? { _, _, _ in .none }
         self.onCancel = onCancel
         self.onSelect = onSelect
     }
@@ -119,7 +154,13 @@ public struct BookChooserView: View {
                         osisBookId: book.osisId,
                         chapter: chapter,
                         verseCount: verseCountProvider(book, chapter) ?? 0,
-                        currentVerse: currentVerseForSelectedContext(book: book, chapter: chapter)
+                        currentVerse: currentVerseForSelectedContext(book: book, chapter: chapter),
+                        rowOrder: chooserOptions.rowOrder,
+                        progressProvider: { verse in
+                            chooserOptions.showProgressBars
+                                ? verseProgressProvider(book, chapter, verse)
+                                : .none
+                        }
                     ) { verse in
                         onSelect(book.name, chapter, verse)
                     }
@@ -128,7 +169,13 @@ public struct BookChooserView: View {
                         bookName: book.name,
                         osisBookId: book.osisId,
                         chapterCount: book.chapterCount,
-                        currentChapter: currentChapterForSelectedBook(book)
+                        currentChapter: currentChapterForSelectedBook(book),
+                        rowOrder: chooserOptions.rowOrder,
+                        progressProvider: { chapter in
+                            chooserOptions.showProgressBars
+                                ? chapterProgressProvider(book, chapter)
+                                : .none
+                        }
                     ) { chapter in
                         if navigateToVerse {
                             selectedChapter = chapter
@@ -145,25 +192,32 @@ public struct BookChooserView: View {
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
+        .background(PassageChooserSurfacePalette.background.swiftUIColor.ignoresSafeArea())
+        .preferredColorScheme(.dark)
+        .tint(.white)
+        .onAppear { loadChooserOptionsIfNeeded() }
+        .overlay(alignment: .topTrailing) {
+            chooserOptionsPopupOverlay
+        }
         .toolbar {
-            ToolbarItem(placement: .cancellationAction) {
-                Button(String(localized: "cancel")) { cancelChooser() }
-            }
-            if selectedChapter != nil {
-                ToolbarItem(placement: .navigation) {
-                    Button(String(localized: "choose_chapter", defaultValue: "Choose Chapter")) {
-                        selectedChapter = nil
-                    }
+            ToolbarItem(placement: .navigation) {
+                Button(action: navigateBackOrCancel) {
+                    Image(systemName: "chevron.left")
+                        .font(.title3.weight(.semibold))
                 }
-            } else if selectedBook != nil {
-                ToolbarItem(placement: .navigation) {
-                    Button(String(localized: "books")) {
-                        selectedBook = nil
-                        selectedChapter = nil
-                    }
+                .accessibilityLabel(String(localized: "back", defaultValue: "Back"))
+            }
+            if selectedBook == nil {
+                ToolbarItem(placement: .primaryAction) {
+                    chooserOptionsMenuButton
                 }
             }
         }
+        #if os(iOS)
+        .toolbarBackground(PassageChooserSurfacePalette.toolbarBackground.swiftUIColor, for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
+        .toolbarColorScheme(.dark, for: .navigationBar)
+        #endif
     }
 
     /**
@@ -179,6 +233,97 @@ public struct BookChooserView: View {
         } else {
             dismiss()
         }
+    }
+
+    /**
+     Navigates backward within the chooser or closes it from the first step.
+
+     Android's chooser surfaces use a toolbar back arrow. Within this SwiftUI-hosted flow, the same
+     affordance returns from verse to chapter, from chapter to book, and finally dismisses the
+     reader-owned chooser presentation.
+     */
+    private func navigateBackOrCancel() {
+        if isChooserMenuPresented {
+            isChooserMenuPresented = false
+        } else if selectedChapter != nil {
+            selectedChapter = nil
+        } else if selectedBook != nil {
+            selectedBook = nil
+            selectedChapter = nil
+        } else {
+            cancelChooser()
+        }
+    }
+
+    /// Android overflow button for chooser ordering, labels, grouping, and progress options.
+    private var chooserOptionsMenuButton: some View {
+        Button {
+            isChooserMenuPresented.toggle()
+        } label: {
+            Image(systemName: "ellipsis")
+                .rotationEffect(.degrees(90))
+                .font(.title3.weight(.semibold))
+        }
+        .accessibilityLabel(String(localized: "more_options", defaultValue: "More options"))
+        .accessibilityIdentifier("passageChooserOverflowButton")
+    }
+
+    /**
+     Draws Android's dark popup menu over the book grid.
+
+     Android's chooser menu is a popup anchored near the top-right toolbar button, not an iOS
+     command menu. The transparent hit target lets taps outside the popup dismiss it without
+     changing chooser state.
+     */
+    @ViewBuilder
+    private var chooserOptionsPopupOverlay: some View {
+        if selectedBook == nil, isChooserMenuPresented {
+            GeometryReader { proxy in
+                ZStack(alignment: .topTrailing) {
+                    Color.black.opacity(0.42)
+                        .ignoresSafeArea()
+                        .onTapGesture {
+                            isChooserMenuPresented = false
+                        }
+
+                    PassageChooserOverflowMenuPopup(options: chooserOptions) { option in
+                        applyChooserOption(option)
+                        isChooserMenuPresented = false
+                    }
+                    .frame(width: min(max(proxy.size.width - 16, 260), 340))
+                    .padding(.top, 8)
+                    .padding(.trailing, 8)
+                }
+            }
+            .transition(.opacity)
+            .zIndex(10)
+        }
+    }
+
+    /**
+     Applies and persists one Android chooser-menu option.
+
+     - Parameter option: Menu option selected by the user.
+     - Side effects: Mutates local option state and writes Android-compatible settings.
+     - Failure modes: SwiftData save errors are swallowed by `SettingsStore`.
+     */
+    private func applyChooserOption(_ option: PassageChooserMenuOption) {
+        chooserOptions.apply(option)
+        chooserOptions.persist(to: SettingsStore(modelContext: modelContext))
+    }
+
+    /**
+     Loads persisted chooser options on first appearance.
+
+     - Side effects: Reads SwiftData through `SettingsStore` once per view lifetime.
+     - Failure modes: Missing settings use Android defaults.
+     */
+    private func loadChooserOptionsIfNeeded() {
+        guard !hasLoadedChooserOptions else {
+            return
+        }
+        chooserOptions = PassageChooserOptions.from(settingsStore: SettingsStore(modelContext: modelContext))
+        hasLoadedChooserOptions = true
     }
 
     /// Navigation title reflecting the current chooser step.
@@ -200,13 +345,19 @@ public struct BookChooserView: View {
     private var bookGrid: some View {
         GeometryReader { proxy in
             let orientation = PassageGridOrientation(size: proxy.size)
-            let layout = PassageGridLayout.androidDefault(
-                itemCount: books.count,
-                kind: .book,
+            let slots = PassageBookOrdering.displaySlots(
+                for: books,
+                options: chooserOptions,
                 orientation: orientation
             )
-            let slots = layout.displaySlots(for: books)
-            let columnCount = max(layout.columns, 1)
+            let columnCount = max(
+                PassageBookOrdering.columnCount(
+                    itemCount: books.count,
+                    options: chooserOptions,
+                    orientation: orientation
+                ),
+                1
+            )
             let metrics = PassageGridMetrics.squareCells(
                 availableWidth: proxy.size.width,
                 columns: columnCount
@@ -221,7 +372,10 @@ public struct BookChooserView: View {
                     ForEach(Array(slots.enumerated()), id: \.offset) { _, book in
                         if let book {
                             PassageGridButton(
-                                title: book.abbreviation,
+                                title: PassageBookDisplayName.title(
+                                    for: book,
+                                    showLongName: chooserOptions.showLongBookName
+                                ),
                                 accessibilityLabel: book.name,
                                 accessibilityIdentifier: "passageBookCell.\(book.osisId)",
                                 palette: PassageGridCellPalette.bookPalette(
@@ -229,8 +383,12 @@ public struct BookChooserView: View {
                                     currentOsisId: currentOsisBookId
                                 ),
                                 font: .subheadline.weight(.semibold),
+                                progress: chooserOptions.showProgressBars
+                                    ? bookProgressProvider(book)
+                                    : .none,
                                 cellSide: metrics.cellSide
                             ) {
+                                isChooserMenuPresented = false
                                 selectedBook = book
                                 selectedChapter = nil
                             }
@@ -289,5 +447,92 @@ public struct BookChooserView: View {
             return nil
         }
         return currentVerse
+    }
+}
+
+/**
+ Android-style popup surface for passage book chooser menu actions.
+
+ The Android chooser uses a dark overflow popup with text on the left and checkboxes on the right.
+ SwiftUI's native `Menu` renders platform command rows and left-side symbols, so this view keeps
+ the passage selector visually aligned with Android while delegating all behavior to
+ `PassageChooserOptions`.
+ */
+private struct PassageChooserOverflowMenuPopup: View {
+    /// Current Android chooser option state used to render row checkmarks.
+    let options: PassageChooserOptions
+
+    /// Callback invoked with the selected Android menu option.
+    let onSelect: (PassageChooserMenuOption) -> Void
+
+    /// Android-like active checkbox tint used by Material dark menus.
+    private let checkedTint = Color(red: 0x80 / 255.0, green: 0xCB / 255.0, blue: 0xC4 / 255.0)
+
+    /**
+     Renders Android's passage chooser overflow popup.
+     */
+    var body: some View {
+        VStack(spacing: 0) {
+            ForEach(PassageChooserMenuEntry.androidBookChooserOrder) { entry in
+                Button {
+                    onSelect(entry.option)
+                } label: {
+                    HStack(spacing: 18) {
+                        Text(localizedTitle(for: entry))
+                            .font(.system(size: 19, weight: .regular))
+                            .foregroundStyle(Color.white)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.82)
+
+                        Spacer(minLength: 12)
+
+                        Image(systemName: isChecked(entry.option) ? "checkmark.square.fill" : "square")
+                            .font(.system(size: 24, weight: .regular))
+                            .foregroundStyle(isChecked(entry.option) ? checkedTint : Color.white)
+                    }
+                    .frame(height: 58)
+                    .padding(.leading, 24)
+                    .padding(.trailing, 18)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(localizedTitle(for: entry))
+                .accessibilityIdentifier("passageChooserMenu.\(entry.localizationKey)")
+            }
+        }
+        .background(PassageChooserSurfacePalette.background.swiftUIColor)
+        .shadow(color: Color.black.opacity(0.45), radius: 10, x: 0, y: 6)
+        .accessibilityIdentifier("passageChooserOverflowPopup")
+    }
+
+    /**
+     Resolves localized text for an Android menu row.
+
+     - Parameter entry: Android menu row metadata.
+     - Returns: Localized menu title or the Android English fallback.
+     */
+    private func localizedTitle(for entry: PassageChooserMenuEntry) -> String {
+        NSLocalizedString(entry.localizationKey, value: entry.defaultTitle, comment: "")
+    }
+
+    /**
+     Returns whether one Android menu option is enabled.
+
+     - Parameter option: Android chooser option represented by a popup row.
+     - Returns: Current checked state for the row.
+     */
+    private func isChecked(_ option: PassageChooserMenuOption) -> Bool {
+        switch option {
+        case .alphabeticalOrder:
+            return options.alphabeticalOrder
+        case .rowOrder:
+            return options.rowOrder
+        case .groupByCategory:
+            return options.groupByCategory
+        case .showLongBookName:
+            return options.showLongBookName
+        case .showProgressBars:
+            return options.showProgressBars
+        }
     }
 }
