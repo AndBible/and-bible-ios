@@ -259,6 +259,7 @@ extension AndBibleUITests {
                     return
                 }
                 let createButton = resolveSearchCreateIndexButton(in: app)
+                observedCreatePrompt = true
                 tapElementReliably(createButton, timeout: 10, file: file, line: line)
                 continue
             }

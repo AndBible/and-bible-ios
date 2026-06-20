@@ -99,6 +99,24 @@ class SearchFixtureGuardrailsTests(unittest.TestCase):
         self.assertIn("state=needsIndex observed", support_source)
         self.assertIn("Create-index prompt observed", support_source)
 
+        needs_index_branch = re.search(
+            r"if sawNeedsIndex \{(?P<body>[\s\S]*?tapElementReliably\(createButton,[\s\S]*?continue)"
+            r"\s*\n\s*\}",
+            support_source,
+        )
+        self.assertIsNotNone(needs_index_branch)
+        branch_body = needs_index_branch.group("body")
+        expected_order = [
+            "observedNeedsIndex = true",
+            "if !allowsRuntimeIndexCreation",
+            "let createButton = resolveSearchCreateIndexButton(in: app)",
+            "observedCreatePrompt = true",
+            "tapElementReliably(createButton",
+        ]
+        positions = [branch_body.find(token) for token in expected_order]
+        self.assertNotIn(-1, positions)
+        self.assertEqual(sorted(positions), positions)
+
     def test_search_tests_document_seeded_index_contract_near_workflow_tests(self) -> None:
         """Keep the fixture expectation visible where future Search UI tests are added."""
         search_source = (REPO_ROOT / "AndBibleUITests/AndBibleUITests+Search.swift").read_text(
