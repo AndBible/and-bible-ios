@@ -177,6 +177,20 @@ struct AndBibleApp: App {
      */
     static let iCloudSyncEnabledKey = "icloud_sync_enabled"
 
+    /**
+     User-visible recovery message shown when CloudKit-backed SwiftData startup fails.
+     *
+     * The app has already recovered by opening the same store locally and clearing the iCloud
+     * bootstrap toggle before this message is presented. Keep this copy generic because failures
+     * can come from iCloud availability, entitlement, or model-compatibility validation.
+     */
+    private static var iCloudStartupRecoveryMessage: String {
+        String(
+            localized: "icloud_startup_recovery_message",
+            defaultValue: "iCloud sync could not be started, so sync was turned off and AndBible opened your local data."
+        )
+    }
+
     init() {
         let networkMonitor = RemoteSyncNetworkMonitor()
         self.remoteSyncNetworkMonitor = networkMonitor
@@ -185,7 +199,7 @@ struct AndBibleApp: App {
         DataMigration.migrateIfNeeded()
 
         // Read iCloud sync preference from UserDefaults (before container creation)
-        let iCloudEnabled = UserDefaults.standard.bool(forKey: Self.iCloudSyncEnabledKey)
+        let requestedICloudEnabled = UserDefaults.standard.bool(forKey: Self.iCloudSyncEnabledKey)
 
         // -- User data models: keep config name "AndBible" so existing store file is reused.
         // When iCloud sync is enabled, these models sync via CloudKit. --
@@ -222,13 +236,6 @@ struct AndBibleApp: App {
 
         // Keep the original config name "AndBible" so SwiftData reuses the existing
         // "AndBible.store" file. Changing the name would break PersistentIdentifiers.
-        let cloudConfig = ModelConfiguration(
-            "AndBible",
-            schema: Schema(cloudModels),
-            isStoredInMemoryOnly: false,
-            cloudKitDatabase: iCloudEnabled ? .private("iCloud.org.andbible.ios") : .none
-        )
-
         let localConfig = ModelConfiguration(
             "LocalStore",
             schema: Schema(localModels),
@@ -239,13 +246,38 @@ struct AndBibleApp: App {
         // Set up SWORD module directory before creating any SwordManager
         SwordSetup.ensureModulesReady()
 
-        // Initialize SyncService with current toggle state
+        // Initialize SyncService after container startup resolves the effective CloudKit mode.
         let sync = SyncService()
-        sync.setInitialState(enabled: iCloudEnabled)
-        self._syncService = State(initialValue: sync)
 
         do {
-            let container = try ModelContainer(for: schema, configurations: [cloudConfig, localConfig])
+            let startupResult = try ICloudModelContainerStartupRecovery.loadContainer(
+                iCloudEnabled: requestedICloudEnabled,
+                syncEnabledKey: Self.iCloudSyncEnabledKey,
+                loadCloudKitContainer: {
+                    let cloudConfig = ModelConfiguration(
+                        "AndBible",
+                        schema: Schema(cloudModels),
+                        isStoredInMemoryOnly: false,
+                        cloudKitDatabase: .private("iCloud.org.andbible.ios")
+                    )
+                    return try ModelContainer(for: schema, configurations: [cloudConfig, localConfig])
+                },
+                loadLocalContainer: {
+                    let cloudConfig = ModelConfiguration(
+                        "AndBible",
+                        schema: Schema(cloudModels),
+                        isStoredInMemoryOnly: false,
+                        cloudKitDatabase: .none
+                    )
+                    return try ModelContainer(for: schema, configurations: [cloudConfig, localConfig])
+                }
+            )
+            let container = startupResult.container
+            sync.setInitialState(enabled: startupResult.effectiveICloudEnabled)
+            self._syncService = State(initialValue: sync)
+            if startupResult.didRecoverFromCloudKitFailure {
+                self._remoteSyncErrorMessage = State(initialValue: Self.iCloudStartupRecoveryMessage)
+            }
             self.modelContainer = container
 
             // Initialize services that need ModelContext
