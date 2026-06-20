@@ -712,42 +712,70 @@ extension AndBibleUITests {
      *   - missingCountsAsSuccess: When true, treats a missing export as success.
      *   - failureDescription: Closure that formats the final failure message from the last value.
      * - Side effects:
-     *   - polls a dedicated state export on the main run loop until the predicate succeeds
+     *   - evaluates a dedicated state export through `XCTNSPredicateExpectation` and `XCTWaiter`
+     *     until the predicate succeeds
      * - Failure modes:
-     *   - records an XCTest failure if the predicate never succeeds before the timeout expires,
-     *     after one final state read for deadline-edge updates
+     *   - records an XCTest failure with elapsed wait time, final observed state, and last observed
+     *     state if the predicate never succeeds before the timeout expires
      */
     func waitForResolvedSemanticState(
         named name: String,
         timeout: TimeInterval,
-        valueProvider: () -> String?,
-        success: (String) -> Bool,
+        valueProvider: @escaping () -> String?,
+        success: @escaping (String) -> Bool,
         missingCountsAsSuccess: Bool = false,
         failureDescription: (String) -> String,
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
-        let deadline = Date().addingTimeInterval(timeout)
-        repeat {
+        let startedAt = Date()
+        var lastObservedValue: String?
+        let predicate = NSPredicate(block: { _, _ in
             if let currentValue = valueProvider() {
+                lastObservedValue = currentValue
                 if success(currentValue) {
-                    return
+                    return true
                 }
             } else if missingCountsAsSuccess {
-                return
+                return true
             }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-        } while Date() < deadline
+            return false
+        })
+        let expectation = XCTNSPredicateExpectation(predicate: predicate, object: nil)
+        expectation.expectationDescription = "Wait for \(name) semantic state"
+        let result = XCTWaiter().wait(for: [expectation], timeout: timeout)
+
+        if result == .completed {
+            return
+        }
 
         if let finalValue = valueProvider() {
+            lastObservedValue = finalValue
             if success(finalValue) {
                 return
             }
-            XCTFail(failureDescription(finalValue), file: file, line: line)
+            let elapsed = String(format: "%.2f", Date().timeIntervalSince(startedAt))
+            let lastObservedState = lastObservedValue ?? "<none>"
+            XCTFail(
+                "\(failureDescription(finalValue)) Semantic wait '\(name)' ended with \(result) "
+                    + "after elapsed=\(elapsed)s; final observed state='\(finalValue)'; "
+                    + "last observed state='\(lastObservedState)'.",
+                file: file,
+                line: line
+            )
         } else if missingCountsAsSuccess {
             return
         } else {
-            XCTFail(failureDescription("<missing \(name)>"), file: file, line: line)
+            let missingValue = "<missing \(name)>"
+            let elapsed = String(format: "%.2f", Date().timeIntervalSince(startedAt))
+            let lastObservedState = lastObservedValue ?? "<none>"
+            XCTFail(
+                "\(failureDescription(missingValue)) Semantic wait '\(name)' ended with \(result) "
+                    + "after elapsed=\(elapsed)s; final observed state='\(missingValue)'; "
+                    + "last observed state='\(lastObservedState)'.",
+                file: file,
+                line: line
+            )
         }
     }
 

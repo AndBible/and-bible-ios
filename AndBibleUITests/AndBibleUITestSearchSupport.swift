@@ -252,7 +252,7 @@ extension AndBibleUITests {
     func waitForSearchSemanticState(
         in app: XCUIApplication,
         timeout: TimeInterval,
-        success: (String) -> Bool,
+        success: @escaping (String) -> Bool,
         failureDescription: (String) -> String,
         file: StaticString = #filePath,
         line: UInt = #line
@@ -260,7 +260,7 @@ extension AndBibleUITests {
         waitForResolvedSemanticState(
             named: "searchStateExport",
             timeout: timeout,
-            valueProvider: { resolvedSearchStateValue(in: app) },
+            valueProvider: { self.resolvedSearchStateValue(in: app) },
             success: success,
             failureDescription: failureDescription,
             file: file,
@@ -421,7 +421,7 @@ extension AndBibleUITests {
             success: {
                 $0.contains("state=ready")
                     && $0.contains("searching=false")
-                    && (searchResultCount(from: $0) ?? -1) >= minimumCount
+                    && (self.searchResultCount(from: $0) ?? -1) >= minimumCount
             },
             failureDescription: {
                 "Expected Search to report at least \(minimumCount) results within \(timeout) seconds; last value was '\($0)'."
@@ -456,7 +456,7 @@ extension AndBibleUITests {
         description: String,
         file: StaticString = #filePath,
         line: UInt = #line,
-        predicate: (Set<String>) -> Bool
+        predicate: @escaping (Set<String>) -> Bool
     ) {
         waitForSearchSemanticState(
             in: app,
@@ -464,7 +464,7 @@ extension AndBibleUITests {
             success: {
                 $0.contains("state=ready")
                     && $0.contains("searching=false")
-                    && searchSelectedModules(from: $0).map(predicate) == true
+                    && self.searchSelectedModules(from: $0).map(predicate) == true
             },
             failureDescription: {
                 "Expected Search selected modules to match \(description) within \(timeout) seconds; last value was '\($0)'."
