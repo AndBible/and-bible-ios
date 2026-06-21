@@ -1056,7 +1056,6 @@ public struct BibleReaderView: View {
         case .globalTextOptions:
             TextDisplaySettingsView(
                 settings: $globalDisplaySettings,
-                workspaceColor: workspaceColorBinding,
                 navigationTitle: String(
                     localized: "global_text_display_settings_title",
                     defaultValue: "Global text options"

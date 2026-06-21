@@ -1,4 +1,5 @@
 import XCTest
+import SwiftUI
 @testable import BibleCore
 @testable import BibleUI
 
@@ -379,15 +380,20 @@ extension AndBibleTests {
     }
 
     /**
-     Verifies the iOS color editor exposes Android's `color_settings.xml` rows by scope.
+     Verifies the iOS color editor exposes Android's durable color rows by scope.
 
-     Android includes workspace color, day/night text color, day/night background color, and
-     day/night noise in the global and workspace color settings screens, but hides
-     `workspace_color` when editing a window. A failure here means the iOS color screen has drifted
-     from Android's actual row contract rather than merely changing local SwiftUI layout.
+     Android's root global color activity inflates the `workspace_color` row, but the commit path
+     writes workspace color only from a `SettingsLevel.WORKSPACE` bundle into workspace metadata.
+     iOS must therefore avoid giving true global settings an active-workspace side effect while
+     still exposing the row from workspace-scoped text options and hiding it for windows.
+
+     Failure meaning:
+     - true global settings can mutate workspace metadata
+     - workspace settings can no longer edit Android's action-bar color
+     - window settings expose a workspace-owned row
      */
-    func testColorSettingsVisibleAndroidKeysMatchAndroidScopeRules() {
-        let expectedGlobalOrWorkspaceKeys = [
+    func testColorSettingsVisibleAndroidKeysMatchAndroidDurableScopeRules() {
+        let expectedWorkspaceKeys = [
             "workspace_color",
             "text_color_day",
             "background_color_day",
@@ -398,11 +404,18 @@ extension AndBibleTests {
         ]
         XCTAssertEqual(
             ColorSettingsView.visibleAndroidKeys(scope: .global),
-            expectedGlobalOrWorkspaceKeys
+            [
+                "text_color_day",
+                "background_color_day",
+                "noise_day",
+                "text_color_night",
+                "background_color_night",
+                "noise_night",
+            ]
         )
         XCTAssertEqual(
             ColorSettingsView.visibleAndroidKeys(scope: .workspace),
-            expectedGlobalOrWorkspaceKeys
+            expectedWorkspaceKeys
         )
         XCTAssertEqual(
             ColorSettingsView.visibleAndroidKeys(scope: .window),
@@ -415,6 +428,53 @@ extension AndBibleTests {
                 "noise_night",
             ]
         )
+    }
+
+    /**
+     Verifies color reset only resets workspace metadata when the caller owns a workspace binding.
+
+     Android resets `WorkspaceSettings.workspaceColor` from workspace-level Text Options, but root
+     global and window routes must not overwrite workspace metadata. This test exercises the shared
+     reset helper with and without a workspace binding so reset behavior follows the same ownership
+     contract as row visibility.
+     */
+    func testColorSettingsResetOnlyMutatesWorkspaceColorForWorkspaceOwnedScope() {
+        var settings = TextDisplaySettings.appDefaults
+        settings.dayTextColor = Int(Int32(bitPattern: 0xFF123456))
+        settings.dayBackground = Int(Int32(bitPattern: 0xFF654321))
+        settings.dayNoise = 42
+        settings.nightTextColor = Int(Int32(bitPattern: 0xFFABCDEF))
+        settings.nightBackground = Int(Int32(bitPattern: 0xFF0F0F0F))
+        settings.nightNoise = 73
+        var workspaceColor: Int? = Int(Int32(bitPattern: 0xFF336699))
+
+        let settingsBinding = Binding<TextDisplaySettings>(
+            get: { settings },
+            set: { settings = $0 }
+        )
+        let workspaceColorBinding = Binding<Int?>(
+            get: { workspaceColor },
+            set: { workspaceColor = $0 }
+        )
+
+        ColorSettingsView.resetThemeColorsToDefaults(
+            settings: settingsBinding,
+            workspaceColor: workspaceColorBinding
+        )
+        XCTAssertEqual(settings.dayTextColor, -16777216)
+        XCTAssertEqual(settings.dayBackground, -1)
+        XCTAssertEqual(settings.dayNoise, 0)
+        XCTAssertEqual(settings.nightTextColor, -1)
+        XCTAssertEqual(settings.nightBackground, -16777216)
+        XCTAssertEqual(settings.nightNoise, 0)
+        XCTAssertEqual(workspaceColor, Workspace.defaultWorkspaceColor)
+
+        workspaceColor = Int(Int32(bitPattern: 0xFF223344))
+        ColorSettingsView.resetThemeColorsToDefaults(
+            settings: settingsBinding,
+            workspaceColor: nil
+        )
+        XCTAssertEqual(workspaceColor, Int(Int32(bitPattern: 0xFF223344)))
     }
 
     /**

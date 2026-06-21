@@ -74,26 +74,26 @@ extension Color {
  The view converts between SwiftUI `Color` values and the signed ARGB integer format expected by the
  Vue-based reader configuration. It mirrors Android's `color_settings.xml`: day/night text colors,
  day/night background colors, day/night noise controls, and the workspace accent color for Android
- global/workspace scopes. Window-level callers omit the workspace binding so the workspace row stays
- hidden like Android's `ColorSettingsFragment(isWindow = true)`.
+ workspace scope. Root/global and window-level callers omit the workspace binding so the workspace
+ row stays hidden unless the launched route owns workspace metadata.
 
  Data dependencies:
  - `settings` is the shared display-settings model whose color fields are being edited
- - `workspaceColor`, when supplied, is the workspace metadata accent color edited by the same
-   Android color screen
+ - `workspaceColor`, when supplied, is the workspace metadata accent color edited by the
+   workspace-scoped Android color screen
  - `onChange` lets the parent re-emit updated settings to the reader after any color mutation
 
  Side effects:
  - each color picker or slider mutation writes back to `settings` or `workspaceColor` and invokes
    `onChange`
  - the reset action restores the standard light/dark defaults and the Android workspace color
-   default when a global/workspace color binding is present
+   default when a workspace-owned color binding is present
  */
 public struct ColorSettingsView: View {
     /// Shared display settings whose theme colors are being edited.
     @Binding var settings: TextDisplaySettings
 
-    /// Optional workspace accent color binding; absence means the row is hidden for window scope.
+    /// Optional workspace accent color binding; absence means the workspace-owned row is hidden.
     private var workspaceColor: Binding<Int?>?
 
     /// Callback invoked after any theme-color mutation.
@@ -105,8 +105,8 @@ public struct ColorSettingsView: View {
      - Parameters:
        - settings: Shared display settings value whose color fields should be edited.
        - workspaceColor: Optional workspace accent-color binding. Supplying it exposes Android's
-         `workspace_color` row for global/workspace scopes; omitting it matches Android's
-         window-level hidden row.
+         `workspace_color` row for workspace scope; omitting it keeps true global/window routes from
+         mutating workspace metadata.
        - onChange: Optional callback invoked after any color mutation.
      */
     public init(
@@ -146,9 +146,9 @@ public struct ColorSettingsView: View {
     /**
      Android preference keys rendered by this view for the supplied settings scope.
 
-     Android's `ColorSettingsFragment` hides `workspace_color` only when the launched settings
-     bundle targets a specific window. Global and workspace color settings both carry the active
-     workspace color through the same row.
+     Android's XML row is inflated for non-window routes, but durable `workspace_color` commits only
+     happen for `SettingsLevel.WORKSPACE`. iOS therefore exposes the row only when this editor has a
+     workspace metadata binding.
 
      - Parameter scope: Android text-display settings scope that launched the color editor.
      - Returns: Android `color_settings.xml` keys in visible order for that scope.
@@ -156,7 +156,7 @@ public struct ColorSettingsView: View {
      - Failure modes: none; the inventory is static and test-audited against Android source.
      */
     static func visibleAndroidKeys(scope: TextDisplaySettingsScope) -> [String] {
-        visibleAndroidKeys(includesWorkspaceColor: scope != .window)
+        visibleAndroidKeys(includesWorkspaceColor: scope == .workspace)
     }
 
     /**
@@ -199,23 +199,41 @@ public struct ColorSettingsView: View {
     }
 
     /**
-     Restores the standard day and night color defaults.
+     Applies Android's standard day and night color defaults to the supplied bindings.
 
      Side effects:
      - writes the default ARGB values and noise levels back into `settings`
      - writes Android's default workspace color when this screen owns a workspace binding
+
+     Failure modes: This helper cannot fail.
+     */
+    static func resetThemeColorsToDefaults(
+        settings: Binding<TextDisplaySettings>,
+        workspaceColor: Binding<Int?>?
+    ) {
+        var updatedSettings = settings.wrappedValue
+        updatedSettings.dayTextColor = -16777216
+        updatedSettings.dayBackground = -1
+        updatedSettings.dayNoise = 0
+        updatedSettings.nightTextColor = -1
+        updatedSettings.nightBackground = -16777216
+        updatedSettings.nightNoise = 0
+        settings.wrappedValue = updatedSettings
+        workspaceColor?.wrappedValue = Workspace.defaultWorkspaceColor
+    }
+
+    /**
+     Restores the current editor to standard color defaults.
+
+     Side effects:
+     - writes default color values through `settings`
+     - resets workspace metadata only when this editor owns a workspace binding
      - invokes `onChange` so the parent can re-emit the updated display settings
 
      Failure modes: This helper cannot fail.
      */
     private func resetThemeColorsToDefaults() {
-        settings.dayTextColor = -16777216
-        settings.dayBackground = -1
-        settings.dayNoise = 0
-        settings.nightTextColor = -1
-        settings.nightBackground = -16777216
-        settings.nightNoise = 0
-        workspaceColor?.wrappedValue = Workspace.defaultWorkspaceColor
+        Self.resetThemeColorsToDefaults(settings: $settings, workspaceColor: workspaceColor)
         onChange?()
     }
 

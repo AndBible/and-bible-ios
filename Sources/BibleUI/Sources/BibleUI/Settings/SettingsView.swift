@@ -1252,7 +1252,6 @@ public struct SettingsView: View {
                 ) {
                     TextDisplaySettingsView(
                         settings: $globalTextDisplaySettings,
-                        workspaceColor: globalTextOptionsWorkspaceColorBinding,
                         onChange: applyGlobalTextDisplaySettingsChange
                     )
                 }
@@ -1702,52 +1701,6 @@ public struct SettingsView: View {
     /// Whether the current query should show the Android feature-shortcut section.
     private var shouldShowFeaturesSection: Bool {
         settingsSearchMatchesSection(featuresSettingsSearchEntries)
-    }
-
-    /**
-     Active-workspace color binding used by Android's global Text Options color screen.
-
-     Android exposes `workspace_color` from the global color-settings route, but the value still
-     belongs to the active workspace metadata rather than the app-level text-display defaults.
-     Root Application Preferences has no reader `WindowManager`, so this resolves the workspace
-     through the persisted active workspace ID and falls back to the first workspace if that local
-     pointer is missing or stale.
-
-     - Returns: A binding that reads/writes the active workspace color with Android's default
-       fallback.
-     - Side Effects: Setting the binding mutates `Workspace.workspaceColor` and saves the model
-       context.
-     - Failure Modes: Missing workspaces ignore writes and render Android's default color.
-     */
-    private var globalTextOptionsWorkspaceColorBinding: Binding<Int?> {
-        Binding(
-            get: {
-                activeWorkspaceForGlobalTextOptions?.workspaceColor ?? Workspace.defaultWorkspaceColor
-            },
-            set: { newValue in
-                guard let workspace = activeWorkspaceForGlobalTextOptions else { return }
-                workspace.workspaceColor = newValue ?? Workspace.defaultWorkspaceColor
-                try? modelContext.save()
-            }
-        )
-    }
-
-    /**
-     Resolves the workspace whose metadata is edited by root global Text Options.
-
-     - Returns: The persisted active workspace when available, otherwise the first workspace in
-       display order.
-     - Side Effects: none.
-     - Failure Modes: Fetch failures are swallowed by `WorkspaceStore` and produce `nil`.
-     */
-    private var activeWorkspaceForGlobalTextOptions: Workspace? {
-        let settingsStore = SettingsStore(modelContext: modelContext)
-        let workspaceStore = WorkspaceStore(modelContext: modelContext)
-        if let activeWorkspaceId = settingsStore.activeWorkspaceId,
-           let activeWorkspace = workspaceStore.workspace(id: activeWorkspaceId) {
-            return activeWorkspace
-        }
-        return workspaceStore.workspaces().first
     }
 
     /// Whether Reading Progress Settings can be opened and persisted from this settings instance.
