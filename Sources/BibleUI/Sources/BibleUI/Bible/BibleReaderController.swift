@@ -48,13 +48,13 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     /**
      Latest ordinal for a synchronized scroll request that this pane received from another source pane.
 
-     `scrollToOrdinal(_:)` records the latest target ordinal after successfully emitting to Vue.
+     `scrollToOrdinal(_:)` records the latest target ordinal after applying native sync state.
      `consumePendingSynchronizedScroll(ordinal:)` uses it to detect the matching target callback
      while all sync-origin visible-verse telemetry remains passive until explicit user interaction
      clears `synchronizedScrollFeedbackSuppressionActive`.
 
      Side effects:
-     - value is replaced by each delivered sync-origin native scroll request
+     - value is replaced by each sync-origin native scroll request
      - value is cleared when the matching target callback arrives or explicit user interaction
        cancels sync-feedback suppression
 
@@ -72,7 +72,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      callbacks and native scroll deltas instead of clearing on the first nonmatching ordinal.
 
      Side effects:
-     - set by delivered synchronized scroll requests
+     - set by synchronized scroll requests after native sync state is applied
      - cleared only by explicit user interaction in this pane
 
      Failure modes:

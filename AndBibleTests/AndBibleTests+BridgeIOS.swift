@@ -74,8 +74,8 @@ extension AndBibleTests {
     /**
      Verifies raw bridge emits expose whether JavaScript was actually dispatched.
 
-     The synchronized-scroll feedback guard uses this delivery signal to avoid suppressing later
-     real user scrolls after a detached bridge failed to receive `scroll_to_verse`.
+     Detached bridge reporting remains observable so callers can distinguish JavaScript dispatch
+     failure from a queued fire-and-forget emit when they need delivery diagnostics.
      */
     @MainActor
     func testBridgeEmitReportsDetachedDispatchFailure() {
