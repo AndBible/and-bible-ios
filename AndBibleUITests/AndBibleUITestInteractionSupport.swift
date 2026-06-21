@@ -148,13 +148,14 @@ extension AndBibleUITests {
             return true
         }
 
-        let visibleFrame = container.frame.insetBy(dx: 0, dy: 16)
+        let minimumVisibleHeight = min(max(24, element.frame.height * 0.5), element.frame.height)
+        let minimumVisibleWidth = min(max(40, element.frame.width * 0.3), element.frame.width)
+        let verticalInset = min(16, max(0, (container.frame.height - minimumVisibleHeight) / 2))
+        let visibleFrame = container.frame.insetBy(dx: 0, dy: verticalInset)
         let intersection = visibleFrame.intersection(element.frame)
         guard !intersection.isNull else {
             return false
         }
-        let minimumVisibleHeight = min(max(24, element.frame.height * 0.5), element.frame.height)
-        let minimumVisibleWidth = min(max(40, element.frame.width * 0.3), element.frame.width)
         return intersection.height >= minimumVisibleHeight &&
             intersection.width >= minimumVisibleWidth
     }
