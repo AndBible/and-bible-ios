@@ -2067,7 +2067,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      - Parameters:
        - bridge: Bridge reporting the scroll position change.
        - ordinal: Approximate verse ordinal currently near the viewport focus.
-       - key: Document OSIS ref such as `Gen.1` or `Gen.1.5` used to infer chapter changes.
+       - key: Document OSIS ref such as `Gen.1` or `Gen.1.5` used to infer chapter changes,
+         or an empty value when the web client can only report ordinal telemetry.
 
      Side effects:
      - updates scroll-restoration state and persists chapter/book changes to the page manager
@@ -2122,6 +2123,17 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
                     currentVerse = verse
                     pm.bibleVerseNo = verse
                 }
+                persistVisibleVerseState(immediate: false)
+            }
+        } else if let reference = verseReference(book: currentBook, ordinal: ordinal) {
+            currentChapter = reference.chapter
+            currentVerse = reference.verse
+            if let pm = activeWindow?.pageManager {
+                pm.bibleChapterNo = reference.chapter
+                if let bookIdx = bookList.firstIndex(where: { $0.name == currentBook }) {
+                    pm.bibleBibleBook = bookIdx
+                }
+                pm.bibleVerseNo = reference.verse
                 persistVisibleVerseState(immediate: false)
             }
         }

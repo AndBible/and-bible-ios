@@ -1977,6 +1977,47 @@ extension AndBibleTests {
     }
 
     /**
+     Protects Android-style visible-verse tracking when the web client cannot supply a document key.
+
+     Android's Bible `scrolledToOrdinal` path ignores the key for Bible documents and resolves the
+     ordinal through JSword. The setup reports the bundled KJV ordinal for Genesis 2:3 with an empty
+     key and expects iOS to update/persist the native chapter and verse from the ordinal. A failure
+     means valid scroll telemetry can be dropped whenever `dataset.osisRef` is missing.
+     */
+    func testDidScrollToOrdinalPersistsVisibleVerseWhenKeyIsEmpty() throws {
+        let bridge = BibleBridge()
+        let modulePath = try makeTemporaryBundledSwordPath()
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        let module = try XCTUnwrap(manager.module(named: controller.activeModuleName))
+        let ordinal = try XCTUnwrap(module.verseOrdinal(osisBookId: "Gen", chapter: 2, verse: 3))
+        let window = Window()
+        let pageManager = PageManager(id: window.id)
+        window.pageManager = pageManager
+        controller.activeWindow = window
+        controller.navigateTo(book: "Genesis", chapter: 1, verse: 1)
+
+        let persisted = expectation(description: "Visible verse state persisted after debounce")
+        var persistCount = 0
+        controller.onPersistState = {
+            persistCount += 1
+            persisted.fulfill()
+        }
+
+        controller.bridge(bridge, didScrollToOrdinal: ordinal, key: "", atChapterTop: false)
+
+        XCTAssertEqual(persistCount, 0)
+        XCTAssertEqual(controller.currentChapter, 2)
+        XCTAssertEqual(controller.currentVerse, 3)
+        XCTAssertEqual(pageManager.bibleChapterNo, 2)
+        XCTAssertEqual(pageManager.bibleVerseNo, 3)
+
+        wait(for: [persisted], timeout: 2.0)
+
+        XCTAssertEqual(persistCount, 1)
+    }
+
+    /**
      Protects visible-verse key parsing for OSIS refs that include a verse segment.
 
      Android's Bible visible-position callback updates by JSword ordinal and does not mistake
