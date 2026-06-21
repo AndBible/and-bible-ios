@@ -740,6 +740,55 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         loadCurrentContent()
     }
 
+    /**
+     Switches the visible document to a Bible module in one Android-parity transition.
+
+     Android's `CurrentPageManager.setCurrentDocument(book)` updates the selected Bible and active
+     page together before notifying the reader. This method gives iOS the same contract for toolbar
+     quick selectors and the full module picker: the pane's Bible document and category are updated
+     together, persisted together, and then rendered once when the web client is ready.
+
+     - Parameter moduleName: Installed SWORD Bible module abbreviation to make current.
+     Side effects:
+     - mutates the active Bible module and current document category
+     - refreshes the cached Bible book list for the selected module
+     - writes `bibleDocument` and `currentCategoryName` to the active pane's `PageManager`
+     - invokes `onPersistState` once when pane state is available
+     - reloads the visible reader document once when the JavaScript client is ready
+     Failure modes:
+     - if the module cannot be resolved, logs a warning and leaves controller/page state unchanged
+     - if the resolved module is not a Bible, logs a warning and leaves controller/page state
+       unchanged
+     - Important: Main-actor isolated because successful switches can mutate SwiftUI-observed reader
+       state and synchronously emit WebView bridge updates through `loadCurrentContent()`.
+     */
+    @MainActor
+    public func switchBibleDocument(to moduleName: String) {
+        guard let mgr = swordManager,
+              let mod = mgr.module(named: moduleName) else {
+            logger.warning("Cannot switch to Bible document \(moduleName) — not found")
+            return
+        }
+        guard mod.info.category == .bible else {
+            logger.warning("Cannot switch to Bible document \(moduleName) — category \(mod.info.category.rawValue)")
+            return
+        }
+        activeModule = mod
+        activeModuleName = moduleName
+        currentCategory = .bible
+        refreshBookList()
+        logger.info("Switched to Bible document: \(moduleName) (\(self.moduleBookList.count) books)")
+
+        if let pm = activeWindow?.pageManager {
+            pm.bibleDocument = moduleName
+            pm.currentCategoryName = DocumentCategory.bible.pageManagerKey
+            onPersistState?()
+        }
+
+        guard clientReady else { return }
+        loadCurrentContent()
+    }
+
     /// Switch to a different installed commentary module.
     public func switchCommentaryModule(to moduleName: String) {
         guard let mgr = swordManager,
@@ -762,6 +811,50 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         loadCurrentContent()
     }
 
+    /**
+     Switches the visible document to a commentary module in one Android-parity transition.
+
+     Android's toolbar quick selector delegates selected commentary documents to
+     `setCurrentDocument(book)`, so the selected module and visible document category change
+     together. This method keeps iOS on that contract for both quick selectors and full chooser
+     selections that should show commentary content immediately.
+
+     - Parameter moduleName: Installed SWORD commentary module abbreviation to make current.
+     Side effects:
+     - mutates the active commentary module and current document category
+     - writes `commentaryDocument` and `currentCategoryName` to the active pane's `PageManager`
+     - invokes `onPersistState` once when pane state is available
+     - reloads the visible reader document once when the JavaScript client is ready
+     Failure modes:
+     - if the module cannot be resolved, logs a warning and leaves controller/page state unchanged
+     - if the resolved module is not a commentary, logs a warning and leaves state unchanged
+     */
+    @MainActor
+    public func switchCommentaryDocument(to moduleName: String) {
+        guard let mgr = swordManager,
+              let mod = mgr.module(named: moduleName) else {
+            logger.warning("Cannot switch to commentary document \(moduleName) — not found")
+            return
+        }
+        guard mod.info.category == .commentary else {
+            logger.warning("Cannot switch to commentary document \(moduleName) — category \(mod.info.category.rawValue)")
+            return
+        }
+        activeCommentaryModule = mod
+        activeCommentaryModuleName = moduleName
+        currentCategory = .commentary
+        logger.info("Switched to commentary document: \(moduleName)")
+
+        if let pm = activeWindow?.pageManager {
+            pm.commentaryDocument = moduleName
+            pm.currentCategoryName = DocumentCategory.commentary.pageManagerKey
+            onPersistState?()
+        }
+
+        guard clientReady else { return }
+        loadCurrentContent()
+    }
+
     /// Switch the active dictionary module.
     public func switchDictionaryModule(to moduleName: String) {
         guard let mgr = swordManager,
@@ -781,6 +874,52 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         }
     }
 
+    /**
+     Switches the visible document to a dictionary module in one Android-parity transition.
+
+     Android's commentary quick popup can include dictionaries and selects them through the same
+     current-document path as commentaries. The selected dictionary, cleared entry key, and visible
+     document category must therefore be persisted together before rendering dictionary content.
+
+     - Parameter moduleName: Installed SWORD dictionary module abbreviation to make current.
+     Side effects:
+     - mutates the active dictionary module, clears the selected dictionary key, and sets the
+       current category to dictionary
+     - writes `dictionaryDocument`, `dictionaryKey`, and `currentCategoryName` to `PageManager`
+     - invokes `onPersistState` once when pane state is available
+     - reloads the visible reader document once when the JavaScript client is ready
+     Failure modes:
+     - if the module cannot be resolved, logs a warning and leaves controller/page state unchanged
+     - if the resolved module is not a dictionary, logs a warning and leaves state unchanged
+     */
+    @MainActor
+    public func switchDictionaryDocument(to moduleName: String) {
+        guard let mgr = swordManager,
+              let mod = mgr.module(named: moduleName) else {
+            logger.warning("Cannot switch to dictionary document \(moduleName) — not found")
+            return
+        }
+        guard mod.info.category == .dictionary else {
+            logger.warning("Cannot switch to dictionary document \(moduleName) — category \(mod.info.category.rawValue)")
+            return
+        }
+        activeDictionaryModule = mod
+        activeDictionaryModuleName = moduleName
+        currentDictionaryKey = nil
+        currentCategory = .dictionary
+        logger.info("Switched to dictionary document: \(moduleName)")
+
+        if let pm = activeWindow?.pageManager {
+            pm.dictionaryDocument = moduleName
+            pm.dictionaryKey = nil
+            pm.currentCategoryName = DocumentCategory.dictionary.pageManagerKey
+            onPersistState?()
+        }
+
+        guard clientReady else { return }
+        loadCurrentContent()
+    }
+
     /// Switch the active general book module.
     public func switchGeneralBookModule(to moduleName: String) {
         guard let mgr = swordManager,
@@ -798,6 +937,52 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             pm.generalBookKey = nil
             onPersistState?()
         }
+    }
+
+    /**
+     Switches the visible document to a general-book module in one Android-parity transition.
+
+     Android's commentary quick popup includes general books and routes selected rows through the
+     same current-document switch as other documents. iOS should not split this into separate module
+     and category updates because that can persist partial pane state or reload stale content.
+
+     - Parameter moduleName: Installed SWORD general-book module abbreviation to make current.
+     Side effects:
+     - mutates the active general-book module, clears the selected general-book key, and sets the
+       current category to general book
+     - writes `generalBookDocument`, `generalBookKey`, and `currentCategoryName` to `PageManager`
+     - invokes `onPersistState` once when pane state is available
+     - reloads the visible reader document once when the JavaScript client is ready
+     Failure modes:
+     - if the module cannot be resolved, logs a warning and leaves controller/page state unchanged
+     - if the resolved module is not a general book, logs a warning and leaves state unchanged
+     */
+    @MainActor
+    public func switchGeneralBookDocument(to moduleName: String) {
+        guard let mgr = swordManager,
+              let mod = mgr.module(named: moduleName) else {
+            logger.warning("Cannot switch to general book document \(moduleName) — not found")
+            return
+        }
+        guard mod.info.category == .generalBook else {
+            logger.warning("Cannot switch to general book document \(moduleName) — category \(mod.info.category.rawValue)")
+            return
+        }
+        activeGeneralBookModule = mod
+        activeGeneralBookModuleName = moduleName
+        currentGeneralBookKey = nil
+        currentCategory = .generalBook
+        logger.info("Switched to general book document: \(moduleName)")
+
+        if let pm = activeWindow?.pageManager {
+            pm.generalBookDocument = moduleName
+            pm.generalBookKey = nil
+            pm.currentCategoryName = DocumentCategory.generalBook.pageManagerKey
+            onPersistState?()
+        }
+
+        guard clientReady else { return }
+        loadCurrentContent()
     }
 
     /// Switch the active map module.

@@ -1,5 +1,55 @@
 import SwiftUI
 
+/**
+ Captures the Bible toolbar trigger bounds so Android-style popups can anchor to the button.
+
+ The reader view consumes this preference when presenting the quick Bible selector. It carries only
+ layout geometry, does not mutate state, and falls back to the previous anchor if SwiftUI reports no
+ newer value during a reduction pass.
+ */
+struct ReaderBibleToolbarButtonBoundsPreferenceKey: PreferenceKey {
+    /// No toolbar button anchor is known until the Bible toolbar icon publishes one.
+    static var defaultValue: Anchor<CGRect>?
+
+    /**
+     Stores the newest non-nil toolbar anchor emitted by SwiftUI preference propagation.
+
+     - Parameters:
+       - value: Previously captured anchor, if any.
+       - nextValue: Deferred provider for the next anchor candidate.
+     - Side effects: Mutates `value` with the latest available anchor.
+     - Failure modes: none; nil candidates leave the previous anchor intact.
+     */
+    static func reduce(value: inout Anchor<CGRect>?, nextValue: () -> Anchor<CGRect>?) {
+        value = nextValue() ?? value
+    }
+}
+
+/**
+ Captures the commentary toolbar trigger bounds so Android-style popups can anchor to the button.
+
+ The reader view consumes this preference when presenting the commentary/document quick selector.
+ It mirrors `ReaderBibleToolbarButtonBoundsPreferenceKey` so Bible and commentary quick menus share
+ the same toolbar anchoring contract without routing commentary through the overflow/menu sheet.
+ */
+struct ReaderCommentaryToolbarButtonBoundsPreferenceKey: PreferenceKey {
+    /// No toolbar button anchor is known until the commentary toolbar icon publishes one.
+    static var defaultValue: Anchor<CGRect>?
+
+    /**
+     Stores the newest non-nil toolbar anchor emitted by SwiftUI preference propagation.
+
+     - Parameters:
+       - value: Previously captured anchor, if any.
+       - nextValue: Deferred provider for the next anchor candidate.
+     - Side effects: Mutates `value` with the latest available anchor.
+     - Failure modes: none; nil candidates leave the previous anchor intact.
+     */
+    static func reduce(value: inout Anchor<CGRect>?, nextValue: () -> Anchor<CGRect>?) {
+        value = nextValue() ?? value
+    }
+}
+
 /// Width-collapsible accessory buttons that compete for toolbar space ahead of workspaces.
 enum BibleReaderToolbarAccessoryButton {
     case search
@@ -21,6 +71,8 @@ struct BibleReaderToolbarActions<OverflowButton: View>: View {
     private let strongsEnabled: Bool
     private let isBibleActive: Bool
     private let isCommentaryActive: Bool
+    /// Whether Bible/commentary document actions can accept gestures for the focused pane.
+    private let moduleActionsEnabled: Bool
     private let onShowSearch: () -> Void
     private let onShowSpeak: () -> Void
     private let onApplyStrongsMode: (Int) -> Void
@@ -40,6 +92,7 @@ struct BibleReaderToolbarActions<OverflowButton: View>: View {
         strongsEnabled: Bool,
         isBibleActive: Bool,
         isCommentaryActive: Bool,
+        moduleActionsEnabled: Bool,
         onShowSearch: @escaping () -> Void,
         onShowSpeak: @escaping () -> Void,
         onApplyStrongsMode: @escaping (Int) -> Void,
@@ -58,6 +111,7 @@ struct BibleReaderToolbarActions<OverflowButton: View>: View {
         self.strongsEnabled = strongsEnabled
         self.isBibleActive = isBibleActive
         self.isCommentaryActive = isCommentaryActive
+        self.moduleActionsEnabled = moduleActionsEnabled
         self.onShowSearch = onShowSearch
         self.onShowSpeak = onShowSpeak
         self.onApplyStrongsMode = onApplyStrongsMode
@@ -162,23 +216,27 @@ struct BibleReaderToolbarActions<OverflowButton: View>: View {
                 .accessibilityLabel(String(localized: "toggle_strongs_numbers"))
             }
 
-            bibleToolbarIcon
-                .foregroundStyle(toolbarIconColor(isActive: isBibleActive))
-                .contentShape(Rectangle())
-                .accessibilityIdentifier("readerBibleToolbarButton")
-                .accessibilityLabel(String(localized: "bible"))
-                .accessibilityAddTraits(.isButton)
-                .onTapGesture(perform: onBibleTap)
-                .onLongPressGesture(perform: onBibleLongPress)
+            moduleToolbarAction(
+                isActive: isBibleActive,
+                accessibilityIdentifier: "readerBibleToolbarButton",
+                accessibilityLabel: String(localized: "bible"),
+                onTap: onBibleTap,
+                onLongPress: onBibleLongPress
+            ) {
+                bibleToolbarIcon
+            }
+            .anchorPreference(key: ReaderBibleToolbarButtonBoundsPreferenceKey.self, value: .bounds) { $0 }
 
-            commentaryToolbarIcon
-                .foregroundStyle(toolbarIconColor(isActive: isCommentaryActive))
-                .contentShape(Rectangle())
-                .accessibilityIdentifier("readerCommentaryToolbarButton")
-                .accessibilityLabel(String(localized: "commentaries"))
-                .accessibilityAddTraits(.isButton)
-                .onTapGesture(perform: onCommentaryTap)
-                .onLongPressGesture(perform: onCommentaryLongPress)
+            moduleToolbarAction(
+                isActive: isCommentaryActive,
+                accessibilityIdentifier: "readerCommentaryToolbarButton",
+                accessibilityLabel: String(localized: "commentaries"),
+                onTap: onCommentaryTap,
+                onLongPress: onCommentaryLongPress
+            ) {
+                commentaryToolbarIcon
+            }
+            .anchorPreference(key: ReaderCommentaryToolbarButtonBoundsPreferenceKey.self, value: .bounds) { $0 }
 
             if showWorkspace {
                 Button(action: onShowWorkspaces) {
@@ -207,6 +265,75 @@ struct BibleReaderToolbarActions<OverflowButton: View>: View {
     private var commentaryToolbarIcon: some View {
         ToolbarAssetIcon(name: "ToolbarCommentary")
             .frame(width: 24, height: 22)
+    }
+
+    /**
+     Renders a Bible/commentary module action with mutually exclusive tap and long-press dispatch.
+
+     Android exposes the quick selector on tap and the full document chooser on long press. SwiftUI
+     `Button` plus `simultaneousGesture` can dispatch both paths for a long press, so this helper
+     owns the gesture contract directly and exposes a default accessibility action for the tap path.
+
+     - Parameters:
+       - isActive: Whether the represented document category is active in the focused pane.
+       - accessibilityIdentifier: Stable UI-test identifier for the toolbar action.
+       - accessibilityLabel: VoiceOver label for the toolbar action.
+       - onTap: Action for Android's quick-selector path.
+       - onLongPress: Action for Android's full-chooser path.
+       - icon: Toolbar icon content supplied by the caller.
+     - Returns: A toolbar icon view that dispatches either tap or long press, never both.
+     - Side effects: Invokes the supplied callback for the recognized gesture.
+     - Failure modes: Disabled module actions ignore gestures and hide from accessibility.
+     */
+    private func moduleToolbarAction<Icon: View>(
+        isActive: Bool,
+        accessibilityIdentifier: String,
+        accessibilityLabel: String,
+        onTap: @escaping () -> Void,
+        onLongPress: @escaping () -> Void,
+        @ViewBuilder icon: () -> Icon
+    ) -> some View {
+        icon()
+            .foregroundStyle(toolbarIconColor(isActive: isActive))
+            .opacity(moduleActionsEnabled ? 1 : 0.45)
+            .contentShape(Rectangle())
+            .gesture(moduleToolbarGesture(onTap: onTap, onLongPress: onLongPress))
+            .disabled(!moduleActionsEnabled)
+            .accessibilityIdentifier(accessibilityIdentifier)
+            .accessibilityLabel(accessibilityLabel)
+            .accessibilityAddTraits(.isButton)
+            .accessibilityHidden(!moduleActionsEnabled)
+            .accessibilityAction {
+                guard moduleActionsEnabled else { return }
+                onTap()
+            }
+    }
+
+    /**
+     Builds the mutually exclusive module toolbar gesture used for tap versus long press.
+
+     - Parameters:
+       - onTap: Action for a completed tap gesture.
+       - onLongPress: Action for a completed long-press gesture.
+     - Returns: An exclusive gesture that resolves to exactly one callback.
+     - Side effects: Invokes one callback when the toolbar action is enabled.
+     - Failure modes: Disabled module actions ignore completed gestures.
+     */
+    private func moduleToolbarGesture(
+        onTap: @escaping () -> Void,
+        onLongPress: @escaping () -> Void
+    ) -> some Gesture {
+        LongPressGesture().exclusively(before: TapGesture()).onEnded { value in
+            guard moduleActionsEnabled else { return }
+            switch value {
+            case .first(true):
+                onLongPress()
+            case .second:
+                onTap()
+            case .first(false):
+                break
+            }
+        }
     }
 
     private var workspaceToolbarIcon: some View {
