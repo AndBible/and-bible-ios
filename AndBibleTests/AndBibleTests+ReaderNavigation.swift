@@ -1087,6 +1087,29 @@ extension AndBibleTests {
     }
     #endif
 
+    /**
+     Protects pane menu action visibility before the pane controller is registered.
+
+     SwiftUI can build a `BibleWindowPane` menu while the persisted `PageManager` already says the
+     links window is Android's `general_book/Multi` page, but before `windowManager.controllers`
+     contains the live controller. Android does not expose copy-reference or sync controls for that
+     special page. The expected fallback is therefore based on persisted category/document state, not a
+     permissive controller-nil default. A failure means the menu can briefly show stale Bible actions
+     during initial render or controller re-registration.
+     */
+    func testPaneMenuCapabilitiesUsePageManagerBeforeControllerRegistration() {
+        let window = Window(isSynchronized: false, isLinksWindow: true)
+        let pageManager = PageManager(id: window.id, currentCategoryName: DocumentCategory.generalBook.pageManagerKey)
+        pageManager.generalBookDocument = "Multi"
+        pageManager.generalBookKey = "KJV:Gen.1.1"
+        window.pageManager = pageManager
+
+        let capabilities = BibleWindowPaneMenuCapabilities(window: window, controller: nil)
+
+        XCTAssertFalse(capabilities.canCopyReference)
+        XCTAssertFalse(capabilities.canSyncWindow)
+    }
+
     @MainActor
     func testDefinitionDocumentRequestedBeforeClientReadyReplaysAfterClientReady() throws {
         let (bridge, recordedScripts) = makeRecordingBridge()

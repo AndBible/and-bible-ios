@@ -235,14 +235,15 @@ struct BibleWindowPane: View {
      Opening the menu also marks this pane active, matching Android's pane menu behavior.
      */
     private var windowMenuButton: some View {
+        let capabilities = BibleWindowPaneMenuCapabilities(window: window, controller: controller)
         let canMoveWindow = !window.isLinksWindow && !windowManager.isMaximized
-        let canSyncWindow = controller?.isCurrentPageSyncable ?? true
+        let canSyncWindow = capabilities.canSyncWindow
         let autoPinEnabled = windowManager.activeWorkspace?.workspaceSettings?.autoPin ?? false
         let canPinWindow = !window.isLinksWindow && !windowManager.isMaximized && !autoPinEnabled
 
         return Menu {
             // Content actions
-            if controller?.isShowingAndroidMultiDocument != true {
+            if capabilities.canCopyReference {
                 Button(String(localized: "copy_reference"), systemImage: "doc.on.clipboard") {
                     copyReference()
                 }
