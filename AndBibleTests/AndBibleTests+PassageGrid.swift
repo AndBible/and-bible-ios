@@ -100,6 +100,99 @@ extension AndBibleTests {
     }
 
     /**
+     Verifies iOS mirrors Android's scripture/deuterocanonical book split.
+
+     Android `NavigationControl.getBibleBooks(isScriptureRequired)` filters the active document's
+     own book list through `Scripture.isScripture`, which is KJV-versification membership rather
+     than KJVA membership. Failure means iOS may expose expanded-canon books in the default Bible
+     grid or hide them entirely instead of showing Android's session-level toggle.
+     */
+    func testPassageBookScriptureScopeMirrorsAndroidKJVScriptureSplit() {
+        let expandedBooks = BibleReaderController.defaultBooks + [
+            BookInfo(name: "Tobit", osisId: "Tob", abbreviation: "Tob", chapterCount: 14, testament: 1),
+            BookInfo(name: "Judith", osisId: "Jdt", abbreviation: "Jdt", chapterCount: 16, testament: 1),
+        ]
+
+        let scriptureBooks = PassageBookScriptureScope.books(from: expandedBooks, scope: .scripture)
+        let deuterocanonicalBooks = PassageBookScriptureScope.books(from: expandedBooks, scope: .deuterocanonical)
+
+        XCTAssertEqual(scriptureBooks.count, 66)
+        XCTAssertEqual(scriptureBooks.first?.osisId, "Gen")
+        XCTAssertFalse(scriptureBooks.contains { $0.osisId == "Tob" })
+        XCTAssertEqual(deuterocanonicalBooks.map(\.osisId), ["Tob", "Jdt"])
+        XCTAssertTrue(PassageBookScriptureScope.hasDeuterocanonicalBooks(expandedBooks))
+        XCTAssertFalse(PassageBookScriptureScope.hasDeuterocanonicalBooks(BibleReaderController.defaultBooks))
+    }
+
+    /**
+     Verifies non-scripture book grids do not apply Android category grouping.
+
+     Android passes the non-scripture book list to the same `ButtonGrid`, but `ButtonGrid` only uses
+     grouped rows when `isCurrentlyShowingScripture` is true. Failure means iOS invents grouped
+     deuterocanonical behavior that Android deliberately does not render.
+     */
+    func testPassageBookOrderingDoesNotGroupDeuterocanonicalScope() {
+        let deuterocanonicalBooks = [
+            BookInfo(name: "Tobit", osisId: "Tob", abbreviation: "Tob", chapterCount: 14, testament: 1),
+            BookInfo(name: "Judith", osisId: "Jdt", abbreviation: "Jdt", chapterCount: 16, testament: 1),
+            BookInfo(name: "Wisdom", osisId: "Wis", abbreviation: "Wis", chapterCount: 19, testament: 1),
+            BookInfo(name: "Sirach", osisId: "Sir", abbreviation: "Sir", chapterCount: 51, testament: 1),
+        ]
+        var groupedOptions = PassageChooserOptions.androidDefault
+        groupedOptions.apply(.groupByCategory)
+
+        let slots = PassageBookOrdering.displaySlots(
+            for: deuterocanonicalBooks,
+            options: groupedOptions,
+            orientation: .portrait,
+            allowsCategoryGrouping: false
+        )
+
+        XCTAssertEqual(slots.compactMap { $0?.osisId }, ["Tob", "Jdt", "Wis", "Sir"])
+        XCTAssertEqual(slots[0]?.osisId, "Tob")
+        XCTAssertEqual(slots[1]?.osisId, "Jdt")
+        XCTAssertEqual(
+            PassageBookOrdering.columnCount(
+                itemCount: deuterocanonicalBooks.count,
+                options: groupedOptions,
+                orientation: .portrait,
+                allowsCategoryGrouping: false
+            ),
+            PassageGridLayout.androidDefault(
+                itemCount: deuterocanonicalBooks.count,
+                kind: .book,
+                orientation: .portrait,
+                rowOrder: groupedOptions.rowOrder
+            ).columns
+        )
+    }
+
+    /**
+     Verifies the deuterocanonical toggle is a separate Android action-bar control.
+
+     Android declares `deut_toggle` before the overflow-only checkable options and shows it as an
+     action item when the active document has non-scripture books. Failure means iOS hid the scope
+     switch inside the options popup or modeled it as a persisted preference.
+     */
+    func testPassageChooserExposesDeuterocanonicalActionOutsideOverflow() throws {
+        let testFileURL = URL(fileURLWithPath: #filePath)
+        let repoRoot = testFileURL
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let sourceURL = repoRoot.appendingPathComponent(
+            "Sources/BibleUI/Sources/BibleUI/Navigation/BookChooserView.swift"
+        )
+
+        let source = try String(contentsOf: sourceURL, encoding: .utf8)
+
+        XCTAssertTrue(source.contains("@State private var bookScope = PassageBookScriptureScope.scripture"))
+        XCTAssertTrue(source.contains("PassageBookScriptureScope.books(from: books, scope: bookScope)"))
+        XCTAssertTrue(source.contains("bookScope.toggle()"))
+        XCTAssertTrue(source.contains("passageChooserDeuterocanonicalToggleButton"))
+        XCTAssertFalse(source.contains("bookGridDeuterocanonical"))
+    }
+
+    /**
      Verifies iOS uses Android/JSword short book labels instead of SWORD abbreviations.
 
      The Android chooser calls `versification.getShortName(book)`, producing labels like `2 Ki`,
