@@ -2072,11 +2072,14 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      Side effects:
      - updates scroll-restoration state and persists chapter/book changes to the page manager
      - notifies the window manager for synchronized scrolling only when this pane is already active
-       from explicit user interaction and the callback did not acknowledge sync-origin feedback
+       from explicit user interaction, the callback did not acknowledge sync-origin feedback, and
+       the visible Bible position actually changed
      */
     public func bridge(_ bridge: BibleBridge, didScrollToOrdinal ordinal: Int, key: String, atChapterTop: Bool) {
+        let previousBook = currentBook
+        let previousChapter = currentChapter
+        let previousVerse = currentVerse
         let acknowledgedSynchronizedScroll = consumePendingSynchronizedScroll(ordinal: ordinal)
-        let shouldBroadcastSynchronizedScroll = !acknowledgedSynchronizedScroll && computeIsActiveWindow()
         // Track scroll position for restoration.
         lastScrollTarget = atChapterTop ? .chapterTop : .ordinal(ordinal)
 
@@ -2121,6 +2124,13 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
                 persistVisibleVerseState(immediate: false)
             }
         }
+
+        let visibleVerseChanged = previousBook != currentBook
+            || previousChapter != currentChapter
+            || previousVerse != currentVerse
+        let shouldBroadcastSynchronizedScroll = !acknowledgedSynchronizedScroll
+            && visibleVerseChanged
+            && computeIsActiveWindow()
 
         // Notify WindowManager for synchronized scrolling
         if shouldBroadcastSynchronizedScroll, let window = activeWindow {
