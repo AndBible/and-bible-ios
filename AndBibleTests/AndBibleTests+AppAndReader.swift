@@ -1140,7 +1140,12 @@ extension AndBibleTests {
             activeModuleName: "KJV"
         )
 
-        XCTAssertEqual(action, .switchDirectly("WEB"))
+        guard case .switchDirectly(let row) = action else {
+            XCTFail("Expected Android's exactly-two-module shortcut to select the alternate Bible.")
+            return
+        }
+        XCTAssertEqual(row.module.name, "WEB")
+        XCTAssertEqual(row.module.category, .bible)
     }
 
     /**
@@ -1242,16 +1247,159 @@ extension AndBibleTests {
             for: controller.installedBibleModules,
             activeModuleName: controller.activeModuleName
         )
-        guard case .switchDirectly(let selectedModuleName) = action else {
+        guard case .switchDirectly(let row) = action else {
             XCTFail("Expected Android's exactly-two-module shortcut to select the alternate Bible.")
             return
         }
 
-        controller.switchBibleDocument(to: selectedModuleName)
+        controller.switchBibleDocument(to: row.module.name)
 
         XCTAssertEqual(controller.activeModuleName, "WEB")
         XCTAssertEqual(pageManager.bibleDocument, "WEB")
         XCTAssertEqual(pageManager.currentCategoryName, DocumentCategory.bible.pageManagerKey)
+    }
+
+    /**
+     Protects Android `MainBibleActivity.commentaryClick` candidate and row semantics.
+
+     The Android default commentary toolbar tap calls `menuForDocs` with unlocked commentaries plus
+     general books plus dictionaries, then `menuForDocs` sorts by language code and abbreviation and
+     renders compact `initials (language)` rows. This test keeps that category mix in the shared
+     quick-selector presentation contract so iOS cannot regress to the full commentary-only chooser
+     sheet or sort by localized descriptions.
+     */
+    func testCommentaryQuickModuleSelectorRowsIncludeAndroidDocumentCategories() {
+        let commentary = ModuleInfo(
+            name: "MHC",
+            description: "Matthew Henry",
+            category: .commentary,
+            language: "en"
+        )
+        let dictionary = ModuleInfo(
+            name: "BDBT",
+            description: "Brown Driver Briggs",
+            category: .dictionary,
+            language: "en"
+        )
+        let generalBook = ModuleInfo(
+            name: "Pilgrim",
+            description: "Pilgrim's Progress",
+            category: .generalBook,
+            language: "en"
+        )
+        let finnishCommentary = ModuleInfo(
+            name: "FinComm",
+            description: "Finnish Commentary",
+            category: .commentary,
+            language: "fi"
+        )
+
+        let rows = BibleReaderQuickModuleSelectorPresentation.rows(
+            for: [generalBook, finnishCommentary, commentary, dictionary],
+            activeModuleName: "BDBT"
+        )
+
+        XCTAssertEqual(rows.map(\.module.category), [.dictionary, .commentary, .generalBook, .commentary])
+        XCTAssertEqual(rows.map(\.title), ["BDBT (en)", "MHC (en)", "Pilgrim (en)", "FinComm (fi)"])
+        XCTAssertEqual(rows.map(\.isEnabled), [false, true, true, true])
+    }
+
+    /**
+     Protects Android's atomic current-document switch behavior for commentary quick selections.
+
+     Android `menuForDocs` delegates the selected commentary `Book` to `setCurrentDocument(book)`,
+     which updates the active document and visible category together. iOS must provide the same
+     controller-level contract for the quick selector instead of switching module and category in
+     separate calls that can reload stale content or persist partial pane state.
+     */
+    @MainActor
+    func testCommentaryDocumentSwitchPersistsModuleAndCategoryTogether() throws {
+        let (bridge, _) = makeRecordingBridge()
+        let modulePath = try makeTemporaryBundledSwordPath()
+        try seedEmptyRawCommentaryModule(named: "UITestComm", in: modulePath)
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        let window = Window()
+        let pageManager = PageManager(id: window.id)
+        window.pageManager = pageManager
+        controller.activeWindow = window
+        var persistCount = 0
+        controller.onPersistState = { persistCount += 1 }
+
+        controller.switchCommentaryDocument(to: "UITestComm")
+
+        XCTAssertEqual(controller.currentCategory, .commentary)
+        XCTAssertEqual(controller.activeCommentaryModuleName, "UITestComm")
+        XCTAssertEqual(pageManager.commentaryDocument, "UITestComm")
+        XCTAssertEqual(pageManager.currentCategoryName, DocumentCategory.commentary.pageManagerKey)
+        XCTAssertEqual(persistCount, 1)
+    }
+
+    /**
+     Protects Android's atomic current-document switch behavior for dictionary quick selections.
+
+     Android routes dictionaries from the commentary quick popup through `setCurrentDocument(book)`.
+     iOS must therefore persist the selected dictionary, clear stale dictionary entry state, and
+     switch the visible category in one controller call rather than splitting module and category
+     updates across separate mutations.
+     */
+    @MainActor
+    func testDictionaryDocumentSwitchPersistsModuleCategoryAndClearsKeyTogether() throws {
+        let (bridge, _) = makeRecordingBridge()
+        let modulePath = try makeTemporaryBundledSwordPath()
+        try seedEmptyRawDictionaryModule(named: "UITestDict", in: modulePath)
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        let window = Window()
+        let pageManager = PageManager(id: window.id)
+        pageManager.dictionaryKey = "stale-key"
+        window.pageManager = pageManager
+        controller.activeWindow = window
+        var persistCount = 0
+        controller.onPersistState = { persistCount += 1 }
+
+        controller.switchDictionaryDocument(to: "UITestDict")
+
+        XCTAssertEqual(controller.currentCategory, .dictionary)
+        XCTAssertEqual(controller.activeDictionaryModuleName, "UITestDict")
+        XCTAssertNil(controller.currentDictionaryKey)
+        XCTAssertEqual(pageManager.dictionaryDocument, "UITestDict")
+        XCTAssertNil(pageManager.dictionaryKey)
+        XCTAssertEqual(pageManager.currentCategoryName, DocumentCategory.dictionary.pageManagerKey)
+        XCTAssertEqual(persistCount, 1)
+    }
+
+    /**
+     Protects Android's atomic current-document switch behavior for general-book quick selections.
+
+     Android includes general books in the commentary quick popup and applies selections through the
+     same current-document transition. The iOS controller must persist module/category and clear the
+     stale general-book key together so quick selection cannot leave mixed pane state behind.
+     */
+    @MainActor
+    func testGeneralBookDocumentSwitchPersistsModuleCategoryAndClearsKeyTogether() throws {
+        let (bridge, _) = makeRecordingBridge()
+        let modulePath = try makeTemporaryBundledSwordPath()
+        try seedEmptyRawGeneralBookModule(named: "UITestGB", in: modulePath)
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        let window = Window()
+        let pageManager = PageManager(id: window.id)
+        pageManager.generalBookKey = "stale-key"
+        window.pageManager = pageManager
+        controller.activeWindow = window
+        var persistCount = 0
+        controller.onPersistState = { persistCount += 1 }
+
+        controller.switchGeneralBookDocument(to: "UITestGB")
+
+        XCTAssertEqual(controller.currentCategory, .generalBook)
+        XCTAssertEqual(controller.activeGeneralBookModuleName, "UITestGB")
+        XCTAssertNil(controller.currentGeneralBookKey)
+        XCTAssertEqual(pageManager.generalBookDocument, "UITestGB")
+        XCTAssertNil(pageManager.generalBookKey)
+        XCTAssertEqual(pageManager.currentCategoryName, DocumentCategory.generalBook.pageManagerKey)
+        XCTAssertEqual(persistCount, 1)
     }
 
     /**
@@ -1396,6 +1544,57 @@ extension AndBibleTests {
         let resolveIndex = try XCTUnwrap(selectionSource.range(of: "let controller = controller(for: targetWindowId)")?.lowerBound)
         let dismissIndex = try XCTUnwrap(selectionSource.range(of: "dismissBibleQuickSelector()")?.lowerBound)
         XCTAssertLessThan(resolveIndex, dismissIndex)
+    }
+
+    /**
+     Guards the commentary toolbar quick-menu route against preserving the old iOS sheet.
+
+     Android default commentary taps show an anchored `PopupMenu` with commentaries, general books,
+     and dictionaries while the reader remains visible. Long press remains the full
+     `ChooseDocument` activity path except for Android's `swap-menu` setting. The SwiftUI
+     coordinator state is private, so this source-level contract checks the same boundary as the
+     Bible quick-menu test: commentary tap must resolve rows, show the anchored popup, anchor from
+     the commentary toolbar button, and route selections through category-specific current-document
+     switch methods.
+     */
+    func testCommentaryToolbarMenuRoutesThroughAnchoredQuickSelectorInsteadOfSheet() throws {
+        let readerSource = try bibleUISource(named: "BibleReaderView.swift")
+        let toolbarSource = try bibleUISource(named: "BibleReaderToolbarActions.swift")
+        let menuActionSource = try extractFunction(
+            named: "performCommentaryMenuAction",
+            from: readerSource
+        )
+        let selectionSource = try extractFunction(
+            named: "selectCommentaryQuickModule",
+            from: readerSource
+        )
+
+        XCTAssertTrue(menuActionSource.contains("BibleReaderQuickModuleSelectorPresentation.action("))
+        XCTAssertTrue(menuActionSource.contains("commentaryQuickSelectorModules("))
+        XCTAssertTrue(menuActionSource.contains("presentCommentaryQuickSelector(controller, rows: rows)"))
+        XCTAssertFalse(menuActionSource.contains("performCommentaryChooserAction()"))
+        XCTAssertTrue(readerSource.contains("performCommentaryMenuAction(controller, includeAuxiliaryDocuments: false)"))
+        XCTAssertTrue(readerSource.contains("modules += controller.installedGeneralBookModules"))
+        XCTAssertTrue(readerSource.contains("modules += controller.installedDictionaryModules"))
+        XCTAssertTrue(readerSource.contains("controller.installedCommentaryModules.filter(\\.isUnlocked)"))
+        XCTAssertTrue(readerSource.contains("@State private var commentaryQuickModuleSelectorRows"))
+        XCTAssertTrue(readerSource.contains("@State private var commentaryQuickModuleSelectorTargetWindowId"))
+        XCTAssertTrue(readerSource.contains("commentaryQuickModuleSelectorTargetWindowId = resolvedTargetWindowId"))
+        XCTAssertTrue(readerSource.contains("commentaryQuickModuleSelectorTargetWindowId = nil"))
+        XCTAssertTrue(readerSource.contains("commentaryQuickModuleSelectorOverlay(anchor: anchor)"))
+        XCTAssertTrue(readerSource.contains("ReaderCommentaryToolbarButtonBoundsPreferenceKey"))
+        XCTAssertTrue(
+            toolbarSource.contains(
+                ".anchorPreference(key: ReaderCommentaryToolbarButtonBoundsPreferenceKey.self"
+            )
+        )
+        XCTAssertTrue(selectionSource.contains("case .commentary:"))
+        XCTAssertTrue(selectionSource.contains("controller.switchCommentaryDocument(to: module.name)"))
+        XCTAssertTrue(selectionSource.contains("case .dictionary:"))
+        XCTAssertTrue(selectionSource.contains("controller.switchDictionaryDocument(to: module.name)"))
+        XCTAssertTrue(selectionSource.contains("case .generalBook:"))
+        XCTAssertTrue(selectionSource.contains("controller.switchGeneralBookDocument(to: module.name)"))
+        XCTAssertTrue(selectionSource.contains("dismissCommentaryQuickSelector()"))
     }
 
     /**

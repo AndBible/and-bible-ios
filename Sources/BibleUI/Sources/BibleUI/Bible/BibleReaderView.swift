@@ -226,6 +226,15 @@ public struct BibleReaderView: View {
     /// Window that owns the active Bible quick selector, kept separate from modal routing state.
     @State private var bibleQuickModuleSelectorTargetWindowId: UUID?
 
+    /// Presents Android's compact commentary/document quick selector anchored to the toolbar button.
+    @State private var showCommentaryQuickModuleSelector = false
+
+    /// Rows resolved by Android's commentary quick-selector contract for the active popup instance.
+    @State private var commentaryQuickModuleSelectorRows: [BibleReaderQuickModuleSelectorPresentation.Row] = []
+
+    /// Window that owns the active commentary quick selector, kept separate from modal routing state.
+    @State private var commentaryQuickModuleSelectorTargetWindowId: UUID?
+
     /// Presents the Android-style left navigation drawer from the reader header.
     @State private var showReaderNavigationDrawer = false
 
@@ -618,6 +627,49 @@ public struct BibleReaderView: View {
     public init() {}
 
     /**
+     Builds the reader content plus always-on reader overlays.
+
+     Keeping this chain out of `body` gives Swift smaller expressions to type-check while
+     preserving the same runtime view hierarchy.
+     */
+    private var readerScreenWithReaderOverlays: some View {
+        readerScreenContent
+            .animation(.easeInOut(duration: 0.2), value: isFullScreen)
+            .overlay(alignment: .bottom) {
+                bibleReferenceOverlay
+            }
+            .overlay(alignment: .bottom) {
+                toastOverlay
+            }
+            .overlay(alignment: .topLeading) {
+                readerRenderedContentStateExport
+            }
+            .overlay {
+                if showReaderNavigationDrawer {
+                    readerNavigationDrawerOverlay
+                }
+                if showBookChooser {
+                    bookChooserDrawerOverlay
+                }
+            }
+            .overlayPreferenceValue(ReaderOverflowButtonBoundsPreferenceKey.self) { anchor in
+                if showReaderOverflowMenu {
+                    readerOverflowMenuOverlay(anchor: anchor)
+                }
+            }
+            .overlayPreferenceValue(ReaderBibleToolbarButtonBoundsPreferenceKey.self) { anchor in
+                if showBibleQuickModuleSelector {
+                    bibleQuickModuleSelectorOverlay(anchor: anchor)
+                }
+            }
+            .overlayPreferenceValue(ReaderCommentaryToolbarButtonBoundsPreferenceKey.self) { anchor in
+                if showCommentaryQuickModuleSelector {
+                    commentaryQuickModuleSelectorOverlay(anchor: anchor)
+                }
+            }
+    }
+
+    /**
      Builds the full reading-screen hierarchy.
 
      The body composes the document header, split pane layout, sheet presenters, keyboard
@@ -625,40 +677,13 @@ public struct BibleReaderView: View {
      `WindowManager` state.
      */
     public var body: some View {
-        readerScreenContent
-        .animation(.easeInOut(duration: 0.2), value: isFullScreen)
-        .overlay(alignment: .bottom) {
-            bibleReferenceOverlay
-        }
-        .overlay(alignment: .bottom) {
-            toastOverlay
-        }
-        .overlay(alignment: .topLeading) {
-            readerRenderedContentStateExport
-        }
-        .overlay {
-            if showReaderNavigationDrawer {
-                readerNavigationDrawerOverlay
-            }
-            if showBookChooser {
-                bookChooserDrawerOverlay
-            }
-        }
-        .overlayPreferenceValue(ReaderOverflowButtonBoundsPreferenceKey.self) { anchor in
-            if showReaderOverflowMenu {
-                readerOverflowMenuOverlay(anchor: anchor)
-            }
-        }
-        .overlayPreferenceValue(ReaderBibleToolbarButtonBoundsPreferenceKey.self) { anchor in
-            if showBibleQuickModuleSelector {
-                bibleQuickModuleSelectorOverlay(anchor: anchor)
-            }
-        }
+        readerScreenWithReaderOverlays
         .animation(.easeInOut(duration: 0.25), value: toastMessage)
         .animation(.easeInOut(duration: 0.2), value: showReaderNavigationDrawer)
         .animation(.easeInOut(duration: 0.2), value: showBookChooser)
         .animation(.easeInOut(duration: 0.16), value: showReaderOverflowMenu)
         .animation(.easeInOut(duration: 0.16), value: showBibleQuickModuleSelector)
+        .animation(.easeInOut(duration: 0.16), value: showCommentaryQuickModuleSelector)
         .background {
             readerSceneMetricsBackground
         }
@@ -673,6 +698,7 @@ public struct BibleReaderView: View {
         }
         .onChange(of: windowManager.activeWindow?.id) { _, _ in
             dismissBibleQuickSelector()
+            dismissCommentaryQuickSelector()
             syncActiveDisplaySettings()
         }
         #if os(iOS)
@@ -1512,6 +1538,7 @@ public struct BibleReaderView: View {
         bibleQuickModuleSelectorRows = rows
         showReaderOverflowMenu = false
         showReaderNavigationDrawer = false
+        dismissCommentaryQuickSelector()
         showBibleQuickModuleSelector = true
     }
 
@@ -1574,6 +1601,123 @@ public struct BibleReaderView: View {
         dismissBibleQuickSelector()
         guard let controller else { return }
         controller.switchBibleDocument(to: module.name)
+    }
+
+    /**
+     Presents Android's commentary/document quick selector for the focused pane.
+
+     - Parameters:
+       - controller: Pane controller whose installed commentary-adjacent module list backs the popup.
+       - rows: Android-parity rows resolved by the pure quick-selector presentation contract.
+     - Side effects: Captures the active pane, closes competing reader popups, and shows the anchored
+       quick selector overlay.
+     - Failure modes: If the active pane cannot be identified, the popup still uses the focused
+       controller fallback through `panePresentationController`.
+     */
+    private func presentCommentaryQuickSelector(
+        _ controller: BibleReaderController,
+        rows: [BibleReaderQuickModuleSelectorPresentation.Row]
+    ) {
+        let targetWindowId = windowManager.controllers.first { _, registeredController in
+            (registeredController as? BibleReaderController) === controller
+        }?.key
+        let resolvedTargetWindowId = targetWindowId ?? windowManager.activeWindow?.id
+        setPanePresentationTarget(resolvedTargetWindowId)
+        commentaryQuickModuleSelectorTargetWindowId = resolvedTargetWindowId
+        commentaryQuickModuleSelectorRows = rows
+        showReaderOverflowMenu = false
+        showReaderNavigationDrawer = false
+        dismissBibleQuickSelector()
+        showCommentaryQuickModuleSelector = true
+    }
+
+    /// Dismisses the commentary quick selector without changing the captured pane target.
+    private func dismissCommentaryQuickSelector() {
+        showCommentaryQuickModuleSelector = false
+        commentaryQuickModuleSelectorRows = []
+        commentaryQuickModuleSelectorTargetWindowId = nil
+    }
+
+    /**
+     Resolves the current commentary-adjacent document name for quick-menu row disabling.
+
+     Android disables whichever document is currently visible in the popup candidate list. The
+     commentary toolbar popup can include commentaries, dictionaries, and general books, so the
+     disabled row follows the pane's active document category instead of always using commentary.
+
+     - Parameter controller: Pane controller that owns the quick selector, if still available.
+     - Returns: Active module abbreviation for commentary, dictionary, or general-book categories;
+       otherwise `nil` so rows remain selectable from Bible and other modes.
+     - Side effects: none.
+     - Failure modes: none; missing controllers are treated as having no current document.
+     */
+    private func currentCommentaryQuickSelectorModuleName(for controller: BibleReaderController?) -> String? {
+        guard let controller else { return nil }
+        switch controller.currentCategory {
+        case .commentary:
+            return controller.activeCommentaryModuleName
+        case .dictionary:
+            return controller.activeDictionaryModuleName
+        case .generalBook:
+            return controller.activeGeneralBookModuleName
+        default:
+            return nil
+        }
+    }
+
+    /**
+     Builds Android's commentary toolbar quick-selector candidate set.
+
+     Android default commentary taps call `menuForDocs` with unlocked commentaries plus general books
+     plus dictionaries. In `swap-menu`, commentary long press calls `menuForDocs` with commentaries
+     only. This helper preserves that distinction and leaves sorting/labeling to the shared
+     presentation contract.
+
+     - Parameters:
+       - controller: Pane controller that owns installed module lists.
+       - includeAuxiliaryDocuments: Whether to include general books and dictionaries.
+     - Returns: Candidate modules in the same category mix Android hands to `menuForDocs`.
+     - Side effects: none.
+     - Failure modes: none; empty installed lists return an empty candidate list.
+     */
+    private func commentaryQuickSelectorModules(
+        _ controller: BibleReaderController,
+        includeAuxiliaryDocuments: Bool
+    ) -> [ModuleInfo] {
+        var modules = controller.installedCommentaryModules.filter(\.isUnlocked)
+        guard includeAuxiliaryDocuments else {
+            return modules
+        }
+        modules += controller.installedGeneralBookModules
+        modules += controller.installedDictionaryModules
+        return modules
+    }
+
+    /**
+     Applies a commentary/document quick-selector choice to the captured pane.
+
+     - Parameters:
+       - module: Installed module selected from the Android-parity quick selector.
+       - targetWindowId: Captured window whose controller owns the popup selection.
+     - Side effects: Dismisses the popup and switches the pane through the category-specific
+       current-document path.
+     - Failure modes: If the controller is no longer available, or the selected module category is
+       not part of Android's commentary quick popup, the selection is ignored after dismissal.
+     */
+    private func selectCommentaryQuickModule(_ module: ModuleInfo, targetWindowId: UUID?) {
+        let controller = controller(for: targetWindowId)
+        dismissCommentaryQuickSelector()
+        guard let controller else { return }
+        switch module.category {
+        case .commentary:
+            controller.switchCommentaryDocument(to: module.name)
+        case .dictionary:
+            controller.switchDictionaryDocument(to: module.name)
+        case .generalBook:
+            controller.switchGeneralBookDocument(to: module.name)
+        default:
+            return
+        }
     }
 
     // MARK: - Modal Routing
@@ -2443,6 +2587,57 @@ public struct BibleReaderView: View {
         }
     }
 
+    /// Full-screen dismiss area plus anchored commentary quick selector mirroring Android's popup.
+    private func commentaryQuickModuleSelectorOverlay(anchor: Anchor<CGRect>?) -> some View {
+        GeometryReader { proxy in
+            let buttonRect = anchor.map { proxy[$0] }
+            let targetWindowId = commentaryQuickModuleSelectorTargetWindowId
+            let rows = commentaryQuickModuleSelectorRows
+            let width = ReaderToolbarPopupPlacement.boundedWidth(
+                containerWidth: proxy.size.width,
+                safeAreaInsets: proxy.safeAreaInsets,
+                preferredWidth: max(proxy.size.width * 0.42, 156),
+                maximumWidth: 232
+            )
+            let placement = ReaderToolbarPopupPlacement.trailingToolbarPopup(
+                containerSize: proxy.size,
+                safeAreaInsets: proxy.safeAreaInsets,
+                triggerRect: buttonRect,
+                popupWidth: width
+            )
+
+            ZStack(alignment: .topLeading) {
+                Color.black.opacity(0.001)
+                    .ignoresSafeArea()
+                    .contentShape(Rectangle())
+                    .onTapGesture { dismissCommentaryQuickSelector() }
+                    .accessibilityIdentifier("readerCommentaryQuickSelectorDismissArea")
+
+                if !rows.isEmpty {
+                    BibleReaderQuickModuleSelector(
+                        rows: rows,
+                        colorScheme: colorScheme,
+                        maximumHeight: placement.maximumHeight,
+                        accessibilityIdentifier: "readerCommentaryQuickSelector",
+                        rowAccessibilityIdentifierPrefix: "readerCommentaryQuickSelectorRow",
+                        onSelect: { module in
+                            selectCommentaryQuickModule(module, targetWindowId: targetWindowId)
+                        }
+                    )
+                    .frame(width: width, alignment: .topLeading)
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .strokeBorder(Color.black.opacity(colorScheme == .dark ? 0.45 : 0.12), lineWidth: 1)
+                    )
+                    .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.32 : 0.18), radius: 14, y: 6)
+                    .offset(x: placement.offset.width, y: placement.offset.height)
+                    .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .topTrailing)))
+                }
+            }
+        }
+    }
+
     /// Full-screen dimmer plus left drawer panel mirroring Android's main navigation drawer.
     private var readerNavigationDrawerOverlay: some View {
         ReaderSideDrawerOverlay(
@@ -3148,7 +3343,7 @@ public struct BibleReaderView: View {
     private func handleCommentaryToolbarLongPress(_ controller: BibleReaderController?) {
         switch toolbarActionsMode {
         case .swapMenu:
-            performCommentaryMenuAction(controller)
+            performCommentaryMenuAction(controller, includeAuxiliaryDocuments: false)
         case .defaultMode, .swapActivity:
             performCommentaryChooserAction()
         }
@@ -3171,8 +3366,8 @@ public struct BibleReaderView: View {
         ) {
         case .none:
             return
-        case .switchDirectly(let nextName):
-            controller.switchBibleDocument(to: nextName)
+        case .switchDirectly(let row):
+            controller.switchBibleDocument(to: row.module.name)
         case .showPopup(let rows):
             presentBibleQuickSelector(controller, rows: rows)
         }
@@ -3210,27 +3405,38 @@ public struct BibleReaderView: View {
     /**
      Handles the Android `menuForDocs` commentary action.
 
-     When exactly two commentary modules are installed, this mirrors Android's auto-cycle
-     shortcut. Otherwise it opens the commentary picker sheet.
+     When exactly two documents are available, this mirrors Android's auto-cycle shortcut. Every
+     other non-empty module list shows the compact anchored popup instead of the full document
+     picker sheet.
 
-     - Parameter controller: Focused pane controller, if one is currently registered.
+     - Parameters:
+       - controller: Focused pane controller, if one is currently registered.
+       - includeAuxiliaryDocuments: Whether to include Android's default general-book and dictionary
+         candidates in addition to commentaries.
      */
-    private func performCommentaryMenuAction(_ controller: BibleReaderController?) {
-        guard let controller else {
-            performCommentaryChooserAction()
+    private func performCommentaryMenuAction(
+        _ controller: BibleReaderController?,
+        includeAuxiliaryDocuments: Bool = true
+    ) {
+        guard let controller else { return }
+        let modules = commentaryQuickSelectorModules(
+            controller,
+            includeAuxiliaryDocuments: includeAuxiliaryDocuments
+        )
+        switch BibleReaderQuickModuleSelectorPresentation.action(
+            for: modules,
+            activeModuleName: currentCommentaryQuickSelectorModuleName(for: controller)
+        ) {
+        case .none:
             return
+        case .switchDirectly(let row):
+            let targetWindowId = windowManager.controllers.first { _, registeredController in
+                (registeredController as? BibleReaderController) === controller
+            }?.key ?? windowManager.activeWindow?.id
+            selectCommentaryQuickModule(row.module, targetWindowId: targetWindowId)
+        case .showPopup(let rows):
+            presentCommentaryQuickSelector(controller, rows: rows)
         }
-        if controller.installedCommentaryModules.count == 2 {
-            cycleToNextModule(
-                modules: controller.installedCommentaryModules,
-                activeName: controller.activeCommentaryModuleName
-            ) { nextName in
-                controller.switchCommentaryModule(to: nextName)
-                controller.switchCategory(to: .commentary)
-            }
-            return
-        }
-        performCommentaryChooserAction()
     }
 
     /**
@@ -3250,10 +3456,10 @@ public struct BibleReaderView: View {
     private func performCommentaryNextDocumentAction(_ controller: BibleReaderController?) {
         guard let controller else { return }
         if controller.currentCategory != .commentary {
-            if controller.activeCommentaryModuleName == nil {
-                performCommentaryChooserAction()
+            if let moduleName = controller.activeCommentaryModuleName {
+                controller.switchCommentaryDocument(to: moduleName)
             } else {
-                controller.switchCategory(to: .commentary)
+                performCommentaryChooserAction()
             }
             return
         }
@@ -3261,8 +3467,7 @@ public struct BibleReaderView: View {
             modules: controller.installedCommentaryModules,
             activeName: controller.activeCommentaryModuleName
         ) { nextName in
-            controller.switchCommentaryModule(to: nextName)
-            controller.switchCategory(to: .commentary)
+            controller.switchCommentaryDocument(to: nextName)
         }
     }
 

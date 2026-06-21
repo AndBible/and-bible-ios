@@ -58,8 +58,8 @@ struct BibleReaderQuickModuleSelectorPresentation {
         /// No menu action is available because there are no candidate modules.
         case none
 
-        /// Android's two-document shortcut: switch directly to the other module.
-        case switchDirectly(String)
+        /// Android's two-document shortcut: switch directly to the other module row.
+        case switchDirectly(Row)
 
         /// Android's popup path: show the sorted compact rows in an anchored menu.
         case showPopup([Row])
@@ -113,7 +113,7 @@ struct BibleReaderQuickModuleSelectorPresentation {
             guard let directRow = rows.first(where: { $0.module.name != activeModuleName }) ?? rows.first else {
                 return .none
             }
-            return .switchDirectly(directRow.module.name)
+            return .switchDirectly(directRow)
         }
         return .showPopup(rows)
     }
@@ -157,6 +157,12 @@ struct BibleReaderQuickModuleSelector: View {
      */
     let maximumHeight: CGFloat
 
+    /// Accessibility identifier applied to the popup container.
+    let accessibilityIdentifier: String
+
+    /// Accessibility identifier prefix applied to each popup row before the module abbreviation.
+    let rowAccessibilityIdentifierPrefix: String
+
     /**
      Selection callback for enabled rows.
 
@@ -172,6 +178,8 @@ struct BibleReaderQuickModuleSelector: View {
        - rows: Sorted Android-parity rows to render.
        - colorScheme: Current app color scheme used for the popup surface.
        - maximumHeight: Visible viewport for the popup; long lists scroll within this height.
+       - accessibilityIdentifier: Stable identifier for the popup container.
+       - rowAccessibilityIdentifierPrefix: Stable identifier prefix for row controls.
        - onSelect: Callback invoked only for enabled module rows.
      - Side effects: none at initialization; row taps later invoke `onSelect`.
      - Failure modes: none; empty rows produce a zero-height popup body.
@@ -180,11 +188,15 @@ struct BibleReaderQuickModuleSelector: View {
         rows: [BibleReaderQuickModuleSelectorPresentation.Row],
         colorScheme: ColorScheme,
         maximumHeight: CGFloat = .infinity,
+        accessibilityIdentifier: String = "readerBibleQuickSelector",
+        rowAccessibilityIdentifierPrefix: String = "readerBibleQuickSelectorRow",
         onSelect: @escaping (ModuleInfo) -> Void
     ) {
         self.rows = rows
         self.colorScheme = colorScheme
         self.maximumHeight = maximumHeight
+        self.accessibilityIdentifier = accessibilityIdentifier
+        self.rowAccessibilityIdentifierPrefix = rowAccessibilityIdentifierPrefix
         self.onSelect = onSelect
     }
 
@@ -208,7 +220,7 @@ struct BibleReaderQuickModuleSelector: View {
         }
         .frame(height: popupHeight)
         .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("readerBibleQuickSelector")
+        .accessibilityIdentifier(accessibilityIdentifier)
         .background(menuBackground)
     }
 
@@ -242,7 +254,7 @@ struct BibleReaderQuickModuleSelector: View {
         .buttonStyle(.plain)
         .disabled(!row.isEnabled)
         .opacity(row.isEnabled ? 1 : 0.48)
-        .accessibilityIdentifier("readerBibleQuickSelectorRow_\(row.module.name)")
+        .accessibilityIdentifier("\(rowAccessibilityIdentifierPrefix)_\(row.module.name)")
         .accessibilityValue(row.isEnabled ? "available" : "current")
     }
 

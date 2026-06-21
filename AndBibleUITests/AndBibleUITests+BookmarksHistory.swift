@@ -136,7 +136,24 @@ extension AndBibleUITests {
         )
 
         tapElementReliably(requireElement("readerCommentaryToolbarButton", in: app, timeout: 10), timeout: 10)
-        if waitForAnyElement(["modulePickerScreen"], in: app, timeout: 3) != nil {
+        if waitForAnyElement(["readerCommentaryQuickSelector"], in: app, timeout: 3) != nil {
+            let quickSelector = requireElement("readerCommentaryQuickSelector", in: app, timeout: 10)
+            let commentaryQuickRow = requireElement("readerCommentaryQuickSelectorRow_UITestComm", in: app, timeout: 10)
+            XCTAssertEqual(
+                commentaryQuickRow.value as? String,
+                "available",
+                "UITestComm quick-selector row must be selectable when switching from Bible."
+            )
+            for _ in 0..<8 where !isElementVisible(commentaryQuickRow, within: quickSelector) {
+                quickSelector.swipeUp()
+                RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+            }
+            XCTAssertTrue(
+                isElementVisible(commentaryQuickRow, within: quickSelector),
+                "Expected quick selector to scroll until UITestComm is visible."
+            )
+            tapElementReliably(commentaryQuickRow, timeout: 10)
+        } else if waitForAnyElement(["modulePickerScreen"], in: app, timeout: 3) != nil {
             tapFirstModulePickerRow(in: app, timeout: 10)
         }
         waitForReaderRenderedContentState(

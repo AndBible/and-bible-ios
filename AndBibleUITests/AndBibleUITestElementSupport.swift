@@ -6,18 +6,44 @@ import UIKit
 #endif
 
 extension AndBibleUITests {
+    /**
+     Returns whether an identifier belongs to the Android-style reader quick-selector popup family.
+
+     Both Bible and commentary toolbar popups render through `BibleReaderQuickModuleSelector`, which
+     exposes a scroll-view container and button rows. Keeping the resolver family-based prevents
+     tests from accidentally preserving old iOS picker behavior for one document category while the
+     other uses Android's compact popup.
+     */
+    func isReaderQuickSelectorIdentifier(_ identifier: String) -> Bool {
+        identifier == "readerBibleQuickSelector" ||
+            identifier == "readerCommentaryQuickSelector"
+    }
+
+    /**
+     Returns whether an identifier belongs to a row inside an Android-style reader quick selector.
+
+     - Parameter identifier: Accessibility identifier requested by a UI test.
+     - Returns: `true` for Bible or commentary quick-selector row identifiers.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    func isReaderQuickSelectorRowIdentifier(_ identifier: String) -> Bool {
+        identifier.hasPrefix("readerBibleQuickSelectorRow_") ||
+            identifier.hasPrefix("readerCommentaryQuickSelectorRow_")
+    }
+
     func heuristicElementCandidates(
         for identifier: String,
         in app: XCUIApplication
     ) -> [XCUIElement] {
-        if identifier == "readerBibleQuickSelector" {
+        if isReaderQuickSelectorIdentifier(identifier) {
             return [
                 app.scrollViews[identifier].firstMatch,
                 app.otherElements[identifier].firstMatch,
             ]
         }
 
-        if identifier.hasPrefix("readerBibleQuickSelectorRow_") {
+        if isReaderQuickSelectorRowIdentifier(identifier) {
             return [
                 app.buttons[identifier].firstMatch,
                 app.scrollViews.buttons[identifier].firstMatch,
