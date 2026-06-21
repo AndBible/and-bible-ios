@@ -2204,13 +2204,15 @@ public final class AndroidDatabaseBackupService {
                     historyItems: historyItems
                 )
             }
+            var workspaceSettings = workspace.workspaceSettings ?? WorkspaceSettings()
+            workspaceSettings.normalizeAutoAssignPrimaryLabel()
             return RemoteSyncAndroidWorkspace(
                 id: workspace.id,
                 name: workspace.name,
                 contentsText: workspace.contentsText,
                 orderNumber: workspace.orderNumber,
                 textDisplaySettings: workspace.textDisplaySettings,
-                workspaceSettings: workspace.workspaceSettings ?? WorkspaceSettings(),
+                workspaceSettings: workspaceSettings,
                 speakSettingsJSON: workspaceFidelityByID[workspace.id]?.speakSettingsJSON,
                 unPinnedWeight: workspace.unPinnedWeight,
                 maximizedWindowID: workspace.maximizedWindowId,

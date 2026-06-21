@@ -1115,6 +1115,7 @@ public final class RemoteSyncWorkspacePatchApplyService {
             columns: columns
         )
 
+        settings.normalizeAutoAssignPrimaryLabel()
         return (settings, speakSettingsJSON, workspaceColor)
     }
 
