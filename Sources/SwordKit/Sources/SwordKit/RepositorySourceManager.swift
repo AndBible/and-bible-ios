@@ -233,8 +233,9 @@ public final class RepositorySourceManager: @unchecked Sendable {
         let recordsByName = Dictionary(customRecords.map { ($0.name, $0) }, uniquingKeysWith: { first, _ in first })
 
         var namesInConfig: Set<String> = []
-        let configSources = persistedSources.map { source in
-            namesInConfig.insert(source.name)
+        let configSources = persistedSources.map { persistedSource in
+            namesInConfig.insert(persistedSource.name)
+            let source = Self.sourceByApplyingAndroidDefaultMetadata(to: persistedSource)
             guard let record = recordsByName[source.name],
                   record.type == SourceConfig.swordHTTPSRepositoryType else {
                 return source
@@ -246,7 +247,7 @@ public final class RepositorySourceManager: @unchecked Sendable {
                 catalogPath: source.catalogPath,
                 repositoryType: record.type,
                 description: record.description,
-                packageDirectory: record.packageDirectory.isEmpty ? nil : record.packageDirectory,
+                packageDirectory: Self.normalizedOptionalPackageDirectory(record.packageDirectory),
                 manifestURL: URL(string: record.manifestURL),
                 sourceURL: URL(string: record.sourceURL)
             )
@@ -257,6 +258,36 @@ public final class RepositorySourceManager: @unchecked Sendable {
             .map(\.source)
 
         return configSources + myBibleSources
+    }
+
+    /**
+     Enriches a SWORD config row with Android default package-directory metadata.
+
+     `InstallMgr.conf` is intentionally kept in SWORD's legacy three-field row shape, but built-in
+     repositories still need Android's package directory before Downloads or package fallback uses
+     them. Custom sidecar records already carry their own package directory and are applied later.
+
+     - Parameter source: Source parsed from local SWORD config.
+     - Returns: A source with Android package metadata when it matches a built-in repository.
+     - Side effects: none.
+     - Failure modes: non-default and already-enriched sources are returned unchanged.
+     */
+    private static func sourceByApplyingAndroidDefaultMetadata(to source: SourceConfig) -> SourceConfig {
+        guard source.packageDirectory == nil,
+              let packageDirectory = InstallManager.defaultPackageDirectory(for: source) else {
+            return source
+        }
+        return SourceConfig(
+            name: source.name,
+            type: source.type,
+            host: source.host,
+            catalogPath: source.catalogPath,
+            repositoryType: source.repositoryType,
+            description: source.description,
+            packageDirectory: packageDirectory,
+            manifestURL: source.manifestURL,
+            sourceURL: source.sourceURL
+        )
     }
 
     /**
@@ -603,7 +634,7 @@ public final class RepositorySourceManager: @unchecked Sendable {
                 catalogPath: catalogDirectory,
                 repositoryType: type,
                 description: description,
-                packageDirectory: packageDirectory.isEmpty ? nil : packageDirectory,
+                packageDirectory: RepositorySourceManager.normalizedOptionalPackageDirectory(packageDirectory),
                 manifestURL: URL(string: manifestURL),
                 sourceURL: URL(string: sourceURL)
             )
@@ -616,7 +647,7 @@ public final class RepositorySourceManager: @unchecked Sendable {
             self.type = registration.type
             self.host = registration.source.host
             self.catalogDirectory = registration.source.catalogPath
-            self.packageDirectory = registration.packageDirectory
+            self.packageDirectory = RepositorySourceManager.normalizedPackageDirectory(registration.packageDirectory)
             self.manifestURL = registration.manifestURL.absoluteString
             self.sourceURL = registration.sourceURL.absoluteString
         }
@@ -938,10 +969,11 @@ public final class RepositorySourceManager: @unchecked Sendable {
             host: manifest.host,
             catalogDirectory: manifest.catalogDirectory
         )
-        let packageDirectory = manifest.packageDirectory ?? Self.appendingPathComponent(
-            "packages",
-            toPath: source.catalogPath
-        )
+        let packageDirectory = Self.normalizedOptionalPackageDirectory(manifest.packageDirectory ?? "")
+            ?? Self.normalizedPackageDirectory(Self.appendingPathComponent(
+                "packages",
+                toPath: source.catalogPath
+            ))
         let sourceURL = try Self.httpsURL(host: source.host, path: source.catalogPath)
         let reportedManifestURL = Self.preferredHTTPSManifestURL(
             from: manifest.manifestUrl,
@@ -1051,6 +1083,15 @@ public final class RepositorySourceManager: @unchecked Sendable {
         let trimmed = rawPath.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return "" }
         return trimmed.hasPrefix("/") ? trimmed : "/\(trimmed)"
+    }
+
+    private static func normalizedPackageDirectory(_ rawPath: String) -> String {
+        normalizedCatalogDirectory(rawPath)
+    }
+
+    private static func normalizedOptionalPackageDirectory(_ rawPath: String) -> String? {
+        let normalized = normalizedPackageDirectory(rawPath)
+        return normalized.isEmpty ? nil : normalized
     }
 
     /**

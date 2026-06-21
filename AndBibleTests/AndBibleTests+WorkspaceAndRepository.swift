@@ -698,6 +698,118 @@ extension AndBibleTests {
         XCTAssertTrue(manager.loadSources().contains { $0.name == "Example Repo" })
     }
 
+    /**
+     Verifies SWORD package directories are normalized before persistence and reload.
+
+     Android package directories are repository paths. iOS accepts Android-style manifests and direct
+     sidecar reloads, so relative manifest values must become root-relative paths before Downloads
+     later builds package ZIP URLs from the host/path tuple.
+     */
+    func testRepositorySourceManagerNormalizesRelativeSwordManifestPackageDirectory() async throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let manifestData = """
+        {
+          "name": "Relative Repo",
+          "description": "Relative package catalog",
+          "type": "sword-https",
+          "host": "example.org",
+          "catalogDirectory": "/sword",
+          "packageDirectory": "sword/packages",
+          "manifestUrl": "https://example.org/sword/manifest.json"
+        }
+        """.data(using: .utf8)!
+
+        MockURLProtocol.requestHandler = { request in
+            XCTAssertEqual(request.url?.absoluteString, "https://example.org/sword/manifest.json")
+            let response = HTTPURLResponse(
+                url: try XCTUnwrap(request.url),
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: nil
+            )!
+            return (response, manifestData)
+        }
+
+        let manager = RepositorySourceManager(
+            basePath: tempDir.path,
+            session: makeMockedURLSession()
+        )
+
+        let registration = try await manager.addCustomSource(from: "https://example.org/sword/manifest.json")
+
+        XCTAssertEqual(registration.packageDirectory, "/sword/packages")
+        let source = try XCTUnwrap(manager.loadSources().first { $0.name == "Relative Repo" })
+        XCTAssertEqual(source.packageDirectory, "/sword/packages")
+
+        let sidecarData = try Data(contentsOf: tempDir.appendingPathComponent("CustomRepositories.json"))
+        let sidecarJSON = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: sidecarData) as? [String: Any]
+        )
+        let repositories = try XCTUnwrap(sidecarJSON["repositories"] as? [[String: Any]])
+        let record = try XCTUnwrap(repositories.first { ($0["name"] as? String) == "Relative Repo" })
+        XCTAssertEqual(record["packageDirectory"] as? String, "/sword/packages")
+    }
+
+    /**
+     Verifies empty SWORD package directories fall back to the Android default package path.
+
+     A manifest can include a blank package directory. Android/JSword behavior treats missing package
+     metadata as a catalog-relative packages path, so iOS must normalize blank values to that fallback
+     instead of persisting an empty package URL component.
+     */
+    func testRepositorySourceManagerFallsBackForBlankSwordManifestPackageDirectory() async throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let manifestData = """
+        {
+          "name": "Blank Package Repo",
+          "description": "Blank package catalog",
+          "type": "sword-https",
+          "host": "example.org",
+          "catalogDirectory": "/sword",
+          "packageDirectory": "   ",
+          "manifestUrl": "https://example.org/sword/manifest.json"
+        }
+        """.data(using: .utf8)!
+
+        MockURLProtocol.requestHandler = { request in
+            XCTAssertEqual(request.url?.absoluteString, "https://example.org/sword/manifest.json")
+            let response = HTTPURLResponse(
+                url: try XCTUnwrap(request.url),
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: nil
+            )!
+            return (response, manifestData)
+        }
+
+        let manager = RepositorySourceManager(
+            basePath: tempDir.path,
+            session: makeMockedURLSession()
+        )
+
+        let registration = try await manager.addCustomSource(from: "https://example.org/sword/manifest.json")
+
+        XCTAssertEqual(registration.packageDirectory, "/sword/packages")
+        let source = try XCTUnwrap(manager.loadSources().first { $0.name == "Blank Package Repo" })
+        XCTAssertEqual(source.packageDirectory, "/sword/packages")
+
+        let sidecarData = try Data(contentsOf: tempDir.appendingPathComponent("CustomRepositories.json"))
+        let sidecarJSON = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: sidecarData) as? [String: Any]
+        )
+        let repositories = try XCTUnwrap(sidecarJSON["repositories"] as? [[String: Any]])
+        let record = try XCTUnwrap(repositories.first { ($0["name"] as? String) == "Blank Package Repo" })
+        XCTAssertEqual(record["packageDirectory"] as? String, "/sword/packages")
+    }
+
     func testRepositorySourceManagerIgnoresNonHTTPSSwordManifestURLMetadata() async throws {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -810,6 +922,93 @@ extension AndBibleTests {
         XCTAssertEqual(source.manifestURL?.absoluteString, "https://legacy.example/catalog")
         XCTAssertEqual(source.packageDirectory, "/catalog/packages")
         XCTAssertEqual(try Data(contentsOf: sidecarURL), unreadableSidecar)
+    }
+
+    /**
+     Verifies sidecar package directories are normalized when merged onto SWORD config rows.
+
+     Older sidecars can contain Android package-directory values before iOS normalized them at write
+     time. Loading must normalize the merged `SourceConfig` so Downloads package fallback receives
+     the same root-relative repository path Android passes to JSword.
+     */
+    func testRepositorySourceManagerNormalizesSidecarPackageDirectoryWhenMergingConfigSource() throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        InstallManager.ensureDefaultConfigPublic(at: tempDir.path)
+        let configURL = tempDir.appendingPathComponent("InstallMgr.conf")
+        var config = try String(contentsOf: configURL, encoding: .utf8)
+        config += "\nHTTPSource=Sidecar Repo|sidecar.example|/catalog\n"
+        try config.write(to: configURL, atomically: true, encoding: .utf8)
+
+        let sidecar = """
+        {
+          "version": 1,
+          "repositories": [
+            {
+              "name": "Sidecar Repo",
+              "description": "Sidecar catalog",
+              "type": "sword-https",
+              "host": "sidecar.example",
+              "catalogDirectory": "/catalog",
+              "packageDirectory": " packages ",
+              "manifestURL": "https://sidecar.example/catalog",
+              "sourceURL": "https://sidecar.example/catalog"
+            }
+          ]
+        }
+        """.data(using: .utf8)!
+        try sidecar.write(to: tempDir.appendingPathComponent("CustomRepositories.json"))
+
+        let manager = RepositorySourceManager(basePath: tempDir.path)
+        let source = try XCTUnwrap(manager.loadSources().first { $0.name == "Sidecar Repo" })
+
+        XCTAssertEqual(source.packageDirectory, "/packages")
+    }
+
+    /**
+     Verifies whitespace-only package metadata is treated as absent when loading old sidecars.
+
+     A whitespace string is not an Android package directory. Keeping it as non-nil empty metadata
+     can hide the direct-catalog fallback path, so the source model should expose `nil` instead.
+     */
+    func testRepositorySourceManagerTreatsWhitespaceSidecarPackageDirectoryAsMissing() throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        InstallManager.ensureDefaultConfigPublic(at: tempDir.path)
+        let configURL = tempDir.appendingPathComponent("InstallMgr.conf")
+        var config = try String(contentsOf: configURL, encoding: .utf8)
+        config += "\nHTTPSource=Whitespace Repo|whitespace.example|/catalog\n"
+        try config.write(to: configURL, atomically: true, encoding: .utf8)
+
+        let sidecar = """
+        {
+          "version": 1,
+          "repositories": [
+            {
+              "name": "Whitespace Repo",
+              "description": "Whitespace catalog",
+              "type": "sword-https",
+              "host": "whitespace.example",
+              "catalogDirectory": "/catalog",
+              "packageDirectory": "   ",
+              "manifestURL": "https://whitespace.example/catalog",
+              "sourceURL": "https://whitespace.example/catalog"
+            }
+          ]
+        }
+        """.data(using: .utf8)!
+        try sidecar.write(to: tempDir.appendingPathComponent("CustomRepositories.json"))
+
+        let manager = RepositorySourceManager(basePath: tempDir.path)
+        let source = try XCTUnwrap(manager.loadSources().first { $0.name == "Whitespace Repo" })
+
+        XCTAssertNil(source.packageDirectory)
     }
 
     func testRepositorySourceManagerAddsMyBibleManifestSource() async throws {
@@ -1562,6 +1761,33 @@ extension AndBibleTests {
         let remaining = manager.loadSources()
         XCTAssertTrue(remaining.contains { $0.name == "AndBible" })
         XCTAssertFalse(remaining.contains { $0.name == "Example Repo" })
+    }
+
+    /**
+     Verifies built-in Downloads sources retain Android's package and catalog directories separately.
+
+     Android's `repositories.txt` defines both directories for every SWORD repository. iOS uses a
+     SWORD-compatible config file as local plumbing, but the source model consumed by Downloads and
+     installs must still expose the Android package directory instead of reconstructing it later.
+     */
+    func testRepositorySourceManagerLoadsAndroidDefaultPackageDirectories() throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let manager = RepositorySourceManager(basePath: tempDir.path)
+        let sources = manager.loadSources()
+
+        let crossWire = try XCTUnwrap(sources.first { $0.name == "CrossWire" })
+        XCTAssertEqual(crossWire.host, "crosswire.org")
+        XCTAssertEqual(crossWire.catalogPath, "/ftpmirror/pub/sword/raw")
+        XCTAssertEqual(crossWire.packageDirectory, "/ftpmirror/pub/sword/packages/rawzip")
+
+        let step = try XCTUnwrap(sources.first { $0.name == "STEP Bible (Tyndale)" })
+        XCTAssertEqual(step.host, "public.modules.stepbible.org")
+        XCTAssertEqual(step.catalogPath, "/catalog")
+        XCTAssertEqual(step.packageDirectory, "/packages")
     }
 
     func testRepositorySourceManagerResetToDefaultsRemovesCustomSourcesAndRestoresDefaults() throws {
