@@ -20,6 +20,8 @@ import UIKit
 
  Data dependencies:
  - `settings` is the persisted display-settings model owned by the parent screen
+ - `workspaceColor`, when supplied, exposes Android's workspace accent row from the nested color
+   editor while keeping that metadata separate from inherited text-display settings
  - `scope` determines which Android parent-scope links are visible
  - SwiftData labels back the Android `BOOKMARKS_HIDELABELS` picker
  - `onChange` lets the parent push updated settings into the reader after each mutation
@@ -36,6 +38,9 @@ public struct TextDisplaySettingsView: View {
 
     /// Callback invoked after any user-visible settings mutation.
     var onChange: (() -> Void)?
+
+    /// Optional workspace accent-color binding passed to the nested Android color editor.
+    private var workspaceColor: Binding<Int?>?
 
     /// Localized navigation title that reflects the Android settings scope currently being edited.
     private let navigationTitleText: String
@@ -103,6 +108,9 @@ public struct TextDisplaySettingsView: View {
 
      - Parameters:
        - settings: Shared display settings value to mutate from the form.
+       - workspaceColor: Optional workspace accent color edited from Android's color settings
+         screen. Supplying this binding exposes the workspace color row; omitting it hides the row
+         for window/global scopes.
        - navigationTitle: Optional Android-scope title shown by the surrounding navigation stack.
          Passing `nil` uses the localized global text-options title.
        - scope: Android text-display scope currently being edited.
@@ -113,6 +121,7 @@ public struct TextDisplaySettingsView: View {
      */
     public init(
         settings: Binding<TextDisplaySettings>,
+        workspaceColor: Binding<Int?>? = nil,
         navigationTitle: String? = nil,
         scope: TextDisplaySettingsScope = .global,
         workspaceName: String? = nil,
@@ -121,6 +130,7 @@ public struct TextDisplaySettingsView: View {
         onChange: (() -> Void)? = nil
     ) {
         self._settings = settings
+        self.workspaceColor = workspaceColor
         self.navigationTitleText = navigationTitle ?? String(
             localized: "global_text_display_settings_title",
             defaultValue: "Global text options"
@@ -502,7 +512,11 @@ public struct TextDisplaySettingsView: View {
 
                     preferenceSection(.appearance) {
                         NavigationLink {
-                            ColorSettingsView(settings: $settings, onChange: onChange)
+                            ColorSettingsView(
+                                settings: $settings,
+                                workspaceColor: workspaceColor,
+                                onChange: onChange
+                            )
                         } label: {
                             preferenceRowContent(
                                 androidKey: "COLORS",

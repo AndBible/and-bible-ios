@@ -63,11 +63,12 @@ public final class WorkspaceStore {
      * - Parameters:
      *   - name: User-visible workspace name.
      *   - inheritingDefaultsFrom: Optional workspace whose workspace-scoped non-theme defaults
-     *     should seed the new workspace.
+     *     and workspace accent color should seed the new workspace.
      * - Returns: The newly created workspace.
      * - Side Effects: Inserts a `Workspace`, a child `Window`, a matching `PageManager`, and saves `modelContext`.
      * - Failure: Save errors are swallowed.
      * - Note: The initial `PageManager.id` is set to the new window ID so the one-to-one relationship stays aligned.
+     *   When no source workspace supplies a color, the workspace uses Android's default `#ff444444`.
      */
     @discardableResult
     public func createWorkspace(name: String, inheritingDefaultsFrom source: Workspace? = nil) -> Workspace {
@@ -75,7 +76,7 @@ public final class WorkspaceStore {
         let workspace = Workspace(name: name, orderNumber: maxOrder + 1)
         workspace.textDisplaySettings = source?.textDisplaySettings?.clearingThemeColors()
         workspace.workspaceSettings = source?.workspaceSettings
-        workspace.workspaceColor = source?.workspaceColor
+        workspace.workspaceColor = source?.workspaceColor ?? Workspace.defaultWorkspaceColor
         modelContext.insert(workspace)
 
         // Create a default window with Bible page
@@ -112,7 +113,8 @@ public final class WorkspaceStore {
      *   - newName: User-visible name for the cloned workspace.
      * - Returns: The cloned workspace.
      * - Side Effects: Inserts a new workspace graph, shifts later workspace order numbers, deep-copies windows,
-     *   page managers, and history items, remaps links-window references, and saves `modelContext`.
+     *   page managers, and history items, remaps links-window references, assigns Android's default
+     *   workspace color when the source has no stored color, and saves `modelContext`.
      * - Failure: Save errors are swallowed.
      * - Note: Window IDs are remapped so links-window references, maximized-window references, and page-manager
      *   ownership remain internally consistent.
@@ -124,7 +126,7 @@ public final class WorkspaceStore {
         cloned.contentsText = source.contentsText
         cloned.textDisplaySettings = source.textDisplaySettings
         cloned.workspaceSettings = source.workspaceSettings
-        cloned.workspaceColor = source.workspaceColor
+        cloned.workspaceColor = source.workspaceColor ?? Workspace.defaultWorkspaceColor
         cloned.unPinnedWeight = source.unPinnedWeight
         modelContext.insert(cloned)
 

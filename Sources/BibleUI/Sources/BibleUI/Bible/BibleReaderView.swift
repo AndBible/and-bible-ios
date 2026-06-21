@@ -455,6 +455,33 @@ public struct BibleReaderView: View {
         )
     }
 
+    /**
+     Workspace accent-color binding for Android's workspace-scope color settings row.
+
+     The nested color settings screen edits `TextDisplaySettings`, but Android carries
+     `workspace_color` as workspace metadata. This binding keeps the metadata separate from the
+     inherited text-display model while letting the same color editor persist it through the normal
+     workspace save callback.
+
+     - Returns: A binding that resolves nil stored colors to Android's `#ff444444` fallback and
+       writes edits to the pane target workspace when available.
+     - Side effects: Setting the binding mutates `Workspace.workspaceColor`; the caller remains
+       responsible for saving the model context.
+     - Failure modes: If the target workspace no longer exists, writes are ignored.
+     */
+    private var workspaceColorBinding: Binding<Int?> {
+        Binding(
+            get: {
+                let workspace = panePresentationTargetWindow?.workspace ?? windowManager.activeWorkspace
+                return workspace?.workspaceColor ?? Workspace.defaultWorkspaceColor
+            },
+            set: { newValue in
+                let workspace = panePresentationTargetWindow?.workspace ?? windowManager.activeWorkspace
+                workspace?.workspaceColor = newValue ?? Workspace.defaultWorkspaceColor
+            }
+        )
+    }
+
     /// User-visible reference string for the currently focused Bible location.
     private var currentReference: String {
         guard let ctrl = focusedController else { return "Genesis 1" }
@@ -1036,6 +1063,7 @@ public struct BibleReaderView: View {
         case .workspaceTextOptions:
             TextDisplaySettingsView(
                 settings: $workspaceDisplaySettings,
+                workspaceColor: workspaceColorBinding,
                 navigationTitle: textOptionsWorkspaceTitle,
                 scope: .workspace,
                 workspaceName: panePresentationTargetWindow?.workspace?.name ?? windowManager.activeWorkspace?.name,

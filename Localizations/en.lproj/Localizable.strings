@@ -240,6 +240,9 @@
 "night_theme" = "Night Theme";
 "text_color" = "Text Color";
 "background" = "Background";
+"color_workspace" = "Workspace color";
+"prefs_noise_title" = "Background noise";
+"prefs_noise_summary" = "Adding some noise to background might make it more comfortable to eyes.";
 "reset_to_defaults" = "Reset to Defaults";
 
 /* Dictionaries */

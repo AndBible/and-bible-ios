@@ -378,6 +378,54 @@ extension AndBibleTests {
         XCTAssertTrue(TextDisplaySettingsPresentation.implementedAndroidKeys.contains("MEMORIZATION_INDICATORS"))
     }
 
+    /**
+     Verifies the iOS color editor exposes Android's `color_settings.xml` rows by scope.
+
+     Android includes workspace color, day/night text color, day/night background color, and
+     day/night noise in the color settings screen, but hides `workspace_color` when editing a
+     window. A failure here means the iOS color screen has drifted from Android's actual row
+     contract rather than merely changing local SwiftUI layout.
+     */
+    func testColorSettingsVisibleAndroidKeysMatchAndroidScopeRules() {
+        XCTAssertEqual(
+            ColorSettingsView.visibleAndroidKeys(includesWorkspaceColor: true),
+            [
+                "workspace_color",
+                "text_color_day",
+                "background_color_day",
+                "noise_day",
+                "text_color_night",
+                "background_color_night",
+                "noise_night",
+            ]
+        )
+        XCTAssertEqual(
+            ColorSettingsView.visibleAndroidKeys(includesWorkspaceColor: false),
+            [
+                "text_color_day",
+                "background_color_day",
+                "noise_day",
+                "text_color_night",
+                "background_color_night",
+                "noise_night",
+            ]
+        )
+    }
+
+    /**
+     Verifies iOS normalizes background-noise edits to Android's seekbar range.
+
+     Android `noise_day` and `noise_night` use a `SeekBarPreference` with max 100 and default 0.
+     This protects iOS from persisting out-of-range slider values into the shared
+     `TextDisplaySettings` sync/reader contract.
+     */
+    func testColorSettingsNoiseValuesNormalizeToAndroidSeekbarRange() {
+        XCTAssertEqual(ColorSettingsView.normalizedNoiseValue(-4.6, fallback: 12), 0)
+        XCTAssertEqual(ColorSettingsView.normalizedNoiseValue(44.5, fallback: 12), 45)
+        XCTAssertEqual(ColorSettingsView.normalizedNoiseValue(120.2, fallback: 12), 100)
+        XCTAssertEqual(ColorSettingsView.normalizedNoiseValue(Double.nan, fallback: 12), 12)
+    }
+
     func testTextDisplaySliderIntegerRoundsSteppedFloatingPointValues() {
         XCTAssertEqual(TextDisplaySettingsView.sliderInteger(639.999999999, fallback: 600), 640)
         XCTAssertEqual(TextDisplaySettingsView.sliderInteger(640.000000001, fallback: 600), 640)

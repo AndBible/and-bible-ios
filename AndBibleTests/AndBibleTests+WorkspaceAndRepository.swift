@@ -176,6 +176,24 @@ extension AndBibleTests {
         XCTAssertNil(createdWindow.pageManager?.textDisplaySettings)
     }
 
+    /**
+     Verifies local iOS workspace creation uses Android's default workspace color.
+
+     Android stores the durable workspace accent in `WorkspaceSettings.workspaceColor` and falls
+     back to `#ff444444` for newly created workspaces and selector rendering. This regression test
+     protects the iOS creation path from returning to a nil color that makes the selector indicator
+     disappear and diverges from Android's color settings behavior.
+     */
+    func testWorkspaceStoreCreateWorkspaceUsesAndroidDefaultWorkspaceColor() throws {
+        let container = try makeWorkspaceModelContainer()
+        let context = ModelContext(container)
+        let store = WorkspaceStore(modelContext: context)
+
+        let workspace = store.createWorkspace(name: "Default Color")
+
+        XCTAssertEqual(workspace.workspaceColor, Int(Int32(bitPattern: 0xFF444444)))
+    }
+
     func testWindowManagerMarksVisibleWindowPendingUntilControllerRegisters() throws {
         let container = try makeWorkspaceModelContainer()
         let context = ModelContext(container)
