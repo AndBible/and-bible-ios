@@ -2974,6 +2974,7 @@ public struct BibleReaderView: View {
         guard let workspace = windowManager.activeWorkspace else { return }
         var settings = workspace.workspaceSettings ?? WorkspaceSettings()
         transform(&settings)
+        settings.normalizeAutoAssignPrimaryLabel()
         workspace.workspaceSettings = settings
         try? modelContext.save()
     }

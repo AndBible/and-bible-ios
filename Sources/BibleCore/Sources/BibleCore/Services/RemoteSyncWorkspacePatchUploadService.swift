@@ -1012,51 +1012,54 @@ public final class RemoteSyncWorkspacePatchUploadService {
         to statement: OpaquePointer,
         index: inout Int32
     ) throws {
-        Self.bindBool(value.enableTiltToScroll, to: statement, index: index)
+        var normalizedValue = value
+        normalizedValue.normalizeAutoAssignPrimaryLabel()
+
+        Self.bindBool(normalizedValue.enableTiltToScroll, to: statement, index: index)
         index += 1
-        Self.bindBool(value.enableReverseSplitMode, to: statement, index: index)
+        Self.bindBool(normalizedValue.enableReverseSplitMode, to: statement, index: index)
         index += 1
-        Self.bindBool(value.autoPin, to: statement, index: index)
+        Self.bindBool(normalizedValue.autoPin, to: statement, index: index)
         index += 1
         Self.bindOptionalText(speakSettingsJSON, to: statement, index: index)
         index += 1
-        if value.recentLabels.isEmpty {
+        if normalizedValue.recentLabels.isEmpty {
             sqlite3_bind_null(statement, index)
         } else {
-            let recentLabelsJSON = try encodeRecentLabelsJSON(value.recentLabels)
+            let recentLabelsJSON = try encodeRecentLabelsJSON(normalizedValue.recentLabels)
             Self.bindText(recentLabelsJSON, to: statement, index: index)
         }
         index += 1
-        if value.autoAssignLabels.isEmpty {
+        if normalizedValue.autoAssignLabels.isEmpty {
             sqlite3_bind_null(statement, index)
         } else {
             let autoAssignLabelsJSON = try encodeSortedUUIDSetJSON(
-                value.autoAssignLabels,
+                normalizedValue.autoAssignLabels,
                 field: "workspace_settings_autoAssignLabels"
             )
             Self.bindText(autoAssignLabelsJSON, to: statement, index: index)
         }
         index += 1
-        Self.bindOptionalUUIDBlob(value.autoAssignPrimaryLabel, to: statement, index: index)
+        Self.bindOptionalUUIDBlob(normalizedValue.autoAssignPrimaryLabel, to: statement, index: index)
         index += 1
-        if value.studyPadCursors.isEmpty {
+        if normalizedValue.studyPadCursors.isEmpty {
             sqlite3_bind_null(statement, index)
         } else {
-            let studyPadCursorsJSON = try encodeStudyPadCursorsJSON(value.studyPadCursors)
+            let studyPadCursorsJSON = try encodeStudyPadCursorsJSON(normalizedValue.studyPadCursors)
             Self.bindText(studyPadCursorsJSON, to: statement, index: index)
         }
         index += 1
-        if value.hideCompareDocuments.isEmpty {
+        if normalizedValue.hideCompareDocuments.isEmpty {
             sqlite3_bind_null(statement, index)
         } else {
             let hiddenCompareDocumentsJSON = try encodeSortedStringSetJSON(
-                value.hideCompareDocuments,
+                normalizedValue.hideCompareDocuments,
                 field: "workspace_settings_hideCompareDocuments"
             )
             Self.bindText(hiddenCompareDocumentsJSON, to: statement, index: index)
         }
         index += 1
-        Self.bindBool(value.limitAmbiguousModalSize, to: statement, index: index)
+        Self.bindBool(normalizedValue.limitAmbiguousModalSize, to: statement, index: index)
         index += 1
         Self.bindOptionalInt(workspaceColor, to: statement, index: index)
         index += 1

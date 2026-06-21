@@ -937,6 +937,38 @@ extension AndBibleTests {
     }
 
     /**
+     Verifies bookmark creation does not treat an orphan auto-assign primary as an implicit label.
+
+     Android passes only `autoAssignLabels` into bookmark creation; if a stale primary is not among
+     those labels, bookmark primary repair falls back to an actually assigned label.
+     */
+    @MainActor
+    func testBookmarkActionCoordinatorDoesNotImplicitlyAssignOrphanAutoAssignPrimaryLabel() throws {
+        let container = try makeBookmarkRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        let bookmarkService = BookmarkService(store: BookmarkStore(modelContext: modelContext))
+        let assignedLabel = bookmarkService.createLabel(name: "Assigned")
+        let orphanPrimaryLabel = bookmarkService.createLabel(name: "Orphan Primary")
+        let coordinator = makeBookmarkActionCoordinator(bookmarkService: bookmarkService)
+        var workspaceSettings = WorkspaceSettings(autoAssignLabels: [assignedLabel.id])
+        workspaceSettings.autoAssignPrimaryLabel = orphanPrimaryLabel.id
+
+        _ = coordinator.addOrUpdateBibleBookmark(
+            bookInitials: "KJV",
+            startOrdinal: 1,
+            endOrdinal: 1,
+            addNote: false,
+            wholeVerse: true,
+            workspaceSettings: workspaceSettings
+        )
+
+        let bookmark = try XCTUnwrap(bookmarkService.bookmarks(for: 1, endOrdinal: 1, book: "Genesis").first)
+        XCTAssertEqual(bookmark.primaryLabelId, assignedLabel.id)
+        XCTAssertNotNil(bookmarkService.bibleBookmarkToLabel(bookmarkId: bookmark.id, labelId: assignedLabel.id))
+        XCTAssertNil(bookmarkService.bibleBookmarkToLabel(bookmarkId: bookmark.id, labelId: orphanPrimaryLabel.id))
+    }
+
+    /**
      Verifies primary-label changes reject Android's reserved unlabelled system label.
 
      Android `BibleJavascriptInterface.setAsPrimaryLabel` returns before mutation when the selected

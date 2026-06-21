@@ -2094,41 +2094,44 @@ public final class RemoteSyncInitialBackupUploadService {
         to statement: OpaquePointer,
         index: inout Int32
     ) throws {
-        bindBool(value.enableTiltToScroll, to: statement, index: index)
+        var normalizedValue = value
+        normalizedValue.normalizeAutoAssignPrimaryLabel()
+
+        bindBool(normalizedValue.enableTiltToScroll, to: statement, index: index)
         index += 1
-        bindBool(value.enableReverseSplitMode, to: statement, index: index)
+        bindBool(normalizedValue.enableReverseSplitMode, to: statement, index: index)
         index += 1
-        bindBool(value.autoPin, to: statement, index: index)
+        bindBool(normalizedValue.autoPin, to: statement, index: index)
         index += 1
         bindOptionalText(speakSettingsJSON, to: statement, index: index)
         index += 1
 
-        let recentLabelsJSON = try encodeRecentLabelsJSON(value.recentLabels)
+        let recentLabelsJSON = try encodeRecentLabelsJSON(normalizedValue.recentLabels)
         bindOptionalText(recentLabelsJSON, to: statement, index: index)
         index += 1
 
         let autoAssignLabelsJSON = try encodeSortedUUIDSetJSON(
-            value.autoAssignLabels,
+            normalizedValue.autoAssignLabels,
             field: "workspace_settings_autoAssignLabels"
         )
         bindOptionalText(autoAssignLabelsJSON, to: statement, index: index)
         index += 1
 
-        bindOptionalUUIDBlob(value.autoAssignPrimaryLabel, to: statement, index: index)
+        bindOptionalUUIDBlob(normalizedValue.autoAssignPrimaryLabel, to: statement, index: index)
         index += 1
 
-        let studyPadCursorsJSON = try encodeStudyPadCursorsJSON(value.studyPadCursors)
+        let studyPadCursorsJSON = try encodeStudyPadCursorsJSON(normalizedValue.studyPadCursors)
         bindOptionalText(studyPadCursorsJSON, to: statement, index: index)
         index += 1
 
         let hideCompareDocumentsJSON = try encodeSortedStringSetJSON(
-            value.hideCompareDocuments,
+            normalizedValue.hideCompareDocuments,
             field: "workspace_settings_hideCompareDocuments"
         )
         bindOptionalText(hideCompareDocumentsJSON, to: statement, index: index)
         index += 1
 
-        bindBool(value.limitAmbiguousModalSize, to: statement, index: index)
+        bindBool(normalizedValue.limitAmbiguousModalSize, to: statement, index: index)
         index += 1
         bindOptionalAndroidSignedInt32(workspaceColor, to: statement, index: index)
         index += 1
