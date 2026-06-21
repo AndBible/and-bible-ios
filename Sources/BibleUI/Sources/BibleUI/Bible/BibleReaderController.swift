@@ -2253,8 +2253,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      - Parameter ordinal: SWORD/JSword ordinal received from the source synchronized pane.
 
      Side effects:
-     - updates `currentChapter`, `currentVerse`, and the active `PageManager` Bible position when the
-       ordinal resolves in the current book
+     - updates `currentChapter`, `currentVerse`, and the active `PageManager` Bible book/chapter/verse
+       position when the ordinal resolves in the current book
      - schedules normal visible-verse persistence so workspace state follows Android's inactive key
        synchronization
 
@@ -2267,6 +2267,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         currentVerse = reference.verse
 
         if let pm = activeWindow?.pageManager {
+            pm.bibleBibleBook = bookList.firstIndex(where: { $0.name == currentBook })
             pm.bibleChapterNo = reference.chapter
             pm.bibleVerseNo = reference.verse
             persistVisibleVerseState(immediate: false)

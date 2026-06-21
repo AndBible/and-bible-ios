@@ -2016,11 +2016,13 @@ extension AndBibleTests {
 
      Android accepts verse-qualified keys as the same chapter position, updates stale inactive
      windows once, and then treats the target's matching callback as passive feedback. The setup
-     makes the first synced pane report `Gen.1.5`, checks that only the stale second pane remains a
-     secondary target, applies that target update, and then sends the target callback. The expected
-     result is one source broadcast with both panes on Genesis 1:5 and no reverse broadcast; a
-     failure means iOS can corrupt the chapter from the key suffix or keep issuing redundant target
-     scrolls that start the alternating rollback loop.
+     makes the first synced pane report `Gen.1.5`, leaves the target's persisted book incomplete to
+     model restored/stale pane state, checks that only the stale second pane remains a secondary
+     target, applies that target update, and then sends the target callback. The expected result is
+     one source broadcast with both panes on comparable Genesis 1:5 PageManager state and no reverse
+     broadcast; a failure means iOS can corrupt the chapter from the key suffix, leave the target
+     perpetually stale, or keep issuing redundant target scrolls that start the alternating rollback
+     loop.
      */
     @MainActor
     func testVerseQualifiedSynchronizedScrollUpdatesTargetOnceWithoutReverseBroadcast() throws {
@@ -2051,6 +2053,7 @@ extension AndBibleTests {
         targetController.windowManagerRef = windowManager
         sourceController.navigateTo(book: "Genesis", chapter: 1, verse: 1)
         targetController.navigateTo(book: "Genesis", chapter: 1, verse: 1)
+        targetWindow.pageManager?.bibleBibleBook = nil
 
         let sourceBroadcast = expectation(description: "source scroll broadcasts once")
         windowManager.onSyncVerseChanged = { eventSourceWindow, sourceOrdinal, key in
@@ -2071,6 +2074,7 @@ extension AndBibleTests {
 
         targetController.scrollToOrdinal(ordinal)
 
+        XCTAssertEqual(targetWindow.pageManager?.bibleBibleBook, 0)
         XCTAssertTrue(windowManager.synchronizedVerseUpdateTargets(for: sourceWindow).isEmpty)
 
         let reverseBroadcast = expectation(description: "target acknowledgement must not rebroadcast")
