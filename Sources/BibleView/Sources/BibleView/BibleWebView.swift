@@ -2,6 +2,9 @@
 
 import SwiftUI
 import WebKit
+#if os(macOS)
+import AppKit
+#endif
 
 /**
  SwiftUI wrapper around WKWebView that loads the Vue.js Bible frontend.
@@ -110,6 +113,49 @@ public struct BibleWebView: UIViewControllerRepresentable {
     }
 }
 #elseif os(macOS)
+/**
+ WKWebView subclass that reports native macOS user input without reclassifying web telemetry.
+
+ The iOS host gets touch and drag callbacks from `UIScrollViewDelegate`/gesture recognizers. macOS
+ does not expose that path through the shared coordinator, so this view reports mouse, keyboard,
+ and wheel events directly before allowing WebKit to handle them normally.
+
+ Side effects:
+ - invokes `onNativeUserInteraction` before forwarding native input to `WKWebView`
+
+ Failure modes:
+ - programmatic scroll and web `scrolledToOrdinal` telemetry do not pass through these overrides,
+   keeping passive synchronized-scroll feedback separate from explicit user input
+ */
+final class InteractionReportingWKWebView: WKWebView {
+    var onNativeUserInteraction: (() -> Void)?
+
+    override func mouseDown(with event: NSEvent) {
+        onNativeUserInteraction?()
+        super.mouseDown(with: event)
+    }
+
+    override func rightMouseDown(with event: NSEvent) {
+        onNativeUserInteraction?()
+        super.rightMouseDown(with: event)
+    }
+
+    override func otherMouseDown(with event: NSEvent) {
+        onNativeUserInteraction?()
+        super.otherMouseDown(with: event)
+    }
+
+    override func keyDown(with event: NSEvent) {
+        onNativeUserInteraction?()
+        super.keyDown(with: event)
+    }
+
+    override func scrollWheel(with event: NSEvent) {
+        onNativeUserInteraction?()
+        super.scrollWheel(with: event)
+    }
+}
+
 /// macOS variant of `BibleWebView` using `NSViewRepresentable`.
 public struct BibleWebView: NSViewRepresentable {
     public typealias NSViewType = WKWebView
@@ -145,10 +191,12 @@ public struct BibleWebView: NSViewRepresentable {
 // MARK: - Shared WebView Creation
 
 extension BibleWebView {
+    #if os(iOS)
     /// Maps one UIKit idiom to the device-class token exported to the web client.
     static func iosDeviceClass(for userInterfaceIdiom: UIUserInterfaceIdiom) -> String {
         userInterfaceIdiom == .pad ? "ios-pad" : "ios-phone"
     }
+    #endif
 
     /// Returns the current iOS device-class token exported to the web client.
     static func iosDeviceClass() -> String {
@@ -319,7 +367,14 @@ extension BibleWebView {
         // Allow file access for local bundle
         config.preferences.setValue(true, forKey: "allowFileAccessFromFileURLs")
 
+        #if os(macOS)
+        let webView = InteractionReportingWKWebView(frame: .zero, configuration: config)
+        webView.onNativeUserInteraction = { [weak bridge] in
+            bridge?.onNativeUserInteraction?()
+        }
+        #else
         let webView = WKWebView(frame: .zero, configuration: config)
+        #endif
         webView.isInspectable = true
 
         #if os(iOS)
