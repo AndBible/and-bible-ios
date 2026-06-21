@@ -51,6 +51,7 @@
    Navigation / Bible Reader
    ======================================== */
 "bible" = "Bible";
+"deuterocanonical" = "Deuterocanonical";
 "bookmarks" = "Bookmarks";
 "reading_plans" = "Reading Plans";
 "downloads" = "Downloads";

@@ -152,6 +152,111 @@ enum PassageChooserSurfacePalette {
 }
 
 /**
+ Android scripture/non-scripture book scope for the passage book chooser.
+
+ Android passes the active document's own `BibleBook` list through `Scripture.isScripture`, where
+ scripture means membership in JSword's KJV versification and excludes introduction pseudo-books.
+ iOS receives `BookInfo` from the active SWORD module instead of JSword, so this helper applies the
+ same KJV 66-book predicate over that module-provided list without replacing it as the data source.
+ */
+enum PassageBookScriptureScope: Equatable, Sendable {
+    /// Android `isScriptureRequired = true`.
+    case scripture
+
+    /// Android `isScriptureRequired = false`, surfaced as the deuterocanonical toggle.
+    case deuterocanonical
+
+    /// JSword KJV scripture books used by Android `Scripture.isScripture`.
+    private static let androidScriptureOsisIds: Set<String> = [
+        "Gen", "Exod", "Lev", "Num", "Deut", "Josh", "Judg", "Ruth",
+        "1Sam", "2Sam", "1Kgs", "2Kgs", "1Chr", "2Chr", "Ezra", "Neh",
+        "Esth", "Job", "Ps", "Prov", "Eccl", "Song", "Isa", "Jer",
+        "Lam", "Ezek", "Dan", "Hos", "Joel", "Amos", "Obad", "Jonah",
+        "Mic", "Nah", "Hab", "Zeph", "Hag", "Zech", "Mal", "Matt",
+        "Mark", "Luke", "John", "Acts", "Rom", "1Cor", "2Cor", "Gal",
+        "Eph", "Phil", "Col", "1Thess", "2Thess", "1Tim", "2Tim",
+        "Titus", "Phlm", "Heb", "Jas", "1Pet", "2Pet", "1John",
+        "2John", "3John", "Jude", "Rev",
+    ]
+
+    /**
+     Filters an active-module book list with Android's scripture/non-scripture predicate.
+
+     - Parameters:
+       - books: Active module-provided books in document order.
+       - scope: Android chooser scope to render.
+     - Returns: Books matching the requested Android scope, preserving the module-provided order.
+     - Side effects: none.
+     - Failure modes: Unknown OSIS ids are treated as non-scripture, matching Android's KJV
+       membership check for books outside `SystemKJV`.
+     */
+    static func books(from books: [BookInfo], scope: PassageBookScriptureScope) -> [BookInfo] {
+        books.filter { book in
+            switch scope {
+            case .scripture:
+                return isScripture(book)
+            case .deuterocanonical:
+                return !isScripture(book)
+            }
+        }
+    }
+
+    /**
+     Returns whether Android would show the passage chooser deuterocanonical action item.
+
+     - Parameter books: Active module-provided books in document order.
+     - Returns: `true` when the module exposes at least one non-scripture book.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    static func hasDeuterocanonicalBooks(_ books: [BookInfo]) -> Bool {
+        books.contains { !isScripture($0) }
+    }
+
+    /**
+     Toggles the visible Android passage book scope.
+
+     - Side effects: Mutates this scope only; Android does not persist this toggle.
+     - Failure modes: none.
+     */
+    mutating func toggle() {
+        self = self == .scripture ? .deuterocanonical : .scripture
+    }
+
+    /// Android `deut_toggle` title localization key for the current scope.
+    var androidToolbarLocalizationKey: String {
+        switch self {
+        case .scripture:
+            return "bible"
+        case .deuterocanonical:
+            return "deuterocanonical"
+        }
+    }
+
+    /// English fallback for Android `deut_toggle` title when no iOS localization exists.
+    var androidToolbarDefaultTitle: String {
+        switch self {
+        case .scripture:
+            return "Bible"
+        case .deuterocanonical:
+            return "Deuterocanonical"
+        }
+    }
+
+    /**
+     Checks Android scripture membership for one book.
+
+     - Parameter book: Active module book metadata.
+     - Returns: `true` when the OSIS id belongs to JSword's KJV scripture versification.
+     - Side effects: none.
+     - Failure modes: Unknown ids return `false`.
+     */
+    private static func isScripture(_ book: BookInfo) -> Bool {
+        androidScriptureOsisIds.contains(book.osisId)
+    }
+}
+
+/**
  Android overflow-menu actions supported by the book chooser.
 
  Each case corresponds to a checkable item in Android `choose_passage_book_menu.xml`. The enum is
@@ -455,6 +560,7 @@ enum PassageBookOrdering {
        - books: Module-provided book list in Bible-book order.
        - options: Current persisted/session chooser options.
        - orientation: Current visual orientation used by Android layout rules.
+       - allowsCategoryGrouping: Whether Android category grouping is allowed for this book scope.
      - Returns: Row-major visual slots, with `nil` placeholders for empty cells/spacers.
      - Side effects: none.
      - Failure modes: Empty input returns an empty array.
@@ -462,13 +568,14 @@ enum PassageBookOrdering {
     static func displaySlots(
         for books: [BookInfo],
         options: PassageChooserOptions,
-        orientation: PassageGridOrientation
+        orientation: PassageGridOrientation,
+        allowsCategoryGrouping: Bool = true
     ) -> [BookInfo?] {
         guard !books.isEmpty else {
             return []
         }
 
-        if options.groupByCategory {
+        if options.groupByCategory, allowsCategoryGrouping {
             return groupedSlots(for: books)
         }
 
@@ -493,6 +600,7 @@ enum PassageBookOrdering {
        - itemCount: Number of source books.
        - options: Current chooser options.
        - orientation: Current visual orientation.
+       - allowsCategoryGrouping: Whether Android category grouping is allowed for this book scope.
      - Returns: Android grouped-grid column count or the layout-derived count.
      - Side effects: none.
      - Failure modes: Counts below one are clamped by callers.
@@ -500,9 +608,10 @@ enum PassageBookOrdering {
     static func columnCount(
         itemCount: Int,
         options: PassageChooserOptions,
-        orientation: PassageGridOrientation
+        orientation: PassageGridOrientation,
+        allowsCategoryGrouping: Bool = true
     ) -> Int {
-        if options.groupByCategory {
+        if options.groupByCategory, allowsCategoryGrouping {
             return groupedColumnCount
         }
         return PassageGridLayout.androidDefault(
