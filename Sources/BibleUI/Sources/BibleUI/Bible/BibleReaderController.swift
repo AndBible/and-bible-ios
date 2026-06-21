@@ -2067,7 +2067,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      - Parameters:
        - bridge: Bridge reporting the scroll position change.
        - ordinal: Approximate verse ordinal currently near the viewport focus.
-       - key: Document OSIS ref such as `Gen.1` used to infer chapter changes.
+       - key: Document OSIS ref such as `Gen.1` or `Gen.1.5` used to infer chapter changes.
 
      Side effects:
      - updates scroll-restoration state and persists chapter/book changes to the page manager
@@ -2084,9 +2084,10 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         lastScrollTarget = atChapterTop ? .chapterTop : .ordinal(ordinal)
 
         // Update toolbar header when scrolling into a different chapter/book (infinite scroll)
-        if !key.isEmpty, let dotIdx = key.lastIndex(of: ".") {
-            let chapterStr = String(key[key.index(after: dotIdx)...])
-            let osisId = String(key[key.startIndex..<dotIdx])
+        let keyParts = key.split(separator: ".", omittingEmptySubsequences: true)
+        if keyParts.count >= 2 {
+            let osisId = String(keyParts[0])
+            let chapterStr = String(keyParts[1])
             if let chapter = Int(chapterStr), chapter != currentChapter {
                 currentChapter = chapter
                 if let name = bookName(forOsisId: osisId), name != currentBook {

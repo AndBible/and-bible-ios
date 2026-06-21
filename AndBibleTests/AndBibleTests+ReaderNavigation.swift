@@ -1977,6 +1977,119 @@ extension AndBibleTests {
     }
 
     /**
+     Protects visible-verse key parsing for OSIS refs that include a verse segment.
+
+     Android's Bible visible-position callback updates by JSword ordinal and does not mistake
+     `Gen.1.5` for chapter 5. The setup reports the Genesis 1:5 ordinal with a verse-qualified
+     document key. The expected result is that native state remains in chapter 1, updates to verse 5,
+     and uses the normal intra-chapter debounce path; a failure means source keys with verse suffixes
+     can corrupt the pane chapter and send synchronized targets to the wrong location.
+     */
+    func testDidScrollToOrdinalParsesVerseQualifiedKeyAsChapter() throws {
+        let bridge = BibleBridge()
+        let modulePath = try makeTemporaryBundledSwordPath()
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        let module = try XCTUnwrap(manager.module(named: controller.activeModuleName))
+        let ordinal = try XCTUnwrap(module.verseOrdinal(osisBookId: "Gen", chapter: 1, verse: 5))
+        let window = Window()
+        let pageManager = PageManager(id: window.id)
+        window.pageManager = pageManager
+        controller.activeWindow = window
+        controller.navigateTo(book: "Genesis", chapter: 1, verse: 1)
+
+        var persistCount = 0
+        controller.onPersistState = { persistCount += 1 }
+
+        controller.bridge(bridge, didScrollToOrdinal: ordinal, key: "Gen.1.5", atChapterTop: false)
+
+        XCTAssertEqual(persistCount, 0)
+        XCTAssertEqual(controller.currentBook, "Genesis")
+        XCTAssertEqual(controller.currentChapter, 1)
+        XCTAssertEqual(controller.currentVerse, 5)
+        XCTAssertEqual(pageManager.bibleChapterNo, 1)
+        XCTAssertEqual(pageManager.bibleVerseNo, 5)
+    }
+
+    /**
+     Protects the synchronized-scroll loop when visible keys include verse suffixes.
+
+     Android accepts verse-qualified keys as the same chapter position, updates stale inactive
+     windows once, and then treats the target's matching callback as passive feedback. The setup
+     makes the first synced pane report `Gen.1.5`, checks that only the stale second pane remains a
+     secondary target, applies that target update, and then sends the target callback. The expected
+     result is one source broadcast with both panes on Genesis 1:5 and no reverse broadcast; a
+     failure means iOS can corrupt the chapter from the key suffix or keep issuing redundant target
+     scrolls that start the alternating rollback loop.
+     */
+    @MainActor
+    func testVerseQualifiedSynchronizedScrollUpdatesTargetOnceWithoutReverseBroadcast() throws {
+        let sourceBridge = BibleBridge()
+        let targetBridge = BibleBridge()
+        let modulePath = try makeTemporaryBundledSwordPath()
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let sourceController = BibleReaderController(bridge: sourceBridge, swordManagerOverride: manager)
+        let targetController = BibleReaderController(bridge: targetBridge, swordManagerOverride: manager)
+        let module = try XCTUnwrap(manager.module(named: sourceController.activeModuleName))
+        let ordinal = try XCTUnwrap(module.verseOrdinal(osisBookId: "Gen", chapter: 1, verse: 5))
+        let container = try makeWorkspaceModelContainer()
+        let context = ModelContext(container)
+        let workspaceStore = WorkspaceStore(modelContext: context)
+        let windowManager = WindowManager(workspaceStore: workspaceStore)
+        let workspace = workspaceStore.createWorkspace(name: "Verse Qualified Sync")
+        let sourceWindow = try XCTUnwrap(workspaceStore.windows(workspaceId: workspace.id).first)
+        windowManager.setActiveWorkspace(workspace)
+        let targetWindow = try XCTUnwrap(windowManager.addWindow(from: sourceWindow))
+        sourceWindow.isSynchronized = true
+        sourceWindow.syncGroup = 0
+        targetWindow.isSynchronized = true
+        targetWindow.syncGroup = 0
+        windowManager.activeWindow = sourceWindow
+        sourceController.activeWindow = sourceWindow
+        sourceController.windowManagerRef = windowManager
+        targetController.activeWindow = targetWindow
+        targetController.windowManagerRef = windowManager
+        sourceController.navigateTo(book: "Genesis", chapter: 1, verse: 1)
+        targetController.navigateTo(book: "Genesis", chapter: 1, verse: 1)
+
+        let sourceBroadcast = expectation(description: "source scroll broadcasts once")
+        windowManager.onSyncVerseChanged = { eventSourceWindow, sourceOrdinal, key in
+            XCTAssertEqual(eventSourceWindow.id, sourceWindow.id)
+            XCTAssertEqual(sourceOrdinal, ordinal)
+            XCTAssertEqual(key, "Gen.1.5")
+            sourceBroadcast.fulfill()
+        }
+
+        sourceController.bridge(sourceBridge, didScrollToOrdinal: ordinal, key: "Gen.1.5", atChapterTop: false)
+
+        wait(for: [sourceBroadcast], timeout: 1.0)
+        XCTAssertEqual(sourceController.currentChapter, 1)
+        XCTAssertEqual(sourceController.currentVerse, 5)
+        XCTAssertEqual(sourceWindow.pageManager?.bibleChapterNo, 1)
+        XCTAssertEqual(sourceWindow.pageManager?.bibleVerseNo, 5)
+        XCTAssertEqual(windowManager.synchronizedVerseUpdateTargets(for: sourceWindow).map(\.id), [targetWindow.id])
+
+        targetController.scrollToOrdinal(ordinal)
+
+        XCTAssertTrue(windowManager.synchronizedVerseUpdateTargets(for: sourceWindow).isEmpty)
+
+        let reverseBroadcast = expectation(description: "target acknowledgement must not rebroadcast")
+        reverseBroadcast.isInverted = true
+        windowManager.onSyncVerseChanged = { _, _, _ in
+            reverseBroadcast.fulfill()
+        }
+
+        targetController.bridge(targetBridge, didScrollToOrdinal: ordinal, key: "Gen.1.5", atChapterTop: false)
+
+        XCTAssertEqual(windowManager.activeWindow?.id, sourceWindow.id)
+        XCTAssertEqual(targetController.currentChapter, 1)
+        XCTAssertEqual(targetController.currentVerse, 5)
+        XCTAssertEqual(targetWindow.pageManager?.bibleChapterNo, 1)
+        XCTAssertEqual(targetWindow.pageManager?.bibleVerseNo, 5)
+        wait(for: [reverseBroadcast], timeout: 0.35)
+    }
+
+    /**
      Protects Android's visible-verse old/new guard for synchronized windows.
 
      Android only posts a synchronized verse-change event when

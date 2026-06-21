@@ -1803,8 +1803,7 @@ public struct BibleReaderView: View {
     private func installSynchronizedScrollingCallback() {
         windowManager.onSyncVerseChanged = { [weak windowManager] sourceWindow, ordinal, key in
             guard let wm = windowManager else { return }
-            let syncTargets = wm.syncedWindows(for: sourceWindow)
-                .filter { $0.id != sourceWindow.id }
+            let syncTargets = wm.synchronizedVerseUpdateTargets(for: sourceWindow)
             for target in syncTargets {
                 guard let ctrl = wm.controllers[target.id] as? BibleReaderController else {
                     continue
