@@ -289,6 +289,25 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     }
 
     /**
+     Resolves the currently visible synchronized ordinal into a stable verse identity.
+
+     Android synchronizes inactive Bible windows by copying the active `Verse` key, then lets each
+     target page convert that verse into its own versification before scrolling. This helper exposes
+     the source side of that contract to the reader shell so synchronized panes do not exchange raw
+     module-local ordinals.
+
+     - Parameter ordinal: Ordinal reported by the source web client.
+     - Returns: The source controller's current book/chapter/verse identity for the ordinal, or
+       `nil` when the ordinal cannot be resolved in the current source book.
+     - Side effects: May temporarily move the active SWORD module cursor through `verseReference`.
+     - Failure modes: Invalid ordinals or source books unsupported by the active module return
+       `nil`.
+     */
+    func synchronizedVerseReference(ordinal: Int) -> VerseKeyReference? {
+        verseReference(book: currentBook, ordinal: ordinal)
+    }
+
+    /**
      Resolves a Bible bookmark ordinal for bookmark-list display and navigation.
 
      `BookmarkListView` does not own a SWORD manager. The active reader supplies this closure so the
@@ -2227,6 +2246,52 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     }
 
     /**
+     Scrolls this pane to a synchronized source verse using this pane's own ordinal space.
+
+     Android does not send a raw source ordinal to the target WebView. It updates the inactive
+     window to the same verse key and then emits a target-local `scroll_to_verse` ordinal. iOS
+     mirrors that by converting `(osisBookId, chapter, verse)` through the target controller's
+     active module before scrolling.
+
+     - Parameters:
+       - osisBookId: Source verse OSIS book identifier.
+       - chapter: Source verse chapter.
+       - verse: Source verse number.
+
+     Side effects:
+     - arms synchronized-scroll feedback suppression
+     - updates native target state and its page manager to the synchronized verse
+     - emits `scroll_to_verse` only when the target chapter is already loaded
+     - delegates cross-chapter changes to `navigateTo` so content loads before the WebView scrolls
+
+     Failure modes:
+     - returns without mutation when the target module cannot resolve the source book or verse
+     */
+    func scrollToSynchronizedVerse(osisBookId: String, chapter: Int, verse: Int) {
+        guard let book = bookName(forOsisId: osisBookId),
+              let targetOrdinal = verseOrdinal(osisBookId: osisBookId, chapter: chapter, verse: verse) else {
+            return
+        }
+
+        let alreadyShowingChapter = currentBook == book && currentChapter == chapter
+        pendingSynchronizedScrollOrdinal = targetOrdinal
+        pendingClientReadySynchronizedScrollOrdinal = nil
+        synchronizedScrollFeedbackSuppressionActive = true
+
+        if alreadyShowingChapter {
+            applySynchronizedVersePosition(book: book, chapter: chapter, verse: verse, ordinal: targetOrdinal)
+            guard clientReady else {
+                pendingClientReadySynchronizedScrollOrdinal = targetOrdinal
+                return
+            }
+            bridge.emit(event: "scroll_to_verse", data: "{\"ordinal\":\(targetOrdinal),\"now\":false}")
+            return
+        }
+
+        navigateTo(book: book, chapter: chapter, verse: verse)
+    }
+
+    /**
      Navigates this pane as a synchronized secondary-window update.
 
      Cross-chapter synchronized movement cannot use `scroll_to_verse` because the target WebView
@@ -2249,13 +2314,17 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
        top while feedback suppression remains active until explicit user interaction
      */
     func navigateToSynchronizedPosition(book: String, chapter: Int, ordinal: Int) {
-        pendingSynchronizedScrollOrdinal = ordinal
-        pendingClientReadySynchronizedScrollOrdinal = nil
-        synchronizedScrollFeedbackSuppressionActive = true
-
         let verse = verseReference(book: book, ordinal: ordinal).flatMap { reference in
             reference.chapter == chapter ? reference.verse : nil
         }
+        if let verse {
+            scrollToSynchronizedVerse(osisBookId: osisBookId(for: book), chapter: chapter, verse: verse)
+            return
+        }
+
+        pendingSynchronizedScrollOrdinal = ordinal
+        pendingClientReadySynchronizedScrollOrdinal = nil
+        synchronizedScrollFeedbackSuppressionActive = true
         navigateTo(book: book, chapter: chapter, verse: verse)
     }
 
@@ -2275,13 +2344,41 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      */
     private func applySynchronizedScrollPosition(ordinal: Int) {
         guard let reference = verseReference(book: currentBook, ordinal: ordinal) else { return }
-        currentChapter = reference.chapter
-        currentVerse = reference.verse
+        applySynchronizedVersePosition(
+            book: currentBook,
+            chapter: reference.chapter,
+            verse: reference.verse,
+            ordinal: ordinal
+        )
+    }
+
+    /**
+     Updates native synchronized target state to an already-converted verse ordinal.
+
+     - Parameters:
+       - book: Target controller's local book name.
+       - chapter: Target chapter.
+       - verse: Target verse.
+       - ordinal: Target-local ordinal for the verse.
+
+     Side effects:
+     - updates reader state and page-manager Bible position
+     - stores the target ordinal for content replay
+     - schedules normal visible-verse persistence
+
+     Failure modes: none.
+     */
+    private func applySynchronizedVersePosition(book: String, chapter: Int, verse: Int, ordinal: Int) {
+        currentBook = book
+        currentChapter = chapter
+        currentVerse = verse
+        lastScrollTarget = .ordinal(ordinal)
+        shouldRestoreScroll = true
 
         if let pm = activeWindow?.pageManager {
-            pm.bibleBibleBook = bookList.firstIndex(where: { $0.name == currentBook })
-            pm.bibleChapterNo = reference.chapter
-            pm.bibleVerseNo = reference.verse
+            pm.bibleBibleBook = bookList.firstIndex(where: { $0.name == book })
+            pm.bibleChapterNo = chapter
+            pm.bibleVerseNo = verse
             persistVisibleVerseState(immediate: false)
         }
     }

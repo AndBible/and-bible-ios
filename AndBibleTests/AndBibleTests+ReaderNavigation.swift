@@ -2135,6 +2135,65 @@ extension AndBibleTests {
     }
 
     /**
+     Protects Android's target-local synchronized scroll anchor conversion.
+
+     Android synchronizes a `Verse` key, then converts it to the inactive window's own
+     versification before emitting `scroll_to_verse`. This fixture uses a bundled KJV source
+     ordinal for Genesis 1:10, whose intro-inclusive SWORD ordinal differs from the placeholder
+     target ordinal, and expects the target WebView payload to use the target ordinal. A failure
+     means iOS is forwarding source ordinals directly and can land nearby instead of on the same
+     verse when panes use different ordinal spaces.
+     */
+    @MainActor
+    func testSynchronizedScrollConvertsSourceVerseToTargetOrdinalSpace() throws {
+        let sourceBridge = BibleBridge()
+        let (targetBridge, recordedScripts) = makeRecordingBridge()
+        let modulePath = try makeTemporaryBundledSwordPath()
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let sourceController = BibleReaderController(bridge: sourceBridge, swordManagerOverride: manager)
+        let targetController = BibleReaderController(bridge: targetBridge, initializesSword: false)
+        let sourceModule = try XCTUnwrap(manager.module(named: sourceController.activeModuleName))
+        let sourceOrdinal = try XCTUnwrap(
+            sourceModule.verseOrdinal(osisBookId: "Gen", chapter: 1, verse: 10)
+        )
+        XCTAssertNotEqual(sourceOrdinal, 10)
+
+        let sourceWindow = Window()
+        let sourcePageManager = PageManager(id: sourceWindow.id)
+        sourceWindow.pageManager = sourcePageManager
+        sourceController.activeWindow = sourceWindow
+        sourceController.navigateTo(book: "Genesis", chapter: 1, verse: 1)
+
+        let targetWindow = Window()
+        let targetPageManager = PageManager(id: targetWindow.id)
+        targetWindow.pageManager = targetPageManager
+        targetController.activeWindow = targetWindow
+        targetController.navigateTo(book: "Genesis", chapter: 1, verse: 1)
+        targetController.bridgeDidSetClientReady(targetBridge)
+        let setupScriptCount = recordedScripts().count
+
+        let sourceReference = try XCTUnwrap(sourceController.synchronizedVerseReference(ordinal: sourceOrdinal))
+        XCTAssertEqual(sourceReference.osisBookId, "Gen")
+        XCTAssertEqual(sourceReference.chapter, 1)
+        XCTAssertEqual(sourceReference.verse, 10)
+
+        targetController.scrollToSynchronizedVerse(
+            osisBookId: sourceReference.osisBookId,
+            chapter: sourceReference.chapter,
+            verse: sourceReference.verse
+        )
+
+        let newScripts = Array(recordedScripts().dropFirst(setupScriptCount))
+        let payload = try XCTUnwrap(
+            bridgeEmissionPayload(from: newScripts, event: "scroll_to_verse") as? [String: Any]
+        )
+        XCTAssertEqual(payload["ordinal"] as? Int, 10)
+        XCTAssertEqual(payload["now"] as? Bool, false)
+        XCTAssertEqual(targetController.currentVerse, 10)
+        XCTAssertEqual(targetPageManager.bibleVerseNo, 10)
+    }
+
+    /**
      Protects Android's visible-verse old/new guard for synchronized windows.
 
      Android only posts a synchronized verse-change event when

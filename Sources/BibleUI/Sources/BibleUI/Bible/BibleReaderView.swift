@@ -1805,8 +1805,19 @@ public struct BibleReaderView: View {
         windowManager.onSyncVerseChanged = { [weak windowManager] sourceWindow, ordinal, key in
             guard let wm = windowManager else { return }
             let syncTargets = wm.synchronizedVerseUpdateTargets(for: sourceWindow)
+            let sourceReference = (wm.controllers[sourceWindow.id] as? BibleReaderController)?
+                .synchronizedVerseReference(ordinal: ordinal)
             for target in syncTargets {
                 guard let ctrl = wm.controllers[target.id] as? BibleReaderController else {
+                    continue
+                }
+
+                if let sourceReference {
+                    ctrl.scrollToSynchronizedVerse(
+                        osisBookId: sourceReference.osisBookId,
+                        chapter: sourceReference.chapter,
+                        verse: sourceReference.verse
+                    )
                     continue
                 }
 
