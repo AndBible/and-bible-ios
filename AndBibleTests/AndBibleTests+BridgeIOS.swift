@@ -65,10 +65,23 @@ extension AndBibleTests {
     func testBridgeEmitUsesFireAndForgetJavaScript() {
         let (bridge, recordedScripts) = makeRecordingBridge()
 
-        bridge.emit(event: "set_config", data: #"{"theme":"light"}"#)
+        XCTAssertTrue(bridge.emit(event: "set_config", data: #"{"theme":"light"}"#))
 
         let script = recordedScripts().first ?? ""
         XCTAssertTrue(script.contains("void bibleView.emit('set_config'"))
+    }
+
+    /**
+     Verifies raw bridge emits expose whether JavaScript was actually dispatched.
+
+     Detached bridge reporting remains observable so callers can distinguish JavaScript dispatch
+     failure from a queued fire-and-forget emit when they need delivery diagnostics.
+     */
+    @MainActor
+    func testBridgeEmitReportsDetachedDispatchFailure() {
+        let bridge = BibleBridge()
+
+        XCTAssertFalse(bridge.emit(event: "set_config", data: #"{"theme":"light"}"#))
     }
 
     /**

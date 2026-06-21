@@ -1225,15 +1225,16 @@ public struct BibleReaderView: View {
      - Parameters:
        - book: Book name selected by Search.
        - chapter: Chapter selected by Search.
+       - verse: Verse selected by Search.
      Side effects:
      - dismisses the Search sheet
      - updates the active pane's reader location
      Failure modes:
      - does nothing when no pane presentation controller is available
      */
-    private func navigateFromSearch(book: String, chapter: Int) {
+    private func navigateFromSearch(book: String, chapter: Int, verse: Int) {
+        panePresentationController?.navigateTo(book: book, chapter: chapter, verse: verse)
         showSearch = false
-        panePresentationController?.navigateTo(book: book, chapter: chapter)
     }
 
     // MARK: - Sheet Routing
@@ -2075,10 +2076,20 @@ public struct BibleReaderView: View {
     private func installSynchronizedScrollingCallback() {
         windowManager.onSyncVerseChanged = { [weak windowManager] sourceWindow, ordinal, key in
             guard let wm = windowManager else { return }
-            let syncTargets = wm.syncedWindows(for: sourceWindow)
-                .filter { $0.id != sourceWindow.id }
+            let syncTargets = wm.synchronizedVerseUpdateTargets(for: sourceWindow)
+            let sourceReference = (wm.controllers[sourceWindow.id] as? BibleReaderController)?
+                .synchronizedVerseReference(ordinal: ordinal)
             for target in syncTargets {
                 guard let ctrl = wm.controllers[target.id] as? BibleReaderController else {
+                    continue
+                }
+
+                if let sourceReference {
+                    ctrl.scrollToSynchronizedVerse(
+                        osisBookId: sourceReference.osisBookId,
+                        chapter: sourceReference.chapter,
+                        verse: sourceReference.verse
+                    )
                     continue
                 }
 
@@ -2096,7 +2107,7 @@ public struct BibleReaderView: View {
                    let chapter = Int(parts[1]) {
                     let osisBook = String(parts[0])
                     if let bookName = ctrl.bookName(forOsisId: osisBook) {
-                        ctrl.navigateTo(book: bookName, chapter: chapter)
+                        ctrl.navigateToSynchronizedPosition(book: bookName, chapter: chapter, ordinal: ordinal)
                     }
                 }
             }
