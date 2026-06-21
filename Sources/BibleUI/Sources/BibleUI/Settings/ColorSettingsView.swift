@@ -144,14 +144,15 @@ public struct ColorSettingsView: View {
     }
 
     /**
-     Android preference keys rendered by this view for the supplied settings scope.
+     Android preference-key inventory expected for a caller's durable workspace-color ownership.
 
+     Runtime row rendering is controlled by whether the caller supplies `workspaceColor`; this
+     helper maps Android text-display scope to that binding policy for tests and call sites.
      Android's XML row is inflated for non-window routes, but durable `workspace_color` commits only
-     happen for `SettingsLevel.WORKSPACE`. iOS therefore exposes the row only when this editor has a
-     workspace metadata binding.
+     happen for `SettingsLevel.WORKSPACE`, so only workspace scope should provide the binding.
 
-     - Parameter scope: Android text-display settings scope that launched the color editor.
-     - Returns: Android `color_settings.xml` keys in visible order for that scope.
+     - Parameter scope: Android text-display settings scope that would launch the color editor.
+     - Returns: Android `color_settings.xml` keys in visible order for the iOS binding policy.
      - Side effects: none.
      - Failure modes: none; the inventory is static and test-audited against Android source.
      */
