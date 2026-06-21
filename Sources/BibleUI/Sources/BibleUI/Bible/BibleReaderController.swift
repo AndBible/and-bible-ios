@@ -180,6 +180,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     private(set) var renderedContentState: String = BibleReaderController.emptyRenderedContentState
     /// Transient document that should be replayed once the Vue client has finished bootstrapping.
     private var pendingClientReadyTransientMultiDocument: TransientMultiDocumentRequest?
+    /// Last transient special document visible in this controller, used for same-session reloads.
+    private var activeTransientMultiDocument: TransientMultiDocumentRequest?
     /// Current My Documents page rendered through the local store rather than a SWORD module.
     private var activeMyDocumentBookInitials: String?
     /// Current My Documents page key rendered through the local store rather than a SWORD module.
@@ -204,8 +206,9 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      Captures a transient Vue `MultiDocument` load until the web client can receive it.
 
      Link-result panes may be created before their `BibleWebView` has sent `setClientReady`. The
-     request stores the serialized document and rendered-content labels so the initial client-ready
-     replay shows the same link result instead of briefly loading the cloned Bible location.
+     request stores both the serialized Vue document and the Android page identity that should be
+     persisted on the links-window target, so client-ready replay, settings reloads, and bottom tabs
+     agree on the same special document.
      */
     private struct TransientMultiDocumentRequest {
         /// Serialized Vue `MultiDocument` payload to emit.
@@ -222,6 +225,33 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
         /// Optional rendered module token.
         let renderedModuleName: String?
+
+        /// Optional PageManager category to persist for Android fake-document parity.
+        let pageCategory: DocumentCategory?
+
+        /// Optional PageManager document initials to persist for Android fake-document parity.
+        let pageDocumentInitials: String?
+
+        /// Optional PageManager key to persist for Android fake-document parity.
+        let pageKey: String?
+    }
+
+    /**
+     Serialized payload rebuilt from Android's durable `Multi` PageManager key.
+
+     Android restores `FakeBookFactory.multiDocument` by converting the saved `BookAndKeyList` key
+     back into fragments. This structure carries the resulting Vue payload plus the rendered-content
+     key that native chrome should expose after restoration.
+     */
+    private struct RestoredAndroidMultiDocumentRequest {
+        /// Serialized Vue `MultiDocument` payload rebuilt from persisted PageManager state.
+        let documentJSON: String
+
+        /// Rendered-content key token, normally `multi` or `strongs`.
+        let renderedKey: String
+
+        /// Original Android `BookAndKeyList.osisRef` persistence string.
+        let pageKey: String
     }
 
     /**
@@ -431,15 +461,102 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         ).encodedValue
     }
 
-    /// Whether the current module has Strong's numbers (matching Android CurrentPageManager.hasStrongs).
+    /// Whether the visible page is Android's synthetic `Multi` general-book document.
+    var isShowingAndroidMultiDocument: Bool {
+        AndroidSpecialDocumentIdentity.isMultiDocument(
+            categoryName: currentCategory.pageManagerKey,
+            moduleName: activeGeneralBookModuleName ?? activeWindow?.pageManager?.generalBookDocument
+        )
+    }
+
+    /// Whether the current page should expose Strong's actions (matching Android CurrentPageManager.hasStrongs).
     var hasStrongs: Bool {
         switch currentCategory {
         case .bible:
             return activeModule?.info.features.contains(.strongsNumbers) == true
         case .commentary:
             return activeCommentaryModule?.info.features.contains(.strongsNumbers) == true
+        case .generalBook:
+            return isShowingAndroidMultiDocument
         default:
             return false
+        }
+    }
+
+    /**
+     Whether actions that depend on an active Bible verse reference are valid for the visible page.
+
+     Android exposes share, compare, and Bible bookmark actions only when selection metadata includes
+     `verseInfo`. The synthetic `Multi` links-window page and other auxiliary documents may render
+     text derived from Bible modules, but their native page identity is not a Bible page and must not
+     fall back to stale `currentBook/currentChapter` state.
+
+     - Returns: `true` only for an actual Bible page; `false` for Android special documents and all
+       auxiliary categories.
+     - Side effects: None.
+     */
+    var canUseBibleReferenceActions: Bool {
+        currentCategory == .bible && !isShowingAndroidMultiDocument
+    }
+
+    /**
+     Whether the current page should expose Android's page search action.
+
+     Android delegates toolbar search visibility to `CurrentPage.isSearchable`: Bible and regular
+     commentary pages are searchable, dictionary pages are not, and general-book pages are searchable
+     only for EPUB-backed content. The iOS reader currently represents EPUB with its own category, so
+     non-EPUB general books, including `Multi`, remain non-searchable.
+
+     - Returns: `true` when the toolbar/search shortcut should be enabled for the visible page.
+     - Side effects: None.
+     */
+    var isCurrentPageSearchable: Bool {
+        switch currentCategory {
+        case .bible, .commentary, .epub:
+            return !isShowingAndroidMultiDocument
+        default:
+            return false
+        }
+    }
+
+    /**
+     Whether the current page can be spoken by Android's page-level speak action.
+
+     Android's `CurrentGeneralBookPage` disables speech for special documents such as `Multi`, while
+     ordinary Bible/commentary pages remain speakable. iOS page-level speech is backed by the current
+     SWORD text context, so this property intentionally suppresses special links-window pages instead
+     of invoking speech with stale Bible coordinates.
+
+     - Returns: `true` when page-level speech is valid for the visible page.
+     - Side effects: None.
+     */
+    var isCurrentPageSpeakable: Bool {
+        switch currentCategory {
+        case .bible, .commentary:
+            return !isShowingAndroidMultiDocument
+        default:
+            return false
+        }
+    }
+
+    /**
+     Whether the current page participates in synchronized scrolling.
+
+     Android reports `CurrentGeneralBookPage.isSyncable=false`, while dictionary/map-style pages
+     inherit the default syncable behavior. iOS mirrors that distinction by disabling general-book
+     and EPUB sync controls, including links-window `Multi`, without globally limiting sync to Bible
+     and commentary pages.
+
+     - Returns: `true` for Android-syncable page categories; `false` for general-book/EPUB pages and
+       special `Multi` content.
+     - Side effects: None.
+     */
+    var isCurrentPageSyncable: Bool {
+        switch currentCategory {
+        case .generalBook, .epub:
+            return false
+        default:
+            return !isShowingAndroidMultiDocument
         }
     }
 
@@ -510,7 +627,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
      - Parameters:
        - documentJSON: Serialized `MultiDocument` payload.
-       - renderedBook: Accessibility/test-state book token for the transient document.
+       - renderedBook: Legacy label retained for the existing routing callback. Target controllers
+         normalize Strong's and dictionary documents to Android's `Multi` page identity.
        - renderedKey: Accessibility/test-state key token for the transient document.
      - Returns: The closure returns no value; the owner reports completion by rendering in the
        selected target controller.
@@ -653,6 +771,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      text extraction and restored immediately after.
      */
     public func speakCurrentChapter() {
+        guard isCurrentPageSpeakable else { return }
         guard let service = speakService, let context = makeSpeechContext() else { return }
         speechCoordinator.speakCurrentChapter(service: service, context: context)
     }
@@ -1022,6 +1141,16 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
     /// Load the appropriate content for the current category.
     public func loadCurrentContent() {
+        if isShowingAndroidMultiDocument {
+            if let activeTransientMultiDocument {
+                emitTransientMultiDocument(activeTransientMultiDocument)
+                return
+            }
+            if loadRestoredAndroidMultiDocument() {
+                return
+            }
+        }
+
         switch currentCategory {
         case .commentary:
             loadCommentaryForCurrentVerse()
@@ -1044,16 +1173,287 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      - Parameter documentJSON: Serialized multi-document payload produced by
        `buildBibleMultiReferenceDocumentJSON(refs:)`.
      - Side effects: clears the current Vue document, emits labels, emits the supplied document and
-       setup payload, resets selection state, updates the rendered-content accessibility token, and
-       reapplies the reader background. It intentionally does not persist PageManager category or
-       location state because Android treats multi-reference documents as link results, not the
-       owning Bible position.
+       setup payload, resets selection state, updates the rendered-content accessibility token,
+       persists Android's `general_book` + `Multi` PageManager identity for the links window, and
+       reapplies the reader background.
      - Failure modes: assumes the payload is already valid JSON; invalid payloads are forwarded to
        the Vue bridge after the transient reader state is prepared, so caller-owned builders should
        validate or serialize before invoking this method.
      */
     func loadMultiReferenceDocument(_ documentJSON: String) {
-        loadTransientMultiDocument(documentJSON, renderedBook: "Multi", renderedKey: "multi")
+        loadTransientMultiDocument(
+            documentJSON,
+            renderedBook: AndroidSpecialDocumentIdentity.multiDocumentInitials,
+            renderedKey: AndroidSpecialDocumentIdentity.multiRenderedKey,
+            renderedCategory: AndroidSpecialDocumentIdentity.multiDocumentCategory,
+            renderedModuleName: AndroidSpecialDocumentIdentity.multiDocumentInitials,
+            pageCategory: AndroidSpecialDocumentIdentity.multiDocumentCategory,
+            pageDocumentInitials: AndroidSpecialDocumentIdentity.multiDocumentInitials,
+            pageKey: AndroidSpecialDocumentIdentity.bookAndKeyListReference(from: documentJSON)
+        )
+    }
+
+    /**
+     Re-emits a restored Android `Multi` fake document from durable PageManager state.
+
+     A live links-window load keeps its serialized Vue payload in memory for client-ready replay.
+     After process restart, Android rebuilds that payload from the saved `BookAndKeyList.osisRef`
+     string. iOS follows that contract here so `general_book/Multi` is not merely a tab label.
+
+     - Returns: `true` when a restored payload was rebuilt and emitted; otherwise `false` so callers
+       can continue through ordinary category loading.
+     - Side effects: Emits a Vue `MultiDocument`, refreshes rendered-content state, and persists the
+       same `general_book/Multi` PageManager identity through `loadTransientMultiDocument`.
+     - Failure modes: Returns `false` when the saved key is missing, malformed, references no
+       installed source documents, or cannot be encoded.
+     */
+    private func loadRestoredAndroidMultiDocument() -> Bool {
+        guard let restored = buildRestoredAndroidMultiDocument() else { return false }
+        loadTransientMultiDocument(
+            restored.documentJSON,
+            renderedBook: AndroidSpecialDocumentIdentity.multiDocumentInitials,
+            renderedKey: restored.renderedKey,
+            renderedCategory: AndroidSpecialDocumentIdentity.multiDocumentCategory,
+            renderedModuleName: AndroidSpecialDocumentIdentity.multiDocumentInitials,
+            pageCategory: AndroidSpecialDocumentIdentity.multiDocumentCategory,
+            pageDocumentInitials: AndroidSpecialDocumentIdentity.multiDocumentInitials,
+            pageKey: restored.pageKey
+        )
+        return true
+    }
+
+    /**
+     Reconstructs the Vue `MultiDocument` payload Android derives from a restored `BookAndKeyList`.
+
+     Each persisted child entry identifies the source document and key that originally contributed a
+     fragment to `FakeBookFactory.multiDocument`. Bible children are rendered from their exact SWORD
+     verse reference; dictionary/glossary children are rendered from the referenced module key.
+
+     - Returns: A restored payload plus rendered-content key, or `nil` when no child can be resolved.
+     - Side effects: Reads SWORD module content and may temporarily move module cursors through
+       `SwordModule` inspection helpers that restore previous cursor state.
+     - Failure modes: Drops individual malformed/unavailable children, matching Android's
+       `mapNotNull` restore behavior; returns `nil` if all children drop or encoding fails.
+     */
+    private func buildRestoredAndroidMultiDocument() -> RestoredAndroidMultiDocumentRequest? {
+        let pageKey = currentGeneralBookKey
+        let references = AndroidSpecialDocumentIdentity.parseBookAndKeyListReference(pageKey)
+        guard !references.isEmpty, let pageKey else { return nil }
+
+        var fragments: [OsisFragment] = []
+        var hasStrongsOrMorphologyContent = false
+        for reference in references {
+            guard let restoredFragment = restoredAndroidMultiDocumentFragment(for: reference) else {
+                continue
+            }
+            fragments.append(restoredFragment.fragment)
+            hasStrongsOrMorphologyContent = hasStrongsOrMorphologyContent || restoredFragment.usesStrongsContentType
+        }
+        guard !fragments.isEmpty else { return nil }
+
+        let renderedKey = hasStrongsOrMorphologyContent
+            ? AndroidSpecialDocumentIdentity.strongsRenderedKey
+            : AndroidSpecialDocumentIdentity.multiRenderedKey
+        let payload = MultiFragmentDocumentPayload(
+            id: "multi-\(UUID().uuidString)",
+            type: "multi",
+            osisFragments: fragments,
+            compare: false,
+            contentType: hasStrongsOrMorphologyContent ? "strongs" : nil,
+            state: nil
+        )
+        guard let data = try? bridgeEncoder.encode(payload),
+              let documentJSON = String(data: data, encoding: .utf8) else {
+            logger.error("Failed to encode restored Android Multi bridge document")
+            return nil
+        }
+        return RestoredAndroidMultiDocumentRequest(
+            documentJSON: documentJSON,
+            renderedKey: renderedKey,
+            pageKey: pageKey
+        )
+    }
+
+    /**
+     Resolves one restored Android `BookAndKey` child into a Vue fragment.
+
+     - Parameter reference: Parsed source document/key pair from the persisted `Multi` key.
+     - Returns: A fragment and whether it should force Vue's Strong's document mode, or `nil` if the
+       source document/key cannot be resolved.
+     - Side effects: May read SWORD content and move source module cursors through restoring helpers.
+     - Failure modes: Unavailable modules, invalid Bible references, or dictionary lookup misses return
+       `nil`, mirroring Android's restored-child `mapNotNull` behavior.
+     */
+    private func restoredAndroidMultiDocumentFragment(
+        for reference: AndroidSpecialDocumentIdentity.BookAndKeyReference
+    ) -> (fragment: OsisFragment, usesStrongsContentType: Bool)? {
+        let sourceModule: SwordModule?
+        if let documentInitials = reference.documentInitials {
+            sourceModule = swordManager?.module(named: documentInitials)
+        } else {
+            sourceModule = activeModule
+        }
+
+        if sourceModule?.info.category == .bible,
+           let osisReference = parseOsisRef(reference.key) {
+            return restoredBibleMultiDocumentFragment(
+                for: osisReference,
+                sourceModule: sourceModule,
+                sourceDocumentInitials: reference.documentInitials
+            ).map { ($0, false) }
+        }
+
+        guard let sourceModule else { return nil }
+        switch sourceModule.info.category {
+        case .dictionary, .glossary:
+            return restoredDictionaryMultiDocumentFragment(
+                for: reference.key,
+                sourceModule: sourceModule
+            )
+        default:
+            return nil
+        }
+    }
+
+    /**
+     Builds one restored Bible fragment for Android `Multi` document restore.
+
+     - Parameters:
+       - ref: Parsed OSIS verse reference from the saved child key.
+       - sourceModule: SWORD Bible module that owns the child key.
+       - sourceDocumentInitials: Persisted source initials. `nil` means Android's `null:` current-Bible
+         marker, so the active Bible module is used.
+     - Returns: A Vue OSIS fragment, or `nil` if the source Bible cannot resolve the verse.
+     - Side effects: Reads the SWORD verse and restores the source module cursor afterward.
+     - Failure modes: Missing source module or missing verse ordinal returns `nil`.
+     */
+    private func restoredBibleMultiDocumentFragment(
+        for ref: OsisRef,
+        sourceModule: SwordModule?,
+        sourceDocumentInitials: String?
+    ) -> OsisFragment? {
+        guard let sourceModule else { return nil }
+        let moduleName = sourceDocumentInitials ?? sourceModule.info.name
+        guard let ordinal = sourceModule.verseOrdinal(
+            osisBookId: ref.osisId,
+            chapter: ref.chapter,
+            verse: ref.verse
+        ) else {
+            return nil
+        }
+        let osisRef = "\(ref.osisId).\(ref.chapter).\(ref.verse)"
+        return OsisFragment(
+            xml: buildBibleMultiReferenceXML(ref: ref, module: sourceModule, ordinal: ordinal),
+            key: "\(moduleName)--\(osisRef)",
+            keyName: ref.displayName,
+            v11n: "KJVA",
+            bookCategory: DocumentCategory.bible.rawValue,
+            bookInitials: moduleName,
+            bookAbbreviation: ref.osisId,
+            osisRef: osisRef,
+            isNewTestament: isNewTestament(ref.book),
+            features: OsisFeatures(),
+            hasStrongs: sourceModule.info.features.contains(.strongsNumbers),
+            ordinalRange: [ordinal, ordinal],
+            language: sourceModule.info.language.isEmpty ? "en" : sourceModule.info.language,
+            direction: sourceModule.info.isRightToLeft ? "rtl" : "ltr"
+        )
+    }
+
+    /**
+     Builds one restored dictionary/glossary fragment for Android `Multi` document restore.
+
+     - Parameters:
+       - key: Persisted child key for the source dictionary or glossary module.
+       - sourceModule: Installed source module that owns the key.
+     - Returns: A Vue fragment plus whether the aggregate document should use Strong's mode.
+     - Side effects: Reads the source module and restores its cursor through `lookupInModule`.
+     - Failure modes: Returns `nil` when the source module cannot resolve the key exactly enough to
+       satisfy the dictionary lookup contract.
+     */
+    private func restoredDictionaryMultiDocumentFragment(
+        for key: String,
+        sourceModule: SwordModule
+    ) -> (fragment: OsisFragment, usesStrongsContentType: Bool)? {
+        let keyOptions = restoredDictionaryLookupKeys(for: key, sourceModule: sourceModule)
+        guard let lookup = lookupInModule(sourceModule, keyOptions: keyOptions) else {
+            return nil
+        }
+        let isStrongsDefinition = sourceModule.info.features.contains(.hebrewDef)
+            || sourceModule.info.features.contains(.greekDef)
+        let isMorphologyDefinition = sourceModule.info.features.contains(.hebrewParse)
+            || sourceModule.info.features.contains(.greekParse)
+        let keyName = isStrongsDefinition
+            ? Self.canonicalStrongsKeyName(requested: key, actualKey: lookup.actualKey, rawEntry: lookup.rawEntry)
+            : lookup.actualKey
+        let features = restoredDictionaryFeatures(for: sourceModule, keyName: keyName)
+        let xml = buildDictionaryEntryXML(
+            rawEntry: lookup.rawEntry,
+            renderedText: lookup.renderedText,
+            fallbackTitle: keyName,
+            strongsLinkPrefix: Self.strongsLinkPrefix(forModuleName: sourceModule.info.name)
+                ?? Self.strongsLinkPrefix(for: key)
+        )
+        let fragment = OsisFragment(
+            xml: xml,
+            key: "\(sourceModule.info.name)--\(keyName)",
+            keyName: keyName,
+            v11n: "KJVA",
+            bookCategory: DocumentCategory.dictionary.rawValue,
+            bookInitials: sourceModule.info.name,
+            bookAbbreviation: moduleDisplayLabel(sourceModule),
+            osisRef: keyName,
+            isNewTestament: false,
+            features: features,
+            hasStrongs: features.type != nil,
+            ordinalRange: [0, 0],
+            language: sourceModule.info.language.isEmpty ? "en" : sourceModule.info.language,
+            direction: sourceModule.info.isRightToLeft ? "rtl" : "ltr"
+        )
+        return (fragment, isStrongsDefinition || isMorphologyDefinition)
+    }
+
+    /**
+     Chooses lookup keys for a restored dictionary child.
+
+     Strong's modules need the same key-family expansion used by live Strong's links because persisted
+     Android keys may be numeric while local modules expect prefixed or zero-stripped variants. Plain
+     dictionaries use the persisted key directly, matching Android's `book.getKey(savedKey)` restore.
+
+     - Parameters:
+       - key: Persisted child key from Android's `BookAndKeyList.osisRef`.
+       - sourceModule: Dictionary or glossary module that owns the key.
+     - Returns: Ordered lookup candidates to try against `sourceModule`.
+     - Side effects: None.
+     - Failure modes: None; lookup failure is handled by the caller.
+     */
+    private func restoredDictionaryLookupKeys(for key: String, sourceModule: SwordModule) -> [String] {
+        if sourceModule.info.features.contains(.hebrewDef)
+            || sourceModule.info.features.contains(.greekDef) {
+            return Self.strongsLookupKeyOptions(for: key)
+        }
+        return [key]
+    }
+
+    /**
+     Maps restored dictionary module features into Vue `OsisFeatures`.
+
+     - Parameters:
+       - sourceModule: Dictionary/glossary module that produced the fragment.
+       - keyName: Canonical key name resolved from the source module.
+     - Returns: Feature metadata for Strong's dictionaries, or an empty feature set for plain
+       dictionaries and morphology modules.
+     - Side effects: None.
+     - Failure modes: None.
+     */
+    private func restoredDictionaryFeatures(for sourceModule: SwordModule, keyName: String) -> OsisFeatures {
+        if sourceModule.info.features.contains(.hebrewDef) {
+            return OsisFeatures(type: "hebrew", keyName: keyName)
+        }
+        if sourceModule.info.features.contains(.greekDef) {
+            return OsisFeatures(type: "greek", keyName: keyName)
+        }
+        return OsisFeatures()
     }
 
     /**
@@ -1101,6 +1501,10 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
        - renderedCategory: Category token to expose through rendered-content state.
        - renderedModuleName: Optional module token to expose through rendered-content state; defaults
          to the active Bible module for existing Bible-backed transient documents.
+       - pageCategory: Optional durable PageManager category for Android fake-document parity.
+       - pageDocumentInitials: Optional durable PageManager document initials for Android
+         fake-document parity.
+       - pageKey: Optional durable PageManager key for Android fake-document parity.
      - Side effects: clears the current Vue document, emits labels, emits the supplied document and
        setup payload, resets selection/editing flags, updates rendered-content accessibility state,
        emits active-window state, clears the web selection, and reapplies the reader background.
@@ -1112,15 +1516,22 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         renderedBook: String,
         renderedKey: String,
         renderedCategory: DocumentCategory = .bible,
-        renderedModuleName: String? = nil
+        renderedModuleName: String? = nil,
+        pageCategory: DocumentCategory? = nil,
+        pageDocumentInitials: String? = nil,
+        pageKey: String? = nil
     ) {
         let request = TransientMultiDocumentRequest(
             documentJSON: documentJSON,
             renderedBook: renderedBook,
             renderedKey: renderedKey,
             renderedCategory: renderedCategory,
-            renderedModuleName: renderedModuleName
+            renderedModuleName: renderedModuleName,
+            pageCategory: pageCategory,
+            pageDocumentInitials: pageDocumentInitials,
+            pageKey: pageKey
         )
+        activeTransientMultiDocument = request
         if clientReady {
             pendingClientReadyTransientMultiDocument = nil
         } else {
@@ -1147,7 +1558,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         editingInWebView = false
         hasActiveSelection = false
         selectedText = ""
-        currentCategory = .bible
+        applyTransientPageIdentity(request)
 
         bridge.emit(event: "clear_document")
         sendLabelsToVueJS()
@@ -1165,6 +1576,44 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
         bridge.clearSelection()
         applyNightModeBackground()
+    }
+
+    /**
+     Applies the native PageManager identity for a transient rendered document.
+
+     Android link-result windows do not stay on the source Bible category when they display aggregate
+     result content. For `FakeBookFactory.multiDocument`, the destination window becomes a
+     `GENERAL_BOOK` page with document initials `Multi` and a `BookAndKeyList` key. This method keeps
+     the controller's category, the PageManager fields, and same-session reload state aligned with
+     that Android model while preserving the old Bible identity for transient documents that do not
+     declare a durable fake-document page.
+
+     - Parameter request: Transient document request carrying optional durable PageManager fields.
+     - Side effects: Mutates `currentCategory`, category-specific controller fields, active
+       `PageManager` fields, and may invoke `onPersistState`.
+     - Failure modes: Requests without `pageCategory` fall back to the previous transient Bible
+       identity and do not persist page-manager state.
+     */
+    private func applyTransientPageIdentity(_ request: TransientMultiDocumentRequest) {
+        guard let pageCategory = request.pageCategory else {
+            currentCategory = .bible
+            return
+        }
+
+        currentCategory = pageCategory
+        if pageCategory == .generalBook {
+            activeGeneralBookModule = nil
+            activeGeneralBookModuleName = request.pageDocumentInitials
+            currentGeneralBookKey = request.pageKey
+        }
+
+        guard let pm = activeWindow?.pageManager else { return }
+        pm.currentCategoryName = pageCategory.pageManagerKey
+        if pageCategory == .generalBook {
+            pm.generalBookDocument = request.pageDocumentInitials
+            pm.generalBookKey = request.pageKey
+        }
+        onPersistState?()
     }
 
     /**
@@ -1880,10 +2329,15 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             logger.info("Restored saved dictionary module: \(savedDict)")
         }
 
-        // Restore general book module
-        if let savedGB = pm.generalBookDocument,
-           let mgr = swordManager,
-           let mod = mgr.module(named: savedGB) {
+        // Restore general book module or Android synthetic Multi document
+        if pm.generalBookDocument == AndroidSpecialDocumentIdentity.multiDocumentInitials {
+            activeGeneralBookModule = nil
+            activeGeneralBookModuleName = AndroidSpecialDocumentIdentity.multiDocumentInitials
+            currentGeneralBookKey = pm.generalBookKey
+            logger.info("Restored Android synthetic Multi document")
+        } else if let savedGB = pm.generalBookDocument,
+                  let mgr = swordManager,
+                  let mod = mgr.module(named: savedGB) {
             activeGeneralBookModule = mod
             activeGeneralBookModuleName = savedGB
             currentGeneralBookKey = pm.generalBookKey
@@ -2005,6 +2459,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
     /// Navigate to the next chapter, wrapping to the next book if needed.
     public func navigateNext() {
+        guard !isShowingAndroidMultiDocument else { return }
         let maxChapter = chapterCount(for: currentBook)
         if currentChapter < maxChapter {
             navigateTo(book: currentBook, chapter: currentChapter + 1)
@@ -2016,6 +2471,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
     /// Navigate to the previous chapter, wrapping to the previous book if needed.
     public func navigatePrevious() {
+        guard !isShowingAndroidMultiDocument else { return }
         if currentChapter > 1 {
             navigateTo(book: currentBook, chapter: currentChapter - 1)
         } else if let prevBook = previousBook(before: currentBook) {
@@ -2038,12 +2494,14 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
     /// Whether there's a next chapter available.
     public var hasNext: Bool {
+        guard !isShowingAndroidMultiDocument else { return false }
         let maxChapter = chapterCount(for: currentBook)
         return currentChapter < maxChapter || nextBook(after: currentBook) != nil
     }
 
     /// Whether there's a previous chapter available.
     public var hasPrevious: Bool {
+        guard !isShowingAndroidMultiDocument else { return false }
         return currentChapter > 1 || previousBook(before: currentBook) != nil
     }
 
@@ -2111,7 +2569,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
      Side effects:
      - updates `activeWindow?.pageManager?.jsState`
-     - updates transient Strong's rendered-content module labels when Vue tab state changes
+     - preserves compatibility for legacy transient dictionary rendered-content labels
      - invokes `onPersistState` so the owning view can save SwiftData changes
      */
     public func bridge(_ bridge: BibleBridge, saveState state: String) {
@@ -2121,18 +2579,20 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     }
 
     /**
-     Applies Strong's tab-selection state to native rendered-content labels.
+     Preserves legacy dictionary rendered-content labels when Vue tab-selection state changes.
 
-     Vue owns the per-dictionary tabs inside `StrongsDocument`, while Swift owns the bottom window
-     tabs. When Vue reports a new selected dictionary, this updates only the native display token so
-     the bottom tab follows the active dictionary module without treating the link result as a
-     durable PageManager category switch.
+     Android exposes Strong's and dictionary result pages as the synthetic general-book `Multi`
+     document, and Swift now keeps that durable native identity stable while Vue owns the
+     per-dictionary tab selection inside the document. This method remains only for older
+     dictionary-rendered transient state that can exist during migration or tests of the legacy
+     token format.
 
      - Parameter state: Serialized Vue state from `android.saveState(...)`.
-     - Returns: No direct return value; `renderedContentState` is updated when the state applies.
-     - Side effects: May update `renderedContentState`.
-     - Failure modes: Non-Strong's rendered content, invalid JSON, or missing selected dictionary
-       fields leave the current rendered-content state unchanged.
+     - Returns: No direct return value; legacy dictionary `renderedContentState` is updated when the
+       state applies.
+     - Side effects: May update legacy dictionary `renderedContentState`.
+     - Failure modes: Android `Multi` content, invalid JSON, or missing selected dictionary fields
+       leave the current rendered-content state unchanged.
      */
     private func updateDefinitionRenderedModuleIfNeeded(from state: String) {
         let currentTokens = renderedContentStateTokens()
@@ -3185,12 +3645,25 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     // MARK: - Selection Actions
 
     /**
-     Query detailed selection info from Vue.js (`bibleView.querySelection()`), with
-     fallback to the bridge's DOM-based query when unavailable.
+     Queries the active web selection using Android-compatible selection metadata.
+
+     The Vue `bibleView.querySelection()` contract includes `bookInitials`, `osisRef`, ordinals, and
+     offsets for both Bible `verseInfo` and generic `ordinalInfo` selections. Native selection
+     actions use those fields to choose the Bible bookmark/share path versus the generic bookmark
+     path. When the richer bridge API is unavailable, the method falls back to the lightweight DOM
+     query, which only supplies text and ordinals and is therefore unsuitable for generic bookmarks.
+
+     - Returns: Selection text plus optional document identity, ordinals, and offsets, or `nil` when
+       no usable selection exists.
+     - Side effects: Executes JavaScript in the active web view and may log bridge query failures.
+     - Failure modes: Malformed JSON, JavaScript exceptions, missing web views, and collapsed
+       selections return `nil` or the lightweight fallback rather than throwing.
      */
     @MainActor
     private func querySelectionDetails() async -> (
         text: String,
+        bookInitials: String?,
+        osisRef: String?,
         startOrdinal: Int?,
         endOrdinal: Int?,
         startOffset: Int?,
@@ -3224,13 +3697,15 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
                     }
 
                     let text = dict["text"] as? String ?? ""
+                    let bookInitials = dict["bookInitials"] as? String
+                    let osisRef = dict["osisRef"] as? String
                     let startOrdinal = asInt(dict["startOrdinal"])
                     let endOrdinal = asInt(dict["endOrdinal"])
                     let startOffset = asInt(dict["startOffset"])
                     let endOffset = asInt(dict["endOffset"])
 
                     if !text.isEmpty || startOrdinal != nil || endOrdinal != nil {
-                        return (text, startOrdinal, endOrdinal, startOffset, endOffset)
+                        return (text, bookInitials, osisRef, startOrdinal, endOrdinal, startOffset, endOffset)
                     }
                 }
             } catch {
@@ -3239,7 +3714,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         }
 
         if let fallback = await bridge.querySelection() {
-            return (fallback.text, fallback.startOrdinal, fallback.endOrdinal, nil, nil)
+            return (fallback.text, nil, nil, fallback.startOrdinal, fallback.endOrdinal, nil, nil)
         }
         return nil
     }
@@ -3251,6 +3726,24 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     func bookmarkSelection(wholeVerse: Bool = false) {
         Task { @MainActor in
             guard let sel = await querySelectionDetails() else { return }
+            if !canUseBibleReferenceActions {
+                guard let bookInitials = sel.bookInitials,
+                      let osisRef = sel.osisRef,
+                      let startOrdinal = sel.startOrdinal else {
+                    logger.warning("Generic selection bookmark ignored because selection metadata is incomplete")
+                    return
+                }
+                addGenericBookmark(
+                    bookInitials: bookInitials,
+                    osisRef: osisRef,
+                    startOrdinal: startOrdinal,
+                    endOrdinal: sel.endOrdinal ?? startOrdinal,
+                    addNote: false
+                )
+                bridge.clearSelection()
+                return
+            }
+
             let startOrd = sel.startOrdinal ?? verseOrdinal(
                 osisBookId: osisBookId(for: currentBook),
                 chapter: currentChapter,
@@ -3278,11 +3771,79 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         }
     }
 
-    /// Copy the selected text to the clipboard.
+    /**
+     Creates a generic bookmark for a non-Bible native selection.
+
+     Android's generic selection action uses the selected document's `bookInitials`, `osisRef`, and
+     ordinals instead of deriving a Bible reference from the active page manager. Native iOS selection
+     actions share that same route so links-window `Multi`, dictionary, and general-book content do
+     not produce stale Bible bookmarks.
+
+     - Parameters:
+       - bookInitials: Module initials from the selected document's DOM metadata.
+       - osisRef: Document/key reference from the selected document's DOM metadata.
+       - startOrdinal: Inclusive start ordinal for the selected generic content.
+       - endOrdinal: Inclusive end ordinal for the selected generic content.
+       - addNote: Whether the bookmark modal should open with note editing active.
+     - Side effects: Inserts a generic bookmark, emits bookmark update events to Vue, may persist
+       workspace settings, and may refresh labels/config through `applyBookmarkActionResult`.
+     - Failure modes: Returns without side effects when bookmark services are unavailable.
+     */
+    private func addGenericBookmark(
+        bookInitials: String,
+        osisRef: String,
+        startOrdinal: Int,
+        endOrdinal: Int,
+        addNote: Bool
+    ) {
+        guard let coordinator = bookmarkActionCoordinator() else {
+            logger.warning("addGenericBookmark: bookmarkService is nil")
+            return
+        }
+        applyBookmarkActionResult(
+            coordinator.addGenericBookmark(
+                bookInitials: bookInitials,
+                osisRef: osisRef,
+                startOrdinal: startOrdinal,
+                endOrdinal: endOrdinal,
+                addNote: addNote,
+                workspaceSettings: activeWindow?.workspace?.workspaceSettings
+            ),
+            bridge: bridge
+        )
+    }
+
+    /**
+     Builds the text payload used by the native copy action.
+
+     Bible pages mirror Android's verse-selection copy behavior by appending the active Bible
+     reference and module. Android `Multi` link-result pages are special general-book documents, so
+     they must copy only the selected text instead of inventing a stale Bible reference from the pane
+     that opened the links window.
+
+     - Returns: The text to write to the system pasteboard, or `nil` when there is no selection.
+     - Side effects: None; callers perform pasteboard writes and selection clearing.
+     - Failure modes: Returns `nil` for an empty native selection.
+     */
+    func selectionCopyTextForCurrentPage() -> String? {
+        guard !selectedText.isEmpty else { return nil }
+        if canUseBibleReferenceActions {
+            let reference = "\(currentBook) \(currentChapter)"
+            return "\(selectedText)\n\u{2014} \(reference) (\(activeModuleName))"
+        }
+        return selectedText
+    }
+
+    /**
+     Copies the current selection to the system clipboard.
+
+     The payload is delegated to `selectionCopyTextForCurrentPage()` so Android `Multi` links-window
+     pages and normal Bible pages share the same eligibility rules across test and production code.
+     The method writes to the platform pasteboard and clears the WebView selection after a successful
+     copy.
+     */
     func copySelection() {
-        guard !selectedText.isEmpty else { return }
-        let reference = "\(currentBook) \(currentChapter)"
-        let copyText = "\(selectedText)\n\u{2014} \(reference) (\(activeModuleName))"
+        guard let copyText = selectionCopyTextForCurrentPage() else { return }
         #if os(iOS)
         UIPasteboard.general.string = copyText
         #elseif os(macOS)
@@ -3294,6 +3855,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
     /// Share the selected text.
     func shareSelection() {
+        guard canUseBibleReferenceActions else { return }
         guard !selectedText.isEmpty else { return }
         let reference = "\(currentBook) \(currentChapter)"
         let shareText = "\(selectedText)\n\u{2014} \(reference) (\(activeModuleName))"
@@ -3304,11 +3866,19 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     /// Speak the selected text.
     func speakSelection() {
         Task { @MainActor in
-            guard let sel = await bridge.querySelection(), !sel.text.isEmpty else { return }
+            guard let sel = await querySelectionDetails(), !sel.text.isEmpty else { return }
             guard let service = speakService else { return }
-            service.currentTitle = "\(currentBook) \(currentChapter)"
-            service.currentSubtitle = activeModuleName
-            let lang = activeModule?.info.language ?? "en"
+            if canUseBibleReferenceActions {
+                service.currentTitle = "\(currentBook) \(currentChapter)"
+                service.currentSubtitle = activeModuleName
+            } else {
+                service.currentTitle = sel.bookInitials ?? activeGeneralBookModuleName ?? activeCommentaryModuleName ?? activeModuleName
+                service.currentSubtitle = sel.osisRef
+            }
+            let lang = activeModule?.info.language
+                ?? activeCommentaryModule?.info.language
+                ?? activeGeneralBookModule?.info.language
+                ?? "en"
             let speechLang = lang.hasPrefix("en") ? "en-US" : lang
             service.speak(text: sel.text, language: speechLang)
             bridge.clearSelection()
@@ -3317,6 +3887,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
     /// Compare translations for the selected verse(s) through the Vue document pipeline.
     func compareSelection() {
+        guard canUseBibleReferenceActions else { return }
         Task { @MainActor in
             var startVerse: Int? = nil
             var endVerse: Int? = nil
@@ -4285,29 +4856,28 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
      - Parameters:
        - documentJSON: Serialized `MultiDocument` payload already shaped for Vue.
-       - renderedBook: Accessibility/test-state book token for the transient result.
+       - renderedBook: Caller-provided legacy label. It is intentionally ignored for native page
+         identity because Android exposes Strong's and dictionary result documents as `Multi`.
        - renderedKey: Accessibility/test-state key token for the transient result.
      - Returns: No direct return value; the embedded document client receives an `add_documents`
        event.
-     - Side effects: Replaces the current web document with the supplied payload and exposes the
-       resolved dictionary module/key through rendered-content state for tab labels. This does not
-       persist PageManager category or key state because Android treats Strong's and dictionary
-       results as link-result documents.
+     - Side effects: Replaces the current web document with the supplied payload and persists the
+       destination window as Android's `general_book` + `Multi` fake document. The dictionary module
+       selection remains inside the Vue `MultiDocument`; it does not become the native window's
+       document identity.
      - Failure modes: Invalid JSON is forwarded unchanged to the Vue bridge, matching the existing
        transient document contract.
      */
-    func loadDefinitionDocument(_ documentJSON: String, renderedBook: String, renderedKey: String) {
-        let tabState = definitionDocumentTabState(
-            from: documentJSON,
-            fallbackBook: renderedBook,
-            fallbackKey: renderedKey
-        )
+    func loadDefinitionDocument(_ documentJSON: String, renderedBook _: String, renderedKey: String) {
         loadTransientMultiDocument(
             documentJSON,
-            renderedBook: tabState.book,
-            renderedKey: tabState.key,
-            renderedCategory: .dictionary,
-            renderedModuleName: tabState.moduleName
+            renderedBook: AndroidSpecialDocumentIdentity.multiDocumentInitials,
+            renderedKey: renderedKey,
+            renderedCategory: AndroidSpecialDocumentIdentity.multiDocumentCategory,
+            renderedModuleName: AndroidSpecialDocumentIdentity.multiDocumentInitials,
+            pageCategory: AndroidSpecialDocumentIdentity.multiDocumentCategory,
+            pageDocumentInitials: AndroidSpecialDocumentIdentity.multiDocumentInitials,
+            pageKey: AndroidSpecialDocumentIdentity.bookAndKeyListReference(from: documentJSON)
         )
     }
 
@@ -4316,7 +4886,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
      - Parameters:
        - documentJSON: Serialized `MultiDocument` payload already shaped for Vue.
-       - renderedBook: Accessibility/test-state book token for the transient result.
+       - renderedBook: Legacy label retained for the existing routing callback; destination
+         controllers normalize native identity to Android's `Multi` document.
        - renderedKey: Accessibility/test-state key token for the transient result.
      - Returns: No direct return value; rendering is delegated to the current or links-window
        controller.
@@ -4331,83 +4902,6 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         } else {
             loadDefinitionDocument(documentJSON, renderedBook: renderedBook, renderedKey: renderedKey)
         }
-    }
-
-    /// Display identity extracted from a transient definition document for native tab chrome.
-    private struct DefinitionDocumentTabState {
-        /// Module initials or abbreviation shown as the primary tab label.
-        let moduleName: String
-
-        /// Compact lookup key shown as the secondary tab label.
-        let key: String
-
-        /// Book token recorded in rendered-content state for UI tests and tab display.
-        let book: String
-    }
-
-    /**
-     Extracts the visible dictionary module/key from a Vue definition document payload.
-
-     Strong's documents can contain several dictionary fragments plus a saved selected-tab state.
-     The bottom window tab should reflect the active dictionary fragment, not the source Bible pane
-     that opened the link. Parsing the serialized payload keeps that display state aligned with the
-     shared Vue route without persisting a durable `PageManager` category change.
-
-     - Parameters:
-       - documentJSON: Serialized `MultiDocument` payload emitted to Vue.
-       - fallbackBook: Book token to use when parsing fails.
-       - fallbackKey: Key token to use when parsing fails.
-     - Returns: Module and key labels suitable for rendered-content state.
-     - Side effects: None.
-     - Failure modes: Invalid JSON or missing fragment fields fall back to the caller-supplied
-       labels so the document still renders.
-     */
-    private func definitionDocumentTabState(
-        from documentJSON: String,
-        fallbackBook: String,
-        fallbackKey: String
-    ) -> DefinitionDocumentTabState {
-        let fallback = DefinitionDocumentTabState(
-            moduleName: fallbackBook,
-            key: fallbackKey,
-            book: fallbackBook
-        )
-        guard let data = documentJSON.data(using: .utf8),
-              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let fragments = root["osisFragments"] as? [[String: Any]],
-              let firstFragment = fragments.first else {
-            return fallback
-        }
-
-        let selectedStrongsDict = (root["state"] as? [String: Any])?["selectedStrongsDict"] as? String
-        let selectedFragment = selectedStrongsDict.flatMap { selected in
-            fragments.first { ($0["bookInitials"] as? String) == selected }
-        } ?? firstFragment
-
-        let moduleName = nonEmptyString(selectedFragment["bookInitials"])
-            ?? nonEmptyString(selectedFragment["bookAbbreviation"])
-            ?? fallback.moduleName
-        let key = definitionDocumentDisplayKey(from: selectedFragment) ?? fallback.key
-        return DefinitionDocumentTabState(moduleName: moduleName, key: key, book: key)
-    }
-
-    /**
-     Builds a compact dictionary key label from one serialized definition fragment.
-
-     - Parameter fragment: JSON object for one `OsisFragment` inside a Vue `MultiDocument`.
-     - Returns: A display key such as `H00776`, `G01234`, or the fragment key name.
-     - Side effects: None.
-     - Failure modes: Returns `nil` when the fragment has no usable key fields.
-     */
-    private func definitionDocumentDisplayKey(from fragment: [String: Any]) -> String? {
-        if let features = fragment["features"] as? [String: Any],
-           let keyName = nonEmptyString(features["keyName"]) {
-            let type = nonEmptyString(features["type"])
-            let prefix = type == "hebrew" ? "H" : type == "greek" ? "G" : ""
-            return keyName.hasPrefix("H") || keyName.hasPrefix("G") ? keyName : "\(prefix)\(keyName)"
-        }
-
-        return nonEmptyString(fragment["keyName"])
     }
 
     /**

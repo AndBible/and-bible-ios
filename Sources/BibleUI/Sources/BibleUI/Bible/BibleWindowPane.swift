@@ -235,10 +235,17 @@ struct BibleWindowPane: View {
      Opening the menu also marks this pane active, matching Android's pane menu behavior.
      */
     private var windowMenuButton: some View {
-        Menu {
+        let canMoveWindow = !window.isLinksWindow && !windowManager.isMaximized
+        let canSyncWindow = controller?.isCurrentPageSyncable ?? true
+        let autoPinEnabled = windowManager.activeWorkspace?.workspaceSettings?.autoPin ?? false
+        let canPinWindow = !window.isLinksWindow && !windowManager.isMaximized && !autoPinEnabled
+
+        return Menu {
             // Content actions
-            Button(String(localized: "copy_reference"), systemImage: "doc.on.clipboard") {
-                copyReference()
+            if controller?.isShowingAndroidMultiDocument != true {
+                Button(String(localized: "copy_reference"), systemImage: "doc.on.clipboard") {
+                    copyReference()
+                }
             }
 
             Button(String(localized: "go_to_reference"), systemImage: "arrow.right.doc.on.clipboard") {
@@ -250,7 +257,7 @@ struct BibleWindowPane: View {
             Divider()
 
             // Move window actions
-            if windowManager.visibleWindows.count > 1 {
+            if canMoveWindow && windowManager.visibleWindows.count > 1 {
                 let sorted = windowManager.visibleWindows.sorted { $0.orderNumber < $1.orderNumber }
                 let currentIndex = sorted.firstIndex(where: { $0.id == window.id })
 
@@ -287,36 +294,44 @@ struct BibleWindowPane: View {
 
             Divider()
 
-            Toggle(isOn: Binding(
-                get: { window.isSynchronized },
-                set: { window.isSynchronized = $0 }
-            )) {
-                SwiftUI.Label(String(localized: "sync_scrolling"), systemImage: "arrow.triangle.2.circlepath")
-            }
+            if canSyncWindow || canPinWindow {
+                if canSyncWindow {
+                    Toggle(isOn: Binding(
+                        get: { window.isSynchronized },
+                        set: { window.isSynchronized = $0 }
+                    )) {
+                        SwiftUI.Label(String(localized: "sync_scrolling"), systemImage: "arrow.triangle.2.circlepath")
+                    }
+                }
 
-            Toggle(isOn: Binding(
-                get: { window.isPinMode },
-                set: { window.isPinMode = $0 }
-            )) {
-                SwiftUI.Label(String(localized: "pin"), systemImage: "pin")
-            }
+                if canPinWindow {
+                    Toggle(isOn: Binding(
+                        get: { window.isPinMode },
+                        set: { window.isPinMode = $0 }
+                    )) {
+                        SwiftUI.Label(String(localized: "pin"), systemImage: "pin")
+                    }
+                }
 
-            // Sync group picker
-            Menu(String(localized: "sync_group")) {
-                ForEach(0..<6) { group in
-                    Button {
-                        window.syncGroup = group
-                    } label: {
-                        if window.syncGroup == group {
-                            SwiftUI.Label(String(localized: "Group \(group)"), systemImage: "checkmark")
-                        } else {
-                            Text(String(localized: "Group \(group)"))
+                // Sync group picker
+                if canSyncWindow {
+                    Menu(String(localized: "sync_group")) {
+                        ForEach(0..<6) { group in
+                            Button {
+                                window.syncGroup = group
+                            } label: {
+                                if window.syncGroup == group {
+                                    SwiftUI.Label(String(localized: "Group \(group)"), systemImage: "checkmark")
+                                } else {
+                                    Text(String(localized: "Group \(group)"))
+                                }
+                            }
                         }
                     }
                 }
-            }
 
-            Divider()
+                Divider()
+            }
 
             Button(
                 localizedDrawerString("all_text_options_window_menutitle", default: "All text options"),
@@ -350,6 +365,8 @@ struct BibleWindowPane: View {
     /// Copies the pane's current reference string and triggers toast feedback.
     private func copyReference() {
         guard let ctrl = controller else { return }
+        guard !ctrl.isShowingAndroidMultiDocument else { return }
+
         let ref = "\(ctrl.currentBook) \(ctrl.currentChapter) (\(ctrl.activeModuleName))"
         #if os(iOS)
         UIPasteboard.general.string = ref
@@ -663,7 +680,7 @@ struct BibleWindowPane: View {
     /// Floating action bar shown while the pane has an active text selection.
     private var selectionActionBar: some View {
         HStack(spacing: 20) {
-            if controller?.currentCategory == .bible {
+            if controller?.canUseBibleReferenceActions == true {
                 if disableTwoStepBookmarking {
                     Button { controller?.bookmarkSelection(wholeVerse: false) } label: {
                         VStack(spacing: 2) {
@@ -720,16 +737,18 @@ struct BibleWindowPane: View {
                     Text(String(localized: "copy")).font(.caption2)
                 }
             }
-            Button { controller?.shareSelection() } label: {
-                VStack(spacing: 2) {
-                    Image(systemName: "square.and.arrow.up")
-                    Text(String(localized: "share")).font(.caption2)
+            if controller?.canUseBibleReferenceActions == true {
+                Button { controller?.shareSelection() } label: {
+                    VStack(spacing: 2) {
+                        Image(systemName: "square.and.arrow.up")
+                        Text(String(localized: "share")).font(.caption2)
+                    }
                 }
-            }
-            Button { controller?.compareSelection() } label: {
-                VStack(spacing: 2) {
-                    Image(systemName: "text.justify.left")
-                    Text(String(localized: "compare")).font(.caption2)
+                Button { controller?.compareSelection() } label: {
+                    VStack(spacing: 2) {
+                        Image(systemName: "text.justify.left")
+                        Text(String(localized: "compare")).font(.caption2)
+                    }
                 }
             }
             Button { controller?.speakSelection() } label: {

@@ -111,9 +111,14 @@ struct WindowTabBar: View {
         let isActive = !isMinimized && window.id == windowManager.activeWindow?.id
         let renderedState = renderedContentTabState(for: window)
         let categoryName = renderedState?.categoryName ?? window.pageManager?.currentCategoryName ?? "bible"
-        let icon = categoryName == "commentary" ? "ToolbarCommentary" : "ToolbarBible"
+        let icon = iconName(for: window, categoryName: categoryName)
         let moduleName = renderedState?.moduleName ?? persistedModuleName(for: window, categoryName: categoryName)
         let reference = renderedState?.reference ?? shortReference(for: window)
+        let canCopyReference = !fullReference(for: window).isEmpty
+        let canMoveWindow = !window.isLinksWindow && !windowManager.isMaximized
+        let canSyncWindow = isWindowSyncable(window)
+        let autoPinEnabled = windowManager.activeWorkspace?.workspaceSettings?.autoPin ?? false
+        let canPinWindow = !window.isLinksWindow && !windowManager.isMaximized && !autoPinEnabled
 
         return Button {
             if isMinimized {
@@ -179,8 +184,10 @@ struct WindowTabBar: View {
         .contextMenu {
             // Content actions
             if !isMinimized {
-                Button(String(localized: "copy_reference"), systemImage: "doc.on.clipboard") {
-                    copyReference(for: window)
+                if canCopyReference {
+                    Button(String(localized: "copy_reference"), systemImage: "doc.on.clipboard") {
+                        copyReference(for: window)
+                    }
                 }
 
                 Button(String(localized: "go_to_reference"), systemImage: "arrow.right.doc.on.clipboard") {
@@ -199,7 +206,7 @@ struct WindowTabBar: View {
                 }
             } else {
                 // Move window actions
-                if windowManager.visibleWindows.count > 1 {
+                if canMoveWindow && windowManager.visibleWindows.count > 1 {
                     let sorted = windowManager.visibleWindows.sorted { $0.orderNumber < $1.orderNumber }
                     let currentIndex = sorted.firstIndex(where: { $0.id == window.id })
 
@@ -236,35 +243,43 @@ struct WindowTabBar: View {
 
             Divider()
 
-            Toggle(isOn: Binding(
-                get: { window.isSynchronized },
-                set: { window.isSynchronized = $0 }
-            )) {
-                SwiftUI.Label(String(localized: "sync_scrolling"), systemImage: "arrow.triangle.2.circlepath")
-            }
+            if canSyncWindow || canPinWindow {
+                if canSyncWindow {
+                    Toggle(isOn: Binding(
+                        get: { window.isSynchronized },
+                        set: { window.isSynchronized = $0 }
+                    )) {
+                        SwiftUI.Label(String(localized: "sync_scrolling"), systemImage: "arrow.triangle.2.circlepath")
+                    }
+                }
 
-            Toggle(isOn: Binding(
-                get: { window.isPinMode },
-                set: { window.isPinMode = $0 }
-            )) {
-                SwiftUI.Label(String(localized: "pin"), systemImage: "pin")
-            }
+                if canPinWindow {
+                    Toggle(isOn: Binding(
+                        get: { window.isPinMode },
+                        set: { window.isPinMode = $0 }
+                    )) {
+                        SwiftUI.Label(String(localized: "pin"), systemImage: "pin")
+                    }
+                }
 
-            Menu(String(localized: "sync_group")) {
-                ForEach(0..<6) { group in
-                    Button {
-                        window.syncGroup = group
-                    } label: {
-                        if window.syncGroup == group {
-                            SwiftUI.Label(String(localized: "Group \(group)"), systemImage: "checkmark")
-                        } else {
-                            Text(String(localized: "Group \(group)"))
+                if canSyncWindow {
+                    Menu(String(localized: "sync_group")) {
+                        ForEach(0..<6) { group in
+                            Button {
+                                window.syncGroup = group
+                            } label: {
+                                if window.syncGroup == group {
+                                    SwiftUI.Label(String(localized: "Group \(group)"), systemImage: "checkmark")
+                                } else {
+                                    Text(String(localized: "Group \(group)"))
+                                }
+                            }
                         }
                     }
                 }
-            }
 
-            Divider()
+                Divider()
+            }
 
             Button(String(localized: "close"), systemImage: "xmark", role: .destructive) {
                 windowManager.removeWindow(window)
@@ -286,14 +301,14 @@ struct WindowTabBar: View {
     }
 
     /**
-     Returns transient document tab labels from the active controller when it is not showing Bible text.
+     Returns non-Bible document tab labels from the active controller's rendered-content token.
 
-     The persisted `PageManager` intentionally remains on the source Bible location for link-result
-     documents. Strong's and dictionary documents still need the bottom tab to mirror Android's
-     active document label, so this reads the controller's rendered-content token before falling
-     back to persisted window state.
+     Android links-window results use the fake general-book document `Multi`. For that identity, the
+     bottom tab displays the document initials without a secondary Bible reference because the
+     underlying key is a `BookAndKeyList`, not a user-facing chapter label. Other non-Bible rendered
+     documents keep their existing module/reference token display.
 
-     - Parameter window: Window whose controller may have transient rendered content.
+     - Parameter window: Window whose controller may have rendered non-Bible content.
      - Returns: Display labels for non-Bible rendered content, or `nil` for ordinary Bible content.
      - Side effects: None.
      - Failure modes: Missing controller state, malformed tokens, or empty module labels return
@@ -310,7 +325,10 @@ struct WindowTabBar: View {
             return nil
         }
 
-        let reference = nonEmptyToken(tokens["book"]) ?? nonEmptyToken(tokens["key"]) ?? ""
+        let reference = AndroidSpecialDocumentIdentity.isMultiDocument(
+            categoryName: category,
+            moduleName: moduleName
+        ) ? "" : nonEmptyToken(tokens["book"]) ?? nonEmptyToken(tokens["key"]) ?? ""
         return RenderedContentTabState(
             categoryName: category,
             moduleName: moduleName,
@@ -343,6 +361,25 @@ struct WindowTabBar: View {
         default:
             return pageManager.bibleDocument ?? "KJV"
         }
+    }
+
+    /**
+     Returns the icon asset used for a tab's primary document role.
+
+     Android shows the link icon for links-window tabs, including the synthetic `Multi` result
+     document. Non-links windows keep the existing category icon behavior.
+
+     - Parameters:
+       - window: Window represented by the tab.
+       - categoryName: Page-manager style category key currently displayed by the tab.
+     - Returns: Asset-catalog icon name for `ToolbarAssetIcon`.
+     - Side effects: None.
+     */
+    private func iconName(for window: Window, categoryName: String) -> String {
+        if window.isLinksWindow {
+            return "SettingsIconLink"
+        }
+        return categoryName == DocumentCategory.commentary.pageManagerKey ? "ToolbarCommentary" : "ToolbarBible"
     }
 
     /**
@@ -383,6 +420,8 @@ struct WindowTabBar: View {
 
     /// Returns a compact OSIS-style reference summary for display inside the tab pill.
     private func shortReference(for window: Window) -> String {
+        guard !isAndroidMultiDocument(window) else { return "" }
+
         // Use controller's dynamic book list if available, otherwise fallback to static
         if let ctrl = windowManager.controllers[window.id] as? BibleReaderController {
             return "\(ctrl.osisBookId(for: ctrl.currentBook)) \(ctrl.currentChapter)"
@@ -411,6 +450,8 @@ struct WindowTabBar: View {
 
     /// Returns the full human-readable reference string for copy-to-clipboard actions.
     private func fullReference(for window: Window) -> String {
+        guard !isAndroidMultiDocument(window) else { return "" }
+
         // Try to get reference from controller if available
         if let ctrl = windowManager.controllers[window.id] as? BibleReaderController {
             return "\(ctrl.currentBook) \(ctrl.currentChapter) (\(ctrl.activeModuleName))"
@@ -424,5 +465,52 @@ struct WindowTabBar: View {
         let book = books[bookIndex]
         let chapter = pm.bibleChapterNo ?? 1
         return "\(book.name) \(chapter) (\(moduleName))"
+    }
+
+    /**
+     Identifies the Android synthetic `Multi` page for one tab.
+
+     The controller is authoritative while attached because it may have just rendered a transient
+     document. The persisted PageManager identity covers restored windows before controller
+     registration completes.
+
+     - Parameter window: Window represented by the tab.
+     - Returns: `true` when the tab is showing Android's `general_book` + `Multi` fake document.
+     - Side effects: None.
+     */
+    private func isAndroidMultiDocument(_ window: Window) -> Bool {
+        if let ctrl = windowManager.controllers[window.id] as? BibleReaderController,
+           ctrl.isShowingAndroidMultiDocument {
+            return true
+        }
+
+        guard let pm = window.pageManager else { return false }
+        return AndroidSpecialDocumentIdentity.isMultiDocument(
+            categoryName: pm.currentCategoryName,
+            moduleName: pm.generalBookDocument
+        )
+    }
+
+    /**
+     Resolves Android page-level syncability for the tab's current document.
+
+     Attached controllers are authoritative because transient links-window content may be rendered
+     before persisted PageManager fields settle. Restored windows fall back to PageManager category
+     state; Android marks general-book pages, including `Multi` and EPUB-like content, as
+     non-syncable while dictionary/map/default pages remain syncable.
+
+     - Parameter window: Window represented by the tab.
+     - Returns: `true` when sync controls should be visible for the tab's current page.
+     - Side effects: None.
+     */
+    private func isWindowSyncable(_ window: Window) -> Bool {
+        if let ctrl = windowManager.controllers[window.id] as? BibleReaderController {
+            return ctrl.isCurrentPageSyncable
+        }
+
+        guard let pm = window.pageManager else { return true }
+        let categoryName = pm.currentCategoryName
+        return categoryName != DocumentCategory.generalBook.pageManagerKey
+            && categoryName != DocumentCategory.epub.pageManagerKey
     }
 }

@@ -370,6 +370,8 @@ extension AndBibleTests {
             strongsEnabled: true,
             isBibleActive: true,
             isCommentaryActive: false,
+            searchEnabled: true,
+            speakEnabled: true,
             moduleActionsEnabled: true,
             onShowSearch: {},
             onShowSpeak: {},

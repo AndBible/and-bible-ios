@@ -2946,6 +2946,8 @@ public struct BibleReaderView: View {
             strongsEnabled: strongsEnabled,
             isBibleActive: controller?.currentCategory == .bible,
             isCommentaryActive: controller?.currentCategory == .commentary,
+            searchEnabled: controller?.isCurrentPageSearchable == true,
+            speakEnabled: controller?.isCurrentPageSpeakable == true,
             moduleActionsEnabled: controller != nil,
             onShowSearch: { presentSearch(from: windowManager.activeWindow?.id) },
             onShowSpeak: {

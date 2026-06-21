@@ -813,7 +813,7 @@ extension AndBibleTests {
         XCTAssertEqual(features["keyName"] as? String, "00430")
         XCTAssertEqual(
             controller.renderedContentState,
-            "category=dictionary;module=StrongsHebrew;book=H00430;chapter=none;key=H00430"
+            "category=general_book;module=Multi;book=Multi;chapter=none;key=strongs"
         )
     }
 
@@ -844,15 +844,248 @@ extension AndBibleTests {
         )
         XCTAssertEqual(
             targetController.renderedContentState,
-            "category=dictionary;module=StrongsHebrew;book=H00430;chapter=none;key=H00430"
+            "category=general_book;module=Multi;book=Multi;chapter=none;key=strongs"
         )
 
         targetController.bridge(BibleBridge(), saveState: #"{"selectedStrongsDict":"HebrewGreek"}"#)
         XCTAssertEqual(
             targetController.renderedContentState,
-            "category=dictionary;module=HebrewGreek;book=H00430;chapter=none;key=H00430"
+            "category=general_book;module=Multi;book=Multi;chapter=none;key=strongs"
         )
     }
+
+    /**
+     Protects Android links-window identity for Strong's and dictionary result documents.
+
+     Android opens Strong's results in the target links window as
+     `FakeBookFactory.multiDocument`, with the selected dictionaries rendered inside that page rather
+     than becoming the window's document identity. The setup renders a Strong's `MultiDocument` into a
+     target controller with a `PageManager`, then simulates Vue saving a different selected dictionary
+     tab. The expected result is that native page/category state remains the general-book `Multi`
+     special document, the links window stays non-Bible syncable behavior-wise, and tab selection does
+     not relabel the whole window as `HebrewGreek`. A failure means iOS has preserved an iOS-only
+     transient dictionary identity instead of Android's durable links-window document semantics.
+     */
+    @MainActor
+    func testDefinitionDocumentUsesAndroidMultiPageIdentityForLinksWindowTarget() throws {
+        let bridge = BibleBridge()
+        let modulePath = try makeTemporaryBundledSwordPath()
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        let window = Window(isSynchronized: false, isLinksWindow: true)
+        let pageManager = PageManager(id: window.id)
+        window.pageManager = pageManager
+        controller.activeWindow = window
+        var persistCount = 0
+        controller.onPersistState = { persistCount += 1 }
+        let documentJSON = try XCTUnwrap(
+            controller.buildStrongsMultiDocJSON(strongs: ["H00430"], robinson: [])
+        )
+
+        controller.loadDefinitionDocument(
+            documentJSON,
+            renderedBook: "Strongs",
+            renderedKey: "strongs"
+        )
+
+        let androidBookAndKeyListRef = "StrongsHebrew:00430"
+        XCTAssertEqual(controller.currentCategory, .generalBook)
+        XCTAssertEqual(controller.currentGeneralBookKey, androidBookAndKeyListRef)
+        XCTAssertTrue(controller.hasStrongs)
+        XCTAssertFalse(controller.canUseBibleReferenceActions)
+        XCTAssertFalse(controller.isCurrentPageSearchable)
+        XCTAssertFalse(controller.isCurrentPageSpeakable)
+        XCTAssertFalse(controller.isCurrentPageSyncable)
+        XCTAssertEqual(pageManager.currentCategoryName, DocumentCategory.generalBook.pageManagerKey)
+        XCTAssertEqual(pageManager.generalBookDocument, "Multi")
+        XCTAssertEqual(pageManager.generalBookKey, androidBookAndKeyListRef)
+        XCTAssertGreaterThan(persistCount, 0)
+        XCTAssertEqual(
+            controller.renderedContentState,
+            "category=general_book;module=Multi;book=Multi;chapter=none;key=strongs"
+        )
+
+        controller.bridge(bridge, saveState: #"{"selectedStrongsDict":"HebrewGreek"}"#)
+
+        XCTAssertEqual(pageManager.currentCategoryName, DocumentCategory.generalBook.pageManagerKey)
+        XCTAssertEqual(pageManager.generalBookDocument, "Multi")
+        XCTAssertEqual(pageManager.generalBookKey, androidBookAndKeyListRef)
+        XCTAssertEqual(
+            controller.renderedContentState,
+            "category=general_book;module=Multi;book=Multi;chapter=none;key=strongs"
+        )
+    }
+
+    /**
+     Protects Android links-window identity for multi-reference Bible link result documents.
+
+     Android does not leave a links-window target on the source Bible page after opening a multi-link;
+     it sets the destination window's current document to `FakeBookFactory.multiDocument` and stores
+     the synthetic key for that special document. The setup sends a minimal serialized Vue
+     `MultiDocument` through the native target-controller entry point. The expected result is a
+     persisted general-book `Multi` page identity with no mutation of the underlying Bible module
+     selection. A failure means bottom tabs and restored window state can report a Bible window while
+     visually displaying a link-result page.
+     */
+    @MainActor
+    func testMultiReferenceDocumentUsesAndroidMultiPageIdentity() {
+        let controller = BibleReaderController(bridge: BibleBridge())
+        let window = Window(isSynchronized: false, isLinksWindow: true)
+        let pageManager = PageManager(id: window.id)
+        window.pageManager = pageManager
+        controller.activeWindow = window
+        let bibleDocumentBeforeLoad = pageManager.bibleDocument
+        let documentJSON = """
+        {
+          "id": "multi-test",
+          "type": "multi",
+          "osisFragments": [
+            {"bookInitials": "KJV", "osisRef": "Gen.1.1"},
+            {"bookInitials": "KJV", "osisRef": "John.3.16"}
+          ],
+          "compare": false
+        }
+        """
+
+        controller.loadMultiReferenceDocument(documentJSON)
+
+        let androidBookAndKeyListRef = "KJV:Gen.1.1||KJV:John.3.16"
+        XCTAssertEqual(controller.currentCategory, .generalBook)
+        XCTAssertEqual(controller.currentGeneralBookKey, androidBookAndKeyListRef)
+        XCTAssertFalse(controller.canUseBibleReferenceActions)
+        XCTAssertFalse(controller.isCurrentPageSearchable)
+        XCTAssertFalse(controller.isCurrentPageSpeakable)
+        XCTAssertFalse(controller.isCurrentPageSyncable)
+        XCTAssertEqual(pageManager.currentCategoryName, DocumentCategory.generalBook.pageManagerKey)
+        XCTAssertEqual(pageManager.generalBookDocument, "Multi")
+        XCTAssertEqual(pageManager.generalBookKey, androidBookAndKeyListRef)
+        XCTAssertEqual(pageManager.bibleDocument, bibleDocumentBeforeLoad)
+        XCTAssertEqual(
+            controller.renderedContentState,
+            "category=general_book;module=Multi;book=Multi;chapter=none;key=multi"
+        )
+    }
+
+    /**
+     Protects restoration of Android's synthetic `Multi` document identity.
+
+     Android persists links-window result pages as a general-book page whose document initials are
+     `Multi`, even though that document is created by `FakeBookFactory` rather than installed from
+     SWORD. The setup restores a controller from those PageManager fields without registering any real
+     general-book module named `Multi`. The expected result is that iOS still marks the window as the
+     synthetic `Multi` general-book document and treats it like Android's special non-navigation page.
+     A failure means restored links-window tabs can fall back to stale Bible identity simply because
+     the synthetic document is not a SWORD module.
+     */
+    @MainActor
+    func testRestoreSavedPositionRecognizesAndroidMultiDocumentIdentity() {
+        let controller = BibleReaderController(bridge: BibleBridge())
+        let window = Window(isSynchronized: false, isLinksWindow: true)
+        let pageManager = PageManager(id: window.id, currentCategoryName: DocumentCategory.generalBook.pageManagerKey)
+        pageManager.generalBookDocument = "Multi"
+        pageManager.generalBookKey = "KJV:Gen.1.1||KJV:John.3.16"
+        window.pageManager = pageManager
+        controller.activeWindow = window
+
+        controller.restoreSavedPosition()
+
+        XCTAssertEqual(controller.currentCategory, .generalBook)
+        XCTAssertEqual(controller.activeGeneralBookModuleName, "Multi")
+        XCTAssertEqual(controller.currentGeneralBookKey, "KJV:Gen.1.1||KJV:John.3.16")
+        XCTAssertTrue(controller.hasStrongs)
+        XCTAssertFalse(controller.hasNext)
+        XCTAssertFalse(controller.hasPrevious)
+        XCTAssertFalse(controller.canUseBibleReferenceActions)
+        XCTAssertFalse(controller.isCurrentPageSearchable)
+        XCTAssertFalse(controller.isCurrentPageSpeakable)
+        XCTAssertFalse(controller.isCurrentPageSyncable)
+    }
+
+    /**
+     Protects Android's durable restore behavior for links-window `Multi` result pages.
+
+     Android restores `FakeBookFactory.multiDocument` by parsing the persisted `BookAndKeyList` OSIS
+     reference back into source document/key pairs, then rendering a `MultiFragmentDocument`. The setup
+     starts with only the persisted PageManager category/document/key fields, as a process restart would.
+     The expected result is a real Vue `MultiDocument` payload derived from the saved key; a failure
+     means iOS has only fixed the bottom-tab label while losing the actual restored links-window content.
+     */
+    @MainActor
+    func testRestoredAndroidMultiDocumentRebuildsPayloadFromPersistedKey() throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let modulePath = try makeTemporaryBundledSwordPath()
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        let window = Window(isSynchronized: false, isLinksWindow: true)
+        let pageManager = PageManager(id: window.id, currentCategoryName: DocumentCategory.generalBook.pageManagerKey)
+        pageManager.generalBookDocument = "Multi"
+        pageManager.generalBookKey = "KJV:Gen.1.1||KJV:John.3.16"
+        window.pageManager = pageManager
+        controller.activeWindow = window
+        controller.restoreSavedPosition()
+
+        controller.loadCurrentContent()
+
+        let payload = try XCTUnwrap(
+            bridgeEmissionPayload(from: recordedScripts(), event: "add_documents") as? [String: Any]
+        )
+        let fragments = try XCTUnwrap(payload["osisFragments"] as? [[String: Any]])
+
+        XCTAssertEqual(payload["type"] as? String, "multi")
+        XCTAssertEqual(fragments.count, 2)
+        XCTAssertEqual(fragments[0]["bookInitials"] as? String, "KJV")
+        XCTAssertEqual(fragments[0]["osisRef"] as? String, "Gen.1.1")
+        XCTAssertEqual(fragments[1]["bookInitials"] as? String, "KJV")
+        XCTAssertEqual(fragments[1]["osisRef"] as? String, "John.3.16")
+        XCTAssertEqual(
+            controller.renderedContentState,
+            "category=general_book;module=Multi;book=Multi;chapter=none;key=multi"
+        )
+    }
+
+    #if os(iOS)
+    /**
+     Protects native selection actions from falling back to the stale Bible page behind `Multi`.
+
+     Android treats `FakeBookFactory.multiDocument` as a special general-book page. Bible-only
+     actions such as sharing verse references are unavailable there, while plain copy must not invent
+     a Bible reference from the source pane. The setup renders a `Multi` links-window document and
+     marks a native text selection. The expected result is a text-only copy payload and no Bible share
+     callback. A failure means iOS can expose stale `Genesis 1 (KJV)` style output for a links-window
+     document that Android no longer considers a Bible page.
+     */
+    @MainActor
+    func testMultiDocumentNativeSelectionActionsDoNotUseStaleBibleReference() {
+        let bridge = BibleBridge()
+        let controller = BibleReaderController(bridge: bridge)
+        let window = Window(isSynchronized: false, isLinksWindow: true)
+        let pageManager = PageManager(id: window.id)
+        window.pageManager = pageManager
+        controller.activeWindow = window
+        controller.loadMultiReferenceDocument("""
+        {
+          "id": "multi-selection-test",
+          "type": "multi",
+          "osisFragments": [
+            {"bookInitials": "KJV", "osisRef": "Gen.1.1"}
+          ],
+          "compare": false
+        }
+        """)
+
+        controller.bridge(bridge, selectionChanged: "Selected definition text")
+        var sharedText: String?
+        controller.onShareVerseText = { sharedText = $0 }
+
+        XCTAssertEqual(controller.selectionCopyTextForCurrentPage(), "Selected definition text")
+        XCTAssertNil(sharedText)
+
+        controller.bridge(bridge, selectionChanged: "Selected definition text")
+        controller.shareSelection()
+
+        XCTAssertNil(sharedText)
+    }
+    #endif
 
     @MainActor
     func testDefinitionDocumentRequestedBeforeClientReadyReplaysAfterClientReady() throws {
@@ -887,7 +1120,7 @@ extension AndBibleTests {
         XCTAssertNotEqual(fragment["osisRef"] as? String, "Gen.1")
         XCTAssertEqual(
             controller.renderedContentState,
-            "category=dictionary;module=StrongsHebrew;book=H00430;chapter=none;key=H00430"
+            "category=general_book;module=Multi;book=Multi;chapter=none;key=strongs"
         )
     }
 
