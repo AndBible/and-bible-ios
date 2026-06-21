@@ -2048,7 +2048,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      - Parameters:
        - bridge: Bridge reporting the scroll position change.
        - ordinal: Approximate verse ordinal currently near the viewport focus.
-       - key: Verse/document key string such as `Gen.1.5` used to infer chapter changes.
+       - key: Document OSIS ref such as `Gen.1` used to infer chapter changes.
 
      Side effects:
      - marks the pane as interacted-with only for user-origin scrolls
