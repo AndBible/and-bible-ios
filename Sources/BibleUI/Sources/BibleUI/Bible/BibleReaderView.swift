@@ -1159,15 +1159,16 @@ public struct BibleReaderView: View {
      - Parameters:
        - book: Book name selected by Search.
        - chapter: Chapter selected by Search.
+       - verse: Verse selected by Search.
      Side effects:
      - dismisses the Search sheet
      - updates the active pane's reader location
      Failure modes:
      - does nothing when no pane presentation controller is available
      */
-    private func navigateFromSearch(book: String, chapter: Int) {
+    private func navigateFromSearch(book: String, chapter: Int, verse: Int) {
+        panePresentationController?.navigateTo(book: book, chapter: chapter, verse: verse)
         showSearch = false
-        panePresentationController?.navigateTo(book: book, chapter: chapter)
     }
 
     // MARK: - Sheet Routing
