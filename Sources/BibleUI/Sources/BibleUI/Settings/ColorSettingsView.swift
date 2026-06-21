@@ -155,10 +155,11 @@ public struct ColorSettingsView: View {
        - fallback: Existing stored value used if `value` is non-finite.
      - Returns: Integer noise value in `0...100`.
      - Side effects: none.
-     - Failure modes: Non-finite values return `fallback` instead of trapping.
+     - Failure modes: Non-finite values return clamped `fallback` instead of trapping.
      */
     static func normalizedNoiseValue(_ value: Double, fallback: Int) -> Int {
-        guard value.isFinite else { return fallback }
+        let clampedFallback = min(max(fallback, 0), 100)
+        guard value.isFinite else { return clampedFallback }
         return min(max(Int(value.rounded()), 0), 100)
     }
 
@@ -244,7 +245,9 @@ public struct ColorSettingsView: View {
      */
     private func noiseBinding(for keyPath: WritableKeyPath<TextDisplaySettings, Int?>) -> Binding<Double> {
         Binding(
-            get: { Double(settings[keyPath: keyPath] ?? 0) },
+            get: {
+                Double(Self.normalizedNoiseValue(Double(settings[keyPath: keyPath] ?? 0), fallback: 0))
+            },
             set: {
                 let fallback = settings[keyPath: keyPath] ?? 0
                 settings[keyPath: keyPath] = Self.normalizedNoiseValue($0, fallback: fallback)

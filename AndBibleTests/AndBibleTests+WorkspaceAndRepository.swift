@@ -191,7 +191,8 @@ extension AndBibleTests {
 
         let workspace = store.createWorkspace(name: "Default Color")
 
-        XCTAssertEqual(workspace.workspaceColor, Int(Int32(bitPattern: 0xFF444444)))
+        XCTAssertEqual(Workspace.defaultWorkspaceColor, Int(Int32(bitPattern: 0xFF444444)))
+        XCTAssertEqual(workspace.workspaceColor, Workspace.defaultWorkspaceColor)
     }
 
     func testWindowManagerMarksVisibleWindowPendingUntilControllerRegisters() throws {

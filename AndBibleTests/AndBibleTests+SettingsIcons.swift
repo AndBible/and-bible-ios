@@ -417,13 +417,16 @@ extension AndBibleTests {
 
      Android `noise_day` and `noise_night` use a `SeekBarPreference` with max 100 and default 0.
      This protects iOS from persisting out-of-range slider values into the shared
-     `TextDisplaySettings` sync/reader contract.
+     `TextDisplaySettings` sync/reader contract, including non-finite edits that fall back to a
+     previously restored out-of-range value.
      */
     func testColorSettingsNoiseValuesNormalizeToAndroidSeekbarRange() {
         XCTAssertEqual(ColorSettingsView.normalizedNoiseValue(-4.6, fallback: 12), 0)
         XCTAssertEqual(ColorSettingsView.normalizedNoiseValue(44.5, fallback: 12), 45)
         XCTAssertEqual(ColorSettingsView.normalizedNoiseValue(120.2, fallback: 12), 100)
         XCTAssertEqual(ColorSettingsView.normalizedNoiseValue(Double.nan, fallback: 12), 12)
+        XCTAssertEqual(ColorSettingsView.normalizedNoiseValue(Double.nan, fallback: -7), 0)
+        XCTAssertEqual(ColorSettingsView.normalizedNoiseValue(Double.nan, fallback: 120), 100)
     }
 
     func testTextDisplaySliderIntegerRoundsSteppedFloatingPointValues() {
