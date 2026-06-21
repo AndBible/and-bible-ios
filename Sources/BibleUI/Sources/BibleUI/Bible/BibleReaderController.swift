@@ -3151,10 +3151,12 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     public func bridge(_ bridge: BibleBridge, setStudyPadCursor labelId: String, orderNumber: Int) {
         logger.info("StudyPad cursor: label=\(labelId) order=\(orderNumber)")
         guard let uuid = UUID(uuidString: labelId) else { return }
-        if activeWindow?.workspace?.workspaceSettings == nil {
-            activeWindow?.workspace?.workspaceSettings = WorkspaceSettings()
+        if let workspace = activeWindow?.workspace {
+            var settings = workspace.workspaceSettings ?? WorkspaceSettings()
+            settings.studyPadCursors[uuid] = orderNumber
+            settings.normalizeAutoAssignPrimaryLabel()
+            workspace.workspaceSettings = settings
         }
-        activeWindow?.workspace?.workspaceSettings?.studyPadCursors[uuid] = orderNumber
         onPersistState?()
         // Re-emit config so Vue.js gets the updated cursor position
         bridge.emit(event: "set_config", data: buildConfigJSON())
@@ -6909,6 +6911,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
         var settings = workspace.workspaceSettings ?? WorkspaceSettings()
         settings.hideCompareDocuments = documents
+        settings.normalizeAutoAssignPrimaryLabel()
         workspace.workspaceSettings = settings
         onPersistState?()
     }
@@ -7579,7 +7582,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         if result.incrementsMyNotesRevision {
             myNotesMutationRevision += 1
         }
-        if let updatedWorkspaceSettings = result.updatedWorkspaceSettings {
+        if var updatedWorkspaceSettings = result.updatedWorkspaceSettings {
+            updatedWorkspaceSettings.normalizeAutoAssignPrimaryLabel()
             activeWindow?.workspace?.workspaceSettings = updatedWorkspaceSettings
         }
         if result.requiresPersistState {

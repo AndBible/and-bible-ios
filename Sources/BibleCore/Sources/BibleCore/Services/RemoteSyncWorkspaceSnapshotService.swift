@@ -436,13 +436,15 @@ public final class RemoteSyncWorkspaceSnapshotService {
         var fingerprintsByKey: [String: String] = [:]
 
         for workspace in workspaces {
+            var workspaceSettings = workspace.workspaceSettings ?? WorkspaceSettings()
+            workspaceSettings.normalizeAutoAssignPrimaryLabel()
             let workspaceRow = RemoteSyncCurrentWorkspaceRow(
                 id: workspace.id,
                 name: workspace.name,
                 contentsText: workspace.contentsText,
                 orderNumber: workspace.orderNumber,
                 textDisplaySettings: workspace.textDisplaySettings,
-                workspaceSettings: workspace.workspaceSettings ?? WorkspaceSettings(),
+                workspaceSettings: workspaceSettings,
                 speakSettingsJSON: workspaceFidelityByID[workspace.id]?.speakSettingsJSON,
                 unPinnedWeight: workspace.unPinnedWeight,
                 maximizedWindowID: workspace.maximizedWindowId,
@@ -837,28 +839,31 @@ public final class RemoteSyncWorkspaceSnapshotService {
      - Failure modes: This helper cannot fail.
      */
     static func canonicalWorkspaceSettings(_ value: WorkspaceSettings) -> String {
-        let recentLabels = value.recentLabels.map {
+        var normalizedValue = value
+        normalizedValue.normalizeAutoAssignPrimaryLabel()
+
+        let recentLabels = normalizedValue.recentLabels.map {
             "\($0.labelId.uuidString.lowercased())@\(Int64($0.lastAccess.timeIntervalSince1970 * 1000.0))"
         }.joined(separator: ",")
-        let autoAssignLabels = value.autoAssignLabels
+        let autoAssignLabels = normalizedValue.autoAssignLabels
             .map { $0.uuidString.lowercased() }
             .sorted()
             .joined(separator: ",")
-        let studyPadCursors = value.studyPadCursors.keys
+        let studyPadCursors = normalizedValue.studyPadCursors.keys
             .sorted { $0.uuidString < $1.uuidString }
-            .map { key in "\(key.uuidString.lowercased())=\(value.studyPadCursors[key] ?? 0)" }
+            .map { key in "\(key.uuidString.lowercased())=\(normalizedValue.studyPadCursors[key] ?? 0)" }
             .joined(separator: ",")
-        let hiddenCompareDocuments = value.hideCompareDocuments.sorted().joined(separator: ",")
+        let hiddenCompareDocuments = normalizedValue.hideCompareDocuments.sorted().joined(separator: ",")
         let components = [
-            canonicalBool(value.enableTiltToScroll),
-            canonicalBool(value.enableReverseSplitMode),
-            canonicalBool(value.autoPin),
+            canonicalBool(normalizedValue.enableTiltToScroll),
+            canonicalBool(normalizedValue.enableReverseSplitMode),
+            canonicalBool(normalizedValue.autoPin),
             recentLabels,
             autoAssignLabels,
-            value.autoAssignPrimaryLabel?.uuidString.lowercased() ?? "",
+            normalizedValue.autoAssignPrimaryLabel?.uuidString.lowercased() ?? "",
             studyPadCursors,
             hiddenCompareDocuments,
-            canonicalBool(value.limitAmbiguousModalSize),
+            canonicalBool(normalizedValue.limitAmbiguousModalSize),
         ]
         return components.joined(separator: "^")
     }
