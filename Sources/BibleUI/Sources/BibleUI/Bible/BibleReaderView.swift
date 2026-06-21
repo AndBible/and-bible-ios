@@ -1824,7 +1824,7 @@ public struct BibleReaderView: View {
                    let chapter = Int(parts[1]) {
                     let osisBook = String(parts[0])
                     if let bookName = ctrl.bookName(forOsisId: osisBook) {
-                        ctrl.navigateTo(book: bookName, chapter: chapter)
+                        ctrl.navigateToSynchronizedPosition(book: bookName, chapter: chapter, ordinal: ordinal)
                     }
                 }
             }

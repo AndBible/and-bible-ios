@@ -471,11 +471,17 @@ struct BibleWindowPane: View {
             }
         }
         ctrl.onInteraction = focusHandler
-        ctrl.bridge.onAnyMessage = focusHandler
-        ctrl.bridge.onNativeUserInteraction = focusHandler
-        ctrl.bridge.onNativeScrollDeltaY = { deltaY in
+        ctrl.bridge.onAnyMessage = { [weak ctrl] in
+            ctrl?.handleUserInteraction()
+        }
+        ctrl.bridge.onNativeUserInteraction = { [weak ctrl] in
+            ctrl?.handleUserInteraction()
+        }
+        ctrl.bridge.onNativeScrollDeltaY = { [weak ctrl] deltaY in
+            guard let ctrl else { return }
+            guard ctrl.shouldTreatNativeScrollDeltaAsUserInteraction() else { return }
             if windowManager.activeWindow?.id != window.id {
-                focusHandler()
+                ctrl.handleUserInteraction()
             }
             onUserScrollDeltaY?(deltaY)
         }
