@@ -2178,6 +2178,77 @@ extension AndBibleTests {
     }
 
     /**
+     Protects synchronized target panes across the native/WebView delivery boundary.
+
+     Android updates an inactive synchronized window's key as sync-origin state before attempting
+     the secondary scroll. If that inactive view later reports the same visible key, it must remain
+     passive even when host focus has moved to the pane through a non-scroll path; only explicit
+     user interaction may make it a new sync source. The setup uses a client-ready bridge without
+     an attached WebView so the JavaScript emit is not delivered, then verifies the native sync
+     state still suppresses the follow-up visible-verse callback. A failure means a detached or
+     rebuilding target pane can rebroadcast its peer's synchronized key and start a reverse loop.
+     */
+    @MainActor
+    func testDetachedSynchronizedScrollRemainsPassiveUntilExplicitInteraction() throws {
+        let bridge = BibleBridge()
+        let modulePath = try makeTemporaryBundledSwordPath()
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        let module = try XCTUnwrap(manager.module(named: controller.activeModuleName))
+        let ordinal = try XCTUnwrap(module.verseOrdinal(osisBookId: "Gen", chapter: 1, verse: 5))
+        let olderOrdinal = try XCTUnwrap(module.verseOrdinal(osisBookId: "Gen", chapter: 1, verse: 4))
+        let container = try makeWorkspaceModelContainer()
+        let context = ModelContext(container)
+        let workspaceStore = WorkspaceStore(modelContext: context)
+        let windowManager = WindowManager(workspaceStore: workspaceStore)
+        let workspace = workspaceStore.createWorkspace(name: "Detached Sync")
+        let sourceWindow = try XCTUnwrap(workspaceStore.windows(workspaceId: workspace.id).first)
+        windowManager.setActiveWorkspace(workspace)
+        let targetWindow = try XCTUnwrap(windowManager.addWindow(from: sourceWindow))
+        sourceWindow.isSynchronized = true
+        sourceWindow.syncGroup = 0
+        targetWindow.isSynchronized = true
+        targetWindow.syncGroup = 0
+        windowManager.activeWindow = sourceWindow
+        controller.activeWindow = targetWindow
+        controller.windowManagerRef = windowManager
+        controller.navigateTo(book: "Genesis", chapter: 1, verse: 1)
+        controller.bridgeDidSetClientReady(bridge)
+        controller.onInteraction = {
+            windowManager.activeWindow = targetWindow
+        }
+        let rebroadcast = expectation(description: "detached sync-origin scroll must not rebroadcast")
+        rebroadcast.isInverted = true
+        windowManager.onSyncVerseChanged = { _, _, _ in
+            rebroadcast.fulfill()
+        }
+
+        controller.scrollToOrdinal(ordinal)
+        windowManager.activeWindow = targetWindow
+        controller.bridge(bridge, didScrollToOrdinal: ordinal, key: "Gen.1", atChapterTop: false)
+
+        XCTAssertEqual(windowManager.activeWindow?.id, targetWindow.id)
+        XCTAssertEqual(controller.currentVerse, 5)
+        XCTAssertEqual(targetWindow.pageManager?.bibleVerseNo, 5)
+        wait(for: [rebroadcast], timeout: 0.35)
+
+        let userBroadcast = expectation(description: "explicit target interaction restores broadcasting")
+        windowManager.onSyncVerseChanged = { sourceWindow, sourceOrdinal, key in
+            XCTAssertEqual(sourceWindow.id, targetWindow.id)
+            XCTAssertEqual(sourceOrdinal, olderOrdinal)
+            XCTAssertEqual(key, "Gen.1")
+            userBroadcast.fulfill()
+        }
+
+        controller.handleUserInteraction()
+        controller.bridge(bridge, didScrollToOrdinal: olderOrdinal, key: "Gen.1", atChapterTop: false)
+
+        XCTAssertEqual(windowManager.activeWindow?.id, targetWindow.id)
+        XCTAssertEqual(controller.currentVerse, 4)
+        wait(for: [userBroadcast], timeout: 1.0)
+    }
+
+    /**
      Protects visible-verse telemetry from acting as source-window ownership.
 
      Android treats document visible-position reports as passive state updates; a synced pane only
@@ -2358,12 +2429,12 @@ extension AndBibleTests {
      Protects user-origin synchronized scrolling while suppressing only secondary feedback.
 
      Android still treats a real scroll in a synchronized pane as the new source window. The setup
-     mirrors the secondary-scroll regression fixture but leaves the bridge detached before an
-     attempted native sync scroll, proving a failed emit does not arm stale suppression, then
-     delivers the explicit interaction that native dragging sends before visible-position
-     telemetry. The expected result is that the active pane emits one sync event through
-     `WindowManager`; a failure means the feedback-loop guard has disabled real synchronized
-     scrolling or visible-verse telemetry is being treated as source ownership.
+     mirrors the secondary-scroll regression fixture with a detached bridge, then delivers the
+     explicit interaction that native dragging sends before visible-position telemetry. The
+     expected result is that explicit interaction clears sync-origin suppression and the active pane
+     emits one sync event through `WindowManager`; a failure means the feedback-loop guard has
+     disabled real synchronized scrolling or visible-verse telemetry is being treated as source
+     ownership.
      */
     @MainActor
     func testUserScrollCallbackStillFocusesAndBroadcastsSynchronizedPane() throws {

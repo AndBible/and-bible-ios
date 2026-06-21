@@ -477,10 +477,10 @@ struct BibleWindowPane: View {
         ctrl.bridge.onNativeUserInteraction = { [weak ctrl] in
             ctrl?.handleUserInteraction()
         }
-        ctrl.bridge.onNativeScrollDeltaY = { [weak ctrl] deltaY in
+        ctrl.bridge.onNativeScrollDeltaY = { [weak ctrl, weak windowManager] deltaY in
             guard let ctrl else { return }
             guard ctrl.shouldTreatNativeScrollDeltaAsUserInteraction() else { return }
-            if windowManager.activeWindow?.id != window.id {
+            if windowManager?.activeWindow?.id != window.id {
                 ctrl.handleUserInteraction()
             }
             onUserScrollDeltaY?(deltaY)

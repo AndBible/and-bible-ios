@@ -2179,14 +2179,14 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      - updates this pane's native visible verse state so pre-ready content replay lands on the
        synchronized target, matching Android's inactive-window key update
      - emits `scroll_to_verse` to the Vue reader
-     - records `ordinal` as the latest pending synchronized scroll acknowledgement only when the
-       Vue client is ready and the bridge dispatches the emit
+     - records `ordinal` as the latest pending synchronized scroll acknowledgement once native
+       sync state is applied, even if the WebView is temporarily detached
 
      Failure modes:
      - if the Vue client is not ready, no bridge event is emitted; the ordinal is deferred until
        `bridgeDidSetClientReady(_:)` replays the native content state
      - if the web view is not attached after client-ready, `BibleBridge` logs the failed JavaScript
-       evaluation and no pending acknowledgement is recorded
+       evaluation while the native sync-origin guard remains active until explicit user interaction
      - if no scroll callback is produced, feedback suppression remains active until explicit user
        interaction makes this pane a source again
      */
@@ -2198,10 +2198,9 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             return
         }
         pendingClientReadySynchronizedScrollOrdinal = nil
-        if bridge.emit(event: "scroll_to_verse", data: "{\"ordinal\":\(ordinal),\"now\":false}") {
-            pendingSynchronizedScrollOrdinal = ordinal
-            synchronizedScrollFeedbackSuppressionActive = true
-        }
+        pendingSynchronizedScrollOrdinal = ordinal
+        synchronizedScrollFeedbackSuppressionActive = true
+        bridge.emit(event: "scroll_to_verse", data: "{\"ordinal\":\(ordinal),\"now\":false}")
     }
 
     /**
