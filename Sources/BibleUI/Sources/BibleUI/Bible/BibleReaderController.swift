@@ -668,6 +668,55 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         loadCurrentContent()
     }
 
+    /**
+     Switches the visible document to a Bible module in one Android-parity transition.
+
+     Android's `CurrentPageManager.setCurrentDocument(book)` updates the selected Bible and active
+     page together before notifying the reader. This method gives iOS the same contract for toolbar
+     quick selectors and the full module picker: the pane's Bible document and category are updated
+     together, persisted together, and then rendered once when the web client is ready.
+
+     - Parameter moduleName: Installed SWORD Bible module abbreviation to make current.
+     Side effects:
+     - mutates the active Bible module and current document category
+     - refreshes the cached Bible book list for the selected module
+     - writes `bibleDocument` and `currentCategoryName` to the active pane's `PageManager`
+     - invokes `onPersistState` once when pane state is available
+     - reloads the visible reader document once when the JavaScript client is ready
+     Failure modes:
+     - if the module cannot be resolved, logs a warning and leaves controller/page state unchanged
+     - if the resolved module is not a Bible, logs a warning and leaves controller/page state
+       unchanged
+     - Important: Main-actor isolated because successful switches can mutate SwiftUI-observed reader
+       state and synchronously emit WebView bridge updates through `loadCurrentContent()`.
+     */
+    @MainActor
+    public func switchBibleDocument(to moduleName: String) {
+        guard let mgr = swordManager,
+              let mod = mgr.module(named: moduleName) else {
+            logger.warning("Cannot switch to Bible document \(moduleName) — not found")
+            return
+        }
+        guard mod.info.category == .bible else {
+            logger.warning("Cannot switch to Bible document \(moduleName) — category \(mod.info.category.rawValue)")
+            return
+        }
+        activeModule = mod
+        activeModuleName = moduleName
+        currentCategory = .bible
+        refreshBookList()
+        logger.info("Switched to Bible document: \(moduleName) (\(self.moduleBookList.count) books)")
+
+        if let pm = activeWindow?.pageManager {
+            pm.bibleDocument = moduleName
+            pm.currentCategoryName = DocumentCategory.bible.pageManagerKey
+            onPersistState?()
+        }
+
+        guard clientReady else { return }
+        loadCurrentContent()
+    }
+
     /// Switch to a different installed commentary module.
     public func switchCommentaryModule(to moduleName: String) {
         guard let mgr = swordManager,

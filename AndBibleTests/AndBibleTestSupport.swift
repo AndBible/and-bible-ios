@@ -405,6 +405,67 @@ extension AndBibleTests {
         )
     }
 
+    /**
+     Seeds an additional Bible module identity that reuses the bundled KJV fixture payload.
+
+     Quick-selector parity tests need multiple installed Bible module initials so they can exercise
+     Android's direct-switch and popup contracts through `SwordManager` and `BibleReaderController`.
+     The alias keeps the canonical KJV data files untouched and only writes a separate `.conf`
+     module descriptor with a different abbreviation, description, and language code.
+
+     - Parameters:
+       - moduleName: SWORD module initials to publish in `mods.d`.
+       - description: Human-readable module name stored in the alias descriptor.
+       - language: ISO language code used by quick-selector ordering and labels.
+       - modulePath: Temporary SWORD root returned by `makeTemporaryBundledSwordPath()`.
+     - Side effects: Writes a `.conf` file under `modulePath/mods.d`.
+     - Failure modes: Propagates filesystem read/write errors, including a missing bundled KJV
+       descriptor in the temporary fixture.
+     */
+    func seedBibleAliasModule(
+        named moduleName: String,
+        description: String,
+        language: String = "en",
+        in modulePath: String
+    ) throws {
+        let moduleRoot = URL(fileURLWithPath: modulePath, isDirectory: true)
+        let modsDURL = moduleRoot.appendingPathComponent("mods.d", isDirectory: true)
+        let kjvConfigURL = modsDURL.appendingPathComponent("kjv.conf", isDirectory: false)
+        var config = try String(contentsOf: kjvConfigURL, encoding: .utf8)
+        config = config.replacingOccurrences(of: "[KJV]", with: "[\(moduleName)]")
+        config = replaceConfigLine(named: "Description", with: description, in: config)
+        config = replaceConfigLine(named: "Lang", with: language, in: config)
+
+        try config.write(
+            to: modsDURL.appendingPathComponent("\(moduleName.lowercased()).conf", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+    }
+
+    /**
+     Replaces one SWORD `.conf` key/value line while preserving the rest of the descriptor.
+
+     - Parameters:
+       - key: Configuration key to replace.
+       - value: Replacement value written after the equals sign.
+       - config: Full descriptor text.
+     - Returns: The updated descriptor, or the original descriptor with a new line appended when the
+       key was absent.
+     - Side effects: none.
+     - Failure modes: none; malformed input simply receives an appended key/value line.
+     */
+    private func replaceConfigLine(named key: String, with value: String, in config: String) -> String {
+        let escapedKey = NSRegularExpression.escapedPattern(for: key)
+        let pattern = #"(?m)^\#(escapedKey)=.*$"#
+        guard let range = config.range(of: pattern, options: .regularExpression) else {
+            return config + "\n\(key)=\(value)\n"
+        }
+        var updatedConfig = config
+        updatedConfig.replaceSubrange(range, with: "\(key)=\(value)")
+        return updatedConfig
+    }
+
     func copyDirectoryContents(from source: URL, to destination: URL) throws {
         let fm = FileManager.default
         try fm.createDirectory(at: destination, withIntermediateDirectories: true)

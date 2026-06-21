@@ -319,10 +319,7 @@ struct BibleReaderModulePicker: View {
             controller.switchCategory(to: .map)
             dismissAndPresentAuxiliaryBrowser(onOpenMapBrowser)
         default:
-            controller.switchModule(to: module.name)
-            if controller.currentCategory != .bible {
-                controller.switchCategory(to: .bible)
-            }
+            controller.switchBibleDocument(to: module.name)
             onDismiss()
         }
     }

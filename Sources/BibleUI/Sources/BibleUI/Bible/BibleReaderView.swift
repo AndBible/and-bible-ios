@@ -217,6 +217,15 @@ public struct BibleReaderView: View {
     /// Presents the reader's overflow action sheet.
     @State private var showReaderOverflowMenu = false
 
+    /// Presents Android's compact Bible-module quick selector anchored to the toolbar button.
+    @State private var showBibleQuickModuleSelector = false
+
+    /// Rows resolved by the Android-parity quick-selector contract for the active popup instance.
+    @State private var bibleQuickModuleSelectorRows: [BibleReaderQuickModuleSelectorPresentation.Row] = []
+
+    /// Window that owns the active Bible quick selector, kept separate from modal routing state.
+    @State private var bibleQuickModuleSelectorTargetWindowId: UUID?
+
     /// Presents the Android-style left navigation drawer from the reader header.
     @State private var showReaderNavigationDrawer = false
 
@@ -307,12 +316,6 @@ public struct BibleReaderView: View {
     /// Preference controlling whether the floating fullscreen reference capsule is hidden.
     @State private var hideBibleReferenceOverlayPref =
         AppPreferenceRegistry.boolDefault(for: .hideBibleReferenceOverlay) ?? false
-
-    /// Suppresses the tap handler that SwiftUI fires after a completed Bible-button long press.
-    @State private var suppressBibleTapAfterLongPress = false
-
-    /// Suppresses the tap handler that SwiftUI fires after a completed commentary-button long press.
-    @State private var suppressCommentaryTapAfterLongPress = false
 
     /// Tracks whether fullscreen was last entered by the double-tap gesture instead of scrolling.
     @State private var lastFullScreenByDoubleTap = false
@@ -571,6 +574,42 @@ public struct BibleReaderView: View {
     }
 
     /**
+     Binding that presents the native share sheet while a share payload exists.
+
+     - Returns: A Boolean binding derived from `shareText`.
+     - Side effects: Setting the binding to `false` clears the pending share payload.
+     - Failure modes: none.
+     */
+    private var shareSheetBinding: Binding<Bool> {
+        Binding(
+            get: { shareText != nil },
+            set: { isPresented in
+                if !isPresented {
+                    shareText = nil
+                }
+            }
+        )
+    }
+
+    /**
+     Binding that presents the cross-reference sheet while cross-reference payload exists.
+
+     - Returns: A Boolean binding derived from `crossReferences`.
+     - Side effects: Setting the binding to `false` clears the pending cross-reference payload.
+     - Failure modes: none.
+     */
+    private var crossReferenceSheetBinding: Binding<Bool> {
+        Binding(
+            get: { crossReferences != nil },
+            set: { isPresented in
+                if !isPresented {
+                    crossReferences = nil
+                }
+            }
+        )
+    }
+
+    /**
      Creates the reader coordinator view.
 
      - Note: This initializer performs no work directly. The view resolves its dependencies from
@@ -610,10 +649,16 @@ public struct BibleReaderView: View {
                 readerOverflowMenuOverlay(anchor: anchor)
             }
         }
+        .overlayPreferenceValue(ReaderBibleToolbarButtonBoundsPreferenceKey.self) { anchor in
+            if showBibleQuickModuleSelector {
+                bibleQuickModuleSelectorOverlay(anchor: anchor)
+            }
+        }
         .animation(.easeInOut(duration: 0.25), value: toastMessage)
         .animation(.easeInOut(duration: 0.2), value: showReaderNavigationDrawer)
         .animation(.easeInOut(duration: 0.2), value: showBookChooser)
         .animation(.easeInOut(duration: 0.16), value: showReaderOverflowMenu)
+        .animation(.easeInOut(duration: 0.16), value: showBibleQuickModuleSelector)
         .background {
             readerSceneMetricsBackground
         }
@@ -627,6 +672,7 @@ public struct BibleReaderView: View {
             handleReaderAppear()
         }
         .onChange(of: windowManager.activeWindow?.id) { _, _ in
+            dismissBibleQuickSelector()
             syncActiveDisplaySettings()
         }
         #if os(iOS)
@@ -706,16 +752,10 @@ public struct BibleReaderView: View {
                 lastFullScreenByDoubleTap = false
             }
         }
-        .sheet(isPresented: Binding(
-            get: { shareText != nil },
-            set: { if !$0 { shareText = nil } }
-        )) {
+        .sheet(isPresented: shareSheetBinding) {
             shareSheetContent
         }
-        .sheet(isPresented: Binding(
-            get: { crossReferences != nil },
-            set: { if !$0 { crossReferences = nil } }
-        )) {
+        .sheet(isPresented: crossReferenceSheetBinding) {
             crossReferenceSheetContent
         }
         .sheet(isPresented: $showRefChooser, onDismiss: resetPassageChooserProgressContext) {
@@ -1446,6 +1486,94 @@ public struct BibleReaderView: View {
     /// Releases stored chooser progress snapshots after the passage chooser closes.
     private func resetPassageChooserProgressContext() {
         passageChooserProgressContext = .empty
+    }
+
+    /**
+     Presents Android's Bible-toolbar quick selector for the focused pane.
+
+     - Parameters:
+       - controller: Pane controller whose installed Bible module list should back the popup.
+       - rows: Android-parity rows resolved by the pure quick-selector presentation contract.
+     - Side effects: Captures the active pane, closes competing reader popups, and shows the anchored
+       quick selector overlay.
+     - Failure modes: If the active pane cannot be identified, the popup still uses the focused
+       controller fallback through `panePresentationController`.
+     */
+    private func presentBibleQuickSelector(
+        _ controller: BibleReaderController,
+        rows: [BibleReaderQuickModuleSelectorPresentation.Row]
+    ) {
+        let targetWindowId = windowManager.controllers.first { _, registeredController in
+            (registeredController as? BibleReaderController) === controller
+        }?.key
+        let resolvedTargetWindowId = targetWindowId ?? windowManager.activeWindow?.id
+        setPanePresentationTarget(resolvedTargetWindowId)
+        bibleQuickModuleSelectorTargetWindowId = resolvedTargetWindowId
+        bibleQuickModuleSelectorRows = rows
+        showReaderOverflowMenu = false
+        showReaderNavigationDrawer = false
+        showBibleQuickModuleSelector = true
+    }
+
+    /// Dismisses the Bible quick selector without changing the captured pane target.
+    private func dismissBibleQuickSelector() {
+        showBibleQuickModuleSelector = false
+        bibleQuickModuleSelectorRows = []
+        bibleQuickModuleSelectorTargetWindowId = nil
+    }
+
+    /**
+     Resolves the current Bible document name for Android quick-menu row disabling.
+
+     - Parameter controller: Pane controller that owns the quick selector, if still available.
+     - Returns: The active Bible module only when the pane is currently displaying a Bible document;
+       otherwise `nil` so Bible rows remain selectable from commentary or other document modes.
+     - Side effects: none.
+     - Failure modes: none; missing controllers are treated as having no current Bible document.
+     */
+    private func currentBibleQuickSelectorModuleName(for controller: BibleReaderController?) -> String? {
+        guard let controller, controller.currentCategory == .bible else {
+            return nil
+        }
+        return controller.activeModuleName
+    }
+
+    /**
+     Resolves the Bible document Android would switch back to from a non-Bible document mode.
+
+     Android's `DocumentControl.suggestedBible` returns the active window's current Bible document
+     when Bible is not the visible document type. iOS stores that same pane-scoped choice on
+     `PageManager.bibleDocument`; if it is absent or no longer installed, the installed Bible list
+     provides the same default fallback established when the reader is initialized.
+
+     - Parameter controller: Pane controller that owns the toolbar action.
+     - Returns: Installed Bible module abbreviation to show, or `nil` when no Bible module exists.
+     - Side effects: none.
+     - Failure modes: returns `nil` when the pane has no installed Bible modules.
+     */
+    private func suggestedBibleDocumentName(for controller: BibleReaderController) -> String? {
+        if let saved = controller.activeWindow?.pageManager?.bibleDocument,
+           controller.installedBibleModules.contains(where: { $0.name == saved }) {
+            return saved
+        }
+        return controller.installedBibleModules.first?.name
+    }
+
+    /**
+     Applies a quick-selector Bible module choice to the captured pane.
+
+     - Parameters:
+       - module: Installed Bible module selected from the Android-parity quick selector.
+       - controller: Pane controller captured when the popup was rendered.
+     - Side effects: Dismisses the popup, switches the active module, and ensures the pane is in Bible
+       mode so the selection persists through the controller's normal document-switching path.
+     - Failure modes: If the controller is no longer available, the selection is ignored.
+     */
+    private func selectBibleQuickModule(_ module: ModuleInfo, targetWindowId: UUID?) {
+        let controller = controller(for: targetWindowId)
+        dismissBibleQuickSelector()
+        guard let controller else { return }
+        controller.switchBibleDocument(to: module.name)
     }
 
     // MARK: - Modal Routing
@@ -2232,16 +2360,18 @@ public struct BibleReaderView: View {
     private func readerOverflowMenuOverlay(anchor: Anchor<CGRect>?) -> some View {
         GeometryReader { proxy in
             let buttonRect = anchor.map { proxy[$0] }
-            let width = min(proxy.size.width - 16, CGFloat(236))
-            let leadingInset: CGFloat = 8
-            let trailingInset: CGFloat = 8
-            let resolvedRightEdge = buttonRect?.maxX ?? (proxy.size.width - trailingInset)
-            let resolvedBottomEdge = buttonRect?.maxY ?? (proxy.safeAreaInsets.top + 38)
-            let x = min(
-                max(leadingInset, resolvedRightEdge - width),
-                proxy.size.width - width - trailingInset
+            let width = ReaderToolbarPopupPlacement.boundedWidth(
+                containerWidth: proxy.size.width,
+                safeAreaInsets: proxy.safeAreaInsets,
+                preferredWidth: 236,
+                maximumWidth: 236
             )
-            let y = max(proxy.safeAreaInsets.top + 6, resolvedBottomEdge + 6)
+            let placement = ReaderToolbarPopupPlacement.trailingToolbarPopup(
+                containerSize: proxy.size,
+                safeAreaInsets: proxy.safeAreaInsets,
+                triggerRect: buttonRect,
+                popupWidth: width
+            )
 
             ZStack(alignment: .topLeading) {
                 Color.black.opacity(0.001)
@@ -2258,8 +2388,57 @@ public struct BibleReaderView: View {
                             .strokeBorder(Color.black.opacity(colorScheme == .dark ? 0.45 : 0.12), lineWidth: 1)
                     )
                     .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.32 : 0.18), radius: 14, y: 6)
-                    .offset(x: x, y: y)
+                    .offset(x: placement.offset.width, y: placement.offset.height)
                     .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .topTrailing)))
+            }
+        }
+    }
+
+    /// Full-screen dismiss area plus anchored Bible quick selector mirroring Android's toolbar popup.
+    private func bibleQuickModuleSelectorOverlay(anchor: Anchor<CGRect>?) -> some View {
+        GeometryReader { proxy in
+            let buttonRect = anchor.map { proxy[$0] }
+            let targetWindowId = bibleQuickModuleSelectorTargetWindowId
+            let rows = bibleQuickModuleSelectorRows
+            let width = ReaderToolbarPopupPlacement.boundedWidth(
+                containerWidth: proxy.size.width,
+                safeAreaInsets: proxy.safeAreaInsets,
+                preferredWidth: max(proxy.size.width * 0.42, 156),
+                maximumWidth: 232
+            )
+            let placement = ReaderToolbarPopupPlacement.trailingToolbarPopup(
+                containerSize: proxy.size,
+                safeAreaInsets: proxy.safeAreaInsets,
+                triggerRect: buttonRect,
+                popupWidth: width
+            )
+
+            ZStack(alignment: .topLeading) {
+                Color.black.opacity(0.001)
+                    .ignoresSafeArea()
+                    .contentShape(Rectangle())
+                    .onTapGesture { dismissBibleQuickSelector() }
+                    .accessibilityIdentifier("readerBibleQuickSelectorDismissArea")
+
+                if !rows.isEmpty {
+                    BibleReaderQuickModuleSelector(
+                        rows: rows,
+                        colorScheme: colorScheme,
+                        maximumHeight: placement.maximumHeight,
+                        onSelect: { module in
+                            selectBibleQuickModule(module, targetWindowId: targetWindowId)
+                        }
+                    )
+                    .frame(width: width, alignment: .topLeading)
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .strokeBorder(Color.black.opacity(colorScheme == .dark ? 0.45 : 0.12), lineWidth: 1)
+                    )
+                    .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.32 : 0.18), radius: 14, y: 6)
+                    .offset(x: placement.offset.width, y: placement.offset.height)
+                    .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .topTrailing)))
+                }
             }
         }
     }
@@ -2533,6 +2712,7 @@ public struct BibleReaderView: View {
             strongsEnabled: strongsEnabled,
             isBibleActive: controller?.currentCategory == .bible,
             isCommentaryActive: controller?.currentCategory == .commentary,
+            moduleActionsEnabled: controller != nil,
             onShowSearch: { presentSearch(from: windowManager.activeWindow?.id) },
             onShowSpeak: {
                 speakLastUsed = Date().timeIntervalSince1970
@@ -2545,25 +2725,15 @@ public struct BibleReaderView: View {
             },
             onApplyStrongsMode: { mode in applyStrongsMode(mode) },
             onBibleTap: {
-                if suppressBibleTapAfterLongPress {
-                    suppressBibleTapAfterLongPress = false
-                    return
-                }
                 handleBibleToolbarTap(controller)
             },
             onBibleLongPress: {
-                suppressBibleTapAfterLongPress = true
                 handleBibleToolbarLongPress(controller)
             },
             onCommentaryTap: {
-                if suppressCommentaryTapAfterLongPress {
-                    suppressCommentaryTapAfterLongPress = false
-                    return
-                }
                 handleCommentaryToolbarTap(controller)
             },
             onCommentaryLongPress: {
-                suppressCommentaryTapAfterLongPress = true
                 handleCommentaryToolbarLongPress(controller)
             },
             onShowWorkspaces: { presentReaderSheet(.workspaces, from: windowManager.activeWindow?.id) }
@@ -2988,26 +3158,24 @@ public struct BibleReaderView: View {
      Handles the Android `menuForDocs` Bible action.
 
      When exactly two Bible modules are installed, this mirrors Android's auto-cycle shortcut.
-     Otherwise it opens the Bible picker sheet.
+     Every other non-empty module list shows the compact anchored popup instead of the full document
+     picker sheet.
 
      - Parameter controller: Focused pane controller, if one is currently registered.
      */
     private func performBibleMenuAction(_ controller: BibleReaderController?) {
-        guard let controller else {
-            performBibleChooserAction()
+        guard let controller else { return }
+        switch BibleReaderQuickModuleSelectorPresentation.action(
+            for: controller.installedBibleModules,
+            activeModuleName: currentBibleQuickSelectorModuleName(for: controller)
+        ) {
+        case .none:
             return
+        case .switchDirectly(let nextName):
+            controller.switchBibleDocument(to: nextName)
+        case .showPopup(let rows):
+            presentBibleQuickSelector(controller, rows: rows)
         }
-        if controller.installedBibleModules.count == 2 {
-            cycleToNextModule(
-                modules: controller.installedBibleModules,
-                activeName: controller.activeModuleName
-            ) { nextName in
-                controller.switchModule(to: nextName)
-                controller.switchCategory(to: .bible)
-            }
-            return
-        }
-        performBibleChooserAction()
     }
 
     /**
@@ -3027,15 +3195,15 @@ public struct BibleReaderView: View {
     private func performBibleNextDocumentAction(_ controller: BibleReaderController?) {
         guard let controller else { return }
         if controller.currentCategory != .bible {
-            controller.switchCategory(to: .bible)
+            guard let moduleName = suggestedBibleDocumentName(for: controller) else { return }
+            controller.switchBibleDocument(to: moduleName)
             return
         }
         cycleToNextModule(
             modules: controller.installedBibleModules,
             activeName: controller.activeModuleName
         ) { nextName in
-            controller.switchModule(to: nextName)
-            controller.switchCategory(to: .bible)
+            controller.switchBibleDocument(to: nextName)
         }
     }
 

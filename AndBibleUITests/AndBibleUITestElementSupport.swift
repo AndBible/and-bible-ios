@@ -10,6 +10,23 @@ extension AndBibleUITests {
         for identifier: String,
         in app: XCUIApplication
     ) -> [XCUIElement] {
+        if identifier == "readerBibleQuickSelector" {
+            return [
+                app.scrollViews[identifier].firstMatch,
+                app.otherElements[identifier].firstMatch,
+            ]
+        }
+
+        if identifier.hasPrefix("readerBibleQuickSelectorRow_") {
+            return [
+                app.buttons[identifier].firstMatch,
+                app.scrollViews.buttons[identifier].firstMatch,
+                app.staticTexts[identifier].firstMatch,
+                app.scrollViews.staticTexts[identifier].firstMatch,
+                app.otherElements[identifier].firstMatch,
+            ]
+        }
+
         if identifier.hasSuffix("Screen") {
             return [
                 app.collectionViews[identifier].firstMatch,
