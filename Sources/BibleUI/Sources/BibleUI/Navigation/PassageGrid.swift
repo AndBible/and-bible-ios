@@ -560,6 +560,7 @@ enum PassageBookOrdering {
        - books: Module-provided book list in Bible-book order.
        - options: Current persisted/session chooser options.
        - orientation: Current visual orientation used by Android layout rules.
+       - allowsCategoryGrouping: Whether Android category grouping is allowed for this book scope.
      - Returns: Row-major visual slots, with `nil` placeholders for empty cells/spacers.
      - Side effects: none.
      - Failure modes: Empty input returns an empty array.
@@ -599,6 +600,7 @@ enum PassageBookOrdering {
        - itemCount: Number of source books.
        - options: Current chooser options.
        - orientation: Current visual orientation.
+       - allowsCategoryGrouping: Whether Android category grouping is allowed for this book scope.
      - Returns: Android grouped-grid column count or the layout-derived count.
      - Side effects: none.
      - Failure modes: Counts below one are clamped by callers.
