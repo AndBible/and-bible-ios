@@ -81,6 +81,33 @@ public struct RemoteModuleInfo: Sendable, Identifiable {
 }
 
 /**
+ Android default SWORD repository definition.
+
+ Android stores built-in repositories in `app/src/main/res/raw/repositories.txt` as independent
+ package and catalog directories. iOS still writes `InstallMgr.conf` in the legacy SWORD-compatible
+ row shape, but this definition is the shared source of truth for Downloads and package fallback so
+ iOS does not reconstruct package URLs from catalog paths later.
+ */
+private struct AndroidDefaultRepositorySource: Sendable {
+    /// Visible repository name from Android.
+    let name: String
+
+    /// HTTPS host from Android.
+    let host: String
+
+    /// Android package directory used by package ZIP installs.
+    let packageDirectory: String
+
+    /// SWORD catalog directory used for `mods.d.tar.gz`.
+    let catalogDirectory: String
+
+    /// SWORD-compatible `InstallMgr.conf` row used by local iOS plumbing.
+    var installManagerLine: String {
+        "HTTPSource=\(name)|\(host)|\(catalogDirectory)"
+    }
+}
+
+/**
  Swift wrapper around SWORD's InstallMgr for downloading and installing modules.
 
  All native operations are serialized through `SwordRuntime` since libsword and the flat bridge
@@ -98,17 +125,70 @@ public struct RemoteModuleInfo: Sendable, Identifiable {
 public final class InstallManager: @unchecked Sendable {
     private static let defaultConfigVersionMarker = "# AndBibleDefaultSourcesVersion=2"
 
-    private static let defaultSourceLines = [
-        "HTTPSource=CrossWire|crosswire.org|/ftpmirror/pub/sword/raw",
-        "HTTPSource=Crosswire Beta|crosswire.org|/ftpmirror/pub/sword/betaraw",
-        "HTTPSource=AndBible Extra|andbible.github.io|/andbible-extra",
-        "HTTPSource=AndBible|andbible.github.io|/data/andbible",
-        "HTTPSource=AndBible Beta|andbible.github.io|/data/andbible/beta",
-        "HTTPSource=IBT|ibtrussia.org|/ftpmirror/pub/modsword/raw",
-        "HTTPSource=Wycliffe (CrossWire)|crosswire.org|/ftpmirror/pub/sword/wyclifferaw",
-        "HTTPSource=eBible|ebible.org|/sword",
-        "HTTPSource=Lockman (CrossWire)|crosswire.org|/ftpmirror/pub/sword/lockmanraw",
-        "HTTPSource=STEP Bible (Tyndale)|public.modules.stepbible.org|/catalog",
+    private static let androidDefaultSources = [
+        AndroidDefaultRepositorySource(
+            name: "CrossWire",
+            host: "crosswire.org",
+            packageDirectory: "/ftpmirror/pub/sword/packages/rawzip",
+            catalogDirectory: "/ftpmirror/pub/sword/raw"
+        ),
+        AndroidDefaultRepositorySource(
+            name: "Crosswire Beta",
+            host: "crosswire.org",
+            packageDirectory: "/ftpmirror/pub/sword/betapackages/rawzip",
+            catalogDirectory: "/ftpmirror/pub/sword/betaraw"
+        ),
+        AndroidDefaultRepositorySource(
+            name: "AndBible Extra",
+            host: "andbible.github.io",
+            packageDirectory: "/andbible-extra/zip",
+            catalogDirectory: "/andbible-extra"
+        ),
+        AndroidDefaultRepositorySource(
+            name: "AndBible",
+            host: "andbible.github.io",
+            packageDirectory: "/data/andbible/zip",
+            catalogDirectory: "/data/andbible"
+        ),
+        AndroidDefaultRepositorySource(
+            name: "AndBible Beta",
+            host: "andbible.github.io",
+            packageDirectory: "/data/andbible/beta/zip",
+            catalogDirectory: "/data/andbible/beta"
+        ),
+        AndroidDefaultRepositorySource(
+            name: "IBT",
+            host: "ibtrussia.org",
+            packageDirectory: "/ftpmirror/pub/modsword/rawzip",
+            catalogDirectory: "/ftpmirror/pub/modsword/raw"
+        ),
+        AndroidDefaultRepositorySource(
+            name: "Wycliffe (CrossWire)",
+            host: "crosswire.org",
+            packageDirectory: "/ftpmirror/pub/sword/wycliffepackages/rawzip",
+            catalogDirectory: "/ftpmirror/pub/sword/wyclifferaw"
+        ),
+        AndroidDefaultRepositorySource(
+            name: "eBible",
+            host: "ebible.org",
+            packageDirectory: "/sword/zip",
+            catalogDirectory: "/sword"
+        ),
+        AndroidDefaultRepositorySource(
+            name: "Lockman (CrossWire)",
+            host: "crosswire.org",
+            packageDirectory: "/ftpmirror/pub/sword/lockmanpackages",
+            catalogDirectory: "/ftpmirror/pub/sword/lockmanraw"
+        ),
+        AndroidDefaultRepositorySource(
+            name: "STEP Bible (Tyndale)",
+            host: "public.modules.stepbible.org",
+            packageDirectory: "/packages",
+            catalogDirectory: "/catalog"
+        )
+    ]
+
+    private static let defaultSourceLines = androidDefaultSources.map(\.installManagerLine) + [
         "FTPSource=CrossWire|ftp.crosswire.org|/pub/sword/raw",
     ]
 
@@ -179,6 +259,23 @@ public final class InstallManager: @unchecked Sendable {
     }
 
     /**
+     Returns Android's package directory for a built-in SWORD repository.
+
+     - Parameter source: Parsed iOS source row.
+     - Returns: The package directory from Android's `repositories.txt` when the source matches a
+       built-in normal or beta repository; otherwise `nil`.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    public static func defaultPackageDirectory(for source: SourceConfig) -> String? {
+        androidDefaultSources.first {
+            $0.name == source.name &&
+                $0.host == source.host &&
+                $0.catalogDirectory == source.catalogPath
+        }?.packageDirectory
+    }
+
+    /**
      Write default InstallMgr.conf with sources matching Android AndBible.
      Sources are from and-bible/app/src/main/res/raw/repositories.txt
      */
@@ -192,7 +289,7 @@ public final class InstallManager: @unchecked Sendable {
         }
 
         // Sources matching AndBible Android's repositories.txt, in priority order.
-        // Format: HTTPSource=Label|host|catalogDirectory
+        // Format: HTTPSource=Label|host|catalogDirectory for SWORD compatibility.
         let config = """
         [General]
         PassiveFTP=true

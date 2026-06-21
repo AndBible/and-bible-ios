@@ -92,7 +92,6 @@ public struct BibleReaderView: View {
     /// Top-level sheets launched from the reader shell or its global shortcuts.
     enum ReaderSheet: String, Identifiable {
         case bookmarks
-        case downloads
         case history
         case readingPlans
         case readingProgress
@@ -107,6 +106,7 @@ public struct BibleReaderView: View {
     /// Reader-stack destinations opened from global reader actions.
     enum ReaderDestination: String, Identifiable, Hashable {
         case settings
+        case downloads
         case globalTextOptions
         case workspaceTextOptions = "textOptions"
         case windowTextOptions
@@ -980,11 +980,6 @@ public struct BibleReaderView: View {
             controller: panePresentationController,
             readingProgressInitialTab: readingProgressInitialTab,
             chapterReadHistoryTarget: chapterReadHistoryTarget,
-            downloadsInitialSearchText: downloadsInitialSearchText,
-            downloadsDefaultDownloadMode: downloadsDefaultDownloadMode,
-            onDefaultDownloadActivityChanged: { isInFlight in
-                handleStartupDefaultDownloadActivityChanged(isInFlight: isInFlight)
-            },
             onDismiss: dismissReaderSheet
         )
     }
@@ -1007,6 +1002,17 @@ public struct BibleReaderView: View {
             // pushed, so re-emit the compact reader-state export here. This keeps reader routing
             // tokens (for example `readerSheet=none;readerDestination=settings`) observable by UI
             // tests on the pushed destination without exposing reader internals to SettingsView.
+            .overlay(alignment: .topLeading) {
+                readerRenderedContentStateExport
+            }
+        case .downloads:
+            ModuleBrowserView(
+                initialSearchText: downloadsInitialSearchText,
+                defaultDownloadMode: downloadsDefaultDownloadMode,
+                onDefaultDownloadActivityChanged: { isInFlight in
+                    handleStartupDefaultDownloadActivityChanged(isInFlight: isInFlight)
+                }
+            )
             .overlay(alignment: .topLeading) {
                 readerRenderedContentStateExport
             }
@@ -1237,7 +1243,7 @@ public struct BibleReaderView: View {
         showSearch = false
     }
 
-    // MARK: - Sheet Routing
+    // MARK: - Sheet and Destination Routing
 
     /// Presents a top-level reader sheet and captures the pane target that should back it.
     private func presentReaderSheet(_ sheet: ReaderSheet, from windowId: UUID? = nil) {
@@ -1310,11 +1316,11 @@ public struct BibleReaderView: View {
     }
 
     /**
-     Presents Downloads and seeds its free-text search from an Android `download://` target.
+     Opens Downloads and seeds its free-text search from an Android `download://` target.
 
      - Parameters:
-       - windowId: Pane whose controller should own the sheet context. When `nil`, the focused pane
-         is used.
+       - windowId: Pane whose controller should own the destination context. When `nil`, the focused
+         pane is used.
        - initialSearchText: Optional module initials from the link query. Empty and whitespace-only
          values are normalized away so normal Downloads entry points remain unfiltered.
        - defaultDownloadMode: Optional startup/default-document mode for Android Easy Start.
@@ -1323,7 +1329,7 @@ public struct BibleReaderView: View {
      - captures the pane presentation target
      - updates `downloadsInitialSearchText`
      - updates `downloadsDefaultDownloadMode`
-     - presents the `.downloads` reader sheet
+     - pushes the `.downloads` reader destination
 
      Failure modes:
      - invalid search text is normalized to an empty string and opens the standard Downloads view
@@ -1335,7 +1341,7 @@ public struct BibleReaderView: View {
     ) {
         downloadsInitialSearchText = normalizedDownloadsSearchText(initialSearchText)
         downloadsDefaultDownloadMode = defaultDownloadMode
-        presentReaderSheet(.downloads, from: windowId)
+        presentReaderDestination(.downloads, from: windowId)
     }
 
     /**
@@ -1359,10 +1365,6 @@ public struct BibleReaderView: View {
 
     /// Closes the currently active top-level reader sheet.
     private func dismissReaderSheet() {
-        if activeReaderSheet == .downloads {
-            downloadsInitialSearchText = ""
-            downloadsDefaultDownloadMode = .disabled
-        }
         activeReaderSheet = nil
         chapterReadHistoryTarget = nil
     }
@@ -1375,10 +1377,8 @@ public struct BibleReaderView: View {
        - currentSheet: Sheet now visible after SwiftUI reported the change.
 
      Side effects:
-     - clears Downloads launch state after Downloads closes
-     - refreshes installed-module caches for each reader controller
-     - reopens the startup prompt when Downloads closes without an installed Bible unless Easy Start
-       downloads are still refreshing or installing
+     - currently no non-download sheet has extra close side effects; Downloads is handled as a
+       reader destination for Android parity
 
      Failure modes:
      - non-closing sheet transitions are ignored
@@ -1391,44 +1391,66 @@ public struct BibleReaderView: View {
             return
         }
 
-        switch previousSheet {
-        case .downloads:
-            downloadsInitialSearchText = ""
-            downloadsDefaultDownloadMode = .disabled
-            let shouldWaitForStartupDefaultDownloads = startupDefaultDownloadsInFlight
-            for (_, ctrl) in windowManager.controllers {
-                (ctrl as? BibleReaderController)?.refreshInstalledModules()
-            }
-            guard !shouldWaitForStartupDefaultDownloads else {
-                return
-            }
-            reevaluateStartupDownloadPromptAfterDownloads()
-        default:
-            break
-        }
+        _ = previousSheet
     }
 
     /**
      Handles side effects that belong to a reader-stack destination closing.
 
-     Settings is now a navigation destination instead of a sheet. Reloading behavior preferences on
-     pop keeps the same refresh boundary as the former modal route without coupling the behavior to
-     sheet state.
+     Settings and Downloads are navigation destinations instead of sheets. Reloading behavior
+     preferences on Settings pop preserves the former modal refresh boundary; Downloads pop refreshes
+     module caches and reopens Android's first-download prompt only if the user still has no Bibles.
 
      - Parameters:
        - previousDestination: Destination that was visible before SwiftUI reported the change.
        - currentDestination: Destination now visible after SwiftUI reported the change.
-     - Side Effects: Reloads reader behavior preferences after Settings closes.
+     - Side Effects: Reloads reader behavior preferences after Settings closes and refreshes module
+       state after Downloads closes.
      - Failure: Non-closing destination transitions are ignored.
      */
     private func handleActiveReaderDestinationChange(
         from previousDestination: ReaderDestination?,
         to currentDestination: ReaderDestination?
     ) {
-        guard currentDestination == nil, previousDestination == .settings else {
+        guard currentDestination == nil, let previousDestination else {
             return
         }
-        reloadBehaviorPreferences()
+        switch previousDestination {
+        case .settings:
+            reloadBehaviorPreferences()
+        case .downloads:
+            handleDownloadsDestinationClosed()
+        case .globalTextOptions, .workspaceTextOptions, .windowTextOptions:
+            break
+        }
+    }
+
+    /**
+     Applies Android's after-download behavior after the Downloads destination closes.
+
+     Android `afterDownload()` refreshes document state and returns to the first-download prompt when
+     the user exits Downloads without installing a Bible. iOS mirrors that on destination pop instead
+     of sheet dismissal because Downloads is a reader-stack route.
+
+     Side effects:
+     - clears one-shot Downloads launch state
+     - refreshes installed-module snapshots in every open reader controller
+     - may re-show the startup no-Bible prompt when no Bible was installed
+
+     Failure modes:
+     - module-refresh failures remain isolated inside each controller's refresh path
+     */
+    private func handleDownloadsDestinationClosed() {
+        downloadsInitialSearchText = ""
+        downloadsDefaultDownloadMode = .disabled
+        let shouldWaitForStartupDefaultDownloads = startupDefaultDownloadsInFlight
+        for (_, ctrl) in windowManager.controllers {
+            (ctrl as? BibleReaderController)?.refreshInstalledModules()
+        }
+        guard !shouldWaitForStartupDefaultDownloads else {
+            return
+        }
+        reevaluateStartupDownloadPromptAfterDownloads()
     }
 
     /**
@@ -1459,8 +1481,13 @@ public struct BibleReaderView: View {
         activeReaderSheet = sheet
     }
 
+    /// Presents a follow-up reader destination after another flow already captured the pane target.
+    private func presentReaderDestinationPreservingPane(_ destination: ReaderDestination) {
+        activeReaderDestination = destination
+    }
+
     /**
-     Presents Downloads after a pane-scoped flow has already captured the owning pane.
+     Opens Downloads after a pane-scoped flow has already captured the owning pane.
 
      - Parameters:
        - initialSearchText: Optional module initials from an Android-compatible link.
@@ -1477,7 +1504,7 @@ public struct BibleReaderView: View {
     ) {
         downloadsInitialSearchText = normalizedDownloadsSearchText(initialSearchText)
         downloadsDefaultDownloadMode = defaultDownloadMode
-        presentReaderSheetPreservingPane(.downloads)
+        presentReaderDestinationPreservingPane(.downloads)
     }
 
     /**
@@ -1945,6 +1972,7 @@ public struct BibleReaderView: View {
     private func evaluateStartupDownloadPromptIfNeeded() {
         guard !didEvaluateStartupDownloadPrompt,
               activeReaderSheet == nil,
+              activeReaderDestination == nil,
               activeReaderModal == nil else {
             return
         }
@@ -1991,7 +2019,7 @@ public struct BibleReaderView: View {
      */
     private func handleStartupDefaultDownloadActivityChanged(isInFlight: Bool) {
         startupDefaultDownloadsInFlight = isInFlight
-        guard !isInFlight, activeReaderSheet == nil else {
+        guard !isInFlight, activeReaderSheet == nil, activeReaderDestination == nil else {
             return
         }
 

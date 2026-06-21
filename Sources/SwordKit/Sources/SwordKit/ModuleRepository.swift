@@ -512,20 +512,16 @@ public struct CatalogModule: Sendable, Identifiable {
      Parses the SWORD `InstallSize` property into bytes for download-list display.
 
      - Parameter value: Raw catalog value from a module `.conf` file.
-     - Returns: Byte count when the value is an integer number of kibibytes; otherwise `nil`.
+     - Returns: Byte count when the value is an integer byte count; otherwise `nil`.
 
      Side effects:
      - none
 
      Failure modes:
-     - non-numeric values or values that overflow bytes return `nil`
+     - non-numeric or overflowing values return `nil`
      */
     private static func installSizeBytes(from value: String) -> Int64? {
-        guard let kibibytes = Int64(value.trimmingCharacters(in: .whitespacesAndNewlines)) else {
-            return nil
-        }
-        let bytes = kibibytes.multipliedReportingOverflow(by: 1024)
-        return bytes.overflow ? nil : bytes.partialValue
+        Int64(value.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 }
 
@@ -2069,107 +2065,58 @@ public final class ModuleRepository: @unchecked Sendable {
     }
 
     /**
-     Builds repository package ZIP candidates that match Android/SWORD repository layouts.
+     Builds the repository package ZIP URL that matches Android's installer source model.
 
      - Parameters:
-       - moduleName: Catalog module abbreviation used as the package filename.
-       - source: Repository source whose host and catalog path anchor package locations.
-     - Returns: De-duplicated HTTPS URLs, ordered from source-local packages to CrossWire-style
-       parent `packages/rawzip` locations.
+     - moduleName: Catalog module abbreviation used as the package filename.
+     - source: Repository source whose host and catalog path anchor package locations.
+     - Returns: The single authoritative package URL for the source, or an empty array when no
+       package directory can be resolved.
      - Side effects: none.
      - Failure modes: malformed host/path combinations are skipped rather than thrown because raw
        file installation remains the primary path.
      */
     private func packageZipCandidateURLs(for moduleName: String, source: SourceConfig) -> [URL] {
         let packageFileName = "\(moduleName).zip"
-        var paths: [String] = []
-        if let androidPackageDirectory = androidPackageDirectory(for: source) {
-            paths.append(appendingPathComponent(packageFileName, toPath: androidPackageDirectory))
-        }
-        paths += [
-            appendingPathComponent("zip/\(packageFileName)", toPath: source.catalogPath),
-            appendingPathComponent("packages/\(packageFileName)", toPath: source.catalogPath),
-            appendingPathComponent("packages/rawzip/\(packageFileName)", toPath: source.catalogPath)
-        ]
-
-        if let rawParentPath = parentPathForRawPackageDirectory(source.catalogPath) {
-            paths.append(appendingPathComponent("packages/rawzip/\(packageFileName)", toPath: rawParentPath))
-        }
-
-        var seen = Set<String>()
-        return paths.compactMap { path in
-            guard let url = URL(string: "https://\(source.host)\(path)") else { return nil }
-            guard seen.insert(url.absoluteString).inserted else { return nil }
-            return url
-        }
+        guard let packageDirectory = packageDirectory(for: source) else { return [] }
+        let path = appendingPathComponent(packageFileName, toPath: packageDirectory)
+        guard let url = URL(string: "https://\(source.host)\(path)") else { return [] }
+        return [url]
     }
 
     /**
-     Returns the Android-parity package directory for known default SWORD repositories.
+     Returns the package directory that Android would give to the SWORD installer.
 
      Android keeps package and catalog directories as distinct repository fields. iOS persists only
-     the catalog-style `HTTPSource` row today, so default sources need an explicit package-directory
-     map to avoid guessing wrong locations for repositories such as STEP, IBT, Wycliffe, and
-     Lockman.
+     the catalog-style `HTTPSource` row for local SWORD compatibility, so default-source metadata is
+     restored through `InstallManager` before falling back to Android's direct custom-repository
+     `catalogDirectory/packages` rule.
 
      - Parameter source: Repository source loaded from `InstallMgr.conf`.
      - Returns: Package directory path from Android's `repositories.txt` when the source matches a
-       built-in repository, otherwise the direct-catalog custom fallback `catalogPath/packages`.
+       built-in repository, an explicit custom package directory, or the direct-catalog custom
+       fallback `catalogPath/packages`.
      - Side effects: none.
      - Failure modes: none.
      */
-    private func androidPackageDirectory(for source: SourceConfig) -> String? {
+    private func packageDirectory(for source: SourceConfig) -> String? {
         if let packageDirectory = source.packageDirectory,
            !packageDirectory.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return packageDirectory
+            return normalizedRepositoryPath(packageDirectory)
         }
 
-        switch (source.name, source.host, source.catalogPath) {
-        case ("CrossWire", "crosswire.org", "/ftpmirror/pub/sword/raw"):
-            return "/ftpmirror/pub/sword/packages/rawzip"
-        case ("Crosswire Beta", "crosswire.org", "/ftpmirror/pub/sword/betaraw"):
-            return "/ftpmirror/pub/sword/betapackages/rawzip"
-        case ("AndBible Extra", "andbible.github.io", "/andbible-extra"):
-            return "/andbible-extra/zip"
-        case ("AndBible", "andbible.github.io", "/data/andbible"):
-            return "/data/andbible/zip"
-        case ("AndBible Beta", "andbible.github.io", "/data/andbible/beta"):
-            return "/data/andbible/beta/zip"
-        case ("IBT", "ibtrussia.org", "/ftpmirror/pub/modsword/raw"):
-            return "/ftpmirror/pub/modsword/rawzip"
-        case ("Wycliffe (CrossWire)", "crosswire.org", "/ftpmirror/pub/sword/wyclifferaw"):
-            return "/ftpmirror/pub/sword/wycliffepackages/rawzip"
-        case ("eBible", "ebible.org", "/sword"):
-            return "/sword/zip"
-        case ("Lockman (CrossWire)", "crosswire.org", "/ftpmirror/pub/sword/lockmanraw"):
-            return "/ftpmirror/pub/sword/lockmanpackages"
-        case ("STEP Bible (Tyndale)", "public.modules.stepbible.org", "/catalog"):
-            return "/packages"
-        default:
-            return appendingPathComponent("packages", toPath: source.catalogPath)
+        if let packageDirectory = InstallManager.defaultPackageDirectory(for: source) {
+            return normalizedRepositoryPath(packageDirectory)
         }
+
+        guard !source.isMyBibleRepository else { return nil }
+        return appendingPathComponent("packages", toPath: source.catalogPath)
     }
 
-    /**
-     Resolves the parent repository path whose `packages/rawzip/` directory pairs with a raw data
-     catalog.
-
-     - Parameter catalogPath: Source catalog path from `InstallMgr.conf`.
-     - Returns: The parent path when the final path component is a raw catalog directory, otherwise
-       `nil`.
-     - Side effects: none.
-     - Failure modes: none.
-     */
-    private func parentPathForRawPackageDirectory(_ catalogPath: String) -> String? {
-        let trimmedPath = catalogPath.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        let components = trimmedPath.split(separator: "/").map(String.init)
-        guard let lastComponent = components.last,
-              lastComponent.lowercased().contains("raw") else {
-            return nil
-        }
-
-        let parentComponents = components.dropLast()
-        return "/" + parentComponents.joined(separator: "/")
+    private func normalizedRepositoryPath(_ rawPath: String) -> String {
+        let trimmed = rawPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "" }
+        return trimmed.hasPrefix("/") ? trimmed : "/\(trimmed)"
     }
 
     /**

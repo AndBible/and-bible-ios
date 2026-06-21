@@ -187,6 +187,273 @@ extension AndBibleTests {
         )
     }
 
+    /**
+     Verifies normal Downloads opens with Android's default document-type filter.
+
+     Android persists the selected document filter and uses index 0 (`All types`) for a fresh
+     Downloads browser. iOS previously defaulted to Bibles, hiding commentaries, dictionaries, books,
+     and maps until the user changed filters.
+     */
+    func testModuleBrowserInitialCategoryDefaultsToAndroidAllTypes() {
+        XCTAssertNil(
+            ModuleBrowserView.initialSelectedCategory(
+                initialSearchText: "",
+                defaultDownloadMode: .disabled
+            )
+        )
+        XCTAssertNil(
+            ModuleBrowserView.initialSelectedCategory(
+                initialSearchText: "KJV",
+                defaultDownloadMode: .disabled
+            )
+        )
+        XCTAssertNil(
+            ModuleBrowserView.initialSelectedCategory(
+                initialSearchText: "",
+                defaultDownloadMode: .englishStartup
+            )
+        )
+        XCTAssertEqual(
+            ModuleBrowserView.initialSelectedCategory(
+                initialSearchText: "",
+                defaultDownloadMode: .disabled,
+                storedFilterIndex: 2
+            ),
+            .commentary
+        )
+        XCTAssertNil(
+            ModuleBrowserView.initialSelectedCategory(
+                initialSearchText: "KJV",
+                defaultDownloadMode: .disabled,
+                storedFilterIndex: 2
+            )
+        )
+        XCTAssertNil(
+            ModuleBrowserView.initialSelectedCategory(
+                initialSearchText: "",
+                defaultDownloadMode: .englishStartup,
+                storedFilterIndex: 2
+            )
+        )
+        XCTAssertEqual(ModuleBrowserView.androidFilterIndex(for: .commentary), 2)
+        XCTAssertEqual(ModuleBrowserView.category(forAndroidFilterIndex: 6), .addon)
+        XCTAssertNil(ModuleBrowserView.category(forAndroidFilterIndex: 99))
+    }
+
+    /**
+     Verifies Downloads default language selection follows Android's priority order.
+
+     Android `DocumentSelectionBase.defaultLanguage` first reuses a valid sticky language, then the
+     device language when that language has Bible rows, then an installed Bible language, then English
+     or the first available language. iOS should not preserve its own all-language default when Android
+     would select a concrete language.
+     */
+    func testModuleBrowserDefaultLanguageMatchesAndroidPriority() {
+        let englishBible = RemoteModuleInfo(
+            name: "KJV",
+            description: "King James Version",
+            category: .bible,
+            language: "en",
+            sourceName: "CrossWire"
+        )
+        let frenchBible = RemoteModuleInfo(
+            name: "LSG",
+            description: "Louis Segond",
+            category: .bible,
+            language: "fr",
+            sourceName: "CrossWire"
+        )
+        let germanCommentary = RemoteModuleInfo(
+            name: "GERCOM",
+            description: "German Commentary",
+            category: .commentary,
+            language: "de",
+            sourceName: "CrossWire"
+        )
+
+        XCTAssertEqual(
+            ModuleBrowserView.defaultLanguageCode(
+                availableModules: [englishBible, frenchBible],
+                installedModules: [],
+                availableLanguages: ["en", "fr"],
+                localeLanguageCode: "en",
+                stickyLanguageCode: "fr"
+            ),
+            "fr"
+        )
+        XCTAssertEqual(
+            ModuleBrowserView.defaultLanguageCode(
+                availableModules: [englishBible, frenchBible],
+                installedModules: [],
+                availableLanguages: ["en", "fr"],
+                localeLanguageCode: "fr",
+                stickyLanguageCode: nil
+            ),
+            "fr"
+        )
+        XCTAssertEqual(
+            ModuleBrowserView.defaultLanguageCode(
+                availableModules: [germanCommentary],
+                installedModules: [
+                    ModuleInfo(
+                        name: "GER",
+                        description: "German Bible",
+                        category: .bible,
+                        language: "de"
+                    )
+                ],
+                availableLanguages: ["de", "fr"],
+                localeLanguageCode: "fr",
+                stickyLanguageCode: nil
+            ),
+            "de"
+        )
+        XCTAssertEqual(
+            ModuleBrowserView.defaultLanguageCode(
+                availableModules: [germanCommentary],
+                installedModules: [],
+                availableLanguages: ["de", "en"],
+                localeLanguageCode: "fr",
+                stickyLanguageCode: nil
+            ),
+            "en"
+        )
+        XCTAssertEqual(
+            ModuleBrowserView.defaultLanguageCode(
+                availableModules: [germanCommentary],
+                installedModules: [],
+                availableLanguages: ["de"],
+                localeLanguageCode: "fr",
+                stickyLanguageCode: nil
+            ),
+            "de"
+        )
+    }
+
+    /**
+     Verifies Android sticky-language state only records explicit user language choices.
+
+     Android stores `DocumentSelectionBase.lastSelectedLanguage` from the language item-click handler.
+     Its default-language routine updates the spinner text but does not make the computed default
+     sticky. iOS must preserve that distinction so a device/default language does not override future
+     default-language resolution as if the user had selected it.
+     */
+    func testModuleBrowserStickyLanguageRecordsOnlyExplicitSelection() {
+        ModuleBrowserView.resetExplicitSelectedLanguageForTesting()
+        defer { ModuleBrowserView.resetExplicitSelectedLanguageForTesting() }
+
+        _ = ModuleBrowserView.defaultLanguageCode(
+            availableModules: [
+                RemoteModuleInfo(
+                    name: "GER",
+                    description: "German Bible",
+                    category: .bible,
+                    language: "de",
+                    sourceName: "CrossWire"
+                )
+            ],
+            installedModules: [],
+            availableLanguages: ["de"],
+            localeLanguageCode: "de",
+            stickyLanguageCode: ModuleBrowserView.explicitSelectedLanguageForTesting()
+        )
+
+        XCTAssertNil(ModuleBrowserView.explicitSelectedLanguageForTesting())
+
+        ModuleBrowserView.rememberExplicitSelectedLanguage("")
+        XCTAssertNil(ModuleBrowserView.explicitSelectedLanguageForTesting())
+
+        ModuleBrowserView.rememberExplicitSelectedLanguage("fr")
+        XCTAssertEqual(ModuleBrowserView.explicitSelectedLanguageForTesting(), "fr")
+    }
+
+    /**
+     Verifies iOS picker cancellation is ignored like Android's Install ZIP cancel path.
+
+     Android returns from the Install ZIP activity without showing a download error when the user
+     backs out. SwiftUI reports the same user action as a file-importer failure, so iOS must classify
+     the Cocoa cancellation code separately from real importer failures.
+     */
+    func testModuleBrowserInstallZipCancellationMatchesAndroidNoErrorBehavior() {
+        XCTAssertTrue(
+            ModuleBrowserView.isFileImporterCancellation(
+                NSError(domain: NSCocoaErrorDomain, code: CocoaError.userCancelled.rawValue)
+            )
+        )
+        XCTAssertFalse(
+            ModuleBrowserView.isFileImporterCancellation(
+                NSError(domain: NSCocoaErrorDomain, code: CocoaError.fileNoSuchFile.rawValue)
+            )
+        )
+        XCTAssertFalse(
+            ModuleBrowserView.isFileImporterCancellation(
+                NSError(domain: NSURLErrorDomain, code: NSURLErrorCancelled)
+            )
+        )
+    }
+
+    /**
+     Verifies refresh errors do not erase prior install/import errors.
+
+     Android tracks document install errors and metadata/repository errors independently. The
+     Downloads overflow should keep earlier install failures visible after a later catalog refresh
+     while still de-duplicating repeated repository errors.
+     */
+    func testModuleBrowserDownloadErrorsMergeRefreshFailures() {
+        XCTAssertEqual(
+            ModuleBrowserView.mergedDownloadErrors(
+                existing: [" Install failed ", "Metadata failed"],
+                refreshErrors: ["Repo failed", "", "Install failed", " Repo failed "]
+            ),
+            ["Install failed", "Metadata failed", "Repo failed"]
+        )
+    }
+
+    /**
+     Verifies install failures reuse the localized download-failure prefix.
+
+     Android surfaces install failures through the same Download errors affordance as repository
+     failures. iOS should keep that shared error contract and avoid introducing hard-coded English
+     prefixes inside the overflow dialog.
+     */
+    func testModuleBrowserDownloadFailureMessageUsesLocalizedPrefix() {
+        let prefix = String(localized: "error_download_failed", defaultValue: "Download failed")
+
+        XCTAssertEqual(
+            ModuleBrowserView.downloadFailureMessage("Network unavailable"),
+            "\(prefix): Network unavailable"
+        )
+        XCTAssertEqual(
+            ModuleBrowserView.downloadFailureMessage(moduleName: "KJV", message: "Network unavailable"),
+            "\(prefix): KJV: Network unavailable"
+        )
+    }
+
+    /**
+     Verifies Downloads failure fallbacks use stable localization keys.
+
+     Android routes repository, install, and uninstall failures through user-visible Downloads
+     surfaces. iOS should keep the same behavior without hard-coded English fallback messages.
+     */
+    func testModuleBrowserFailureFallbackMessagesUseLocalization() {
+        XCTAssertEqual(
+            ModuleBrowserView.noRepositorySourcesConfiguredMessage(),
+            String(localized: "no_sources_configured", defaultValue: "No repository sources configured.")
+        )
+        XCTAssertEqual(
+            ModuleBrowserView.moduleUnavailableForInstallationMessage(moduleName: "KJV"),
+            String(localized: "module_unavailable_for_installation \("KJV")")
+        )
+        XCTAssertEqual(
+            ModuleBrowserView.moduleSourceNotFoundMessage(moduleName: "KJV"),
+            String(localized: "module_source_not_found \("KJV")")
+        )
+        XCTAssertEqual(
+            ModuleBrowserView.uninstallFailureMessage("Disk locked"),
+            String(localized: "uninstall_failed \("Disk locked")")
+        )
+    }
+
     func testModuleRepositoryRefreshesMyBibleCatalogFromManifest() async throws {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -1344,6 +1611,180 @@ extension AndBibleTests {
             try Data(contentsOf: localDir.appendingPathComponent("custom.idx")),
             Data("index-data".utf8)
         )
+    }
+
+    /**
+     Verifies explicit package-directory metadata is normalized before building package ZIP URLs.
+
+     Android gives JSword a repository package directory, not an arbitrary URL fragment. iOS should
+     preserve that one authoritative directory while making relative legacy/manifest values safe for
+     the `https://host/path/module.zip` request shape.
+     */
+    func testModuleRepositoryNormalizesRelativeCustomPackageDirectoryForPackageFallback() async throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let swordDir = tempDir.appendingPathComponent("sword", isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let source = SourceConfig(
+            name: "Custom Repo",
+            type: "HTTP",
+            host: "custom.example",
+            catalogPath: "/catalog",
+            packageDirectory: "android/packages"
+        )
+        let catalogData = try makeModuleRepositoryCatalogArchive(moduleName: "CUSTOM")
+        let zipData = makeModuleRepositoryZip([
+            ("mods.d/custom.conf", Data("placeholder".utf8)),
+            ("modules/lexdict/rawld/custom/custom.dat", Data("dictionary-data".utf8)),
+            ("modules/lexdict/rawld/custom/custom.idx", Data("index-data".utf8))
+        ])
+        var requestedURLs: [String] = []
+
+        ModuleRepositoryDownloadMockURLProtocol.requestHandler = { request in
+            requestedURLs.append(request.url?.absoluteString ?? "")
+            let response: HTTPURLResponse
+            let data: Data
+            switch request.url?.path {
+            case "/catalog/mods.d.tar.gz":
+                response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!
+                data = catalogData
+            case "/catalog/modules/lexdict/rawld/custom/custom.dat":
+                response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 404,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!
+                data = Data()
+            case "/android/packages/CUSTOM.zip":
+                response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!
+                data = zipData
+            default:
+                XCTFail("Unexpected request: \(request.url?.absoluteString ?? "<nil>")")
+                response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 404,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!
+                data = Data()
+            }
+            return (response, data)
+        }
+        defer { ModuleRepositoryDownloadMockURLProtocol.requestHandler = nil }
+
+        let repository = ModuleRepository(
+            basePath: tempDir.path,
+            swordPath: swordDir.path,
+            session: makeModuleRepositoryDownloadMockSession()
+        )
+
+        _ = try await repository.refreshCatalog(for: source)
+        try await repository.installModule(named: "CUSTOM", from: source)
+
+        XCTAssertTrue(requestedURLs.contains("https://custom.example/android/packages/CUSTOM.zip"))
+        XCTAssertFalse(
+            requestedURLs.contains("https://custom.exampleandroid/packages/CUSTOM.zip"),
+            "Relative package metadata must not be appended directly to the host."
+        )
+    }
+
+    /**
+     Verifies explicit Android package directories are authoritative for package fallback.
+
+     Android gives the installer one package directory per repository. When that explicit directory
+     does not contain a ZIP, iOS should surface the install failure instead of probing catalog-relative
+     guesses that Android would never use.
+     */
+    func testModuleRepositoryDoesNotGuessPackageDirectoriesWhenAndroidPackageDirectoryIsExplicit() async throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let swordDir = tempDir.appendingPathComponent("sword", isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let source = SourceConfig(
+            name: "Custom Repo",
+            type: "HTTP",
+            host: "custom.example",
+            catalogPath: "/catalog",
+            packageDirectory: "/android/packages"
+        )
+        let catalogData = try makeModuleRepositoryCatalogArchive(moduleName: "CUSTOM")
+        var requestedPaths: [String] = []
+
+        ModuleRepositoryDownloadMockURLProtocol.requestHandler = { request in
+            requestedPaths.append(request.url?.path ?? "")
+            let response: HTTPURLResponse
+            let data: Data
+            switch request.url?.path {
+            case "/catalog/mods.d.tar.gz":
+                response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!
+                data = catalogData
+            case "/catalog/modules/lexdict/rawld/custom/custom.dat":
+                response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 404,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!
+                data = Data()
+            case "/android/packages/CUSTOM.zip":
+                response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 404,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!
+                data = Data()
+            default:
+                XCTFail("Unexpected package-directory guess: \(request.url?.absoluteString ?? "<nil>")")
+                response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 404,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!
+                data = Data()
+            }
+            return (response, data)
+        }
+        defer { ModuleRepositoryDownloadMockURLProtocol.requestHandler = nil }
+
+        let repository = ModuleRepository(
+            basePath: tempDir.path,
+            swordPath: swordDir.path,
+            session: makeModuleRepositoryDownloadMockSession()
+        )
+
+        _ = try await repository.refreshCatalog(for: source)
+        do {
+            try await repository.installModule(named: "CUSTOM", from: source)
+            XCTFail("Expected the install to fail after Android's explicit package directory returned 404.")
+        } catch {
+            XCTAssertTrue(requestedPaths.contains("/android/packages/CUSTOM.zip"))
+        }
+
+        XCTAssertFalse(requestedPaths.contains("/catalog/packages/CUSTOM.zip"))
+        XCTAssertFalse(requestedPaths.contains("/catalog/zip/CUSTOM.zip"))
+        XCTAssertFalse(requestedPaths.contains("/catalog/packages/rawzip/CUSTOM.zip"))
     }
 
     func testModuleRepositoryCancellationStopsBeforeInstalledMarker() async throws {
