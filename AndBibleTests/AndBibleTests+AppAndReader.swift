@@ -545,17 +545,16 @@ extension AndBibleTests {
         XCTAssertTrue(String(describing: type(of: view)).contains("BibleReaderOverflowMenu"))
     }
 
-    func testBibleReaderActiveSheetContentBuildsDownloadsSheet() {
-        let view = BibleReaderActiveSheetContent(
-            sheet: .downloads,
-            controller: nil,
-            readingProgressInitialTab: .reading,
-            chapterReadHistoryTarget: nil,
-            downloadsInitialSearchText: "",
-            onDismiss: {}
-        )
+    /**
+     Verifies Downloads is modeled as a reader destination rather than a top-level sheet.
 
-        XCTAssertTrue(String(describing: type(of: view)).contains("BibleReaderActiveSheetContent"))
+     Android opens `Download Documents` as an activity-style route with its own back app bar. The iOS
+     reader should therefore expose Downloads through destination routing, leaving `ReaderSheet` for
+     genuinely modal reader surfaces.
+     */
+    func testBibleReaderDownloadsUsesReaderDestinationRoute() {
+        XCTAssertEqual(BibleReaderView.ReaderDestination.downloads.rawValue, "downloads")
+        XCTAssertEqual(BibleReaderView.ReaderDestination.downloads.id, "downloads")
     }
 
     func testBibleReaderKeyboardShortcutsBuildCommandSurface() {
@@ -895,7 +894,14 @@ extension AndBibleTests {
         }
     }
 
-    func testCatalogModuleConvertsSwordInstallSizeKilobytes() {
+    /**
+     Verifies iOS preserves Android's `InstallSize` units when rendering Downloads sizes.
+
+     Android reads SWORD `KEY_INSTALL_SIZE` directly as bytes and formats that value as megabytes.
+     iOS must not multiply it by 1024, because that inflates catalog sizes by three orders of
+     magnitude and makes the Downloads browser disagree with Android for the same repository row.
+     */
+    func testCatalogModulePreservesAndroidInstallSizeBytes() {
         let module = CatalogModule(
             name: "KJV",
             description: "King James Version",
@@ -906,10 +912,10 @@ extension AndBibleTests {
             confContent: "",
             sourceName: "CrossWire",
             version: "1.0",
-            size: "1260"
+            size: "1260000"
         )
 
-        XCTAssertEqual(module.remoteModuleInfo.installSizeBytes, 1_290_240)
+        XCTAssertEqual(module.remoteModuleInfo.installSizeBytes, 1_260_000)
         XCTAssertEqual(ModuleBrowserView.installSizeText(for: module.remoteModuleInfo.installSizeBytes), "1.3 MB")
     }
 

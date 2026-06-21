@@ -778,7 +778,7 @@ extension AndBibleUITests {
         openReaderActionDestination(
             actionIdentifier: "readerOpenDownloadsAction",
             destinationIdentifier: "moduleBrowserScreen",
-            readinessIdentifiers: ["moduleBrowserRepositoriesButton"],
+            readinessIdentifiers: ["moduleBrowserOverflowButton", "moduleBrowserSearchField"],
             in: app
         )
     }

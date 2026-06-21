@@ -2,6 +2,7 @@
 
 import Foundation
 import SwiftUI
+import UniformTypeIdentifiers
 import BibleCore
 import SwordKit
 
@@ -172,6 +173,48 @@ public enum ModuleBrowserDefaultDownloadMode: Sendable, Equatable {
 }
 
 /**
+ Fixed Android Downloads surface colors.
+
+ Android renders the document download browser with a dark app-bar/list surface independent of the
+ reader's day/night theme. iOS keeps those colors local to Downloads so app theming still controls
+ the reader while this route matches Android's document-management UI.
+
+ Side effects:
+ - none; values are static color constants
+
+ Failure modes:
+ - none
+ */
+private enum ModuleBrowserPalette {
+    /// Full-screen Downloads background.
+    static let background = Color(red: 0.18, green: 0.18, blue: 0.18)
+
+    /// Android top app bar background.
+    static let appBar = Color.black
+
+    /// Android overflow menu popup surface.
+    static let menuSurface = Color(red: 0.20, green: 0.20, blue: 0.20)
+
+    /// Row divider and filter underline color.
+    static let divider = Color.white.opacity(0.16)
+
+    /// Primary row/app-bar text color.
+    static let primaryText = Color.white
+
+    /// Secondary row/filter text color.
+    static let secondaryText = Color.white.opacity(0.72)
+
+    /// Muted metadata text color.
+    static let tertiaryText = Color.white.opacity(0.52)
+
+    /// Android install/update affordance color.
+    static let install = Color.orange
+
+    /// Android installed affordance color.
+    static let installed = Color(red: 0.15, green: 0.85, blue: 0.28)
+}
+
+/**
  Browses installed and remote SWORD modules, then coordinates install and uninstall actions.
 
  The view combines locally installed module metadata from `SwordManager` with cached or refreshed
@@ -199,6 +242,15 @@ public struct ModuleBrowserView: View {
     /// Android's repository list staleness window before Downloads refreshes catalogs on open.
     static let downloadCatalogStaleInterval: TimeInterval = 24 * 60 * 60
 
+    /// Persisted Android-style document type filter index.
+    private static let selectedDocumentFilterIndexKey = "downloads.selectedDocumentFilterIndex"
+
+    /// Android-style sticky Downloads language for the current app process.
+    private static var lastSelectedLanguageCode: String?
+
+    /// Dismisses the Android-style Downloads destination back to the reader stack.
+    @Environment(\.dismiss) private var dismiss
+
     /// Shared full-text search index service used for Android's Delete Index row action.
     @Environment(SearchIndexService.self) private var searchIndexService
 
@@ -209,7 +261,7 @@ public struct ModuleBrowserView: View {
     private let onDefaultDownloadActivityChanged: (Bool) -> Void
 
     /// Selected remote/local module category segment, or `nil` for Android's "All types" filter.
-    @State private var selectedCategory: ModuleCategory? = .bible
+    @State private var selectedCategory: ModuleCategory?
 
     /// Selected language filter, or an empty string when all languages should be shown.
     @State private var selectedLanguage: String = ""
@@ -262,8 +314,35 @@ public struct ModuleBrowserView: View {
     /// User-visible error text for refresh, install, or uninstall failures.
     @State private var errorMessage: String?
 
+    /// Android overflow-menu download errors accumulated from repositories, metadata, and installs.
+    @State private var downloadErrors: [String] = []
+
+    /// Whether the Android-equivalent Download errors alert is visible.
+    @State private var showDownloadErrors = false
+
+    /// Whether Android's top-right Downloads overflow popup is visible.
+    @State private var showOverflowMenu = false
+
     /// Module details currently presented from Android's row About action.
     @State private var selectedModuleDetails: ModuleBrowserModuleDetails?
+
+    /// Whether the custom repository manager is pushed from the Downloads overflow menu.
+    @State private var showRepositoryManager = false
+
+    /// Whether Android's Install ZIP file picker is visible.
+    @State private var showInstallZipImporter = false
+
+    /// Whether a selected ZIP/EPUB/font import is currently installing.
+    @State private var isImportingExternalDocument = false
+
+    /// Feedback from Android's Install ZIP equivalent.
+    @State private var externalDocumentImportMessage: String?
+
+    /// Current Dynamic Type size used to keep Android's compact filter row readable.
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    /// Ensures Android's startup/default language is applied once after catalog state exists.
+    @State private var didApplyAndroidDefaultLanguage = false
 
     /// Destructive row action waiting for Android-style confirmation.
     @State private var pendingRowActionConfirmation: ModuleBrowserRowActionConfirmation?
@@ -308,10 +387,13 @@ public struct ModuleBrowserView: View {
         self.defaultDownloadMode = defaultDownloadMode
         self.onDefaultDownloadActivityChanged = onDefaultDownloadActivityChanged
         let normalizedSearchText = initialSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let storedFilterIndex = Self.persistedDocumentFilterIndex()
         _selectedCategory = State(
-            initialValue: normalizedSearchText.isEmpty && !defaultDownloadMode.shouldInstallDefaultDocuments
-                ? .bible
-                : nil
+            initialValue: Self.initialSelectedCategory(
+                initialSearchText: normalizedSearchText,
+                defaultDownloadMode: defaultDownloadMode,
+                storedFilterIndex: storedFilterIndex
+            )
         )
         _searchText = State(initialValue: normalizedSearchText)
     }
@@ -380,129 +462,96 @@ public struct ModuleBrowserView: View {
      Builds the filtered Android-style download list and repository-management toolbar actions.
      */
     public var body: some View {
+        androidDownloadsScreen
+    }
+
+    /**
+     Builds Android's full-screen Downloads route.
+
+     iOS previously reused a modal `List` sheet. Android opens a full-screen activity with a dark
+     app bar, inline filters, and document rows. Keeping this as the root screen body avoids carrying
+     iOS sheet chrome into a route whose UX is platform-shared in AndBible.
+
+     - Returns: Full-screen Downloads content with app bar, filters, and rows.
+     - Side effects: Toolbar buttons can dismiss, show Android overflow actions, or push repository
+       management.
+     - Failure modes: Repository errors are rendered in the list and do not prevent the route from
+       opening.
+     */
+    private var androidDownloadsScreen: some View {
         let visibleModules = filteredAvailableModules
         let installedModulesByName = Self.installedModuleLookup(from: installedModules)
 
-        List {
-            // Category picker
-            Section {
-                Picker("Category", selection: $selectedCategory) {
-                    Text(String(localized: "doc_type_all", defaultValue: "All types"))
-                        .tag(Optional<ModuleCategory>.none)
-                    Text(String(localized: "bibles")).tag(Optional(ModuleCategory.bible))
-                    Text(String(localized: "commentaries")).tag(Optional(ModuleCategory.commentary))
-                    Text(String(localized: "dictionaries")).tag(Optional(ModuleCategory.dictionary))
-                    Text(String(localized: "category_books")).tag(Optional(ModuleCategory.generalBook))
-                    Text(String(localized: "maps", defaultValue: "Maps")).tag(Optional(ModuleCategory.map))
-                    if shouldShowAddonsFilter {
-                        Text(String(localized: "doc_type_addons", defaultValue: "Add-ons"))
-                            .tag(Optional(ModuleCategory.addon))
-                    }
-                }
-                .pickerStyle(.segmented)
-                .onChange(of: selectedCategory) {
-                    // Reset language filter when category changes
-                    selectedLanguage = ""
-                }
+        return ZStack(alignment: .topTrailing) {
+            moduleBrowserScreenMarker
+            VStack(spacing: 0) {
+                androidTopAppBar
+                androidFilterBar(visibleModuleCount: visibleModules.count)
+                androidDownloadsContent(
+                    visibleModules: visibleModules,
+                    installedModulesByName: installedModulesByName
+                )
             }
-
-            // Language filter
-            if !availableLanguages.isEmpty {
-                Section {
-                    Picker("Language", selection: $selectedLanguage) {
-                        Text(String(localized: "all_languages_count \(availableLanguages.count)"))
-                            .tag("")
-                        ForEach(availableLanguages, id: \.self) { lang in
-                            Text(displayName(for: lang))
-                                .tag(lang)
-                        }
+            if showOverflowMenu {
+                Color.black.opacity(0.001)
+                    .ignoresSafeArea()
+                    .accessibilityHidden(true)
+                    .onTapGesture {
+                        showOverflowMenu = false
                     }
-                }
-            }
-
-            if let errorMessage {
-                Section {
-                    Text(errorMessage)
-                        .foregroundStyle(.red)
-                        .font(.caption)
-                }
-            }
-
-            if isLoadingInitialState || isRefreshing {
-                Section {
-                    VStack(spacing: 8) {
-                        ProgressView()
-                        if let refreshProgress {
-                            Text(refreshProgress)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        } else if isLoadingInitialState {
-                            Text(String(localized: "loading", defaultValue: "Loading..."))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        } else {
-                            Text(String(localized: "refreshing_catalog"))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 8)
-                }
-            } else if visibleModules.isEmpty && !availableModules.isEmpty {
-                Section {
-                    Text(String(localized: "no_modules_match_filters"))
-                        .foregroundStyle(.secondary)
-                }
-            } else if !visibleModules.isEmpty {
-                Section(String(localized: "document_filter_results \(visibleModules.count)")) {
-                    ForEach(visibleModules) { module in
-                        remoteModuleRow(
-                            module,
-                            installedModulesByName: installedModulesByName
-                        )
-                    }
-                }
-            } else if availableModules.isEmpty && !isRefreshing && !isLoadingInitialState {
-                Section {
-                    VStack(spacing: 8) {
-                        Text(String(localized: "tap_refresh_to_load"))
-                            .foregroundStyle(.secondary)
-                        Button(String(localized: "refresh_catalog")) {
-                            refreshCatalog()
-                        }
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical)
-                }
+                androidOverflowMenu
+                    .padding(.top, 56)
+                    .padding(.trailing, 8)
+                    .zIndex(1)
             }
         }
-        .accessibilityIdentifier("moduleBrowserScreen")
-        .searchable(text: $searchText, prompt: String(localized: "search_modules"))
+        .background(ModuleBrowserPalette.background.ignoresSafeArea())
         .onChange(of: searchText) {
             alignFiltersWithAndroidSearchState(searchText)
         }
-        .navigationTitle(String(localized: "downloads"))
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                HStack(spacing: 12) {
-                    NavigationLink {
-                        RepositoryManagerView()
-                    } label: {
-                        Image(systemName: "server.rack")
-                    }
-                    .accessibilityIdentifier("moduleBrowserRepositoriesButton")
-                    Button("Refresh", systemImage: "arrow.clockwise") {
-                        refreshCatalog()
-                    }
-                    .disabled(isRefreshing || isLoadingInitialState)
-                }
-            }
+        .navigationBarBackButtonHidden(true)
+        #if os(iOS)
+        .toolbar(.hidden, for: .navigationBar)
+        #endif
+        .navigationDestination(isPresented: $showRepositoryManager) {
+            RepositoryManagerView()
+            #if os(iOS)
+            .toolbar(.visible, for: .navigationBar)
+            #endif
         }
+        .fileImporter(
+            isPresented: $showInstallZipImporter,
+            allowedContentTypes: ExternalDocumentImportService.supportedContentTypes,
+            allowsMultipleSelection: false,
+            onCompletion: handleInstallZipSelection
+        )
         .sheet(item: $selectedModuleDetails) { details in
             NavigationStack {
                 ModuleBrowserModuleDetailsView(details: details)
             }
+        }
+        .alert(
+            String(localized: "download_errors", defaultValue: "Download errors"),
+            isPresented: $showDownloadErrors
+        ) {
+            Button(String(localized: "okay", defaultValue: "OK"), role: .cancel) {}
+        } message: {
+            Text(downloadErrors.joined(separator: "\n"))
+        }
+        .alert(
+            String(localized: "install_zip", defaultValue: "Load Documents From Files"),
+            isPresented: Binding(
+                get: { externalDocumentImportMessage != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        externalDocumentImportMessage = nil
+                    }
+                }
+            )
+        ) {
+            Button(String(localized: "okay", defaultValue: "OK"), role: .cancel) {}
+        } message: {
+            Text(externalDocumentImportMessage ?? "")
         }
         .alert(
             pendingRowActionConfirmation?.title ?? "",
@@ -549,6 +598,820 @@ public struct ModuleBrowserView: View {
         }
     }
 
+    /**
+     Builds a stable screen-level accessibility marker without overriding child identifiers.
+
+     SwiftUI propagates container accessibility identifiers to descendants in this layout. Keeping
+     the screen identifier on a tiny explicit marker lets UI tests detect the route while preserving
+     concrete identifiers on the app bar, filters, and rows.
+
+     - Returns: A one-pixel accessibility marker for the Downloads route.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    private var moduleBrowserScreenMarker: some View {
+        Rectangle()
+            .fill(ModuleBrowserPalette.background.opacity(0.001))
+            .frame(width: 1, height: 1)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(String(localized: "download_documents", defaultValue: "Download Documents"))
+            .accessibilityIdentifier("moduleBrowserScreen")
+            .allowsHitTesting(false)
+    }
+
+    /**
+     Builds the Android Downloads top app bar with back navigation and overflow actions.
+
+     - Returns: Dark app bar matching Android's `Download Documents` activity title row.
+     - Side effects: Back dismisses the pushed route; the overflow button shows Android's Downloads
+       action menu.
+     - Failure modes: none.
+     */
+    private var androidTopAppBar: some View {
+        HStack(spacing: 16) {
+            Button {
+                dismiss()
+            } label: {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 24, weight: .semibold))
+                    .frame(width: 44, height: 44)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(ModuleBrowserPalette.primaryText)
+            .accessibilityLabel(String(localized: "back_to_previous", defaultValue: "Back"))
+            .accessibilityIdentifier("moduleBrowserBackButton")
+
+            Text(String(localized: "download_documents", defaultValue: "Download Documents"))
+                .font(.system(size: 24, weight: .semibold))
+                .foregroundStyle(ModuleBrowserPalette.primaryText)
+                .lineLimit(1)
+
+            Spacer(minLength: 8)
+
+            Button {
+                showOverflowMenu.toggle()
+            } label: {
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 24, weight: .bold))
+                    .frame(width: 44, height: 44)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(ModuleBrowserPalette.primaryText)
+            .accessibilityLabel(String(localized: "more", defaultValue: "More"))
+            .accessibilityIdentifier("moduleBrowserOverflowButton")
+        }
+        .padding(.horizontal, 8)
+        .frame(height: 56)
+        .background(ModuleBrowserPalette.appBar)
+    }
+
+    /**
+     Builds the Downloads overflow popup using Android's menu item set.
+
+     Android defines Download errors, Load Documents From Files, and Custom repositories for this activity. iOS
+     presents the same actions from an explicit top-right popup instead of SwiftUI's native `Menu`
+     because the route needs Android-style placement and stable accessibility behavior.
+
+     - Returns: A dark, right-aligned overflow popup anchored below the app bar.
+     - Side effects: Menu rows can show download errors, start the ZIP importer, or push repository
+       management.
+     - Failure modes: Install ZIP remains visible but disabled while a selected external document is
+       being imported.
+     */
+    private var androidOverflowMenu: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if !downloadErrors.isEmpty {
+                androidOverflowMenuButton(
+                    title: String(localized: "download_errors", defaultValue: "Download errors"),
+                    accessibilityIdentifier: "moduleBrowserDownloadErrorsButton"
+                ) {
+                    showOverflowMenu = false
+                    showDownloadErrors = true
+                }
+                Divider()
+                    .background(ModuleBrowserPalette.divider)
+            }
+
+            androidOverflowMenuButton(
+                title: String(localized: "install_zip", defaultValue: "Load Documents From Files"),
+                accessibilityIdentifier: "moduleBrowserInstallZipButton",
+                disabled: isImportingExternalDocument
+            ) {
+                showOverflowMenu = false
+                showInstallZipImporter = true
+            }
+
+            androidOverflowMenuButton(
+                title: String(localized: "custom_repositories", defaultValue: "Custom repositories"),
+                accessibilityIdentifier: "moduleBrowserRepositoriesButton"
+            ) {
+                showOverflowMenu = false
+                showRepositoryManager = true
+            }
+        }
+        .frame(width: 260, alignment: .leading)
+        .background(ModuleBrowserPalette.menuSurface)
+        .clipShape(RoundedRectangle(cornerRadius: 2, style: .continuous))
+        .shadow(color: Color.black.opacity(0.35), radius: 8, x: 0, y: 4)
+    }
+
+    /**
+     Builds one Android overflow-menu row.
+
+     - Parameters:
+       - title: Localized row title.
+       - accessibilityIdentifier: Stable identifier used by UI tests for the concrete action.
+       - disabled: Whether the row should reject taps while remaining visible.
+       - action: Action to execute when the row is enabled and tapped.
+     - Returns: A full-width text row matching Android's compact overflow menu.
+     - Side effects: Executes `action` when tapped.
+     - Failure modes: Disabled rows do not execute their action.
+     */
+    private func androidOverflowMenuButton(
+        title: String,
+        accessibilityIdentifier: String,
+        disabled: Bool = false,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button {
+            guard !disabled else { return }
+            action()
+        } label: {
+            Text(title)
+                .font(.system(size: 18, weight: .regular))
+                .foregroundStyle(disabled ? ModuleBrowserPalette.tertiaryText : ModuleBrowserPalette.primaryText)
+                .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
+                .padding(.horizontal, 16)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(disabled)
+        .accessibilityIdentifier(accessibilityIdentifier)
+    }
+
+    /**
+     Builds Android's inline Downloads filters.
+
+     - Parameter visibleModuleCount: Number of rows visible after current filters.
+     - Returns: Language, search, document-type, and count controls in Android's compact row.
+     - Side effects: Filter menus mutate `selectedLanguage` and `selectedCategory`; search text
+       mutates `searchText`.
+     - Failure modes: Empty language catalogs show the all-language label and keep the menu usable.
+     */
+    private func androidFilterBar(visibleModuleCount: Int) -> some View {
+        VStack(spacing: 4) {
+            Group {
+                if dynamicTypeSize.isAccessibilitySize {
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack(alignment: .bottom, spacing: 14) {
+                            androidLanguageFilterMenu()
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            androidDocumentTypeFilterMenu(visibleModuleCount: visibleModuleCount)
+                                .frame(maxWidth: .infinity, alignment: .trailing)
+                        }
+                        androidSearchFilterField()
+                    }
+                } else {
+                    HStack(alignment: .bottom, spacing: 14) {
+                        androidLanguageFilterMenu()
+                            .frame(minWidth: 96, maxWidth: .infinity, alignment: .leading)
+                            .layoutPriority(1)
+                        androidSearchFilterField()
+                            .frame(minWidth: 96)
+                            .layoutPriority(2)
+                        androidDocumentTypeFilterMenu(visibleModuleCount: visibleModuleCount)
+                            .frame(minWidth: 112, maxWidth: .infinity, alignment: .trailing)
+                            .layoutPriority(1)
+                    }
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 18)
+            .padding(.bottom, 10)
+
+            Rectangle()
+                .fill(ModuleBrowserPalette.divider)
+                .frame(height: 1)
+        }
+        .background(ModuleBrowserPalette.background)
+    }
+
+    /**
+     Builds Android's language filter menu for the Downloads filter row.
+
+     - Returns: Menu containing all available languages plus Android's all-language option.
+     - Side effects: Mutates `selectedLanguage` when a menu item is selected.
+     - Failure modes: Empty catalogs show only the all-language option.
+     */
+    private func androidLanguageFilterMenu() -> some View {
+        Menu {
+            Button(languageFilterTitle(for: "")) {
+                selectedLanguage = ""
+            }
+            if !availableLanguages.isEmpty {
+                Divider()
+            }
+            ForEach(availableLanguages, id: \.self) { language in
+                Button(displayName(for: language)) {
+                    selectedLanguage = language
+                    Self.rememberExplicitSelectedLanguage(language)
+                }
+            }
+        } label: {
+            androidFilterLabel(languageFilterTitle(for: selectedLanguage))
+        }
+    }
+
+    /**
+     Builds Android's inline search filter for the Downloads filter row.
+
+     - Returns: Plain underlined search field matching Android's compact Downloads toolbar.
+     - Side effects: Mutates `searchText` as the user types.
+     - Failure modes: none.
+     */
+    private func androidSearchFilterField() -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            TextField(String(localized: "search", defaultValue: "Search"), text: $searchText)
+                .textFieldStyle(.plain)
+                .foregroundStyle(ModuleBrowserPalette.primaryText)
+                .tint(ModuleBrowserPalette.primaryText)
+                .submitLabel(.search)
+            Rectangle()
+                .fill(ModuleBrowserPalette.secondaryText)
+                .frame(height: 1)
+        }
+        .accessibilityIdentifier("moduleBrowserSearchField")
+    }
+
+    /**
+     Builds Android's document-type filter and visible document count.
+
+     - Parameter visibleModuleCount: Number of rows visible after current filters.
+     - Returns: Count text stacked above the Android document-type filter menu.
+     - Side effects: Mutates and persists `selectedCategory`; resets language selection using Android's
+       category-switch behavior.
+     - Failure modes: Empty category catalogs still expose Android's all-type option.
+     */
+    private func androidDocumentTypeFilterMenu(visibleModuleCount: Int) -> some View {
+        VStack(alignment: .trailing, spacing: 2) {
+            Text(documentsCountTitle(visibleModuleCount))
+                .font(.system(size: 14, weight: .regular))
+                .foregroundStyle(ModuleBrowserPalette.secondaryText)
+                .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
+                .multilineTextAlignment(.trailing)
+            Menu {
+                Button(categoryFilterTitle(for: nil)) {
+                    selectedCategory = nil
+                    selectedLanguage = ""
+                    persistSelectedCategory(nil)
+                    applyAndroidDefaultLanguageIfNeeded(force: true)
+                }
+                Divider()
+                ForEach(visibleCategoryFilters, id: \.self) { category in
+                    Button(categoryFilterTitle(for: category)) {
+                        selectedCategory = category
+                        selectedLanguage = ""
+                        persistSelectedCategory(category)
+                        applyAndroidDefaultLanguageIfNeeded(force: true)
+                    }
+                }
+            } label: {
+                HStack(spacing: 6) {
+                    Text(categoryFilterTitle(for: selectedCategory))
+                        .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
+                        .multilineTextAlignment(.trailing)
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 11, weight: .semibold))
+                }
+                .foregroundStyle(ModuleBrowserPalette.primaryText)
+            }
+        }
+    }
+
+    /**
+     Builds one underlined Android filter menu label.
+
+     - Parameter title: User-visible filter title.
+     - Returns: Compact label with underline.
+     - Side effects: none.
+     - Failure modes: Long titles use two lines at accessibility Dynamic Type sizes and otherwise
+       compress like Android's toolbar filters.
+     */
+    private func androidFilterLabel(_ title: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+                .font(.system(size: 22, weight: .regular))
+                .foregroundStyle(ModuleBrowserPalette.primaryText)
+                .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
+            Rectangle()
+                .fill(ModuleBrowserPalette.secondaryText)
+                .frame(height: 1)
+        }
+    }
+
+    /**
+     Builds the scrollable Android Downloads row list.
+
+     - Parameters:
+       - visibleModules: Rows visible after filter/search processing.
+       - installedModulesByName: Installed modules keyed by initials for row status resolution.
+     - Returns: Loading, empty, error, or row content matching Android's document list.
+     - Side effects: Row buttons can start/cancel installs or open row details.
+     - Failure modes: Empty or failed catalogs show retry affordances instead of a blank list.
+     */
+    @ViewBuilder
+    private func androidDownloadsContent(
+        visibleModules: [RemoteModuleInfo],
+        installedModulesByName: [String: ModuleInfo]
+    ) -> some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 0) {
+                if let errorMessage {
+                    Text(errorMessage)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 10)
+                }
+
+                if isLoadingInitialState || isRefreshing {
+                    androidLoadingRow
+                } else if visibleModules.isEmpty && !availableModules.isEmpty {
+                    androidMessageRow(String(localized: "no_modules_match_filters"))
+                } else if !visibleModules.isEmpty {
+                    ForEach(visibleModules) { module in
+                        remoteModuleRow(
+                            module,
+                            installedModulesByName: installedModulesByName
+                        )
+                    }
+                } else if availableModules.isEmpty && !isRefreshing && !isLoadingInitialState {
+                    VStack(spacing: 10) {
+                        Text(String(localized: "tap_refresh_to_load"))
+                            .foregroundStyle(ModuleBrowserPalette.secondaryText)
+                        Button {
+                            refreshCatalog()
+                        } label: {
+                            Label(String(localized: "refresh_catalog"), systemImage: "arrow.clockwise")
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(ModuleBrowserPalette.primaryText)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 28)
+                }
+
+                if isImportingExternalDocument {
+                    androidLoadingRow
+                }
+            }
+        }
+        .scrollContentBackground(.hidden)
+        .background(ModuleBrowserPalette.background)
+    }
+
+    /**
+     Loading row used while local state or repositories are refreshing.
+
+     - Returns: Android-dark progress row with current source text when available.
+     - Side effects: none.
+     - Failure modes: Missing progress text falls back to Loading/Refreshing text.
+     */
+    private var androidLoadingRow: some View {
+        VStack(spacing: 8) {
+            ProgressView()
+                .tint(ModuleBrowserPalette.primaryText)
+            Text(refreshProgress ?? (isLoadingInitialState
+                ? String(localized: "loading", defaultValue: "Loading...")
+                : String(localized: "refreshing_catalog")))
+                .font(.caption)
+                .foregroundStyle(ModuleBrowserPalette.secondaryText)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 22)
+    }
+
+    /**
+     Message row for empty Android Downloads states.
+
+     - Parameter message: User-visible empty-state message.
+     - Returns: Full-width dark-list message row.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    private func androidMessageRow(_ message: String) -> some View {
+        Text(message)
+            .font(.body)
+            .foregroundStyle(ModuleBrowserPalette.secondaryText)
+            .frame(maxWidth: .infinity, alignment: .center)
+            .padding(.vertical, 24)
+    }
+
+    /**
+     Document categories shown in Android's type filter.
+
+     - Returns: Category rows in Android filter order, omitting Add-ons until catalog data proves
+       that Android add-on rows are present.
+     - Side effects: none.
+     - Failure modes: none
+     */
+    private var visibleCategoryFilters: [ModuleCategory] {
+        var categories: [ModuleCategory] = [
+            .bible,
+            .commentary,
+            .dictionary,
+            .generalBook,
+            .map,
+        ]
+        if shouldShowAddonsFilter {
+            categories.append(.addon)
+        }
+        return categories
+    }
+
+    /**
+     Resolves the Downloads language filter label.
+
+     - Parameter language: Selected language code, or an empty string for Android's all-languages
+       option.
+     - Returns: User-visible filter title.
+     - Side effects: none.
+     - Failure modes: Unknown language codes fall back through `displayName(for:)`.
+     */
+    private func languageFilterTitle(for language: String) -> String {
+        guard !language.isEmpty else {
+            return String(localized: "all_languages_count \(availableLanguages.count)")
+        }
+        return displayName(for: language)
+    }
+
+    /**
+     Formats the Android Downloads visible-document count.
+
+     - Parameter count: Number of rows visible after filters.
+     - Returns: User-visible count text.
+     - Side effects: none.
+    - Failure modes: none
+     */
+    private func documentsCountTitle(_ count: Int) -> String {
+        String(localized: "documents_count \(count)")
+    }
+
+    /**
+     Resolves the Downloads document-type filter label.
+
+     - Parameter category: Selected document category, or `nil` for Android's All types option.
+     - Returns: User-visible category label.
+     - Side effects: none.
+     - Failure modes: Unsupported categories fall back to their raw SWORD value.
+     */
+    private func categoryFilterTitle(for category: ModuleCategory?) -> String {
+        guard let category else {
+            return String(localized: "doc_type_all", defaultValue: "All types")
+        }
+        switch category {
+        case .bible:
+            return String(localized: "bibles")
+        case .commentary:
+            return String(localized: "commentaries")
+        case .dictionary:
+            return String(localized: "dictionaries")
+        case .generalBook:
+            return String(localized: "category_books")
+        case .map:
+            return String(localized: "maps", defaultValue: "Maps")
+        case .addon:
+            return String(localized: "doc_type_addons", defaultValue: "Add-ons")
+        default:
+            return category.rawValue
+        }
+    }
+
+    /**
+     Reads Android's persisted document type filter index.
+
+     - Returns: Stored index, or `0` when Downloads has never persisted a type filter.
+     - Side effects: Reads `UserDefaults`.
+     - Failure modes: Nonexistent values fall back to Android's All types index.
+     */
+    private static func persistedDocumentFilterIndex() -> Int {
+        UserDefaults.standard.object(forKey: selectedDocumentFilterIndexKey) as? Int ?? 0
+    }
+
+    /**
+     Persists the selected document type using Android's spinner index contract.
+
+     - Parameter category: Selected document category, or `nil` for All types.
+     - Side effects: Writes `UserDefaults`.
+     - Failure modes: Unsupported categories persist as All types.
+     */
+    private func persistSelectedCategory(_ category: ModuleCategory?) {
+        UserDefaults.standard.set(Self.androidFilterIndex(for: category), forKey: Self.selectedDocumentFilterIndexKey)
+    }
+
+    /**
+     Remembers Android's sticky Downloads language after explicit user selection.
+
+     - Parameter language: Selected language code, or empty when the user clears the filter.
+     - Side effects: Updates process memory only for concrete language selections.
+     - Failure modes: Empty language values are ignored so Android's default-language logic can run.
+     */
+    static func rememberExplicitSelectedLanguage(_ language: String) {
+        guard !language.isEmpty else { return }
+        lastSelectedLanguageCode = language
+    }
+
+    /**
+     Clears Android's process-local sticky Downloads language for deterministic tests.
+
+     - Returns: none.
+     - Side effects: Clears `lastSelectedLanguageCode`.
+     - Failure modes: none.
+     */
+    static func resetExplicitSelectedLanguageForTesting() {
+        lastSelectedLanguageCode = nil
+    }
+
+    /**
+     Returns Android's process-local sticky Downloads language for deterministic tests.
+
+     - Returns: Last explicit language-menu selection, or `nil` when none has been selected.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    static func explicitSelectedLanguageForTesting() -> String? {
+        lastSelectedLanguageCode
+    }
+
+    /**
+     Applies Android's default language rule once catalog rows are available.
+
+     Android chooses a sticky language when present, otherwise the device language if there are Bibles
+     in that language, otherwise an installed Bible language, otherwise English. iOS applies the same
+     rule after cached or refreshed catalog data is loaded because the language list depends on the
+     current document rows.
+
+     - Parameter force: Whether to re-run the rule after a document-type change.
+     - Side effects: Mutates `selectedLanguage` when a matching default exists.
+     - Failure modes: Empty catalogs leave the language unselected until rows are available.
+     */
+    private func applyAndroidDefaultLanguageIfNeeded(force: Bool = false) {
+        if force {
+            didApplyAndroidDefaultLanguage = false
+        }
+        guard !didApplyAndroidDefaultLanguage,
+              selectedLanguage.isEmpty,
+              searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return
+        }
+        guard let defaultLanguage = Self.defaultLanguageCode(
+            availableModules: availableModules,
+            installedModules: installedModules,
+            availableLanguages: availableLanguages,
+            localeLanguageCode: Locale.current.language.languageCode?.identifier,
+            stickyLanguageCode: Self.lastSelectedLanguageCode
+        ) else {
+            return
+        }
+        selectedLanguage = defaultLanguage
+        didApplyAndroidDefaultLanguage = true
+    }
+
+    /**
+     Resolves Android's default Downloads language from catalog and installed module state.
+
+     - Parameters:
+       - availableModules: Remote rows used to test whether the device language has Bible rows.
+       - installedModules: Local modules used as Android's installed-language fallback.
+       - availableLanguages: Current language menu values for the selected document filter.
+       - localeLanguageCode: Device language code, such as `en`.
+       - stickyLanguageCode: Previous user-selected Downloads language.
+     - Returns: Language code to select, or `nil` when no language rows are available.
+     - Side effects: none.
+     - Failure modes: Invalid/empty language codes are ignored.
+     */
+    static func defaultLanguageCode(
+        availableModules: [RemoteModuleInfo],
+        installedModules: [ModuleInfo],
+        availableLanguages: [String],
+        localeLanguageCode: String?,
+        stickyLanguageCode: String?
+    ) -> String? {
+        guard !availableLanguages.isEmpty else { return nil }
+        if let stickyLanguageCode,
+           availableLanguages.contains(stickyLanguageCode) {
+            return stickyLanguageCode
+        }
+
+        let normalizedLocaleLanguage = localeLanguageCode?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        if let normalizedLocaleLanguage,
+           !normalizedLocaleLanguage.isEmpty,
+           availableModules.contains(where: {
+               $0.category == .bible && $0.language.lowercased() == normalizedLocaleLanguage
+           }),
+           let matchingLanguage = availableLanguages.first(where: { $0.lowercased() == normalizedLocaleLanguage }) {
+            return matchingLanguage
+        }
+
+        if let installedBibleLanguage = installedModules.first(where: {
+            $0.category == .bible && availableLanguages.contains($0.language)
+        })?.language {
+            return installedBibleLanguage
+        }
+
+        if let english = availableLanguages.first(where: { $0.lowercased() == "en" }) {
+            return english
+        }
+        return availableLanguages.first
+    }
+
+    /**
+     Handles Android's Install ZIP overflow picker result.
+
+     - Parameter result: File importer result from iOS document picker.
+     - Side effects: Imports the selected document through `ExternalDocumentImportService`, refreshes
+       installed module state, and surfaces feedback through the Downloads alert/errors menu.
+     - Failure modes: Picker cancellation is ignored; importer failures become user-visible feedback.
+     */
+    private func handleInstallZipSelection(_ result: Result<[URL], Error>) {
+        switch result {
+        case .success(let urls):
+            guard let url = urls.first else { return }
+            isImportingExternalDocument = true
+            Task { @MainActor in
+                let request = ExternalDocumentImportRequest(
+                    url: url,
+                    contentTypeIdentifier: try? url.resourceValues(forKeys: [.contentTypeKey]).contentType?.identifier,
+                    suggestedFileName: url.lastPathComponent
+                )
+                let importResult = await Task.detached(priority: .userInitiated) {
+                    ExternalDocumentImportService().importDocument(request)
+                }.value
+                isImportingExternalDocument = false
+                externalDocumentImportMessage = importResult.feedbackMessage
+                if case .failed(let message) = importResult {
+                    recordDownloadError(message)
+                }
+                refreshInstalledList()
+            }
+        case .failure(let error):
+            if Self.isFileImporterCancellation(error) {
+                return
+            }
+            let message = error.localizedDescription
+            externalDocumentImportMessage = message
+            recordDownloadError(message)
+        }
+    }
+
+    /**
+     Returns whether a file-importer error represents a user-cancelled picker.
+
+     iOS reports picker cancellation through the `.failure` branch even though Android simply
+     returns to the previous screen when Install ZIP is cancelled. Treating cancellation as a no-op
+     keeps iOS plumbing aligned with Android's user-visible behavior.
+
+     - Parameter error: Error delivered by SwiftUI's `fileImporter`.
+     - Returns: `true` when the error is the standard Cocoa user-cancelled code.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    static func isFileImporterCancellation(_ error: Error) -> Bool {
+        let nsError = error as NSError
+        return nsError.domain == NSCocoaErrorDomain && nsError.code == CocoaError.userCancelled.rawValue
+    }
+
+    /**
+     Adds one message to Android's Download errors overflow list.
+
+     - Parameter message: Error text from a repository, metadata, or install failure.
+     - Side effects: Mutates `downloadErrors` without duplicating identical messages.
+     - Failure modes: Empty messages are ignored.
+     */
+    private func recordDownloadError(_ message: String) {
+        let trimmedMessage = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedMessage.isEmpty,
+              !downloadErrors.contains(trimmedMessage) else {
+            return
+        }
+        downloadErrors.append(trimmedMessage)
+    }
+
+    /**
+     Merges Android's catalog refresh errors into the Download errors overflow list.
+
+     - Parameter errors: Repository or metadata errors produced by the refresh.
+     - Side effects: Mutates `downloadErrors` without dropping install/import errors from earlier
+       user actions.
+     - Failure modes: Empty errors leave prior non-refresh errors intact.
+    */
+    private func replaceDownloadErrors(with errors: [String]) {
+        downloadErrors = Self.mergedDownloadErrors(existing: downloadErrors, refreshErrors: errors)
+    }
+
+    /**
+     Merges refresh failures with existing Download errors while preserving first-seen order.
+
+     Android tracks repository/metadata failures separately from row install failures. Refreshing
+     metadata must therefore not erase install/import errors that are still visible through the
+     Downloads overflow menu.
+
+     - Parameters:
+       - existing: Current Download errors list.
+       - refreshErrors: Repository or metadata errors produced by the refresh.
+     - Returns: Trimmed, non-empty, de-duplicated errors in first-seen order.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    static func mergedDownloadErrors(existing: [String], refreshErrors: [String]) -> [String] {
+        var merged: [String] = []
+        for message in existing + refreshErrors {
+            let trimmedMessage = message.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmedMessage.isEmpty,
+                  !merged.contains(trimmedMessage) else {
+                continue
+            }
+            merged.append(trimmedMessage)
+        }
+        return merged
+    }
+
+    /**
+     Formats a localized module download failure for Android's Download errors surface.
+
+     - Parameters:
+       - moduleName: Module initials associated with the failure.
+       - message: Platform error detail reported by the repository or installer.
+     - Returns: Download failure text with a localized prefix and stable module context.
+     - Side effects: none.
+     - Failure modes: Empty module names or messages are preserved so the caller can still surface the
+       underlying failure.
+     */
+    static func downloadFailureMessage(moduleName: String, message: String) -> String {
+        "\(String(localized: "error_download_failed", defaultValue: "Download failed")): \(moduleName): \(message)"
+    }
+
+    /**
+     Formats a localized module download failure for inline alert presentation.
+
+     - Parameter message: Platform error detail reported by the repository or installer.
+     - Returns: Download failure text with a localized prefix.
+     - Side effects: none.
+     - Failure modes: Empty messages are preserved so the caller can still surface a failure state.
+     */
+    static func downloadFailureMessage(_ message: String) -> String {
+        "\(String(localized: "error_download_failed", defaultValue: "Download failed")): \(message)"
+    }
+
+    /**
+     Resolves the localized empty-repository error used by refresh and Download errors.
+
+     - Returns: User-visible message for an empty repository source list.
+     - Side effects: none.
+     - Failure modes: none
+     */
+    static func noRepositorySourcesConfiguredMessage() -> String {
+        String(localized: "no_sources_configured", defaultValue: "No repository sources configured.")
+    }
+
+    /**
+     Formats the localized fallback for an unavailable remote module.
+
+     - Parameter moduleName: Module initials shown in the unavailable message.
+     - Returns: User-visible unavailable-module message.
+     - Side effects: none.
+     - Failure modes: Empty module names are preserved so the caller can still show the failure.
+     */
+    static func moduleUnavailableForInstallationMessage(moduleName: String) -> String {
+        String(localized: "module_unavailable_for_installation \(moduleName)")
+    }
+
+    /**
+     Formats the localized fallback for a missing repository source.
+
+     - Parameter moduleName: Module initials whose source could not be resolved.
+     - Returns: User-visible missing-source message.
+     - Side effects: none.
+     - Failure modes: Empty module names are preserved so the caller can still show the failure.
+     */
+    static func moduleSourceNotFoundMessage(moduleName: String) -> String {
+        String(localized: "module_source_not_found \(moduleName)")
+    }
+
+    /**
+     Formats the localized uninstall failure text.
+
+     - Parameter message: Platform error detail reported by the repository.
+     - Returns: User-visible uninstall failure message.
+     - Side effects: none.
+     - Failure modes: Empty messages are preserved so the caller can still show the failure.
+     */
+    static func uninstallFailureMessage(_ message: String) -> String {
+        String(localized: "uninstall_failed \(message)")
+    }
+
     // MARK: - Row Views
 
     /**
@@ -574,6 +1437,90 @@ public struct ModuleBrowserView: View {
         }
         selectedCategory = nil
         selectedLanguage = ""
+        persistSelectedCategory(nil)
+    }
+
+    /**
+     Resolves the initial Downloads document-type filter from Android's startup rules.
+
+     Android starts a fresh Downloads browser on filter index 0, `All types`; search and Easy Start
+     entry points also use an all-type query so a module initials lookup can match any document
+     family.
+
+     - Parameters:
+       - initialSearchText: Optional query supplied by the caller.
+       - defaultDownloadMode: Startup default-download mode supplied by the caller.
+       - storedFilterIndex: Persisted Android document filter index.
+     - Returns: Selected category, or `nil` for Android's `All types` filter.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    static func initialSelectedCategory(
+        initialSearchText: String,
+        defaultDownloadMode: ModuleBrowserDefaultDownloadMode,
+        storedFilterIndex: Int = 0
+    ) -> ModuleCategory? {
+        guard initialSearchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              !defaultDownloadMode.shouldInstallDefaultDocuments else {
+            return nil
+        }
+        return category(forAndroidFilterIndex: storedFilterIndex)
+    }
+
+    /**
+     Maps Android's document type spinner index to the iOS module category.
+
+     - Parameter index: Android `selected_document_filter_no` value.
+     - Returns: Matching category, or `nil` for All/unknown values.
+     - Side effects: none.
+     - Failure modes: Unknown persisted indexes reset to All types.
+     */
+    static func category(forAndroidFilterIndex index: Int) -> ModuleCategory? {
+        switch index {
+        case 1:
+            return .bible
+        case 2:
+            return .commentary
+        case 3:
+            return .dictionary
+        case 4:
+            return .generalBook
+        case 5:
+            return .map
+        case 6:
+            return .addon
+        default:
+            return nil
+        }
+    }
+
+    /**
+     Maps one iOS module category back to Android's document type spinner index.
+
+     - Parameter category: Selected category, or `nil` for All types.
+     - Returns: Android `selected_document_filter_no` value.
+     - Side effects: none.
+     - Failure modes: Unsupported categories map to All types.
+     */
+    static func androidFilterIndex(for category: ModuleCategory?) -> Int {
+        switch category {
+        case .bible:
+            return 1
+        case .commentary:
+            return 2
+        case .dictionary:
+            return 3
+        case .generalBook:
+            return 4
+        case .map:
+            return 5
+        case .addon:
+            return 6
+        case nil:
+            return 0
+        default:
+            return 0
+        }
     }
 
     /**
@@ -601,55 +1548,85 @@ public struct ModuleBrowserView: View {
         let isRecommended = recommendedDocuments?.contains(module) == true
         let badAction = badDocuments?.badDocumentAction(for: module) ?? .none
 
-        return HStack {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(module.name)
-                    .font(.headline)
-                Text(module.description)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(module.isInstallable ? 2 : 3)
-                HStack(spacing: 4) {
-                    Text(displayName(for: module.language))
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                    Text(module.sourceName)
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                    if let installSize = Self.installSizeText(for: module.installSizeBytes) {
-                        Text(installSize)
-                            .font(.caption2)
-                            .foregroundStyle(.tertiary)
-                    }
-                }
-                HStack(spacing: 6) {
+        return VStack(spacing: 0) {
+            HStack(alignment: .top, spacing: 12) {
+                VStack(spacing: 5) {
+                    categoryIcon(for: module.category)
+                        .foregroundStyle(ModuleBrowserPalette.secondaryText)
                     if isRecommended {
-                        Label(String(localized: "recommended_document"), systemImage: "star.fill")
-                            .font(.caption2)
-                            .foregroundStyle(.orange)
+                        Image(systemName: "star.fill")
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundStyle(.yellow)
                     }
                     if badAction == .warn {
-                        Label(String(localized: "bad_document_warning"), systemImage: "exclamationmark.triangle.fill")
-                            .font(.caption2)
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.system(size: 15, weight: .bold))
                             .foregroundStyle(.red)
                     }
+                    Text(displayName(for: module.language))
+                        .font(.system(size: 14, weight: .regular))
+                        .foregroundStyle(ModuleBrowserPalette.secondaryText)
+                        .lineLimit(1)
+                    if let installSize = Self.installSizeText(for: module.installSizeBytes) {
+                        Text(installSize)
+                            .font(.system(size: 14, weight: .regular))
+                            .foregroundStyle(ModuleBrowserPalette.secondaryText)
+                            .lineLimit(1)
+                    }
                 }
-                if case let .errorDownloading(message) = status {
-                    Text(message.isEmpty ? String(localized: "error_download_failed") : message)
-                        .font(.caption2)
-                        .foregroundStyle(.red)
+                .frame(width: 70)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(module.name)
+                        .font(.system(size: 22, weight: .regular))
+                        .foregroundStyle(ModuleBrowserPalette.primaryText)
+                        .lineLimit(1)
+                    Text(module.description)
+                        .font(.system(size: 17, weight: .regular))
+                        .foregroundStyle(ModuleBrowserPalette.secondaryText)
+                        .lineLimit(module.isInstallable ? 2 : 3)
+                    if isRecommended {
+                        Text(String(localized: "recommended_document", defaultValue: "Recommended!"))
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(ModuleBrowserPalette.secondaryText)
+                    }
+                    if case let .errorDownloading(message) = status {
+                        Text(message.isEmpty ? String(localized: "error_download_failed") : message)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                            .lineLimit(2)
+                    }
+                }
+
+                Spacer(minLength: 8)
+
+                VStack(alignment: .trailing, spacing: 10) {
+                    Text(module.sourceName)
+                        .font(.system(size: 17, weight: .regular))
+                        .foregroundStyle(ModuleBrowserPalette.secondaryText)
                         .lineLimit(2)
+                        .multilineTextAlignment(.trailing)
+
+                    rowTrailingControls(
+                        for: module,
+                        installedModule: installedModule,
+                        status: status,
+                        rowActions: rowActions
+                    )
                 }
+                .frame(width: 112, alignment: .trailing)
             }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
 
-            Spacer()
-
-            rowTrailingControls(
-                for: module,
-                installedModule: installedModule,
-                status: status,
-                rowActions: rowActions
-            )
+            Rectangle()
+                .fill(ModuleBrowserPalette.divider)
+                .frame(height: 1)
+                .padding(.leading, 96)
+        }
+        .contentShape(Rectangle())
+        .onTapGesture {
+            performPrimaryRowAction(for: module, status: status)
         }
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
             if rowActions.contains(.uninstall) {
@@ -701,6 +1678,36 @@ public struct ModuleBrowserView: View {
     }
 
     /**
+     Renders the Android-sourced category icon for a Downloads row.
+
+     - Parameter category: Remote module category.
+     - Returns: Template icon matching the closest Android document category glyph available in the
+       packaged icon catalog.
+     - Side effects: Loads local asset images when rendered.
+     - Failure modes: Unsupported categories use the generic documents icon.
+     */
+    @ViewBuilder
+    private func categoryIcon(for category: ModuleCategory) -> some View {
+        switch category {
+        case .bible:
+            AndBibleIconView(name: "ToolbarBible", size: 28)
+        case .commentary:
+            AndBibleIconView(name: "ToolbarCommentary", size: 28)
+        case .dictionary:
+            AndBibleIconView(name: "SettingsIconDictionary", size: 28)
+        case .generalBook:
+            AndBibleIconView(name: "DrawerDocuments", size: 28)
+        case .map:
+            Image(systemName: "map")
+                .font(.system(size: 26, weight: .regular))
+        case .addon:
+            AndBibleIconView(name: "DrawerDownloads", size: 28)
+        default:
+            AndBibleIconView(name: "DrawerDocuments", size: 28)
+        }
+    }
+
+    /**
      Builds the trailing controls for a Downloads row from Android-compatible row actions.
 
      - Parameters:
@@ -728,10 +1735,11 @@ public struct ModuleBrowserView: View {
                         installedModule: installedModule
                     )
                 } label: {
-                    Label(String(localized: "about"), systemImage: "info.circle")
+                    Image(systemName: "info.circle")
+                        .font(.system(size: 22, weight: .regular))
                 }
-                .labelStyle(.iconOnly)
-                .buttonStyle(.borderless)
+                .buttonStyle(.plain)
+                .foregroundStyle(.blue)
                 .accessibilityLabel(String(localized: "about"))
             }
 
@@ -758,50 +1766,92 @@ public struct ModuleBrowserView: View {
         switch status {
         case .installed:
             Image(systemName: "checkmark.circle.fill")
-                .foregroundStyle(.green)
+                .font(.system(size: 24, weight: .bold))
+                .foregroundStyle(ModuleBrowserPalette.installed)
         case .beingInstalled(let progressPercent):
             VStack(alignment: .trailing, spacing: 6) {
                 Text("\(progressPercent)%")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(ModuleBrowserPalette.secondaryText)
                 ProgressView(value: Double(progressPercent), total: 100)
                     .frame(width: 76)
+                    .tint(ModuleBrowserPalette.primaryText)
                 Button {
                     cancelInstall(module.name)
                 } label: {
-                    Label(String(localized: "cancel"), systemImage: "arrow.uturn.backward.circle")
+                    Image(systemName: "xmark.circle")
+                        .font(.system(size: 22, weight: .regular))
                 }
-                .labelStyle(.iconOnly)
-                .buttonStyle(.bordered)
-                .controlSize(.small)
+                .buttonStyle(.plain)
+                .foregroundStyle(ModuleBrowserPalette.secondaryText)
                 .accessibilityLabel(String(localized: "cancel"))
             }
         case .errorDownloading:
             VStack(alignment: .trailing, spacing: 6) {
                 Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 22, weight: .bold))
                     .foregroundStyle(.red)
-                Button(String(localized: "retry", defaultValue: "Retry")) {
+                Button {
                     installModule(module)
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 22, weight: .semibold))
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
+                .buttonStyle(.plain)
+                .foregroundStyle(ModuleBrowserPalette.install)
+                .accessibilityLabel(String(localized: "retry", defaultValue: "Retry"))
             }
         case .updateAvailable:
-            Button(String(localized: "update")) {
+            Button {
                 installModule(module)
+            } label: {
+                Image(systemName: "arrow.up.circle.fill")
+                    .font(.system(size: 24, weight: .bold))
             }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
+            .buttonStyle(.plain)
+            .foregroundStyle(ModuleBrowserPalette.install)
+            .accessibilityLabel(String(localized: "update"))
         case .unavailable:
             Label(String(localized: "unavailable"), systemImage: "lock.slash")
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(ModuleBrowserPalette.tertiaryText)
         case .installable:
-            Button(String(localized: "install_module", defaultValue: "Install")) {
+            Button {
                 installModule(module)
+            } label: {
+                Image(systemName: "arrow.up")
+                    .font(.system(size: 24, weight: .bold))
             }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
+            .buttonStyle(.plain)
+            .foregroundStyle(ModuleBrowserPalette.install)
+            .accessibilityLabel(String(localized: "install_module", defaultValue: "Install"))
+        }
+    }
+
+    /**
+     Runs Android's primary row action for a visible Downloads document.
+
+     Android rows dispatch to `DownloadControl.manageDownload`: installable, update, and failed rows
+     start or retry downloads; active rows cancel; installed/unavailable rows do not install again.
+     iOS keeps the same behavior for row taps while preserving the explicit trailing icons.
+
+     - Parameters:
+       - module: Remote catalog row represented by the tapped row.
+       - status: Current Android-equivalent install status.
+     - Side effects: May start, retry, or cancel one install task.
+     - Failure modes: `installModule(_:)` and `cancelInstall(_:)` own their failure behavior.
+     */
+    private func performPrimaryRowAction(
+        for module: RemoteModuleInfo,
+        status: ModuleBrowserDownloadStatus
+    ) {
+        switch status {
+        case .installable, .updateAvailable, .errorDownloading:
+            installModule(module)
+        case .beingInstalled:
+            cancelInstall(module.name)
+        case .installed, .unavailable:
+            break
         }
     }
 
@@ -1389,6 +2439,7 @@ public struct ModuleBrowserView: View {
         if availableModules.isEmpty && !initialState.cachedModules.isEmpty {
             availableModules = deduplicatedModules(from: initialState.cachedModules)
         }
+        applyAndroidDefaultLanguageIfNeeded()
         isLoadingInitialState = false
         if defaultDownloadMode.shouldInstallDefaultDocuments {
             startDefaultDownloadFlowIfNeeded()
@@ -1549,7 +2600,9 @@ public struct ModuleBrowserView: View {
             let shouldRequireDefaultDocuments = defaultDownloadMode.shouldInstallDefaultDocuments
             if sourcesToRefresh.isEmpty {
                 await MainActor.run {
-                    errorMessage = "No remote sources configured."
+                    let message = Self.noRepositorySourcesConfiguredMessage()
+                    errorMessage = message
+                    recordDownloadError(message)
                     isRefreshing = false
                     finishDefaultDownloadActivityIfNeeded()
                 }
@@ -1655,6 +2708,8 @@ public struct ModuleBrowserView: View {
 
             await MainActor.run {
                 availableModules = uniqueModules
+                replaceDownloadErrors(with: errors)
+                applyAndroidDefaultLanguageIfNeeded()
                 isRefreshing = false
                 refreshProgress = nil
                 installDefaultDocumentsIfNeeded(
@@ -1690,10 +2745,13 @@ public struct ModuleBrowserView: View {
      - task cancellation clears active row state without reporting a failure, matching Android
        `INSTALL_CANCELLED`
      - repository installation errors are caught and reported without crashing the view
-     */
+    */
     private func installModule(_ module: RemoteModuleInfo) {
         guard module.isInstallable else {
-            errorMessage = module.unavailableReason ?? "\(module.name) is not available for installation."
+            let message = module.unavailableReason
+                ?? Self.moduleUnavailableForInstallationMessage(moduleName: module.name)
+            errorMessage = message
+            recordDownloadError(message)
             markDefaultDownloadModuleFinishedIfNeeded(module.name)
             return
         }
@@ -1703,7 +2761,9 @@ public struct ModuleBrowserView: View {
         }
 
         guard let source = sources.first(where: { $0.name == module.sourceName }) ?? repository.source(for: module.name) else {
-            errorMessage = "Source not found for \(module.name)"
+            let message = Self.moduleSourceNotFoundMessage(moduleName: module.name)
+            errorMessage = message
+            recordDownloadError(message)
             markDefaultDownloadModuleFinishedIfNeeded(module.name)
             return
         }
@@ -1742,7 +2802,8 @@ public struct ModuleBrowserView: View {
                     } else {
                         let message = error.localizedDescription
                         downloadActivities[module.name] = .failed(message)
-                        errorMessage = "Install failed: \(message)"
+                        errorMessage = Self.downloadFailureMessage(message)
+                        recordDownloadError(Self.downloadFailureMessage(moduleName: module.name, message: message))
                     }
                     markDefaultDownloadModuleFinishedIfNeeded(module.name)
                 }
@@ -1855,7 +2916,9 @@ public struct ModuleBrowserView: View {
                 }
             } catch {
                 await MainActor.run {
-                    errorMessage = "Uninstall failed: \(error.localizedDescription)"
+                    let message = Self.uninstallFailureMessage(error.localizedDescription)
+                    errorMessage = message
+                    recordDownloadError(message)
                 }
             }
         }
