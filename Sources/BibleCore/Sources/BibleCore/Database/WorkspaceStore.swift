@@ -75,7 +75,10 @@ public final class WorkspaceStore {
         let maxOrder = workspaces().map(\.orderNumber).max() ?? -1
         let workspace = Workspace(name: name, orderNumber: maxOrder + 1)
         workspace.textDisplaySettings = source?.textDisplaySettings?.clearingThemeColors()
-        workspace.workspaceSettings = source?.workspaceSettings
+        if var workspaceSettings = source?.workspaceSettings {
+            workspaceSettings.normalizeAutoAssignPrimaryLabel()
+            workspace.workspaceSettings = workspaceSettings
+        }
         workspace.workspaceColor = source?.workspaceColor ?? Workspace.defaultWorkspaceColor
         modelContext.insert(workspace)
 
@@ -125,7 +128,10 @@ public final class WorkspaceStore {
         let cloned = Workspace(name: newName, orderNumber: source.orderNumber + 1)
         cloned.contentsText = source.contentsText
         cloned.textDisplaySettings = source.textDisplaySettings
-        cloned.workspaceSettings = source.workspaceSettings
+        if var workspaceSettings = source.workspaceSettings {
+            workspaceSettings.normalizeAutoAssignPrimaryLabel()
+            cloned.workspaceSettings = workspaceSettings
+        }
         cloned.workspaceColor = source.workspaceColor ?? Workspace.defaultWorkspaceColor
         cloned.unPinnedWeight = source.unPinnedWeight
         modelContext.insert(cloned)

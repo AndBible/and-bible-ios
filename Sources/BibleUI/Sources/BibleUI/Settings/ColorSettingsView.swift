@@ -73,9 +73,9 @@ extension Color {
 
  The view converts between SwiftUI `Color` values and the signed ARGB integer format expected by the
  Vue-based reader configuration. It mirrors Android's `color_settings.xml`: day/night text colors,
- day/night background colors, day/night noise controls, and the workspace accent color when a
- workspace-level binding is supplied. Window-level callers omit the workspace binding so the
- workspace row stays hidden like Android's `ColorSettingsFragment(isWindow = true)`.
+ day/night background colors, day/night noise controls, and the workspace accent color for Android
+ global/workspace scopes. Window-level callers omit the workspace binding so the workspace row stays
+ hidden like Android's `ColorSettingsFragment(isWindow = true)`.
 
  Data dependencies:
  - `settings` is the shared display-settings model whose color fields are being edited
@@ -87,7 +87,7 @@ extension Color {
  - each color picker or slider mutation writes back to `settings` or `workspaceColor` and invokes
    `onChange`
  - the reset action restores the standard light/dark defaults and the Android workspace color
-   default when a workspace binding is present
+   default when a global/workspace color binding is present
  */
 public struct ColorSettingsView: View {
     /// Shared display settings whose theme colors are being edited.
@@ -105,7 +105,8 @@ public struct ColorSettingsView: View {
      - Parameters:
        - settings: Shared display settings value whose color fields should be edited.
        - workspaceColor: Optional workspace accent-color binding. Supplying it exposes Android's
-         `workspace_color` row; omitting it matches Android's window-level hidden row.
+         `workspace_color` row for global/workspace scopes; omitting it matches Android's
+         window-level hidden row.
        - onChange: Optional callback invoked after any color mutation.
      */
     public init(
@@ -119,10 +120,9 @@ public struct ColorSettingsView: View {
     }
 
     /**
-     Android preference keys rendered by this view for the supplied scope.
+     Android preference keys rendered by this view for the supplied row inventory decision.
 
-     - Parameter includesWorkspaceColor: Whether the caller is editing workspace color settings
-       with access to workspace metadata. `false` represents Android's window scope.
+     - Parameter includesWorkspaceColor: Whether Android's `workspace_color` row is visible.
      - Returns: Android `color_settings.xml` keys in visible order.
      - Side effects: none.
      - Failure modes: none; the inventory is static and test-audited against Android source.
@@ -141,6 +141,22 @@ public struct ColorSettingsView: View {
             "noise_night",
         ])
         return keys
+    }
+
+    /**
+     Android preference keys rendered by this view for the supplied settings scope.
+
+     Android's `ColorSettingsFragment` hides `workspace_color` only when the launched settings
+     bundle targets a specific window. Global and workspace color settings both carry the active
+     workspace color through the same row.
+
+     - Parameter scope: Android text-display settings scope that launched the color editor.
+     - Returns: Android `color_settings.xml` keys in visible order for that scope.
+     - Side effects: none.
+     - Failure modes: none; the inventory is static and test-audited against Android source.
+     */
+    static func visibleAndroidKeys(scope: TextDisplaySettingsScope) -> [String] {
+        visibleAndroidKeys(includesWorkspaceColor: scope != .window)
     }
 
     /**

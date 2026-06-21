@@ -1514,6 +1514,7 @@ public final class RemoteSyncWorkspaceRestoreService {
             columns: columns
         )
 
+        settings.normalizeAutoAssignPrimaryLabel()
         return (settings, speakSettingsJSON, workspaceColor)
     }
 

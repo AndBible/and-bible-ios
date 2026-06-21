@@ -84,6 +84,18 @@ public final class Workspace {
  owning `Workspace` is saved.
  */
 public struct WorkspaceSettings: Codable, Sendable {
+    private enum CodingKeys: String, CodingKey {
+        case enableTiltToScroll
+        case enableReverseSplitMode
+        case autoPin
+        case recentLabels
+        case autoAssignLabels
+        case autoAssignPrimaryLabel
+        case studyPadCursors
+        case hideCompareDocuments
+        case limitAmbiguousModalSize
+    }
+
     /// Enables tilt-to-scroll behavior for windows in this workspace when supported.
     public var enableTiltToScroll: Bool
 
@@ -120,7 +132,7 @@ public struct WorkspaceSettings: Codable, Sendable {
        - autoPin: Whether windows should auto-pin by default.
        - recentLabels: Recently used labels for quick selection UI.
        - autoAssignLabels: Labels automatically assigned to new bookmarks.
-       - autoAssignPrimaryLabel: Primary label automatically assigned to new bookmarks.
+       - autoAssignPrimaryLabel: Primary label automatically assigned to new bookmarks; normalized to an assigned label or `nil` when inconsistent.
        - studyPadCursors: Stored StudyPad cursor positions keyed by label id.
        - hideCompareDocuments: Module initials hidden from compare pickers.
        - limitAmbiguousModalSize: Whether ambiguous chooser modals should be size-limited.
@@ -145,6 +157,47 @@ public struct WorkspaceSettings: Codable, Sendable {
         self.studyPadCursors = studyPadCursors
         self.hideCompareDocuments = hideCompareDocuments
         self.limitAmbiguousModalSize = limitAmbiguousModalSize
+        normalizeAutoAssignPrimaryLabel()
+    }
+
+    /**
+     Decodes workspace settings while preserving defaults for missing historical fields.
+
+     - Parameter decoder: Decoder containing a workspace-settings payload.
+     - Side effects: none.
+     - Failure modes: rethrows decoding failures for malformed values.
+     */
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        enableTiltToScroll = try container.decodeIfPresent(Bool.self, forKey: .enableTiltToScroll) ?? false
+        enableReverseSplitMode = try container.decodeIfPresent(Bool.self, forKey: .enableReverseSplitMode) ?? false
+        autoPin = try container.decodeIfPresent(Bool.self, forKey: .autoPin) ?? false
+        recentLabels = try container.decodeIfPresent([RecentLabel].self, forKey: .recentLabels) ?? []
+        autoAssignLabels = try container.decodeIfPresent(Set<UUID>.self, forKey: .autoAssignLabels) ?? []
+        autoAssignPrimaryLabel = try container.decodeIfPresent(UUID.self, forKey: .autoAssignPrimaryLabel)
+        studyPadCursors = try container.decodeIfPresent([UUID: Int].self, forKey: .studyPadCursors) ?? [:]
+        hideCompareDocuments = try container.decodeIfPresent(Set<String>.self, forKey: .hideCompareDocuments) ?? []
+        limitAmbiguousModalSize = try container.decodeIfPresent(Bool.self, forKey: .limitAmbiguousModalSize) ?? false
+        normalizeAutoAssignPrimaryLabel()
+    }
+
+    /**
+     Restores Android's auto-assign primary-label invariant on this settings payload.
+
+     Android label management never leaves a primary label outside the auto-assigned label set. When
+     incoming or stale iOS data is inconsistent, the primary falls back to the deterministic first
+     auto-assigned label by UUID string, or `nil` when no auto-assigned labels remain.
+
+     - Side effects: mutates `autoAssignPrimaryLabel` when it is no longer contained by `autoAssignLabels`.
+     - Failure modes: This helper cannot fail.
+     */
+    public mutating func normalizeAutoAssignPrimaryLabel() {
+        if let primaryLabel = autoAssignPrimaryLabel, autoAssignLabels.contains(primaryLabel) {
+            return
+        }
+        autoAssignPrimaryLabel = autoAssignLabels
+            .sorted { $0.uuidString < $1.uuidString }
+            .first
     }
 }
 

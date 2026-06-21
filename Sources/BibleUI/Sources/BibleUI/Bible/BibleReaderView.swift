@@ -326,6 +326,10 @@ public struct BibleReaderView: View {
     @State private var hideBibleReferenceOverlayPref =
         AppPreferenceRegistry.boolDefault(for: .hideBibleReferenceOverlay) ?? false
 
+    /// Android monochrome/e-ink preference used by native reader toolbar chrome.
+    @State private var monochromeModePref =
+        AppPreferenceRegistry.boolDefault(for: .monochromeMode) ?? false
+
     /// Tracks whether fullscreen was last entered by the double-tap gesture instead of scrolling.
     @State private var lastFullScreenByDoubleTap = false
 
@@ -595,9 +599,15 @@ public struct BibleReaderView: View {
             focusedController?.currentCategory == .bible
     }
 
-    /// Reader-shell palette derived from the active pane's text-display colors.
+    /// Reader-shell palette derived from active pane content settings and workspace chrome color.
     private var readerThemeSurfacePalette: ReaderThemeSurfacePalette {
-        ReaderThemeSurfacePalette(settings: displaySettings, nightMode: nightMode)
+        ReaderThemeSurfacePalette(
+            settings: displaySettings,
+            nightMode: nightMode,
+            workspaceColor: windowManager.activeWindow?.workspace?.workspaceColor
+                ?? windowManager.activeWorkspace?.workspaceColor,
+            monochromeMode: monochromeModePref
+        )
     }
 
     /// Bottom inset for the floating reference capsule, accounting for other bottom chrome.
@@ -1046,6 +1056,7 @@ public struct BibleReaderView: View {
         case .globalTextOptions:
             TextDisplaySettingsView(
                 settings: $globalDisplaySettings,
+                workspaceColor: workspaceColorBinding,
                 navigationTitle: String(
                     localized: "global_text_display_settings_title",
                     defaultValue: "Global text options"
@@ -2093,6 +2104,7 @@ public struct BibleReaderView: View {
         fullScreenHideButtonsPref = store.getBool(.fullScreenHideButtonsPref)
         hideWindowButtonsPref = store.getBool(.hideWindowButtons)
         hideBibleReferenceOverlayPref = store.getBool(.hideBibleReferenceOverlay)
+        monochromeModePref = store.getBool(.monochromeMode)
         #if os(iOS)
         UIApplication.shared.isIdleTimerDisabled = store.getBool(.screenKeepOnPref)
         #endif
@@ -2967,6 +2979,7 @@ public struct BibleReaderView: View {
     private func readerToolbarActions(controller: BibleReaderController?) -> some View {
         BibleReaderToolbarActions(
             usesCompactToolbar: usesCompactReaderToolbar,
+            surfacePalette: readerThemeSurfacePalette,
             preferredSingleAccessory: preferredSingleToolbarAccessory,
             moduleHasStrongs: moduleHasStrongs,
             strongsIconAssetName: strongsIconAssetName,
@@ -3006,7 +3019,9 @@ public struct BibleReaderView: View {
 
     /// Neutral toolbar tint matching Android's white/grey icon-state treatment.
     private func toolbarIconColor(isActive: Bool = true) -> Color {
-        isActive ? .primary : .secondary
+        isActive
+            ? readerThemeSurfacePalette.toolbarForegroundColor
+            : readerThemeSurfacePalette.toolbarSecondaryForegroundColor
     }
 
     /// Trailing overflow trigger that must remain visible even when toolbar actions collapse.
@@ -3041,6 +3056,7 @@ public struct BibleReaderView: View {
         guard let workspace = windowManager.activeWorkspace else { return }
         var settings = workspace.workspaceSettings ?? WorkspaceSettings()
         transform(&settings)
+        settings.normalizeAutoAssignPrimaryLabel()
         workspace.workspaceSettings = settings
         try? modelContext.save()
     }
@@ -3582,6 +3598,7 @@ public struct BibleReaderView: View {
         fullScreenHideButtonsPref = store.getBool(.fullScreenHideButtonsPref)
         hideWindowButtonsPref = store.getBool(.hideWindowButtons)
         hideBibleReferenceOverlayPref = store.getBool(.hideBibleReferenceOverlay)
+        monochromeModePref = store.getBool(.monochromeMode)
         nightModeMode = store.getString(.nightModePref3)
         let manualNightMode = store.getBool("night_mode")
         nightMode = NightModeSettingsResolver.isNightMode(

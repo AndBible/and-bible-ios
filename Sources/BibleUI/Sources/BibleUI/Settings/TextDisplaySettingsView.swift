@@ -109,8 +109,8 @@ public struct TextDisplaySettingsView: View {
      - Parameters:
        - settings: Shared display settings value to mutate from the form.
        - workspaceColor: Optional workspace accent color edited from Android's color settings
-         screen. Supplying this binding exposes the workspace color row; omitting it hides the row
-         for window/global scopes.
+         screen. Supplying this binding exposes the workspace color row for Android global and
+         workspace scopes; omitting it hides the row for Android window scope.
        - navigationTitle: Optional Android-scope title shown by the surrounding navigation stack.
          Passing `nil` uses the localized global text-options title.
        - scope: Android text-display scope currently being edited.

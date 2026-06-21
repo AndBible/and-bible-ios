@@ -64,6 +64,7 @@ enum BibleReaderToolbarAccessoryButton {
  */
 struct BibleReaderToolbarActions<OverflowButton: View>: View {
     private let usesCompactToolbar: Bool
+    private let surfacePalette: ReaderThemeSurfacePalette
     private let preferredSingleAccessory: BibleReaderToolbarAccessoryButton?
     private let moduleHasStrongs: Bool
     private let strongsIconAssetName: String
@@ -85,6 +86,7 @@ struct BibleReaderToolbarActions<OverflowButton: View>: View {
 
     init(
         usesCompactToolbar: Bool,
+        surfacePalette: ReaderThemeSurfacePalette = .standard,
         preferredSingleAccessory: BibleReaderToolbarAccessoryButton?,
         moduleHasStrongs: Bool,
         strongsIconAssetName: String,
@@ -104,6 +106,7 @@ struct BibleReaderToolbarActions<OverflowButton: View>: View {
         @ViewBuilder overflowButton: @escaping () -> OverflowButton
     ) {
         self.usesCompactToolbar = usesCompactToolbar
+        self.surfacePalette = surfacePalette
         self.preferredSingleAccessory = preferredSingleAccessory
         self.moduleHasStrongs = moduleHasStrongs
         self.strongsIconAssetName = strongsIconAssetName
@@ -342,6 +345,8 @@ struct BibleReaderToolbarActions<OverflowButton: View>: View {
     }
 
     private func toolbarIconColor(isActive: Bool = true) -> Color {
-        isActive ? .primary : .secondary
+        isActive
+            ? surfacePalette.toolbarForegroundColor
+            : surfacePalette.toolbarSecondaryForegroundColor
     }
 }

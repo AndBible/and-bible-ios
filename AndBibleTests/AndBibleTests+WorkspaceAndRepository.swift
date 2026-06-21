@@ -18,6 +18,54 @@ import struct SwiftUI.Color
 #endif
 
 extension AndBibleTests {
+    /**
+     Verifies workspace settings clear an auto-assign primary label when no auto-assigned labels remain.
+     */
+    func testWorkspaceSettingsClearsAutoAssignPrimaryLabelWhenAutoAssignLabelsAreEmpty() {
+        let orphanPrimaryLabelID = UUID(uuidString: "c2100000-0000-0000-0000-000000000001")!
+
+        let settings = WorkspaceSettings(
+            autoAssignLabels: [],
+            autoAssignPrimaryLabel: orphanPrimaryLabelID
+        )
+
+        XCTAssertTrue(settings.autoAssignLabels.isEmpty)
+        XCTAssertNil(settings.autoAssignPrimaryLabel)
+    }
+
+    /**
+     Verifies workspace settings repair an orphan primary label to the deterministic first assigned label.
+     */
+    func testWorkspaceSettingsRepairsOrphanAutoAssignPrimaryLabelToFirstAssignedLabel() {
+        let firstAssignedLabelID = UUID(uuidString: "c2100000-0000-0000-0000-000000000002")!
+        let secondAssignedLabelID = UUID(uuidString: "c2100000-0000-0000-0000-000000000003")!
+        let orphanPrimaryLabelID = UUID(uuidString: "c2100000-0000-0000-0000-000000000004")!
+
+        let settings = WorkspaceSettings(
+            autoAssignLabels: [secondAssignedLabelID, firstAssignedLabelID],
+            autoAssignPrimaryLabel: orphanPrimaryLabelID
+        )
+
+        XCTAssertEqual(settings.autoAssignLabels, [firstAssignedLabelID, secondAssignedLabelID])
+        XCTAssertEqual(settings.autoAssignPrimaryLabel, firstAssignedLabelID)
+    }
+
+    /**
+     Verifies workspace settings keep an auto-assign primary label that is still assigned.
+     */
+    func testWorkspaceSettingsPreservesAssignedAutoAssignPrimaryLabel() {
+        let firstAssignedLabelID = UUID(uuidString: "c2100000-0000-0000-0000-000000000005")!
+        let primaryLabelID = UUID(uuidString: "c2100000-0000-0000-0000-000000000006")!
+
+        let settings = WorkspaceSettings(
+            autoAssignLabels: [firstAssignedLabelID, primaryLabelID],
+            autoAssignPrimaryLabel: primaryLabelID
+        )
+
+        XCTAssertEqual(settings.autoAssignLabels, [firstAssignedLabelID, primaryLabelID])
+        XCTAssertEqual(settings.autoAssignPrimaryLabel, primaryLabelID)
+    }
+
     func testBookmarkStoreBibleBookmarksCanFilterByLabel() throws {
         let schema = Schema([
             BibleBookmark.self,
@@ -121,7 +169,6 @@ extension AndBibleTests {
 
         let recentLabelID = UUID()
         let autoAssignLabelID = UUID()
-        let primaryLabelID = UUID()
         let studyPadLabelID = UUID()
         source.workspaceSettings = WorkspaceSettings(
             enableTiltToScroll: true,
@@ -129,7 +176,7 @@ extension AndBibleTests {
             autoPin: true,
             recentLabels: [RecentLabel(labelId: recentLabelID)],
             autoAssignLabels: [autoAssignLabelID],
-            autoAssignPrimaryLabel: primaryLabelID,
+            autoAssignPrimaryLabel: autoAssignLabelID,
             studyPadCursors: [studyPadLabelID: 3],
             hideCompareDocuments: ["KJV"],
             limitAmbiguousModalSize: true
@@ -161,7 +208,7 @@ extension AndBibleTests {
         XCTAssertEqual(created.workspaceSettings?.recentLabels.first?.labelId, recentLabelID)
         XCTAssertEqual(created.workspaceSettings?.autoAssignLabels.count, 1)
         XCTAssertEqual(created.workspaceSettings?.autoAssignLabels.first, autoAssignLabelID)
-        XCTAssertEqual(created.workspaceSettings?.autoAssignPrimaryLabel, primaryLabelID)
+        XCTAssertEqual(created.workspaceSettings?.autoAssignPrimaryLabel, autoAssignLabelID)
         XCTAssertEqual(created.workspaceSettings?.studyPadCursors.count, 1)
         XCTAssertEqual(created.workspaceSettings?.studyPadCursors[studyPadLabelID], 3)
         XCTAssertEqual(created.workspaceSettings?.hideCompareDocuments, ["KJV"])

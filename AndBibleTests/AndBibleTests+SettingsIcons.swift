@@ -382,15 +382,31 @@ extension AndBibleTests {
      Verifies the iOS color editor exposes Android's `color_settings.xml` rows by scope.
 
      Android includes workspace color, day/night text color, day/night background color, and
-     day/night noise in the color settings screen, but hides `workspace_color` when editing a
-     window. A failure here means the iOS color screen has drifted from Android's actual row
-     contract rather than merely changing local SwiftUI layout.
+     day/night noise in the global and workspace color settings screens, but hides
+     `workspace_color` when editing a window. A failure here means the iOS color screen has drifted
+     from Android's actual row contract rather than merely changing local SwiftUI layout.
      */
     func testColorSettingsVisibleAndroidKeysMatchAndroidScopeRules() {
+        let expectedGlobalOrWorkspaceKeys = [
+            "workspace_color",
+            "text_color_day",
+            "background_color_day",
+            "noise_day",
+            "text_color_night",
+            "background_color_night",
+            "noise_night",
+        ]
         XCTAssertEqual(
-            ColorSettingsView.visibleAndroidKeys(includesWorkspaceColor: true),
+            ColorSettingsView.visibleAndroidKeys(scope: .global),
+            expectedGlobalOrWorkspaceKeys
+        )
+        XCTAssertEqual(
+            ColorSettingsView.visibleAndroidKeys(scope: .workspace),
+            expectedGlobalOrWorkspaceKeys
+        )
+        XCTAssertEqual(
+            ColorSettingsView.visibleAndroidKeys(scope: .window),
             [
-                "workspace_color",
                 "text_color_day",
                 "background_color_day",
                 "noise_day",
@@ -399,17 +415,67 @@ extension AndBibleTests {
                 "noise_night",
             ]
         )
-        XCTAssertEqual(
-            ColorSettingsView.visibleAndroidKeys(includesWorkspaceColor: false),
-            [
-                "text_color_day",
-                "background_color_day",
-                "noise_day",
-                "text_color_night",
-                "background_color_night",
-                "noise_night",
-            ]
+    }
+
+    /**
+     Protects Android's workspace-color application contract for reader chrome.
+
+     Android stores `workspace_color` with workspace metadata and applies it to action-bar chrome
+     in day mode. It does not replace the reader content background. Night mode uses black toolbar
+     chrome while tinting the drawer/home affordance with the workspace color, and monochrome mode
+     forces black-on-white day chrome.
+
+     Failure meaning:
+     - iOS can persist workspace color without changing the visible toolbar, or it can drift into
+       applying workspace color to reader content instead of Android's action-bar surface.
+     */
+    func testReaderToolbarChromeUsesAndroidWorkspaceColorContract() {
+        var settings = TextDisplaySettings.appDefaults
+        let dayBackground = Int(Int32(bitPattern: 0xFFFAF4E8))
+        let dayTextColor = Int(Int32(bitPattern: 0xFF17130F))
+        let workspaceColor = Int(Int32(bitPattern: 0xFF336699))
+        settings.dayBackground = dayBackground
+        settings.dayTextColor = dayTextColor
+
+        let dayPalette = ReaderThemeSurfacePalette(
+            settings: settings,
+            nightMode: false,
+            workspaceColor: workspaceColor,
+            monochromeMode: false
         )
+        XCTAssertEqual(dayPalette.backgroundColorInt, dayBackground)
+        XCTAssertEqual(dayPalette.foregroundColorInt, dayTextColor)
+        XCTAssertEqual(dayPalette.toolbarBackgroundColorInt, workspaceColor)
+        XCTAssertEqual(dayPalette.toolbarForegroundColorInt, -1)
+        XCTAssertEqual(dayPalette.navigationDrawerColorInt, -1)
+
+        let nightPalette = ReaderThemeSurfacePalette(
+            settings: settings,
+            nightMode: true,
+            workspaceColor: workspaceColor,
+            monochromeMode: false
+        )
+        XCTAssertEqual(nightPalette.toolbarBackgroundColorInt, -16777216)
+        XCTAssertEqual(nightPalette.toolbarForegroundColorInt, -1)
+        XCTAssertEqual(nightPalette.navigationDrawerColorInt, workspaceColor)
+
+        let fallbackPalette = ReaderThemeSurfacePalette(
+            settings: settings,
+            nightMode: false,
+            workspaceColor: nil,
+            monochromeMode: false
+        )
+        XCTAssertEqual(fallbackPalette.toolbarBackgroundColorInt, Workspace.defaultWorkspaceColor)
+
+        let monochromePalette = ReaderThemeSurfacePalette(
+            settings: settings,
+            nightMode: false,
+            workspaceColor: workspaceColor,
+            monochromeMode: true
+        )
+        XCTAssertEqual(monochromePalette.toolbarBackgroundColorInt, -1)
+        XCTAssertEqual(monochromePalette.toolbarForegroundColorInt, -16777216)
+        XCTAssertEqual(monochromePalette.navigationDrawerColorInt, -16777216)
     }
 
     /**
