@@ -34,6 +34,7 @@ import SwordKit
  - tapping a chapter may either complete the flow or advance to the verse step
  - tapping toolbar back actions resets the local step state without dismissing the chooser
  - tapping overflow-menu rows persists Android-compatible chooser options in `SettingsStore`
+ - tapping the deuterocanonical toolbar action toggles a view-local book scope, matching Android
  */
 public struct BookChooserView: View {
     /// Dynamic book list derived from the active module's versification.
@@ -80,6 +81,9 @@ public struct BookChooserView: View {
 
     /// Android chooser overflow-menu state loaded from `SettingsStore`.
     @State private var chooserOptions = PassageChooserOptions.androidDefault
+
+    /// Android scripture/non-scripture book scope for the current chooser presentation.
+    @State private var bookScope = PassageBookScriptureScope.scripture
 
     /// Tracks first appearance so option state is not reloaded after in-view menu changes.
     @State private var hasLoadedChooserOptions = false
@@ -150,7 +154,9 @@ public struct BookChooserView: View {
             PassageChooserAppBar(
                 title: navigationTitle,
                 showsOverflowButton: selectedBook == nil,
+                deuterocanonicalToggleTitle: selectedBook == nil ? deuterocanonicalToggleTitle : nil,
                 onBack: navigateBackOrCancel,
+                onToggleDeuterocanonical: toggleDeuterocanonicalScope,
                 onOverflow: {
                     isChooserMenuPresented.toggle()
                 }
@@ -297,6 +303,21 @@ public struct BookChooserView: View {
     }
 
     /**
+     Toggles Android's session-local scripture/deuterocanonical book scope.
+
+     Android invalidates the book chooser menu and rebuilds the grid without persisting this state.
+     iOS mirrors that by mutating only view-local state and leaving the durable chooser options
+     untouched.
+
+     - Side effects: Hides the overflow popup and changes the visible book grid scope.
+     - Failure modes: none.
+     */
+    private func toggleDeuterocanonicalScope() {
+        isChooserMenuPresented = false
+        bookScope.toggle()
+    }
+
+    /**
      Loads persisted chooser options on first appearance.
 
      - Side effects: Reads SwiftData through `SettingsStore` once per view lifetime.
@@ -325,20 +346,46 @@ public struct BookChooserView: View {
         )
     }
 
+    /// Active module books filtered through Android's current scripture/deuterocanonical scope.
+    private var visibleBooks: [BookInfo] {
+        PassageBookScriptureScope.books(from: books, scope: bookScope)
+    }
+
+    /// Whether Android would show the book chooser deuterocanonical action for this module.
+    private var hasDeuterocanonicalBooks: Bool {
+        PassageBookScriptureScope.hasDeuterocanonicalBooks(books)
+    }
+
+    /// Localized title for Android's `deut_toggle` action item, or `nil` when hidden.
+    private var deuterocanonicalToggleTitle: String? {
+        guard hasDeuterocanonicalBooks else {
+            return nil
+        }
+        return NSLocalizedString(
+            bookScope.androidToolbarLocalizationKey,
+            value: bookScope.androidToolbarDefaultTitle,
+            comment: ""
+        )
+    }
+
     /// Scrollable container for the Android-aligned book grid.
     private var bookGrid: some View {
         GeometryReader { proxy in
             let orientation = PassageGridOrientation(size: proxy.size)
+            let scopedBooks = visibleBooks
+            let allowsCategoryGrouping = bookScope == .scripture
             let slots = PassageBookOrdering.displaySlots(
-                for: books,
+                for: scopedBooks,
                 options: chooserOptions,
-                orientation: orientation
+                orientation: orientation,
+                allowsCategoryGrouping: allowsCategoryGrouping
             )
             let columnCount = max(
                 PassageBookOrdering.columnCount(
-                    itemCount: books.count,
+                    itemCount: scopedBooks.count,
                     options: chooserOptions,
-                    orientation: orientation
+                    orientation: orientation,
+                    allowsCategoryGrouping: allowsCategoryGrouping
                 ),
                 1
             )
@@ -451,8 +498,14 @@ private struct PassageChooserAppBar: View {
     /// Whether the Android overflow menu should be available for the current chooser step.
     let showsOverflowButton: Bool
 
+    /// Title for Android's separate scripture/deuterocanonical action item.
+    let deuterocanonicalToggleTitle: String?
+
     /// Back action for stepping back within the chooser or closing it from the book grid.
     let onBack: () -> Void
+
+    /// Action that toggles Android's scripture/deuterocanonical book scope.
+    let onToggleDeuterocanonical: () -> Void
 
     /// Action that toggles Android's chooser option popup.
     let onOverflow: () -> Void
@@ -477,6 +530,19 @@ private struct PassageChooserAppBar: View {
                 .foregroundStyle(Color.white)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .accessibilityIdentifier("passageChooserTitle")
+
+            if showsOverflowButton,
+               let deuterocanonicalToggleTitle {
+                Button(action: onToggleDeuterocanonical) {
+                    Image(systemName: "plus")
+                        .font(.system(size: 24, weight: .semibold))
+                        .frame(width: 52, height: Self.height)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(deuterocanonicalToggleTitle)
+                .accessibilityIdentifier("passageChooserDeuterocanonicalToggleButton")
+            }
 
             if showsOverflowButton {
                 Button(action: onOverflow) {
