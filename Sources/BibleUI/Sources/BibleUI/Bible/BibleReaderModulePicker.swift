@@ -301,18 +301,13 @@ struct BibleReaderModulePicker: View {
 
         switch selectedDocumentCategory {
         case .commentary:
-            controller.switchCommentaryModule(to: module.name)
-            if controller.currentCategory != .commentary {
-                controller.switchCategory(to: .commentary)
-            }
+            controller.switchCommentaryDocument(to: module.name)
             onDismiss()
         case .dictionary:
-            controller.switchDictionaryModule(to: module.name)
-            controller.switchCategory(to: .dictionary)
+            controller.switchDictionaryDocument(to: module.name)
             dismissAndPresentAuxiliaryBrowser(onOpenDictionaryBrowser)
         case .generalBook:
-            controller.switchGeneralBookModule(to: module.name)
-            controller.switchCategory(to: .generalBook)
+            controller.switchGeneralBookDocument(to: module.name)
             dismissAndPresentAuxiliaryBrowser(onOpenGeneralBookBrowser)
         case .map:
             controller.switchMapModule(to: module.name)

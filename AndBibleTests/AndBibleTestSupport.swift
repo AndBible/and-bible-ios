@@ -406,6 +406,109 @@ extension AndBibleTests {
     }
 
     /**
+     Seeds a deterministic empty SWORD dictionary module into a temporary module directory.
+
+     Commentary quick-selector parity tests need a real dictionary category because Android's
+     commentary popup includes dictionaries beside commentaries. The module uses empty `RawLD`
+     payload files, which is enough for SWORD category discovery and controller switching without
+     redistributing dictionary content.
+
+     - Parameters:
+       - moduleName: SWORD module initials to publish in `mods.d`.
+       - modulePath: Temporary SWORD root returned by `makeTemporaryBundledSwordPath()`.
+     - Side effects: Writes a `.conf` file and empty `RawLD` data files under `modulePath`.
+     - Failure modes: Propagates filesystem write errors.
+     */
+    func seedEmptyRawDictionaryModule(named moduleName: String = "UITestDict", in modulePath: String) throws {
+        let fm = FileManager.default
+        let moduleKey = moduleName.lowercased()
+        let moduleRoot = URL(fileURLWithPath: modulePath, isDirectory: true)
+        let modsDURL = moduleRoot.appendingPathComponent("mods.d", isDirectory: true)
+        let dataURL = moduleRoot
+            .appendingPathComponent("modules", isDirectory: true)
+            .appendingPathComponent("lexdict", isDirectory: true)
+            .appendingPathComponent("rawld", isDirectory: true)
+            .appendingPathComponent(moduleKey, isDirectory: true)
+
+        try fm.createDirectory(at: modsDURL, withIntermediateDirectories: true)
+        try fm.createDirectory(at: dataURL, withIntermediateDirectories: true)
+        for fileName in ["\(moduleKey).dat", "\(moduleKey).idx"] {
+            let fileURL = dataURL.appendingPathComponent(fileName, isDirectory: false)
+            if !fm.fileExists(atPath: fileURL.path) {
+                try Data().write(to: fileURL)
+            }
+        }
+
+        let conf = """
+        [\(moduleName)]
+        Description=UI Test Dictionary
+        Category=Lexicons / Dictionaries
+        DataPath=./modules/lexdict/rawld/\(moduleKey)/\(moduleKey)
+        ModDrv=RawLD
+        SourceType=OSIS
+        Encoding=UTF-8
+        Lang=en
+        About=Deterministic empty dictionary module for iOS parity tests.
+        """
+        try conf.write(
+            to: modsDURL.appendingPathComponent("\(moduleKey).conf", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+    }
+
+    /**
+     Seeds a deterministic empty SWORD general-book module into a temporary module directory.
+
+     Android's commentary quick selector includes general books. This fixture gives controller
+     parity tests a real general-book module through SWORD's installed-module discovery without
+     adding redistributable book content to the repository.
+
+     - Parameters:
+       - moduleName: SWORD module initials to publish in `mods.d`.
+       - modulePath: Temporary SWORD root returned by `makeTemporaryBundledSwordPath()`.
+     - Side effects: Writes a `.conf` file and empty `RawGenBook` data files under `modulePath`.
+     - Failure modes: Propagates filesystem write errors.
+     */
+    func seedEmptyRawGeneralBookModule(named moduleName: String = "UITestGB", in modulePath: String) throws {
+        let fm = FileManager.default
+        let moduleKey = moduleName.lowercased()
+        let moduleRoot = URL(fileURLWithPath: modulePath, isDirectory: true)
+        let modsDURL = moduleRoot.appendingPathComponent("mods.d", isDirectory: true)
+        let dataURL = moduleRoot
+            .appendingPathComponent("modules", isDirectory: true)
+            .appendingPathComponent("genbook", isDirectory: true)
+            .appendingPathComponent("rawgenbook", isDirectory: true)
+            .appendingPathComponent(moduleKey, isDirectory: true)
+
+        try fm.createDirectory(at: modsDURL, withIntermediateDirectories: true)
+        try fm.createDirectory(at: dataURL, withIntermediateDirectories: true)
+        for fileName in ["\(moduleKey).dat", "\(moduleKey).idx"] {
+            let fileURL = dataURL.appendingPathComponent(fileName, isDirectory: false)
+            if !fm.fileExists(atPath: fileURL.path) {
+                try Data().write(to: fileURL)
+            }
+        }
+
+        let conf = """
+        [\(moduleName)]
+        Description=UI Test General Book
+        Category=Generic Books
+        DataPath=./modules/genbook/rawgenbook/\(moduleKey)/\(moduleKey)
+        ModDrv=RawGenBook
+        SourceType=OSIS
+        Encoding=UTF-8
+        Lang=en
+        About=Deterministic empty general book module for iOS parity tests.
+        """
+        try conf.write(
+            to: modsDURL.appendingPathComponent("\(moduleKey).conf", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+    }
+
+    /**
      Seeds an additional Bible module identity that reuses the bundled KJV fixture payload.
 
      Quick-selector parity tests need multiple installed Bible module initials so they can exercise

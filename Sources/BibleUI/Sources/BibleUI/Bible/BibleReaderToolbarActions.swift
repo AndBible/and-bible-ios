@@ -25,6 +25,31 @@ struct ReaderBibleToolbarButtonBoundsPreferenceKey: PreferenceKey {
     }
 }
 
+/**
+ Captures the commentary toolbar trigger bounds so Android-style popups can anchor to the button.
+
+ The reader view consumes this preference when presenting the commentary/document quick selector.
+ It mirrors `ReaderBibleToolbarButtonBoundsPreferenceKey` so Bible and commentary quick menus share
+ the same toolbar anchoring contract without routing commentary through the overflow/menu sheet.
+ */
+struct ReaderCommentaryToolbarButtonBoundsPreferenceKey: PreferenceKey {
+    /// No toolbar button anchor is known until the commentary toolbar icon publishes one.
+    static var defaultValue: Anchor<CGRect>?
+
+    /**
+     Stores the newest non-nil toolbar anchor emitted by SwiftUI preference propagation.
+
+     - Parameters:
+       - value: Previously captured anchor, if any.
+       - nextValue: Deferred provider for the next anchor candidate.
+     - Side effects: Mutates `value` with the latest available anchor.
+     - Failure modes: none; nil candidates leave the previous anchor intact.
+     */
+    static func reduce(value: inout Anchor<CGRect>?, nextValue: () -> Anchor<CGRect>?) {
+        value = nextValue() ?? value
+    }
+}
+
 /// Width-collapsible accessory buttons that compete for toolbar space ahead of workspaces.
 enum BibleReaderToolbarAccessoryButton {
     case search
@@ -211,6 +236,7 @@ struct BibleReaderToolbarActions<OverflowButton: View>: View {
             ) {
                 commentaryToolbarIcon
             }
+            .anchorPreference(key: ReaderCommentaryToolbarButtonBoundsPreferenceKey.self, value: .bounds) { $0 }
 
             if showWorkspace {
                 Button(action: onShowWorkspaces) {
