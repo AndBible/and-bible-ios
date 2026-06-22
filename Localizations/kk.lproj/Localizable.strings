@@ -17,6 +17,7 @@
 "error" = "Error";
 "loading" = "Loading...";
 "create" = "Create";
+"new_window" = "Жаңа терезе";
 "clear" = "Clear";
 "reset" = "Reset";
 "all" = "All";

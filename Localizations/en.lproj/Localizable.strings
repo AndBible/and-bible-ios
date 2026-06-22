@@ -19,6 +19,7 @@
 "error" = "Error";
 "loading" = "Loading...";
 "create" = "Create";
+"new_window" = "New window";
 "clear" = "Clear";
 "reset" = "Reset";
 "retry" = "Retry";
