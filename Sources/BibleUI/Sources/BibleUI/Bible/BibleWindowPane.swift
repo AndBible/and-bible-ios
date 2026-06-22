@@ -63,8 +63,14 @@ struct BibleWindowPane: View {
     /// Bookmark awaiting label-assignment sheet presentation.
     @State private var pendingLabelBookmarkId: UUID?
 
+    /// Whether the custom Android-style pane hamburger menu is visible.
+    @State private var isWindowMenuPresented = false
+
     /// Shared workspace/window coordinator used for controller registration and layout actions.
     @Environment(WindowManager.self) private var windowManager
+
+    /// Current platform color scheme used by custom Android-style popup surfaces.
+    @Environment(\.colorScheme) private var colorScheme
 
     /// SwiftData context used to build stores and persist pane-driven mutations.
     @Environment(\.modelContext) private var modelContext
@@ -198,6 +204,11 @@ struct BibleWindowPane: View {
                     .padding(6)
             }
         }
+        .overlay {
+            if isWindowMenuPresented {
+                windowMenuOverlay
+            }
+        }
         .border(isFocused && windowManager.visibleWindows.count > 1 ? Color.accentColor : Color.clear, width: 2)
         .onAppear {
             if controller == nil {
@@ -236,10 +247,11 @@ struct BibleWindowPane: View {
      Opening the menu also marks this pane active, matching Android's pane menu behavior.
      */
     private var windowMenuButton: some View {
-        let model = BibleWindowPaneMenuModel(snapshot: windowMenuSnapshot)
-
-        return Menu {
-            menuItems(model.items)
+        Button {
+            windowManager.activeWindow = window
+            withAnimation(.easeOut(duration: 0.12)) {
+                isWindowMenuPresented.toggle()
+            }
         } label: {
             Image(systemName: "line.3.horizontal")
                 .font(.caption)
@@ -248,39 +260,53 @@ struct BibleWindowPane: View {
                 .frame(width: 28, height: 28)
                 .background(surfacePalette.controlFillColor, in: RoundedRectangle(cornerRadius: 6))
         }
+        .buttonStyle(.plain)
         .accessibilityIdentifier("windowPaneMenuButton::\(window.orderNumber)")
-        .simultaneousGesture(TapGesture().onEnded {
-            windowManager.activeWindow = window
-        })
     }
 
-    private func menuItems(_ items: [BibleWindowPaneMenuItem]) -> AnyView {
-        AnyView(ForEach(items) { item in
-            if item.children.isEmpty, let action = item.action {
-                Button(role: action == .close ? .destructive : nil) {
+    /**
+     Full-pane dismiss area plus an anchored custom popup for pane-scoped Android menu actions.
+
+     The popup is anchored below the pane hamburger button rather than using `SwiftUI.Menu`, so
+     iOS does not substitute platform-native row styling or submenu presentation. Terminal actions
+     close the popup before mutating window state, matching Android's popup dismissal behavior.
+     */
+    private var windowMenuOverlay: some View {
+        GeometryReader { proxy in
+            let width = min(max(proxy.size.width - 12, 220), 320)
+            let maximumHeight = max(proxy.size.height - 52, 120)
+            ZStack(alignment: .topTrailing) {
+                Color.black.opacity(0.001)
+                    .ignoresSafeArea()
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        withAnimation(.easeOut(duration: 0.12)) {
+                            isWindowMenuPresented = false
+                        }
+                    }
+                    .accessibilityIdentifier("windowPaneMenuDismissArea::\(window.orderNumber)")
+
+                BibleWindowPaneMenuPopup(
+                    items: BibleWindowPaneMenuModel(snapshot: windowMenuSnapshot).items,
+                    colorScheme: colorScheme,
+                    maximumHeight: maximumHeight
+                ) { action in
+                    withAnimation(.easeOut(duration: 0.12)) {
+                        isWindowMenuPresented = false
+                    }
                     performWindowMenuAction(action)
-                } label: {
-                    menuItemLabel(item)
                 }
-                .accessibilityIdentifier("windowPaneMenuItem::\(item.id)")
-            } else {
-                Menu {
-                    menuItems(item.children)
-                } label: {
-                    menuItemLabel(item)
-                }
-                .accessibilityIdentifier("windowPaneMenuItem::\(item.id)")
+                .frame(width: width, alignment: .topLeading)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .strokeBorder(Color.black.opacity(colorScheme == .dark ? 0.45 : 0.12), lineWidth: 1)
+                )
+                .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.32 : 0.18), radius: 14, y: 6)
+                .padding(.top, 42)
+                .padding(.trailing, 6)
+                .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .topTrailing)))
             }
-        })
-    }
-
-    @ViewBuilder
-    private func menuItemLabel(_ item: BibleWindowPaneMenuItem) -> some View {
-        let iconName = item.isChecked ? "checkmark" : item.systemImage
-        if let iconName {
-            SwiftUI.Label(item.title, systemImage: iconName)
-        } else {
-            Text(item.title)
         }
     }
 

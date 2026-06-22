@@ -126,6 +126,33 @@ extension AndBibleTests {
     }
 
     /**
+     Protects Android checkable menu-row state as distinct from checked state.
+
+     Android XML marks `pinMode` checkable even when it is unchecked, and dynamic text-display
+     preference rows are checkable booleans. The custom iOS renderer needs that metadata so it can
+     draw an empty checkbox instead of treating `false` as a plain command row.
+     */
+    func testWindowPaneMenuCheckableRowsExposeUncheckedStateForRenderer() throws {
+        let model = BibleWindowPaneMenuModel(snapshot: .fixture(
+            isPinned: false,
+            sectionTitlesEnabled: false,
+            verseNumbersEnabled: true
+        ))
+
+        let pin = try XCTUnwrap(model.items.first { $0.id == "pin" })
+        XCTAssertTrue(pin.isCheckable)
+        XCTAssertFalse(pin.isChecked)
+
+        let textOptions = try XCTUnwrap(model.items.first { $0.id == "textOptions" })
+        let sectionTitles = try XCTUnwrap(textOptions.children.first { $0.id == "sectionTitles" })
+        let verseNumbers = try XCTUnwrap(textOptions.children.first { $0.id == "verseNumbers" })
+        XCTAssertTrue(sectionTitles.isCheckable)
+        XCTAssertFalse(sectionTitles.isChecked)
+        XCTAssertTrue(verseNumbers.isCheckable)
+        XCTAssertTrue(verseNumbers.isChecked)
+    }
+
+    /**
      Protects Android-compatible copy-link URL construction.
 
      The pane menu should copy a `read.andbible.org` URL with the OSIS reference and module initials,
@@ -150,6 +177,8 @@ private extension BibleWindowPaneMenuSnapshot {
         isSynchronized: Bool = false,
         syncGroup: Int = 0,
         isMaximized: Bool = false,
+        sectionTitlesEnabled: Bool = true,
+        verseNumbersEnabled: Bool = true,
         allWindowsInPersistedOrder: [BibleWindowPaneMenuWindowSummary] = [
             .fixture(position: 0, document: "KJV", reference: "Gen 1"),
             .fixture(position: 1, document: "ESV", reference: "Rom 1"),
@@ -170,8 +199,8 @@ private extension BibleWindowPaneMenuSnapshot {
             canCopyLink: true,
             autoPinEnabled: false,
             moduleHasStrongs: true,
-            sectionTitlesEnabled: true,
-            verseNumbersEnabled: true,
+            sectionTitlesEnabled: sectionTitlesEnabled,
+            verseNumbersEnabled: verseNumbersEnabled,
             allWindowsInPersistedOrder: allWindowsInPersistedOrder,
             visibleWindows: visibleWindows ?? allWindowsInPersistedOrder
         )

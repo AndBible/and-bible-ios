@@ -41,6 +41,7 @@ struct BibleWindowPaneMenuItem: Equatable, Identifiable {
     let id: String
     let title: String
     let systemImage: String?
+    let isCheckable: Bool
     let isChecked: Bool
     let action: BibleWindowPaneMenuAction?
     let children: [BibleWindowPaneMenuItem]
@@ -49,6 +50,7 @@ struct BibleWindowPaneMenuItem: Equatable, Identifiable {
         id: String,
         title: String,
         systemImage: String? = nil,
+        isCheckable: Bool = false,
         isChecked: Bool = false,
         action: BibleWindowPaneMenuAction? = nil,
         children: [BibleWindowPaneMenuItem] = []
@@ -56,6 +58,7 @@ struct BibleWindowPaneMenuItem: Equatable, Identifiable {
         self.id = id
         self.title = title
         self.systemImage = systemImage
+        self.isCheckable = isCheckable
         self.isChecked = isChecked
         self.action = action
         self.children = children
@@ -162,6 +165,7 @@ struct BibleWindowPaneMenuModel: Equatable {
                 id: "pin",
                 title: Self.localized("window_pin_mode", default: "Pin"),
                 systemImage: "pin",
+                isCheckable: true,
                 isChecked: snapshot.isPinned,
                 action: .togglePin
             ))
@@ -266,6 +270,7 @@ struct BibleWindowPaneMenuModel: Equatable {
                 id: "sectionTitles",
                 title: localized("prefs_section_title_title", default: "Section titles"),
                 systemImage: "textformat.size",
+                isCheckable: true,
                 isChecked: snapshot.sectionTitlesEnabled,
                 action: .toggleSectionTitles
             ),
@@ -285,6 +290,7 @@ struct BibleWindowPaneMenuModel: Equatable {
                 id: "verseNumbers",
                 title: localized("prefs_show_verseno_title", default: "Chapter & verse numbers"),
                 systemImage: "number",
+                isCheckable: true,
                 isChecked: snapshot.verseNumbersEnabled,
                 action: .toggleVerseNumbers
             ),
@@ -355,6 +361,7 @@ private extension BibleWindowPaneMenuItem {
         id: String,
         title: String,
         systemImage: String? = nil,
+        isCheckable: Bool = false,
         isChecked: Bool = false,
         action: BibleWindowPaneMenuAction
     ) -> BibleWindowPaneMenuItem {
@@ -362,6 +369,7 @@ private extension BibleWindowPaneMenuItem {
             id: id,
             title: title,
             systemImage: systemImage,
+            isCheckable: isCheckable,
             isChecked: isChecked,
             action: action
         )
