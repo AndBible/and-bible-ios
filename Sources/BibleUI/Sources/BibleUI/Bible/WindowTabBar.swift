@@ -287,53 +287,45 @@ struct WindowTabBar: View {
                 tabShape
                     .fill(tabPalette.backgroundColor(isActive: isActive, isVisible: !isMinimized))
 
-                if windowManager.isMaximized {
-                    Image(systemName: "arrow.down.right.and.arrow.up.left")
-                        .font(.system(size: 18, weight: .medium))
+                VStack(alignment: .leading, spacing: 0) {
+                    Color.clear
+                        .frame(height: 13)
+
+                    Text(reference.isEmpty ? " " : reference)
+                        .font(.system(size: 8.5, weight: .medium))
                         .foregroundStyle(tabPalette.windowButtonTextColor)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else {
-                    VStack(alignment: .leading, spacing: 0) {
-                        Color.clear
-                            .frame(height: 13)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.45)
+                        .frame(height: 10, alignment: .leading)
 
-                        Text(reference.isEmpty ? " " : reference)
-                            .font(.system(size: 8.5, weight: .medium))
-                            .foregroundStyle(tabPalette.windowButtonTextColor)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.45)
-                            .frame(height: 10, alignment: .leading)
+                    Text(moduleName)
+                        .font(.system(size: 12, weight: isMinimized ? .regular : .semibold))
+                        .foregroundStyle(tabPalette.windowButtonTextColor)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.45)
+                        .frame(height: 16, alignment: .leading)
+                }
+                .padding(.leading, 2)
+                .padding(.trailing, 1)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
 
-                        Text(moduleName)
-                            .font(.system(size: 12, weight: isMinimized ? .regular : .semibold))
-                            .foregroundStyle(tabPalette.windowButtonTextColor)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.45)
-                            .frame(height: 16, alignment: .leading)
+                ToolbarAssetIcon(name: icon, size: 14)
+                    .foregroundStyle(window.isLinksWindow ? tabPalette.linksIconColor : tabPalette.categoryIconColor)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                    .padding(.top, 2)
+                    .padding(.trailing, 2)
+
+                if canSyncWindow && window.isSynchronized {
+                    HStack(spacing: 0) {
+                        Image(systemName: "arrow.triangle.2.circlepath")
+                            .font(.system(size: 7, weight: .bold))
+                        Text("\(window.syncGroup + 1)")
+                            .font(.system(size: 7, weight: .bold))
                     }
-                    .padding(.leading, 2)
-                    .padding(.trailing, 1)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
-
-                    ToolbarAssetIcon(name: icon, size: 14)
-                        .foregroundStyle(window.isLinksWindow ? tabPalette.linksIconColor : tabPalette.categoryIconColor)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-                        .padding(.top, 2)
-                        .padding(.trailing, 2)
-
-                    if canSyncWindow && window.isSynchronized {
-                        HStack(spacing: 0) {
-                            Image(systemName: "arrow.triangle.2.circlepath")
-                                .font(.system(size: 7, weight: .bold))
-                            Text("\(window.syncGroup + 1)")
-                                .font(.system(size: 7, weight: .bold))
-                        }
-                        .foregroundStyle(tabPalette.statusIconColor)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                        .padding(.top, 2)
-                        .padding(.leading, 1)
-                    }
-
+                    .foregroundStyle(tabPalette.statusIconColor)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .padding(.top, 2)
+                    .padding(.leading, 1)
                 }
             }
             .frame(width: WindowTabBarLayout.fixedButtonSize, height: WindowTabBarLayout.fixedButtonSize)
