@@ -12,6 +12,16 @@ import SwiftData
  */
 @Model
 public final class Workspace {
+    /**
+     Android-compatible fallback accent color for workspaces.
+
+     Android defines `defaultWorkspaceColor` as `Color.parseColor("#ff444444")` and uses it when a
+     workspace has no durable `WorkspaceSettings.workspaceColor` value. iOS stores colors using the
+     same signed ARGB integer convention, so this constant is the shared fallback for new local
+     workspaces, reset behavior, and selector rendering.
+     */
+    public static let defaultWorkspaceColor = Int(Int32(bitPattern: 0xFF444444))
+
     /// Stable identifier mirrored from Android's workspace IdType contract.
     public var id: UUID = UUID()
 

@@ -265,6 +265,9 @@ public struct BibleReaderView: View {
     /// Workspace-scoped text-display state edited from Android's main reader All Text Options route.
     @State private var workspaceDisplaySettings: TextDisplaySettings = .appDefaults
 
+    /// Workspace metadata color currently driving Android-parity reader toolbar chrome.
+    @State private var workspaceChromeColor: Int = Workspace.defaultWorkspaceColor
+
     /// Effective night-mode value currently applied to pane controllers and overlays.
     @State private var nightMode = false
 
@@ -325,6 +328,10 @@ public struct BibleReaderView: View {
     /// Preference controlling whether the floating fullscreen reference capsule is hidden.
     @State private var hideBibleReferenceOverlayPref =
         AppPreferenceRegistry.boolDefault(for: .hideBibleReferenceOverlay) ?? false
+
+    /// Android monochrome/e-ink preference used by native reader toolbar chrome.
+    @State private var monochromeModePref =
+        AppPreferenceRegistry.boolDefault(for: .monochromeMode) ?? false
 
     /// Tracks whether fullscreen was last entered by the double-tap gesture instead of scrolling.
     @State private var lastFullScreenByDoubleTap = false
@@ -455,6 +462,35 @@ public struct BibleReaderView: View {
         )
     }
 
+    /**
+     Workspace accent-color binding for Android's workspace-scope color settings row.
+
+     The nested color settings screen edits `TextDisplaySettings`, but Android carries
+     `workspace_color` as workspace metadata. This binding keeps the metadata separate from the
+     inherited text-display model while letting the same color editor persist it through the normal
+     workspace save callback.
+
+     - Returns: A binding that resolves nil stored colors to Android's `#ff444444` fallback and
+       writes edits to the pane target workspace when available.
+     - Side effects: Setting the binding mutates `Workspace.workspaceColor`; the caller remains
+       responsible for saving the model context.
+     - Failure modes: If the target workspace no longer exists, writes are ignored.
+     */
+    private var workspaceColorBinding: Binding<Int?> {
+        Binding(
+            get: {
+                let workspace = panePresentationTargetWindow?.workspace ?? windowManager.activeWorkspace
+                return workspace?.workspaceColor ?? Workspace.defaultWorkspaceColor
+            },
+            set: { newValue in
+                let workspace = panePresentationTargetWindow?.workspace ?? windowManager.activeWorkspace
+                let resolvedColor = newValue ?? Workspace.defaultWorkspaceColor
+                workspace?.workspaceColor = resolvedColor
+                workspaceChromeColor = resolvedColor
+            }
+        )
+    }
+
     /// User-visible reference string for the currently focused Bible location.
     private var currentReference: String {
         guard let ctrl = focusedController else { return "Genesis 1" }
@@ -568,9 +604,14 @@ public struct BibleReaderView: View {
             focusedController?.currentCategory == .bible
     }
 
-    /// Reader-shell palette derived from the active pane's text-display colors.
+    /// Reader-shell palette derived from active pane content settings and workspace chrome color.
     private var readerThemeSurfacePalette: ReaderThemeSurfacePalette {
-        ReaderThemeSurfacePalette(settings: displaySettings, nightMode: nightMode)
+        ReaderThemeSurfacePalette(
+            settings: displaySettings,
+            nightMode: nightMode,
+            workspaceColor: workspaceChromeColor,
+            monochromeMode: monochromeModePref
+        )
     }
 
     /// Bottom inset for the floating reference capsule, accounting for other bottom chrome.
@@ -1036,6 +1077,7 @@ public struct BibleReaderView: View {
         case .workspaceTextOptions:
             TextDisplaySettingsView(
                 settings: $workspaceDisplaySettings,
+                workspaceColor: workspaceColorBinding,
                 navigationTitle: textOptionsWorkspaceTitle,
                 scope: .workspace,
                 workspaceName: panePresentationTargetWindow?.workspace?.name ?? windowManager.activeWorkspace?.name,
@@ -2065,6 +2107,7 @@ public struct BibleReaderView: View {
         fullScreenHideButtonsPref = store.getBool(.fullScreenHideButtonsPref)
         hideWindowButtonsPref = store.getBool(.hideWindowButtons)
         hideBibleReferenceOverlayPref = store.getBool(.hideBibleReferenceOverlay)
+        monochromeModePref = store.getBool(.monochromeMode)
         #if os(iOS)
         UIApplication.shared.isIdleTimerDisabled = store.getBool(.screenKeepOnPref)
         #endif
@@ -2939,6 +2982,7 @@ public struct BibleReaderView: View {
     private func readerToolbarActions(controller: BibleReaderController?) -> some View {
         BibleReaderToolbarActions(
             usesCompactToolbar: usesCompactReaderToolbar,
+            surfacePalette: readerThemeSurfacePalette,
             preferredSingleAccessory: preferredSingleToolbarAccessory,
             moduleHasStrongs: moduleHasStrongs,
             strongsIconAssetName: strongsIconAssetName,
@@ -2978,7 +3022,9 @@ public struct BibleReaderView: View {
 
     /// Neutral toolbar tint matching Android's white/grey icon-state treatment.
     private func toolbarIconColor(isActive: Bool = true) -> Color {
-        isActive ? .primary : .secondary
+        isActive
+            ? readerThemeSurfacePalette.toolbarForegroundColor
+            : readerThemeSurfacePalette.toolbarSecondaryForegroundColor
     }
 
     /// Trailing overflow trigger that must remain visible even when toolbar actions collapse.
@@ -3291,6 +3337,10 @@ public struct BibleReaderView: View {
     /// Re-syncs the focused toolbar/settings state from the current active window.
     private func syncActiveDisplaySettings() {
         displaySettings = resolvedDisplaySettings(for: windowManager.activeWindow)
+        workspaceChromeColor = ReaderWorkspaceChromeColor.resolved(
+            activeWindow: windowManager.activeWindow,
+            activeWorkspace: windowManager.activeWorkspace
+        )
         workspaceDisplaySettings = resolvedWorkspaceDisplaySettings(
             for: panePresentationTargetWindow?.workspace ?? windowManager.activeWorkspace
         )
@@ -3555,6 +3605,7 @@ public struct BibleReaderView: View {
         fullScreenHideButtonsPref = store.getBool(.fullScreenHideButtonsPref)
         hideWindowButtonsPref = store.getBool(.hideWindowButtons)
         hideBibleReferenceOverlayPref = store.getBool(.hideBibleReferenceOverlay)
+        monochromeModePref = store.getBool(.monochromeMode)
         nightModeMode = store.getString(.nightModePref3)
         let manualNightMode = store.getBool("night_mode")
         nightMode = NightModeSettingsResolver.isNightMode(
