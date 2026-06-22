@@ -11,7 +11,7 @@ import CoreGraphics
  those fixed logical sizes instead of keeping the add-window control visible in every mode.
 
  Inputs:
- - `availableWidth`: footer width available to the window-button strip.
+ - `tabWidth`: document button width used by occupied-strip calculations.
  - `windowCount`: number of open document windows represented by fixed buttons.
 
  Outputs:
@@ -20,8 +20,8 @@ import CoreGraphics
    control for the current window mode
 
  Side effects: none.
- Failure modes: negative widths and negative window counts are clamped into deterministic
-   non-negative layout results.
+ Failure modes: occupied-width calculations clamp negative widths and negative window counts into
+   deterministic non-negative layout results.
  Determinism: pure value calculations; no UI state, filesystem, or platform calls are involved.
  */
 enum WindowTabBarLayout {
@@ -61,17 +61,11 @@ enum WindowTabBarLayout {
     /**
      Returns the Android-parity fixed tab width for the current footer.
 
-     - Parameters:
-       - availableWidth: Width offered by the reader footer. Included for callers and tests that
-         reason about total occupancy; the Android button width itself remains fixed.
-       - windowCount: Number of open document windows. Negative counts are treated as zero.
      - Returns: `40`, matching Android's `windowButtonHeight` dimension.
      - Side effects: None.
-     - Failure modes: None; invalid inputs do not throw.
+     - Failure modes: None.
      */
-    static func tabWidth(availableWidth: CGFloat, windowCount: Int) -> CGFloat {
-        _ = max(0, availableWidth)
-        _ = max(0, windowCount)
+    static func tabWidth() -> CGFloat {
         return fixedButtonSize
     }
 

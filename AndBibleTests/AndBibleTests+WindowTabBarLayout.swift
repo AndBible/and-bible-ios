@@ -12,7 +12,7 @@ extension AndBibleTests {
      window counts may reduce to the minimum compact size.
      */
     func testFourReaderWindowsAndRestoreToggleFitInPhoneFooter() {
-        let tabWidth = WindowTabBarLayout.tabWidth(availableWidth: 430, windowCount: 4)
+        let tabWidth = WindowTabBarLayout.tabWidth()
         let occupiedWidth = WindowTabBarLayout.multiWindowOccupiedWidth(tabWidth: tabWidth, windowCount: 4)
 
         XCTAssertLessThanOrEqual(occupiedWidth, 430)
@@ -44,7 +44,7 @@ extension AndBibleTests {
      back toward squeezing text until the icon/title/reference identity is no longer readable.
      */
     func testManyReaderWindowsClampToMinimumCompactWidth() {
-        let tabWidth = WindowTabBarLayout.tabWidth(availableWidth: 430, windowCount: 8)
+        let tabWidth = WindowTabBarLayout.tabWidth()
 
         XCTAssertEqual(tabWidth, WindowTabBarLayout.minimumTabWidth)
     }
