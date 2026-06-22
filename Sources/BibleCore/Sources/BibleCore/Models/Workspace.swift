@@ -88,6 +88,7 @@ public struct WorkspaceSettings: Codable, Sendable {
         case enableTiltToScroll
         case enableReverseSplitMode
         case autoPin
+        case restoreButtonsVisible
         case recentLabels
         case autoAssignLabels
         case autoAssignPrimaryLabel
@@ -104,6 +105,9 @@ public struct WorkspaceSettings: Codable, Sendable {
 
     /// Automatically pins new or updated windows according to workspace behavior rules.
     public var autoPin: Bool
+
+    /// Shows Android's bottom restore-button strip for multi-window workspaces.
+    public var restoreButtonsVisible: Bool
 
     /// Most recently used labels, ordered by access time for quick-pick UI.
     public var recentLabels: [RecentLabel]
@@ -130,6 +134,7 @@ public struct WorkspaceSettings: Codable, Sendable {
        - enableTiltToScroll: Whether tilt-to-scroll is enabled for the workspace.
        - enableReverseSplitMode: Whether split ordering is reversed.
        - autoPin: Whether windows should auto-pin by default.
+       - restoreButtonsVisible: Whether Android's bottom restore-button strip is expanded.
        - recentLabels: Recently used labels for quick selection UI.
        - autoAssignLabels: Labels automatically assigned to new bookmarks.
        - autoAssignPrimaryLabel: Primary label automatically assigned to new bookmarks; normalized to an assigned label or `nil` when inconsistent.
@@ -141,6 +146,7 @@ public struct WorkspaceSettings: Codable, Sendable {
         enableTiltToScroll: Bool = false,
         enableReverseSplitMode: Bool = false,
         autoPin: Bool = false,
+        restoreButtonsVisible: Bool = true,
         recentLabels: [RecentLabel] = [],
         autoAssignLabels: Set<UUID> = [],
         autoAssignPrimaryLabel: UUID? = nil,
@@ -151,6 +157,7 @@ public struct WorkspaceSettings: Codable, Sendable {
         self.enableTiltToScroll = enableTiltToScroll
         self.enableReverseSplitMode = enableReverseSplitMode
         self.autoPin = autoPin
+        self.restoreButtonsVisible = restoreButtonsVisible
         self.recentLabels = recentLabels
         self.autoAssignLabels = autoAssignLabels
         self.autoAssignPrimaryLabel = autoAssignPrimaryLabel
@@ -172,6 +179,7 @@ public struct WorkspaceSettings: Codable, Sendable {
         enableTiltToScroll = try container.decodeIfPresent(Bool.self, forKey: .enableTiltToScroll) ?? false
         enableReverseSplitMode = try container.decodeIfPresent(Bool.self, forKey: .enableReverseSplitMode) ?? false
         autoPin = try container.decodeIfPresent(Bool.self, forKey: .autoPin) ?? false
+        restoreButtonsVisible = try container.decodeIfPresent(Bool.self, forKey: .restoreButtonsVisible) ?? true
         recentLabels = try container.decodeIfPresent([RecentLabel].self, forKey: .recentLabels) ?? []
         autoAssignLabels = try container.decodeIfPresent(Set<UUID>.self, forKey: .autoAssignLabels) ?? []
         autoAssignPrimaryLabel = try container.decodeIfPresent(UUID.self, forKey: .autoAssignPrimaryLabel)

@@ -17,6 +17,7 @@
 "error" = "Error";
 "loading" = "Loading...";
 "create" = "Create";
+"new_window" = "కొత్త విండో";
 "clear" = "Clear";
 "reset" = "Reset";
 "all" = "All";
@@ -478,6 +479,9 @@
 "hide_bible_reference_overlay_title" = "బైబిల్ సూచన అతివ్యాప్తిని దాచండి";
 "hide_window_buttons_summary" = "బైబిల్ వీక్షణల కుడి వైపున ప్రదర్శించబడే విండో బటన్‌లు దాచబడ్డాయి. దిగువన విండో నావిగేషన్ బార్ ఇప్పటికీ ప్రదర్శించబడుతుంది మరియు మీరు వాటిని ఎక్కువసేపు క్లిక్ చేయడం ద్వారా విండో పాప్అప్ మెనుని తెరవవచ్చు.";
 "hide_window_buttons_title" = "విండో బటన్లను దాచండి";
+"show_window_buttons_title" = "Show window buttons";
+"hide_window_buttons_hint" = "Hides the window button strip";
+"show_window_buttons_hint" = "Shows the window button strip";
 "pref_font_size_multiplier_title" = "ఫాంట్ పరిమాణ గుణకం";
 "prefs_bible_view_swipe_mode_summary" = "తదుపరి పేజీ / అధ్యాయానికి వెళ్ళడానికి స్వైప్ ఎడమ / కుడి జెస్చర్ ఉపయోగించవచ్చు.";
 "prefs_bible_view_swipe_mode_title" = "స్వైప్ ఎడమ / కుడి జెస్చర్ చర్య";

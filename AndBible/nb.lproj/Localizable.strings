@@ -17,6 +17,7 @@
 "error" = "Error";
 "loading" = "Loading...";
 "create" = "Create";
+"new_window" = "Nytt vindu";
 "clear" = "Clear";
 "reset" = "Reset";
 "all" = "All";
@@ -478,6 +479,9 @@
 "hide_bible_reference_overlay_title" = "Skjul bibelreferanseoverlegg";
 "hide_window_buttons_summary" = "Vindusknapper som vises på høyre side av bibelvisningene er skjult. Vindusnavigasjonslinjen nederst vises fortsatt og du kan åpne vinduets hurtigmeny ved å holde inne knappene.";
 "hide_window_buttons_title" = "Skjul vindusknapper";
+"show_window_buttons_title" = "Show window buttons";
+"hide_window_buttons_hint" = "Hides the window button strip";
+"show_window_buttons_hint" = "Shows the window button strip";
 "pref_font_size_multiplier_title" = "Skriftstørrelsesmultiplikator";
 "prefs_bible_view_swipe_mode_summary" = "Sveip til venstre/høyre kan brukes til å gå til neste side/kapittel.";
 "prefs_bible_view_swipe_mode_title" = "Handling for sveip til venstre/høyre";

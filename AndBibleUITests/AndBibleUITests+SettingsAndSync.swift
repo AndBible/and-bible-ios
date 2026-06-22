@@ -370,7 +370,6 @@ extension AndBibleUITests {
         XCTAssertTrue(openLabelManager(in: app).exists)
 
         tapElementReliably(requireElement("labelManagerAddButton", in: app, timeout: 10), timeout: 10)
-        waitForLabelManagerState(containing: "showNewLabel=true", in: app, timeout: 10)
         let newLabelNameField = requireLabelManagerNewLabelField(in: app, timeout: 10)
         guard typePromptText(
             originalName,

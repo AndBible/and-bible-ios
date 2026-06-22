@@ -72,6 +72,10 @@ struct BibleReaderToolbarActions<OverflowButton: View>: View {
     private let strongsEnabled: Bool
     private let isBibleActive: Bool
     private let isCommentaryActive: Bool
+    /// Whether Android's page-search action is valid for the focused pane.
+    private let searchEnabled: Bool
+    /// Whether Android's page-speak action is valid for the focused pane.
+    private let speakEnabled: Bool
     /// Whether Bible/commentary document actions can accept gestures for the focused pane.
     private let moduleActionsEnabled: Bool
     private let onShowSearch: () -> Void
@@ -94,6 +98,8 @@ struct BibleReaderToolbarActions<OverflowButton: View>: View {
         strongsEnabled: Bool,
         isBibleActive: Bool,
         isCommentaryActive: Bool,
+        searchEnabled: Bool,
+        speakEnabled: Bool,
         moduleActionsEnabled: Bool,
         onShowSearch: @escaping () -> Void,
         onShowSpeak: @escaping () -> Void,
@@ -114,6 +120,8 @@ struct BibleReaderToolbarActions<OverflowButton: View>: View {
         self.strongsEnabled = strongsEnabled
         self.isBibleActive = isBibleActive
         self.isCommentaryActive = isCommentaryActive
+        self.searchEnabled = searchEnabled
+        self.speakEnabled = speakEnabled
         self.moduleActionsEnabled = moduleActionsEnabled
         self.onShowSearch = onShowSearch
         self.onShowSpeak = onShowSpeak
@@ -129,30 +137,30 @@ struct BibleReaderToolbarActions<OverflowButton: View>: View {
     var body: some View {
         if usesCompactToolbar {
             toolbarActionButtons(
-                showSearch: true,
+                showSearch: searchEnabled,
                 showSpeak: false,
                 showWorkspace: false
             )
         } else {
             ViewThatFits(in: .horizontal) {
                 toolbarActionButtons(
-                    showSearch: true,
-                    showSpeak: true,
+                    showSearch: searchEnabled,
+                    showSpeak: speakEnabled,
                     showWorkspace: true
                 )
                 toolbarActionButtons(
-                    showSearch: true,
-                    showSpeak: true,
+                    showSearch: searchEnabled,
+                    showSpeak: speakEnabled,
                     showWorkspace: false
                 )
                 toolbarActionButtons(
-                    showSearch: preferredSingleAccessory == .search,
-                    showSpeak: preferredSingleAccessory == .speak,
+                    showSearch: searchEnabled && preferredSingleAccessory == .search,
+                    showSpeak: speakEnabled && preferredSingleAccessory == .speak,
                     showWorkspace: true
                 )
                 toolbarActionButtons(
-                    showSearch: preferredSingleAccessory == .search,
-                    showSpeak: preferredSingleAccessory == .speak,
+                    showSearch: searchEnabled && preferredSingleAccessory == .search,
+                    showSpeak: speakEnabled && preferredSingleAccessory == .speak,
                     showWorkspace: false
                 )
                 toolbarActionButtons(

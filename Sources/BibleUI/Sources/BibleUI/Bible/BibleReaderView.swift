@@ -592,6 +592,19 @@ public struct BibleReaderView: View {
         !isFullScreen || !fullScreenHideButtonsPref
     }
 
+    /// Height the Android-parity window tab bar reserves below reader content.
+    private var windowTabBarReservedHeight: CGFloat {
+        guard shouldShowWindowTabBar else { return 0 }
+        let restoreButtonsVisible = windowManager.activeWorkspace?.workspaceSettings?.restoreButtonsVisible ?? true
+        let singleWindowFooterMode = !windowManager.isMaximized
+            && windowManager.allWindows.count <= 1
+            && windowManager.visibleWindows.count <= 1
+        return WindowTabBarLayout.reservedHeight(
+            restoreButtonsVisible: restoreButtonsVisible,
+            isSingleWindowFooterMode: singleWindowFooterMode
+        )
+    }
+
     /// Whether Android's English-only Easy Start default download action should be offered.
     private var isStartupEasyStartAvailable: Bool {
         Locale.current.language.languageCode?.identifier == "en"
@@ -616,7 +629,10 @@ public struct BibleReaderView: View {
 
     /// Bottom inset for the floating reference capsule, accounting for other bottom chrome.
     private var bibleReferenceOverlayBottomPadding: CGFloat {
-        var padding: CGFloat = shouldShowWindowTabBar ? 58 : 16
+        let reservedTabBarHeight = windowTabBarReservedHeight
+        var padding: CGFloat = reservedTabBarHeight > 0
+            ? reservedTabBarHeight + 6
+            : 16
         if speakService.isSpeaking {
             padding += 56
         }
@@ -2990,6 +3006,8 @@ public struct BibleReaderView: View {
             strongsEnabled: strongsEnabled,
             isBibleActive: controller?.currentCategory == .bible,
             isCommentaryActive: controller?.currentCategory == .commentary,
+            searchEnabled: controller?.isCurrentPageSearchable == true,
+            speakEnabled: controller?.isCurrentPageSpeakable == true,
             moduleActionsEnabled: controller != nil,
             onShowSearch: { presentSearch(from: windowManager.activeWindow?.id) },
             onShowSpeak: {

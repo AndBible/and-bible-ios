@@ -17,6 +17,7 @@
 "error" = "Error";
 "loading" = "Loading...";
 "create" = "Create";
+"new_window" = "Új ablak";
 "clear" = "Clear";
 "reset" = "Reset";
 "all" = "All";
@@ -478,6 +479,9 @@
 "hide_bible_reference_overlay_title" = "Biblia referenciák elrejtése";
 "hide_window_buttons_summary" = "A Biblia nézeteinek jobb oldalán megjelenő ablakgombok el vannak rejtve. Az alsó ablak navigációs sávja továbbra is megjelenik, és hosszú kattintással megnyithatja az ablak felbukkanó menüjét.";
 "hide_window_buttons_title" = "Ablakvezérlő gombok elrejtése";
+"show_window_buttons_title" = "Show window buttons";
+"hide_window_buttons_hint" = "Hides the window button strip";
+"show_window_buttons_hint" = "Shows the window button strip";
 "pref_font_size_multiplier_title" = "Betűméret szorzó";
 "prefs_bible_view_swipe_mode_summary" = "A balra / jobbra húzás gesztussal a következő oldalra / fejezetre lehet lépni.";
 "prefs_bible_view_swipe_mode_title" = "Balra / jobbra húzás művelete";
