@@ -57,23 +57,26 @@ struct WindowTabBar: View {
         let tabPalette = AndroidWindowTabPalette.resolved(for: surfacePalette)
         let restoreButtonsVisible = windowManager.activeWorkspace?.workspaceSettings?.restoreButtonsVisible ?? true
 
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: WindowTabBarLayout.spacing) {
-                if windowManager.isMaximized {
-                    unmaximizeButton(tabPalette: tabPalette)
-                } else if isSingleWindowFooterMode {
-                    addWindowButton(tabPalette: tabPalette)
-                } else {
-                    restoreButtonsToggle(isExpanded: restoreButtonsVisible, tabPalette: tabPalette)
-                    if restoreButtonsVisible {
-                        ForEach(windowManager.allWindows, id: \.id) { window in
-                            windowTab(for: window, tabPalette: tabPalette)
+        GeometryReader { geometry in
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: WindowTabBarLayout.spacing) {
+                    if windowManager.isMaximized {
+                        unmaximizeButton(tabPalette: tabPalette)
+                    } else if isSingleWindowFooterMode {
+                        addWindowButton(tabPalette: tabPalette)
+                    } else {
+                        restoreButtonsToggle(isExpanded: restoreButtonsVisible, tabPalette: tabPalette)
+                        if restoreButtonsVisible {
+                            ForEach(windowManager.allWindows, id: \.id) { window in
+                                windowTab(for: window, tabPalette: tabPalette)
+                            }
                         }
                     }
                 }
+                .padding(.horizontal, WindowTabBarLayout.horizontalPadding / 2)
+                .padding(.vertical, WindowTabBarLayout.verticalPadding)
+                .frame(minWidth: geometry.size.width, alignment: .trailing)
             }
-            .padding(.horizontal, WindowTabBarLayout.horizontalPadding / 2)
-            .padding(.vertical, WindowTabBarLayout.verticalPadding)
         }
         .frame(height: WindowTabBarLayout.barHeight)
         .accessibilityIdentifier("windowTabBar")
