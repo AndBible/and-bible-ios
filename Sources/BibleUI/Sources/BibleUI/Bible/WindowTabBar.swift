@@ -437,10 +437,11 @@ struct WindowTabBar: View {
                             Button {
                                 window.syncGroup = group
                             } label: {
+                                let groupTitle = String.localizedStringWithFormat(String(localized: "Group %lld"), group)
                                 if window.syncGroup == group {
-                                    SwiftUI.Label(String(localized: "Group \(group)"), systemImage: "checkmark")
+                                    SwiftUI.Label(groupTitle, systemImage: "checkmark")
                                 } else {
-                                    Text(String(localized: "Group \(group)"))
+                                    Text(groupTitle)
                                 }
                             }
                         }
