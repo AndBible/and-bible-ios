@@ -180,8 +180,10 @@ extension AndBibleUITests {
         addWindowTab(expectingOrder: 1, in: app, timeout: 15)
         let paneMenu = requireElement("windowPaneMenuButton::1", in: app, timeout: 10)
         tapElementReliably(paneMenu, timeout: 10)
-        let textOptionsAction = requireElement("windowPaneTextOptionsButton", in: app, timeout: 10)
-        tapElementReliably(textOptionsAction, timeout: 10)
+        let textOptionsSubmenu = requirePaneMenuItem("windowPaneMenuItem::textOptions", in: app, timeout: 10)
+        tapElementReliably(textOptionsSubmenu, timeout: 10)
+        let allTextOptionsAction = requirePaneMenuItem("windowPaneMenuItem::allTextOptions", in: app, timeout: 10)
+        tapElementReliably(allTextOptionsAction, timeout: 10)
 
         waitForElementValue("textDisplaySettingsScreen", toContain: "scope=window", in: app, timeout: 10)
         let workspaceLink = requireElement("textDisplayOpenWorkspaceSettingsButton", in: app, timeout: 10)
@@ -191,6 +193,110 @@ extension AndBibleUITests {
         waitForElementValue("textDisplaySettingsScreen", toContain: "scope=workspace", in: app, timeout: 10)
         XCTAssertFalse(unresolvedElement("textDisplayOpenWorkspaceSettingsButton", in: app).exists)
         XCTAssertTrue(requireElement("textDisplayOpenGlobalSettingsButton", in: app, timeout: 10).exists)
+    }
+
+    /**
+     Verifies that closing a pane from Android's pane hamburger menu leaves the reader alive.
+
+     The close action removes the active SwiftData `Window` and its cascaded `PageManager`. The
+     reader must detach that window from visible SwiftUI state before deleting it so the split view
+     never re-renders a pane backed by invalidated model objects.
+     *
+     - Side effects:
+     *   - launches the app, creates a second reader window through the tab bar, and opens the
+     *     active pane hamburger menu
+     *   - activates the pane-level Close command
+     * - Failure modes:
+     *   - fails if the pane menu close action terminates the app
+     *   - fails if the closed window tab remains visible after the close transaction settles
+     *   - fails if the remaining one-window pane loses Android's pane hamburger affordance
+     *   - fails if the remaining one-window footer cannot create another window
+     */
+    func testPaneMenuCloseWindowKeepsReaderAlive() {
+        let app = makeApp()
+        app.launch()
+
+        addWindowTab(expectingOrder: 1, in: app, timeout: 15)
+        tapElementReliably(requireElement("windowPaneMenuButton::1", in: app, timeout: 10), timeout: 10)
+        tapElementReliably(
+            requirePaneMenuItem("windowPaneMenuItem::close", in: app, timeout: 12),
+            timeout: 10
+        )
+
+        XCTAssertTrue(
+            waitForReaderShellReady(in: app, timeout: 20),
+            "Expected reader shell to remain alive after pane-menu Close."
+        )
+        waitForElementExistence("windowTabButton::1", in: app, shouldExist: false, timeout: 10)
+        let finalState = readerRenderedContentStateValue(in: app) ?? "nil"
+        XCTAssertFalse(finalState.contains("windowOrder=none"), "Expected an active reader window after Close; state=\(finalState)")
+        XCTAssertTrue(requireElement("windowPaneMenuButton::0", in: app, timeout: 10).exists)
+        XCTAssertTrue(requireElement("windowTabAddButton", in: app, timeout: 10).exists)
+    }
+
+    /**
+     Resolves one Android-style pane-menu row, scrolling the custom popup when the row is below the
+     first visible viewport.
+
+     - Parameters:
+     *   - identifier: Accessibility identifier for the pane-menu row.
+     *   - app: Running application under test.
+     *   - timeout: Maximum time to search while scrolling.
+     *   - file: Source file used for XCTest failure attribution.
+     *   - line: Source line used for XCTest failure attribution.
+     * - Returns: The first matching row with a usable frame, or the unresolved query after failure.
+     * - Side effects: swipes the `windowPaneMenu` popup surface upward while re-querying rows.
+     * - Failure modes: records an XCTest failure when the row never materializes.
+     */
+    private func requirePaneMenuItem(
+        _ identifier: String,
+        in app: XCUIApplication,
+        timeout: TimeInterval = 10,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) -> XCUIElement {
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            if let item = resolvedPaneMenuItem(identifier, in: app) {
+                return item
+            }
+
+            let menuScrollView = app.scrollViews["windowPaneMenu"].firstMatch
+            if elementHasUsableFrame(menuScrollView) {
+                menuScrollView.swipeUp()
+            } else if let menuSurface = resolvedElement("windowPaneMenu", in: app),
+                      elementHasUsableFrame(menuSurface) {
+                menuSurface.swipeUp()
+            } else {
+                app.swipeUp()
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        } while Date() < deadline
+
+        let item = app.buttons[identifier].firstMatch.exists
+            ? app.buttons[identifier].firstMatch
+            : unresolvedElement(identifier, in: app)
+        XCTAssertTrue(
+            item.exists,
+            "Expected pane menu item '\(identifier)' to become visible within \(timeout) seconds.",
+            file: file,
+            line: line
+        )
+        return item
+    }
+
+    private func resolvedPaneMenuItem(
+        _ identifier: String,
+        in app: XCUIApplication
+    ) -> XCUIElement? {
+        let menuScrollView = app.scrollViews["windowPaneMenu"].firstMatch
+        let candidates = [
+            menuScrollView.buttons[identifier].firstMatch,
+            app.buttons[identifier].firstMatch,
+            menuScrollView.otherElements[identifier].firstMatch,
+            app.otherElements[identifier].firstMatch,
+        ]
+        return candidates.first(where: { isElementHittable($0) })
     }
 
     /**
