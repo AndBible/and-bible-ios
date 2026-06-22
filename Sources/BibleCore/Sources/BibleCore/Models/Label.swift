@@ -18,40 +18,41 @@ public enum LabelType: String, Codable, Sendable {
  Stores a bookmark label and its visual styling metadata.
 
  Labels are used for user-visible tagging, highlighting rules, quick actions, and as the
- container entity for StudyPad notes. Deleting a label cascades to its StudyPad entries,
- while bookmark junction rows are managed by their owning bookmark relationships.
+ container entity for StudyPad notes. Deleting a label cascades to its StudyPad entries
+ and bookmark junction rows, matching the existing behavior where label deletion detaches
+ bookmark relationships instead of deleting the bookmarked content.
  */
 @Model
 public final class Label {
-    /// Unique identifier used for persistence, bookmark linking, and CloudKit deduplication.
-    @Attribute(.unique) public var id: UUID
+    /// Stable identifier used for persistence, bookmark linking, and sync reconciliation.
+    public var id: UUID = UUID()
 
     /// User-visible label name or one of the reserved system label identifiers.
-    public var name: String
+    public var name: String = ""
 
     /// Signed ARGB color integer consumed by native and web rendering layers.
-    public var color: Int
+    public var color: Int = 0xFF91A7FF
 
     /// Enables marker-style rendering instead of the default highlight treatment.
-    public var markerStyle: Bool
+    public var markerStyle: Bool = false
 
     /// Applies the marker style to the whole verse instead of only the selected text span.
-    public var markerStyleWholeVerse: Bool
+    public var markerStyleWholeVerse: Bool = false
 
     /// Enables underline-style rendering for bookmarks using this label.
-    public var underlineStyle: Bool
+    public var underlineStyle: Bool = false
 
     /// Applies underline styling to the whole verse instead of only the selected text span.
-    public var underlineStyleWholeVerse: Bool
+    public var underlineStyleWholeVerse: Bool = true
 
     /// Hides the visible highlight while keeping the label and bookmark metadata intact.
-    public var hideStyle: Bool
+    public var hideStyle: Bool = false
 
     /// Applies the hidden style to the whole verse instead of only the selected text span.
-    public var hideStyleWholeVerse: Bool
+    public var hideStyleWholeVerse: Bool = false
 
     /// Flags the label for quick-access surfaces such as bookmark and label pickers.
-    public var favourite: Bool
+    public var favourite: Bool = false
 
     /// Optional raw label type string mirrored from Android parity state.
     public var type: String?
@@ -62,6 +63,14 @@ public final class Label {
     /// StudyPad text rows owned by this label and cascade-deleted with it.
     @Relationship(deleteRule: .cascade, inverse: \StudyPadTextEntry.label)
     public var studyPadEntries: [StudyPadTextEntry]?
+
+    /// Bible bookmark junction rows that reference this label.
+    @Relationship(deleteRule: .cascade, inverse: \BibleBookmarkToLabel.label)
+    public var bibleBookmarkToLabels: [BibleBookmarkToLabel]?
+
+    /// Generic bookmark junction rows that reference this label.
+    @Relationship(deleteRule: .cascade, inverse: \GenericBookmarkToLabel.label)
+    public var genericBookmarkToLabels: [GenericBookmarkToLabel]?
 
     /**
      Creates a label with styling metadata.

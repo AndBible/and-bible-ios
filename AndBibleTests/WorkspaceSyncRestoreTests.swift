@@ -276,7 +276,7 @@ final class WorkspaceSyncRestoreTests: XCTestCase {
             Date(timeIntervalSince1970: 1_735_689_600)
         )
         XCTAssertEqual(workspace.workspaceSettings.autoAssignLabels, [autoAssignLabelID])
-        XCTAssertEqual(workspace.workspaceSettings.autoAssignPrimaryLabel, primaryLabelID)
+        XCTAssertEqual(workspace.workspaceSettings.autoAssignPrimaryLabel, autoAssignLabelID)
         XCTAssertEqual(workspace.workspaceSettings.studyPadCursors, [cursorLabelID: 5])
         XCTAssertEqual(workspace.workspaceSettings.hideCompareDocuments, ["ESV", "NET"])
         XCTAssertTrue(workspace.workspaceSettings.enableTiltToScroll)
@@ -309,6 +309,97 @@ final class WorkspaceSyncRestoreTests: XCTestCase {
                 anchorOrdinal: 101
             )
         ])
+    }
+
+    /**
+     Verifies restore clears an incoming auto-assign primary label when Android data has no auto-assigned labels.
+     */
+    func testRemoteSyncWorkspaceRestoreClearsAutoAssignPrimaryLabelWhenNoAutoAssignLabelsRemain() throws {
+        let service = RemoteSyncWorkspaceRestoreService()
+        let workspaceID = UUID(uuidString: "c2200000-0000-0000-0000-000000000001")!
+        let orphanPrimaryLabelID = UUID(uuidString: "c2200000-0000-0000-0000-000000000002")!
+        let databaseURL = try makeAndroidWorkspacesDatabase(
+            workspaces: [
+                .init(
+                    id: workspaceID,
+                    name: "No Auto Labels",
+                    orderNumber: 0,
+                    workspaceSettings: .init(autoAssignPrimaryLabelID: orphanPrimaryLabelID)
+                )
+            ],
+            windows: [],
+            pageManagers: [],
+            historyItems: []
+        )
+        defer { try? FileManager.default.removeItem(at: databaseURL) }
+
+        let snapshot = try service.readSnapshot(from: databaseURL)
+
+        let workspace = try XCTUnwrap(snapshot.workspaces.first)
+        XCTAssertTrue(workspace.workspaceSettings.autoAssignLabels.isEmpty)
+        XCTAssertNil(workspace.workspaceSettings.autoAssignPrimaryLabel)
+    }
+
+    /**
+     Verifies restore preserves an incoming auto-assign primary label when it is still auto-assigned.
+     */
+    func testRemoteSyncWorkspaceRestorePreservesAssignedAutoAssignPrimaryLabel() throws {
+        let service = RemoteSyncWorkspaceRestoreService()
+        let workspaceID = UUID(uuidString: "c2200000-0000-0000-0000-000000000003")!
+        let firstAssignedLabelID = UUID(uuidString: "c2200000-0000-0000-0000-000000000004")!
+        let primaryLabelID = UUID(uuidString: "c2200000-0000-0000-0000-000000000005")!
+        let databaseURL = try makeAndroidWorkspacesDatabase(
+            workspaces: [
+                .init(
+                    id: workspaceID,
+                    name: "Valid Auto Labels",
+                    orderNumber: 0,
+                    workspaceSettings: .init(
+                        autoAssignLabelsJSON: #"["\#(firstAssignedLabelID.uuidString)","\#(primaryLabelID.uuidString)"]"#,
+                        autoAssignPrimaryLabelID: primaryLabelID
+                    )
+                )
+            ],
+            windows: [],
+            pageManagers: [],
+            historyItems: []
+        )
+        defer { try? FileManager.default.removeItem(at: databaseURL) }
+
+        let snapshot = try service.readSnapshot(from: databaseURL)
+
+        let workspace = try XCTUnwrap(snapshot.workspaces.first)
+        XCTAssertEqual(workspace.workspaceSettings.autoAssignLabels, [firstAssignedLabelID, primaryLabelID])
+        XCTAssertEqual(workspace.workspaceSettings.autoAssignPrimaryLabel, primaryLabelID)
+    }
+
+    /**
+     Verifies outbound workspace snapshots repair stale local auto-assign primary-label state before fingerprinting.
+     */
+    func testRemoteSyncWorkspaceSnapshotNormalizesInvalidAutoAssignPrimaryLabelBeforeFingerprinting() throws {
+        let container = try makeWorkspaceRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        let settingsStore = SettingsStore(modelContext: modelContext)
+        let service = RemoteSyncWorkspaceSnapshotService()
+        let workspaceID = UUID(uuidString: "c2200000-0000-0000-0000-000000000006")!
+        let assignedLabelID = UUID(uuidString: "c2200000-0000-0000-0000-000000000007")!
+        let orphanPrimaryLabelID = UUID(uuidString: "c2200000-0000-0000-0000-000000000008")!
+        let workspace = Workspace(id: workspaceID, name: "Local Stale Settings", orderNumber: 0)
+        var workspaceSettings = WorkspaceSettings(autoAssignLabels: [assignedLabelID])
+        workspaceSettings.autoAssignPrimaryLabel = orphanPrimaryLabelID
+        workspace.workspaceSettings = workspaceSettings
+        modelContext.insert(workspace)
+        try modelContext.save()
+
+        let snapshot = service.snapshotCurrentState(modelContext: modelContext, settingsStore: settingsStore)
+
+        let workspaceRow = try XCTUnwrap(snapshot.workspaceRowsByKey.values.first)
+        XCTAssertEqual(workspaceRow.workspaceSettings.autoAssignLabels, [assignedLabelID])
+        XCTAssertEqual(workspaceRow.workspaceSettings.autoAssignPrimaryLabel, assignedLabelID)
+        let canonicalComponents = RemoteSyncWorkspaceSnapshotService.canonicalWorkspaceSettings(workspaceRow.workspaceSettings)
+            .split(separator: "^", omittingEmptySubsequences: false)
+        XCTAssertEqual(canonicalComponents[5], Substring(assignedLabelID.uuidString.lowercased()))
+        XCTAssertFalse(canonicalComponents.contains(Substring(orphanPrimaryLabelID.uuidString.lowercased())))
     }
 
     func testRemoteSyncWorkspaceRestoreReplacesLocalWorkspacesAndPreservesAndroidFidelity() throws {
@@ -498,7 +589,7 @@ final class WorkspaceSyncRestoreTests: XCTestCase {
             Date(timeIntervalSince1970: 1_735_689_600)
         )
         XCTAssertEqual(workspaces[0].workspaceSettings?.autoAssignLabels, [autoAssignLabelID])
-        XCTAssertEqual(workspaces[0].workspaceSettings?.autoAssignPrimaryLabel, primaryLabelID)
+        XCTAssertEqual(workspaces[0].workspaceSettings?.autoAssignPrimaryLabel, autoAssignLabelID)
         XCTAssertEqual(workspaces[0].workspaceSettings?.studyPadCursors, [cursorLabelID: 9])
         XCTAssertEqual(workspaces[0].workspaceSettings?.hideCompareDocuments, ["ESV"])
         XCTAssertEqual(workspaces[0].textDisplaySettings?.bookmarksHideLabels, [hiddenLabelID])

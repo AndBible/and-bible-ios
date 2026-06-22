@@ -347,6 +347,40 @@ public final class WindowManager {
         visibleWindows.filter { $0.syncGroup == window.syncGroup && $0.isSynchronized }
     }
 
+    /**
+     Returns synchronized peer windows that still need a visible-verse update from the source.
+
+     Android's `WindowSync` updates an inactive window's Bible key, then compares the old key before
+     posting a secondary scroll. This mirrors that contract at the persisted window-state level: a
+     target whose concrete Bible book/chapter/verse already equals the source is not asked to scroll
+     again, while incomplete state is treated as stale so the existing sync path can repair it.
+
+     - Parameter sourceWindow: Window that reported the latest visible verse.
+     - Returns: Visible synchronized peer windows in the same sync group that differ from the source
+       Bible position or lack a complete comparable position.
+     - Side Effects: None.
+     - Failure Modes: Returns an empty list when the source itself is not synchronized.
+     */
+    public func synchronizedVerseUpdateTargets(for sourceWindow: Window) -> [Window] {
+        guard sourceWindow.isSynchronized else { return [] }
+        return syncedWindows(for: sourceWindow).filter { target in
+            guard target.id != sourceWindow.id else { return false }
+            guard let sourcePM = sourceWindow.pageManager,
+                  let targetPM = target.pageManager,
+                  let sourceBook = sourcePM.bibleBibleBook,
+                  let sourceChapter = sourcePM.bibleChapterNo,
+                  let sourceVerse = sourcePM.bibleVerseNo,
+                  let targetBook = targetPM.bibleBibleBook,
+                  let targetChapter = targetPM.bibleChapterNo,
+                  let targetVerse = targetPM.bibleVerseNo else {
+                return true
+            }
+            return sourceBook != targetBook
+                || sourceChapter != targetChapter
+                || sourceVerse != targetVerse
+        }
+    }
+
     /// Notify that a verse changed in a window — triggers debounced sync to other windows.
     public func notifyVerseChanged(sourceWindow: Window, ordinal: Int, key: String) {
         guard sourceWindow.isSynchronized else { return }

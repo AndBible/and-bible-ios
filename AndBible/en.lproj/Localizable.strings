@@ -51,6 +51,7 @@
    Navigation / Bible Reader
    ======================================== */
 "bible" = "Bible";
+"deuterocanonical" = "Deuterocanonical";
 "bookmarks" = "Bookmarks";
 "reading_plans" = "Reading Plans";
 "downloads" = "Downloads";
@@ -190,6 +191,9 @@
 "refresh_catalog" = "Refresh Catalog";
 "repositories" = "Repositories";
 "all_languages_count %lld" = "All Languages (%lld)";
+"documents_count %lld" = "%lld documents";
+"download_errors" = "Download errors";
+"install_zip" = "Load Documents From Files";
 "refreshing_catalog" = "Refreshing catalog...";
 "no_modules_match_filters" = "No modules match your filters";
 "tap_refresh_to_load" = "Tap Refresh to load available modules";
@@ -316,6 +320,9 @@
    Repository Manager
    ======================================== */
 "no_sources_configured" = "No repository sources configured.";
+"module_unavailable_for_installation %@" = "%@ is not available for installation.";
+"module_source_not_found %@" = "Source not found for %@";
+"uninstall_failed %@" = "Uninstall failed: %@";
 "remote_sources" = "Remote Sources";
 "sources_count_%lld_%lld" = "%lld sources configured, %lld enabled";
 "reset_sources_title" = "Reset Sources?";
@@ -577,6 +584,7 @@
 /* iCloud Sync */
 "icloud_sync" = "iCloud Sync";
 "icloud_sync_enabled" = "Enable iCloud Sync";
+"icloud_startup_recovery_message" = "iCloud sync could not be started, so sync was turned off and AndBible opened your local data.";
 "icloud_sync_description" = "Sync bookmarks, labels, workspaces, reading plans, and notes across your devices via iCloud. Requires an iCloud account.";
 "sync_status" = "Status";
 "status" = "Status";

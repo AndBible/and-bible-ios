@@ -65,7 +65,7 @@ enum UITestSearchQuerySeed {
  */
 public struct SearchView: View {
     /// Callback invoked when the user selects a search hit and wants to navigate to it.
-    let onNavigate: ((String, Int) -> Void)?
+    let onNavigate: ((String, Int, Int) -> Void)?
 
     /// Primary Sword module whose search index and results drive the screen.
     var swordModule: SwordModule?
@@ -219,7 +219,7 @@ public struct SearchView: View {
         currentBook: String = "Genesis",
         currentOsisBookId: String = "Gen",
         initialQuery: String = "",
-        onNavigate: ((String, Int) -> Void)? = nil
+        onNavigate: ((String, Int, Int) -> Void)? = nil
     ) {
         self.swordModule = swordModule
         self.swordManager = swordManager
@@ -1007,13 +1007,13 @@ public struct SearchView: View {
     // MARK: - Navigation
 
     /**
-     Dismisses the search sheet and forwards the selected result to the caller.
+     Forwards the selected result to the caller and dismisses the search sheet.
 
      - Parameter hit: Selected search result.
      */
     private func navigateTo(_ hit: SearchHit) {
+        onNavigate?(hit.book, hit.chapter, hit.verse)
         dismiss()
-        onNavigate?(hit.book, hit.chapter)
     }
 
     // MARK: - Index Management

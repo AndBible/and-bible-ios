@@ -13,15 +13,6 @@ struct BibleReaderActiveSheetContent: View {
     let readingProgressInitialTab: ReadingProgressTab
     let chapterReadHistoryTarget: ChapterReadHistoryTarget?
 
-    /// Initial Downloads search text supplied by Android-compatible `download://` links.
-    let downloadsInitialSearchText: String
-
-    /// Startup/default-document mode supplied when the reader opens Downloads for Easy Start.
-    let downloadsDefaultDownloadMode: ModuleBrowserDefaultDownloadMode
-
-    /// Callback reporting startup default refresh/install activity from Downloads.
-    let onDefaultDownloadActivityChanged: (Bool) -> Void
-
     let onDismiss: () -> Void
 
     /**
@@ -32,10 +23,6 @@ struct BibleReaderActiveSheetContent: View {
        - controller: Focused reader controller backing sheet navigation actions.
        - readingProgressInitialTab: Initial reading-progress tab for progress routes.
        - chapterReadHistoryTarget: Optional chapter read-history target.
-       - downloadsInitialSearchText: Initial Downloads filter from Android-compatible links.
-       - downloadsDefaultDownloadMode: Optional startup/default-document mode for Easy Start.
-       - onDefaultDownloadActivityChanged: Callback invoked when Easy Start Downloads starts or
-         finishes refresh/install activity.
        - onDismiss: Callback used to close the active sheet.
 
      Side effects:
@@ -49,18 +36,12 @@ struct BibleReaderActiveSheetContent: View {
         controller: BibleReaderController?,
         readingProgressInitialTab: ReadingProgressTab,
         chapterReadHistoryTarget: ChapterReadHistoryTarget?,
-        downloadsInitialSearchText: String,
-        downloadsDefaultDownloadMode: ModuleBrowserDefaultDownloadMode = .disabled,
-        onDefaultDownloadActivityChanged: @escaping (Bool) -> Void = { _ in },
         onDismiss: @escaping () -> Void
     ) {
         self.sheet = sheet
         self.controller = controller
         self.readingProgressInitialTab = readingProgressInitialTab
         self.chapterReadHistoryTarget = chapterReadHistoryTarget
-        self.downloadsInitialSearchText = downloadsInitialSearchText
-        self.downloadsDefaultDownloadMode = downloadsDefaultDownloadMode
-        self.onDefaultDownloadActivityChanged = onDefaultDownloadActivityChanged
         self.onDismiss = onDismiss
     }
 
@@ -80,19 +61,6 @@ struct BibleReaderActiveSheetContent: View {
                         controller?.bookmarkListVerseReference(book: book, ordinal: ordinal)
                     }
                 )
-            }
-        case .downloads:
-            NavigationStack {
-                ModuleBrowserView(
-                    initialSearchText: downloadsInitialSearchText,
-                    defaultDownloadMode: downloadsDefaultDownloadMode,
-                    onDefaultDownloadActivityChanged: onDefaultDownloadActivityChanged
-                )
-                    .toolbar {
-                        ToolbarItem(placement: .cancellationAction) {
-                            Button(String(localized: "done"), action: onDismiss)
-                        }
-                    }
             }
         case .history:
             NavigationStack {

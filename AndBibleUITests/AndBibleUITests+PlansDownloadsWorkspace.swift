@@ -92,7 +92,7 @@ extension AndBibleUITests {
      *
      * - Side effects:
      *   - launches directly into Downloads
-     *   - opens the repository manager from the real downloads toolbar button
+     *   - opens the repository manager from Android's Downloads overflow menu
      *   - opens the add-source sheet and cancels it
      * - Failure modes:
      *   - fails if the downloads browser or repository manager never appears
@@ -104,6 +104,10 @@ extension AndBibleUITests {
         app.launch()
 
         XCTAssertTrue(openDownloads(in: app).exists)
+        tapElementReliably(
+            requireElement("moduleBrowserOverflowButton", in: app, timeout: 10),
+            timeout: 15
+        )
         tapElementReliably(
             requireElement("moduleBrowserRepositoriesButton", in: app, timeout: 10),
             timeout: 15

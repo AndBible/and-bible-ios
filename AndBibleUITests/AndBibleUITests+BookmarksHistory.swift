@@ -107,7 +107,8 @@ extension AndBibleUITests {
      *   - launches the baseline reader shell, creates two additional windows, and activates the
      *     third one
      *   - switches that third pane into commentary and then back into Bible using the real toolbar
-     *     document controls and, when needed, the real module picker
+     *     document controls and, when needed, the Android-parity quick selector or full module
+     *     picker
      *   - switches back to the first tab to confirm its rendered content never left `Genesis 1`
      * - Failure modes:
      *   - fails if the third window cannot be activated
@@ -135,7 +136,24 @@ extension AndBibleUITests {
         )
 
         tapElementReliably(requireElement("readerCommentaryToolbarButton", in: app, timeout: 10), timeout: 10)
-        if waitForAnyElement(["modulePickerScreen"], in: app, timeout: 3) != nil {
+        if waitForAnyElement(["readerCommentaryQuickSelector"], in: app, timeout: 3) != nil {
+            let quickSelector = requireElement("readerCommentaryQuickSelector", in: app, timeout: 10)
+            let commentaryQuickRow = requireElement("readerCommentaryQuickSelectorRow_UITestComm", in: app, timeout: 10)
+            XCTAssertEqual(
+                commentaryQuickRow.value as? String,
+                "available",
+                "UITestComm quick-selector row must be selectable when switching from Bible."
+            )
+            for _ in 0..<8 where !isElementVisible(commentaryQuickRow, within: quickSelector) {
+                quickSelector.swipeUp()
+                RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+            }
+            XCTAssertTrue(
+                isElementVisible(commentaryQuickRow, within: quickSelector),
+                "Expected quick selector to scroll until UITestComm is visible."
+            )
+            tapElementReliably(commentaryQuickRow, timeout: 10)
+        } else if waitForAnyElement(["modulePickerScreen"], in: app, timeout: 3) != nil {
             tapFirstModulePickerRow(in: app, timeout: 10)
         }
         waitForReaderRenderedContentState(
@@ -145,7 +163,24 @@ extension AndBibleUITests {
         )
 
         tapElementReliably(requireElement("readerBibleToolbarButton", in: app, timeout: 10), timeout: 10)
-        if waitForAnyElement(["modulePickerScreen"], in: app, timeout: 3) != nil {
+        if waitForAnyElement(["readerBibleQuickSelector"], in: app, timeout: 3) != nil {
+            let quickSelector = requireElement("readerBibleQuickSelector", in: app, timeout: 10)
+            let kjvQuickRow = requireElement("readerBibleQuickSelectorRow_KJV", in: app, timeout: 10)
+            XCTAssertEqual(
+                kjvQuickRow.value as? String,
+                "available",
+                "KJV quick-selector row must remain selectable when returning from commentary."
+            )
+            for _ in 0..<8 where !isElementVisible(kjvQuickRow, within: quickSelector) {
+                quickSelector.swipeUp()
+                RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+            }
+            XCTAssertTrue(
+                isElementVisible(kjvQuickRow, within: quickSelector),
+                "Expected quick selector to scroll until KJV is visible."
+            )
+            tapElementReliably(kjvQuickRow, timeout: 10)
+        } else if waitForAnyElement(["modulePickerScreen"], in: app, timeout: 3) != nil {
             if let kjvRow = resolvedElement("modulePickerRow::KJV", in: app) {
                 tapElementReliably(kjvRow, timeout: 10)
             } else {

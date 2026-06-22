@@ -25,25 +25,25 @@ public enum MyDocumentContentType: String, Codable, Sendable {
 @Model
 public final class MyDocument {
     /// Stable primary key used by SwiftData and future sync mapping.
-    @Attribute(.unique) public var id: UUID
+    public var id: UUID = UUID()
 
     /// User-visible document name.
-    public var name: String
+    public var name: String = ""
 
     /// Optional document description.
     public var documentDescription: String?
 
     /// Stable Android-style document initials used by bridge lookups.
-    @Attribute(.unique) public var initials: String
+    public var initials: String = ""
 
     /// Zero-based display order.
-    public var orderNumber: Int
+    public var orderNumber: Int = 0
 
     /// Creation timestamp.
-    public var createdAt: Date
+    public var createdAt: Date = Date()
 
     /// Last metadata/content update timestamp.
-    public var updatedAt: Date
+    public var updatedAt: Date = Date()
 
     /// Prompt identifier when this document was created from AI output.
     public var sourcePromptId: UUID?
@@ -83,28 +83,28 @@ public final class MyDocument {
 @Model
 public final class MyDocumentPage {
     /// Stable primary key for the page.
-    @Attribute(.unique) public var id: UUID
+    public var id: UUID = UUID()
 
     /// Parent document.
     public var document: MyDocument?
 
     /// User-visible page title.
-    public var title: String
+    public var title: String = ""
 
     /// Stable key scoped to the parent document and used by bridge calls.
-    public var pageKey: String
+    public var pageKey: String = ""
 
     /// Persisted raw content type value.
-    public var contentTypeRawValue: String
+    public var contentTypeRawValue: String = MyDocumentContentType.markdown.rawValue
 
     /// Zero-based display order within the document.
-    public var orderNumber: Int
+    public var orderNumber: Int = 0
 
     /// Creation timestamp.
-    public var createdAt: Date
+    public var createdAt: Date = Date()
 
     /// Last metadata/content update timestamp.
-    public var updatedAt: Date
+    public var updatedAt: Date = Date()
 
     /// Prompt identifier when this page was generated from AI output.
     public var sourcePromptId: UUID?
@@ -154,13 +154,13 @@ public final class MyDocumentPage {
 @Model
 public final class MyDocumentPageContent {
     /// Mirrors the owning page identifier for 1:1 lookup and future sync mapping.
-    @Attribute(.unique) public var pageId: UUID
+    public var pageId: UUID = UUID()
 
     /// Back-reference to the owning page.
     public var page: MyDocumentPage?
 
     /// Stored raw page content.
-    public var content: String
+    public var content: String = ""
 
     public init(pageId: UUID, content: String = "") {
         self.pageId = pageId
@@ -174,16 +174,16 @@ public final class MyDocumentPageContent {
 @Model
 public final class AiPageCacheEntry {
     /// Stable primary key for the cache row.
-    @Attribute(.unique) public var id: UUID
+    public var id: UUID = UUID()
 
     /// Owning page identifier.
-    public var pageId: UUID
+    public var pageId: UUID = UUID()
 
     /// Back-reference to the owning page.
     public var page: MyDocumentPage?
 
     /// Prompt that generated or updated the page.
-    public var sourcePromptId: UUID
+    public var sourcePromptId: UUID = UUID()
 
     /// Optional serialized source context.
     public var sourceContext: String?
@@ -198,7 +198,7 @@ public final class AiPageCacheEntry {
     public var contextHash: String?
 
     /// Whether the AI write tools were used for this cache entry.
-    public var usedWriteTools: Bool
+    public var usedWriteTools: Bool = false
 
     /// Optional AI model name.
     public var sourceModelName: String?

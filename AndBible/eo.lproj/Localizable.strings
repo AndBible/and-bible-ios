@@ -34,6 +34,7 @@
 "no_results" = "No Results";
 "searching" = "Searching...";
 "bible" = "Biblio";
+"deuterocanonical" = "Dua-kanonaj libroj";
 "bookmarks" = "Legosignoj";
 "reading_plans" = "Reading Plans";
 "downloads" = "Downloads";
@@ -190,6 +191,9 @@
 "installed_font_%@" = "Installed font: %@";
 "install_do_you_want" = "Do you want to install %@?";
 "no_sources_configured" = "No repository sources configured.";
+"module_unavailable_for_installation %@" = "%@ is not available for installation.";
+"module_source_not_found %@" = "Source not found for %@";
+"uninstall_failed %@" = "Uninstall failed: %@";
 "remote_sources" = "Remote Sources";
 "sources_count_%lld_%lld" = "%lld sources configured, %lld enabled";
 "reset_sources_title" = "Reset Sources?";
@@ -410,6 +414,9 @@
 /* Phase H: Module Browser */
 "category_books" = "Books";
 "all_languages_count %lld" = "All Languages (%lld)";
+"documents_count %lld" = "%lld documents";
+"download_errors" = "Eraroj dum elŝuti";
+"install_zip" = "Enlegi dokumentojn el dosieroj";
 "refreshing_catalog" = "Refreshing catalog...";
 "no_modules_match_filters" = "No modules match your filters";
 "tap_refresh_to_load" = "Tap Refresh to load available modules";

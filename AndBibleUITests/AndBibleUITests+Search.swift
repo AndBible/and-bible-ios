@@ -504,7 +504,7 @@ extension AndBibleUITests {
      *   - fails if Search cannot be opened from the reader toolbar
      *   - fails if the Search field cannot receive and submit the deterministic query
      *   - fails if bundled search results do not produce at least one tappable result row
-     *   - fails if selecting the result does not move the reader away from `Genesis 1`
+     *   - fails if selecting the result does not move the reader to the selected verse
      */
     func testSearchResultSelectionNavigatesReaderToBundledReference() {
         let app = makeApp()
@@ -532,6 +532,10 @@ extension AndBibleUITests {
             updatedReference,
             initialReference,
             "Expected selecting a Search result to move the reader away from '\(initialReference)'."
+        )
+        XCTAssertTrue(
+            updatedReference.localizedCaseInsensitiveContains("Genesis 6:8"),
+            "Expected selecting the Search result to navigate to Genesis 6:8, but saw '\(updatedReference)'."
         )
     }
 

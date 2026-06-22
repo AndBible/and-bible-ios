@@ -148,13 +148,14 @@ extension AndBibleUITests {
             return true
         }
 
-        let visibleFrame = container.frame.insetBy(dx: 0, dy: 16)
+        let minimumVisibleHeight = min(max(24, element.frame.height * 0.5), element.frame.height)
+        let minimumVisibleWidth = min(max(40, element.frame.width * 0.3), element.frame.width)
+        let verticalInset = min(16, max(0, (container.frame.height - minimumVisibleHeight) / 2))
+        let visibleFrame = container.frame.insetBy(dx: 0, dy: verticalInset)
         let intersection = visibleFrame.intersection(element.frame)
         guard !intersection.isNull else {
             return false
         }
-        let minimumVisibleHeight = min(max(24, element.frame.height * 0.5), element.frame.height)
-        let minimumVisibleWidth = min(max(40, element.frame.width * 0.3), element.frame.width)
         return intersection.height >= minimumVisibleHeight &&
             intersection.width >= minimumVisibleWidth
     }
@@ -896,7 +897,7 @@ extension AndBibleUITests {
         waitForResolvedSemanticState(
             named: "readerRenderedContentState",
             timeout: timeout,
-            valueProvider: { readerRenderedContentStateValue(in: app) },
+            valueProvider: { self.readerRenderedContentStateValue(in: app) },
             success: { $0.contains(token) },
             failureDescription: { finalValue in
                 "Expected My Notes state to contain '\(token)' within \(timeout) seconds. Final value: '\(finalValue)'."
@@ -919,7 +920,7 @@ extension AndBibleUITests {
         waitForResolvedSemanticState(
             named: "readerRenderedContentState",
             timeout: timeout,
-            valueProvider: { readerRenderedContentStateValue(in: app) },
+            valueProvider: { self.readerRenderedContentStateValue(in: app) },
             success: { $0.contains("myNotesVisible=true") && $0.contains(token) },
             failureDescription: { finalValue in
                 "Expected visible My Notes state to contain '\(token)' within \(timeout) seconds. Final value: '\(finalValue)'."
@@ -942,7 +943,7 @@ extension AndBibleUITests {
         waitForResolvedSemanticState(
             named: "readerRenderedContentState",
             timeout: timeout,
-            valueProvider: { readerRenderedContentStateValue(in: app) },
+            valueProvider: { self.readerRenderedContentStateValue(in: app) },
             success: { state in
                 state.contains("myNotesVisible=true")
                     && (state.contains("myNotesEditing=true") || state.contains(marker))
@@ -1058,7 +1059,7 @@ extension AndBibleUITests {
         waitForResolvedSemanticState(
             named: "readerRenderedContentState",
             timeout: timeout,
-            valueProvider: { readerRenderedContentStateValue(in: app) },
+            valueProvider: { self.readerRenderedContentStateValue(in: app) },
             success: { !$0.contains(token) },
             failureDescription: { finalValue in
                 "Expected My Notes state to stop containing '\(token)' within \(timeout) seconds. Final value: '\(finalValue)'."
@@ -1081,7 +1082,7 @@ extension AndBibleUITests {
         waitForResolvedSemanticState(
             named: "readerRenderedContentState",
             timeout: timeout,
-            valueProvider: { readerRenderedContentStateValue(in: app) },
+            valueProvider: { self.readerRenderedContentStateValue(in: app) },
             success: { $0.contains("myNotesVisible=true") && !$0.contains(token) },
             failureDescription: { finalValue in
                 "Expected visible My Notes state to stop containing '\(token)' within \(timeout) seconds. Final value: '\(finalValue)'."
@@ -1257,7 +1258,7 @@ extension AndBibleUITests {
         waitForResolvedSemanticState(
             named: "readerRenderedContentState",
             timeout: timeout,
-            valueProvider: { readerRenderedContentStateValue(in: app) },
+            valueProvider: { self.readerRenderedContentStateValue(in: app) },
             success: { $0.contains("studyPadVisible=true") && $0.contains(token) },
             failureDescription: { finalValue in
                 "Expected visible StudyPad state to contain '\(token)' within \(timeout) seconds. Final value: '\(finalValue)'."
