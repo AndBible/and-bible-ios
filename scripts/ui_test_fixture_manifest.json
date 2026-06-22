@@ -52,9 +52,9 @@
   "AndBibleUITests/AndBibleUITests/testSyncSettingsCategoryDisablePersistsAcrossDirectReopen": "sync-nextcloud-bookmarks-enabled",
   "AndBibleUITests/AndBibleUITests/testSyncSettingsCategoryToggleMutatesExportedState": "sync-nextcloud-bookmarks-enabled",
   "AndBibleUITests/AndBibleUITests/testSyncSettingsNextCloudInvalidURLShowsValidationStatus": "sync-nextcloud",
-  "AndBibleUITests/AndBibleUITests/testThirdWindowBookmarkNavigationUpdatesOnlyTargetPaneContent": "bookmark-navigation",
-  "AndBibleUITests/AndBibleUITests/testThirdWindowDocumentSwitchUpdatesOnlyTargetPaneContent": "commentary-module",
-  "AndBibleUITests/AndBibleUITests/testThirdWindowStrongsToggleAffectsOnlyActiveWindow": "baseline",
+  "AndBibleUITests/AndBibleUITests/testThirdWindowBookmarkNavigationUpdatesOnlyTargetPaneContent": "bookmark-navigation-three-windows",
+  "AndBibleUITests/AndBibleUITests/testThirdWindowDocumentSwitchUpdatesOnlyTargetPaneContent": "commentary-module-three-windows",
+  "AndBibleUITests/AndBibleUITests/testThirdWindowStrongsToggleAffectsOnlyActiveWindow": "baseline-three-windows",
   "AndBibleUITests/AndBibleUITests/testTextDisplayFontFamilyButtonPresentsFontPicker": "baseline",
   "AndBibleUITests/AndBibleUITests/testTextDisplayJustifyToggleMutatesControlState": "baseline",
   "AndBibleUITests/AndBibleUITests/testWorkspaceSelectorCreateAndSwitchFlow": "baseline"

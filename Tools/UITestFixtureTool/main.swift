@@ -35,10 +35,13 @@ private enum ToolCommand: String {
 /// Deterministic fixture scenarios used by the UI automation suite.
 private enum FixtureScenario: String, CaseIterable {
     case baseline = "baseline"
+    case baselineThreeWindows = "baseline-three-windows"
     case commentaryModule = "commentary-module"
+    case commentaryModuleThreeWindows = "commentary-module-three-windows"
     case searchIndexed = "search-indexed"
     case searchMultiTranslation = "search-multi-translation"
     case bookmarkNavigation = "bookmark-navigation"
+    case bookmarkNavigationThreeWindows = "bookmark-navigation-three-windows"
     case bookmarkMultiRow = "bookmark-multirow"
     case bookmarkFilter = "bookmark-filter"
     case bookmarkRowLabel = "bookmark-row-label"
@@ -285,8 +288,10 @@ private struct FixtureTool {
         let swordURL = paths.documentsURL.appendingPathComponent("sword", isDirectory: true)
         let candidates = [
             swordURL.appendingPathComponent("mods.d/modules-conf.cache", isDirectory: false),
+            swordURL.appendingPathComponent("mods.d/000uitestcomm.conf", isDirectory: false),
             swordURL.appendingPathComponent("mods.d/uitestcomm.conf", isDirectory: false),
             swordURL.appendingPathComponent("mods.d/uitestweb.conf", isDirectory: false),
+            swordURL.appendingPathComponent("modules/comments/rawcom/000uitestcomm", isDirectory: true),
             swordURL.appendingPathComponent("modules/comments/rawcom/uitestcomm", isDirectory: true),
             swordURL.appendingPathComponent("modules/texts/rawtext/uitestweb", isDirectory: true),
             swordURL.appendingPathComponent("modules/texts/ztext/uitestweb", isDirectory: true),
@@ -395,7 +400,12 @@ private final class FixtureContext {
         switch scenario {
         case .baseline:
             break
+        case .baselineThreeWindows:
+            try ensureVisibleBibleWindowCount(3, baseline: baseline)
         case .commentaryModule:
+            try seedUITestCommentaryModule()
+        case .commentaryModuleThreeWindows:
+            try ensureVisibleBibleWindowCount(3, baseline: baseline)
             try seedUITestCommentaryModule()
         case .searchIndexed:
             try seedBundledSearchIndex()
@@ -403,6 +413,9 @@ private final class FixtureContext {
             try seedUITestBibleModule()
             try seedMultiTranslationSearchIndex()
         case .bookmarkNavigation:
+            try seedBookmarkNavigation()
+        case .bookmarkNavigationThreeWindows:
+            try ensureVisibleBibleWindowCount(3, baseline: baseline)
             try seedBookmarkNavigation()
         case .bookmarkMultiRow:
             try seedBookmarkMultiRow()
@@ -848,7 +861,7 @@ private final class FixtureContext {
         let swordURL = paths.documentsURL.appendingPathComponent("sword", isDirectory: true)
         let modsDURL = swordURL.appendingPathComponent("mods.d", isDirectory: true)
         let dataURL = swordURL.appendingPathComponent(
-            "modules/comments/rawcom/uitestcomm",
+            "modules/comments/rawcom/000uitestcomm",
             isDirectory: true
         )
         try fileManager.createDirectory(at: modsDURL, withIntermediateDirectories: true)
@@ -856,9 +869,9 @@ private final class FixtureContext {
         try removeCachedSwordModuleConfig(in: modsDURL)
 
         let conf = """
-        [UITestComm]
+        [000UITestComm]
         Description=UI Test Commentary
-        DataPath=./modules/comments/rawcom/uitestcomm/
+        DataPath=./modules/comments/rawcom/000uitestcomm/
         ModDrv=RawCom
         SourceType=OSIS
         Encoding=UTF-8
@@ -867,7 +880,7 @@ private final class FixtureContext {
         About=Deterministic empty commentary module for iOS UI automation.
         """
         try conf.write(
-            to: modsDURL.appendingPathComponent("uitestcomm.conf", isDirectory: false),
+            to: modsDURL.appendingPathComponent("000uitestcomm.conf", isDirectory: false),
             atomically: true,
             encoding: .utf8
         )
@@ -1036,6 +1049,61 @@ private final class FixtureContext {
         try modelContext.save()
 
         return BaselineState(workspace: workspace, window: window, pageManager: pageManager)
+    }
+
+    /**
+     Ensures a fixture workspace starts with the requested number of visible Bible panes.
+
+     Third-pane UI tests validate pane-local behavior after the app has already entered
+     multi-window mode. Android no longer exposes the add-window footer button in that mode, so
+     those tests seed the workspace shape directly instead of requiring an iOS-only repeated add
+     affordance.
+
+     - Parameters:
+       - count: Number of visible Bible windows the fixture should expose.
+       - baseline: Baseline workspace graph returned by `ensureBaseline()`.
+     - Side effects: Inserts missing windows, normalizes their page-manager Bible location to KJV
+       Genesis 1, clears minimized/links state, and saves the SwiftData context.
+     - Failure modes: Rethrows SwiftData save failures.
+     */
+    private func ensureVisibleBibleWindowCount(_ count: Int, baseline: BaselineState) throws {
+        guard count > 0 else { return }
+
+        var windows = workspaceStore.windows(workspaceId: baseline.workspace.id)
+        while windows.count < count {
+            let window = workspaceStore.addWindow(
+                to: baseline.workspace,
+                document: baseline.pageManager.bibleDocument ?? "KJV",
+                category: "bible"
+            )
+            windows.append(window)
+        }
+
+        for (order, window) in windows.prefix(count).enumerated() {
+            window.orderNumber = order
+            window.layoutState = "split"
+            window.isLinksWindow = false
+            window.layoutWeight = 1.0
+
+            let pageManager: PageManager
+            if let existingPageManager = window.pageManager {
+                pageManager = existingPageManager
+            } else {
+                let createdPageManager = PageManager(id: window.id, currentCategoryName: "bible")
+                createdPageManager.window = window
+                modelContext.insert(createdPageManager)
+                pageManager = createdPageManager
+            }
+
+            pageManager.currentCategoryName = "bible"
+            pageManager.bibleDocument = pageManager.bibleDocument ?? baseline.pageManager.bibleDocument ?? "KJV"
+            pageManager.bibleVersification = pageManager.bibleVersification ?? "KJVA"
+            pageManager.bibleBibleBook = 0
+            pageManager.bibleChapterNo = 1
+            pageManager.bibleVerseNo = 1
+        }
+
+        try modelContext.save()
     }
 
     /**

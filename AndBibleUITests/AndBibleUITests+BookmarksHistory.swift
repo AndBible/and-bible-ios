@@ -55,12 +55,12 @@ extension AndBibleUITests {
      Verifies that bookmark navigation from a third window updates only that pane's rendered content.
      *
      * - Side effects:
-     *   - launches the seeded bookmark-navigation fixture on the reader shell
-     *   - creates two additional windows, activates the third one, opens the bookmark list from
-     *     that pane, and selects the seeded `Exodus 2:1` row
+     *   - launches the seeded bookmark-navigation fixture with three visible reader windows
+     *   - activates the third window, opens the bookmark list from that pane, and selects the
+     *     seeded `Exodus 2:1` row
      *   - switches back to the first window to confirm its rendered content stayed on `Genesis 1`
      * - Failure modes:
-     *   - fails if the extra windows cannot be created or activated
+     *   - fails if the seeded third window cannot be activated
      *   - fails if the third window does not render `Exodus 2`
      *   - fails if the first window's rendered content also changes away from `Genesis 1`
      */
@@ -74,9 +74,7 @@ extension AndBibleUITests {
             timeout: 20
         )
 
-        addWindowTab(expectingOrder: 1, in: app, timeout: 15)
-        addWindowTab(expectingOrder: 2, in: app, timeout: 15)
-
+        tapWindowTab(2, in: app, timeout: 10)
         waitForReaderRenderedContentState(
             containing: "windowOrder=2;category=bible;module=KJV;book=Genesis;chapter=1",
             in: app,
@@ -104,8 +102,8 @@ extension AndBibleUITests {
      mutating tab chrome.
      *
      * - Side effects:
-     *   - launches the baseline reader shell, creates two additional windows, and activates the
-     *     third one
+     *   - launches the commentary-module fixture with three visible reader windows and activates
+     *     the third one
      *   - switches that third pane into commentary and then back into Bible using the real toolbar
      *     document controls and, when needed, the Android-parity quick selector or full module
      *     picker
@@ -125,9 +123,6 @@ extension AndBibleUITests {
             timeout: 20
         )
 
-        addWindowTab(expectingOrder: 1, in: app, timeout: 15)
-        addWindowTab(expectingOrder: 2, in: app, timeout: 15)
-
         tapWindowTab(2, in: app, timeout: 10)
         waitForReaderRenderedContentState(
             containing: "windowOrder=2;category=bible",
@@ -138,19 +133,16 @@ extension AndBibleUITests {
         tapElementReliably(requireElement("readerCommentaryToolbarButton", in: app, timeout: 10), timeout: 10)
         if waitForAnyElement(["readerCommentaryQuickSelector"], in: app, timeout: 3) != nil {
             let quickSelector = requireElement("readerCommentaryQuickSelector", in: app, timeout: 10)
-            let commentaryQuickRow = requireElement("readerCommentaryQuickSelectorRow_UITestComm", in: app, timeout: 10)
+            let commentaryQuickRow = requireQuickSelectorRow(
+                "readerCommentaryQuickSelectorRow_000UITestComm",
+                in: quickSelector,
+                app: app,
+                timeout: 10
+            )
             XCTAssertEqual(
                 commentaryQuickRow.value as? String,
                 "available",
-                "UITestComm quick-selector row must be selectable when switching from Bible."
-            )
-            for _ in 0..<8 where !isElementVisible(commentaryQuickRow, within: quickSelector) {
-                quickSelector.swipeUp()
-                RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-            }
-            XCTAssertTrue(
-                isElementVisible(commentaryQuickRow, within: quickSelector),
-                "Expected quick selector to scroll until UITestComm is visible."
+                "000UITestComm quick-selector row must be selectable when switching from Bible."
             )
             tapElementReliably(commentaryQuickRow, timeout: 10)
         } else if waitForAnyElement(["modulePickerScreen"], in: app, timeout: 3) != nil {
@@ -165,19 +157,16 @@ extension AndBibleUITests {
         tapElementReliably(requireElement("readerBibleToolbarButton", in: app, timeout: 10), timeout: 10)
         if waitForAnyElement(["readerBibleQuickSelector"], in: app, timeout: 3) != nil {
             let quickSelector = requireElement("readerBibleQuickSelector", in: app, timeout: 10)
-            let kjvQuickRow = requireElement("readerBibleQuickSelectorRow_KJV", in: app, timeout: 10)
+            let kjvQuickRow = requireQuickSelectorRow(
+                "readerBibleQuickSelectorRow_KJV",
+                in: quickSelector,
+                app: app,
+                timeout: 10
+            )
             XCTAssertEqual(
                 kjvQuickRow.value as? String,
                 "available",
                 "KJV quick-selector row must remain selectable when returning from commentary."
-            )
-            for _ in 0..<8 where !isElementVisible(kjvQuickRow, within: quickSelector) {
-                quickSelector.swipeUp()
-                RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-            }
-            XCTAssertTrue(
-                isElementVisible(kjvQuickRow, within: quickSelector),
-                "Expected quick selector to scroll until KJV is visible."
             )
             tapElementReliably(kjvQuickRow, timeout: 10)
         } else if waitForAnyElement(["modulePickerScreen"], in: app, timeout: 3) != nil {
@@ -205,8 +194,8 @@ extension AndBibleUITests {
      Verifies that the reader Strong's quick toggle is scoped to the active window only.
      *
      * - Side effects:
-     *   - launches the baseline reader shell, creates two additional windows, and activates the
-     *     third one
+     *   - launches the baseline fixture with three visible reader windows and activates the third
+     *     one
      *   - toggles Strong's on in the third window, confirms the first window stays off, then
      *     toggles Strong's on in the first window and confirms the third window preserves its own
      *     state
@@ -226,9 +215,6 @@ extension AndBibleUITests {
             timeout: 20
         )
         waitForReaderRenderedContentState(containing: "strongsMode=0", in: app, timeout: 20)
-
-        addWindowTab(expectingOrder: 1, in: app, timeout: 15)
-        addWindowTab(expectingOrder: 2, in: app, timeout: 15)
 
         tapWindowTab(2, in: app, timeout: 10)
         waitForReaderRenderedContentState(containing: "windowOrder=2", in: app, timeout: 20)
@@ -745,4 +731,66 @@ extension AndBibleUITests {
      *   - fails if the about action is missing from the reader menu
      *   - fails if the about screen does not render after navigation completes
      */
+
+    /**
+     Finds a row in the Android-style quick selector, scrolling until SwiftUI materializes it.
+
+     The quick selector intentionally uses a bounded `ScrollView` with a lazy row stack so local
+     simulators with many installed modules do not grow the popup offscreen. XCTest cannot resolve
+     lazy rows before they enter that viewport, so callers must search by scrolling instead of
+     requiring the row before it exists.
+
+     - Parameters:
+       - identifier: Accessibility identifier for the desired quick-selector row.
+       - quickSelector: Scroll view that owns the quick-selector rows.
+       - app: Application under test, used to resolve row candidates after each scroll.
+       - timeout: Maximum search time before failing the test.
+       - file: Source file used for XCTest failure attribution.
+       - line: Source line used for XCTest failure attribution.
+     - Returns: Visible quick-selector row element.
+     - Side effects: Scrolls the quick selector downward while searching.
+     - Failure modes: Fails the XCTest when the row never appears or remains outside the visible
+       quick-selector viewport.
+     */
+    func requireQuickSelectorRow(
+        _ identifier: String,
+        in quickSelector: XCUIElement,
+        app: XCUIApplication,
+        timeout: TimeInterval,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) -> XCUIElement {
+        let deadline = Date().addingTimeInterval(timeout)
+        var lastCandidate: XCUIElement?
+
+        repeat {
+            if let candidate = heuristicElementCandidates(for: identifier, in: app)
+                .first(where: { $0.exists }) {
+                lastCandidate = candidate
+                if isElementVisible(candidate, within: quickSelector) {
+                    return candidate
+                }
+            }
+
+            quickSelector.swipeUp()
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        } while Date() < deadline
+
+        if let lastCandidate {
+            XCTAssertTrue(
+                isElementVisible(lastCandidate, within: quickSelector),
+                "Expected quick selector to scroll until '\(identifier)' is visible.",
+                file: file,
+                line: line
+            )
+            return lastCandidate
+        }
+
+        XCTFail(
+            "Expected quick selector row '\(identifier)' to exist within \(timeout) seconds.",
+            file: file,
+            line: line
+        )
+        return app.buttons[identifier].firstMatch
+    }
 }
