@@ -1,21 +1,29 @@
 // WindowTabBar.swift -- Bottom tab bar showing open document windows
 
 import SwiftUI
+import SwiftData
 import BibleCore
 
 /**
  Shows all workspace windows in Android-style compact buttons below the reader.
 
  Android renders the footer from `window_button.xml`: each window is a fixed 40dp button with
- overlaid document/link/sync/pin indicators and tiny title/document labels. This view mirrors that
- structure instead of using variable-width iOS text chips, so opening several reader windows keeps
- the full tab set visible on phone-width screens.
+ overlaid document/link/sync/pin indicators and tiny title/document labels. Multi-window mode
+ prefixes those buttons with the persisted restore-strip hide/show arrow, while true single-window
+ mode shows the add-window affordance instead. This view mirrors that structure instead of using
+ variable-width iOS text chips.
 
- It also hosts typed-reference navigation and the add-window affordance.
+ It also hosts typed-reference navigation for represented windows.
  */
 struct WindowTabBar: View {
     /// Shared workspace/window coordinator used to read and mutate tab state.
     @Environment(WindowManager.self) private var windowManager
+
+    /// SwiftData context used to persist workspace restore-strip visibility.
+    @Environment(\.modelContext) private var modelContext
+
+    /// Current layout direction, used to mirror Android's restore-strip arrow in RTL locales.
+    @Environment(\.layoutDirection) private var layoutDirection
 
     /// Reader-surface colors shared with the active WebView display settings.
     var surfacePalette: ReaderThemeSurfacePalette = .standard
@@ -47,44 +55,22 @@ struct WindowTabBar: View {
 
     var body: some View {
         let tabPalette = AndroidWindowTabPalette.resolved(for: surfacePalette)
+        let restoreButtonsVisible = windowManager.activeWorkspace?.workspaceSettings?.restoreButtonsVisible ?? true
 
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: WindowTabBarLayout.spacing) {
-                ForEach(windowManager.allWindows, id: \.id) { window in
-                    windowTab(for: window, tabPalette: tabPalette)
-                }
-
-                Button {
-                    guard !isAddWindowDisabled else { return }
-                    windowManager.addWindow(from: windowManager.activeWindow)
-                } label: {
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 6)
-                            .fill(tabPalette.addButtonBackgroundColor)
-
-                        if isAddWindowDisabled {
-                            ProgressView()
-                                .controlSize(.small)
-                                .tint(tabPalette.windowButtonTextColor)
-                        } else {
-                            ToolbarAssetIcon(name: "ToolbarWindowAdd", size: 24)
-                                .foregroundStyle(tabPalette.windowButtonTextColor)
+                if windowManager.isMaximized {
+                    unmaximizeButton(tabPalette: tabPalette)
+                } else if isSingleWindowFooterMode {
+                    addWindowButton(tabPalette: tabPalette)
+                } else {
+                    restoreButtonsToggle(isExpanded: restoreButtonsVisible, tabPalette: tabPalette)
+                    if restoreButtonsVisible {
+                        ForEach(windowManager.allWindows, id: \.id) { window in
+                            windowTab(for: window, tabPalette: tabPalette)
                         }
                     }
-                    .frame(width: WindowTabBarLayout.fixedButtonSize, height: WindowTabBarLayout.fixedButtonSize)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 6)
-                            .strokeBorder(tabPalette.strokeColor, lineWidth: 1)
-                    )
                 }
-                .buttonStyle(.plain)
-                .disabled(isAddWindowDisabled)
-                .accessibilityIdentifier("windowTabAddButton")
-                .accessibilityValue(
-                    isAddWindowDisabled
-                        ? String(localized: "reader_window_opening", defaultValue: "Window opening")
-                        : ""
-                )
             }
             .padding(.horizontal, WindowTabBarLayout.horizontalPadding / 2)
             .padding(.vertical, WindowTabBarLayout.verticalPadding)
@@ -109,6 +95,151 @@ struct WindowTabBar: View {
         } message: {
             Text(String(localized: "go_to_reference_message"))
         }
+    }
+
+    /// Whether Android would show only the add-window footer control.
+    private var isSingleWindowFooterMode: Bool {
+        !windowManager.isMaximized
+            && windowManager.allWindows.count <= 1
+            && windowManager.visibleWindows.count <= 1
+    }
+
+    // MARK: - Footer Controls
+
+    /**
+     Builds Android's single-window add button for the restore strip.
+
+     - Parameter tabPalette: Android-derived footer colors.
+     - Returns: Fixed-size add-window button matching Android's single-window footer mode.
+     - Side effects: Tapping creates a new window from the active window when controller
+       registration is not pending.
+     - Failure modes: If no active workspace exists, `WindowManager.addWindow` returns `nil`.
+     */
+    private func addWindowButton(tabPalette: AndroidWindowTabPalette) -> some View {
+        Button {
+            guard !isAddWindowDisabled else { return }
+            windowManager.addWindow(from: windowManager.activeWindow)
+        } label: {
+            ZStack {
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(tabPalette.addButtonBackgroundColor)
+
+                if isAddWindowDisabled {
+                    ProgressView()
+                        .controlSize(.small)
+                        .tint(tabPalette.windowButtonTextColor)
+                } else {
+                    ToolbarAssetIcon(name: "ToolbarWindowAdd", size: 24)
+                        .foregroundStyle(tabPalette.windowButtonTextColor)
+                }
+            }
+            .frame(width: WindowTabBarLayout.fixedButtonSize, height: WindowTabBarLayout.fixedButtonSize)
+            .overlay(
+                RoundedRectangle(cornerRadius: 6)
+                    .strokeBorder(tabPalette.strokeColor, lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+        .disabled(isAddWindowDisabled)
+        .accessibilityIdentifier("windowTabAddButton")
+        .accessibilityValue(
+            isAddWindowDisabled
+                ? String(localized: "reader_window_opening", defaultValue: "Window opening")
+                : ""
+        )
+    }
+
+    /**
+     Builds Android's multi-window restore-strip hide/show arrow.
+
+     - Parameters:
+       - isExpanded: Whether the restore buttons are currently visible.
+       - tabPalette: Android-derived footer colors.
+     - Returns: A 50pt control matching Android's 20dp extension plus 30dp arrow button.
+     - Side effects: Persists `WorkspaceSettings.restoreButtonsVisible` and refreshes window state
+       so SwiftUI re-renders the footer immediately.
+     - Failure modes: If no active workspace exists, the tap is ignored.
+     */
+    private func restoreButtonsToggle(
+        isExpanded: Bool,
+        tabPalette: AndroidWindowTabPalette
+    ) -> some View {
+        let isRTL = layoutDirection == .rightToLeft
+        let iconName = isExpanded
+            ? (isRTL ? "ToolbarRestoreButtonsLeft" : "ToolbarRestoreButtonsRight")
+            : (isRTL ? "ToolbarRestoreButtonsRight" : "ToolbarRestoreButtonsLeft")
+
+        return Button {
+            setRestoreButtonsVisible(!isExpanded)
+        } label: {
+            HStack(spacing: 0) {
+                Color.clear
+                    .frame(width: WindowTabBarLayout.restoreToggleTouchExtensionWidth)
+
+                ToolbarAssetIcon(name: iconName, size: 24)
+                    .foregroundStyle(tabPalette.windowButtonTextColor)
+                    .frame(
+                        width: WindowTabBarLayout.restoreToggleButtonWidth,
+                        height: WindowTabBarLayout.fixedButtonSize
+                    )
+            }
+            .frame(
+                width: WindowTabBarLayout.multiWindowControlWidth,
+                height: WindowTabBarLayout.fixedButtonSize
+            )
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("windowTabRestoreToggleButton")
+        .accessibilityValue(isExpanded ? "expanded" : "collapsed")
+    }
+
+    /**
+     Builds Android's maximized-window unmaximize footer control.
+
+     - Parameter tabPalette: Android-derived footer colors.
+     - Returns: Fixed-size unmaximize button.
+     - Side effects: Tapping clears maximized layout through `WindowManager`.
+     - Failure modes: None; unmaximize is idempotent when no maximized window exists.
+     */
+    private func unmaximizeButton(tabPalette: AndroidWindowTabPalette) -> some View {
+        Button {
+            windowManager.unmaximize()
+        } label: {
+            ZStack {
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(tabPalette.visibleButtonBackgroundColor)
+
+                Image(systemName: "arrow.down.right.and.arrow.up.left")
+                    .font(.system(size: 18, weight: .medium))
+                    .foregroundStyle(tabPalette.windowButtonTextColor)
+            }
+            .frame(width: WindowTabBarLayout.fixedButtonSize, height: WindowTabBarLayout.fixedButtonSize)
+            .overlay(
+                RoundedRectangle(cornerRadius: 6)
+                    .strokeBorder(tabPalette.strokeColor, lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("windowTabUnmaximizeButton")
+    }
+
+    /**
+     Persists Android's workspace-scoped restore-button visibility flag.
+
+     - Parameter isVisible: Desired restore-button strip expansion state.
+     - Side effects: Mutates the active workspace settings, saves through SwiftData, and refreshes
+       window state so observers see the change.
+     - Failure modes: If no active workspace exists, no mutation is performed. SwiftData save
+       failures are intentionally ignored, matching nearby workspace-setting update behavior.
+     */
+    private func setRestoreButtonsVisible(_ isVisible: Bool) {
+        guard let workspace = windowManager.activeWorkspace else { return }
+        var settings = workspace.workspaceSettings ?? WorkspaceSettings()
+        settings.restoreButtonsVisible = isVisible
+        settings.normalizeAutoAssignPrimaryLabel()
+        workspace.workspaceSettings = settings
+        try? modelContext.save()
+        windowManager.refreshWindows()
     }
 
     // MARK: - Window Tab

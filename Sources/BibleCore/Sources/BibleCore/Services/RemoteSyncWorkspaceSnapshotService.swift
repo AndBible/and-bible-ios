@@ -858,6 +858,7 @@ public final class RemoteSyncWorkspaceSnapshotService {
             canonicalBool(normalizedValue.enableTiltToScroll),
             canonicalBool(normalizedValue.enableReverseSplitMode),
             canonicalBool(normalizedValue.autoPin),
+            canonicalBool(normalizedValue.restoreButtonsVisible),
             recentLabels,
             autoAssignLabels,
             normalizedValue.autoAssignPrimaryLabel?.uuidString.lowercased() ?? "",

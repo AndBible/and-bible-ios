@@ -181,6 +181,7 @@ final class WorkspaceSyncRestoreTests: XCTestCase {
                         enableTiltToScroll: true,
                         enableReverseSplitMode: true,
                         autoPin: false,
+                        restoreButtonsVisible: false,
                         speakSettingsJSON: #"{"sleepTimer":15,"queue":true}"#,
                         recentLabelsJSON: #"[{"labelId":"\#(recentLabelID.uuidString)","lastAccess":1735689600000}]"#,
                         autoAssignLabelsJSON: #"["\#(autoAssignLabelID.uuidString)"]"#,
@@ -282,6 +283,7 @@ final class WorkspaceSyncRestoreTests: XCTestCase {
         XCTAssertTrue(workspace.workspaceSettings.enableTiltToScroll)
         XCTAssertTrue(workspace.workspaceSettings.enableReverseSplitMode)
         XCTAssertFalse(workspace.workspaceSettings.autoPin)
+        XCTAssertFalse(workspace.workspaceSettings.restoreButtonsVisible)
         XCTAssertTrue(workspace.workspaceSettings.limitAmbiguousModalSize)
 
         XCTAssertEqual(workspace.windows.count, 1)
@@ -398,7 +400,7 @@ final class WorkspaceSyncRestoreTests: XCTestCase {
         XCTAssertEqual(workspaceRow.workspaceSettings.autoAssignPrimaryLabel, assignedLabelID)
         let canonicalComponents = RemoteSyncWorkspaceSnapshotService.canonicalWorkspaceSettings(workspaceRow.workspaceSettings)
             .split(separator: "^", omittingEmptySubsequences: false)
-        XCTAssertEqual(canonicalComponents[5], Substring(assignedLabelID.uuidString.lowercased()))
+        XCTAssertEqual(canonicalComponents[6], Substring(assignedLabelID.uuidString.lowercased()))
         XCTAssertFalse(canonicalComponents.contains(Substring(orphanPrimaryLabelID.uuidString.lowercased())))
     }
 
@@ -2258,6 +2260,7 @@ final class WorkspaceSyncRestoreTests: XCTestCase {
         var enableTiltToScroll: Bool = false
         var enableReverseSplitMode: Bool = false
         var autoPin: Bool = true
+        var restoreButtonsVisible: Bool = true
         var speakSettingsJSON: String? = nil
         var recentLabelsJSON: String? = nil
         var autoAssignLabelsJSON: String? = nil
@@ -2619,6 +2622,7 @@ final class WorkspaceSyncRestoreTests: XCTestCase {
                     workspace_settings_enableTiltToScroll INTEGER DEFAULT 0,
                     workspace_settings_enableReverseSplitMode INTEGER DEFAULT 0,
                     workspace_settings_autoPin INTEGER DEFAULT 1,
+                    workspace_settings_restoreButtonsVisible INTEGER DEFAULT 1,
                     workspace_settings_speakSettings TEXT DEFAULT NULL,
                     workspace_settings_recentLabels TEXT DEFAULT NULL,
                     workspace_settings_autoAssignLabels TEXT DEFAULT NULL,
@@ -2759,7 +2763,7 @@ final class WorkspaceSyncRestoreTests: XCTestCase {
             XCTAssertEqual(
                 sqlite3_prepare_v2(
                     db,
-                    "INSERT INTO \"Workspace\" (name, contentsText, id, orderNumber, unPinnedWeight, maximizedWindowId, primaryTargetLinksWindowId, text_display_settings_strongsMode, text_display_settings_showMorphology, text_display_settings_showFootNotes, text_display_settings_showFootNotesInline, text_display_settings_expandXrefs, text_display_settings_showXrefs, text_display_settings_showRedLetters, text_display_settings_showSectionTitles, text_display_settings_showVerseNumbers, text_display_settings_showVersePerLine, text_display_settings_showBookmarks, text_display_settings_showMyNotes, text_display_settings_justifyText, text_display_settings_hyphenation, text_display_settings_topMargin, text_display_settings_fontSize, text_display_settings_fontFamily, text_display_settings_lineSpacing, text_display_settings_bookmarksHideLabels, text_display_settings_showPageNumber, text_display_settings_margin_size_marginLeft, text_display_settings_margin_size_marginRight, text_display_settings_margin_size_maxWidth, text_display_settings_colors_dayTextColor, text_display_settings_colors_dayBackground, text_display_settings_colors_dayNoise, text_display_settings_colors_nightTextColor, text_display_settings_colors_nightBackground, text_display_settings_colors_nightNoise, workspace_settings_enableTiltToScroll, workspace_settings_enableReverseSplitMode, workspace_settings_autoPin, workspace_settings_speakSettings, workspace_settings_recentLabels, workspace_settings_autoAssignLabels, workspace_settings_autoAssignPrimaryLabel, workspace_settings_studyPadCursors, workspace_settings_hideCompareDocuments, workspace_settings_limitAmbiguousModalSize, workspace_settings_workspaceColor) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "INSERT INTO \"Workspace\" (name, contentsText, id, orderNumber, unPinnedWeight, maximizedWindowId, primaryTargetLinksWindowId, text_display_settings_strongsMode, text_display_settings_showMorphology, text_display_settings_showFootNotes, text_display_settings_showFootNotesInline, text_display_settings_expandXrefs, text_display_settings_showXrefs, text_display_settings_showRedLetters, text_display_settings_showSectionTitles, text_display_settings_showVerseNumbers, text_display_settings_showVersePerLine, text_display_settings_showBookmarks, text_display_settings_showMyNotes, text_display_settings_justifyText, text_display_settings_hyphenation, text_display_settings_topMargin, text_display_settings_fontSize, text_display_settings_fontFamily, text_display_settings_lineSpacing, text_display_settings_bookmarksHideLabels, text_display_settings_showPageNumber, text_display_settings_margin_size_marginLeft, text_display_settings_margin_size_marginRight, text_display_settings_margin_size_maxWidth, text_display_settings_colors_dayTextColor, text_display_settings_colors_dayBackground, text_display_settings_colors_dayNoise, text_display_settings_colors_nightTextColor, text_display_settings_colors_nightBackground, text_display_settings_colors_nightNoise, workspace_settings_enableTiltToScroll, workspace_settings_enableReverseSplitMode, workspace_settings_autoPin, workspace_settings_restoreButtonsVisible, workspace_settings_speakSettings, workspace_settings_recentLabels, workspace_settings_autoAssignLabels, workspace_settings_autoAssignPrimaryLabel, workspace_settings_studyPadCursors, workspace_settings_hideCompareDocuments, workspace_settings_limitAmbiguousModalSize, workspace_settings_workspaceColor) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     -1,
                     &statement,
                     nil
@@ -3082,6 +3086,8 @@ final class WorkspaceSyncRestoreTests: XCTestCase {
         bindBool(settings.enableReverseSplitMode, to: statement, index: index)
         index += 1
         bindBool(settings.autoPin, to: statement, index: index)
+        index += 1
+        bindBool(settings.restoreButtonsVisible, to: statement, index: index)
         index += 1
         bindOptionalText(settings.speakSettingsJSON, to: statement, index: index)
         index += 1

@@ -6,8 +6,9 @@ import CoreGraphics
  Defines the compact window-button metrics used by the reader footer.
 
  Android renders each bottom window control from `window_button.xml`, whose root button width and
- height both resolve to `?windowButtonHeight = 40dp`. iOS keeps that fixed logical size so normal
- multi-window workspaces can show every tab without expanding labels into variable-width chips.
+ height both resolve to `?windowButtonHeight = 40dp`. In multi-window mode, Android reserves the
+ separate 20dp touch extension and 30dp hide/restore arrow before the restore buttons; iOS mirrors
+ those fixed logical sizes instead of keeping the add-window control visible in every mode.
 
  Inputs:
  - `availableWidth`: footer width available to the window-button strip.
@@ -15,7 +16,8 @@ import CoreGraphics
 
  Outputs:
  - fixed button width for each document window
- - occupied strip width including horizontal padding, inter-button spacing, and add-window button
+ - occupied strip width including horizontal padding, inter-button spacing, and the active footer
+   control for the current window mode
 
  Side effects: none.
  Failure modes: negative widths and negative window counts are clamped into deterministic
@@ -44,6 +46,18 @@ enum WindowTabBarLayout {
     /// Full footer height needed by a 40pt button plus vertical padding.
     static let barHeight: CGFloat = fixedButtonSize + (verticalPadding * 2)
 
+    /// Android `hideRestoreButtonExtension` width that expands the restore-toggle tap target.
+    static let restoreToggleTouchExtensionWidth: CGFloat = 20
+
+    /// Android `hideRestoreButton` width that draws the left/right restore-strip arrow.
+    static let restoreToggleButtonWidth: CGFloat = 30
+
+    /// Footer control width used when Android shows only the add-window button.
+    static let singleWindowControlWidth: CGFloat = fixedButtonSize
+
+    /// Footer control width used when Android shows the multi-window restore-strip toggle.
+    static let multiWindowControlWidth: CGFloat = restoreToggleTouchExtensionWidth + restoreToggleButtonWidth
+
     /**
      Returns the Android-parity fixed tab width for the current footer.
 
@@ -62,24 +76,24 @@ enum WindowTabBarLayout {
     }
 
     /**
-     Computes the total width occupied by document buttons and the add-window button.
+     Computes multi-window footer width with Android's restore-strip toggle.
 
      - Parameters:
        - tabWidth: Width used for each document window button.
        - windowCount: Number of open document windows. Negative counts are treated as zero.
-     - Returns: Width consumed by padding, fixed add button, all document buttons, and spacing.
+     - Returns: Width consumed by padding, restore-toggle control, document buttons, and spacing.
      - Side effects: None.
      - Failure modes: None; invalid inputs are clamped to a non-negative result.
      */
-    static func occupiedWidth(tabWidth: CGFloat, windowCount: Int) -> CGFloat {
+    static func multiWindowOccupiedWidth(tabWidth: CGFloat, windowCount: Int) -> CGFloat {
         let count = max(0, windowCount)
         let buttonWidth = max(0, tabWidth)
         guard count > 0 else {
-            return horizontalPadding + fixedButtonSize
+            return horizontalPadding + multiWindowControlWidth
         }
 
         return horizontalPadding
-            + fixedButtonSize
+            + multiWindowControlWidth
             + (buttonWidth * CGFloat(count))
             + (spacing * CGFloat(count))
     }

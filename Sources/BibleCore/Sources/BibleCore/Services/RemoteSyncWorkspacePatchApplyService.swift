@@ -1040,6 +1040,13 @@ public final class RemoteSyncWorkspacePatchApplyService {
             columns: columns,
             default: true
         )
+        settings.restoreButtonsVisible = try boolColumn(
+            "workspace_settings_restoreButtonsVisible",
+            table: table,
+            statement: statement,
+            columns: columns,
+            default: true
+        )
         if let recentLabelsJSON = try optionalTextColumn(
             "workspace_settings_recentLabels",
             table: table,
