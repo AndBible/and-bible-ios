@@ -1498,6 +1498,101 @@ extension AndBibleTests {
     }
 
     /**
+     Protects the extracted document-switch category guard used by Android-style current-document
+     changes.
+
+     A Bible document switch must not accept a commentary module because that would persist a Bible
+     page identity with non-Bible initials. The controller's public API logs the failure; this
+     collaborator-level contract keeps the rule isolated from logging and WebView reload concerns.
+     */
+    func testReaderModuleSwitchCoordinatorRejectsMismatchedDocumentCategory() {
+        let coordinator = BibleReaderModuleSwitchCoordinator()
+
+        let result = coordinator.documentSwitchPlan(
+            moduleName: "MHC",
+            moduleCategory: .commentary,
+            targetCategory: .bible
+        )
+
+        XCTAssertEqual(
+            result,
+            .failure(.categoryMismatch(moduleName: "MHC", expected: .bible, actual: .commentary))
+        )
+    }
+
+    /**
+     Protects Android's atomic dictionary document switch persistence contract.
+
+     Selecting a dictionary from the commentary/document chooser updates the visible category and
+     selected dictionary together while clearing a stale dictionary key. A failure here means the
+     controller could again split module selection from category persistence.
+     */
+    func testReaderModuleSwitchCoordinatorPersistsDictionaryDocumentAndClearsStaleKey() throws {
+        let coordinator = BibleReaderModuleSwitchCoordinator()
+        let pageManager = PageManager(currentCategoryName: DocumentCategory.bible.pageManagerKey)
+        pageManager.dictionaryDocument = "OldDict"
+        pageManager.dictionaryKey = "stale-key"
+
+        let plan = try coordinator.documentSwitchPlan(
+            moduleName: "BDBT",
+            moduleCategory: .dictionary,
+            targetCategory: .dictionary
+        ).get()
+
+        plan.apply(to: pageManager)
+
+        XCTAssertEqual(plan.category, .dictionary)
+        XCTAssertTrue(plan.updatesVisibleCategory)
+        XCTAssertEqual(pageManager.currentCategoryName, DocumentCategory.dictionary.pageManagerKey)
+        XCTAssertEqual(pageManager.dictionaryDocument, "BDBT")
+        XCTAssertNil(pageManager.dictionaryKey)
+    }
+
+    /**
+     Protects module-only switching as separate from visible category switching.
+
+     The full module picker currently selects a map by first switching the map module and then
+     switching category. This legacy two-call path is still present in the UI, so a module-only plan
+     must update the selected map and clear the stale key without changing the visible page category.
+     */
+    func testReaderModuleSwitchCoordinatorModuleOnlyPlanDoesNotChangeVisibleCategory() {
+        let coordinator = BibleReaderModuleSwitchCoordinator()
+        let pageManager = PageManager(currentCategoryName: DocumentCategory.bible.pageManagerKey)
+        pageManager.mapDocument = "OldMap"
+        pageManager.mapKey = "stale-map-key"
+
+        let plan = coordinator.moduleOnlySwitchPlan(
+            moduleName: "BibleMap",
+            targetCategory: .map
+        )
+
+        plan.apply(to: pageManager)
+
+        XCTAssertEqual(plan.category, .map)
+        XCTAssertFalse(plan.updatesVisibleCategory)
+        XCTAssertEqual(pageManager.currentCategoryName, DocumentCategory.bible.pageManagerKey)
+        XCTAssertEqual(pageManager.mapDocument, "BibleMap")
+        XCTAssertNil(pageManager.mapKey)
+    }
+
+    /**
+     Protects category-only reload decisions from being hidden inside controller code.
+
+     Switching to the same category should persist the category but not request a WebView reload;
+     switching to a different category should request one. The controller remains responsible for
+     checking client readiness before actually reloading.
+     */
+    func testReaderModuleSwitchCoordinatorCategoryPlanRequestsReloadOnlyWhenCategoryChanges() {
+        let coordinator = BibleReaderModuleSwitchCoordinator()
+
+        let unchanged = coordinator.categorySwitchPlan(from: .bible, to: .bible)
+        let changed = coordinator.categorySwitchPlan(from: .bible, to: .commentary)
+
+        XCTAssertFalse(unchanged.shouldReloadContent)
+        XCTAssertTrue(changed.shouldReloadContent)
+    }
+
+    /**
      Guards the reader coordinator against regressing to the iOS sheet for the quick-menu path.
 
      The coordinator state is intentionally private, so this source-level test checks the routing
