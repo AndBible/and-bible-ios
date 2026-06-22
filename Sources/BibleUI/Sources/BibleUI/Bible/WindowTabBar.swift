@@ -199,7 +199,6 @@ struct WindowTabBar: View {
         .accessibilityIdentifier("windowTabRestoreToggleButton")
         .accessibilityLabel(label)
         .accessibilityHint(hint)
-        .accessibilityValue(isExpanded ? "expanded" : "collapsed")
     }
 
     /**

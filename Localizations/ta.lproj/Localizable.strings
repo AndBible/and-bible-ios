@@ -443,6 +443,9 @@
 "hide_bible_reference_overlay_title" = "விவிலிய குறிப்பு மேலடுக்கை மறை";
 "hide_window_buttons_summary" = "விவிலிய வாசிப்பு பக்கத்தின் வலப்புறம் காட்டப்படும் சாளர பொத்தான்கள் மறைக்கப்பட்டுள்ளன. கீழே உள்ள சாளர வழிசெலுத்தல் பட்டி இன்னும் காட்டப்படும் மற்றும் அவற்றை நீண்ட கிளிக் செய்வதன் மூலம் சாளர பாப்அப் மெனுவைத் திறக்கலாம்.";
 "hide_window_buttons_title" = "சாரள பொத்தான்களை மறை";
+"show_window_buttons_title" = "Show window buttons";
+"hide_window_buttons_hint" = "Hides the window button strip";
+"show_window_buttons_hint" = "Shows the window button strip";
 "pref_font_size_multiplier_title" = "எழுத்துரு அளவு பெருக்கி";
 "prefs_bible_view_swipe_mode_summary" = "இடது/வலது ஸ்வைப் சைகையை அடுத்த பக்கம்/அதிகாரம் செல்ல பயன்படுத்தலாம்.";
 "prefs_bible_view_swipe_mode_title" = "இடது/வலது ஸ்வைப் சைகைக்கான செயல்";

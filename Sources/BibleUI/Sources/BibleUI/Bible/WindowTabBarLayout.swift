@@ -37,7 +37,7 @@ enum WindowTabBarLayout {
     /// Horizontal spacing between compact window buttons.
     static let spacing: CGFloat = 6
 
-    /// Horizontal inset around the scrollable button strip.
+    /// Total horizontal inset around the scrollable button strip; callers split it per side.
     static let horizontalPadding: CGFloat = 24
 
     /// Vertical inset around the 40pt Android-style button.

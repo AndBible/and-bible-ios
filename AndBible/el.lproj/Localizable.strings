@@ -478,6 +478,9 @@
 "hide_bible_reference_overlay_title" = "Απόκρυψη επικάλυψης βιβλικής παραπομπής";
 "hide_window_buttons_summary" = "Απόκρυψη κουμπιών παραθύρου που εμφανίζονται στη δεξιά πλευρά στην εμφάνιση Βίβλου. Η μπάρα πλοήγησης του παραθύρου στο κάτω μέρος είναι ακόμα εμφανής και μπορείτε να ανοίξετε το αναδυόμενο παράθυρο μενού με παρατεταμένο πάτημα";
 "hide_window_buttons_title" = "Απόκρυψη κουμπιών παραθύρου";
+"show_window_buttons_title" = "Show window buttons";
+"hide_window_buttons_hint" = "Hides the window button strip";
+"show_window_buttons_hint" = "Shows the window button strip";
 "pref_font_size_multiplier_title" = "Μεγέθυνση γραμματοσειράς";
 "prefs_bible_view_swipe_mode_summary" = "Η χειρονομία συρσίματος δεξιά/αριστερά μπορεί να χρησιμοποιηθεί για μετάβαση στην επόμενη σελίδα / κεφάλαιο";
 "prefs_bible_view_swipe_mode_title" = "Ενέργεια χειρονομίας συρσίματος αριστερά / δεξιά";

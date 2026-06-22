@@ -478,6 +478,9 @@
 "hide_bible_reference_overlay_title" = "Laag met Schriftverwijzing verbergen";
 "hide_window_buttons_summary" = "Vensterknoppen aan de rechterzijde van het leesscherm zijn verborgen. Vensternavigatie aan de onderkant wordt weergegeven; u kunt het venster popup-menu openen door hier lang op te drukken.";
 "hide_window_buttons_title" = "Vensterknoppen verbergen";
+"show_window_buttons_title" = "Show window buttons";
+"hide_window_buttons_hint" = "Hides the window button strip";
+"show_window_buttons_hint" = "Shows the window button strip";
 "pref_font_size_multiplier_title" = "Lettergrootte vermenigvuldiger";
 "prefs_bible_view_swipe_mode_summary" = "Het veeggebaar links/rechts kan worden gebruikt om naar de volgende pagina/het volgende hoofdstuk te gaan.";
 "prefs_bible_view_swipe_mode_title" = "Actie voor veeggebaar links/rechts";

@@ -478,6 +478,9 @@
 "hide_bible_reference_overlay_title" = "הסתר שכבת מראה מקום";
 "hide_window_buttons_summary" = "כפתורי החלון שבצד שמאל מוסתרים. סרגל הניווט בתחתית המסך עדיין מוצג, ואפשר לפתוח את תפריט אפשרויות החלון בלחיצה ארוכה עליו.";
 "hide_window_buttons_title" = "הסתרת כפתורים של החלון";
+"show_window_buttons_title" = "Show window buttons";
+"hide_window_buttons_hint" = "Hides the window button strip";
+"show_window_buttons_hint" = "Shows the window button strip";
 "pref_font_size_multiplier_title" = "מכפיל גודל גופן";
 "prefs_bible_view_swipe_mode_summary" = "מחווה של החלקה שמאלה/ימינה ניתן להשתמש למעבר לעמוד/פרק הבא.";
 "prefs_bible_view_swipe_mode_title" = "פעולה למחווה של החלקה שמאלה/ימינה";

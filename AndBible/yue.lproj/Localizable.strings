@@ -478,6 +478,9 @@
 "hide_bible_reference_overlay_title" = "隱藏聖經參考浮動視窗";
 "hide_window_buttons_summary" = "隱藏在聖經視窗右下方的視窗按鍵。你可以長按底部的導覽列，以開啟彈出選單";
 "hide_window_buttons_title" = "隱藏視窗按鍵";
+"show_window_buttons_title" = "Show window buttons";
+"hide_window_buttons_hint" = "Hides the window button strip";
+"show_window_buttons_hint" = "Shows the window button strip";
 "pref_font_size_multiplier_title" = "Font size multiplier";
 "prefs_bible_view_swipe_mode_summary" = "Swipe left / right gesture can be used to go to next page / chapter.";
 "prefs_bible_view_swipe_mode_title" = "Action for swipe left / right gesture";

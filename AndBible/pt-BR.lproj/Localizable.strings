@@ -478,6 +478,9 @@
 "hide_bible_reference_overlay_title" = "Ocultar sobreposição de referência da Bíblia";
 "hide_window_buttons_summary" = "Os botões da janela que são exibidos no lado direito das visualizações da Bíblia ficam ocultos. A barra de navegação da janela na parte inferior ainda é exibida e você pode abrir o menu pop-up da janela clicando-lhes longamente.";
 "hide_window_buttons_title" = "Ocultar botões da janela";
+"show_window_buttons_title" = "Show window buttons";
+"hide_window_buttons_hint" = "Hides the window button strip";
+"show_window_buttons_hint" = "Shows the window button strip";
 "pref_font_size_multiplier_title" = "Multiplicador de tamanho de letra";
 "prefs_bible_view_swipe_mode_summary" = "O gesto de deslizar para a esquerda/direita pode ser utilizado para ir para a página/capítulo seguinte.";
 "prefs_bible_view_swipe_mode_title" = "Ação para o gesto de deslizar para a esquerda / direita";

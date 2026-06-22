@@ -443,6 +443,9 @@
 "hide_bible_reference_overlay_title" = "İncil’e gönderme yapan katmanı gizle";
 "hide_window_buttons_summary" = "İncil görünümlerinin sağ tarafında görüntülenen pencere düğmeleri gizlenir. Aşağıdaki pencere gezinme çubuğu hala gösterilir ve pencerenin açılır menüsünü uzun tıklayarak açabilirsiniz.";
 "hide_window_buttons_title" = "Pencere düğmelerini gizle";
+"show_window_buttons_title" = "Show window buttons";
+"hide_window_buttons_hint" = "Hides the window button strip";
+"show_window_buttons_hint" = "Shows the window button strip";
 "pref_font_size_multiplier_title" = "Yazı tipi boyutu çarpanı";
 "prefs_bible_view_swipe_mode_summary" = "Bir sonraki sayfaya / bölüme gitmek için sola / sağa kaydırma hareketi kullanılabilir.<br>";
 "prefs_bible_view_swipe_mode_title" = "Sola / sağa kaydırma hareketi için eylem";

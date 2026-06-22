@@ -478,6 +478,9 @@
 "hide_bible_reference_overlay_title" = "Versteek Bybel verwysing oorleg";
 "hide_window_buttons_summary" = "Venster knoppies wat aan die regterkant van die Bybel aansigte vertoon word, word weggesteek. Venster navigasiebalk aan die onderkant word steeds vertoon en jy kan venste ropspring kieslys oopmaak deur hulle lank te klik";
 "hide_window_buttons_title" = "Versteek venster knoppies";
+"show_window_buttons_title" = "Show window buttons";
+"hide_window_buttons_hint" = "Hides the window button strip";
+"show_window_buttons_hint" = "Shows the window button strip";
 "pref_font_size_multiplier_title" = "Lettertipe-grootte vermenigvuldiger";
 "prefs_bible_view_swipe_mode_summary" = "Vee links / regs gebaar kan gebruik word om na die volgende bladsy / hoofstuk te gaan.";
 "prefs_bible_view_swipe_mode_title" = "Aksie vir vee links / regs gebaar";

@@ -478,6 +478,9 @@
 "hide_bible_reference_overlay_title" = "Skryť prekrytie referencií na Bibliu ";
 "hide_window_buttons_summary" = "Tlačidlá okien, ktoré sa zobrazujú na pravej strane zobrazení Biblie, sú skryté. Navigačný panel v spodnej časti okna je stále zobrazený a vyskakovacie okno je možné otvoriť dlhým kliknutím. ";
 "hide_window_buttons_title" = "Kryť tlačidlá okna";
+"show_window_buttons_title" = "Show window buttons";
+"hide_window_buttons_hint" = "Hides the window button strip";
+"show_window_buttons_hint" = "Shows the window button strip";
 "pref_font_size_multiplier_title" = "Násobič veľkosti písma";
 "prefs_bible_view_swipe_mode_summary" = "Gesto potiahnutia doľava/doprava možno použiť na prechod na ďalšiu stranu/kapitolu.";
 "prefs_bible_view_swipe_mode_title" = "Akcia pre gesto potiahnutia doľava/doprava";

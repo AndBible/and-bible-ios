@@ -478,6 +478,9 @@
 "hide_bible_reference_overlay_title" = "Ascunde trimiterile biblice suprapuse";
 "hide_window_buttons_summary" = "Butoanele ferestrei din partea dreaptă a paginii sînt ascunse. Butoanele ferestrelor din partea de jos a paginii sînt în continuare afișate și poți deschide opțiunile ferestrelor ținînd apăsat pe ele.";
 "hide_window_buttons_title" = "Ascunde butoanele ferestrei";
+"show_window_buttons_title" = "Show window buttons";
+"hide_window_buttons_hint" = "Hides the window button strip";
+"show_window_buttons_hint" = "Shows the window button strip";
 "pref_font_size_multiplier_title" = "Multiplicator mărime litere";
 "prefs_bible_view_swipe_mode_summary" = "Gestul de tragere în stânga / dreapta poate fi utilizat pentru a trece la pagina / capitolul următor.";
 "prefs_bible_view_swipe_mode_title" = "Acțiune pentru gestul de tragere în stânga / dreapta";

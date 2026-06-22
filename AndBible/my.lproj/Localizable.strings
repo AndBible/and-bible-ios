@@ -478,6 +478,9 @@
 "hide_bible_reference_overlay_title" = "ကျမ်းစာကိုးကားချက် အလွှာကို ဖျောက်ထားပါ";
 "hide_window_buttons_summary" = "ကျမ်းစာမြင်ကွင်း၏ ညာဖက်တွင် ပေါ်နေသည့် ဝင်းဒိုးခလုတ်များကို ဖျောက်ထားပါသည်။ အောက်ခြေတွင်ရှိသည့် ဝင်းဒိုးလမ်းညွှန်းပြဘားသည် ပေါ်နေဆဲဖြစ်ပြီး ဝင်းဒိုး popup မီနူးကို ကြာကြာဖိထားခြင်းဖြင့် ဖွင့်နိုင်သည်။ ";
 "hide_window_buttons_title" = "ဝင်းဒိုးခလုတ်ကို ဖျောက်ထားပါ";
+"show_window_buttons_title" = "Show window buttons";
+"hide_window_buttons_hint" = "Hides the window button strip";
+"show_window_buttons_hint" = "Shows the window button strip";
 "pref_font_size_multiplier_title" = "Font size multiplier";
 "prefs_bible_view_swipe_mode_summary" = "Swipe left / right gesture can be used to go to next page / chapter.";
 "prefs_bible_view_swipe_mode_title" = "Action for swipe left / right gesture";

@@ -443,6 +443,9 @@
 "hide_bible_reference_overlay_title" = "বাইবেলের রেফারেন্স আচ্ছাদনে লুকান";
 "hide_window_buttons_summary" = "বাইবেলের দৃশ্যের ডানদিকে প্রদর্শিত উইন্ডো বোতামগুলি লুকানো আছে। নীচে উইন্ডো ন্যাভিগেশন বারটি এখনও প্রদর্শিত হবে এবং আপনি দীর্ঘ-ক্লিক করে উইন্ডো পপআপ মেনুটি খুলতে পারেন।";
 "hide_window_buttons_title" = "উইন্ডো বোতামগুলি লুকান";
+"show_window_buttons_title" = "Show window buttons";
+"hide_window_buttons_hint" = "Hides the window button strip";
+"show_window_buttons_hint" = "Shows the window button strip";
 "pref_font_size_multiplier_title" = "হরফ আকার গুণক";
 "prefs_bible_view_swipe_mode_summary" = "পরবর্তী পৃষ্ঠা / অধ্যায়ে যেতে বাম / ডান সোয়াইপ জেসচার ব্যবহার করা যায়।";
 "prefs_bible_view_swipe_mode_title" = "বাম / ডান সোয়াইপ জেসচারের অ্যাকশন";

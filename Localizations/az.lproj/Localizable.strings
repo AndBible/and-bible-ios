@@ -443,6 +443,9 @@
 "hide_bible_reference_overlay_title" = "Hide Bible reference overlay";
 "hide_window_buttons_summary" = "Window buttons that are displayed on right side of the Bible views are hidden. Window navigation bar on the bottom is still displayed and you may open window popup menu by long-clicking them.";
 "hide_window_buttons_title" = "Hide window buttons";
+"show_window_buttons_title" = "Show window buttons";
+"hide_window_buttons_hint" = "Hides the window button strip";
+"show_window_buttons_hint" = "Shows the window button strip";
 "pref_font_size_multiplier_title" = "Font size multiplier";
 "prefs_bible_view_swipe_mode_summary" = "Swipe left / right gesture can be used to go to next page / chapter.";
 "prefs_bible_view_swipe_mode_title" = "Action for swipe left / right gesture";

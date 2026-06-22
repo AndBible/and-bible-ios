@@ -443,6 +443,9 @@
 "hide_bible_reference_overlay_title" = "Sembunyikan overlay referensi alkitab";
 "hide_window_buttons_summary" = "Tombol jendela yang ditampilkan di sisi kanan tampilan Alkitab disembunyikan. Bilah navigasi jendela di bagian bawah tetap ditampilkan dan Anda dapat membuka menu popup jendela dengan menahan lama tombolnya.";
 "hide_window_buttons_title" = "Sembunyikan tombol jendela";
+"show_window_buttons_title" = "Show window buttons";
+"hide_window_buttons_hint" = "Hides the window button strip";
+"show_window_buttons_hint" = "Shows the window button strip";
 "pref_font_size_multiplier_title" = "Pengali ukuran font";
 "prefs_bible_view_swipe_mode_summary" = "Gestur geser kiri / kanan dapat digunakan untuk pergi ke halaman / pasal berikutnya.";
 "prefs_bible_view_swipe_mode_title" = "Tindakan untuk gestur geser kiri / kanan";

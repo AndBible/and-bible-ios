@@ -443,6 +443,9 @@
 "hide_bible_reference_overlay_title" = "Paslėpti Biblijos nuorodų sluoksnį";
 "hide_window_buttons_summary" = "Biblijos rodinio dešinėje pusėje esantys mygtukai yra paslėpti. Apačioje esanti naršymo juosta yra vis dar rodoma ir jūs galite atverti iškylantįjį langą ant jos paspaudę ir palaikę.";
 "hide_window_buttons_title" = "Paslėpti lango mygtukus";
+"show_window_buttons_title" = "Show window buttons";
+"hide_window_buttons_hint" = "Hides the window button strip";
+"show_window_buttons_hint" = "Shows the window button strip";
 "pref_font_size_multiplier_title" = "Šrifto dydžio daugiklis";
 "prefs_bible_view_swipe_mode_summary" = "Perbraukimo kairėn / dešinėn gestas gali būti naudojamas perėjimui į kitą puslapį / skyrių.";
 "prefs_bible_view_swipe_mode_title" = "Perbraukimo kairėn / dešinėn gesto veiksmas";

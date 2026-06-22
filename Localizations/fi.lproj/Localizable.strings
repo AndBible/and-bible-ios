@@ -443,6 +443,9 @@
 "hide_bible_reference_overlay_title" = "Piilota Raamattuviitteen näyttö";
 "hide_window_buttons_summary" = "Piilota ikkunoiden painikkeet, jotka näytetään tavallisesti kunkin raamattunäkymän oikealla puolella. Ikkunan navigointipaneeli ruudun alakulmassa näytetään edelleen, ja voit avata ikkunan ponnahdusvalikon napsauttamalla pitkään näitä painikkeita.";
 "hide_window_buttons_title" = "Piilota ikkunoiden painikkeet";
+"show_window_buttons_title" = "Show window buttons";
+"hide_window_buttons_hint" = "Hides the window button strip";
+"show_window_buttons_hint" = "Shows the window button strip";
 "pref_font_size_multiplier_title" = "Fontin koon kerroin";
 "prefs_bible_view_swipe_mode_summary" = "Pyyhkäisyelettä vasemmalle / oikealle voidaan käyttää seuraavaan sivuun / lukuun siirtymiseen.";
 "prefs_bible_view_swipe_mode_title" = "Toiminne pyyhkäisyeleelle (oikea / vasen)";

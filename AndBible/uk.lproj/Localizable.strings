@@ -478,6 +478,9 @@
 "hide_bible_reference_overlay_title" = "Сховати накладене посилання";
 "hide_window_buttons_summary" = "Кнопки вікна, які відображаються на правій стороні під час перегляду Біблії, приховані. Навігаційна панель вікна внизу все ще відображається, і ви можете відкрити спливаюче меню вікна, довго натискаючи її.";
 "hide_window_buttons_title" = "Сховати кнопки вікна";
+"show_window_buttons_title" = "Show window buttons";
+"hide_window_buttons_hint" = "Hides the window button strip";
+"show_window_buttons_hint" = "Shows the window button strip";
 "pref_font_size_multiplier_title" = "Множник розміру шрифту";
 "prefs_bible_view_swipe_mode_summary" = "Жест проведення вліво/вправо можна використовувати для переходу до наступної сторінки/розділу.";
 "prefs_bible_view_swipe_mode_title" = "Дія для жесту проведення вліво/вправо";

@@ -478,6 +478,9 @@
 "hide_bible_reference_overlay_title" = "Kaŝi surtavolon de bibliaj referencoj";
 "hide_window_buttons_summary" = "Butonoj de fenestroj montrataj ĉe dekstra flanko de la biblia vido estas nun kaŝitaj. Fenestra navigadstrio ĉe sube estas plue montrata kaj vi povas malfermi la menuon de fenestro per frapetadi ĝin.";
 "hide_window_buttons_title" = "Kaŝi butonojn de fenestroj";
+"show_window_buttons_title" = "Show window buttons";
+"hide_window_buttons_hint" = "Hides the window button strip";
+"show_window_buttons_hint" = "Shows the window button strip";
 "pref_font_size_multiplier_title" = "Pligrandigi tiparon";
 "prefs_bible_view_swipe_mode_summary" = "Elekti kion fari responde al la gestoj fingrumi (mal)dekstren: ĉu ŝanĝi paĝon aŭ ĉapitron.";
 "prefs_bible_view_swipe_mode_title" = "Ago por fingrumi (mal)dekstren";

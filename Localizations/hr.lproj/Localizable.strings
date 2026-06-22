@@ -443,6 +443,9 @@
 "hide_bible_reference_overlay_title" = "Sakrij prikrivajući prikaz za reference Biblije";
 "hide_window_buttons_summary" = "Skriveni su gumbi prozora koji se prikazuju sa desne strane pregleda Biblije. Linija za navigaciju prozora u dnu je i dalje prikazana i možete otvoriti skočni izbornik dugim pritiskom na njega";
 "hide_window_buttons_title" = "Sakrij gumbe prozora";
+"show_window_buttons_title" = "Show window buttons";
+"hide_window_buttons_hint" = "Hides the window button strip";
+"show_window_buttons_hint" = "Shows the window button strip";
 "pref_font_size_multiplier_title" = "Množitelj veličine fonta";
 "prefs_bible_view_swipe_mode_summary" = "Gesta povlačenja lijevo/desno može se koristiti za prijelaz na sljedeću stranicu/poglavlje.";
 "prefs_bible_view_swipe_mode_title" = "Radnja za gestu povlačenja lijevo/desno";

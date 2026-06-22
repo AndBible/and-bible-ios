@@ -478,6 +478,9 @@
 "hide_bible_reference_overlay_title" = "Киелі кітаптың сілтемелер белгісін жасыру";
 "hide_window_buttons_summary" = "Киелі Кітаптың көріністерінің оң жағында көрсетілген терезенің түймелері жасырылған. Төменгі жағындағы навигациялық шарлау жолағы әлі де көрсетіледі, оларды ұзақ басып терезенің қалқымалы мәзірін аша аласыз.";
 "hide_window_buttons_title" = "Терезе түймелерін жасырыңыз";
+"show_window_buttons_title" = "Show window buttons";
+"hide_window_buttons_hint" = "Hides the window button strip";
+"show_window_buttons_hint" = "Shows the window button strip";
 "pref_font_size_multiplier_title" = "Font size multiplier";
 "prefs_bible_view_swipe_mode_summary" = "Swipe left / right gesture can be used to go to next page / chapter.";
 "prefs_bible_view_swipe_mode_title" = "Action for swipe left / right gesture";
