@@ -1062,8 +1062,9 @@ private final class FixtureContext {
      - Parameters:
        - count: Number of visible Bible windows the fixture should expose.
        - baseline: Baseline workspace graph returned by `ensureBaseline()`.
-     - Side effects: Inserts missing windows, normalizes their page-manager Bible location to KJV
-       Genesis 1, clears minimized/links state, and saves the SwiftData context.
+     - Side effects: Inserts missing windows, assigns unique sequential order numbers to every
+       persisted workspace window, normalizes the requested visible windows to KJV Genesis 1,
+       minimizes extra windows, and saves the SwiftData context.
      - Failure modes: Rethrows SwiftData save failures.
      */
     private func ensureVisibleBibleWindowCount(_ count: Int, baseline: BaselineState) throws {
@@ -1079,8 +1080,20 @@ private final class FixtureContext {
             windows.append(window)
         }
 
-        for (order, window) in windows.prefix(count).enumerated() {
+        windows = windows.sorted {
+            if $0.orderNumber != $1.orderNumber {
+                return $0.orderNumber < $1.orderNumber
+            }
+            return $0.id.uuidString < $1.id.uuidString
+        }
+
+        for (order, window) in windows.enumerated() {
             window.orderNumber = order
+            guard order < count else {
+                window.layoutState = "minimized"
+                continue
+            }
+
             window.layoutState = "split"
             window.isLinksWindow = false
             window.layoutWeight = 1.0
