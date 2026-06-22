@@ -418,6 +418,43 @@ struct BibleReaderModuleSwitchCoordinator {
     }
 
     /**
+     Switches the visible document to a map module in one Android-parity transition.
+
+     Android's document chooser routes maps through `setCurrentDocument(book)`, so map selections
+     update the selected map, clear stale map entry state, and switch the visible category as one
+     durable page-manager write before content reload.
+
+     - Parameters:
+       - moduleName: Installed map module initials to make current.
+       - context: Controller-owned state and callbacks for the active pane.
+     - Side effects: Mutates active map/category state, clears stale map keys, persists map
+       document/category fields together, and reloads once when ready.
+     - Failure modes: Logs and leaves state unchanged when the module is missing or not a map.
+     */
+    func switchMapDocument(to moduleName: String, context: BibleReaderModuleSwitchContext) {
+        guard let mod = module(named: moduleName, context: context, logSubject: "map document") else {
+            return
+        }
+        guard let plan = validatedDocumentSwitchPlan(
+            moduleName: moduleName,
+            moduleCategory: mod.info.category,
+            targetCategory: .map,
+            logSubject: "map document"
+        ) else {
+            return
+        }
+
+        context.setMapModule(mod, moduleName)
+        context.setCurrentCategory(plan.category)
+        moduleSwitchLogger.info("Switched to map document: \(moduleName)")
+
+        persist(plan, context: context)
+
+        guard context.clientReady else { return }
+        context.loadCurrentContent()
+    }
+
+    /**
      Switches the visible document category without changing selected modules.
 
      - Parameters:
@@ -472,10 +509,9 @@ struct BibleReaderModuleSwitchCoordinator {
     /**
      Builds a module-only switch plan.
 
-     This preserves existing iOS call paths that update the selected module for a category without
-     changing which category is visible. The full map picker currently uses this before an explicit
-     category switch, and direct module switches use it to keep category and module ownership
-     separate.
+     Direct module-switch actions update the selected module for a category without changing which
+     category is visible. Full current-document chooser paths should use `documentSwitchPlan` so the
+     selected module and visible category are persisted together like Android.
 
      - Parameters:
        - moduleName: Installed module initials to persist.

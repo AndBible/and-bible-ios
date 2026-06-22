@@ -1038,6 +1038,23 @@ extension AndBibleTests {
     }
 
     /**
+     Guards Android current-document parity for full module-picker map selections.
+
+     Android routes map rows through `setCurrentDocument(book)` just like other document rows. The
+     full iOS picker must therefore call the controller's map document switch instead of splitting
+     map module and category updates across separate mutations.
+     */
+    func testBibleReaderModulePickerRoutesMapsThroughDocumentSwitch() throws {
+        let source = try bibleUISource(named: "BibleReaderModulePicker.swift")
+        let selectionSource = try extractFunction(named: "select", from: source)
+
+        XCTAssertTrue(selectionSource.contains("case .map:"))
+        XCTAssertTrue(selectionSource.contains("controller.switchMapDocument(to: module.name)"))
+        XCTAssertFalse(selectionSource.contains("controller.switchMapModule(to: module.name)"))
+        XCTAssertFalse(selectionSource.contains("controller.switchCategory(to: .map)"))
+    }
+
+    /**
      Protects Android `MainBibleActivity.menuForDocs` parity for the Bible toolbar quick menu.
 
      Android sorts quick-menu entries by language code and then book abbreviation, renders labels as
@@ -1411,6 +1428,39 @@ extension AndBibleTests {
     }
 
     /**
+     Protects Android's atomic current-document switch behavior for map selections.
+
+     Android routes maps through the same current-document transition as other chooser rows. The
+     iOS controller must therefore persist the selected map/category and clear stale map keys
+     together so map selection cannot leave mixed pane state behind.
+     */
+    @MainActor
+    func testMapDocumentSwitchPersistsModuleCategoryAndClearsKeyTogether() throws {
+        let (bridge, _) = makeRecordingBridge()
+        let modulePath = try makeTemporaryBundledSwordPath()
+        try seedEmptyRawMapModule(named: "UITestMap", in: modulePath)
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        let window = Window()
+        let pageManager = PageManager(id: window.id)
+        pageManager.mapKey = "stale-key"
+        window.pageManager = pageManager
+        controller.activeWindow = window
+        var persistCount = 0
+        controller.onPersistState = { persistCount += 1 }
+
+        controller.switchMapDocument(to: "UITestMap")
+
+        XCTAssertEqual(controller.currentCategory, .map)
+        XCTAssertEqual(controller.activeMapModuleName, "UITestMap")
+        XCTAssertNil(controller.currentMapKey)
+        XCTAssertEqual(pageManager.mapDocument, "UITestMap")
+        XCTAssertNil(pageManager.mapKey)
+        XCTAssertEqual(pageManager.currentCategoryName, DocumentCategory.map.pageManagerKey)
+        XCTAssertEqual(persistCount, 1)
+    }
+
+    /**
      Protects Android's atomic current-document switch behavior for Bible quick selections.
 
      Android `MainBibleActivity.menuForDocs` delegates selected Bible rows to
@@ -1549,11 +1599,39 @@ extension AndBibleTests {
     }
 
     /**
+     Protects Android's atomic map document switch persistence contract.
+
+     Selecting a map from the document chooser updates the visible category and selected map
+     together while clearing stale map entry state. A failure here means map selection can again
+     split module selection from category persistence.
+     */
+    func testReaderModuleSwitchCoordinatorPersistsMapDocumentAndClearsStaleKey() throws {
+        let coordinator = BibleReaderModuleSwitchCoordinator()
+        let pageManager = PageManager(currentCategoryName: DocumentCategory.bible.pageManagerKey)
+        pageManager.mapDocument = "OldMap"
+        pageManager.mapKey = "stale-key"
+
+        let plan = try coordinator.documentSwitchPlan(
+            moduleName: "BibleMap",
+            moduleCategory: .map,
+            targetCategory: .map
+        ).get()
+
+        plan.apply(to: pageManager)
+
+        XCTAssertEqual(plan.category, .map)
+        XCTAssertTrue(plan.updatesVisibleCategory)
+        XCTAssertEqual(pageManager.currentCategoryName, DocumentCategory.map.pageManagerKey)
+        XCTAssertEqual(pageManager.mapDocument, "BibleMap")
+        XCTAssertNil(pageManager.mapKey)
+    }
+
+    /**
      Protects module-only switching as separate from visible category switching.
 
-     The full module picker currently selects a map by first switching the map module and then
-     switching category. This legacy two-call path is still present in the UI, so a module-only plan
-     must update the selected map and clear the stale key without changing the visible page category.
+     Direct module-switch paths can update the selected module for an inactive category. That must
+     remain separate from full current-document chooser paths, which update the selected module and
+     visible category together.
      */
     func testReaderModuleSwitchCoordinatorModuleOnlyPlanDoesNotChangeVisibleCategory() {
         let coordinator = BibleReaderModuleSwitchCoordinator()

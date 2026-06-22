@@ -1013,6 +1013,30 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         moduleSwitchCoordinator.switchMapModule(to: moduleName, context: makeModuleSwitchContext())
     }
 
+    /**
+     Switches the visible document to a map module in one Android-parity transition.
+
+     Android routes map rows through the same `setCurrentDocument(book)` path as Bible,
+     commentary, dictionary, and general-book rows. iOS must therefore persist the selected map,
+     clear stale map entry state, and switch the visible category together instead of splitting map
+     selection and category selection across separate controller mutations.
+
+     - Parameter moduleName: Installed SWORD map module abbreviation to make current.
+     Side effects:
+     - mutates the active map module, clears the selected map key, and sets the current category to
+       map
+     - writes `mapDocument`, `mapKey`, and `currentCategoryName` to `PageManager`
+     - invokes `onPersistState` once when pane state is available
+     - reloads the visible reader document once when the JavaScript client is ready
+     Failure modes:
+     - if the module cannot be resolved, logs a warning and leaves controller/page state unchanged
+     - if the resolved module is not a map, logs a warning and leaves state unchanged
+     */
+    @MainActor
+    public func switchMapDocument(to moduleName: String) {
+        moduleSwitchCoordinator.switchMapDocument(to: moduleName, context: makeModuleSwitchContext())
+    }
+
     /// Switch between document categories (Bible, Commentary, Dictionary, General Book, Map).
     public func switchCategory(to category: DocumentCategory) {
         moduleSwitchCoordinator.switchCategory(to: category, context: makeModuleSwitchContext())
