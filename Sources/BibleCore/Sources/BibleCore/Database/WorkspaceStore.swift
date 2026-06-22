@@ -308,6 +308,21 @@ public final class WorkspaceStore {
     }
 
     /**
+     * Rewrites window `orderNumber` fields to match the supplied ordering.
+     * - Parameter windows: Windows in their new desired persisted order.
+     * - Side Effects: Mutates each window's `orderNumber` and saves `modelContext`.
+     * - Failure: Save errors are swallowed.
+     * - Precondition: The array must already represent the complete ordering for the affected
+     *   workspace.
+     */
+    public func reorderWindows(_ windows: [Window]) {
+        for (index, window) in windows.enumerated() {
+            window.orderNumber = index
+        }
+        save()
+    }
+
+    /**
      * Deletes a window and relies on cascade rules for its page manager and history.
      * - Parameter window: Window to delete.
      * - Side Effects: Deletes the window graph and saves `modelContext`.

@@ -110,8 +110,34 @@ public struct BibleReaderView: View {
         case globalTextOptions
         case workspaceTextOptions = "textOptions"
         case windowTextOptions
+        case windowColorSettings
 
         var id: String { rawValue }
+    }
+
+    /// Target scope selected from Android's Copy settings to submenu.
+    private enum TextSettingsCopyTarget: Hashable {
+        case window(UUID)
+        case workspace
+        case global
+    }
+
+    /// Pending Android-style copy-settings dialog request.
+    private struct TextSettingsCopyRequest: Identifiable, Hashable {
+        let sourceWindowID: UUID
+        let target: TextSettingsCopyTarget
+        let targetTitle: String
+
+        var id: String {
+            switch target {
+            case .window(let windowID):
+                return "window::\(sourceWindowID.uuidString)::\(windowID.uuidString)"
+            case .workspace:
+                return "workspace::\(sourceWindowID.uuidString)"
+            case .global:
+                return "global::\(sourceWindowID.uuidString)"
+            }
+        }
     }
 
     /// Coordinator-owned modal flows that do not require payload-backed sheet state.
@@ -261,6 +287,9 @@ public struct BibleReaderView: View {
 
     /// Window-scoped text-display state edited from Android's pane/window All Text Options route.
     @State private var windowDisplaySettings: TextDisplaySettings = .appDefaults
+
+    /// Pending Android-style selective copy-settings dialog opened from a pane hamburger menu.
+    @State private var textSettingsCopyRequest: TextSettingsCopyRequest?
 
     /// Workspace-scoped text-display state edited from Android's main reader All Text Options route.
     @State private var workspaceDisplaySettings: TextDisplaySettings = .appDefaults
@@ -708,6 +737,7 @@ public struct BibleReaderView: View {
                 if showBookChooser {
                     bookChooserDrawerOverlay
                 }
+                textSettingsCopyDialogOverlay
             }
             .overlayPreferenceValue(ReaderOverflowButtonBoundsPreferenceKey.self) { anchor in
                 if showReaderOverflowMenu {
@@ -922,6 +952,32 @@ public struct BibleReaderView: View {
         }
     }
 
+    /// Android-style selective copy-settings dialog overlay.
+    @ViewBuilder
+    private var textSettingsCopyDialogOverlay: some View {
+        if let request = textSettingsCopyRequest {
+            ZStack {
+                Color.black.opacity(0.36)
+                    .ignoresSafeArea()
+                    .onTapGesture {
+                        textSettingsCopyRequest = nil
+                    }
+
+                TextDisplaySettingsCopyDialog(
+                    targetTitle: request.targetTitle,
+                    onCancel: { textSettingsCopyRequest = nil },
+                    onConfirm: { fields in
+                        applyTextSettingsCopy(request, fields: fields)
+                        textSettingsCopyRequest = nil
+                    }
+                )
+                .padding(.horizontal, 24)
+            }
+            .transition(.opacity)
+            .zIndex(20)
+        }
+    }
+
     /// Invisible scene-measurement surface used by pane and overlay placement.
     private var readerSceneMetricsBackground: some View {
         GeometryReader { proxy in
@@ -1123,6 +1179,17 @@ public struct BibleReaderView: View {
             #endif
             // Mirror the Settings destination's state export so UI tests can distinguish the
             // window-level All Text Options route from global Application Preferences.
+            .overlay(alignment: .topLeading) {
+                readerRenderedContentStateExport
+            }
+        case .windowColorSettings:
+            ColorSettingsView(
+                settings: $windowDisplaySettings,
+                onChange: applyWindowDisplaySettingsChange
+            )
+            #if os(iOS)
+            .toolbar(.visible, for: .navigationBar)
+            #endif
             .overlay(alignment: .topLeading) {
                 readerRenderedContentStateExport
             }
@@ -1374,6 +1441,92 @@ public struct BibleReaderView: View {
     }
 
     /**
+     Opens Android's window-scoped Color settings route directly from the pane menu.
+
+     - Parameter windowId: Pane whose color overrides should be edited.
+     - Side effects: refreshes the window editor state and pushes the color settings destination.
+     - Failure modes: Missing windows fall back to the active window and inherited settings.
+     */
+    private func presentWindowColorSettings(from windowId: UUID? = nil) {
+        let targetWindow = windowId.flatMap { id in
+            windowManager.allWindows.first { $0.id == id }
+        } ?? windowManager.activeWindow
+        windowDisplaySettings = resolvedDisplaySettings(for: targetWindow)
+        presentReaderDestination(.windowColorSettings, from: targetWindow?.id ?? windowId)
+    }
+
+    /**
+     Presents Android's selective Copy settings dialog for one pane menu target.
+
+     - Parameters:
+       - sourceWindowId: Window whose raw text-display overrides are copied.
+       - target: Destination selected from the `Copy settings to...` submenu.
+     - Side effects: Captures a pending copy request rendered by `TextDisplaySettingsCopyDialog`.
+     - Failure modes: Missing source windows are ignored.
+     */
+    private func presentTextSettingsCopy(from sourceWindowId: UUID, target: TextSettingsCopyTarget) {
+        guard windowManager.allWindows.contains(where: { $0.id == sourceWindowId }) else { return }
+        textSettingsCopyRequest = TextSettingsCopyRequest(
+            sourceWindowID: sourceWindowId,
+            target: target,
+            targetTitle: textSettingsCopyTargetTitle(target)
+        )
+    }
+
+    private func textSettingsCopyTargetTitle(_ target: TextSettingsCopyTarget) -> String {
+        switch target {
+        case .window(let targetWindowID):
+            guard let targetWindow = windowManager.visibleWindows.first(where: { $0.id == targetWindowID }) else {
+                return localizedAndroidOverflowString(
+                    androidKey: "copy_settings_to_window",
+                    fallbackKey: nil,
+                    default: "Window"
+                )
+            }
+            return windowCopySettingsTitle(targetWindow)
+        case .workspace:
+            return localizedAndroidOverflowString(
+                androidKey: "copy_settings_to_workspace",
+                fallbackKey: nil,
+                default: "Workspace"
+            )
+        case .global:
+            return localizedAndroidOverflowString(
+                androidKey: "copy_settings_to_global",
+                fallbackKey: nil,
+                default: "Global defaults"
+            )
+        }
+    }
+
+    private func windowCopySettingsTitle(_ window: Window) -> String {
+        let visibleWindows = windowManager.visibleWindows
+        let position = (visibleWindows.firstIndex(where: { $0.id == window.id }) ?? 0) + 1
+        let controller = self.controller(for: window.id)
+        let document = controller?.activeModuleName(for: controller?.currentCategory ?? .bible)
+            ?? window.pageManager?.bibleDocument
+            ?? ""
+        let reference: String
+        if let controller {
+            reference = "\(controller.currentBook) \(controller.currentChapter)"
+        } else if let chapter = window.pageManager?.bibleChapterNo {
+            reference = "\(chapter)"
+        } else {
+            reference = ""
+        }
+        return String(
+            format: localizedAndroidOverflowString(
+                androidKey: "copy_settings_to_window",
+                fallbackKey: nil,
+                default: "Window %1$d (%2$@:%3$@)"
+            ),
+            position,
+            document,
+            reference
+        )
+    }
+
+    /**
      Opens Downloads and seeds its free-text search from an Android `download://` target.
 
      - Parameters:
@@ -1478,7 +1631,7 @@ public struct BibleReaderView: View {
             reloadBehaviorPreferences()
         case .downloads:
             handleDownloadsDestinationClosed()
-        case .globalTextOptions, .workspaceTextOptions, .windowTextOptions:
+        case .globalTextOptions, .workspaceTextOptions, .windowTextOptions, .windowColorSettings:
             break
         }
     }
@@ -2342,6 +2495,25 @@ public struct BibleReaderView: View {
             onShowBookmarks: { presentReaderSheet(.bookmarks, from: window.id) },
             onShowSettings: { presentSettings(from: window.id) },
             onShowWindowTextOptions: { presentWindowTextOptions(from: window.id) },
+            onShowWindowColorSettings: { presentWindowColorSettings(from: window.id) },
+            onToggleWindowSectionTitles: {
+                toggleDisplaySetting(\.showSectionTitles, default: true, for: window)
+            },
+            onShowWindowStrongsMode: {
+                presentWindowStrongsMode(from: window.id)
+            },
+            onToggleWindowVerseNumbers: {
+                toggleDisplaySetting(\.showVerseNumbers, default: true, for: window)
+            },
+            onCopyWindowSettingsToWindow: { targetWindowID in
+                presentTextSettingsCopy(from: window.id, target: .window(targetWindowID))
+            },
+            onCopyWindowSettingsToWorkspace: {
+                presentTextSettingsCopy(from: window.id, target: .workspace)
+            },
+            onCopyWindowSettingsToGlobal: {
+                presentTextSettingsCopy(from: window.id, target: .global)
+            },
             onShowDownloads: { initialSearchText in
                 presentDownloads(from: window.id, initialSearchText: initialSearchText)
             },
@@ -3092,7 +3264,21 @@ public struct BibleReaderView: View {
        only in-memory refreshes. SwiftData save failures are intentionally swallowed.
      */
     private func applyStrongsMode(_ mode: Int) {
-        let targetWindow = windowManager.activeWindow
+        applyStrongsMode(mode, for: windowManager.activeWindow)
+    }
+
+    /**
+     Applies a Strong's display mode to a specific window and refreshes that pane.
+
+     - Parameters:
+       - mode: Raw Vue.js/config mode value (`0...3`) matching `StrongsMode`.
+       - window: Pane whose window-scoped settings should be changed.
+     - Side effects: Persists the updated Strong's mode through the window-scope settings helper and
+       refreshes the affected pane.
+     - Failure modes: Missing window or page manager falls back through the persistence helper.
+     */
+    private func applyStrongsMode(_ mode: Int, for window: Window?) {
+        let targetWindow = window
         let previousWindowSettings = resolvedDisplaySettings(for: targetWindow)
         var nextWindowSettings = previousWindowSettings
         nextWindowSettings.strongsMode = mode
@@ -3117,7 +3303,26 @@ public struct BibleReaderView: View {
         _ keyPath: WritableKeyPath<TextDisplaySettings, Bool?>,
         default defaultValue: Bool
     ) {
-        let targetWindow = windowManager.activeWindow
+        toggleDisplaySetting(keyPath, default: defaultValue, for: windowManager.activeWindow)
+    }
+
+    /**
+     Toggles one optional Boolean text-display field for a specific window.
+
+     - Parameters:
+       - keyPath: Writable `TextDisplaySettings` field to flip.
+       - defaultValue: Effective fallback used when the current value is unset.
+       - window: Pane whose window-scoped setting should be changed.
+     - Side effects: Persists the updated field through the window-scope settings helper and
+       refreshes the affected pane.
+     - Failure modes: Missing window results in an in-memory refresh only.
+     */
+    private func toggleDisplaySetting(
+        _ keyPath: WritableKeyPath<TextDisplaySettings, Bool?>,
+        default defaultValue: Bool,
+        for window: Window?
+    ) {
+        let targetWindow = window
         let previousWindowSettings = resolvedDisplaySettings(for: targetWindow)
         let currentValue = previousWindowSettings[keyPath: keyPath] ?? defaultValue
         var nextWindowSettings = previousWindowSettings
@@ -3127,6 +3332,21 @@ public struct BibleReaderView: View {
             for: targetWindow,
             previousResolvedSettings: previousWindowSettings
         )
+    }
+
+    /**
+     Opens the Strong's mode chooser for a specific pane.
+
+     - Parameter windowId: Pane whose Strong's setting should receive the selected value.
+     - Side effects: Makes the pane active so the existing chooser callback applies to it.
+     - Failure modes: Missing windows fall back to current active-window behavior.
+     */
+    private func presentWindowStrongsMode(from windowId: UUID) {
+        if let targetWindow = windowManager.allWindows.first(where: { $0.id == windowId }) {
+            windowManager.activeWindow = targetWindow
+            syncActiveDisplaySettings()
+        }
+        showReaderStrongsModeDialog = true
     }
 
     /**
@@ -3210,6 +3430,69 @@ public struct BibleReaderView: View {
             displaySettings = resolvedSettings
         }
         windowDisplaySettings = resolvedSettings
+        reloadBehaviorPreferences()
+    }
+
+    /**
+     Applies Android's selective Copy settings dialog result.
+
+     Android copies raw page-manager text-display values, field by field, into another window,
+     workspace, or global defaults. This method mirrors that raw override behavior and then refreshes
+     visible panes through the existing display-settings pipeline.
+
+     - Parameters:
+       - request: Source and target captured when the pane menu action was selected.
+       - fields: Checked text-display fields from the dialog.
+     - Side effects:
+       - mutates the selected target scope's text-display settings
+       - persists through SwiftData or `SettingsStore`
+       - refreshes visible pane controllers and active toolbar state
+     - Failure modes: Missing source/target windows or an empty field selection are ignored.
+     */
+    private func applyTextSettingsCopy(
+        _ request: TextSettingsCopyRequest,
+        fields: Set<TextDisplaySettingsCopyField>
+    ) {
+        guard !fields.isEmpty,
+              let sourceWindow = windowManager.allWindows.first(where: { $0.id == request.sourceWindowID }) else {
+            return
+        }
+
+        let sourceSettings = sourceWindow.pageManager?.textDisplaySettings ?? TextDisplaySettings()
+
+        switch request.target {
+        case .window(let targetWindowID):
+            guard let targetWindow = windowManager.allWindows.first(where: { $0.id == targetWindowID }),
+                  let targetPageManager = targetWindow.pageManager else {
+                return
+            }
+            let targetSettings = targetPageManager.textDisplaySettings ?? TextDisplaySettings()
+            targetPageManager.textDisplaySettings = targetSettings.copyingSelectedFields(
+                from: sourceSettings,
+                fields: fields
+            )
+            try? modelContext.save()
+        case .workspace:
+            let targetWorkspace = sourceWindow.workspace ?? windowManager.activeWorkspace
+            guard let targetWorkspace else { return }
+            let targetSettings = targetWorkspace.textDisplaySettings ?? TextDisplaySettings()
+            targetWorkspace.textDisplaySettings = targetSettings.copyingSelectedFields(
+                from: sourceSettings,
+                fields: fields
+            )
+            try? modelContext.save()
+        case .global:
+            let store = SettingsStore(modelContext: modelContext)
+            let targetSettings = globalDisplaySettings.copyingSelectedFields(
+                from: sourceSettings,
+                fields: fields
+            )
+            globalDisplaySettings = targetSettings
+            store.setGlobalTextDisplaySettings(targetSettings)
+        }
+
+        refreshVisibleControllerDisplaySettings()
+        syncActiveDisplaySettings()
         reloadBehaviorPreferences()
     }
 
