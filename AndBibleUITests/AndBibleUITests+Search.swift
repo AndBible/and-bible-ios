@@ -180,8 +180,10 @@ extension AndBibleUITests {
         addWindowTab(expectingOrder: 1, in: app, timeout: 15)
         let paneMenu = requireElement("windowPaneMenuButton::1", in: app, timeout: 10)
         tapElementReliably(paneMenu, timeout: 10)
-        let textOptionsAction = requireElement("windowPaneTextOptionsButton", in: app, timeout: 10)
-        tapElementReliably(textOptionsAction, timeout: 10)
+        let textOptionsSubmenu = requirePaneMenuItem("windowPaneMenuItem::textOptions", in: app, timeout: 10)
+        tapElementReliably(textOptionsSubmenu, timeout: 10)
+        let allTextOptionsAction = requirePaneMenuItem("windowPaneMenuItem::allTextOptions", in: app, timeout: 10)
+        tapElementReliably(allTextOptionsAction, timeout: 10)
 
         waitForElementValue("textDisplaySettingsScreen", toContain: "scope=window", in: app, timeout: 10)
         let workspaceLink = requireElement("textDisplayOpenWorkspaceSettingsButton", in: app, timeout: 10)
@@ -207,6 +209,7 @@ extension AndBibleUITests {
      * - Failure modes:
      *   - fails if the pane menu close action terminates the app
      *   - fails if the closed window tab remains visible after the close transaction settles
+     *   - fails if the remaining one-window pane loses Android's pane hamburger affordance
      *   - fails if the remaining one-window footer cannot create another window
      */
     func testPaneMenuCloseWindowKeepsReaderAlive() {
@@ -227,6 +230,7 @@ extension AndBibleUITests {
         waitForElementExistence("windowTabButton::1", in: app, shouldExist: false, timeout: 10)
         let finalState = readerRenderedContentStateValue(in: app) ?? "nil"
         XCTAssertFalse(finalState.contains("windowOrder=none"), "Expected an active reader window after Close; state=\(finalState)")
+        XCTAssertTrue(requireElement("windowPaneMenuButton::0", in: app, timeout: 10).exists)
         XCTAssertTrue(requireElement("windowTabAddButton", in: app, timeout: 10).exists)
     }
 

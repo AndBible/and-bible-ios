@@ -199,7 +199,7 @@ struct BibleWindowPane: View {
         }
         .overlay(alignment: .topTrailing) {
             // Window menu button — matches Android's hamburger button in top-right of each pane
-            if !hideWindowButtons && (windowManager.visibleWindows.count > 1 || windowManager.allWindows.count > 1) {
+            if !hideWindowButtons && !windowManager.isMaximized {
                 windowMenuButton
                     .padding(6)
             }
