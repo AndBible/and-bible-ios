@@ -43,6 +43,7 @@
   "AndBibleUITests/AndBibleUITests/testAllTextOptionsOpensReaderTextDisplaySurface": "baseline",
   "AndBibleUITests/AndBibleUITests/testWorkspaceTextOptionsParentLinkOpensGlobalScope": "baseline",
   "AndBibleUITests/AndBibleUITests/testPaneAllTextOptionsOpensWindowScopeAndWorkspaceParentLink": "baseline",
+  "AndBibleUITests/AndBibleUITests/testPaneMenuCloseWindowKeepsReaderAlive": "baseline",
   "AndBibleUITests/AndBibleUITests/testApplicationPreferencesGlobalTextOptionsOpenGlobalScope": "baseline",
   "AndBibleUITests/AndBibleUITests/testSyncSettingsAdoptCreateConfirmationCreateChoiceSynchronizesFromVisibleWorkflow": "none",
   "AndBibleUITests/AndBibleUITests/testSyncSettingsMyDocumentsCategoryToggleStartsManualSyncPath": "none",

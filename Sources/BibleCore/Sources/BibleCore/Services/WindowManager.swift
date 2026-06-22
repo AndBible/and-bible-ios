@@ -322,9 +322,26 @@ public final class WindowManager {
         }
     }
 
-    /// Remove a window from the workspace.
+    /**
+     Removes a window from the active workspace.
+
+     The window is detached from published reader state before its SwiftData graph is deleted. That
+     ordering prevents SwiftUI from re-evaluating a pane with a deleted `Window` or cascaded
+     `PageManager` during the close transaction.
+     */
     public func removeWindow(_ window: Window) {
-        unregisterController(for: window.id)
+        let removedWindowId = window.id
+        let nextActiveWindow = visibleWindows.first { $0.id != removedWindowId }
+
+        unregisterController(for: removedWindowId)
+        if activeWorkspace?.maximizedWindowId == removedWindowId {
+            activeWorkspace?.maximizedWindowId = nil
+        }
+        visibleWindows.removeAll { $0.id == removedWindowId }
+        allWindows.removeAll { $0.id == removedWindowId }
+        if activeWindow?.id == removedWindowId {
+            activeWindow = nextActiveWindow ?? visibleWindows.first
+        }
         workspaceStore.delete(window)
         refreshWindows()
     }

@@ -76,6 +76,7 @@ struct BibleWindowPaneMenuPopup: View {
                     }
                 }
             }
+            .accessibilityIdentifier("windowPaneMenu")
             .frame(maxHeight: maximumHeight)
         }
         .onChange(of: items) { _, _ in
