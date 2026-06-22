@@ -18,6 +18,7 @@ import CoreGraphics
  - fixed button width for each document window
  - occupied strip width including horizontal padding, inter-button spacing, and the active footer
    control for the current window mode
+ - reserved footer height for the reader content when Android keeps the restore buttons visible
 
  Side effects: none.
  Failure modes: occupied-width calculations clamp negative widths and negative window counts into
@@ -46,6 +47,9 @@ enum WindowTabBarLayout {
     /// Full footer height needed by a 40pt button plus vertical padding.
     static let barHeight: CGFloat = fixedButtonSize + (verticalPadding * 2)
 
+    /// Reader layout height reserved when Android collapses the multi-window restore strip.
+    static let collapsedBarHeight: CGFloat = 0
+
     /// Android `hideRestoreButtonExtension` width that expands the restore-toggle tap target.
     static let restoreToggleTouchExtensionWidth: CGFloat = 20
 
@@ -57,6 +61,9 @@ enum WindowTabBarLayout {
 
     /// Footer control width used when Android shows the multi-window restore-strip toggle.
     static let multiWindowControlWidth: CGFloat = restoreToggleTouchExtensionWidth + restoreToggleButtonWidth
+
+    /// Width of the hidden restore-strip affordance left reachable at the trailing screen edge.
+    static let collapsedControlWidth: CGFloat = multiWindowControlWidth + horizontalPadding
 
     /**
      Returns the Android-parity fixed tab width for the current footer.
@@ -90,5 +97,31 @@ enum WindowTabBarLayout {
             + multiWindowControlWidth
             + (buttonWidth * CGFloat(count))
             + (spacing * CGFloat(count))
+    }
+
+    /**
+     Computes the height that should be reserved below the reader content.
+
+     Android's WebView bottom offset includes `windowButtonHeight` only while the restore buttons
+     are visible. When the multi-window strip is hidden, Android translates the button container so
+     only the restore affordance remains reachable, but it does not reserve button height for the
+     document content. Single-window mode remains expanded because Android forces
+     `restoreButtonsVisible = true` while showing the add-window button.
+
+     - Parameters:
+       - restoreButtonsVisible: Persisted Android restore-strip visibility flag.
+       - isSingleWindowFooterMode: Whether the footer is showing Android's single-window add button.
+     - Returns: Full footer height when content should reserve the button strip, otherwise zero.
+     - Side effects: None.
+     - Failure modes: None; this is a pure mapping of Android footer state to layout height.
+     */
+    static func reservedHeight(
+        restoreButtonsVisible: Bool,
+        isSingleWindowFooterMode: Bool
+    ) -> CGFloat {
+        if isSingleWindowFooterMode || restoreButtonsVisible {
+            return barHeight
+        }
+        return collapsedBarHeight
     }
 }

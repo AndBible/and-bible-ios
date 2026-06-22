@@ -37,6 +37,61 @@ extension AndBibleTests {
     }
 
     /**
+     Protects Android's hidden restore-strip bottom offset contract.
+
+     Android removes `windowButtonHeight` from the WebView bottom offset when the multi-window
+     restore strip is hidden, while leaving only the hide/show affordance translated onto the
+     screen edge. iOS must not reserve a full-height bottom bar in that state because it shortens
+     the reader content differently than Android.
+     */
+    func testHiddenMultiWindowFooterDoesNotReserveReaderHeight() {
+        XCTAssertEqual(
+            WindowTabBarLayout.reservedHeight(
+                restoreButtonsVisible: false,
+                isSingleWindowFooterMode: false
+            ),
+            WindowTabBarLayout.collapsedBarHeight
+        )
+    }
+
+    /**
+     Protects Android's expanded and single-window footer height contract.
+
+     Android reserves `windowButtonHeight` while restore buttons are visible and forces the restore
+     strip visible in single-window mode so the add-window button remains a normal bottom control.
+     */
+    func testVisibleOrSingleWindowFooterReservesReaderHeight() {
+        XCTAssertEqual(
+            WindowTabBarLayout.reservedHeight(
+                restoreButtonsVisible: true,
+                isSingleWindowFooterMode: false
+            ),
+            WindowTabBarLayout.barHeight
+        )
+        XCTAssertEqual(
+            WindowTabBarLayout.reservedHeight(
+                restoreButtonsVisible: false,
+                isSingleWindowFooterMode: true
+            ),
+            WindowTabBarLayout.barHeight
+        )
+    }
+
+    /**
+     Protects the hidden restore affordance hit width.
+
+     Android leaves the 20dp extension plus 30dp arrow reachable when the strip is hidden; iOS adds
+     only its existing horizontal inset around that control and must not keep a full-width footer
+     surface visible.
+     */
+    func testCollapsedFooterOnlyKeepsRestoreAffordanceWidth() {
+        XCTAssertEqual(
+            WindowTabBarLayout.collapsedControlWidth,
+            WindowTabBarLayout.multiWindowControlWidth + WindowTabBarLayout.horizontalPadding
+        )
+    }
+
+    /**
      Protects the lower bound for dense tab sets.
 
      The footer should not shrink window buttons below their legible Android-style compact shape

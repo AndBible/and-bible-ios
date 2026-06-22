@@ -11,7 +11,9 @@ import BibleCore
  overlaid document/link/sync/pin indicators and tiny title/document labels. Multi-window mode
  prefixes those buttons with the persisted restore-strip hide/show arrow, while true single-window
  mode shows the add-window affordance instead. This view mirrors that structure instead of using
- variable-width iOS text chips.
+ variable-width iOS text chips. Hidden multi-window mode follows Android's WebView offset contract:
+ the full-width footer no longer reserves height, while the trailing restore affordance remains
+ reachable as an overlay.
 
  It also hosts typed-reference navigation for represented windows.
  */
@@ -56,7 +58,63 @@ struct WindowTabBar: View {
     var body: some View {
         let tabPalette = AndroidWindowTabPalette.resolved(for: surfacePalette)
         let restoreButtonsVisible = windowManager.activeWorkspace?.workspaceSettings?.restoreButtonsVisible ?? true
+        let singleWindowFooterMode = isSingleWindowFooterMode
+        let reservedHeight = WindowTabBarLayout.reservedHeight(
+            restoreButtonsVisible: restoreButtonsVisible,
+            isSingleWindowFooterMode: singleWindowFooterMode
+        )
+        let isCollapsed = reservedHeight == WindowTabBarLayout.collapsedBarHeight
 
+        Color.clear
+            .frame(height: reservedHeight)
+            .overlay(alignment: .bottomTrailing) {
+                footerStrip(
+                    tabPalette: tabPalette,
+                    restoreButtonsVisible: restoreButtonsVisible,
+                    isSingleWindowFooterMode: singleWindowFooterMode,
+                    isCollapsed: isCollapsed
+                )
+            }
+            .accessibilityIdentifier("windowTabBar")
+            .foregroundStyle(surfacePalette.foregroundColor)
+            .alert(String(localized: "go_to_reference"), isPresented: $showGoToRefAlert) {
+                TextField(String(localized: "go_to_reference_placeholder"), text: $goToRefText)
+                Button(String(localized: "go")) {
+                    if let w = goToRefWindow {
+                        if !(onGoToTypedRef?(w, goToRefText) ?? false) {
+                            onShowToast?(String(localized: "go_to_reference_invalid"))
+                        }
+                    }
+                }
+                Button(String(localized: "browse"), role: nil) {
+                    onShowBookChooser?()
+                }
+                Button(String(localized: "cancel"), role: .cancel) { }
+            } message: {
+                Text(String(localized: "go_to_reference_message"))
+            }
+    }
+
+    /**
+     Builds the Android restore-button strip surface.
+
+     - Parameters:
+       - tabPalette: Android-derived footer colors.
+       - restoreButtonsVisible: Persisted restore-strip visibility flag.
+       - isSingleWindowFooterMode: Whether only Android's add-window affordance is shown.
+       - isCollapsed: Whether the reader should reserve no bottom footer height.
+     - Returns: A footer strip that either fills the screen width or leaves only the restore
+       affordance reachable at the trailing edge when collapsed.
+     - Side effects: Child button actions may mutate workspace/window state.
+     - Failure modes: Child actions are idempotent and no-op when their required workspace/window
+       state is unavailable.
+     */
+    private func footerStrip(
+        tabPalette: AndroidWindowTabPalette,
+        restoreButtonsVisible: Bool,
+        isSingleWindowFooterMode: Bool,
+        isCollapsed: Bool
+    ) -> some View {
         GeometryReader { geometry in
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: WindowTabBarLayout.spacing) {
@@ -78,26 +136,12 @@ struct WindowTabBar: View {
                 .frame(minWidth: geometry.size.width, alignment: .trailing)
             }
         }
-        .frame(height: WindowTabBarLayout.barHeight)
-        .accessibilityIdentifier("windowTabBar")
-        .foregroundStyle(surfacePalette.foregroundColor)
-        .background(surfacePalette.backgroundColor)
-        .alert(String(localized: "go_to_reference"), isPresented: $showGoToRefAlert) {
-            TextField(String(localized: "go_to_reference_placeholder"), text: $goToRefText)
-            Button(String(localized: "go")) {
-                if let w = goToRefWindow {
-                    if !(onGoToTypedRef?(w, goToRefText) ?? false) {
-                        onShowToast?(String(localized: "go_to_reference_invalid"))
-                    }
-                }
-            }
-            Button(String(localized: "browse"), role: nil) {
-                onShowBookChooser?()
-            }
-            Button(String(localized: "cancel"), role: .cancel) { }
-        } message: {
-            Text(String(localized: "go_to_reference_message"))
-        }
+        .frame(
+            width: isCollapsed ? WindowTabBarLayout.collapsedControlWidth : nil,
+            height: WindowTabBarLayout.barHeight
+        )
+        .frame(maxWidth: isCollapsed ? nil : .infinity, alignment: .trailing)
+        .background(isCollapsed ? Color.clear : surfacePalette.backgroundColor)
     }
 
     /// Whether Android would show only the add-window footer control.
