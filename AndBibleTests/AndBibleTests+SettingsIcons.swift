@@ -539,6 +539,53 @@ extension AndBibleTests {
     }
 
     /**
+     Protects the reader chrome state boundary for Android workspace color.
+
+     Android persists workspace color as `WorkspaceSettings.workspaceColor`, outside the
+     `TextDisplaySettings` value that drives page content colors. The SwiftUI reader therefore
+     needs a separate chrome-color state value instead of relying on text-display state changes to
+     invalidate the toolbar after a workspace-color edit.
+
+     Failure meaning:
+     - workspace color edits can persist without repainting the native toolbar
+     - active-window workspace color can be ignored in favor of an unrelated fallback workspace
+     - legacy nil values no longer use Android's `#ff444444` default
+     */
+    func testReaderWorkspaceChromeColorResolvesFromWorkspaceMetadata() {
+        let activeWorkspace = Workspace(name: "Active")
+        activeWorkspace.workspaceColor = Int(Int32(bitPattern: 0xFF224466))
+
+        let windowWorkspace = Workspace(name: "Window")
+        windowWorkspace.workspaceColor = Int(Int32(bitPattern: 0xFF336699))
+        let activeWindow = Window()
+        activeWindow.workspace = windowWorkspace
+
+        XCTAssertEqual(
+            ReaderWorkspaceChromeColor.resolved(
+                activeWindow: activeWindow,
+                activeWorkspace: activeWorkspace
+            ),
+            windowWorkspace.workspaceColor
+        )
+        XCTAssertEqual(
+            ReaderWorkspaceChromeColor.resolved(
+                activeWindow: nil,
+                activeWorkspace: activeWorkspace
+            ),
+            activeWorkspace.workspaceColor
+        )
+
+        activeWorkspace.workspaceColor = nil
+        XCTAssertEqual(
+            ReaderWorkspaceChromeColor.resolved(
+                activeWindow: nil,
+                activeWorkspace: activeWorkspace
+            ),
+            Workspace.defaultWorkspaceColor
+        )
+    }
+
+    /**
      Verifies iOS normalizes background-noise edits to Android's seekbar range.
 
      Android `noise_day` and `noise_night` use a `SeekBarPreference` with max 100 and default 0.

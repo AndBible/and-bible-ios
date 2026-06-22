@@ -4,6 +4,32 @@ import SwiftUI
 import BibleCore
 
 /**
+ Resolves Android's workspace chrome color from workspace metadata.
+
+ Android stores `workspace_color` on `WorkspaceSettings`, not in text-display colors. The SwiftUI
+ reader keeps the resolved value as its own chrome state so editing the workspace color can repaint
+ native toolbar surfaces even when the page text/background settings did not change.
+
+ Inputs:
+ - `activeWindow`: preferred pane context. When present, its workspace owns the reader chrome.
+ - `activeWorkspace`: fallback workspace used when no active window is available.
+
+ Output:
+ - a signed ARGB workspace color, falling back to Android's `#ff444444` default for nil legacy data
+
+ Side effects: none.
+ Failure modes: missing window/workspace metadata returns the Android default.
+ Determinism: pure value derivation with no persistence or asynchronous work.
+ */
+enum ReaderWorkspaceChromeColor {
+    static func resolved(activeWindow: Window?, activeWorkspace: Workspace?) -> Int {
+        activeWindow?.workspace?.workspaceColor
+            ?? activeWorkspace?.workspaceColor
+            ?? Workspace.defaultWorkspaceColor
+    }
+}
+
+/**
  Resolves the native reader shell colors from the same day/night theme settings used by the WebView.
 
  The Vue reader receives `TextDisplaySettings` through the bridge and applies those ARGB colors to

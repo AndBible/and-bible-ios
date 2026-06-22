@@ -265,6 +265,9 @@ public struct BibleReaderView: View {
     /// Workspace-scoped text-display state edited from Android's main reader All Text Options route.
     @State private var workspaceDisplaySettings: TextDisplaySettings = .appDefaults
 
+    /// Workspace metadata color currently driving Android-parity reader toolbar chrome.
+    @State private var workspaceChromeColor: Int = Workspace.defaultWorkspaceColor
+
     /// Effective night-mode value currently applied to pane controllers and overlays.
     @State private var nightMode = false
 
@@ -481,7 +484,9 @@ public struct BibleReaderView: View {
             },
             set: { newValue in
                 let workspace = panePresentationTargetWindow?.workspace ?? windowManager.activeWorkspace
-                workspace?.workspaceColor = newValue ?? Workspace.defaultWorkspaceColor
+                let resolvedColor = newValue ?? Workspace.defaultWorkspaceColor
+                workspace?.workspaceColor = resolvedColor
+                workspaceChromeColor = resolvedColor
             }
         )
     }
@@ -604,8 +609,7 @@ public struct BibleReaderView: View {
         ReaderThemeSurfacePalette(
             settings: displaySettings,
             nightMode: nightMode,
-            workspaceColor: windowManager.activeWindow?.workspace?.workspaceColor
-                ?? windowManager.activeWorkspace?.workspaceColor,
+            workspaceColor: workspaceChromeColor,
             monochromeMode: monochromeModePref
         )
     }
@@ -3333,6 +3337,10 @@ public struct BibleReaderView: View {
     /// Re-syncs the focused toolbar/settings state from the current active window.
     private func syncActiveDisplaySettings() {
         displaySettings = resolvedDisplaySettings(for: windowManager.activeWindow)
+        workspaceChromeColor = ReaderWorkspaceChromeColor.resolved(
+            activeWindow: windowManager.activeWindow,
+            activeWorkspace: windowManager.activeWorkspace
+        )
         workspaceDisplaySettings = resolvedWorkspaceDisplaySettings(
             for: panePresentationTargetWindow?.workspace ?? windowManager.activeWorkspace
         )
