@@ -55,7 +55,8 @@ extension AndBibleUITests {
      Verifies that bookmark navigation from a third window updates only that pane's rendered content.
      *
      * - Side effects:
-     *   - launches the seeded bookmark-navigation fixture with three visible reader windows
+     *   - launches the seeded bookmark-navigation-three-windows fixture with three visible reader
+     *     windows
      *   - activates the third window, opens the bookmark list from that pane, and selects the
      *     seeded `Exodus 2:1` row
      *   - switches back to the first window to confirm its rendered content stayed on `Genesis 1`
@@ -102,8 +103,8 @@ extension AndBibleUITests {
      mutating tab chrome.
      *
      * - Side effects:
-     *   - launches the commentary-module fixture with three visible reader windows and activates
-     *     the third one
+     *   - launches the commentary-module-three-windows fixture with three visible reader windows
+     *     and activates the third one
      *   - switches that third pane into commentary and then back into Bible using the real toolbar
      *     document controls and, when needed, the Android-parity quick selector or full module
      *     picker
