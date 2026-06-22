@@ -142,6 +142,7 @@ struct WindowTabBar: View {
         .buttonStyle(.plain)
         .disabled(isAddWindowDisabled)
         .accessibilityIdentifier("windowTabAddButton")
+        .accessibilityLabel(String(localized: "new_window", defaultValue: "New window"))
         .accessibilityValue(
             isAddWindowDisabled
                 ? String(localized: "reader_window_opening", defaultValue: "Window opening")
@@ -168,6 +169,12 @@ struct WindowTabBar: View {
         let iconName = isExpanded
             ? (isRTL ? "ToolbarRestoreButtonsLeft" : "ToolbarRestoreButtonsRight")
             : (isRTL ? "ToolbarRestoreButtonsRight" : "ToolbarRestoreButtonsLeft")
+        let label = isExpanded
+            ? String(localized: "hide_window_buttons_title", defaultValue: "Hide window buttons")
+            : String(localized: "show_window_buttons_title", defaultValue: "Show window buttons")
+        let hint = isExpanded
+            ? String(localized: "hide_window_buttons_hint", defaultValue: "Hides the window button strip")
+            : String(localized: "show_window_buttons_hint", defaultValue: "Shows the window button strip")
 
         return Button {
             setRestoreButtonsVisible(!isExpanded)
@@ -190,6 +197,8 @@ struct WindowTabBar: View {
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("windowTabRestoreToggleButton")
+        .accessibilityLabel(label)
+        .accessibilityHint(hint)
         .accessibilityValue(isExpanded ? "expanded" : "collapsed")
     }
 

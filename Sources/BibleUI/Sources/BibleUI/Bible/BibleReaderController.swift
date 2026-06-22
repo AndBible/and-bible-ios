@@ -1592,7 +1592,9 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      - Side effects: Mutates `currentCategory`, category-specific controller fields, active
        `PageManager` fields, and may invoke `onPersistState`.
      - Failure modes: Requests without `pageCategory` fall back to the previous transient Bible
-       identity and do not persist page-manager state.
+       identity and do not persist page-manager state. General-book requests without a non-empty
+       durable document/key update only the transient controller category so malformed bridge
+       payloads cannot erase the last restorable Android `Multi` key.
      */
     private func applyTransientPageIdentity(_ request: TransientMultiDocumentRequest) {
         guard let pageCategory = request.pageCategory else {
@@ -1604,15 +1606,22 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         if pageCategory == .generalBook {
             activeGeneralBookModule = nil
             activeGeneralBookModuleName = request.pageDocumentInitials
-            currentGeneralBookKey = request.pageKey
+            guard let pageDocumentInitials = request.pageDocumentInitials, !pageDocumentInitials.isEmpty,
+                  let pageKey = request.pageKey, !pageKey.isEmpty else {
+                return
+            }
+            currentGeneralBookKey = pageKey
+
+            guard let pm = activeWindow?.pageManager else { return }
+            pm.currentCategoryName = pageCategory.pageManagerKey
+            pm.generalBookDocument = pageDocumentInitials
+            pm.generalBookKey = pageKey
+            onPersistState?()
+            return
         }
 
         guard let pm = activeWindow?.pageManager else { return }
         pm.currentCategoryName = pageCategory.pageManagerKey
-        if pageCategory == .generalBook {
-            pm.generalBookDocument = request.pageDocumentInitials
-            pm.generalBookKey = request.pageKey
-        }
         onPersistState?()
     }
 

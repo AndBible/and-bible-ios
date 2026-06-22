@@ -967,6 +967,39 @@ extension AndBibleTests {
     }
 
     /**
+     Protects restored Android `Multi` keys from malformed transient result payloads.
+
+     Android's durable links-window restore key is the `BookAndKeyList` string stored in the general
+     book page. iOS may still receive malformed transient JSON from a bridge path, but that should not
+     overwrite the last restorable key with `nil`. The setup restores an existing Android `Multi`
+     page, then loads a malformed multi-reference payload that cannot produce a new
+     `BookAndKeyList`. The expected result is no durable PageManager mutation; a failure means one
+     bad transient render can make the links window unrestorable after restart.
+     */
+    @MainActor
+    func testMalformedMultiReferenceDocumentDoesNotEraseRestoredAndroidMultiKey() {
+        let controller = BibleReaderController(bridge: BibleBridge())
+        let window = Window(isSynchronized: false, isLinksWindow: true)
+        let pageManager = PageManager(id: window.id, currentCategoryName: DocumentCategory.generalBook.pageManagerKey)
+        pageManager.generalBookDocument = "Multi"
+        pageManager.generalBookKey = "KJV:Gen.1.1||KJV:John.3.16"
+        window.pageManager = pageManager
+        controller.activeWindow = window
+        controller.restoreSavedPosition()
+        var persistCount = 0
+        controller.onPersistState = { persistCount += 1 }
+
+        controller.loadMultiReferenceDocument(#"{"id":"bad-multi","type":"multi"}"#)
+
+        XCTAssertEqual(controller.currentCategory, .generalBook)
+        XCTAssertEqual(controller.currentGeneralBookKey, "KJV:Gen.1.1||KJV:John.3.16")
+        XCTAssertEqual(pageManager.currentCategoryName, DocumentCategory.generalBook.pageManagerKey)
+        XCTAssertEqual(pageManager.generalBookDocument, "Multi")
+        XCTAssertEqual(pageManager.generalBookKey, "KJV:Gen.1.1||KJV:John.3.16")
+        XCTAssertEqual(persistCount, 0)
+    }
+
+    /**
      Protects restoration of Android's synthetic `Multi` document identity.
 
      Android persists links-window result pages as a general-book page whose document initials are
