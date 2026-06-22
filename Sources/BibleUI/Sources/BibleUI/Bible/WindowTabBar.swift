@@ -4,12 +4,12 @@ import SwiftUI
 import BibleCore
 
 /**
- Shows all workspace windows in a horizontal tab strip below the reader.
+ Shows all workspace windows in Android-style compact buttons below the reader.
 
- The tab bar reflects three window states:
- - active visible window: accent-highlighted border and green status dot
- - inactive visible window: neutral border and gray status dot
- - minimized window: dimmed pill with dashed border and restore-on-tap behavior
+ Android renders the footer from `window_button.xml`: each window is a fixed 40dp button with
+ overlaid document/link/sync/pin indicators and tiny title/document labels. This view mirrors that
+ structure instead of using variable-width iOS text chips, so opening several reader windows keeps
+ the full tab set visible on phone-width screens.
 
  It also hosts typed-reference navigation and the add-window affordance.
  */
@@ -46,29 +46,36 @@ struct WindowTabBar: View {
     }
 
     var body: some View {
+        let tabPalette = AndroidWindowTabPalette.resolved(for: surfacePalette)
+
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 6) {
+            HStack(spacing: WindowTabBarLayout.spacing) {
                 ForEach(windowManager.allWindows, id: \.id) { window in
-                    windowTab(for: window)
+                    windowTab(for: window, tabPalette: tabPalette)
                 }
 
-                // Add window button
                 Button {
                     guard !isAddWindowDisabled else { return }
                     windowManager.addWindow(from: windowManager.activeWindow)
                 } label: {
-                    Group {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(tabPalette.addButtonBackgroundColor)
+
                         if isAddWindowDisabled {
                             ProgressView()
                                 .controlSize(.small)
+                                .tint(tabPalette.windowButtonTextColor)
                         } else {
-                            Image(systemName: "plus")
-                                .font(.caption)
+                            ToolbarAssetIcon(name: "ToolbarWindowAdd", size: 24)
+                                .foregroundStyle(tabPalette.windowButtonTextColor)
                         }
                     }
-                    .foregroundStyle(surfacePalette.secondaryForegroundColor)
-                    .frame(width: 28, height: 28)
-                    .background(surfacePalette.controlFillColor, in: RoundedRectangle(cornerRadius: 6))
+                    .frame(width: WindowTabBarLayout.fixedButtonSize, height: WindowTabBarLayout.fixedButtonSize)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6)
+                            .strokeBorder(tabPalette.strokeColor, lineWidth: 1)
+                    )
                 }
                 .buttonStyle(.plain)
                 .disabled(isAddWindowDisabled)
@@ -79,9 +86,10 @@ struct WindowTabBar: View {
                         : ""
                 )
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
+            .padding(.horizontal, WindowTabBarLayout.horizontalPadding / 2)
+            .padding(.vertical, WindowTabBarLayout.verticalPadding)
         }
+        .frame(height: WindowTabBarLayout.barHeight)
         .accessibilityIdentifier("windowTabBar")
         .foregroundStyle(surfacePalette.foregroundColor)
         .background(surfacePalette.backgroundColor)
@@ -105,8 +113,8 @@ struct WindowTabBar: View {
 
     // MARK: - Window Tab
 
-    /// Builds the tab pill for one window, including context menu actions and state styling.
-    private func windowTab(for window: Window) -> some View {
+    /// Builds the Android-style compact button for one window, including context menu actions.
+    private func windowTab(for window: Window, tabPalette: AndroidWindowTabPalette) -> some View {
         let isMinimized = window.layoutState == "minimized"
         let isActive = !isMinimized && window.id == windowManager.activeWindow?.id
         let renderedState = renderedContentTabState(for: window)
@@ -119,6 +127,15 @@ struct WindowTabBar: View {
         let canSyncWindow = isWindowSyncable(window)
         let autoPinEnabled = windowManager.activeWorkspace?.workspaceSettings?.autoPin ?? false
         let canPinWindow = !window.isLinksWindow && !windowManager.isMaximized && !autoPinEnabled
+        let topCornerRadius: CGFloat = (window.isPinMode || window.isLinksWindow) ? 6 : 1
+        let tabShape = UnevenRoundedRectangle(
+            cornerRadii: RectangleCornerRadii(
+                topLeading: topCornerRadius,
+                bottomLeading: 0,
+                bottomTrailing: 0,
+                topTrailing: topCornerRadius
+            )
+        )
 
         return Button {
             if isMinimized {
@@ -127,50 +144,71 @@ struct WindowTabBar: View {
                 windowManager.activeWindow = window
             }
         } label: {
-            HStack(spacing: 4) {
-                // Status indicator dot
-                if isMinimized {
-                    // Minimized: small "eye.slash" icon instead of dot
-                    Image(systemName: "eye.slash")
-                        .font(.system(size: 8))
-                        .foregroundStyle(surfacePalette.secondaryForegroundColor.opacity(0.75))
+            ZStack(alignment: .topLeading) {
+                tabShape
+                    .fill(tabPalette.backgroundColor(isActive: isActive, isVisible: !isMinimized))
+
+                if windowManager.isMaximized {
+                    Image(systemName: "arrow.down.right.and.arrow.up.left")
+                        .font(.system(size: 18, weight: .medium))
+                        .foregroundStyle(tabPalette.windowButtonTextColor)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
-                    Circle()
-                        .fill(isActive ? Color.green : surfacePalette.secondaryForegroundColor)
-                        .frame(width: 6, height: 6)
-                }
+                    VStack(alignment: .leading, spacing: 0) {
+                        Color.clear
+                            .frame(height: 13)
 
-                ToolbarAssetIcon(name: icon, size: 12)
+                        Text(reference.isEmpty ? " " : reference)
+                            .font(.system(size: 8.5, weight: .medium))
+                            .foregroundStyle(tabPalette.windowButtonTextColor)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.45)
+                            .frame(height: 10, alignment: .leading)
 
-                Text(moduleName)
-                    .font(.caption.weight(isMinimized ? .regular : .semibold))
-                    .lineLimit(1)
+                        Text(moduleName)
+                            .font(.system(size: 12, weight: isMinimized ? .regular : .semibold))
+                            .foregroundStyle(tabPalette.windowButtonTextColor)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.45)
+                            .frame(height: 16, alignment: .leading)
+                    }
+                    .padding(.leading, 2)
+                    .padding(.trailing, 1)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
 
-                if !isMinimized && !reference.isEmpty {
-                    Text(reference)
-                        .font(.caption2)
-                        .foregroundStyle(surfacePalette.secondaryForegroundColor)
-                        .lineLimit(1)
+                    ToolbarAssetIcon(name: icon, size: 14)
+                        .foregroundStyle(window.isLinksWindow ? tabPalette.linksIconColor : tabPalette.categoryIconColor)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                        .padding(.top, 2)
+                        .padding(.trailing, 2)
+
+                    if canSyncWindow && window.isSynchronized {
+                        HStack(spacing: 0) {
+                            Image(systemName: "arrow.triangle.2.circlepath")
+                                .font(.system(size: 7, weight: .bold))
+                            Text("\(window.syncGroup + 1)")
+                                .font(.system(size: 7, weight: .bold))
+                        }
+                        .foregroundStyle(tabPalette.statusIconColor)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                        .padding(.top, 2)
+                        .padding(.leading, 1)
+                    }
+
                 }
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(isActive ? Color.accentColor.opacity(0.15) : Color.clear)
-            )
+            .frame(width: WindowTabBarLayout.fixedButtonSize, height: WindowTabBarLayout.fixedButtonSize)
+            .clipped()
             .overlay(
-                RoundedRectangle(cornerRadius: 8)
+                tabShape
                     .strokeBorder(
-                        isActive ? Color.accentColor
-                            : isMinimized ? surfacePalette.inactiveBorderColor.opacity(0.55)
-                            : surfacePalette.inactiveBorderColor,
+                        isActive ? tabPalette.activeStrokeColor : tabPalette.strokeColor,
                         style: isMinimized
                             ? StrokeStyle(lineWidth: 1, dash: [4, 3])
-                            : StrokeStyle(lineWidth: 1)
+                            : StrokeStyle(lineWidth: isActive ? 3 : 1)
                     )
             )
-            .opacity(isMinimized ? 0.5 : 1.0)
+            .opacity(isMinimized ? 0.62 : 1.0)
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("windowTabButton::\(window.orderNumber)")
@@ -512,5 +550,132 @@ struct WindowTabBar: View {
         let categoryName = pm.currentCategoryName
         return categoryName != DocumentCategory.generalBook.pageManagerKey
             && categoryName != DocumentCategory.epub.pageManagerKey
+    }
+}
+
+/**
+ Maps Android window-button resource colors into SwiftUI colors for the reader footer.
+
+ Android defines separate day/night resource values for bottom restore buttons and the add-window
+ button. This helper resolves the same colors from the active reader surface brightness so the iOS
+ footer follows Android's visual semantics without hard-coding unrelated SwiftUI accent colors.
+
+ Inputs:
+ - `ReaderThemeSurfacePalette`: active reader background/foreground pair used to infer whether the
+   Android day or night resource tuple should be used.
+
+ Outputs:
+ - button fill, stroke, text, category-icon, link-icon, and sync/status-icon colors
+
+ Side effects: none.
+ Failure modes: malformed ARGB inputs are handled by truncating to the same 32-bit representation
+   used elsewhere in the app's Android color bridge.
+ Determinism: pure color derivation; no user defaults, file I/O, or environment reads.
+ */
+private struct AndroidWindowTabPalette {
+    /// Fill used by visible window restore buttons.
+    let visibleButtonBackgroundColor: Color
+
+    /// Fill used by minimized or otherwise non-visible restore buttons.
+    let hiddenButtonBackgroundColor: Color
+
+    /// Fill used by the add-window button.
+    let addButtonBackgroundColor: Color
+
+    /// Neutral restore-button border color.
+    let strokeColor: Color
+
+    /// Active restore-button border color.
+    let activeStrokeColor: Color
+
+    /// Text color for compact title/document labels.
+    let windowButtonTextColor: Color
+
+    /// Tint for ordinary document category icons.
+    let categoryIconColor: Color
+
+    /// Tint for Android links-window icons.
+    let linksIconColor: Color
+
+    /// Tint for sync and pin overlays.
+    let statusIconColor: Color
+
+    /**
+     Resolves Android day/night window-button colors from the active reader surface.
+
+     - Parameter surfacePalette: Reader chrome palette derived from text display settings.
+     - Returns: An Android resource color tuple represented as SwiftUI colors.
+     - Side effects: None.
+     - Failure modes: None; color integer parsing is deterministic for all inputs.
+     */
+    static func resolved(for surfacePalette: ReaderThemeSurfacePalette) -> AndroidWindowTabPalette {
+        if isDarkSurface(surfacePalette.backgroundColorInt) {
+            return AndroidWindowTabPalette(
+                visibleButtonBackgroundColor: color(argb: 0xFF6A6A6A),
+                hiddenButtonBackgroundColor: color(argb: 0xFF2E2E2E),
+                addButtonBackgroundColor: color(argb: 0xB7525252),
+                strokeColor: color(argb: 0xFF686868),
+                activeStrokeColor: color(argb: 0xFF002AFF),
+                windowButtonTextColor: color(argb: 0xFF939393),
+                categoryIconColor: color(argb: 0xFF939393),
+                linksIconColor: color(argb: 0xFF7088FF),
+                statusIconColor: color(argb: 0xFF939393)
+            )
+        }
+
+        return AndroidWindowTabPalette(
+            visibleButtonBackgroundColor: color(argb: 0xFF535353),
+            hiddenButtonBackgroundColor: color(argb: 0xFF878787),
+            addButtonBackgroundColor: color(argb: 0xB7525252),
+            strokeColor: color(argb: 0xFF686868),
+            activeStrokeColor: color(argb: 0xFF002AFF),
+            windowButtonTextColor: color(argb: 0xFFE8E8E8),
+            categoryIconColor: color(argb: 0xFFAAAAAA),
+            linksIconColor: color(argb: 0xFF7088FF),
+            statusIconColor: color(argb: 0xFFE8E8E8)
+        )
+    }
+
+    /**
+     Returns the fill color for a document window button.
+
+     - Parameters:
+       - isActive: Whether the represented window is the active reader window.
+       - isVisible: Whether the represented window is currently visible rather than minimized.
+     - Returns: Android visible or hidden button fill color.
+     - Side effects: None.
+     - Failure modes: None.
+     */
+    func backgroundColor(isActive: Bool, isVisible: Bool) -> Color {
+        isActive || isVisible ? visibleButtonBackgroundColor : hiddenButtonBackgroundColor
+    }
+
+    /**
+     Converts an Android unsigned ARGB resource value into SwiftUI `Color`.
+
+     - Parameter argb: Android ARGB resource value, including alpha.
+     - Returns: SwiftUI color using the app's signed-ARGB bridge initializer.
+     - Side effects: None.
+     - Failure modes: None; bit-pattern conversion preserves all 32 bits.
+     */
+    private static func color(argb: UInt32) -> Color {
+        Color(argbInt: Int(Int32(bitPattern: argb)))
+    }
+
+    /**
+     Classifies the active reader surface as dark or light for Android resource selection.
+
+     - Parameter argbInt: Signed Android ARGB integer from `ReaderThemeSurfacePalette`.
+     - Returns: `true` when relative luminance is below the midpoint.
+     - Side effects: None.
+     - Failure modes: None; invalid sign-extension cases are normalized by truncating to 32 bits.
+     */
+    private static func isDarkSurface(_ argbInt: Int) -> Bool {
+        let value = UInt32(bitPattern: Int32(truncatingIfNeeded: argbInt))
+        let red = Double((value >> 16) & 0xFF)
+        let green = Double((value >> 8) & 0xFF)
+        let blue = Double(value & 0xFF)
+        let luminance = ((0.2126 * red) + (0.7152 * green) + (0.0722 * blue)) / 255
+        return luminance < 0.5
     }
 }
