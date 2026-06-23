@@ -2611,6 +2611,43 @@ extension AndBibleTests {
     }
 
     /**
+     Protects the synchronized-scroll feedback state machine used by reader panes.
+
+     Android keeps secondary synchronized panes passive until explicit user interaction, including
+     when a target scroll arrives before the Vue client is ready. The setup drives the extracted
+     state machine without a WebView: it defers a target ordinal, promotes it after client-ready
+     replay, acknowledges intermediate and matching callbacks, and finally clears through explicit
+     interaction. The expected result is that sync-origin callbacks and native deltas stay passive
+     until interaction. A failure means the state owner can reintroduce target-pane ping-pong even
+     when controller-level tests pass through incidental state.
+     */
+    func testReaderSynchronizedScrollCoordinatorPreservesPassiveTargetStateUntilInteraction() {
+        let coordinator = BibleReaderSynchronizedScrollCoordinator()
+
+        XCTAssertTrue(coordinator.shouldTreatNativeScrollDeltaAsUserInteraction)
+
+        coordinator.deferUntilClientReady(ordinal: 105)
+        XCTAssertFalse(coordinator.shouldTreatNativeScrollDeltaAsUserInteraction)
+
+        let deferredOrdinal = coordinator.consumeDeferredClientReadyOrdinalForReplay()
+        XCTAssertEqual(deferredOrdinal, 105)
+        if let deferredOrdinal {
+            coordinator.markClientReadyReplayPending(ordinal: deferredOrdinal)
+        }
+
+        XCTAssertTrue(coordinator.acknowledgeVisibleOrdinal(104))
+        XCTAssertFalse(coordinator.shouldTreatNativeScrollDeltaAsUserInteraction)
+        XCTAssertTrue(coordinator.acknowledgeVisibleOrdinal(105))
+        XCTAssertFalse(coordinator.shouldTreatNativeScrollDeltaAsUserInteraction)
+        XCTAssertTrue(coordinator.acknowledgeVisibleOrdinal(106))
+
+        coordinator.clearForUserInteraction()
+
+        XCTAssertTrue(coordinator.shouldTreatNativeScrollDeltaAsUserInteraction)
+        XCTAssertFalse(coordinator.acknowledgeVisibleOrdinal(105))
+    }
+
+    /**
      Protects Android's secondary-window synchronized scroll contract.
 
      Android posts a secondary scroll event to synced inactive windows and does not let the web
