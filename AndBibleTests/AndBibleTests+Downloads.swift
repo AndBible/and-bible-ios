@@ -24,6 +24,28 @@ extension AndBibleTests {
         XCTAssertEqual(deleteIndex.message, "Delete the search index for King James Version?")
     }
 
+    /**
+     Verifies Downloads status-slot icons preserve Android's NOT_INSTALLED versus UPGRADE_AVAILABLE
+     distinction.
+
+     Android `DocumentListItem.updateControlState` clears the status icon for
+     `DocumentInstallStatus.NOT_INSTALLED` and only shows `ic_arrow_upward_amber_24dp` for
+     `UPGRADE_AVAILABLE`. A failure means iOS is visually reporting ordinary installable modules as
+     updates even though row taps should still install them.
+     */
+    func testModuleBrowserStatusSlotPresentationKeepsInstallableDistinctFromUpdate() {
+        XCTAssertEqual(
+            ModuleBrowserStatusSlotPresentation(status: .installable).statusIconSystemName,
+            nil
+        )
+        XCTAssertFalse(ModuleBrowserStatusSlotPresentation(status: .installable).isActionControl)
+        XCTAssertEqual(
+            ModuleBrowserStatusSlotPresentation(status: .updateAvailable).statusIconSystemName,
+            "arrow.up.circle.fill"
+        )
+        XCTAssertTrue(ModuleBrowserStatusSlotPresentation(status: .updateAvailable).isActionControl)
+    }
+
     func testSearchIndexDeleteIndexAwaitsQueuedMutation() async throws {
         let databaseURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("search-index-\(UUID().uuidString).sqlite")
