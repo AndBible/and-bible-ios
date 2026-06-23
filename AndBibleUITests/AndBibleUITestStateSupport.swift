@@ -188,14 +188,10 @@ extension AndBibleUITests {
                 }
                 return prompt.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.52))
             case "workspaceNamePromptTextField":
-                guard let prompt = firstExistingElement(
-                    workspaceNamePromptScreenCandidates(in: app),
-                    timeout: 0.2
-                ),
-                    elementFrameIsUsable(prompt.frame) else {
-                    return nil
-                }
-                return prompt.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.18))
+                // The workspace prompt resolver already found the text field. Re-sampling the
+                // custom SwiftUI prompt root for its frame can wedge hosted XCTest snapshots, so
+                // let `focusResolvedPromptTextEntryElement` use the resolved field directly.
+                return nil
             default:
                 return nil
             }

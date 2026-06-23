@@ -58,12 +58,14 @@ class WorkspacePromptUITestContractTests(unittest.TestCase):
         self.assertNotIn("prompt.textFields", candidates_body)
 
     def test_workspace_prompt_screen_uses_prompt_specific_container_lookup(self) -> None:
-        """The prompt surface lookup must not ask XCTest to resolve absent scroll/list containers.
+        """The prompt surface lookup must stay bounded and must not drive text-entry focus.
 
         The CI shard failure timed out while `waitForAnyElement(["workspaceNamePromptScreen"])`
         evaluated generic table/collection/scroll candidates before reaching the SwiftUI prompt's
-        actual accessibility node. A failure here means the create-workspace test can regress to
-        the hosted XCTest snapshot path that stalls before the field lookup starts.
+        actual accessibility node. A later shard failure showed that even the bounded prompt-root
+        query can wedge if the typing helper reads the root frame for a tap coordinate after the
+        text field is already resolved. A failure here means the create-workspace test can regress
+        to a hosted XCTest snapshot path that stalls before text entry.
         """
         source = (
             REPO_ROOT / "AndBibleUITests" / "AndBibleUITestElementSupport.swift"
@@ -87,9 +89,10 @@ class WorkspacePromptUITestContractTests(unittest.TestCase):
         self.assertIn("app.otherElements[identifier].firstMatch", prompt_candidates_body)
         self.assertNotIn("app.collectionViews[identifier]", prompt_candidates_body)
         self.assertNotIn("app.scrollViews[identifier]", prompt_candidates_body)
-        self.assertIn("workspaceNamePromptScreenCandidates(in: app)", coordinate_body)
+        self.assertNotIn("workspaceNamePromptScreenCandidates(in: app)", coordinate_body)
         self.assertNotIn('app.collectionViews["workspaceNamePromptScreen"]', coordinate_body)
         self.assertNotIn('app.scrollViews["workspaceNamePromptScreen"]', coordinate_body)
+        self.assertIn("return nil", coordinate_body)
         self.assertIn(
             'case "workspaceNamePromptScreen":\n'
             "            return workspaceNamePromptScreenCandidates(in: app)",
