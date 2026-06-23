@@ -6853,22 +6853,36 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     /// Fixed UUID for the "Unlabeled" system label, sent to Vue.js so bookmarks always have a valid label reference.
     private static let unlabeledLabelId = BibleCore.Label.unlabeledId.uuidString
 
-    /// Recently used label IDs (most recent first, max 5).
-    private var recentLabelIds: [String] = []
+    /// Owns recent-label ordering, de-duplication, and persisted settings representation.
+    private var recentLabelCoordinator = BibleReaderRecentLabelCoordinator()
 
-    /// Track a label as recently used (for Vue.js recentLabels config).
+    /**
+     Delegates recent-label tracking for bookmark actions that selected or created a label.
+
+     - Parameter labelId: Opaque label UUID string produced by the bookmark action coordinator.
+     - Side effects: Updates the recent-label coordinator and persists the joined label IDs through
+       `SettingsStore` using the legacy key consumed by reader configuration.
+     - Failure modes: If `settingsStore` is unavailable, the in-memory recent-label list still
+       updates for the current config payload, matching other controller-owned optional stores.
+     */
     private func trackRecentLabel(_ labelId: String) {
-        recentLabelIds.removeAll { $0 == labelId }
-        recentLabelIds.insert(labelId, at: 0)
-        if recentLabelIds.count > 5 { recentLabelIds = Array(recentLabelIds.prefix(5)) }
-        // Persist to settings
-        settingsStore?.setString("recent_labels", value: recentLabelIds.joined(separator: ","))
+        recentLabelCoordinator.track(labelId) { [settingsStore] persistedValue in
+            settingsStore?.setString(BibleReaderRecentLabelCoordinator.settingsKey, value: persistedValue)
+        }
     }
 
-    /// Load recent label IDs from settings.
+    /**
+     Loads recently used bookmark labels before reader configuration is emitted to Vue.
+
+     - Side effects: Reads `SettingsStore` and updates `recentLabelCoordinator` when the legacy
+       setting exists and is non-empty.
+     - Failure modes: Missing or empty settings leave the coordinator unchanged, preserving the
+       prior controller behavior.
+     */
     private func loadRecentLabels() {
-        guard let stored = settingsStore?.getString("recent_labels"), !stored.isEmpty else { return }
-        recentLabelIds = stored.components(separatedBy: ",")
+        recentLabelCoordinator.load(
+            storedValue: settingsStore?.getString(BibleReaderRecentLabelCoordinator.settingsKey)
+        )
     }
 
     /**
@@ -7301,7 +7315,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             favouriteLabelIds: bookmarkService?.allLabels()
                 .filter { $0.favourite }
                 .map { $0.id.uuidString } ?? [],
-            recentLabelIds: recentLabelIds,
+            recentLabelIds: recentLabelCoordinator.labelIds,
             studyPadCursors: activeWindow?.workspace?.workspaceSettings?.studyPadCursors ?? [:],
             autoAssignLabelIds: activeWindow?.workspace?.workspaceSettings?.autoAssignLabels ?? [],
             hiddenCompareDocuments: currentHiddenCompareDocuments(),
