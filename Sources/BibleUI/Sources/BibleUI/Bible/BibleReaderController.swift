@@ -567,6 +567,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     var speakService: SpeakService?
     /// Speech-specific collaborator that builds TTS payloads and owns word-highlight state.
     private let speechCoordinator = BibleReaderSpeechCoordinator()
+    /// SWORD setup collaborator that owns manager option mapping and module-state projection.
+    private let swordCoordinator = BibleReaderSwordCoordinator()
     /// Workspace store for history recording
     var workspaceStore: WorkspaceStore?
     /// The current window (for history recording)
@@ -2196,67 +2198,70 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     private func configureSwordManager(_ mgr: SwordManager) {
         swordManager = mgr
 
-        // Enable headings and verse-level rendering
-        mgr.setGlobalOption(.headings, enabled: true)
-        mgr.setGlobalOption(.redLetterWords, enabled: true)
-        applySwordOptions()
-
-        let modules = mgr.installedModules()
-        logger.info("SWORD found \(modules.count) installed modules")
-        for mod in modules {
+        let state = swordCoordinator.configure(
+            manager: mgr,
+            selection: currentSwordSelection(),
+            displaySettings: displaySettings
+        )
+        logger.info("SWORD found \(state.installedModules.count) installed modules")
+        for mod in state.installedModules {
             let hasStrongs = mod.features.contains(.strongsNumbers)
             logger.info("  Module: \(mod.name) (\(mod.description)) [\(mod.category.rawValue)] strongs=\(hasStrongs)")
         }
 
-        installedBibleModules = modules.filter { $0.category == .bible }
-        installedCommentaryModules = modules.filter { $0.category == .commentary }
-        installedDictionaryModules = modules.filter { $0.category == .dictionary }
-        installedGeneralBookModules = modules.filter { $0.category == .generalBook }
-        installedMapModules = modules.filter { $0.category == .map }
-
-        if let mod = mgr.module(named: activeModuleName) {
-            activeModule = mod
-        } else if let kjv = mgr.module(named: "KJV") {
-            activeModule = kjv
-            activeModuleName = kjv.info.name
-            logger.info("Using Bible module: \(kjv.info.name)")
-        } else if let firstBible = installedBibleModules.first {
-            activeModule = mgr.module(named: firstBible.name)
-            activeModuleName = firstBible.name
-            logger.info("Using Bible module: \(firstBible.name)")
-        } else {
-            activeModule = nil
+        applySwordState(state)
+        if activeModule == nil {
             logger.warning("No Bible modules installed — using placeholder text")
-        }
-
-        if let name = activeCommentaryModuleName, let mod = mgr.module(named: name) {
-            activeCommentaryModule = mod
-        } else if let firstComm = installedCommentaryModules.first {
-            activeCommentaryModule = mgr.module(named: firstComm.name)
-            activeCommentaryModuleName = firstComm.name
         } else {
-            activeCommentaryModule = nil
+            logger.info("Using Bible module: \(self.activeModuleName)")
         }
 
-        if let name = activeDictionaryModuleName, let mod = mgr.module(named: name) {
-            activeDictionaryModule = mod
-        } else {
-            activeDictionaryModule = nil
-        }
+        logBookListRefresh(module: activeModule, books: moduleBookList)
+    }
 
-        if let name = activeGeneralBookModuleName, let mod = mgr.module(named: name) {
-            activeGeneralBookModule = mod
-        } else {
-            activeGeneralBookModule = nil
-        }
+    /**
+     Builds the current module-selection DTO consumed by the SWORD setup coordinator.
 
-        if let name = activeMapModuleName, let mod = mgr.module(named: name) {
-            activeMapModule = mod
-        } else {
-            activeMapModule = nil
-        }
+     - Returns: The category-owned module initials currently stored on this controller.
+     - Side effects: None.
+     - Failure modes: None; nil optional categories indicate no explicit auxiliary selection.
+     */
+    private func currentSwordSelection() -> BibleReaderSwordSelection {
+        BibleReaderSwordSelection(
+            activeModuleName: activeModuleName,
+            activeCommentaryModuleName: activeCommentaryModuleName,
+            activeDictionaryModuleName: activeDictionaryModuleName,
+            activeGeneralBookModuleName: activeGeneralBookModuleName,
+            activeMapModuleName: activeMapModuleName
+        )
+    }
 
-        refreshBookList()
+    /**
+     Applies a SWORD setup projection to controller-owned observable state.
+
+     - Parameter state: Installed-module catalog and active module handles generated from the
+       current `SwordManager`.
+     - Side effects: Mutates installed-module arrays, active module references, selected initials,
+       and `moduleBookList` on the controller.
+     - Failure modes: None; absent modules are represented by nil handles in `state`.
+     */
+    private func applySwordState(_ state: BibleReaderSwordState) {
+        installedBibleModules = state.installedBibleModules
+        installedCommentaryModules = state.installedCommentaryModules
+        installedDictionaryModules = state.installedDictionaryModules
+        installedGeneralBookModules = state.installedGeneralBookModules
+        installedMapModules = state.installedMapModules
+        activeModule = state.activeModule
+        activeModuleName = state.activeModuleName
+        activeCommentaryModule = state.activeCommentaryModule
+        activeCommentaryModuleName = state.activeCommentaryModuleName
+        activeDictionaryModule = state.activeDictionaryModule
+        activeDictionaryModuleName = state.activeDictionaryModuleName
+        activeGeneralBookModule = state.activeGeneralBookModule
+        activeGeneralBookModuleName = state.activeGeneralBookModuleName
+        activeMapModule = state.activeMapModule
+        activeMapModuleName = state.activeMapModuleName
+        moduleBookList = state.moduleBookList
     }
 
     /**
@@ -2308,9 +2313,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             self.activeMapModuleName = mapName
         }
 
-        // Apply global options to match
-        mgr.setGlobalOption(.headings, enabled: true)
-        mgr.setGlobalOption(.redLetterWords, enabled: true)
+        swordCoordinator.applyBaseOptions(to: mgr)
         applySwordOptions()
         return true
     }
@@ -2435,15 +2438,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     /// Apply SWORD global options based on current display settings.
     private func applySwordOptions() {
         guard let mgr = swordManager else { return }
-        let s = displaySettings
-        let d = TextDisplaySettings.appDefaults
-        let strongsOn = (s.strongsMode ?? d.strongsMode ?? 0) > 0
-        let xrefsOn = s.showXrefs ?? d.showXrefs ?? false
-        let footnotesOn = s.showFootNotes ?? d.showFootNotes ?? false
-        mgr.setGlobalOption(.strongsNumbers, enabled: strongsOn)
-        mgr.setGlobalOption(.morphology, enabled: s.showMorphology ?? d.showMorphology ?? false)
-        mgr.setGlobalOption(.footnotes, enabled: footnotesOn)
-        mgr.setGlobalOption(.crossReferences, enabled: xrefsOn)
+        swordCoordinator.applyDisplayOptions(to: mgr, settings: displaySettings)
     }
 
     // MARK: - Public Navigation API
@@ -8707,13 +8702,26 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             moduleBookList = []
             return
         }
-        let books = mod.getBookList()
+        moduleBookList = swordCoordinator.bookList(for: mod)
+        logBookListRefresh(module: mod, books: moduleBookList)
+    }
+
+    /**
+     Logs the outcome of an active-module book-list refresh.
+
+     - Parameters:
+       - module: Active Bible module used to read the list.
+       - books: Books returned by SWORD for that module.
+     - Side effects: Writes diagnostic log entries only.
+     - Failure modes: Empty book lists are logged as errors because static-canon fallback while a
+       SWORD Bible is active would diverge from Android/JSword versification behavior.
+     */
+    private func logBookListRefresh(module: SwordModule?, books: [BookInfo]) {
+        guard let module else { return }
         if books.isEmpty {
-            logger.error("Module \(mod.info.name, privacy: .public) returned no books; refusing static canon fallback while active")
-            moduleBookList = []
+            logger.error("Module \(module.info.name, privacy: .public) returned no books; refusing static canon fallback while active")
         } else {
-            logger.info("Module \(mod.info.name) has \(books.count) books (versification: \(mod.configEntry("Versification") ?? "KJV"))")
-            moduleBookList = books
+            logger.info("Module \(module.info.name) has \(books.count) books (versification: \(module.configEntry("Versification") ?? "KJV"))")
         }
     }
 
