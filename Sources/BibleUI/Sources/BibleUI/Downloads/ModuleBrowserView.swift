@@ -1754,7 +1754,9 @@ public struct ModuleBrowserView: View {
        - module: Remote catalog row being rendered.
        - status: Current Android-equivalent install status.
      - Returns: SwiftUI control matching Android's status branch for the row.
-     - Side effects: Buttons may start, retry, update, or cancel module installs.
+     - Side effects: Buttons may retry, update, or cancel module installs. Installable rows use
+       `performPrimaryRowAction(for:status:)` from the row tap while this slot stays empty to match
+       Android `NOT_INSTALLED`.
      - Failure modes: Install failures are caught and retained as row error state by
        `installModule(_:)`.
      */
@@ -1763,12 +1765,14 @@ public struct ModuleBrowserView: View {
         for module: RemoteModuleInfo,
         status: ModuleBrowserDownloadStatus
     ) -> some View {
-        switch status {
+        let presentation = ModuleBrowserStatusSlotPresentation(status: status)
+
+        switch presentation.kind {
         case .installed:
-            Image(systemName: "checkmark.circle.fill")
+            Image(systemName: presentation.statusIconSystemName ?? "checkmark.circle.fill")
                 .font(.system(size: 24, weight: .bold))
                 .foregroundStyle(ModuleBrowserPalette.installed)
-        case .beingInstalled(let progressPercent):
+        case .progress(let progressPercent):
             VStack(alignment: .trailing, spacing: 6) {
                 Text("\(progressPercent)%")
                     .font(.caption)
@@ -1786,9 +1790,9 @@ public struct ModuleBrowserView: View {
                 .foregroundStyle(ModuleBrowserPalette.secondaryText)
                 .accessibilityLabel(String(localized: "cancel"))
             }
-        case .errorDownloading:
+        case .retryError:
             VStack(alignment: .trailing, spacing: 6) {
-                Image(systemName: "exclamationmark.triangle.fill")
+                Image(systemName: presentation.statusIconSystemName ?? "exclamationmark.triangle.fill")
                     .font(.system(size: 22, weight: .bold))
                     .foregroundStyle(.red)
                 Button {
@@ -1801,11 +1805,11 @@ public struct ModuleBrowserView: View {
                 .foregroundStyle(ModuleBrowserPalette.install)
                 .accessibilityLabel(String(localized: "retry", defaultValue: "Retry"))
             }
-        case .updateAvailable:
+        case .update:
             Button {
                 installModule(module)
             } label: {
-                Image(systemName: "arrow.up.circle.fill")
+                Image(systemName: presentation.statusIconSystemName ?? "arrow.up.circle.fill")
                     .font(.system(size: 24, weight: .bold))
             }
             .buttonStyle(.plain)
@@ -1815,16 +1819,10 @@ public struct ModuleBrowserView: View {
             Label(String(localized: "unavailable"), systemImage: "lock.slash")
                 .font(.caption)
                 .foregroundStyle(ModuleBrowserPalette.tertiaryText)
-        case .installable:
-            Button {
-                installModule(module)
-            } label: {
-                Image(systemName: "arrow.up")
-                    .font(.system(size: 24, weight: .bold))
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(ModuleBrowserPalette.install)
-            .accessibilityLabel(String(localized: "install_module", defaultValue: "Install"))
+        case .emptyInstallableSlot:
+            Color.clear
+                .frame(width: 24, height: 24)
+                .accessibilityHidden(true)
         }
     }
 
