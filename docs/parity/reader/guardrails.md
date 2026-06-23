@@ -66,6 +66,14 @@ someone is changing:
    - `docs/parity/reader/verification-matrix.md` if status changes
    - `docs/parity/reader/regression-report.md` when validation scope changes
 
+8. Classify presentation ownership before preserving a sheet.
+
+   When adding or changing a reader sheet, modal, destination, popover, alert,
+   confirmation dialog, or picker, update
+   `docs/parity/reader/modal-ownership-matrix.md` using ADR 0006 categories.
+   The guardrail test should fail if a new `ReaderSheet`, `ReaderDestination`,
+   or `ReaderModal` case is added without a matrix row.
+
 ## Validation Expectations
 
 At minimum, reader-adjacent changes should keep the focused workflow subset in
@@ -97,5 +105,4 @@ subset.
 
 ## Useful Next Improvements
 
-- implement and cover #124 multi-reference / cross-reference document-pipeline routing
 - add a tighter guardrail around reader config emission into the embedded document client
