@@ -33,11 +33,6 @@ private let logger = Logger(subsystem: "org.andbible", category: "BibleReaderCon
  */
 @Observable
 public final class BibleReaderController: NSObject, BibleBridgeDelegate {
-    private enum ScrollRestoreTarget {
-        case chapterTop
-        case ordinal(Int)
-    }
-
     let bridge: BibleBridge
     var bookmarkService: BookmarkService?
     var myDocumentStore: MyDocumentStore?
@@ -153,6 +148,9 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     private(set) var currentCategory: DocumentCategory = .bible
     /// Pure planner for Android-style module/category PageManager transitions.
     private let moduleSwitchCoordinator = BibleReaderModuleSwitchCoordinator()
+    /// State machine for Android-style Bible navigation and visible-position persistence.
+    @ObservationIgnored
+    private let navigationCoordinator = BibleReaderNavigationCoordinator()
 
     /// Dictionary/Lexicon module support
     private(set) var installedDictionaryModules: [ModuleInfo] = []
@@ -197,15 +195,6 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     private var maxLoadedChapter: Int = 0
     private var minLoadedBook: String = "Genesis"
     private var maxLoadedBook: String = "Genesis"
-
-    /// Last rendered reading position, preserving chapter-top context separately from verse ordinals.
-    private var lastScrollTarget: ScrollRestoreTarget = .chapterTop
-    /// Whether the next loadCurrentChapter should restore scroll position (true = settings reload).
-    private var shouldRestoreScroll = false
-    /// Coalesces intra-chapter scroll persistence so visible-verse updates do not save SwiftData on every tick.
-    private var pendingVisibleVersePersistWorkItem: DispatchWorkItem?
-    /// Optional verse range that should render as the explicit navigation target on the next load.
-    private var originalNavigationOrdinalRange: [Int]? = nil
 
     /**
      Captures a transient Vue `MultiDocument` load until the web client can receive it.
@@ -738,19 +727,100 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
     /// Persists the current page-manager state either immediately or after a short debounce for scroll updates.
     private func persistVisibleVerseState(immediate: Bool) {
-        pendingVisibleVersePersistWorkItem?.cancel()
-        pendingVisibleVersePersistWorkItem = nil
-
-        guard let onPersistState else { return }
-
-        if immediate {
-            onPersistState()
-            return
+        navigationCoordinator.persistVisibleVerseState(immediate: immediate) { [weak self] in
+            self?.onPersistState?()
         }
+    }
 
-        let workItem = DispatchWorkItem(block: onPersistState)
-        pendingVisibleVersePersistWorkItem = workItem
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35, execute: workItem)
+    /**
+     Builds the controller-owned dependency context used by the navigation coordinator.
+
+     The coordinator owns the Bible position transition rules while this controller remains the
+     owner of observed reader state, SWORD/JSword-compatible versification lookups, history storage,
+     active-window PageManager access, and WebView reloads. Weak captures prevent deferred
+     visible-verse persistence from extending pane lifetime.
+     */
+    private func makeNavigationContext() -> BibleReaderNavigationContext {
+        BibleReaderNavigationContext(
+            currentPosition: { [weak self] in
+                BibleReaderNavigationPosition(
+                    book: self?.currentBook ?? "Genesis",
+                    chapter: self?.currentChapter ?? 1,
+                    verse: self?.currentVerse ?? 1
+                )
+            },
+            setCurrentPosition: { [weak self] position in
+                self?.currentBook = position.book
+                self?.currentChapter = position.chapter
+                self?.currentVerse = position.verse
+            },
+            pageManager: { [weak self] in
+                self?.activeWindow?.pageManager
+            },
+            bookList: { [weak self] in
+                self?.bookList.map {
+                    BibleReaderNavigationBook(
+                        name: $0.name,
+                        osisId: $0.osisId,
+                        chapterCount: $0.chapterCount
+                    )
+                } ?? []
+            },
+            isShowingAndroidMultiDocument: { [weak self] in
+                self?.isShowingAndroidMultiDocument ?? false
+            },
+            clientReady: { [weak self] in
+                self?.clientReady ?? false
+            },
+            chapterCount: { [weak self] book in
+                self?.chapterCount(for: book) ?? 0
+            },
+            nextBook: { [weak self] book in
+                self?.nextBook(after: book)
+            },
+            previousBook: { [weak self] book in
+                self?.previousBook(before: book)
+            },
+            bookNameForOsisId: { [weak self] osisId in
+                self?.bookName(forOsisId: osisId)
+            },
+            ordinalForVerse: { [weak self] book, chapter, verse in
+                guard let self else { return nil }
+                return self.verseOrdinal(
+                    osisBookId: self.osisBookId(for: book),
+                    chapter: chapter,
+                    verse: verse
+                )
+            },
+            verseReference: { [weak self] book, ordinal in
+                self?.verseReference(book: book, ordinal: ordinal).map {
+                    BibleReaderNavigationVerseReference(
+                        chapter: $0.chapter,
+                        verse: $0.verse,
+                        osisBookId: $0.osisBookId
+                    )
+                }
+            },
+            recordHistory: { [weak self] book, chapter, verse in
+                guard let self,
+                      let store = self.workspaceStore,
+                      let window = self.activeWindow else {
+                    return
+                }
+                let osisId = self.osisBookId(for: book)
+                store.addHistoryItem(
+                    to: window,
+                    document: self.activeModuleName,
+                    key: "\(osisId).\(chapter).\(verse)"
+                )
+            },
+            persistState: { [weak self] in
+                self?.onPersistState?()
+            },
+            loadCurrentContent: { [weak self] in
+                self?.loadCurrentContent()
+            }
+        )
     }
 
     /**
@@ -816,7 +886,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         guard clientReady else { return }
         bridge.emit(event: "set_config", data: buildConfigJSON())
         // Reload to re-render with new options; restore scroll position for same-chapter reload
-        shouldRestoreScroll = true
+        navigationCoordinator.prepareForContentReload()
         loadCurrentContent()
     }
 
@@ -2345,12 +2415,19 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         } else {
             currentVerse = 1
         }
-        originalNavigationOrdinalRange = nil
-        if currentVerse > 1,
-           let ordinal = ordinal(forChapter: currentChapter, verse: currentVerse) {
-            lastScrollTarget = .ordinal(ordinal)
-        } else {
-            lastScrollTarget = .chapterTop
+        navigationCoordinator.restoreSavedPosition(
+            BibleReaderNavigationPosition(
+                book: currentBook,
+                chapter: currentChapter,
+                verse: currentVerse
+            )
+        ) { [weak self] book, chapter, verse in
+            guard let self else { return nil }
+            return self.verseOrdinal(
+                osisBookId: self.osisBookId(for: book),
+                chapter: chapter,
+                verse: verse
+            )
         }
         logger.info("Restored position: \(self.currentBook) \(self.currentChapter):\(self.currentVerse)")
     }
@@ -2373,67 +2450,22 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
     /// Navigate to a specific book and chapter. Sends content to the WebView.
     public func navigateTo(book: String, chapter: Int, verse: Int? = nil) {
-        currentBook = book
-        currentChapter = chapter
-        let resolvedVerse = max(1, verse ?? 1)
-        currentVerse = resolvedVerse
-        if let explicitVerse = verse {
-            if let ordinal = ordinal(forChapter: chapter, verse: max(1, explicitVerse)) {
-                originalNavigationOrdinalRange = [ordinal, ordinal]
-            } else {
-                originalNavigationOrdinalRange = nil
-            }
-        } else {
-            originalNavigationOrdinalRange = nil
-        }
-        if resolvedVerse > 1,
-           let ordinal = ordinal(forChapter: chapter, verse: resolvedVerse) {
-            lastScrollTarget = .ordinal(ordinal)
-            shouldRestoreScroll = true
-        } else {
-            lastScrollTarget = .chapterTop
-            shouldRestoreScroll = false
-        }
-
-        // Record history
-        if let store = workspaceStore, let window = activeWindow {
-            let osisId = osisBookId(for: book)
-            store.addHistoryItem(to: window, document: activeModuleName, key: "\(osisId).\(chapter).\(resolvedVerse)")
-        }
-
-        // Persist position to PageManager
-        if let pm = activeWindow?.pageManager {
-            pm.bibleBibleBook = bookList.firstIndex(where: { $0.name == book })
-            pm.bibleChapterNo = chapter
-            pm.bibleVerseNo = resolvedVerse
-            onPersistState?()
-        }
-
-        guard clientReady else { return }
-        loadCurrentContent()
+        navigationCoordinator.navigateTo(
+            book: book,
+            chapter: chapter,
+            verse: verse,
+            context: makeNavigationContext()
+        )
     }
 
     /// Navigate to the next chapter, wrapping to the next book if needed.
     public func navigateNext() {
-        guard !isShowingAndroidMultiDocument else { return }
-        let maxChapter = chapterCount(for: currentBook)
-        if currentChapter < maxChapter {
-            navigateTo(book: currentBook, chapter: currentChapter + 1)
-        } else if let nextBook = nextBook(after: currentBook) {
-            navigateTo(book: nextBook, chapter: 1)
-        }
-        // At Revelation's last chapter, do nothing
+        navigationCoordinator.navigateNext(context: makeNavigationContext())
     }
 
     /// Navigate to the previous chapter, wrapping to the previous book if needed.
     public func navigatePrevious() {
-        guard !isShowingAndroidMultiDocument else { return }
-        if currentChapter > 1 {
-            navigateTo(book: currentBook, chapter: currentChapter - 1)
-        } else if let prevBook = previousBook(before: currentBook) {
-            navigateTo(book: prevBook, chapter: chapterCount(for: prevBook))
-        }
-        // At Genesis 1, do nothing
+        navigationCoordinator.navigatePrevious(context: makeNavigationContext())
     }
 
     /// Scroll down by one viewport page (Android parity: PAGE swipe mode).
@@ -2450,15 +2482,12 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
     /// Whether there's a next chapter available.
     public var hasNext: Bool {
-        guard !isShowingAndroidMultiDocument else { return false }
-        let maxChapter = chapterCount(for: currentBook)
-        return currentChapter < maxChapter || nextBook(after: currentBook) != nil
+        navigationCoordinator.hasNext(context: makeNavigationContext())
     }
 
     /// Whether there's a previous chapter available.
     public var hasPrevious: Bool {
-        guard !isShowingAndroidMultiDocument else { return false }
-        return currentChapter > 1 || previousBook(before: currentBook) != nil
+        navigationCoordinator.hasPrevious(context: makeNavigationContext())
     }
 
     // MARK: - BibleBridgeDelegate — State
@@ -2688,62 +2717,12 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         let previousChapter = currentChapter
         let previousVerse = currentVerse
         let acknowledgedSynchronizedScroll = consumePendingSynchronizedScroll(ordinal: ordinal)
-        // Track scroll position for restoration.
-        lastScrollTarget = atChapterTop ? .chapterTop : .ordinal(ordinal)
-
-        // Update toolbar header when scrolling into a different chapter/book (infinite scroll)
-        let keyParts = key.split(separator: ".", omittingEmptySubsequences: true)
-        if keyParts.count >= 2 {
-            let osisId = String(keyParts[0])
-            let chapterStr = String(keyParts[1])
-            if let chapter = Int(chapterStr), chapter != currentChapter {
-                currentChapter = chapter
-                if let name = bookName(forOsisId: osisId), name != currentBook {
-                    currentBook = name
-                }
-                // Persist updated position to PageManager
-                if let pm = activeWindow?.pageManager {
-                    pm.bibleChapterNo = chapter
-                    if let bookIdx = bookList.firstIndex(where: { $0.name == currentBook }) {
-                        pm.bibleBibleBook = bookIdx
-                    }
-                    if let verse = verseReference(book: currentBook, ordinal: ordinal)?.verse {
-                        currentVerse = verse
-                        pm.bibleVerseNo = verse
-                    }
-                    persistVisibleVerseState(immediate: true)
-                }
-            } else if let name = bookName(forOsisId: osisId), name != currentBook {
-                currentBook = name
-                if let pm = activeWindow?.pageManager {
-                    if let bookIdx = bookList.firstIndex(where: { $0.name == currentBook }) {
-                        pm.bibleBibleBook = bookIdx
-                    }
-                    if let verse = verseReference(book: currentBook, ordinal: ordinal)?.verse {
-                        currentVerse = verse
-                        pm.bibleVerseNo = verse
-                    }
-                    persistVisibleVerseState(immediate: true)
-                }
-            } else if let pm = activeWindow?.pageManager {
-                if let verse = verseReference(book: currentBook, ordinal: ordinal)?.verse {
-                    currentVerse = verse
-                    pm.bibleVerseNo = verse
-                }
-                persistVisibleVerseState(immediate: false)
-            }
-        } else if let reference = verseReference(book: currentBook, ordinal: ordinal) {
-            currentChapter = reference.chapter
-            currentVerse = reference.verse
-            if let pm = activeWindow?.pageManager {
-                pm.bibleChapterNo = reference.chapter
-                if let bookIdx = bookList.firstIndex(where: { $0.name == currentBook }) {
-                    pm.bibleBibleBook = bookIdx
-                }
-                pm.bibleVerseNo = reference.verse
-                persistVisibleVerseState(immediate: false)
-            }
-        }
+        navigationCoordinator.updateVisiblePosition(
+            ordinal: ordinal,
+            key: key,
+            atChapterTop: atChapterTop,
+            context: makeNavigationContext()
+        )
 
         let visibleVerseChanged = previousBook != currentBook
             || previousChapter != currentChapter
@@ -2957,18 +2936,13 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      Failure modes: none.
      */
     private func applySynchronizedVersePosition(book: String, chapter: Int, verse: Int, ordinal: Int) {
-        currentBook = book
-        currentChapter = chapter
-        currentVerse = verse
-        lastScrollTarget = .ordinal(ordinal)
-        shouldRestoreScroll = true
-
-        if let pm = activeWindow?.pageManager {
-            pm.bibleBibleBook = bookList.firstIndex(where: { $0.name == book })
-            pm.bibleChapterNo = chapter
-            pm.bibleVerseNo = verse
-            persistVisibleVerseState(immediate: false)
-        }
+        navigationCoordinator.applySynchronizedVersePosition(
+            book: book,
+            chapter: chapter,
+            verse: verse,
+            ordinal: ordinal,
+            context: makeNavigationContext()
+        )
     }
 
     /**
@@ -7598,7 +7572,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             xml: xml,
             bookmarks: chapterBookmarks,
             addChapter: addChapter,
-            originalOrdinalRange: originalNavigationOrdinalRange
+            originalOrdinalRange: navigationCoordinator.originalNavigationOrdinalRange
         ) else { return }
         bridge.emit(event: "add_documents", data: document)
 
@@ -7609,16 +7583,20 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         maxLoadedBook = currentBook
 
         // Restore either the exact verse anchor or the chapter-top reading context.
-        let restoreTarget: ScrollRestoreTarget
-        if shouldRestoreScroll {
-            restoreTarget = lastScrollTarget
-        } else if currentVerse > 1,
-                  let ordinal = ordinal(forChapter: currentChapter, verse: currentVerse) {
-            restoreTarget = .ordinal(ordinal)
-        } else {
-            restoreTarget = .chapterTop
+        let restoreTarget = navigationCoordinator.consumeContentRestoreTarget(
+            currentPosition: BibleReaderNavigationPosition(
+                book: currentBook,
+                chapter: currentChapter,
+                verse: currentVerse
+            )
+        ) { [weak self] book, chapter, verse in
+            guard let self else { return nil }
+            return self.verseOrdinal(
+                osisBookId: self.osisBookId(for: book),
+                chapter: chapter,
+                verse: verse
+            )
         }
-        shouldRestoreScroll = false
         let jumpOrdinal: String
         let jumpToId: String
         switch restoreTarget {
