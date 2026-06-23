@@ -3064,4 +3064,222 @@ extension AndBibleTests {
         XCTAssertEqual(pageManager.bibleVerseNo, 5)
     }
 
+    /**
+     Mutable state captured by the navigation context test closures.
+
+     The production coordinator receives escaping closures owned by `BibleReaderController`. Tests
+     use this reference type to model the same lifetime explicitly without unsafe pointer captures.
+     A failure involving this helper usually means the test fixture no longer matches the
+     coordinator's closure-based dependency contract.
+     */
+    private final class NavigationCoordinatorStateBox {
+        /// Current visible Bible position.
+        var position: BibleReaderNavigationPosition
+
+        /// Recorded history keys supplied by explicit navigation.
+        var history: [String] = []
+
+        /// Number of durable persistence requests.
+        var persistCount = 0
+
+        /// Number of host content reload requests.
+        var loadCount = 0
+
+        /// Creates a fixture state box for one coordinator test.
+        init(position: BibleReaderNavigationPosition) {
+            self.position = position
+        }
+    }
+
+    /**
+     Builds a deterministic navigation context backed by in-memory state.
+
+     The fixture uses two books and synthetic ordinals (`chapter * 100 + verse`) so assertions can
+     focus on coordinator ownership rather than SWORD lookups. This mirrors the production contract:
+     the controller supplies versification lookups, while the coordinator decides when to use them
+     and when to persist PageManager state.
+     */
+    private func makeNavigationCoordinatorContext(
+        state: NavigationCoordinatorStateBox,
+        pageManager: PageManager,
+        clientReady: Bool = true,
+        isShowingAndroidMultiDocument: Bool = false
+    ) -> BibleReaderNavigationContext {
+        let books = [
+            BibleReaderNavigationBook(name: "Genesis", osisId: "Gen", chapterCount: 50),
+            BibleReaderNavigationBook(name: "Exodus", osisId: "Exod", chapterCount: 40),
+        ]
+
+        func book(named name: String) -> BibleReaderNavigationBook? {
+            books.first { $0.name == name }
+        }
+
+        func osisId(for name: String) -> String {
+            book(named: name)?.osisId ?? name
+        }
+
+        return BibleReaderNavigationContext(
+            currentPosition: { state.position },
+            setCurrentPosition: { state.position = $0 },
+            pageManager: { pageManager },
+            bookList: { books },
+            isShowingAndroidMultiDocument: { isShowingAndroidMultiDocument },
+            clientReady: { clientReady },
+            chapterCount: { book(named: $0)?.chapterCount ?? 0 },
+            nextBook: { name in
+                guard let index = books.firstIndex(where: { $0.name == name }),
+                      index + 1 < books.count else {
+                    return nil
+                }
+                return books[index + 1].name
+            },
+            previousBook: { name in
+                guard let index = books.firstIndex(where: { $0.name == name }),
+                      index > 0 else {
+                    return nil
+                }
+                return books[index - 1].name
+            },
+            bookNameForOsisId: { osisId in
+                books.first { $0.osisId == osisId }?.name
+            },
+            ordinalForVerse: { _, chapter, verse in
+                chapter * 100 + verse
+            },
+            verseReference: { bookName, ordinal in
+                BibleReaderNavigationVerseReference(
+                    chapter: ordinal / 100,
+                    verse: ordinal % 100,
+                    osisBookId: osisId(for: bookName)
+                )
+            },
+            recordHistory: { bookName, chapter, verse in
+                state.history.append("\(osisId(for: bookName)).\(chapter).\(verse)")
+            },
+            persistState: {
+                state.persistCount += 1
+            },
+            loadCurrentContent: {
+                state.loadCount += 1
+            }
+        )
+    }
+
+    /**
+     Protects the extracted direct-navigation state transition.
+
+     Setup creates an active in-memory PageManager and a client-ready context. Navigation to an
+     explicit verse should update visible state, persist the Bible position, record the Android-style
+     OSIS history key, retain the explicit ordinal range for the next render, and ask the host to
+     reload content once. A failure means direct reader navigation has drifted back into ad hoc
+     controller mutations instead of a single durable page-position transition.
+     */
+    func testReaderNavigationCoordinatorPersistsHistoryAndExplicitRestoreTarget() {
+        let coordinator = BibleReaderNavigationCoordinator()
+        let state = NavigationCoordinatorStateBox(
+            position: BibleReaderNavigationPosition(book: "Genesis", chapter: 1, verse: 1)
+        )
+        let pageManager = PageManager()
+        let context = makeNavigationCoordinatorContext(
+            state: state,
+            pageManager: pageManager
+        )
+
+        coordinator.navigateTo(book: "Exodus", chapter: 2, verse: 3, context: context)
+
+        XCTAssertEqual(state.position, BibleReaderNavigationPosition(book: "Exodus", chapter: 2, verse: 3))
+        XCTAssertEqual(pageManager.bibleBibleBook, 1)
+        XCTAssertEqual(pageManager.bibleChapterNo, 2)
+        XCTAssertEqual(pageManager.bibleVerseNo, 3)
+        XCTAssertEqual(state.history, ["Exod.2.3"])
+        XCTAssertEqual(state.persistCount, 1)
+        XCTAssertEqual(state.loadCount, 1)
+        XCTAssertEqual(coordinator.originalNavigationOrdinalRange, [203, 203])
+        XCTAssertEqual(
+            coordinator.consumeContentRestoreTarget(
+                currentPosition: state.position,
+                ordinalForVerse: { _, chapter, verse in chapter * 100 + verse }
+            ),
+            .ordinal(203)
+        )
+    }
+
+    /**
+     Protects visible-scroll state updates reported by the Vue reader.
+
+     Android treats WebView visible-position callbacks as page-manager updates, not transient UI
+     hints. This test scrolls from Genesis into an Exodus key and expects the coordinator to update
+     the visible book/chapter/verse, persist the new PageManager position immediately, and preserve a
+     restore target for the current visible verse. A failure means iOS can reopen or synchronize a
+     stale verse after infinite-scroll movement.
+     */
+    func testReaderNavigationCoordinatorVisibleScrollUpdatesBookChapterVerseAndPageManager() {
+        let coordinator = BibleReaderNavigationCoordinator()
+        let state = NavigationCoordinatorStateBox(
+            position: BibleReaderNavigationPosition(book: "Genesis", chapter: 1, verse: 1)
+        )
+        let pageManager = PageManager()
+        let context = makeNavigationCoordinatorContext(
+            state: state,
+            pageManager: pageManager
+        )
+
+        let changed = coordinator.updateVisiblePosition(
+            ordinal: 205,
+            key: "Exod.2",
+            atChapterTop: false,
+            context: context
+        )
+
+        XCTAssertTrue(changed)
+        XCTAssertEqual(state.position, BibleReaderNavigationPosition(book: "Exodus", chapter: 2, verse: 5))
+        XCTAssertEqual(pageManager.bibleBibleBook, 1)
+        XCTAssertEqual(pageManager.bibleChapterNo, 2)
+        XCTAssertEqual(pageManager.bibleVerseNo, 5)
+        XCTAssertEqual(state.persistCount, 1)
+        XCTAssertEqual(state.loadCount, 0)
+        XCTAssertEqual(
+            coordinator.consumeContentRestoreTarget(
+                currentPosition: state.position,
+                ordinalForVerse: { _, chapter, verse in chapter * 100 + verse }
+            ),
+            .ordinal(205)
+        )
+    }
+
+    /**
+     Protects Android-style chapter wrapping and synthetic multi-document blocking.
+
+     The reader host delegates next/previous chapter controls into the same coordinator used by
+     bridge navigation. Genesis 50 should wrap to Exodus 1, Exodus 1 should wrap back to Genesis 50,
+     and Android synthetic multi documents must not advertise Bible chapter navigation. A failure
+     means toolbar, keyboard, swipe, and bridge navigation can diverge.
+     */
+    func testReaderNavigationCoordinatorChapterWrappingAndMultiDocumentNavigationAvailability() {
+        let coordinator = BibleReaderNavigationCoordinator()
+        let state = NavigationCoordinatorStateBox(
+            position: BibleReaderNavigationPosition(book: "Genesis", chapter: 50, verse: 1)
+        )
+        let pageManager = PageManager()
+        let context = makeNavigationCoordinatorContext(
+            state: state,
+            pageManager: pageManager
+        )
+
+        XCTAssertTrue(coordinator.hasNext(context: context))
+        coordinator.navigateNext(context: context)
+        XCTAssertEqual(state.position, BibleReaderNavigationPosition(book: "Exodus", chapter: 1, verse: 1))
+
+        coordinator.navigatePrevious(context: context)
+        XCTAssertEqual(state.position, BibleReaderNavigationPosition(book: "Genesis", chapter: 50, verse: 1))
+
+        let multiDocumentContext = makeNavigationCoordinatorContext(
+            state: state,
+            pageManager: pageManager,
+            isShowingAndroidMultiDocument: true
+        )
+        XCTAssertFalse(coordinator.hasNext(context: multiDocumentContext))
+        XCTAssertFalse(coordinator.hasPrevious(context: multiDocumentContext))
+    }
+
 }
