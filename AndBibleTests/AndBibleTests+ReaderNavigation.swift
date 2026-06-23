@@ -1950,6 +1950,42 @@ extension AndBibleTests {
         XCTAssertEqual(persistCount, 1)
     }
 
+    /**
+     Protects recent bookmark-label state as a coordinator-owned reader configuration input.
+
+     Android exposes recently used bookmark labels through reader configuration without making the
+     top-level reader controller own the de-duplication, ordering, and persisted setting value. The
+     setup starts from the legacy comma-separated setting, reuses one older label, then adds enough
+     labels to exceed the five-label cap. The expected result is most-recent-first ordering, no
+     duplicate reused label, cap enforcement, and one persisted comma-separated value per tracked
+     label. A failure means #146 regressed by leaving state semantics in the controller or changing
+     the config payload behavior that Vue receives.
+     */
+    func testReaderRecentLabelCoordinatorLoadsDeduplicatesCapsAndPersistsRecentLabels() {
+        var coordinator = BibleReaderRecentLabelCoordinator()
+        var persistedValues: [String] = []
+
+        coordinator.load(storedValue: "oldA,oldB")
+        XCTAssertEqual(coordinator.labelIds, ["oldA", "oldB"])
+
+        for labelId in ["oldC", "oldA", "oldD", "oldE", "oldF", "oldG"] {
+            coordinator.track(labelId) { persistedValues.append($0) }
+        }
+
+        XCTAssertEqual(coordinator.labelIds, ["oldG", "oldF", "oldE", "oldD", "oldA"])
+        XCTAssertEqual(
+            persistedValues,
+            [
+                "oldC,oldA,oldB",
+                "oldA,oldC,oldB",
+                "oldD,oldA,oldC,oldB",
+                "oldE,oldD,oldA,oldC,oldB",
+                "oldF,oldE,oldD,oldA,oldC",
+                "oldG,oldF,oldE,oldD,oldA"
+            ]
+        )
+    }
+
     @MainActor
     func testRequestMoreToBeginningSendsDocumentResponseWithOriginalCallId() throws {
         let (bridge, recordedScripts) = makeRecordingBridge()
