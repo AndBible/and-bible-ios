@@ -19,7 +19,9 @@ answer four questions without having to reconstruct repo history first:
 For durable decisions behind the docs, use
 [`../adr/`](../adr/README.md). ADR 0001 defines the gradual migration of
 durable parity decisions into ADRs, and ADR 0002 records the current reader
-document/modal routing decision from the #122 audit.
+document/modal routing decision from the #122 audit. ADR 0006 defines the
+cross-domain modal and presentation ownership matrix used to distinguish
+WebView-owned, app-owned, platform-boundary, and adapted iOS surfaces.
 
 ## Domain Snapshot
 

@@ -15,6 +15,11 @@ Decision records that explain durable parity choices live in
 parity decisions should gradually move into ADRs so this subtree does not become
 an endlessly growing tracker.
 
+Presentation-surface ownership is governed by
+[ADR 0006](../adr/0006-modal-presentation-ownership-for-android-parity.md).
+Use that matrix before treating a SwiftUI sheet, native dialog, file picker, or
+share sheet as Android parity.
+
 Use domain folders so each parity area can carry, as needed:
 
 - current contract summaries
