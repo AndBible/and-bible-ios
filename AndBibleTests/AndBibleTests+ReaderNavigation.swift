@@ -765,10 +765,15 @@ extension AndBibleTests {
         let bridge = BibleBridge()
         let modulePath = try makeTemporaryBundledSwordPath()
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
-        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        let builder = BibleReaderStrongsDocumentBuilder(
+            swordManager: manager,
+            selectedPreferenceValues: { _ in [] },
+            moduleDisplayLabel: { $0.info.name },
+            localizedString: { _, defaultValue in defaultValue }
+        )
 
         let multiDocJSON = try XCTUnwrap(
-            controller.buildStrongsMultiDocJSON(strongs: ["H00430"], robinson: []),
+            builder.buildStrongsMultiDocumentJSON(strongs: ["H00430"], robinson: []),
             "Expected Android-style missing-document fallback when no Strong's dictionary is installed"
         )
         let payloadData = try XCTUnwrap(multiDocJSON.data(using: .utf8))

@@ -1403,15 +1403,19 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         let isMorphologyDefinition = sourceModule.info.features.contains(.hebrewParse)
             || sourceModule.info.features.contains(.greekParse)
         let keyName = isStrongsDefinition
-            ? Self.canonicalStrongsKeyName(requested: key, actualKey: lookup.actualKey, rawEntry: lookup.rawEntry)
+            ? BibleReaderStrongsDocumentBuilder.canonicalStrongsKeyName(
+                requested: key,
+                actualKey: lookup.actualKey,
+                rawEntry: lookup.rawEntry
+            )
             : lookup.actualKey
         let features = restoredDictionaryFeatures(for: sourceModule, keyName: keyName)
-        let xml = buildDictionaryEntryXML(
+        let xml = BibleReaderStrongsDocumentBuilder.buildDictionaryEntryXML(
             rawEntry: lookup.rawEntry,
             renderedText: lookup.renderedText,
             fallbackTitle: keyName,
-            strongsLinkPrefix: Self.strongsLinkPrefix(forModuleName: sourceModule.info.name)
-                ?? Self.strongsLinkPrefix(for: key)
+            strongsLinkPrefix: BibleReaderStrongsDocumentBuilder.strongsLinkPrefix(forModuleName: sourceModule.info.name)
+                ?? BibleReaderStrongsDocumentBuilder.strongsLinkPrefix(for: key)
         )
         let fragment = OsisFragment(
             xml: xml,
@@ -1420,7 +1424,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             v11n: "KJVA",
             bookCategory: DocumentCategory.dictionary.rawValue,
             bookInitials: sourceModule.info.name,
-            bookAbbreviation: moduleDisplayLabel(sourceModule),
+            bookAbbreviation: BibleReaderStrongsDocumentBuilder.moduleDisplayLabel(sourceModule),
             osisRef: keyName,
             isNewTestament: false,
             features: features,
@@ -1449,7 +1453,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     private func restoredDictionaryLookupKeys(for key: String, sourceModule: SwordModule) -> [String] {
         if sourceModule.info.features.contains(.hebrewDef)
             || sourceModule.info.features.contains(.greekDef) {
-            return Self.strongsLookupKeyOptions(for: key)
+            return BibleReaderStrongsDocumentBuilder.strongsLookupKeyOptions(for: key)
         }
         return [key]
     }
@@ -4865,128 +4869,32 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     }
 
     /**
-     Build a MultiFragmentDocument JSON from Strong's numbers and Robinson codes.
-     Returns nil if no definitions were found.
+     Builds the Android-style Strong's `MultiDocument` payload for bridge routing.
+
+     The controller only supplies pane dependencies; lookup, module selection, linkification, and
+     fallback-document construction are owned by `BibleReaderStrongsDocumentBuilder`.
      */
     func buildStrongsMultiDocJSON(strongs: [String], robinson: [String], stateJSON: String? = nil) -> String? {
-        logger.info("buildStrongsMultiDocJSON: strongs=\(strongs), robinson=\(robinson), swordManager=\(self.swordManager == nil ? "nil" : "alive")")
-        var fragments: [(xml: String, key: String, keyName: String, bookInitials: String, bookAbbreviation: String, features: OsisFeatures)] = []
-
-        for num in strongs {
-            let lexModules = findAllLexiconModules(for: num)
-            logger.info("buildStrongsMultiDocJSON: num=\(num), lexModules=\(lexModules.map { $0.info.name })")
-            let keyOptions = buildKeyOptions(for: num)
-            logger.info("buildStrongsMultiDocJSON: keyOptions=\(keyOptions)")
-            for mod in lexModules {
-                if let lookup = lookupInModule(mod, keyOptions: keyOptions) {
-                    // Determine features type for "Find all occurrences" link
-                    let isHebrew = num.hasPrefix("H") || (!num.hasPrefix("G") && (Int(String(num.drop(while: { $0.isLetter || $0 == "0" }))) ?? 0) > 5624)
-                    let featureType = isHebrew ? "hebrew" : "greek"
-                    let keyName = Self.canonicalStrongsKeyName(requested: num, actualKey: lookup.actualKey, rawEntry: lookup.rawEntry)
-                    let xml = buildDictionaryEntryXML(
-                        rawEntry: lookup.rawEntry,
-                        renderedText: lookup.renderedText,
-                        strongsLinkPrefix: Self.strongsLinkPrefix(for: num)
-                    )
-                    let features = OsisFeatures(type: featureType, keyName: keyName)
-
-                    fragments.append((
-                        xml: xml,
-                        key: "\(mod.info.name)--\(keyName)",
-                        keyName: keyName,
-                        bookInitials: mod.info.name,
-                        bookAbbreviation: moduleDisplayLabel(mod),
-                        features: features
-                    ))
-                }
-            }
-        }
-
-        // Look up morphology codes in morphology dictionaries
-        if !robinson.isEmpty {
-            let morphModules = findMorphologyModules()
-            for code in robinson {
-                for mod in morphModules {
-                    let morphKeys = [code, code.uppercased(), code.lowercased()]
-                    if let lookup = lookupInModule(mod, keyOptions: morphKeys) {
-                        let xml = buildDictionaryEntryXML(
-                            rawEntry: lookup.rawEntry,
-                            renderedText: lookup.renderedText,
-                            fallbackTitle: "Morphology: \(code)"
-                        )
-                        fragments.append((
-                            xml: xml,
-                            key: "\(mod.info.name)--\(code)",
-                            keyName: code,
-                            bookInitials: mod.info.name,
-                            bookAbbreviation: moduleDisplayLabel(mod),
-                            features: OsisFeatures()
-                        ))
-                    }
-                }
-            }
-        }
-
-        if fragments.isEmpty, let firstStrongs = strongs.first {
-            fragments.append(missingStrongsDictionaryFragment(for: firstStrongs))
-        }
-
-        if fragments.isEmpty {
-            logger.info("handleStrongsLink: no definitions found")
-            return nil
-        }
-
-        return buildMultiFragmentJSON(
-            fragments: fragments,
-            contentType: "strongs",
+        strongsDocumentBuilder().buildStrongsMultiDocumentJSON(
+            strongs: strongs,
+            robinson: robinson,
             stateJSON: stateJSON
         )
     }
 
     /**
-     Builds the Android-style missing-document fallback shown when Strong's display is available
-     but no matching Strong's dictionary module is installed.
-
-     Android falls back to a synthetic dictionary document with a download link instead of leaving
-     the user with an enabled Strong's UI and no actionable destination.
-    */
-    private func missingStrongsDictionaryFragment(
-        for strongsNumber: String
-    ) -> (xml: String, key: String, keyName: String, bookInitials: String, bookAbbreviation: String, features: OsisFeatures) {
-        let isHebrew = Self.isHebrewStrongsNumber(strongsNumber)
-        let moduleName = isHebrew ? "StrongsHebrew" : "StrongsGreek"
-        let featureType = isHebrew ? "hebrew" : "greek"
-        let numericKey = Self.normalizeNumericKey(strongsNumber)
-        let keyName = numericKey.count < 5
-            ? String(repeating: "0", count: max(0, 5 - numericKey.count)) + numericKey
-            : numericKey
-        let message = escapeXML(
-            Bundle.main.localizedString(
-                forKey: "no_dictionary_installed",
-                value: "No dictionary module installed. Download Strong's Hebrew/Greek from Downloads.",
-                table: nil
-            )
-        )
-        let downloadsLabel = escapeXML(
-            Bundle.main.localizedString(
-                forKey: "downloads",
-                value: "Downloads",
-                table: nil
-            )
-        )
-        let xml = """
-        <div>
-        <title type="x-gen">\(message)</title>
-        <p><a href="download://">\(downloadsLabel)</a></p>
-        </div>
-        """
-        return (
-            xml: xml,
-            key: "\(moduleName)--\(keyName)--missing",
-            keyName: keyName,
-            bookInitials: moduleName,
-            bookAbbreviation: moduleName,
-            features: OsisFeatures(type: featureType, keyName: keyName)
+     Creates the Strong's document builder bound to this pane's SWORD and settings state.
+     */
+    private func strongsDocumentBuilder() -> BibleReaderStrongsDocumentBuilder {
+        BibleReaderStrongsDocumentBuilder(
+            swordManager: swordManager,
+            selectedPreferenceValues: { [weak self] key in
+                self?.settingsStore?.getStringSet(key) ?? []
+            },
+            moduleDisplayLabel: BibleReaderStrongsDocumentBuilder.moduleDisplayLabel,
+            localizedString: { key, defaultValue in
+                Bundle.main.localizedString(forKey: key, value: defaultValue, table: nil)
+            }
         )
     }
 
@@ -5046,168 +4954,6 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     }
 
     /**
-     Transform dictionary cross-references into clickable links.
-     Handles:
-     1. ThML `<ref target="StrongsHebrew/02421">text</ref>` tags
-     2. Plain text "see HEBREW for 05774" / "see GREEK for 01234" from StrongsHebrew/Greek modules
-     3. Plain text "from 05774" / "From H5774" patterns
-     */
-    static func linkifyRenderedDictionaryHTML(_ html: String, defaultPrefix: String? = nil) -> String {
-        var result = html
-
-        result = linkifyStructuredDictionaryRefs(in: result, defaultPrefix: defaultPrefix)
-
-        // Handle bare <ref target="key">text</ref> for any remaining ref tags
-        let bareRefPattern = try? NSRegularExpression(
-            pattern: #"<ref\s+target="[^"]*?/?(\d+)"[^>]*>(.*?)</ref>"#,
-            options: [.dotMatchesLineSeparators]
-        )
-        if let regex = bareRefPattern {
-            let range = NSRange(result.startIndex..., in: result)
-            let prefix = defaultPrefix.map { "\($0)" } ?? ""
-            result = regex.stringByReplacingMatches(
-                in: result,
-                range: range,
-                withTemplate: "<a href=\"ab-w://?strong=\(prefix)$1\">$2</a>"
-            )
-        }
-
-        // 2. Plain text: "see HEBREW for 05774" → link the number
-        let seeHebrewPattern = try? NSRegularExpression(
-            pattern: #"see HEBREW for (\d{4,5})"#,
-            options: []
-        )
-        if let regex = seeHebrewPattern {
-            let range = NSRange(result.startIndex..., in: result)
-            result = regex.stringByReplacingMatches(in: result, range: range, withTemplate: "see HEBREW for <a href=\"ab-w://?strong=H$1\">$1</a>")
-        }
-
-        // 3. Plain text: "see GREEK for 01234" → link the number
-        let seeGreekPattern = try? NSRegularExpression(
-            pattern: #"see GREEK for (\d{4,5})"#,
-            options: []
-        )
-        if let regex = seeGreekPattern {
-            let range = NSRange(result.startIndex..., in: result)
-            result = regex.stringByReplacingMatches(in: result, range: range, withTemplate: "see GREEK for <a href=\"ab-w://?strong=G$1\">$1</a>")
-        }
-
-        // 4. Plain text: "from 05774" or "From 05774" (common in StrongsHebrew entries)
-        // Only match standalone numbers preceded by "from " to avoid false positives
-        let fromPattern = try? NSRegularExpression(
-            pattern: #"(?<=[Ff]rom )(\d{4,5})(?=[;,.\s]|$)"#,
-            options: []
-        )
-        if let regex = fromPattern, let defaultPrefix {
-            let range = NSRange(result.startIndex..., in: result)
-            result = regex.stringByReplacingMatches(
-                in: result,
-                range: range,
-                withTemplate: "<a href=\"ab-w://?strong=\(defaultPrefix)$1\">$1</a>"
-            )
-        }
-
-        // 5. Remove <br/> tags immediately before <span class="sense"> — redundant when
-        // .sense is CSS display:block, and causes double line spacing otherwise.
-        let brBeforeSensePattern = try? NSRegularExpression(
-            pattern: #"<br\s*/?>\s*(?=<span\s+class="sense")"#,
-            options: []
-        )
-        if let regex = brBeforeSensePattern {
-            let range = NSRange(result.startIndex..., in: result)
-            result = regex.stringByReplacingMatches(in: result, range: range, withTemplate: "")
-        }
-
-        return result
-    }
-
-    /// Transform raw dictionary XML references into clickable links while preserving TEI structure.
-    static func linkifyRawDictionaryXML(_ xml: String, defaultPrefix: String? = nil) -> String {
-        var result = xml
-
-        result = linkifyStructuredDictionaryRefs(in: result, defaultPrefix: defaultPrefix)
-
-        let bareRefPattern = try? NSRegularExpression(
-            pattern: #"<ref\s+target="[^"]*?/?(\d+)"[^>]*>(.*?)</ref>"#,
-            options: [.dotMatchesLineSeparators]
-        )
-        if let regex = bareRefPattern {
-            let range = NSRange(result.startIndex..., in: result)
-            let prefix = defaultPrefix.map { "\($0)" } ?? ""
-            result = regex.stringByReplacingMatches(
-                in: result,
-                range: range,
-                withTemplate: "<a href=\"ab-w://?strong=\(prefix)$1\">$2</a>"
-            )
-        }
-
-        let seeHebrewPattern = try? NSRegularExpression(
-            pattern: #"see HEBREW for (\d{4,5})"#,
-            options: []
-        )
-        if let regex = seeHebrewPattern {
-            let range = NSRange(result.startIndex..., in: result)
-            result = regex.stringByReplacingMatches(
-                in: result,
-                range: range,
-                withTemplate: "see HEBREW for <a href=\"ab-w://?strong=H$1\">$1</a>"
-            )
-        }
-
-        let seeGreekPattern = try? NSRegularExpression(
-            pattern: #"see GREEK for (\d{4,5})"#,
-            options: []
-        )
-        if let regex = seeGreekPattern {
-            let range = NSRange(result.startIndex..., in: result)
-            result = regex.stringByReplacingMatches(
-                in: result,
-                range: range,
-                withTemplate: "see GREEK for <a href=\"ab-w://?strong=G$1\">$1</a>"
-            )
-        }
-
-        let fromPattern = try? NSRegularExpression(
-            pattern: #"(?<=[Ff]rom )(\d{4,5})(?=[;,.\s]|$)"#,
-            options: []
-        )
-        if let regex = fromPattern, let defaultPrefix {
-            let range = NSRange(result.startIndex..., in: result)
-            result = regex.stringByReplacingMatches(
-                in: result,
-                range: range,
-                withTemplate: "<a href=\"ab-w://?strong=\(defaultPrefix)$1\">$1</a>"
-            )
-        }
-
-        return result
-    }
-
-    private static func linkifyStructuredDictionaryRefs(in source: String, defaultPrefix: String?) -> String {
-        let refPattern = try? NSRegularExpression(
-            pattern: #"<ref\s+target="(StrongsHebrew|StrongsGreek|StrongsRealGreek|BDB|OSHB|Thayer)[/:](\d+)"[^>]*>(.*?)</ref>"#,
-            options: [.dotMatchesLineSeparators]
-        )
-        guard let regex = refPattern else { return source }
-
-        let mutable = NSMutableString(string: source)
-        let matches = regex.matches(in: source, range: NSRange(source.startIndex..., in: source))
-        guard !matches.isEmpty else { return source }
-
-        let nsSource = source as NSString
-        for match in matches.reversed() {
-            let moduleName = nsSource.substring(with: match.range(at: 1))
-            let digits = nsSource.substring(with: match.range(at: 2))
-            let text = nsSource.substring(with: match.range(at: 3))
-            let prefix = strongsLinkPrefix(forModuleName: moduleName) ?? defaultPrefix ?? ""
-            let replacement = "<a href=\"ab-w://?strong=\(prefix)\(digits)\">\(text)</a>"
-            mutable.replaceCharacters(in: match.range, with: replacement)
-        }
-
-        return mutable as String
-    }
-
-    /**
      Build a typed MultiFragmentDocument JSON string for rendering in Vue.js document views.
 
      - Parameters:
@@ -5224,40 +4970,11 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         contentType: String? = nil,
         stateJSON: String? = nil
     ) -> String? {
-        let id = "strongs-multi-\(UUID().uuidString)"
-        let osisFragments = fragments.map { frag in
-            OsisFragment(
-                xml: frag.xml.replacingOccurrences(of: "\r", with: ""),
-                key: frag.key,
-                keyName: frag.keyName,
-                v11n: "KJVA",
-                bookCategory: DocumentCategory.dictionary.rawValue,
-                bookInitials: frag.bookInitials,
-                bookAbbreviation: frag.bookAbbreviation,
-                osisRef: frag.keyName,
-                isNewTestament: false,
-                features: frag.features,
-                hasStrongs: frag.features.type != nil,
-                ordinalRange: [0, 0],
-                language: "en",
-                direction: "ltr"
-            )
-        }
-
-        let payload = MultiFragmentDocumentPayload(
-            id: id,
-            type: "multi",
-            osisFragments: osisFragments,
-            compare: false,
+        BibleReaderMultiFragmentDocumentBuilder.buildJSON(
+            fragments: fragments,
             contentType: contentType,
-            state: bridgeJSONValue(from: stateJSON)
+            stateJSON: stateJSON
         )
-        guard let data = try? bridgeEncoder.encode(payload),
-              let json = String(data: data, encoding: .utf8) else {
-            logger.error("Failed to encode multi-fragment bridge document")
-            return nil
-        }
-        return json
     }
 
     /**
@@ -5660,479 +5377,13 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     }
 
     /**
-     Build Strong's key variants using the same families Android tries for dictionary lookup.
-
-     Android parity matters here because installed Strong's dictionaries do not all expose the same
-     key shape. Some expect zero-padded numeric keys, some want a prefixed category key such as
-     `G1234` / `H1234`, and some zLD modules require a trailing carriage return.
+     Performs dictionary lookup through the shared Android-parity dictionary validation helper.
      */
-    private func buildKeyOptions(for strongsNumber: String) -> [String] {
-        Self.strongsLookupKeyOptions(for: strongsNumber)
-    }
-
-    /// Shared Strong's lookup key variants used by reader dictionary resolution and tests.
-    static func strongsLookupKeyOptions(for strongsNumber: String) -> [String] {
-        let original = strongsNumber.trimmingCharacters(in: .whitespacesAndNewlines)
-        let numberOnly = String(original.drop(while: { $0.isLetter }))
-        let stripped = numberOnly.replacingOccurrences(of: "^0+", with: "", options: .regularExpression)
-        let sanitizedBase = stripped.isEmpty ? numberOnly : stripped
-
-        let categoryPrefix: String
-        categoryPrefix = isHebrewStrongsNumber(original) ? "H" : "G"
-
-        var keys: [String] = []
-
-        func appendUnique(_ candidate: String) {
-            guard !candidate.isEmpty, !keys.contains(candidate) else { return }
-            keys.append(candidate)
-        }
-
-        var digitVariants: [String] = [numberOnly]
-        var currentDigits = numberOnly
-        while currentDigits.hasPrefix("0"), currentDigits.count > 1 {
-            currentDigits.removeFirst()
-            digitVariants.append(currentDigits)
-        }
-
-        appendUnique(original)
-        for digits in digitVariants {
-            appendUnique(digits)
-            appendUnique(digits + "\r")
-            appendUnique("\(categoryPrefix)\(digits)")
-        }
-        appendUnique(sanitizedBase)
-
-        return keys
-    }
-
-    /// Mirrors Android's heuristic for inferring Hebrew-vs-Greek when the prefix is omitted.
-    static func isHebrewStrongsNumber(_ strongsNumber: String) -> Bool {
-        let normalized = strongsNumber.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        if normalized.hasPrefix("H") { return true }
-        if normalized.hasPrefix("G") { return false }
-
-        let digits = String(normalized.drop(while: { $0.isLetter || $0 == "0" }))
-        return (Int(digits) ?? 0) > 5624
-    }
-
-    /**
-     Try each key variant in a module and return the first valid renderText() result.
-     After setKey(), SWORD positions to the nearest entry even if the exact key
-     doesn't exist. We must verify currentKey() matches to avoid returning wrong entries.
-     */
-    private struct DictionaryLookupResult {
-        let actualKey: String
-        let rawEntry: String
-        let renderedText: String
-    }
-
-    private func lookupInModule(_ module: SwordModule, keyOptions: [String]) -> DictionaryLookupResult? {
-        logger.info("lookupInModule: \(module.info.name), keyOptions=\(keyOptions)")
-
-        for key in keyOptions {
-            // Atomic setKey + currentKey + renderText in one queue.sync block
-            // to prevent SWORD state interleaving between calls.
-            let inspection = module.setKeyAndInspect(key)
-            let actualKey = inspection.actualKey
-            let candidate = inspection.renderedText
-            let trimmedKey = actualKey.trimmingCharacters(in: .whitespacesAndNewlines)
-            logger.info("lookupInModule: tried key='\(key)', actualKey='\(trimmedKey)', renderLen=\(candidate.count)")
-
-            switch Self.dictionaryLookupCandidateRejectionReason(
-                requested: key,
-                actualKey: trimmedKey,
-                rawEntry: inspection.rawEntry,
-                renderedText: candidate
-            ) {
-            case .none:
-                break
-            case .actualKeyMismatch:
-                logger.info("lookupInModule: key mismatch, skipping")
-                continue
-            case let .rawEntryMismatch(rawEntryKey):
-                logger.info("lookupInModule: raw entry key mismatch (\(rawEntryKey)), skipping")
-                continue
-            case .emptyRenderedText:
-                continue
-            case .renderedEntryMismatch:
-                logger.info("lookupInModule: rendered entry key mismatch, skipping")
-                continue
-            case .renderedTextMissingRequestedNumericKey:
-                logger.info("lookupInModule: rendered text missing requested numeric key, skipping")
-                continue
-            }
-
-            return DictionaryLookupResult(
-                actualKey: trimmedKey,
-                rawEntry: inspection.rawEntry.trimmingCharacters(in: .whitespacesAndNewlines),
-                renderedText: candidate.trimmingCharacters(in: .whitespacesAndNewlines)
-            )
-        }
-        return nil
-    }
-
-    private func buildDictionaryEntryXML(
-        rawEntry: String,
-        renderedText: String,
-        fallbackTitle: String? = nil,
-        strongsLinkPrefix: String? = nil
-    ) -> String {
-        let trimmedRawEntry = rawEntry.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmedRawEntry.hasPrefix("<"), trimmedRawEntry.hasSuffix(">") {
-            let linkifiedRawEntry = Self.linkifyRawDictionaryXML(
-                trimmedRawEntry,
-                defaultPrefix: strongsLinkPrefix
-            )
-            if let fallbackTitle, !trimmedRawEntry.localizedCaseInsensitiveContains("<title") {
-                let escapedTitle = escapeXML(fallbackTitle)
-                return "<div><title type=\"x-gen\">\(escapedTitle)</title>\(linkifiedRawEntry)</div>"
-            }
-            return "<div>\(linkifiedRawEntry)</div>"
-        }
-
-        let linkifiedHtml = Self.linkifyRenderedDictionaryHTML(
-            renderedText,
-            defaultPrefix: strongsLinkPrefix
-        )
-        let titlePrefix = fallbackTitle.map { "<title type=\"x-gen\">\(escapeXML($0))</title>" } ?? ""
-        return "<div>\(titlePrefix)<div type=\"paragraph\">\(linkifiedHtml)</div></div>"
-    }
-
-    private static func strongsLinkPrefix(for value: String) -> String? {
-        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        guard let prefix = trimmed.first, prefix == "H" || prefix == "G" else {
-            return nil
-        }
-        return String(prefix)
-    }
-
-    private static func strongsLinkPrefix(forModuleName moduleName: String) -> String? {
-        switch moduleName {
-        case "StrongsHebrew", "BDB", "OSHB":
-            return "H"
-        case "StrongsGreek", "StrongsRealGreek", "Thayer":
-            return "G"
-        default:
-            return nil
-        }
-    }
-
-    static func canonicalStrongsKeyName(requested: String, actualKey: String, rawEntry: String) -> String {
-        let resolvedKey = dictionaryEntryKey(actualKey: actualKey, rawEntry: rawEntry) ?? requested
-        let numericKey = Self.normalizeNumericKey(resolvedKey)
-        guard !numericKey.isEmpty else {
-            return Self.normalizeNumericKey(requested)
-        }
-        return numericKey.count < 5
-            ? String(repeating: "0", count: 5 - numericKey.count) + numericKey
-            : numericKey
-    }
-
-    static func dictionaryEntryKey(actualKey: String, rawEntry: String) -> String? {
-        let trimmedActualKey = actualKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !trimmedActualKey.isEmpty {
-            return trimmedActualKey
-        }
-
-        let titlePattern = try? NSRegularExpression(pattern: #"<title>([^<]+)</title>"#, options: [])
-        if let regex = titlePattern,
-           let match = regex.firstMatch(in: rawEntry, range: NSRange(rawEntry.startIndex..., in: rawEntry)),
-           let range = Range(match.range(at: 1), in: rawEntry) {
-            return String(rawEntry[range]).trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-
-        let entryPattern = try? NSRegularExpression(
-            pattern: #"<entryFree\b[^>]*\bn\s*=\s*"([^"]+)""#,
-            options: []
-        )
-        if let regex = entryPattern,
-           let match = regex.firstMatch(in: rawEntry, range: NSRange(rawEntry.startIndex..., in: rawEntry)),
-           let range = Range(match.range(at: 1), in: rawEntry) {
-            return String(rawEntry[range]).trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-
-        return nil
-    }
-
-    static func rawDictionaryEntryMatchesRequestedKey(requested: String, rawEntry: String) -> Bool {
-        guard let resolvedKey = dictionaryEntryKey(actualKey: "", rawEntry: rawEntry) else {
-            return true
-        }
-
-        let trimmedRequested = requested.trimmingCharacters(in: .whitespacesAndNewlines)
-        let trimmedResolvedKey = resolvedKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmedRequested.caseInsensitiveCompare(trimmedResolvedKey) == .orderedSame {
-            return true
-        }
-
-        let requestedNumeric = normalizeNumericKey(trimmedRequested)
-        let resolvedNumeric = normalizeNumericKey(trimmedResolvedKey)
-        return !requestedNumeric.isEmpty && requestedNumeric == resolvedNumeric
-    }
-
-    enum DictionaryLookupCandidateRejectionReason: Equatable {
-        case actualKeyMismatch
-        case rawEntryMismatch(String)
-        case emptyRenderedText
-        case renderedEntryMismatch
-        case renderedTextMissingRequestedNumericKey
-    }
-
-    static func dictionaryLookupCandidateRejectionReason(
-        requested: String,
-        actualKey: String,
-        rawEntry: String,
-        renderedText: String
-    ) -> DictionaryLookupCandidateRejectionReason? {
-        let trimmedActualKey = actualKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        let trimmedRenderedText = renderedText.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        // Verify the key actually matched. SWORD dictionary modules silently
-        // position to the nearest entry when the exact key doesn't exist.
-        if !trimmedActualKey.isEmpty,
-           !keysMatchNormalized(requested: requested, actual: trimmedActualKey) {
-            return .actualKeyMismatch
-        }
-
-        if let rawEntryKey = dictionaryEntryKey(actualKey: "", rawEntry: rawEntry),
-           !rawDictionaryEntryMatchesRequestedKey(requested: requested, rawEntry: rawEntry) {
-            return .rawEntryMismatch(rawEntryKey)
-        }
-
-        if trimmedRenderedText.isEmpty || trimmedRenderedText.contains("@@@@") {
-            return .emptyRenderedText
-        }
-
-        if !renderedDictionaryEntryMatchesRequestedKey(
-            requested: requested,
-            renderedText: trimmedRenderedText
-        ) {
-            return .renderedEntryMismatch
-        }
-
-        // For modules where currentKey() returns empty (some zLD modules like
-        // BDBGlosses), verify the content references the requested Strong's number.
-        // Without this check, these modules return whatever entry they're stuck on.
-        if trimmedActualKey.isEmpty {
-            let numericKey = normalizeNumericKey(requested)
-            if !numericKey.isEmpty && !trimmedRenderedText.contains(numericKey) {
-                return .renderedTextMissingRequestedNumericKey
-            }
-        }
-
-        return nil
-    }
-
-    static func renderedDictionaryEntryKey(renderedText: String) -> String? {
-        let withoutTags = renderedText.replacingOccurrences(
-            of: #"<[^>]+>"#,
-            with: " ",
-            options: .regularExpression
-        )
-        let normalized = withoutTags
-            .replacingOccurrences(of: "&nbsp;", with: " ")
-            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-
-        guard !normalized.isEmpty else { return nil }
-
-        let pattern = try? NSRegularExpression(
-            pattern: #"^([HG]?\d{1,5})\b"#,
-            options: [.caseInsensitive]
-        )
-        guard let regex = pattern,
-              let match = regex.firstMatch(
-                in: normalized,
-                range: NSRange(normalized.startIndex..., in: normalized)
-              ),
-              let range = Range(match.range(at: 1), in: normalized) else {
-            return nil
-        }
-
-        return String(normalized[range]).trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    static func renderedDictionaryEntryMatchesRequestedKey(requested: String, renderedText: String) -> Bool {
-        guard let resolvedKey = renderedDictionaryEntryKey(renderedText: renderedText) else {
-            return true
-        }
-
-        let trimmedRequested = requested.trimmingCharacters(in: .whitespacesAndNewlines)
-        let trimmedResolvedKey = resolvedKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmedRequested.caseInsensitiveCompare(trimmedResolvedKey) == .orderedSame {
-            return true
-        }
-
-        let requestedNumeric = normalizeNumericKey(trimmedRequested)
-        let resolvedNumeric = normalizeNumericKey(trimmedResolvedKey)
-        return !requestedNumeric.isEmpty && requestedNumeric == resolvedNumeric
-    }
-
-    /**
-     Compare two dictionary keys by normalizing: strip letter prefixes, leading zeros,
-     and compare case-insensitively. Handles Strong's variants ("01121" == "1121" == "H1121")
-     and non-numeric keys like Robinson morphology codes ("V-2AAI-3S").
-     */
-    static func keysMatchNormalized(requested: String, actual: String) -> Bool {
-        let trimmedRequested = requested.trimmingCharacters(in: .whitespacesAndNewlines)
-        let trimmedActual = actual.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        // Direct case-insensitive match (handles morphology codes, etc.)
-        if trimmedRequested.caseInsensitiveCompare(trimmedActual) == .orderedSame { return true }
-
-        // Numeric normalization: strip letter prefix and leading zeros, then compare
-        let reqNumeric = Self.normalizeNumericKey(trimmedRequested)
-        let actNumeric = Self.normalizeNumericKey(trimmedActual)
-        if !reqNumeric.isEmpty && reqNumeric == actNumeric { return true }
-
-        return false
-    }
-
-    /**
-     Strip optional letter prefix (H/G) and leading zeros from a key.
-     "H07225" → "7225", "01121" → "1121", "7225" → "7225"
-     */
-    static func normalizeNumericKey(_ key: String) -> String {
-        let trimmedKey = key.trimmingCharacters(in: .whitespacesAndNewlines)
-        let afterLetters = String(trimmedKey.drop(while: { $0.isLetter }))
-        let stripped = afterLetters.replacingOccurrences(of: "^0+", with: "", options: .regularExpression)
-        // Verify it's actually numeric
-        guard !stripped.isEmpty, stripped.allSatisfy({ $0.isNumber }) else { return "" }
-        return stripped
-    }
-
-    private func moduleDisplayLabel(_ module: SwordModule) -> String {
-        if let abbreviation = module.configEntry("Abbreviation")?
-            .trimmingCharacters(in: .whitespacesAndNewlines),
-           !abbreviation.isEmpty {
-            return abbreviation
-        }
-        return module.info.name
-    }
-
-    /// Find ALL lexicon/dictionary modules that can look up the given Strong's number.
-    private func findAllLexiconModules(for strongsNumber: String) -> [SwordModule] {
-        guard let mgr = swordManager else {
-            logger.error("findAllLexiconModules: swordManager is nil!")
-            return []
-        }
-
-        let isHebrew: Bool
-        if strongsNumber.hasPrefix("H") {
-            isHebrew = true
-        } else if strongsNumber.hasPrefix("G") {
-            isHebrew = false
-        } else {
-            let numStr = strongsNumber.replacingOccurrences(of: "^0+", with: "", options: .regularExpression)
-            isHebrew = (Int(numStr) ?? 0) > 5624
-        }
-        let feature: ModuleFeatures = isHebrew ? .hebrewDef : .greekDef
-
-        let allModules = mgr.installedModules()
-        logger.info("findAllLexiconModules: \(allModules.count) installed modules, isHebrew=\(isHebrew), categories: \(allModules.map { $0.name + ":" + String(describing: $0.category) }.joined(separator: ", "))")
-        var result: [SwordModule] = []
-        var seen = Set<String>()
-
-        // 1. Explicit user selection (Android parity: when non-empty, use only selected modules)
-        let selectionKey: AppPreferenceKey = isHebrew ? .strongsHebrewDictionary : .strongsGreekDictionary
-        let selectedNames = settingsStore?.getStringSet(selectionKey) ?? []
-        if !selectedNames.isEmpty {
-            for name in selectedNames where seen.insert(name).inserted {
-                if let mod = mgr.module(named: name),
-                   StrongsDictionaryPolicy.isSupportedDictionaryModuleName(mod.info.name),
-                   (mod.info.category == .dictionary || mod.info.category == .glossary),
-                   mod.info.features.contains(feature) {
-                    result.append(mod)
-                }
-            }
-            // Fall back to runtime defaults when persisted values are stale/invalid.
-            if !result.isEmpty {
-                return result
-            }
-        }
-
-        // 2. Runtime default: dictionary/glossary modules with matching feature
-        for info in allModules where
-            (info.category == .dictionary || info.category == .glossary) &&
-                StrongsDictionaryPolicy.isSupportedDictionaryModuleName(info.name) &&
-                info.features.contains(feature) {
-            if seen.insert(info.name).inserted, let mod = mgr.module(named: info.name) {
-                result.append(mod)
-            }
-        }
-
-        if !result.isEmpty {
-            return result
-        }
-
-        // 3. Known lexicon module names fallback
-        let lexiconNames = isHebrew
-            ? ["StrongsHebrew", "OSHB", "BDB"]
-            : ["StrongsGreek", "StrongsRealGreek", "Thayer", "ISBE"]
-        for name in lexiconNames {
-            if seen.insert(name).inserted, let mod = mgr.module(named: name) {
-                result.append(mod)
-            }
-        }
-
-        return result
-    }
-
-    /**
-     Android currently excludes certain Strong's modules from the curated Strong's-dictionary flow
-     because their content/lookup behavior is not good enough for parity use.
-
-     We mirror that product decision here so iOS does not surface modules that Android intentionally
-     hides, which would otherwise produce confusing tab labels and materially different entry content.
-     */
-    static func isSupportedStrongsDictionaryModuleName(_ name: String) -> Bool {
-        StrongsDictionaryPolicy.isSupportedDictionaryModuleName(name)
-    }
-
-    /// Find modules that can decode morphology (Robinson, Packard, etc.).
-    private func findMorphologyModules() -> [SwordModule] {
-        guard let mgr = swordManager else { return [] }
-        let allModules = mgr.installedModules()
-        var result: [SwordModule] = []
-        var seen = Set<String>()
-
-        // 1. Explicit user selection (Android parity: when non-empty, use only selected modules)
-        let selectedNames = settingsStore?.getStringSet(.robinsonGreekMorphology) ?? []
-        if !selectedNames.isEmpty {
-            for name in selectedNames where seen.insert(name).inserted {
-                if let mod = mgr.module(named: name),
-                   (mod.info.category == .dictionary || mod.info.category == .glossary),
-                   mod.info.features.contains(.greekParse) {
-                    result.append(mod)
-                }
-            }
-            // Fall back to runtime defaults when persisted values are stale/invalid.
-            if !result.isEmpty {
-                return result
-            }
-        }
-
-        // 2. Runtime default: dictionary/glossary modules with Greek morphology
-        for info in allModules where
-            (info.category == .dictionary || info.category == .glossary) &&
-                info.features.contains(.greekParse) {
-            if seen.insert(info.name).inserted, let mod = mgr.module(named: info.name) {
-                result.append(mod)
-            }
-        }
-
-        if !result.isEmpty {
-            return result
-        }
-
-        // 3. Known morphology module fallback
-        for name in ["Robinson"] {
-            if seen.insert(name).inserted, let mod = mgr.module(named: name) {
-                result.append(mod)
-            }
-        }
-
-        return result
+    private func lookupInModule(
+        _ module: SwordModule,
+        keyOptions: [String]
+    ) -> BibleReaderStrongsDocumentBuilder.DictionaryLookupResult? {
+        BibleReaderStrongsDocumentBuilder.lookupInModule(module, keyOptions: keyOptions)
     }
 
     /**
