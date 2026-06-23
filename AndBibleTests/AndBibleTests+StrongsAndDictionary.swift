@@ -839,7 +839,7 @@ extension AndBibleTests {
         <entryFree n="H6440"><title>H6440</title> <foreign xml:lang="he">פָּנֶה</foreign>, pl. <foreign xml:lang="he">פָּנִים</foreign> <hi rend="italic">face</hi>, also <hi rend="italic">faces</hi></entryFree>
         """
 
-        let keyName = BibleReaderController.canonicalStrongsKeyName(
+        let keyName = BibleReaderStrongsDocumentBuilder.canonicalStrongsKeyName(
             requested: "H06440",
             actualKey: "",
             rawEntry: rawEntry
@@ -852,7 +852,7 @@ extension AndBibleTests {
         let rawEntry = #"<entryFree type="x" n = "430"><orth>אֱלֹהִים</orth></entryFree>"#
 
         XCTAssertEqual(
-            BibleReaderController.dictionaryEntryKey(actualKey: "", rawEntry: rawEntry),
+            BibleReaderStrongsDocumentBuilder.dictionaryEntryKey(actualKey: "", rawEntry: rawEntry),
             "430"
         )
     }
@@ -862,7 +862,7 @@ extension AndBibleTests {
         <entryFree n="6440"><def>From 6437; see HEBREW for 05774 and <ref target="StrongsHebrew/02421">2421</ref>.</def></entryFree>
         """
 
-        let linkified = BibleReaderController.linkifyRawDictionaryXML(rawEntry, defaultPrefix: "H")
+        let linkified = BibleReaderStrongsDocumentBuilder.linkifyRawDictionaryXML(rawEntry, defaultPrefix: "H")
 
         XCTAssertTrue(linkified.contains("<entryFree"))
         XCTAssertTrue(linkified.contains("<a href=\"ab-w://?strong=H6437\">6437</a>"))
@@ -872,7 +872,7 @@ extension AndBibleTests {
 
     func testStrongsLookupKeyOptionsIncludeIntermediateZeroTrimVariants() {
         XCTAssertEqual(
-            BibleReaderController.strongsLookupKeyOptions(for: "H00430"),
+            BibleReaderStrongsDocumentBuilder.strongsLookupKeyOptions(for: "H00430"),
             ["H00430", "00430", "00430\r", "0430", "0430\r", "H0430", "430", "430\r", "H430"]
         )
     }
@@ -886,7 +886,7 @@ extension AndBibleTests {
         """
 
         XCTAssertEqual(
-            BibleReaderController.dictionaryLookupCandidateRejectionReason(
+            BibleReaderStrongsDocumentBuilder.dictionaryLookupCandidateRejectionReason(
                 requested: "H00430",
                 actualKey: "0430",
                 rawEntry: rawEntry,
@@ -895,7 +895,7 @@ extension AndBibleTests {
             .renderedEntryMismatch
         )
         XCTAssertNil(
-            BibleReaderController.dictionaryLookupCandidateRejectionReason(
+            BibleReaderStrongsDocumentBuilder.dictionaryLookupCandidateRejectionReason(
                 requested: "H00430",
                 actualKey: "0430",
                 rawEntry: rawEntry,
@@ -913,13 +913,13 @@ extension AndBibleTests {
         """
 
         XCTAssertFalse(
-            BibleReaderController.rawDictionaryEntryMatchesRequestedKey(
+            BibleReaderStrongsDocumentBuilder.rawDictionaryEntryMatchesRequestedKey(
                 requested: "H05775",
                 rawEntry: mismatchedRawEntry
             )
         )
         XCTAssertTrue(
-            BibleReaderController.rawDictionaryEntryMatchesRequestedKey(
+            BibleReaderStrongsDocumentBuilder.rawDictionaryEntryMatchesRequestedKey(
                 requested: "05775\r",
                 rawEntry: matchingRawEntry
             )
@@ -932,7 +932,7 @@ extension AndBibleTests {
         """
 
         XCTAssertEqual(
-            BibleReaderController.renderedDictionaryEntryKey(renderedText: rendered),
+            BibleReaderStrongsDocumentBuilder.renderedDictionaryEntryKey(renderedText: rendered),
             "8674"
         )
     }
@@ -943,13 +943,13 @@ extension AndBibleTests {
         """
 
         XCTAssertFalse(
-            BibleReaderController.renderedDictionaryEntryMatchesRequestedKey(
+            BibleReaderStrongsDocumentBuilder.renderedDictionaryEntryMatchesRequestedKey(
                 requested: "H00430",
                 renderedText: rendered
             )
         )
         XCTAssertTrue(
-            BibleReaderController.renderedDictionaryEntryMatchesRequestedKey(
+            BibleReaderStrongsDocumentBuilder.renderedDictionaryEntryMatchesRequestedKey(
                 requested: "H00430",
                 renderedText: "<div><p>430 'elohiym gods in the ordinary sense.</p></div>"
             )
@@ -962,18 +962,18 @@ extension AndBibleTests {
         """
 
         XCTAssertTrue(
-            BibleReaderController.renderedDictionaryEntryMatchesRequestedKey(
+            BibleReaderStrongsDocumentBuilder.renderedDictionaryEntryMatchesRequestedKey(
                 requested: "H05774",
                 renderedText: rendered
             )
         )
-        XCTAssertNil(BibleReaderController.renderedDictionaryEntryKey(renderedText: rendered))
+        XCTAssertNil(BibleReaderStrongsDocumentBuilder.renderedDictionaryEntryKey(renderedText: rendered))
     }
 
     func testIsSupportedStrongsDictionaryModuleNameMatchesAndroidCuratedPolicy() {
-        XCTAssertFalse(BibleReaderController.isSupportedStrongsDictionaryModuleName("BDBGlosses_Strongs"))
-        XCTAssertTrue(BibleReaderController.isSupportedStrongsDictionaryModuleName("StrongsHebrew"))
-        XCTAssertTrue(BibleReaderController.isSupportedStrongsDictionaryModuleName("InvStrongsRealHebrew"))
+        XCTAssertFalse(BibleReaderStrongsDocumentBuilder.isSupportedStrongsDictionaryModuleName("BDBGlosses_Strongs"))
+        XCTAssertTrue(BibleReaderStrongsDocumentBuilder.isSupportedStrongsDictionaryModuleName("StrongsHebrew"))
+        XCTAssertTrue(BibleReaderStrongsDocumentBuilder.isSupportedStrongsDictionaryModuleName("InvStrongsRealHebrew"))
     }
 
     func testRenderedContentStateDefaultsToNeutralToken() {
