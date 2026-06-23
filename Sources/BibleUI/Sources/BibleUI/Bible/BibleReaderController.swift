@@ -120,6 +120,9 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     private(set) var editingInWebView = false
     /// Whether the Vue reader client currently reports an open modal for this pane.
     private(set) var webModalIsOpen = false
+    /// Router for bridge events whose behavior is limited to pane-local modal and host callbacks.
+    @ObservationIgnored
+    private lazy var bridgeEventRouter = makeBridgeEventRouter()
 
     /// SWORD module manager and active Bible module
     private(set) var swordManager: SwordManager?
@@ -618,6 +621,47 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         super.init()
         bridge.delegate = self
         configureSwordManager(swordManagerOverride)
+    }
+
+    /**
+     Creates the collaborator that owns pane-local bridge event routing.
+
+     The closures deliberately bounce back into controller-owned dependencies for navigation,
+     preference lookup, bridge emission, and host callbacks. This keeps the router focused on
+     dispatch rules while preserving the controller as the state/presentation orchestration boundary.
+
+     - Returns: A router configured for this controller's bridge and host callbacks.
+     - Side effects: None during creation; side effects happen when the router handles bridge events.
+     - Failure modes: Deallocated controllers or unset host callbacks become no-ops, matching the
+       previous optional-callback behavior.
+     */
+    private func makeBridgeEventRouter() -> BibleReaderBridgeEventRouter {
+        BibleReaderBridgeEventRouter(
+            emitBridgeEvent: { [weak self] event in
+                self?.bridge.emit(event: event) ?? false
+            },
+            navigatePrevious: { [weak self] in
+                self?.navigatePrevious()
+            },
+            navigateNext: { [weak self] in
+                self?.navigateNext()
+            },
+            showToast: { [weak self] text in
+                self?.onShowToast?(text)
+            },
+            shareHtml: { [weak self] html in
+                self?.onShareHtml?(html)
+            },
+            openDownloads: { [weak self] searchText in
+                self?.onRequestOpenDownloads?(searchText)
+            },
+            shouldToggleFullScreen: { [weak self] in
+                self?.appPreferenceBool(.doubleTapToFullscreen) ?? false
+            },
+            toggleFullScreen: { [weak self] in
+                self?.onToggleFullScreen?()
+            }
+        )
     }
 
     /**
@@ -2565,7 +2609,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
        delegate method is called
      */
     public func bridge(_ bridge: BibleBridge, reportModalState isOpen: Bool) {
-        webModalIsOpen = isOpen
+        bridgeEventRouter.reportModalState(isOpen)
+        webModalIsOpen = bridgeEventRouter.webModalIsOpen
     }
 
     /**
@@ -2577,7 +2622,9 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
      - Note: iOS currently does not need this signal, so the callback is intentionally a no-op.
      */
-    public func bridge(_ bridge: BibleBridge, reportInputFocus focused: Bool) {}
+    public func bridge(_ bridge: BibleBridge, reportInputFocus focused: Bool) {
+        bridgeEventRouter.reportInputFocus(focused)
+    }
 
     /**
      Handles keyboard navigation events forwarded from the web client.
@@ -2595,21 +2642,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      - ignores keys other than `ArrowLeft`, `ArrowRight`, `Escape`, and `Esc`
      */
     public func bridge(_ bridge: BibleBridge, onKeyDown key: String) {
-        guard !webModalIsOpen else {
-            if key == "Escape" || key == "Esc" {
-                closeWebModalIfNeeded()
-            }
-            return
-        }
-
-        switch key {
-        case "ArrowLeft":
-            navigatePrevious()
-        case "ArrowRight":
-            navigateNext()
-        default:
-            break
-        }
+        bridgeEventRouter.handleKeyDown(key)
     }
 
     /**
@@ -2630,9 +2663,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      */
     @discardableResult
     func closeWebModalIfNeeded() -> Bool {
-        guard webModalIsOpen else { return false }
-        bridge.emit(event: "close_modals")
-        return true
+        bridgeEventRouter.closeWebModalIfNeeded()
     }
 
     // MARK: - BibleBridgeDelegate — Navigation & Scroll
@@ -4617,7 +4648,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         }
         // Handle Downloads links surfaced in web-rendered help/error content.
         if link.hasPrefix("download://") {
-            onRequestOpenDownloads?(Self.downloadSearchText(from: link))
+            bridgeEventRouter.requestOpenDownloads(searchText: Self.downloadSearchText(from: link))
             return
         }
         // Handle My Notes links surfaced in bookmark metadata.
@@ -4682,13 +4713,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      `nil`, which keeps the caller on the standard unfiltered Downloads presentation path.
      */
     static func downloadSearchText(from link: String) -> String? {
-        guard link.hasPrefix("download://"),
-              let components = URLComponents(string: link),
-              let value = components.queryItems?.first(where: { $0.name == "initials" })?.value else {
-            return nil
-        }
-        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? nil : trimmed
+        BibleReaderBridgeEventRouter.downloadSearchText(from: link)
     }
 
     private func handleErrorReportLink() {
@@ -6497,7 +6522,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      Requests that the owning SwiftUI view present the downloads/install UI.
      */
     public func bridgeDidRequestOpenDownloads(_ bridge: BibleBridge) {
-        onRequestOpenDownloads?(nil)
+        bridgeEventRouter.requestOpenDownloads()
     }
 
     // MARK: - BibleBridgeDelegate — Dialogs
@@ -7263,14 +7288,14 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      Forwards a toast/banner message request to the owning SwiftUI view.
      */
     public func bridge(_ bridge: BibleBridge, showToast text: String) {
-        onShowToast?(text)
+        bridgeEventRouter.showToast(text)
     }
 
     /**
      Forwards HTML sharing content to the host view so platform share UI can be presented.
      */
     public func bridge(_ bridge: BibleBridge, shareHtml html: String) {
-        onShareHtml?(html)
+        bridgeEventRouter.shareHtml(html)
     }
 
     /**
@@ -7332,9 +7357,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      - returns without side effects when the user has disabled double-tap fullscreen in preferences
      */
     public func bridgeDidRequestToggleFullScreen(_ bridge: BibleBridge) {
-        // Match Android: double-tap fullscreen can be disabled by user preference.
-        guard appPreferenceBool(.doubleTapToFullscreen) else { return }
-        onToggleFullScreen?()
+        bridgeEventRouter.requestToggleFullScreen()
     }
 
     // MARK: - EPUB Link Navigation
