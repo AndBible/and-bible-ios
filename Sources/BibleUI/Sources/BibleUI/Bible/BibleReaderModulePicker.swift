@@ -310,8 +310,7 @@ struct BibleReaderModulePicker: View {
             controller.switchGeneralBookDocument(to: module.name)
             dismissAndPresentAuxiliaryBrowser(onOpenGeneralBookBrowser)
         case .map:
-            controller.switchMapModule(to: module.name)
-            controller.switchCategory(to: .map)
+            controller.switchMapDocument(to: module.name)
             dismissAndPresentAuxiliaryBrowser(onOpenMapBrowser)
         default:
             controller.switchBibleDocument(to: module.name)

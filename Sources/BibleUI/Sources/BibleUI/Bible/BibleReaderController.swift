@@ -148,6 +148,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     private(set) var activeCommentaryModule: SwordModule?
     private(set) var activeCommentaryModuleName: String?
     private(set) var currentCategory: DocumentCategory = .bible
+    /// Pure planner for Android-style module/category PageManager transitions.
+    private let moduleSwitchCoordinator = BibleReaderModuleSwitchCoordinator()
 
     /// Dictionary/Lexicon module support
     private(set) var installedDictionaryModules: [ModuleInfo] = []
@@ -707,6 +709,60 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.35, execute: workItem)
     }
 
+    /**
+     Builds the controller-owned mutation context used by the module switch coordinator.
+
+     The coordinator owns module/category switching rules while this controller remains the owner of
+     observed active-module state, current keys, persistence callbacks, and WebView reloads. Closures
+     capture the controller weakly so a pending switch action cannot extend pane lifetime.
+     */
+    private func makeModuleSwitchContext() -> BibleReaderModuleSwitchContext {
+        BibleReaderModuleSwitchContext(
+            swordManager: swordManager,
+            activeWindow: activeWindow,
+            clientReady: clientReady,
+            currentCategory: currentCategory,
+            setBibleModule: { [weak self] module, moduleName in
+                self?.activeModule = module
+                self?.activeModuleName = moduleName
+            },
+            setCommentaryModule: { [weak self] module, moduleName in
+                self?.activeCommentaryModule = module
+                self?.activeCommentaryModuleName = moduleName
+            },
+            setDictionaryModule: { [weak self] module, moduleName in
+                self?.activeDictionaryModule = module
+                self?.activeDictionaryModuleName = moduleName
+                self?.currentDictionaryKey = nil
+            },
+            setGeneralBookModule: { [weak self] module, moduleName in
+                self?.activeGeneralBookModule = module
+                self?.activeGeneralBookModuleName = moduleName
+                self?.currentGeneralBookKey = nil
+            },
+            setMapModule: { [weak self] module, moduleName in
+                self?.activeMapModule = module
+                self?.activeMapModuleName = moduleName
+                self?.currentMapKey = nil
+            },
+            setCurrentCategory: { [weak self] category in
+                self?.currentCategory = category
+            },
+            refreshBookList: { [weak self] in
+                self?.refreshBookList()
+            },
+            moduleBookListCount: { [weak self] in
+                self?.moduleBookList.count ?? 0
+            },
+            persistState: { [weak self] in
+                self?.onPersistState?()
+            },
+            loadCurrentContent: { [weak self] in
+                self?.loadCurrentContent()
+            }
+        )
+    }
+
     /// Update display settings and re-emit config to Vue.js.
     public func updateDisplaySettings(_ settings: TextDisplaySettings, nightMode: Bool) {
         self.displaySettings = settings
@@ -838,25 +894,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
     /// Switch to a different installed Bible module.
     public func switchModule(to moduleName: String) {
-        guard let mgr = swordManager,
-              let mod = mgr.module(named: moduleName) else {
-            logger.warning("Cannot switch to module \(moduleName) — not found")
-            return
-        }
-        activeModule = mod
-        activeModuleName = moduleName
-        refreshBookList()
-        logger.info("Switched to module: \(moduleName) (\(self.moduleBookList.count) books)")
-
-        // Persist module selection to PageManager
-        if let pm = activeWindow?.pageManager {
-            pm.bibleDocument = moduleName
-            onPersistState?()
-        }
-
-        // Reload the current chapter with the new module
-        guard clientReady else { return }
-        loadCurrentContent()
+        moduleSwitchCoordinator.switchModule(to: moduleName, context: makeModuleSwitchContext())
     }
 
     /**
@@ -883,51 +921,12 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      */
     @MainActor
     public func switchBibleDocument(to moduleName: String) {
-        guard let mgr = swordManager,
-              let mod = mgr.module(named: moduleName) else {
-            logger.warning("Cannot switch to Bible document \(moduleName) — not found")
-            return
-        }
-        guard mod.info.category == .bible else {
-            logger.warning("Cannot switch to Bible document \(moduleName) — category \(mod.info.category.rawValue)")
-            return
-        }
-        activeModule = mod
-        activeModuleName = moduleName
-        currentCategory = .bible
-        refreshBookList()
-        logger.info("Switched to Bible document: \(moduleName) (\(self.moduleBookList.count) books)")
-
-        if let pm = activeWindow?.pageManager {
-            pm.bibleDocument = moduleName
-            pm.currentCategoryName = DocumentCategory.bible.pageManagerKey
-            onPersistState?()
-        }
-
-        guard clientReady else { return }
-        loadCurrentContent()
+        moduleSwitchCoordinator.switchBibleDocument(to: moduleName, context: makeModuleSwitchContext())
     }
 
     /// Switch to a different installed commentary module.
     public func switchCommentaryModule(to moduleName: String) {
-        guard let mgr = swordManager,
-              let mod = mgr.module(named: moduleName) else {
-            logger.warning("Cannot switch to commentary module \(moduleName) — not found")
-            return
-        }
-        activeCommentaryModule = mod
-        activeCommentaryModuleName = moduleName
-        logger.info("Switched to commentary module: \(moduleName)")
-
-        // Persist to PageManager
-        if let pm = activeWindow?.pageManager {
-            pm.commentaryDocument = moduleName
-            onPersistState?()
-        }
-
-        // Reload if currently viewing commentary
-        guard clientReady, currentCategory == .commentary else { return }
-        loadCurrentContent()
+        moduleSwitchCoordinator.switchCommentaryModule(to: moduleName, context: makeModuleSwitchContext())
     }
 
     /**
@@ -950,47 +949,12 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      */
     @MainActor
     public func switchCommentaryDocument(to moduleName: String) {
-        guard let mgr = swordManager,
-              let mod = mgr.module(named: moduleName) else {
-            logger.warning("Cannot switch to commentary document \(moduleName) — not found")
-            return
-        }
-        guard mod.info.category == .commentary else {
-            logger.warning("Cannot switch to commentary document \(moduleName) — category \(mod.info.category.rawValue)")
-            return
-        }
-        activeCommentaryModule = mod
-        activeCommentaryModuleName = moduleName
-        currentCategory = .commentary
-        logger.info("Switched to commentary document: \(moduleName)")
-
-        if let pm = activeWindow?.pageManager {
-            pm.commentaryDocument = moduleName
-            pm.currentCategoryName = DocumentCategory.commentary.pageManagerKey
-            onPersistState?()
-        }
-
-        guard clientReady else { return }
-        loadCurrentContent()
+        moduleSwitchCoordinator.switchCommentaryDocument(to: moduleName, context: makeModuleSwitchContext())
     }
 
     /// Switch the active dictionary module.
     public func switchDictionaryModule(to moduleName: String) {
-        guard let mgr = swordManager,
-              let mod = mgr.module(named: moduleName) else {
-            logger.warning("Cannot switch to dictionary module \(moduleName) — not found")
-            return
-        }
-        activeDictionaryModule = mod
-        activeDictionaryModuleName = moduleName
-        currentDictionaryKey = nil
-        logger.info("Switched to dictionary module: \(moduleName)")
-
-        if let pm = activeWindow?.pageManager {
-            pm.dictionaryDocument = moduleName
-            pm.dictionaryKey = nil
-            onPersistState?()
-        }
+        moduleSwitchCoordinator.switchDictionaryModule(to: moduleName, context: makeModuleSwitchContext())
     }
 
     /**
@@ -1013,49 +977,12 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      */
     @MainActor
     public func switchDictionaryDocument(to moduleName: String) {
-        guard let mgr = swordManager,
-              let mod = mgr.module(named: moduleName) else {
-            logger.warning("Cannot switch to dictionary document \(moduleName) — not found")
-            return
-        }
-        guard mod.info.category == .dictionary else {
-            logger.warning("Cannot switch to dictionary document \(moduleName) — category \(mod.info.category.rawValue)")
-            return
-        }
-        activeDictionaryModule = mod
-        activeDictionaryModuleName = moduleName
-        currentDictionaryKey = nil
-        currentCategory = .dictionary
-        logger.info("Switched to dictionary document: \(moduleName)")
-
-        if let pm = activeWindow?.pageManager {
-            pm.dictionaryDocument = moduleName
-            pm.dictionaryKey = nil
-            pm.currentCategoryName = DocumentCategory.dictionary.pageManagerKey
-            onPersistState?()
-        }
-
-        guard clientReady else { return }
-        loadCurrentContent()
+        moduleSwitchCoordinator.switchDictionaryDocument(to: moduleName, context: makeModuleSwitchContext())
     }
 
     /// Switch the active general book module.
     public func switchGeneralBookModule(to moduleName: String) {
-        guard let mgr = swordManager,
-              let mod = mgr.module(named: moduleName) else {
-            logger.warning("Cannot switch to general book module \(moduleName) — not found")
-            return
-        }
-        activeGeneralBookModule = mod
-        activeGeneralBookModuleName = moduleName
-        currentGeneralBookKey = nil
-        logger.info("Switched to general book module: \(moduleName)")
-
-        if let pm = activeWindow?.pageManager {
-            pm.generalBookDocument = moduleName
-            pm.generalBookKey = nil
-            onPersistState?()
-        }
+        moduleSwitchCoordinator.switchGeneralBookModule(to: moduleName, context: makeModuleSwitchContext())
     }
 
     /**
@@ -1078,65 +1005,41 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      */
     @MainActor
     public func switchGeneralBookDocument(to moduleName: String) {
-        guard let mgr = swordManager,
-              let mod = mgr.module(named: moduleName) else {
-            logger.warning("Cannot switch to general book document \(moduleName) — not found")
-            return
-        }
-        guard mod.info.category == .generalBook else {
-            logger.warning("Cannot switch to general book document \(moduleName) — category \(mod.info.category.rawValue)")
-            return
-        }
-        activeGeneralBookModule = mod
-        activeGeneralBookModuleName = moduleName
-        currentGeneralBookKey = nil
-        currentCategory = .generalBook
-        logger.info("Switched to general book document: \(moduleName)")
-
-        if let pm = activeWindow?.pageManager {
-            pm.generalBookDocument = moduleName
-            pm.generalBookKey = nil
-            pm.currentCategoryName = DocumentCategory.generalBook.pageManagerKey
-            onPersistState?()
-        }
-
-        guard clientReady else { return }
-        loadCurrentContent()
+        moduleSwitchCoordinator.switchGeneralBookDocument(to: moduleName, context: makeModuleSwitchContext())
     }
 
     /// Switch the active map module.
     public func switchMapModule(to moduleName: String) {
-        guard let mgr = swordManager,
-              let mod = mgr.module(named: moduleName) else {
-            logger.warning("Cannot switch to map module \(moduleName) — not found")
-            return
-        }
-        activeMapModule = mod
-        activeMapModuleName = moduleName
-        currentMapKey = nil
-        logger.info("Switched to map module: \(moduleName)")
+        moduleSwitchCoordinator.switchMapModule(to: moduleName, context: makeModuleSwitchContext())
+    }
 
-        if let pm = activeWindow?.pageManager {
-            pm.mapDocument = moduleName
-            pm.mapKey = nil
-            onPersistState?()
-        }
+    /**
+     Switches the visible document to a map module in one Android-parity transition.
+
+     Android routes map rows through the same `setCurrentDocument(book)` path as Bible,
+     commentary, dictionary, and general-book rows. iOS must therefore persist the selected map,
+     clear stale map entry state, and switch the visible category together instead of splitting map
+     selection and category selection across separate controller mutations.
+
+     - Parameter moduleName: Installed SWORD map module abbreviation to make current.
+     Side effects:
+     - mutates the active map module, clears the selected map key, and sets the current category to
+       map
+     - writes `mapDocument`, `mapKey`, and `currentCategoryName` to `PageManager`
+     - invokes `onPersistState` once when pane state is available
+     - reloads the visible reader document once when the JavaScript client is ready
+     Failure modes:
+     - if the module cannot be resolved, logs a warning and leaves controller/page state unchanged
+     - if the resolved module is not a map, logs a warning and leaves state unchanged
+     */
+    @MainActor
+    public func switchMapDocument(to moduleName: String) {
+        moduleSwitchCoordinator.switchMapDocument(to: moduleName, context: makeModuleSwitchContext())
     }
 
     /// Switch between document categories (Bible, Commentary, Dictionary, General Book, Map).
     public func switchCategory(to category: DocumentCategory) {
-        let oldCategory = currentCategory
-        currentCategory = category
-
-        // Persist to PageManager
-        if let pm = activeWindow?.pageManager {
-            pm.currentCategoryName = category.pageManagerKey
-            onPersistState?()
-        }
-
-        // Reload content if the category actually changed
-        guard clientReady, category != oldCategory else { return }
-        loadCurrentContent()
+        moduleSwitchCoordinator.switchCategory(to: category, context: makeModuleSwitchContext())
     }
 
     /// Load the appropriate content for the current category.
