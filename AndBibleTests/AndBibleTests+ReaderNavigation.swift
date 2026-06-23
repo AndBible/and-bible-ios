@@ -1867,6 +1867,84 @@ extension AndBibleTests {
         XCTAssertEqual(appSettings["hasActiveIndicator"] as? Bool, false)
     }
 
+    /**
+     Protects the extracted reader configuration coordinator's ownership of active-window projection.
+
+     The setup mirrors Android's `windowControl.activeWindow.id == window.id` rule with two visible
+     windows and active-indicator preference enabled. The focused contract is that the coordinator
+     computes both `activeWindow` and `hasActiveIndicator` together so the controller does not keep
+     duplicate window-state math beside the config payload builder. A failure means #146 regressed by
+     moving state projection mechanically without preserving Android's active-pane semantics.
+     */
+    @MainActor
+    func testReaderConfigurationCoordinatorComputesActiveWindowProjection() throws {
+        let container = try makeWorkspaceModelContainer()
+        let context = ModelContext(container)
+        let workspaceStore = WorkspaceStore(modelContext: context)
+        let windowManager = WindowManager(workspaceStore: workspaceStore)
+        let workspace = workspaceStore.createWorkspace(name: "Config Coordinator")
+        let firstWindow = try XCTUnwrap(workspaceStore.windows(workspaceId: workspace.id).first)
+        windowManager.setActiveWorkspace(workspace)
+        let secondWindow = try XCTUnwrap(windowManager.addWindow(from: firstWindow))
+        windowManager.activeWindow = firstWindow
+
+        let coordinator = BibleReaderConfigurationCoordinator()
+
+        let activeProjection = coordinator.activeWindowState(
+            activeWindow: firstWindow,
+            windowManager: windowManager,
+            activeIndicatorEnabled: true
+        )
+        let inactiveProjection = coordinator.activeWindowState(
+            activeWindow: secondWindow,
+            windowManager: windowManager,
+            activeIndicatorEnabled: true
+        )
+
+        XCTAssertEqual(activeProjection.isActive, true)
+        XCTAssertEqual(activeProjection.hasActiveIndicator, true)
+        XCTAssertEqual(activeProjection.eventJSON, #"{"hasActiveIndicator":true,"isActive":true}"#)
+        XCTAssertEqual(inactiveProjection.isActive, false)
+        XCTAssertEqual(inactiveProjection.hasActiveIndicator, false)
+        XCTAssertEqual(inactiveProjection.eventJSON, #"{"hasActiveIndicator":false,"isActive":false}"#)
+    }
+
+    /**
+     Protects workspace-backed compare visibility as coordinator-owned reader configuration state.
+
+     Android stores compare-document visibility with workspace settings instead of treating it as
+     transient pane state. This test creates a persisted workspace, toggles one module through the
+     coordinator, and verifies the updated set is written to `WorkspaceSettings`, mirrored to the
+     coordinator fallback, and persisted exactly once. A failure means the extraction preserved file
+     shape but left #146's reader/window/workspace state ownership split across the controller.
+     */
+    @MainActor
+    func testReaderConfigurationCoordinatorPersistsHiddenCompareDocumentsToWorkspace() throws {
+        let container = try makeWorkspaceModelContainer()
+        let context = ModelContext(container)
+        let workspaceStore = WorkspaceStore(modelContext: context)
+        let workspace = workspaceStore.createWorkspace(name: "Compare Coordinator")
+        workspace.workspaceSettings = WorkspaceSettings(hideCompareDocuments: ["ESV"])
+        let window = try XCTUnwrap(workspaceStore.windows(workspaceId: workspace.id).first)
+        var coordinator = BibleReaderConfigurationCoordinator()
+        var persistCount = 0
+
+        coordinator.toggleHiddenCompareDocument("KJV", activeWindow: window) {
+            persistCount += 1
+        }
+
+        XCTAssertEqual(workspace.workspaceSettings?.hideCompareDocuments, ["ESV", "KJV"])
+        XCTAssertEqual(coordinator.hiddenCompareDocuments(activeWindow: window), ["ESV", "KJV"])
+        XCTAssertEqual(persistCount, 1)
+
+        coordinator.toggleHiddenCompareDocument("ESV", activeWindow: nil) {
+            persistCount += 1
+        }
+
+        XCTAssertEqual(coordinator.hiddenCompareDocuments(activeWindow: nil), ["KJV"])
+        XCTAssertEqual(persistCount, 1)
+    }
+
     @MainActor
     func testRequestMoreToBeginningSendsDocumentResponseWithOriginalCallId() throws {
         let (bridge, recordedScripts) = makeRecordingBridge()

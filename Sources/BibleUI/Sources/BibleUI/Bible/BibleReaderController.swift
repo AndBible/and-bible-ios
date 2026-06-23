@@ -558,8 +558,6 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     var displaySettings: TextDisplaySettings = .appDefaults
     /// Night mode toggle
     var nightMode: Bool = false
-    /// Document IDs hidden in compare view (toggled via toggleCompareDocument bridge method)
-    var hiddenCompareDocuments: Set<String> = []
 
     /// Latest asynchronous compare request used to ignore stale background payloads.
     private var compareDocumentRequestID = UUID()
@@ -569,6 +567,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     private let speechCoordinator = BibleReaderSpeechCoordinator()
     /// SWORD setup collaborator that owns manager option mapping and module-state projection.
     private let swordCoordinator = BibleReaderSwordCoordinator()
+    /// Reader config/window-state collaborator that owns bridge payload projection and compare visibility state.
+    private var configurationCoordinator = BibleReaderConfigurationCoordinator()
     /// Workspace store for history recording
     var workspaceStore: WorkspaceStore?
     /// The current window (for history recording)
@@ -7271,13 +7271,9 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      Toggles whether one compare document should be hidden in the current compare session.
      */
     public func bridge(_ bridge: BibleBridge, toggleCompareDocument documentId: String) {
-        var documents = currentHiddenCompareDocuments()
-        if documents.contains(documentId) {
-            documents.remove(documentId)
-        } else {
-            documents.insert(documentId)
+        configurationCoordinator.toggleHiddenCompareDocument(documentId, activeWindow: activeWindow) { [weak self] in
+            self?.onPersistState?()
         }
-        persistHiddenCompareDocuments(documents)
         // Notify Vue.js of updated settings
         bridge.emit(event: "set_config", data: buildConfigJSON())
     }
@@ -7291,29 +7287,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      - Failure modes: none.
      */
     private func currentHiddenCompareDocuments() -> Set<String> {
-        if let workspaceDocuments = activeWindow?.workspace?.workspaceSettings?.hideCompareDocuments {
-            return workspaceDocuments
-        }
-        return hiddenCompareDocuments
-    }
-
-    /**
-     Persists hidden compare module state to the active workspace when available.
-
-     - Parameter documents: Module initials hidden from Vue compare output.
-     - Side effects: updates the controller fallback cache, mutates active workspace settings, and
-       invokes `onPersistState` so the owning pane can save SwiftData.
-     - Failure modes: if no workspace is active, only the controller fallback cache is updated.
-     */
-    private func persistHiddenCompareDocuments(_ documents: Set<String>) {
-        hiddenCompareDocuments = documents
-        guard let workspace = activeWindow?.workspace else { return }
-
-        var settings = workspace.workspaceSettings ?? WorkspaceSettings()
-        settings.hideCompareDocuments = documents
-        settings.normalizeAutoAssignPrimaryLabel()
-        workspace.workspaceSettings = settings
-        onPersistState?()
+        configurationCoordinator.hiddenCompareDocuments(activeWindow: activeWindow)
     }
 
     /// Callback for fullscreen toggle requests (from double-tap in WebView).
@@ -8123,9 +8097,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      Matches Android: `windowControl.activeWindow.id == window.id`
      */
     private func computeIsActiveWindow() -> Bool {
-        guard let myWindow = activeWindow,
-              let wm = windowManagerRef else { return true }
-        return wm.activeWindow?.id == myWindow.id
+        activeWindowState().isActive
     }
 
     /**
@@ -8133,10 +8105,22 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      Called after content load and when active window changes.
      */
     func emitActiveState() {
-        let isActive = computeIsActiveWindow()
-        let indicatorEnabled = appPreferenceBool(.showActiveWindowIndicator)
-        let hasIndicator = indicatorEnabled && isActive && (windowManagerRef?.visibleWindows.count ?? 0) > 1
-        bridge.emit(event: "set_active", data: "{\"hasActiveIndicator\":\(hasIndicator),\"isActive\":\(isActive)}")
+        bridge.emit(event: "set_active", data: activeWindowState().eventJSON)
+    }
+
+    /**
+     Builds the active-window state projection used by both config and active-state bridge events.
+
+     - Returns: Active-window flags matching Android focus semantics and existing indicator rules.
+     - Side effects: Reads app preferences and current window manager state.
+     - Failure modes: Missing window-manager state falls back inside the configuration coordinator.
+     */
+    private func activeWindowState() -> BibleReaderActiveWindowState {
+        configurationCoordinator.activeWindowState(
+            activeWindow: activeWindow,
+            windowManager: windowManagerRef,
+            activeIndicatorEnabled: appPreferenceBool(.showActiveWindowIndicator)
+        )
     }
 
     // MARK: - JSON Builders
@@ -8185,271 +8169,6 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     }
 
     /**
-     Wire payload for the Vue.js `set_config` event.
-
-     The shape mirrors Android's `bibleView.emit('set_config', { config, appSettings, initial })`
-     contract: a fully resolved text-display config, native app settings needed by the web reader,
-     and an initial-load marker. Encoding this struct keeps bridge payload generation type-checked
-     and avoids the brittle hand-built JSON string that previously had to be extended field by field.
-
-     - Side effects: none; callers gather live settings before constructing the value.
-     - Failure modes: encoding can only fail if one of the nested payload types stops conforming to
-       `Encodable`; `buildConfigJSON()` logs and emits an empty object in that case.
-     */
-    private struct ReaderSetConfigPayload: Encodable {
-        /// Fully resolved reader display settings consumed by the Vue text renderer.
-        let config: ReaderDisplayConfig
-        /// Application/runtime settings consumed by Vue components outside text rendering.
-        let appSettings: ReaderAppSettings
-        /// Whether this config is sent as part of first WebView attachment.
-        let initial: Bool
-    }
-
-    /**
-     Text-display configuration sent to the Vue reader.
-
-     - Parameter settings: Window/workspace/global-resolved settings currently active for the pane.
-     - Parameter defaults: App-level fallback values for any unset field.
-     - Returns: A non-optional bridge projection whose keys match the Android/Vue `config` object.
-     - Side effects: none.
-     - Failure modes: none; unset settings fall back through `defaults` and hard-coded Vue defaults
-       that match the previous bridge payload.
-     */
-    private struct ReaderDisplayConfig: Encodable {
-        let developmentMode: Bool
-        let testMode: Bool
-        let showAnnotations: Bool
-        let showChapterNumbers: Bool
-        let showVerseNumbers: Bool
-        let strongsMode: Int
-        let showMorphology: Bool
-        let showRedLetters: Bool
-        let showVersePerLine: Bool
-        let showNonCanonical: Bool
-        let makeNonCanonicalItalic: Bool
-        let showSectionTitles: Bool
-        let showStrongsSeparately: Bool
-        let showFootNotes: Bool
-        let showFootNotesInline: Bool
-        let showXrefs: Bool
-        let expandXrefs: Bool
-        let fontFamily: String
-        let fontSize: Int
-        let disableBookmarking: Bool
-        let showBookmarks: Bool
-        let showMyNotes: Bool
-        let bookmarksHideLabels: [String]
-        let bookmarksAssignLabels: [String]
-        let colors: ReaderDisplayColors
-        let hyphenation: Bool
-        let lineSpacing: Int
-        let justifyText: Bool
-        let marginSize: ReaderDisplayMarginSize
-        let topMargin: Int
-        let showPageNumber: Bool
-        let infiniteScroll: Bool
-        let nonStrongsWordItalic: Bool
-        let showMarkAsReadButton: Bool
-        let showTitleScrollButton: Bool
-        let showMemorizationIndicators: Bool
-        let showAiDocMarkers: Bool
-        let pageScrollAmount: Int
-        let showOrdinals: Bool
-
-        init(settings s: TextDisplaySettings, defaults d: TextDisplaySettings) {
-            self.developmentMode = false
-            self.testMode = false
-            self.showAnnotations = true
-            self.showChapterNumbers = true
-            self.showVerseNumbers = s.showVerseNumbers ?? d.showVerseNumbers ?? true
-            self.strongsMode = s.strongsMode ?? d.strongsMode ?? 0
-            self.showMorphology = s.showMorphology ?? d.showMorphology ?? false
-            self.showRedLetters = s.showRedLetters ?? d.showRedLetters ?? true
-            self.showVersePerLine = s.showVersePerLine ?? d.showVersePerLine ?? false
-            self.showNonCanonical = true
-            self.makeNonCanonicalItalic = true
-            self.showSectionTitles = s.showSectionTitles ?? d.showSectionTitles ?? true
-            self.showStrongsSeparately = false
-            self.showFootNotes = s.showFootNotes ?? d.showFootNotes ?? false
-            self.showFootNotesInline = s.showFootNotesInline ?? d.showFootNotesInline ?? false
-            self.showXrefs = s.showXrefs ?? d.showXrefs ?? false
-            self.expandXrefs = s.expandXrefs ?? d.expandXrefs ?? false
-            self.fontFamily = s.fontFamily ?? d.fontFamily ?? "sans-serif"
-            self.fontSize = s.fontSize ?? d.fontSize ?? 18
-            self.disableBookmarking = false
-            self.showBookmarks = s.showBookmarks ?? d.showBookmarks ?? true
-            self.showMyNotes = s.showMyNotes ?? d.showMyNotes ?? true
-            self.bookmarksHideLabels = (s.bookmarksHideLabels ?? d.bookmarksHideLabels ?? []).map(\.uuidString)
-            self.bookmarksAssignLabels = []
-            self.colors = ReaderDisplayColors(settings: s, defaults: d)
-            self.hyphenation = s.hyphenation ?? d.hyphenation ?? true
-            self.lineSpacing = s.lineSpacing ?? d.lineSpacing ?? 10
-            self.justifyText = s.justifyText ?? d.justifyText ?? false
-            self.marginSize = ReaderDisplayMarginSize(settings: s, defaults: d)
-            self.topMargin = s.topMargin ?? d.topMargin ?? 0
-            self.showPageNumber = s.showPageNumber ?? d.showPageNumber ?? false
-            self.infiniteScroll = s.infiniteScroll ?? d.infiniteScroll ?? true
-            self.nonStrongsWordItalic = s.nonStrongsWordItalic ?? d.nonStrongsWordItalic ?? false
-            self.showMarkAsReadButton = s.showMarkAsReadButton ?? d.showMarkAsReadButton ?? true
-            self.showTitleScrollButton = s.showTitleScrollButton ?? d.showTitleScrollButton ?? false
-            self.showMemorizationIndicators = s.showMemorizationIndicators ?? d.showMemorizationIndicators ?? false
-            self.showAiDocMarkers = s.showAiDocMarkers ?? d.showAiDocMarkers ?? true
-            self.pageScrollAmount = TextDisplaySettings.normalizedPageScrollAmount(s.pageScrollAmount ?? d.pageScrollAmount)
-            self.showOrdinals = s.showOrdinals ?? d.showOrdinals ?? false
-        }
-    }
-
-    /**
-     Color sub-object inside the Vue reader `config` payload.
-
-     - Parameters:
-       - settings: Active pane settings that may override individual color values.
-       - defaults: App-level fallback colors.
-     - Side effects: none.
-     - Failure modes: none; every field falls back to the previous hard-coded bridge default.
-     */
-    private struct ReaderDisplayColors: Encodable {
-        let dayBackground: Int
-        let dayNoise: Int
-        let nightBackground: Int
-        let nightNoise: Int
-        let dayTextColor: Int
-        let nightTextColor: Int
-
-        init(settings s: TextDisplaySettings, defaults d: TextDisplaySettings) {
-            self.dayBackground = s.dayBackground ?? d.dayBackground ?? -1
-            self.dayNoise = s.dayNoise ?? d.dayNoise ?? 0
-            self.nightBackground = s.nightBackground ?? d.nightBackground ?? -16777216
-            self.nightNoise = s.nightNoise ?? d.nightNoise ?? 0
-            self.dayTextColor = s.dayTextColor ?? d.dayTextColor ?? -16777216
-            self.nightTextColor = s.nightTextColor ?? d.nightTextColor ?? -1
-        }
-    }
-
-    /**
-     Margin sub-object inside the Vue reader `config` payload.
-
-     - Parameters:
-       - settings: Active pane settings that may override individual margin values.
-       - defaults: App-level fallback margins.
-     - Side effects: none.
-     - Failure modes: none; every field falls back to the previous hard-coded bridge default.
-     */
-    private struct ReaderDisplayMarginSize: Encodable {
-        let marginLeft: Int
-        let marginRight: Int
-        let maxWidth: Int
-
-        init(settings s: TextDisplaySettings, defaults d: TextDisplaySettings) {
-            self.marginLeft = s.marginLeft ?? d.marginLeft ?? 2
-            self.marginRight = s.marginRight ?? d.marginRight ?? 2
-            self.maxWidth = s.maxWidth ?? d.maxWidth ?? 600
-        }
-    }
-
-    /**
-     Native app settings included in the Vue reader `set_config` payload.
-
-     These values are not part of `TextDisplaySettings` on Android, but Android sends them beside
-     `config` in the same `set_config` event. Keeping them as a typed projection preserves that
-     contract while avoiding ad-hoc JSON fragments for arrays and dictionaries.
-
-     - Side effects: none; all values are captured by the controller before initialization.
-     - Failure modes: none; the struct stores only JSON-encodable primitive, array, dictionary, and
-       reading-progress bundle values.
-     */
-    private struct ReaderAppSettings: Encodable {
-        let nightMode: Bool
-        let errorBox: Bool
-        let favouriteLabels: [String]
-        let recentLabels: [String]
-        let studyPadCursors: [String: Int]
-        let autoAssignLabels: [String]
-        let hideCompareDocuments: [String]
-        let activeWindow: Bool
-        let rightToLeft: Bool
-        let actionMode: Bool
-        let hasActiveIndicator: Bool
-        let activeSince: Int
-        let limitAmbiguousModalSize: Bool
-        let windowId: String
-        let disableBibleModalButtons: [String]
-        let disableGenericModalButtons: [String]
-        let monochromeMode: Bool
-        let disableAnimations: Bool
-        let disableClickToEdit: Bool
-        let notesContentType: String
-        let fontSizeMultiplier: Double
-        let enabledExperimentalFeatures: [String]
-        let autoTrackReading: Bool
-        let readingProgressSettings: ReadingProgressSettingsBundle
-    }
-
-    /**
-     Builds the combined reader/configuration payload consumed by the Vue.js application.
-
-     - Returns: Typed payload containing `config` and `appSettings` sections for the current pane.
-
-     Side effects:
-     - reads persisted settings, workspace cursor state, recent/favourite labels, and active-window
-       state to compute the emitted payload
-
-     Failure modes:
-     - none; missing services or settings fall back to empty collections and app defaults
-     */
-    private func buildConfigPayload() -> ReaderSetConfigPayload {
-        let settings = displaySettings
-        let defaults = TextDisplaySettings.appDefaults
-        let isActiveWindow = computeIsActiveWindow()
-        let activeIndicatorEnabled = appPreferenceBool(.showActiveWindowIndicator)
-        let hasActiveIndicator = activeIndicatorEnabled && isActiveWindow && (windowManagerRef?.visibleWindows.count ?? 0) > 1
-        let fontSizeMultiplierPercent = max(10, appPreferenceInt(.fontSizeMultiplier))
-        let fontSizeMultiplier = Double(fontSizeMultiplierPercent) / 100.0
-        let favouriteIds = bookmarkService?.allLabels()
-            .filter { $0.favourite }
-            .map { $0.id.uuidString } ?? []
-        let cursors = activeWindow?.workspace?.workspaceSettings?.studyPadCursors ?? [:]
-        let studyPadCursors = Dictionary(
-            uniqueKeysWithValues: cursors.map { ($0.key.uuidString, $0.value) }
-        )
-        let autoAssignLabels = activeWindow?.workspace?.workspaceSettings?.autoAssignLabels
-            .map(\.uuidString) ?? []
-        let readingProgressSettings = readingProgressStore?.snapshot().settings ?? ReadingProgressSettingsSnapshot()
-        let readingProgressBundle = ReadingProgressSettingsBundle(settings: readingProgressSettings)
-
-        return ReaderSetConfigPayload(
-            config: ReaderDisplayConfig(settings: settings, defaults: defaults),
-            appSettings: ReaderAppSettings(
-                nightMode: nightMode,
-                errorBox: appPreferenceBool(.showErrorBox),
-                favouriteLabels: favouriteIds,
-                recentLabels: recentLabelIds,
-                studyPadCursors: studyPadCursors,
-                autoAssignLabels: autoAssignLabels,
-                hideCompareDocuments: currentHiddenCompareDocuments().sorted(),
-                activeWindow: isActiveWindow,
-                rightToLeft: false,
-                actionMode: false,
-                hasActiveIndicator: hasActiveIndicator,
-                activeSince: Int(Date().timeIntervalSince1970 * 1000) - 1000,
-                limitAmbiguousModalSize: false,
-                windowId: "",
-                disableBibleModalButtons: appPreferenceStringSet(.disableBibleBookmarkModalButtons),
-                disableGenericModalButtons: appPreferenceStringSet(.disableGenBookmarkModalButtons),
-                monochromeMode: appPreferenceBool(.monochromeMode),
-                disableAnimations: appPreferenceBool(.disableAnimations),
-                disableClickToEdit: appPreferenceBool(.disableClickToEdit),
-                notesContentType: currentNotesContentType(),
-                fontSizeMultiplier: fontSizeMultiplier,
-                enabledExperimentalFeatures: appPreferenceStringSet(.experimentalFeatures),
-                autoTrackReading: readingProgressSettings.autoTrackReading,
-                readingProgressSettings: readingProgressBundle
-            ),
-            initial: false
-        )
-    }
-
-    /**
      Encodes the combined reader/configuration payload consumed by the Vue.js application.
 
      - Returns: JSON string containing `config` and `appSettings` sections for the current pane.
@@ -8462,14 +8181,48 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      - logs and returns `{}` if the typed bridge payload unexpectedly fails to encode
      */
     private func buildConfigJSON() -> String {
-        let payload = buildConfigPayload()
-        let encoder = JSONEncoder()
-        guard let data = try? encoder.encode(payload),
-              let json = String(data: data, encoding: .utf8) else {
+        guard let json = configurationCoordinator.configJSON(context: buildConfigContext()) else {
             logger.error("Failed to encode set_config bridge payload")
             return "{}"
         }
         return json
+    }
+
+    /**
+     Captures the live controller inputs needed to build one reader configuration payload.
+
+     - Returns: Immutable configuration context consumed by `BibleReaderConfigurationCoordinator`.
+     - Side effects: Reads settings, workspace state, bookmark labels, and reading-progress settings.
+     - Failure modes: Missing stores or workspace settings fall back to empty collections and app
+       defaults, preserving the previous controller behavior.
+     */
+    private func buildConfigContext() -> BibleReaderConfigurationContext {
+        let fontSizeMultiplierPercent = max(10, appPreferenceInt(.fontSizeMultiplier))
+        let readingProgressSettings = readingProgressStore?.snapshot().settings ?? ReadingProgressSettingsSnapshot()
+        return BibleReaderConfigurationContext(
+            displaySettings: displaySettings,
+            defaults: .appDefaults,
+            nightMode: nightMode,
+            errorBox: appPreferenceBool(.showErrorBox),
+            favouriteLabelIds: bookmarkService?.allLabels()
+                .filter { $0.favourite }
+                .map { $0.id.uuidString } ?? [],
+            recentLabelIds: recentLabelIds,
+            studyPadCursors: activeWindow?.workspace?.workspaceSettings?.studyPadCursors ?? [:],
+            autoAssignLabelIds: activeWindow?.workspace?.workspaceSettings?.autoAssignLabels ?? [],
+            hiddenCompareDocuments: currentHiddenCompareDocuments(),
+            activeWindowState: activeWindowState(),
+            disableBibleModalButtons: appPreferenceStringSet(.disableBibleBookmarkModalButtons),
+            disableGenericModalButtons: appPreferenceStringSet(.disableGenBookmarkModalButtons),
+            monochromeMode: appPreferenceBool(.monochromeMode),
+            disableAnimations: appPreferenceBool(.disableAnimations),
+            disableClickToEdit: appPreferenceBool(.disableClickToEdit),
+            notesContentType: currentNotesContentType(),
+            fontSizeMultiplier: Double(fontSizeMultiplierPercent) / 100.0,
+            enabledExperimentalFeatures: appPreferenceStringSet(.experimentalFeatures),
+            autoTrackReading: readingProgressSettings.autoTrackReading,
+            readingProgressSettings: ReadingProgressSettingsBundle(settings: readingProgressSettings)
+        )
     }
 
     /**
