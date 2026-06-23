@@ -3846,7 +3846,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      */
     func lookupSelectionInDictionaries() {
         guard !selectedText.isEmpty else { return }
-        let query = normalizeWordLookupQuery(selectedText)
+        let query = BibleReaderWordLookupDocumentBuilder.normalizeQuery(selectedText)
         guard !query.isEmpty else {
             onShowToast?(String(
                 localized: "word_not_found_in_dictionaries",
@@ -3854,7 +3854,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             ))
             return
         }
-        guard let multiDocJSON = buildWordLookupMultiDocJSON(query: query) else {
+        guard let multiDocJSON = wordLookupDocumentBuilder()
+            .buildWordLookupMultiDocumentJSON(query: query) else {
             onShowToast?(String(
                 localized: "word_not_found_in_dictionaries",
                 defaultValue: "Word not found in any dictionary"
@@ -3888,7 +3889,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     /// The currently selected text.
     private(set) var selectedText: String = ""
     /// Whether any plain word-lookup dictionaries are currently available.
-    var hasWordLookupDictionaries: Bool { !findWordLookupDictionaryModules().isEmpty }
+    var hasWordLookupDictionaries: Bool { wordLookupDocumentBuilder().hasWordLookupDictionaries }
 
     /**
      Builds a shareable verse string for the current module and forwards it to native sharing UI.
@@ -4898,6 +4899,21 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         )
     }
 
+    /**
+     Creates the selected-word lookup document builder bound to this pane's SWORD and settings state.
+
+     The controller keeps orchestration concerns while `BibleReaderWordLookupDocumentBuilder` owns
+     Android-parity dictionary discovery, query normalization, and multi-document payload assembly.
+     */
+    private func wordLookupDocumentBuilder() -> BibleReaderWordLookupDocumentBuilder {
+        BibleReaderWordLookupDocumentBuilder(
+            swordManager: swordManager,
+            disabledDictionaryNames: { [weak self] in
+                Set(self?.settingsStore?.getStringSet(.disabledWordLookupDictionaries) ?? [])
+            }
+        )
+    }
+
     /// Handle "Find all occurrences" links: ab-find-all://?type=hebrew&name=H05775
     private func handleFindAllLink(_ link: String) {
         logger.info("handleFindAllLink: \(link)")
@@ -4951,30 +4967,6 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             ?? items.first(where: { $0.name == "entryId" })?.value
         let bookmarkUUID = entryId.flatMap(UUID.init(uuidString:))
         loadStudyPadDocument(labelId: labelUUID, bookmarkId: bookmarkUUID)
-    }
-
-    /**
-     Build a typed MultiFragmentDocument JSON string for rendering in Vue.js document views.
-
-     - Parameters:
-       - fragments: Dictionary fragments to project into Vue `OsisFragment` values.
-       - contentType: Optional document content type such as `strongs`.
-       - stateJSON: Optional saved Vue state JSON to attach to the document.
-     - Returns: Serialized bridge JSON, or `nil` if typed encoding unexpectedly fails.
-     - Side effects: none.
-     - Failure modes: logs and returns `nil` when the payload cannot be encoded, allowing callers
-       to avoid emitting an invalid Vue document shape.
-     */
-    private func buildMultiFragmentJSON(
-        fragments: [(xml: String, key: String, keyName: String, bookInitials: String, bookAbbreviation: String, features: OsisFeatures)],
-        contentType: String? = nil,
-        stateJSON: String? = nil
-    ) -> String? {
-        BibleReaderMultiFragmentDocumentBuilder.buildJSON(
-            fragments: fragments,
-            contentType: contentType,
-            stateJSON: stateJSON
-        )
     }
 
     /**
@@ -5384,75 +5376,6 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         keyOptions: [String]
     ) -> BibleReaderStrongsDocumentBuilder.DictionaryLookupResult? {
         BibleReaderStrongsDocumentBuilder.lookupInModule(module, keyOptions: keyOptions)
-    }
-
-    /**
-     Find plain dictionaries used by "Lookup in dictionaries".
-     Mirrors Android `SwordDocumentFacade.wordLookupDictionaries`.
-     */
-    private func findWordLookupDictionaryModules() -> [SwordModule] {
-        guard let mgr = swordManager else { return [] }
-        let disabled = Set(settingsStore?.getStringSet(.disabledWordLookupDictionaries) ?? [])
-        let allModules = mgr.installedModules()
-
-        var result: [SwordModule] = []
-        for info in allModules where
-            info.category == .dictionary &&
-                !info.features.contains(.greekDef) &&
-                !info.features.contains(.hebrewDef) &&
-                !info.features.contains(.greekParse) &&
-                !disabled.contains(info.name) {
-            if let module = mgr.module(named: info.name) {
-                result.append(module)
-            }
-        }
-        return result
-    }
-
-    /**
-     Normalizes selected text before dictionary lookup by trimming whitespace and trailing punctuation.
-
-     - Parameter text: Raw selected text from the web client.
-     - Returns: Sanitized lookup key used against plain dictionary modules.
-     */
-    private func normalizeWordLookupQuery(_ text: String) -> String {
-        text.trimmingCharacters(in: .whitespacesAndNewlines)
-            .replacingOccurrences(of: #"[.,;:!?"'()\[\]]+$"#, with: "", options: .regularExpression)
-    }
-
-    /**
-     Builds a multi-fragment dictionary document for the current word-lookup query.
-
-     - Parameter query: Normalized lookup key to resolve across enabled plain dictionaries.
-     - Returns: Multi-document JSON for the lookup results, or `nil` when nothing matches.
-
-     Failure modes:
-     - returns `nil` when no enabled lookup dictionaries are installed or when none contain the key
-     */
-    private func buildWordLookupMultiDocJSON(query: String) -> String? {
-        let modules = findWordLookupDictionaryModules()
-        guard !modules.isEmpty else { return nil }
-
-        // Try common case variants, while still requiring exact key match after normalization.
-        let keyOptions = [query, query.lowercased(), query.capitalized]
-        var fragments: [(xml: String, key: String, keyName: String, bookInitials: String, bookAbbreviation: String, features: OsisFeatures)] = []
-
-        for mod in modules {
-            guard let html = lookupInModule(mod, keyOptions: keyOptions) else { continue }
-            let escapedTitle = escapeXML(query)
-            let xml = "<div><title type=\"x-gen\">\(escapedTitle)</title><div type=\"paragraph\">\(html)</div></div>"
-            fragments.append((
-                xml: xml,
-                key: "\(mod.info.name)--\(query)",
-                keyName: query,
-                bookInitials: mod.info.name,
-                bookAbbreviation: String(mod.info.name.prefix(10)),
-                features: OsisFeatures()
-            ))
-        }
-
-        guard !fragments.isEmpty else { return nil }
-        return buildMultiFragmentJSON(fragments: fragments)
     }
 
     /// Handle a single cross-reference link: osis://?osis=Matt.1.1&v11n=KJV

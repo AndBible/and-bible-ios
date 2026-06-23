@@ -976,6 +976,63 @@ extension AndBibleTests {
         XCTAssertTrue(BibleReaderStrongsDocumentBuilder.isSupportedStrongsDictionaryModuleName("InvStrongsRealHebrew"))
     }
 
+    /**
+     Verifies selected-word lookup preserves Android's dictionary rendering contract.
+
+     Android `LinkControl.lookupInDictionaries` resolves exact dictionary keys through JSword and
+     opens a `MultiDocument` made from the matched entries. The iOS builder must therefore project
+     the rendered entry text into the bridge payload; a failure here means users would see Swift
+     diagnostic text or lose dictionary body content even though the dictionary lookup succeeded.
+     */
+    func testWordLookupDocumentUsesRenderedDictionaryText() throws {
+        let builder = BibleReaderWordLookupDocumentBuilder(modules: {
+            [
+                BibleReaderWordLookupDocumentBuilder.DictionaryModule(
+                    name: "Websters",
+                    abbreviation: "Websters",
+                    lookup: { keyOptions in
+                        XCTAssertEqual(keyOptions, ["Grace", "grace", "Grace"])
+                        return BibleReaderStrongsDocumentBuilder.DictionaryLookupResult(
+                            actualKey: "Grace",
+                            rawEntry: "raw dictionary bytes",
+                            renderedText: "<p>Grace rendered from SWORD</p>"
+                        )
+                    }
+                )
+            ]
+        })
+
+        let json = try XCTUnwrap(builder.buildWordLookupMultiDocumentJSON(query: "Grace"))
+        let payload = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any])
+        let fragments = try XCTUnwrap(payload["osisFragments"] as? [[String: Any]])
+        let fragment = try XCTUnwrap(fragments.first)
+        let xml = try XCTUnwrap(fragment["xml"] as? String)
+
+        XCTAssertEqual(payload["type"] as? String, "multi")
+        XCTAssertEqual(fragment["key"] as? String, "Websters--Grace")
+        XCTAssertEqual(fragment["bookInitials"] as? String, "Websters")
+        XCTAssertTrue(xml.contains("Grace rendered from SWORD"))
+        XCTAssertFalse(xml.contains("DictionaryLookupResult"))
+    }
+
+    /**
+     Verifies iOS selected-word normalization stays aligned with Android `LinkControl`.
+
+     Android trims surrounding whitespace and removes trailing punctuation before calling
+     `Book.getKey`. A failure means selected text with punctuation could resolve differently on iOS
+     than Android, causing avoidable "not found" feedback for the same installed dictionaries.
+     */
+    func testWordLookupQueryNormalizationMatchesAndroid() {
+        XCTAssertEqual(
+            BibleReaderWordLookupDocumentBuilder.normalizeQuery("  Grace?!  "),
+            "Grace"
+        )
+        XCTAssertEqual(
+            BibleReaderWordLookupDocumentBuilder.normalizeQuery("faith."),
+            "faith"
+        )
+    }
+
     func testRenderedContentStateDefaultsToNeutralToken() {
         let controller = BibleReaderController(bridge: BibleBridge())
 
