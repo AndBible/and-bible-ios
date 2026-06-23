@@ -40,59 +40,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     private(set) var currentChapter: Int = 1
     private(set) var currentVerse: Int = 1
     private var clientReady = false
-    /**
-     Latest ordinal for a synchronized scroll request that this pane received from another source pane.
-
-     `scrollToOrdinal(_:)` records the latest target ordinal after applying native sync state.
-     `consumePendingSynchronizedScroll(ordinal:)` uses it to detect the matching target callback
-     while all sync-origin visible-verse telemetry remains passive until explicit user interaction
-     clears `synchronizedScrollFeedbackSuppressionActive`.
-
-     Side effects:
-     - value is replaced by each sync-origin native scroll request
-     - value is cleared when the matching target callback arrives or explicit user interaction
-       cancels sync-feedback suppression
-
-     Failure modes:
-     - nonmatching callbacks are still treated as sync-origin feedback while suppression is active,
-       avoiding target-pane ping-pong from intermediate WebKit scroll telemetry
-     */
-    private var pendingSynchronizedScrollOrdinal: Int?
-    /**
-     Tracks whether this pane is currently receiving scroll telemetry from a synchronized peer.
-
-     Android keeps inactive synchronized windows passive while source-window scrolls move them; only
-     a real touch or active web interaction in the target pane should make it the new source.
-     Matching iOS behavior requires a stateful guard that survives intermediate visible-verse
-     callbacks and native scroll deltas instead of clearing on the first nonmatching ordinal.
-
-     Side effects:
-     - set by synchronized scroll requests after native sync state is applied
-     - cleared only by explicit user interaction in this pane
-
-     Failure modes:
-     - if the WebView never reports the exact target ordinal, feedback remains suppressed until the
-       user interacts with the pane, matching Android's touch-driven source handoff
-     */
-    private var synchronizedScrollFeedbackSuppressionActive = false
-    /**
-     Latest synchronized-scroll target received before the Vue reader reports `clientReady`.
-
-     Android updates the inactive window's verse key even when the secondary WebView cannot yet be
-     scrolled, then lets the next content load land on that key. iOS mirrors that by updating native
-     state immediately but delaying feedback suppression until `bridgeDidSetClientReady(_:)`
-     replays content into a mounted Vue client.
-
-     Side effects:
-     - replaced by newer pre-ready sync requests
-     - promoted to `pendingSynchronizedScrollOrdinal` during client-ready content replay
-     - cleared when explicit user interaction makes the pane a source before replay completes
-
-     Failure modes:
-     - if the ready replay never produces scroll telemetry, feedback suppression remains active until
-       explicit user interaction makes this pane a source again
-     */
-    private var pendingClientReadySynchronizedScrollOrdinal: Int?
+    /// Sync-scroll feedback state used to keep inactive target panes passive until interaction.
+    private let synchronizedScrollCoordinator = BibleReaderSynchronizedScrollCoordinator()
 
     /// Whether the WebView is currently showing the My Notes document (vs Bible text).
     private(set) var showingMyNotes = false
@@ -2503,15 +2452,17 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     public func bridgeDidSetClientReady(_ bridge: BibleBridge) {
         logger.info("Client ready, sending initial content")
         clientReady = true
-        let deferredSynchronizedScrollOrdinal = pendingClientReadySynchronizedScrollOrdinal
-        pendingClientReadySynchronizedScrollOrdinal = nil
+        let deferredSynchronizedScrollOrdinal = synchronizedScrollCoordinator
+            .consumeDeferredClientReadyOrdinalForReplay()
         loadRecentLabels()
         applyNightModeBackground()
         updateActiveLanguages()
         bridge.emit(event: "set_config", data: buildConfigJSON())
         reloadVisibleDocumentAfterClientReady()
         if let deferredSynchronizedScrollOrdinal {
-            pendingSynchronizedScrollOrdinal = deferredSynchronizedScrollOrdinal
+            synchronizedScrollCoordinator.markClientReadyReplayPending(
+                ordinal: deferredSynchronizedScrollOrdinal
+            )
         }
     }
 
@@ -2715,7 +2666,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         let previousBook = currentBook
         let previousChapter = currentChapter
         let previousVerse = currentVerse
-        let acknowledgedSynchronizedScroll = consumePendingSynchronizedScroll(ordinal: ordinal)
+        let acknowledgedSynchronizedScroll = synchronizedScrollCoordinator
+            .acknowledgeVisibleOrdinal(ordinal)
         navigationCoordinator.updateVisiblePosition(
             ordinal: ordinal,
             key: key,
@@ -2753,9 +2705,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
        focus state is changed
      */
     func handleUserInteraction() {
-        pendingSynchronizedScrollOrdinal = nil
-        pendingClientReadySynchronizedScrollOrdinal = nil
-        synchronizedScrollFeedbackSuppressionActive = false
+        synchronizedScrollCoordinator.clearForUserInteraction()
         onInteraction?()
     }
 
@@ -2764,7 +2714,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
      UIKit can report `UIScrollView` deltas while WebKit is applying a synchronized secondary
      scroll. Those deltas are passive feedback, not a source-window handoff, until explicit user
-     interaction clears `synchronizedScrollFeedbackSuppressionActive`.
+     interaction clears the synchronized-scroll coordinator's feedback guard.
 
      - Returns: `true` when no synchronized secondary-scroll feedback guard is active.
 
@@ -2775,7 +2725,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
        or auto-hiding chrome from passive target-pane motion
      */
     func shouldTreatNativeScrollDeltaAsUserInteraction() -> Bool {
-        !synchronizedScrollFeedbackSuppressionActive
+        synchronizedScrollCoordinator.shouldTreatNativeScrollDeltaAsUserInteraction
     }
 
     /**
@@ -2801,13 +2751,10 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     public func scrollToOrdinal(_ ordinal: Int) {
         applySynchronizedScrollPosition(ordinal: ordinal)
         guard clientReady else {
-            pendingClientReadySynchronizedScrollOrdinal = ordinal
-            synchronizedScrollFeedbackSuppressionActive = true
+            synchronizedScrollCoordinator.deferUntilClientReady(ordinal: ordinal)
             return
         }
-        pendingClientReadySynchronizedScrollOrdinal = nil
-        pendingSynchronizedScrollOrdinal = ordinal
-        synchronizedScrollFeedbackSuppressionActive = true
+        synchronizedScrollCoordinator.armSynchronizedFeedback(ordinal: ordinal)
         bridge.emit(event: "scroll_to_verse", data: "{\"ordinal\":\(ordinal),\"now\":false}")
     }
 
@@ -2840,14 +2787,12 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         }
 
         let alreadyShowingChapter = currentBook == book && currentChapter == chapter
-        pendingSynchronizedScrollOrdinal = targetOrdinal
-        pendingClientReadySynchronizedScrollOrdinal = nil
-        synchronizedScrollFeedbackSuppressionActive = true
+        synchronizedScrollCoordinator.armSynchronizedFeedback(ordinal: targetOrdinal)
 
         if alreadyShowingChapter {
             applySynchronizedVersePosition(book: book, chapter: chapter, verse: verse, ordinal: targetOrdinal)
             guard clientReady else {
-                pendingClientReadySynchronizedScrollOrdinal = targetOrdinal
+                synchronizedScrollCoordinator.deferUntilClientReady(ordinal: targetOrdinal)
                 return
             }
             bridge.emit(event: "scroll_to_verse", data: "{\"ordinal\":\(targetOrdinal),\"now\":false}")
@@ -2888,9 +2833,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             return
         }
 
-        pendingSynchronizedScrollOrdinal = ordinal
-        pendingClientReadySynchronizedScrollOrdinal = nil
-        synchronizedScrollFeedbackSuppressionActive = true
+        synchronizedScrollCoordinator.armSynchronizedFeedback(ordinal: ordinal)
         navigateTo(book: book, chapter: chapter, verse: verse)
     }
 
@@ -2942,29 +2885,6 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             ordinal: ordinal,
             context: makeNavigationContext()
         )
-    }
-
-    /**
-     Classifies a web-visible ordinal callback while a synchronized secondary scroll is in flight.
-
-     - Parameter ordinal: Ordinal reported by the web client after a scroll position change.
-     - Returns: `true` when the pane is suppressing sync-origin feedback; otherwise `false`.
-
-     Side effects:
-     - clears the pending target ordinal when the matching callback arrives
-     - keeps suppression active for intermediate/nonmatching callbacks until explicit interaction
-
-     Failure modes:
-     - returns `false` only when no sync-origin suppression is active, so normal user-origin scrolls
-       continue to rebroadcast after explicit interaction has made this pane active
-     */
-    private func consumePendingSynchronizedScroll(ordinal: Int) -> Bool {
-        guard synchronizedScrollFeedbackSuppressionActive else { return false }
-        if pendingSynchronizedScrollOrdinal == ordinal {
-            pendingSynchronizedScrollOrdinal = nil
-            pendingClientReadySynchronizedScrollOrdinal = nil
-        }
-        return true
     }
 
     /**
