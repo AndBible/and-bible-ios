@@ -1986,6 +1986,52 @@ extension AndBibleTests {
         )
     }
 
+    /**
+     Protects pending/active transient `MultiDocument` state as a coordinator-owned reader concern.
+
+     Android links-window `Multi` documents can be requested before the WebView client is ready, so
+     iOS must remember the same transient document as both the active special document and the
+     pending client-ready replay. The test then consumes that pending replay once and verifies that a
+     later client-ready request remains active without leaving stale pending replay state. A failure
+     means the controller has regained hidden transient state ownership or the Android `Multi`
+     restore/replay contract can duplicate or lose special documents.
+     */
+    func testReaderTransientDocumentCoordinatorStoresActiveAndPendingReplayState() {
+        var coordinator = BibleReaderTransientDocumentCoordinator()
+        let pendingRequest = BibleReaderTransientDocumentRequest(
+            documentJSON: #"{"id":"pending"}"#,
+            renderedBook: "Multi",
+            renderedKey: "multi",
+            renderedCategory: .generalBook,
+            renderedModuleName: "Multi",
+            pageCategory: .generalBook,
+            pageDocumentInitials: "Multi",
+            pageKey: "KJV:Gen.1.1"
+        )
+        let readyRequest = BibleReaderTransientDocumentRequest(
+            documentJSON: #"{"id":"ready"}"#,
+            renderedBook: "Compare",
+            renderedKey: "compare",
+            renderedCategory: .bible,
+            renderedModuleName: nil,
+            pageCategory: nil,
+            pageDocumentInitials: nil,
+            pageKey: nil
+        )
+
+        coordinator.store(pendingRequest, clientReady: false)
+
+        XCTAssertEqual(coordinator.activeRequest(isShowingAndroidMultiDocument: true)?.documentJSON, pendingRequest.documentJSON)
+        XCTAssertNil(coordinator.activeRequest(isShowingAndroidMultiDocument: false))
+        XCTAssertEqual(coordinator.consumePendingClientReadyRequest()?.documentJSON, pendingRequest.documentJSON)
+        XCTAssertNil(coordinator.consumePendingClientReadyRequest())
+
+        coordinator.store(readyRequest, clientReady: true)
+
+        XCTAssertEqual(coordinator.activeRequest(isShowingAndroidMultiDocument: true)?.documentJSON, readyRequest.documentJSON)
+        XCTAssertNil(coordinator.consumePendingClientReadyRequest())
+    }
+
     @MainActor
     func testRequestMoreToBeginningSendsDocumentResponseWithOriginalCallId() throws {
         let (bridge, recordedScripts) = makeRecordingBridge()
