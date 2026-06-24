@@ -151,6 +151,28 @@ class SemanticWaitGuardrailsTests(unittest.TestCase):
         self.assertNotIn("resolvedSearchStateValue", pre_loop)
         self.assertNotIn("searchScreen.value", pre_loop)
 
+    def test_search_opening_verifies_presentation_before_success(self) -> None:
+        """Keep reader-triggered Search opening state-driven instead of tap-assumption driven."""
+        search_source = (
+            REPO_ROOT / "AndBibleUITests/AndBibleUITestSearchSupport.swift"
+        ).read_text(encoding="utf-8")
+        open_body = swift_function_body(search_source, "openSearch")
+        presentation_body = swift_function_body(search_source, "presentSearchFromReader")
+
+        self.assertIn("presentSearchFromReader", open_body)
+        self.assertNotIn("tapReaderSearchEntry", open_body)
+        self.assertIn("resolvedSearchScreenElement", presentation_body)
+        self.assertIn('readerRenderedContentStateContains("searchVisible=true"', presentation_body)
+        drawer_action = re.search(
+            r"tapReaderAction\s*\(\s*\"readerOpenSearchAction\"",
+            presentation_body,
+        )
+        self.assertIsNotNone(drawer_action)
+        self.assertLess(
+            presentation_body.find("tapReaderSearchEntry"),
+            drawer_action.start(),
+        )
+
     def test_window_tab_bar_identifier_belongs_to_scroll_view_container(self) -> None:
         """Keep tab-button lookup scoped to the actual container that owns the buttons."""
         source = (

@@ -71,8 +71,7 @@ extension AndBibleUITests {
             return prePresentedSearch
         }
 
-        tapReaderSearchEntry(in: app, timeout: 15, file: file, line: line)
-        let searchScreen = requireSearchScreen(in: app, timeout: 20, file: file, line: line)
+        let searchScreen = presentSearchFromReader(in: app, timeout: 20, file: file, line: line)
         waitForSearchInteractionReady(
             on: searchScreen,
             in: app,
@@ -119,6 +118,78 @@ extension AndBibleUITests {
         } while Date() < deadline
 
         return nil
+    }
+
+    /**
+     Presents Search from the reader shell and verifies that the app actually entered Search state.
+
+     The adaptive SwiftUI toolbar can expose multiple Search button candidates while `ViewThatFits`
+     settles. XCTest can report a native tap as completed even when that resolved node did not invoke
+     the production action. This helper keeps Search opening condition-based: the direct toolbar path
+     is attempted first, but success is only accepted after either the reader state export reports
+     `searchVisible=true` or the Search root appears. If the direct path does not change state, the
+     helper falls back to the Android-style drawer action instead of waiting out the full presentation
+     budget on a failed tap assumption.
+     *
+     * - Parameters:
+     *   - app: Running application under test.
+     *   - timeout: Maximum seconds to spend across direct and drawer activation paths.
+     *   - file: Source file used for XCTest failure attribution.
+     *   - line: Source line used for XCTest failure attribution.
+     * - Returns: The visible Search root once presentation is confirmed.
+     * - Side effects:
+     *   - taps the direct reader Search affordance
+     *   - may open the reader navigation drawer and tap its Search action when the direct tap does not
+     *     produce Search presentation state
+     *   - polls the compact reader state export and Search root accessibility identifier
+     * - Failure modes:
+     *   - records an XCTest failure when neither production activation path presents Search before
+     *     the timeout expires
+     */
+    func presentSearchFromReader(
+        in app: XCUIApplication,
+        timeout: TimeInterval = 20,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) -> XCUIElement {
+        let deadline = Date().addingTimeInterval(timeout)
+        var attemptedDrawerFallback = false
+        var observedSearchVisibleState = false
+
+        tapReaderSearchEntry(in: app, timeout: min(10, timeout), file: file, line: line)
+
+        repeat {
+            if let searchScreen = resolvedSearchScreenElement(in: app) {
+                return searchScreen
+            }
+
+            if readerRenderedContentStateContains("searchVisible=true", in: app) {
+                observedSearchVisibleState = true
+            } else if !attemptedDrawerFallback,
+                      waitForReaderShellReady(in: app, timeout: 0.2) {
+                tapReaderAction(
+                    "readerOpenSearchAction",
+                    in: app,
+                    timeout: min(8, max(1, deadline.timeIntervalSinceNow)),
+                    file: file,
+                    line: line
+                )
+                attemptedDrawerFallback = true
+            }
+
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        } while Date() < deadline
+
+        let searchScreen = unresolvedElement("searchScreen", in: app)
+        XCTAssertTrue(
+            searchScreen.exists,
+            "Expected Search to present from reader within \(timeout) seconds; "
+                + "observed searchVisible=\(observedSearchVisibleState), "
+                + "attemptedDrawerFallback=\(attemptedDrawerFallback).",
+            file: file,
+            line: line
+        )
+        return searchScreen
     }
 
     /**
