@@ -126,6 +126,59 @@ extension AndBibleTests {
     }
 
     /**
+     Protects the extracted compare document builder's Android `MultiDocument` contract.
+
+     Android renders Compare through `FakeBookFactory.compareDocument` as a multi-fragment Bible
+     document with `compare=true`. This test exercises the builder directly against the bundled KJV
+     SWORD fixture so the controller can remain an orchestration boundary while the builder owns
+     module ordering, verse extraction, range titles, and typed bridge JSON assembly.
+     */
+    func testCompareDocumentBuilderBuildsAndroidMultiDocumentPayload() throws {
+        let modulePath = try makeTemporaryBundledSwordPath()
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let moduleInfo = try XCTUnwrap(manager.installedModules().first { $0.name == "KJV" })
+        let builder = BibleReaderCompareDocumentBuilder(
+            swordManager: manager,
+            installedBibleModules: [moduleInfo],
+            activeModuleName: "KJV"
+        )
+
+        let request = try XCTUnwrap(
+            builder.makeRequest(
+                osisBookId: "2Cor",
+                bookName: "2 Corinthians",
+                chapter: 2,
+                isNewTestament: true,
+                startVerse: 5,
+                endVerse: 7
+            )
+        )
+        let json = try XCTUnwrap(BibleReaderCompareDocumentBuilder.buildDocumentJSON(request))
+        let object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any]
+        )
+
+        XCTAssertEqual(object["type"] as? String, "multi")
+        XCTAssertEqual(object["compare"] as? Bool, true)
+        let fragments = try XCTUnwrap(object["osisFragments"] as? [[String: Any]])
+        XCTAssertEqual(fragments.count, 1)
+        let fragment = try XCTUnwrap(fragments.first)
+        XCTAssertEqual(fragment["bookCategory"] as? String, DocumentCategory.bible.rawValue)
+        XCTAssertEqual(fragment["bookInitials"] as? String, "KJV")
+        XCTAssertEqual(fragment["bookAbbreviation"] as? String, "KJV")
+        XCTAssertEqual(fragment["osisRef"] as? String, "2Cor.2.5-2Cor.2.7")
+        XCTAssertEqual(fragment["keyName"] as? String, "2 Corinthians 2:5-7")
+        XCTAssertEqual(fragment["isNewTestament"] as? Bool, true)
+        XCTAssertEqual(fragment["hasStrongs"] as? Bool, true)
+        XCTAssertEqual(fragment["language"] as? String, "en")
+        XCTAssertEqual(fragment["direction"] as? String, "ltr")
+        XCTAssertEqual(fragment["ordinalRange"] as? [Int], [
+            try XCTUnwrap(manager.module(named: "KJV")?.verseOrdinal(osisBookId: "2Cor", chapter: 2, verse: 5)),
+            try XCTUnwrap(manager.module(named: "KJV")?.verseOrdinal(osisBookId: "2Cor", chapter: 2, verse: 7)),
+        ])
+    }
+
+    /**
      Protects the extracted reader document payload factory's Bible document contract.
 
      Android and Vue consume document ordinals, Strong's capability, reading progress, and
