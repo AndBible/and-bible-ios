@@ -277,7 +277,7 @@ extension AndBibleUITests {
         case "searchStateExport":
             return [
                 app.otherElements["searchScreen"].firstMatch,
-            ] + screenScopedStateCandidates(identifier, within: "searchScreen", in: app)
+            ]
         case "bookmarkListStateExport":
             return screenRootCandidates("bookmarkListScreen", in: app)
                 + screenScopedStateCandidates(identifier, within: "bookmarkListScreen", in: app)
@@ -417,7 +417,7 @@ extension AndBibleUITests {
         return titledCandidates
     }
 
-    /// Returns workspace-name prompt buttons without walking the custom sheet hierarchy.
+    /// Returns workspace-name prompt buttons without starting from expensive app-wide id queries.
     func workspaceNamePromptButtonCandidates(
         _ identifier: String,
         in app: XCUIApplication
@@ -432,19 +432,20 @@ extension AndBibleUITests {
             titles = []
         }
 
-        let directIdentifierCandidates = [
-            app.navigationBars.buttons[identifier].firstMatch,
-            app.toolbars.buttons[identifier].firstMatch,
-            app.buttons[identifier].firstMatch,
-            app.collectionViews.buttons[identifier].firstMatch,
-            app.tables.buttons[identifier].firstMatch,
-            app.scrollViews.buttons[identifier].firstMatch,
-            app.otherElements[identifier].firstMatch,
-        ]
+        let prompt = app.otherElements["workspaceNamePromptScreen"].firstMatch
+        let promptScopedCandidates = modalButtonCandidates(
+            in: prompt,
+            identifiers: [identifier],
+            titles: titles
+        )
         let directTitleCandidates = titles.map { title in
             app.buttons[title].firstMatch
         }
-        return directIdentifierCandidates + directTitleCandidates
+        let directIdentifierCandidates = [
+            app.buttons[identifier].firstMatch,
+            app.otherElements[identifier].firstMatch,
+        ]
+        return promptScopedCandidates + directTitleCandidates + directIdentifierCandidates
     }
 
     /// Returns screen-aware candidates for small exported semantic state controls.

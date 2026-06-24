@@ -298,8 +298,8 @@ extension AndBibleUITests {
         line: UInt = #line
     ) {
         let deadline = Date().addingTimeInterval(timeout)
-        var lastState = resolvedSearchStateValue(in: app) ?? (searchScreen.value as? String ?? "nil")
-        var observedNeedsIndex = lastState.contains("state=needsIndex")
+        var lastState = "nil"
+        var observedNeedsIndex = false
         var observedCreatePrompt = false
         func failSeededFixtureReadiness() {
             let indexCreationRequested = observedNeedsIndex || observedCreatePrompt
@@ -315,7 +315,7 @@ extension AndBibleUITests {
         }
 
         while Date() < deadline {
-            let state = resolvedSearchStateValue(in: app) ?? (searchScreen.value as? String ?? "")
+            let state = resolvedSearchStateValue(in: app) ?? ""
             if !state.isEmpty {
                 lastState = state
             }

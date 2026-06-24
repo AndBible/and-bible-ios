@@ -70,8 +70,52 @@ def swift_function_bodies(source: str, name: str) -> list[str]:
 class SemanticWaitGuardrailsTests(unittest.TestCase):
     """Protects pure semantic-state waits from regressing to ad hoc run-loop polling."""
 
-    def test_search_state_candidates_prefer_screen_root_before_hidden_export(self) -> None:
-        """Keep Search readiness polling off the volatile hidden static-text export first."""
+    def test_workspace_create_prompt_waits_on_prompt_root_before_buttons(self) -> None:
+        """Avoid hosted XCTest stalls from proving absent prompt buttons before root exists."""
+        list_source = (
+            REPO_ROOT / "AndBibleUITests/AndBibleUITestListSupport.swift"
+        ).read_text(encoding="utf-8")
+        body = swift_function_body(list_source, "openWorkspaceCreatePrompt")
+
+        prompt_root = '"workspaceNamePromptScreen"'
+        prompt_field = '"workspaceNamePromptTextField"'
+        confirm_button = '"workspaceNamePromptConfirmButton"'
+        cancel_button = '"workspaceNamePromptCancelButton"'
+
+        for identifier in [prompt_root, prompt_field, confirm_button, cancel_button]:
+            self.assertIn(identifier, body)
+
+        self.assertLess(body.find(prompt_root), body.find(confirm_button))
+        self.assertLess(body.find(prompt_field), body.find(confirm_button))
+        self.assertLess(body.find(prompt_root), body.find(cancel_button))
+        self.assertLess(body.find(prompt_field), body.find(cancel_button))
+
+    def test_workspace_prompt_button_candidates_prefer_prompt_scope_and_titles(self) -> None:
+        """Keep workspace prompt button lookup off expensive app-wide identifier queries first."""
+        element_source = (
+            REPO_ROOT / "AndBibleUITests/AndBibleUITestElementSupport.swift"
+        ).read_text(encoding="utf-8")
+        body = swift_function_body(element_source, "workspaceNamePromptButtonCandidates")
+
+        prompt_candidate = 'app.otherElements["workspaceNamePromptScreen"].firstMatch'
+        scoped_button_candidates = "modalButtonCandidates("
+        title_candidate = "app.buttons[title].firstMatch"
+        identifier_candidate = "app.buttons[identifier].firstMatch"
+
+        for snippet in [
+            prompt_candidate,
+            scoped_button_candidates,
+            title_candidate,
+            identifier_candidate,
+        ]:
+            self.assertIn(snippet, body)
+
+        self.assertLess(body.find(prompt_candidate), body.find(identifier_candidate))
+        self.assertLess(body.find(scoped_button_candidates), body.find(identifier_candidate))
+        self.assertLess(body.find(title_candidate), body.find(identifier_candidate))
+
+    def test_search_state_candidates_use_screen_root_without_hidden_export_fallback(self) -> None:
+        """Keep Search readiness polling off the volatile hidden static-text export."""
         element_source = (
             REPO_ROOT / "AndBibleUITests/AndBibleUITestElementSupport.swift"
         ).read_text(encoding="utf-8")
@@ -88,11 +132,20 @@ class SemanticWaitGuardrailsTests(unittest.TestCase):
         )
 
         self.assertIn(root_candidate, search_case)
-        self.assertIn(hidden_export_candidate, search_case)
-        self.assertLess(
-            search_case.find(root_candidate),
-            search_case.find(hidden_export_candidate),
-        )
+        self.assertNotIn(hidden_export_candidate, search_case)
+
+    def test_search_interaction_ready_does_not_read_state_before_poll_loop(self) -> None:
+        """Keep the Search readiness timeout from being consumed by a pre-loop XCTest snapshot."""
+        search_source = (
+            REPO_ROOT / "AndBibleUITests/AndBibleUITestSearchSupport.swift"
+        ).read_text(encoding="utf-8")
+        body = swift_function_body(search_source, "waitForSearchInteractionReady")
+        loop_start = body.find("while Date() < deadline")
+        self.assertNotEqual(loop_start, -1)
+
+        pre_loop = body[:loop_start]
+        self.assertNotIn("resolvedSearchStateValue", pre_loop)
+        self.assertNotIn("searchScreen.value", pre_loop)
 
     def test_resolved_semantic_wait_uses_xctest_waiter_not_run_loop_polling(self) -> None:
         """Ensure the shared pure-observation wait is backed by XCTest wait primitives."""
