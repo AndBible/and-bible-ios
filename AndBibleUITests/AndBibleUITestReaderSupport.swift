@@ -146,6 +146,8 @@ extension AndBibleUITests {
      * - Side effects:
      *   - repeatedly samples the live XCUI hierarchy until the requested element exists or
      *     disappears
+     *   - keeps reader tab-bar controls scoped to `windowTabBar` so negative waits do not snapshot
+     *     the full reader hierarchy
      * - Failure modes:
      *   - records an XCTest failure when the element never reaches the requested existence state
      */
@@ -158,15 +160,21 @@ extension AndBibleUITests {
         line: UInt = #line
     ) {
         let deadline = Date().addingTimeInterval(timeout)
+        let resolveElement: () -> XCUIElement? = {
+            if self.isWindowTabBarButtonIdentifier(identifier) {
+                return self.resolvedWindowTabBarButton(identifier, in: app)
+            }
+            return self.resolvedElement(identifier, in: app)
+        }
         repeat {
-            let currentExists = resolvedElement(identifier, in: app) != nil
+            let currentExists = resolveElement() != nil
             if currentExists == shouldExist {
                 return
             }
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         } while Date() < deadline
 
-        let currentExists = resolvedElement(identifier, in: app) != nil
+        let currentExists = resolveElement() != nil
         XCTAssertEqual(
             currentExists,
             shouldExist,

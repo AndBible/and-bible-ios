@@ -236,6 +236,92 @@ extension AndBibleUITests {
         }
     }
 
+    /// Returns whether the identifier belongs to a control rendered inside the reader window tab bar.
+    func isWindowTabBarButtonIdentifier(_ identifier: String) -> Bool {
+        identifier.hasPrefix("windowTabButton::") ||
+            identifier == "windowTabAddButton" ||
+            identifier == "windowTabRestoreToggleButton" ||
+            identifier == "windowTabUnmaximizeButton"
+    }
+
+    /**
+     Resolves window-tab controls only through the tab bar container that owns them.
+
+     The bottom tab bar sits above web-reader content, and app-wide button snapshots can time out in
+     CI while XCTest walks the whole reader hierarchy. These controls always live in `windowTabBar`,
+     so callers should fail against that scoped contract instead of falling back to broad queries.
+     */
+    func windowTabBarButtonCandidates(
+        _ identifier: String,
+        in app: XCUIApplication
+    ) -> [XCUIElement] {
+        [
+            app.scrollViews["windowTabBar"].firstMatch,
+            app.otherElements["windowTabBar"].firstMatch,
+        ].flatMap { tabBar in
+            [
+                tabBar.buttons[identifier].firstMatch,
+                tabBar.otherElements[identifier].firstMatch,
+            ]
+        }
+    }
+
+    /**
+     Resolves one tab-bar control without falling back to unrelated app-wide button queries.
+
+     - Parameters:
+       - identifier: Accessibility identifier for a button owned by `windowTabBar`.
+       - app: Running application under test.
+     - Returns: The first existing scoped tab-bar control, or `nil` when the tab bar has not exposed it.
+     - Side effects: none.
+     - Failure modes: none; callers decide whether absence should fail the test.
+     */
+    func resolvedWindowTabBarButton(
+        _ identifier: String,
+        in app: XCUIApplication
+    ) -> XCUIElement? {
+        windowTabBarButtonCandidates(identifier, in: app).first(where: { $0.exists })
+    }
+
+    /**
+     Requires one tab-bar control to appear under the `windowTabBar` accessibility container.
+
+     - Parameters:
+       - identifier: Accessibility identifier for a button owned by `windowTabBar`.
+       - app: Running application under test.
+       - timeout: Maximum time to wait for the scoped control.
+       - file: Source file used for XCTest failure attribution.
+       - line: Source line used for XCTest failure attribution.
+     - Returns: The resolved tab-bar button.
+     - Side effects: polls only the tab-bar subtree until the control appears.
+     - Failure modes: records an XCTest failure when the tab bar never exposes the requested control.
+     */
+    func requireWindowTabBarButton(
+        _ identifier: String,
+        in app: XCUIApplication,
+        timeout: TimeInterval = 10,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) -> XCUIElement {
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            if let element = resolvedWindowTabBarButton(identifier, in: app) {
+                return element
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        } while Date() < deadline
+
+        let element = windowTabBarButtonCandidates(identifier, in: app).first ??
+            app.otherElements["windowTabBar"].firstMatch
+        XCTAssertTrue(
+            element.exists,
+            "Expected tab-bar control '\(identifier)' to exist within \(timeout) seconds.",
+            file: file,
+            line: line
+        )
+        return element
+    }
+
     /**
      Resolves lightweight state-export or status candidates without probing broad `Other` queries.
 
@@ -1432,7 +1518,7 @@ extension AndBibleUITests {
         line: UInt = #line
     ) {
         let identifier = "windowTabButton::\(order)"
-        let tabButton = requireElement(identifier, in: app, timeout: timeout, file: file, line: line)
+        let tabButton = requireWindowTabBarButton(identifier, in: app, timeout: timeout, file: file, line: line)
         tapElementReliably(tabButton, timeout: timeout, file: file, line: line)
 
         let deadline = Date().addingTimeInterval(timeout)
@@ -1484,7 +1570,7 @@ extension AndBibleUITests {
 
         for attempt in 1...2 {
             tapElementReliably(
-                requireElement("windowTabAddButton", in: app, timeout: timeout, file: file, line: line),
+                requireWindowTabBarButton("windowTabAddButton", in: app, timeout: timeout, file: file, line: line),
                 timeout: timeout,
                 file: file,
                 line: line
@@ -1492,7 +1578,7 @@ extension AndBibleUITests {
 
             let deadline = Date().addingTimeInterval(timeout)
             repeat {
-                if let tabButton = resolvedElement(identifier, in: app) {
+                if let tabButton = resolvedWindowTabBarButton(identifier, in: app) {
                     sawExpectedTab = true
                     lastTabValue = tabButton.value.map { "\($0)" } ?? "nil"
                     lastRenderedState = readerRenderedContentStateValue(in: app) ?? "nil"

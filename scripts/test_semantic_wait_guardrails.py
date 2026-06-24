@@ -151,6 +151,53 @@ class SemanticWaitGuardrailsTests(unittest.TestCase):
         self.assertNotIn("resolvedSearchStateValue", pre_loop)
         self.assertNotIn("searchScreen.value", pre_loop)
 
+    def test_window_tab_bar_identifier_belongs_to_scroll_view_container(self) -> None:
+        """Keep tab-button lookup scoped to the actual container that owns the buttons."""
+        source = (
+            REPO_ROOT / "Sources/BibleUI/Sources/BibleUI/Bible/WindowTabBar.swift"
+        ).read_text(encoding="utf-8")
+        body_start = source.find("var body: some View")
+        footer_start = source.find("private func footerStrip")
+        self.assertNotEqual(body_start, -1)
+        self.assertNotEqual(footer_start, -1)
+
+        body_section = source[body_start:footer_start]
+        footer_body = swift_function_body(source, "footerStrip")
+        scroll_view = "ScrollView(.horizontal, showsIndicators: false)"
+        identifier = '.accessibilityIdentifier("windowTabBar")'
+
+        self.assertNotIn(identifier, body_section)
+        self.assertIn(scroll_view, footer_body)
+        self.assertIn(identifier, footer_body)
+        self.assertLess(footer_body.find(scroll_view), footer_body.find(identifier))
+
+    def test_window_tab_helpers_avoid_app_wide_button_fallbacks(self) -> None:
+        """Keep tab selection from falling back to expensive full-hierarchy button queries."""
+        element_source = (
+            REPO_ROOT / "AndBibleUITests/AndBibleUITestElementSupport.swift"
+        ).read_text(encoding="utf-8")
+        reader_source = (
+            REPO_ROOT / "AndBibleUITests/AndBibleUITestReaderSupport.swift"
+        ).read_text(encoding="utf-8")
+
+        candidates_body = swift_function_body(element_source, "windowTabBarButtonCandidates")
+        tap_body = swift_function_body(element_source, "tapWindowTab")
+        add_body = swift_function_body(element_source, "addWindowTab")
+        existence_body = swift_function_body(reader_source, "waitForElementExistence")
+
+        self.assertIn('app.scrollViews["windowTabBar"].firstMatch', candidates_body)
+        self.assertIn('app.otherElements["windowTabBar"].firstMatch', candidates_body)
+        self.assertNotIn("app.buttons[identifier]", candidates_body)
+        self.assertNotIn("app.collectionViews.buttons[identifier]", candidates_body)
+        self.assertNotIn("app.cells.buttons[identifier]", candidates_body)
+
+        self.assertIn("requireWindowTabBarButton", tap_body)
+        self.assertNotIn("requireElement(identifier", tap_body)
+        self.assertIn("requireWindowTabBarButton", add_body)
+        self.assertIn("resolvedWindowTabBarButton", add_body)
+        self.assertIn("isWindowTabBarButtonIdentifier", existence_body)
+        self.assertIn("resolvedWindowTabBarButton", existence_body)
+
     def test_resolved_semantic_wait_uses_xctest_waiter_not_run_loop_polling(self) -> None:
         """Ensure the shared pure-observation wait is backed by XCTest wait primitives."""
         state_source = (
