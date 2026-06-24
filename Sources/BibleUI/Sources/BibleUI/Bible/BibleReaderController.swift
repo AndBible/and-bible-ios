@@ -130,10 +130,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     static let emptyRenderedContentState = BibleReaderRenderedContentState.empty.encodedValue
     private static let issueTrackerURLString = "https://github.com/AndBible/and-bible/issues"
     private(set) var renderedContentState: String = BibleReaderController.emptyRenderedContentState
-    /// Transient document that should be replayed once the Vue client has finished bootstrapping.
-    private var pendingClientReadyTransientMultiDocument: TransientMultiDocumentRequest?
-    /// Last transient special document visible in this controller, used for same-session reloads.
-    private var activeTransientMultiDocument: TransientMultiDocumentRequest?
+    /// State machine for pending and active Android-style transient `MultiDocument` pages.
+    private var transientDocumentCoordinator = BibleReaderTransientDocumentCoordinator()
     /// Current My Documents page rendered through the local store rather than a SWORD module.
     private var activeMyDocumentBookInitials: String?
     /// Current My Documents page key rendered through the local store rather than a SWORD module.
@@ -144,40 +142,6 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     private var maxLoadedChapter: Int = 0
     private var minLoadedBook: String = "Genesis"
     private var maxLoadedBook: String = "Genesis"
-
-    /**
-     Captures a transient Vue `MultiDocument` load until the web client can receive it.
-
-     Link-result panes may be created before their `BibleWebView` has sent `setClientReady`. The
-     request stores both the serialized Vue document and the Android page identity that should be
-     persisted on the links-window target, so client-ready replay, settings reloads, and bottom tabs
-     agree on the same special document.
-     */
-    private struct TransientMultiDocumentRequest {
-        /// Serialized Vue `MultiDocument` payload to emit.
-        let documentJSON: String
-
-        /// Rendered-content book token for accessibility and tab display.
-        let renderedBook: String
-
-        /// Rendered-content key token for accessibility and tab display.
-        let renderedKey: String
-
-        /// Rendered-content category token.
-        let renderedCategory: DocumentCategory
-
-        /// Optional rendered module token.
-        let renderedModuleName: String?
-
-        /// Optional PageManager category to persist for Android fake-document parity.
-        let pageCategory: DocumentCategory?
-
-        /// Optional PageManager document initials to persist for Android fake-document parity.
-        let pageDocumentInitials: String?
-
-        /// Optional PageManager key to persist for Android fake-document parity.
-        let pageKey: String?
-    }
 
     /**
      Serialized payload rebuilt from Android's durable `Multi` PageManager key.
@@ -1110,8 +1074,10 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     /// Load the appropriate content for the current category.
     public func loadCurrentContent() {
         if isShowingAndroidMultiDocument {
-            if let activeTransientMultiDocument {
-                emitTransientMultiDocument(activeTransientMultiDocument)
+            if let activeRequest = transientDocumentCoordinator.activeRequest(
+                isShowingAndroidMultiDocument: isShowingAndroidMultiDocument
+            ) {
+                emitTransientMultiDocument(activeRequest)
                 return
             }
             if loadRestoredAndroidMultiDocument() {
@@ -1493,7 +1459,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         pageDocumentInitials: String? = nil,
         pageKey: String? = nil
     ) {
-        let request = TransientMultiDocumentRequest(
+        let request = BibleReaderTransientDocumentRequest(
             documentJSON: documentJSON,
             renderedBook: renderedBook,
             renderedKey: renderedKey,
@@ -1503,12 +1469,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             pageDocumentInitials: pageDocumentInitials,
             pageKey: pageKey
         )
-        activeTransientMultiDocument = request
-        if clientReady {
-            pendingClientReadyTransientMultiDocument = nil
-        } else {
-            pendingClientReadyTransientMultiDocument = request
-        }
+        transientDocumentCoordinator.store(request, clientReady: clientReady)
         emitTransientMultiDocument(request)
     }
 
@@ -1522,7 +1483,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      - Failure modes: Invalid JSON is forwarded unchanged to the bridge, matching the existing
        transient document contract.
      */
-    private func emitTransientMultiDocument(_ request: TransientMultiDocumentRequest) {
+    private func emitTransientMultiDocument(_ request: BibleReaderTransientDocumentRequest) {
         showingMyNotes = false
         showingStudyPad = false
         activeStudyPadLabelId = nil
@@ -1568,7 +1529,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
        durable document/key update only the transient controller category so malformed bridge
        payloads cannot erase the last restorable Android `Multi` key.
      */
-    private func applyTransientPageIdentity(_ request: TransientMultiDocumentRequest) {
+    private func applyTransientPageIdentity(_ request: BibleReaderTransientDocumentRequest) {
         guard let pageCategory = request.pageCategory else {
             currentCategory = .bible
             return
@@ -2476,9 +2437,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      accessibility/export state aligned.
      */
     private func reloadVisibleDocumentAfterClientReady() {
-        if let pendingClientReadyTransientMultiDocument {
-            self.pendingClientReadyTransientMultiDocument = nil
-            emitTransientMultiDocument(pendingClientReadyTransientMultiDocument)
+        if let pendingClientReadyRequest = transientDocumentCoordinator.consumePendingClientReadyRequest() {
+            emitTransientMultiDocument(pendingClientReadyRequest)
             return
         }
 
