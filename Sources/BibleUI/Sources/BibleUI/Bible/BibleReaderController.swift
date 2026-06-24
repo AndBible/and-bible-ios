@@ -132,10 +132,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     private(set) var renderedContentState: String = BibleReaderController.emptyRenderedContentState
     /// State machine for pending and active Android-style transient `MultiDocument` pages.
     private var transientDocumentCoordinator = BibleReaderTransientDocumentCoordinator()
-    /// Current My Documents page rendered through the local store rather than a SWORD module.
-    private var activeMyDocumentBookInitials: String?
-    /// Current My Documents page key rendered through the local store rather than a SWORD module.
-    private var activeMyDocumentPageKey: String?
+    /// Reader-local My Documents active page state and document payload assembly.
+    private var myDocumentCoordinator = BibleReaderMyDocumentCoordinator()
 
     /// Infinite scroll: tracks the range of chapters/books currently loaded in the WebView.
     private var minLoadedChapter: Int = 0
@@ -355,10 +353,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         chapter: Int? = nil,
         key: String? = nil
     ) {
-        if category != .generalBook || moduleName != activeMyDocumentBookInitials {
-            activeMyDocumentBookInitials = nil
-            activeMyDocumentPageKey = nil
-        }
+        myDocumentCoordinator.clearActivePageUnless(category: category, moduleName: moduleName)
         renderedContentState = BibleReaderRenderedContentState(
             category: category,
             moduleName: moduleName,
@@ -3841,6 +3836,11 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             return false
         }
 
+        guard let documentJSON = myDocumentCoordinator.documentJSON(document: document, page: page) else {
+            logger.error("Failed to serialize My Documents page JSON for \(document.initials, privacy: .public)")
+            return false
+        }
+
         showingMyNotes = false
         showingStudyPad = false
         activeStudyPadLabelId = nil
@@ -3849,8 +3849,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         hasActiveSelection = false
         selectedText = ""
         currentCategory = .generalBook
-        activeMyDocumentBookInitials = bookInitials
-        activeMyDocumentPageKey = pageKey
+        myDocumentCoordinator.setActivePage(bookInitials: bookInitials, pageKey: pageKey)
         setRenderedContentState(
             category: .generalBook,
             moduleName: document.initials,
@@ -3858,7 +3857,6 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             key: page.pageKey
         )
 
-        let documentJSON = buildMyDocumentDocumentJSON(document: document, page: page)
         bridge.emit(event: "clear_document")
         bridge.emit(event: "add_documents", data: documentJSON)
         bridge.emit(
@@ -3868,79 +3866,6 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         bridge.clearSelection()
         applyNightModeBackground()
         return true
-    }
-
-    /**
-     Builds the Vue.js `OsisDocument` payload for one stored My Documents page.
-     */
-    private func buildMyDocumentDocumentJSON(document: MyDocument, page: MyDocumentPage) -> String {
-        let content = page.pageContent?.content ?? ""
-        let xml = renderedMyDocumentXML(content: content, contentType: page.contentType)
-        let promptId: Any = page.sourcePromptId?.uuidString ?? NSNull()
-
-        let osisFragment: [String: Any] = [
-            "xml": xml,
-            "key": page.pageKey,
-            "keyName": page.title,
-            "v11n": "KJVA",
-            "bookCategory": DocumentCategory.generalBook.rawValue,
-            "bookInitials": document.initials,
-            "bookAbbreviation": document.initials,
-            "osisRef": page.pageKey,
-            "isNewTestament": false,
-            "features": [String: Any](),
-            "hasStrongs": false,
-            "ordinalRange": [0, 0],
-            "language": page.languageCode ?? Locale.current.languageCode ?? "en",
-            "direction": "ltr",
-        ]
-
-        let renderedDocument: [String: Any] = [
-            "id": "my-document-\(page.id.uuidString)",
-            "type": "osis",
-            "osisFragment": osisFragment,
-            "bookInitials": document.initials,
-            "bookCategory": DocumentCategory.generalBook.rawValue,
-            "bookAbbreviation": document.initials,
-            "bookName": document.name,
-            "key": page.pageKey,
-            "v11n": "KJVA",
-            "osisRef": page.pageKey,
-            "annotateRef": page.pageKey,
-            "genericBookmarks": [Any](),
-            "ordinalRange": [0, 0],
-            "isNativeHtml": false,
-            "highlightedOrdinalRange": NSNull(),
-            "isMyDocument": true,
-            "isAiDocument": document.initials == "AIDocuments",
-            "myDocumentPageId": page.id.uuidString,
-            "sourcePromptId": promptId,
-            "sourcePromptName": NSNull(),
-            "sourceModelName": NSNull(),
-            "aiDocMarkers": [Any](),
-        ]
-
-        guard let data = try? JSONSerialization.data(withJSONObject: renderedDocument, options: [.sortedKeys]),
-              let json = String(data: data, encoding: .utf8) else {
-            logger.error("Failed to serialize My Documents page JSON for \(document.initials, privacy: .public)")
-            return "{}"
-        }
-
-        return json
-    }
-
-    /**
-     Converts stored raw My Documents content into the OSIS-template fragment consumed by Vue.js.
-     */
-    private func renderedMyDocumentXML(content: String, contentType: MyDocumentContentType) -> String {
-        switch contentType {
-        case .markdown:
-            return "<div class=\"mydoc-markdown\"><markdown>\(escapeXML(content))</markdown></div>"
-        case .html:
-            return "<div class=\"mydoc-html\"><html>\(escapeXML(content))</html></div>"
-        case .osis:
-            return content
-        }
     }
 
     /**
@@ -3967,13 +3892,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             return
         }
 
-        let shareText: String
-        if payload.title.isEmpty {
-            shareText = payload.content
-        } else {
-            shareText = "\(payload.title)\n\n\(payload.content)"
-        }
-        onShareVerseText?(shareText)
+        onShareVerseText?(myDocumentCoordinator.shareText(for: payload))
     }
 
     /**
@@ -4000,8 +3919,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      Reloads the currently visible My Documents page when it belongs to the supplied document.
      */
     public func bridge(_ bridge: BibleBridge, reloadMyDocumentPage bookInitials: String) {
-        guard activeMyDocumentBookInitials == bookInitials,
-              let pageKey = activeMyDocumentPageKey else {
+        guard let pageKey = myDocumentCoordinator.activePageKey(for: bookInitials) else {
             return
         }
 
@@ -4062,13 +3980,12 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      Keeps the visible WebView in sync after an AI My Documents page deletion.
      */
     private func refreshMyDocumentAfterDeletingPage(_ context: MyDocumentAIPageActionContext) {
-        guard activeMyDocumentBookInitials == context.bookInitials else {
+        guard myDocumentCoordinator.isActiveDocument(context) else {
             return
         }
 
-        if activeMyDocumentPageKey == context.pageKey {
-            activeMyDocumentBookInitials = nil
-            activeMyDocumentPageKey = nil
+        if myDocumentCoordinator.isActivePage(context) {
+            myDocumentCoordinator.clearActivePage()
             currentCategory = .bible
             if let pageManager = activeWindow?.pageManager {
                 pageManager.currentCategoryName = DocumentCategory.bible.pageManagerKey
@@ -4078,7 +3995,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             return
         }
 
-        if let pageKey = activeMyDocumentPageKey {
+        if let pageKey = myDocumentCoordinator.activePageKey(for: context.bookInitials) {
             loadMyDocumentPage(bookInitials: context.bookInitials, pageKey: pageKey)
         }
     }

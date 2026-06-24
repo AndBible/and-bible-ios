@@ -141,6 +141,26 @@ extension AndBibleUITests {
             usesPromptScopedResolvedField ? [] : focusedTextEntryCandidates(in: app)
         }
 
+        func appCoordinate(for frame: CGRect, normalizedOffset: CGVector) -> XCUICoordinate? {
+            let appFrame = app.frame
+            guard elementFrameIsUsable(frame),
+                  elementFrameIsUsable(appFrame),
+                  appFrame.width > 0,
+                  appFrame.height > 0
+            else {
+                return nil
+            }
+
+            let absoluteX = frame.minX + frame.width * normalizedOffset.dx
+            let absoluteY = frame.minY + frame.height * normalizedOffset.dy
+            return app.coordinate(
+                withNormalizedOffset: CGVector(
+                    dx: absoluteX / appFrame.width,
+                    dy: absoluteY / appFrame.height
+                )
+            )
+        }
+
         func resolvedPromptTextField() -> XCUIElement {
             if usesPromptScopedResolvedField {
                 return element
@@ -186,7 +206,10 @@ extension AndBibleUITests {
                       elementFrameIsUsable(prompt.frame) else {
                     return nil
                 }
-                return prompt.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.52))
+                return appCoordinate(
+                    for: prompt.frame,
+                    normalizedOffset: CGVector(dx: 0.5, dy: 0.52)
+                )
             case "workspaceNamePromptTextField":
                 // The workspace prompt resolver already found the text field. Re-sampling the
                 // custom SwiftUI prompt root for its frame can wedge hosted XCTest snapshots, so

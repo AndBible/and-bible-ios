@@ -55,6 +55,7 @@ struct BibleReaderActiveSheetContent: View {
                         controller?.navigateTo(book: book, chapter: chapter)
                     },
                     onOpenStudyPad: { labelId in
+                        onDismiss()
                         controller?.loadStudyPadDocument(labelId: labelId)
                     },
                     bibleOrdinalResolver: { book, ordinal in
