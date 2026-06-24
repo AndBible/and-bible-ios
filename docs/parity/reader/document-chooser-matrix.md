@@ -27,8 +27,9 @@ iOS references:
 
 | Behavior | Android | iOS Status | Notes |
 |---|---|---|---|
-| Drawer Choose Document entry | Opens `ChooseDocument` directly without a type extra, so the document type spinner starts at all types. | Pass | The reader `.chooseDocument` route now presents `BibleReaderModulePicker` directly with `startsWithAllTypes: true`; the removed category-first Swift sheet was Android drift. |
-| Category-specific picker entry | Bible/commentary launches pass a type extra and start the spinner on that category. | Pass | The existing module picker route still starts on the requested category unless the caller explicitly asks for all types. |
+| Presentation shell | Opens `ChooseDocument` as a full-screen app-owned activity. | Pass | iOS filters both `.chooseDocument` and `.modulePicker` out of the generic reader-modal sheet and presents them through a full-screen chooser cover. |
+| Drawer Choose Document entry | Opens `ChooseDocument` directly without a type extra, so the document type spinner starts at all types. | Pass | The reader `.chooseDocument` route presents `BibleReaderModulePicker` with `startsWithAllTypes: true`; the removed category-first Swift sheet was Android drift. |
+| Category-specific picker entry | Bible/commentary launches pass a type extra and start the spinner on that category. | Pass | The module-picker route starts on the requested category and now uses the same full-screen chooser presenter as the all-types route. |
 | Document type filters | Shows all types, Bible, commentary, dictionary, books, maps, and add-ons. | Pass | iOS exposes all installed Bible/commentary/dictionary/general-book/map modules, hides add-ons from all types, and exposes installed add-ons from the Add-ons filter like Android's AND_BIBLE branch. |
 | Language default and sorting | Starts on all languages and sorts language names alphabetically. | Pass | iOS starts with the empty all-language filter and builds alphabetized display names from the full chooser dataset. Add-ons survive concrete language filtering, matching Android's AND_BIBLE language exception. |
 | Search focus behavior | Entering search clears the selected language and moves document type to all types. | Pass | iOS clears both filters when non-empty search begins. |
@@ -37,7 +38,7 @@ iOS references:
 | Locked encrypted documents | Selection attempts Android unlock before accepting the document. | Gap | iOS shows a lock affordance for encrypted locked modules but does not yet have the Android-equivalent unlock prompt/cipher-key coordinator in this chooser. |
 | Pseudo-documents | Visible pseudo-documents are included; hidden Memorize and non-chooser Multi are excluded. | Pass | iOS now adds My Notes, StudyPad/Journal, and Compare rows from an explicit Android pseudo-document model, maps them to existing reader routes, excludes Memorize because Android marks it `HideFromSelector=1`, and excludes Multi because Android does not include it in `FakeBookFactory.pseudoDocuments`. |
 | About/delete/delete-index actions | Long-press action mode exposes about, delete, delete index, and unlock actions where applicable. | Partial Pass | iOS installed-module rows expose About, Uninstall, and Delete Index through the same presentation and module-management services used by Downloads. Unlock remains hidden because iOS still lacks a real cipher-key coordinator. |
-| Downloads handoff | Toolbar Downloads opens `DownloadActivity`; returning reloads the document list. | Pass | iOS exposes a persistent Downloads toolbar action and refreshes installed modules when the Downloads sheet closes. |
+| Downloads handoff | Toolbar Downloads opens `DownloadActivity`; returning reloads the document list. | Pass | iOS exposes a persistent Downloads toolbar action and refreshes installed modules when the Downloads destination closes. |
 | Selection result | Returns selected initials to the reader, which updates the active document. | Adapted Pass | iOS switches the active pane controller directly. Dictionary/general-book/map selections still open their content browsers after switching, matching the existing reader category behavior. |
 
 ## Follow-Up Targets

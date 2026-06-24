@@ -65,7 +65,7 @@ Android references:
 | `ReaderModal.syncSettings` | `SyncSettingsView` in a coordinator modal | `Android app-owned` | `SyncSettingsActivity` | Adapted app-owned settings route. |
 | `ReaderModal.importExport` | `ImportExportView` in a coordinator modal | `Android app-owned` plus `iOS system boundary` | Android backup/import/export flows plus OS file/share intents | App-owned route may use native iOS file/share boundaries only at OS handoff points. |
 | `ReaderModal.speakControls` | `SpeakControlView` with detents | `Android app-owned` | Android speak transport/activity/widget | Adapted app-owned route; transport semantics must remain reader/pane-aware. |
-| `ReaderModal.modulePicker` | Category-scoped `BibleReaderModulePicker` | `Android app-owned` | `ChooseDocument` with type extra | Partial. Full chooser behavior is tracked by #245. |
+| `ReaderModal.modulePicker` | Category-scoped `BibleReaderModulePicker` in the full-screen document chooser presenter | `Android app-owned` | `ChooseDocument` with type extra | App-owned full-screen route. Remaining encrypted unlock behavior is documented in the chooser matrix. |
 | `ReaderModal.dictionaryBrowser` | Dictionary browser modal | `Android app-owned` | Android dictionary/key selection surfaces | Adapted app-owned browser route. Verify key-selection behavior when touched. |
 | `ReaderModal.generalBookBrowser` | General-book browser modal | `Android app-owned` | Android general-book/key selection surfaces | Adapted app-owned browser route. Verify key-selection behavior when touched. |
 | `ReaderModal.mapBrowser` | Map browser modal | `Android app-owned` | Android map/key selection surfaces | Adapted app-owned browser route. Verify key-selection behavior when touched. |
@@ -74,7 +74,7 @@ Android references:
 | `ReaderModal.epubSearch` | EPUB search modal | `Android app-owned` | Android EPUB search activity | Adapted app-owned route. |
 | `ReaderModal.labelManager` | `LabelManagerView` from overflow | `Android app-owned` | `ManageLabels` activity | Partial. Label/StudyPad ownership details are tracked by #246. |
 | `ReaderModal.studyPadSelector` | `LabelManagerView` configured for StudyPad selection | `Android app-owned` | `ManageLabels` with `Mode.STUDYPAD` | Partial. StudyPad presentation and mutation details are tracked by #246. |
-| `ReaderModal.chooseDocument` | All-types `BibleReaderModulePicker` | `Android app-owned` | `ChooseDocument` without a type extra | Partial. Full chooser behavior is tracked by #245. |
+| `ReaderModal.chooseDocument` | All-types `BibleReaderModulePicker` in the full-screen document chooser presenter | `Android app-owned` | `ChooseDocument` without a type extra | App-owned full-screen route. Remaining encrypted unlock behavior is documented in the chooser matrix. |
 | `ReaderModal.help` | `HelpView` in a coordinator modal | `Android app-owned` | Android help dialog/activity surfaces | Adapted informational route. Vue-scoped help remains bridge-owned when invoked from Vue. |
 
 ## Standalone Transient Routes

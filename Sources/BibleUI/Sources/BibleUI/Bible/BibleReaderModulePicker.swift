@@ -173,7 +173,6 @@ struct BibleReaderModulePicker: View {
                 }
             }
         }
-        .presentationDetents([.medium, .large])
         .sheet(item: $selectedModuleDetails) { details in
             NavigationStack {
                 ModuleBrowserModuleDetailsView(details: details)

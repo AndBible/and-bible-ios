@@ -167,6 +167,15 @@ public struct BibleReaderView: View {
                 return true
             }
         }
+
+        var isDocumentChooserRoute: Bool {
+            switch self {
+            case .modulePicker, .chooseDocument:
+                return true
+            default:
+                return false
+            }
+        }
     }
 
     /// Internal reader-overflow destinations that should run only after the overflow sheet dismisses.
@@ -818,7 +827,10 @@ public struct BibleReaderView: View {
         } message: {
             startupDownloadPromptMessage
         }
-        .sheet(item: $activeReaderModal) { modal in
+        .sheet(item: readerSheetModalBinding) { modal in
+            readerModalContent(modal)
+        }
+        .fullScreenCover(item: readerDocumentChooserModalBinding) { modal in
             readerModalContent(modal)
         }
         .confirmationDialog(
@@ -1972,6 +1984,43 @@ public struct BibleReaderView: View {
     /// Closes the currently active coordinator-owned modal.
     private func dismissReaderModal() {
         activeReaderModal = nil
+    }
+
+    /**
+     Filters coordinator-owned modal state into the generic sheet presenter.
+
+     Android `ChooseDocument` routes are full-screen app-owned surfaces, so they are intentionally
+     excluded from the sheet binding and routed through `readerDocumentChooserModalBinding`.
+     */
+    private var readerSheetModalBinding: Binding<ReaderModal?> {
+        Binding(
+            get: {
+                guard activeReaderModal?.isDocumentChooserRoute != true else {
+                    return nil
+                }
+                return activeReaderModal
+            },
+            set: { activeReaderModal = $0 }
+        )
+    }
+
+    /**
+     Filters coordinator-owned modal state into Android-style full-screen chooser presentation.
+
+     Both the all-types drawer route and the category-scoped toolbar route map to Android
+     `ChooseDocument`, with or without a type extra. Keeping them in the same full-screen presenter
+     prevents one entry point from silently preserving the old iOS sheet behavior.
+     */
+    private var readerDocumentChooserModalBinding: Binding<ReaderModal?> {
+        Binding(
+            get: {
+                guard activeReaderModal?.isDocumentChooserRoute == true else {
+                    return nil
+                }
+                return activeReaderModal
+            },
+            set: { activeReaderModal = $0 }
+        )
     }
 
     /// Presents the document-category module picker for a pane-scoped action.
