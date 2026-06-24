@@ -2019,7 +2019,8 @@ public struct BibleReaderView: View {
                     onOpenDownloads: { presentDownloadsPreservingPane() },
                     onOpenDictionaryBrowser: { presentReaderModalPreservingPane(.dictionaryBrowser) },
                     onOpenGeneralBookBrowser: { presentReaderModalPreservingPane(.generalBookBrowser) },
-                    onOpenMapBrowser: { presentReaderModalPreservingPane(.mapBrowser) }
+                    onOpenMapBrowser: { presentReaderModalPreservingPane(.mapBrowser) },
+                    onOpenStudyPadSelector: { presentReaderModalPreservingPane(.studyPadSelector) }
                 )
             } else {
                 readerPanePreparationContent
@@ -2130,7 +2131,8 @@ public struct BibleReaderView: View {
                     onOpenDownloads: { presentDownloadsPreservingPane() },
                     onOpenDictionaryBrowser: { presentReaderModalPreservingPane(.dictionaryBrowser) },
                     onOpenGeneralBookBrowser: { presentReaderModalPreservingPane(.generalBookBrowser) },
-                    onOpenMapBrowser: { presentReaderModalPreservingPane(.mapBrowser) }
+                    onOpenMapBrowser: { presentReaderModalPreservingPane(.mapBrowser) },
+                    onOpenStudyPadSelector: { presentReaderModalPreservingPane(.studyPadSelector) }
                 )
             } else {
                 readerPanePreparationContent
