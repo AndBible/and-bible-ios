@@ -1508,6 +1508,107 @@ extension AndBibleUITests {
     }
 
     /**
+     Reads one semicolon-delimited token from the compact reader state export.
+
+     - Parameters:
+       - key: Token key without the trailing equals sign.
+       - state: Semicolon-delimited reader state export.
+     - Returns: The token value, or `nil` when the export does not contain the key.
+     - Side effects: none.
+     - Failure modes: malformed tokens are ignored and returned as absent.
+     */
+    func readerRenderedContentStateToken(_ key: String, in state: String) -> String? {
+        let prefix = "\(key)="
+        return state
+            .split(separator: ";")
+            .first { $0.hasPrefix(prefix) }
+            .map { String($0.dropFirst(prefix.count)) }
+    }
+
+    /**
+     Reads the rendered window-tab order from the compact reader state export.
+
+     The footer renders tabs from `WindowManager.allWindows`; this state token mirrors that order so
+     coordinate fallback taps can target the real footer without walking the full SwiftUI/WebView
+     accessibility hierarchy.
+
+     - Parameters:
+       - app: Running application under test.
+     - Returns: Ordered tab button order numbers, or `nil` when the state export is unavailable.
+     - Side effects: snapshots only the compact reader state export.
+     - Failure modes: malformed order values are dropped; an empty token returns an empty array.
+     */
+    func windowTabOrdersFromReaderState(in app: XCUIApplication) -> [Int]? {
+        guard let state = readerRenderedContentStateValue(in: app),
+              let rawOrders = readerRenderedContentStateToken("windowTabOrders", in: state) else {
+            return nil
+        }
+        guard rawOrders != "none" else {
+            return []
+        }
+        return rawOrders
+            .split(separator: ",")
+            .compactMap { Int($0) }
+    }
+
+    /**
+     Taps a bottom window-tab button by deriving its real footer coordinate from exported tab order.
+
+     - Parameters:
+       - order: Window order number to activate.
+       - app: Running application under test.
+       - timeout: Maximum time to wait for the active-window state export after the tap.
+       - file: Source file used for XCTest failure attribution.
+       - line: Source line used for XCTest failure attribution.
+     - Returns: `true` when a coordinate tap was attempted and the reader state reports the requested
+       active window.
+     - Side effects:
+       - performs one real coordinate tap against the footer area
+       - polls the compact reader state export for the active window order
+     - Failure modes: returns `false` when tab-order metadata, app frame, or activation is unavailable.
+     */
+    func tapWindowTabAtExpectedFooterCoordinate(
+        _ order: Int,
+        in app: XCUIApplication,
+        timeout: TimeInterval,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) -> Bool {
+        guard let tabOrders = windowTabOrdersFromReaderState(in: app),
+              let tabIndex = tabOrders.firstIndex(of: order),
+              !tabOrders.isEmpty else {
+            return false
+        }
+
+        let appFrame = app.frame
+        guard elementFrameIsUsable(appFrame) else {
+            return false
+        }
+
+        let fixedButtonSize: CGFloat = 40
+        let spacing: CGFloat = 6
+        let trailingPadding: CGFloat = 12
+        let barHeight: CGFloat = 52
+        let tabsToRight = tabOrders.count - tabIndex - 1
+        let x = appFrame.maxX
+            - trailingPadding
+            - (fixedButtonSize / 2)
+            - (CGFloat(tabsToRight) * (fixedButtonSize + spacing))
+        let y = appFrame.maxY - (barHeight / 2)
+        guard appFrame.contains(CGPoint(x: x, y: y)) else {
+            return false
+        }
+
+        let origin = app.coordinate(withNormalizedOffset: CGVector(dx: 0, dy: 0))
+        origin.withOffset(CGVector(dx: x - appFrame.minX, dy: y - appFrame.minY)).tap()
+        return waitForReaderRenderedContentStateIfPresent(
+            containing: "windowOrder=\(order)",
+            in: app,
+            timeout: timeout
+        )
+    }
+
+    /**
      Taps one bottom window-tab pill by order number and waits for its active state to surface.
      */
     func tapWindowTab(
@@ -1517,6 +1618,28 @@ extension AndBibleUITests {
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
+        if readerRenderedContentStateContains("windowOrder=\(order)", in: app) {
+            return
+        }
+        if windowTabOrdersFromReaderState(in: app) != nil {
+            if tapWindowTabAtExpectedFooterCoordinate(
+                order,
+                in: app,
+                timeout: timeout,
+                file: file,
+                line: line
+            ) {
+                return
+            }
+            let finalState = readerRenderedContentStateValue(in: app) ?? "nil"
+            XCTFail(
+                "Expected footer coordinate tap for window tab \(order) to activate that window within \(timeout) seconds; final reader state was '\(finalState)'.",
+                file: file,
+                line: line
+            )
+            return
+        }
+
         let identifier = "windowTabButton::\(order)"
         let tabButton = requireWindowTabBarButton(identifier, in: app, timeout: timeout, file: file, line: line)
         tapElementReliably(tabButton, timeout: timeout, file: file, line: line)

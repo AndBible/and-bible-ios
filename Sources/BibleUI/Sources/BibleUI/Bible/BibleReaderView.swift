@@ -561,6 +561,10 @@ public struct BibleReaderView: View {
     /// Accessibility-exported state for the content most recently rendered in the active pane.
     private var readerRenderedContentStateValue: String {
         let windowToken = windowManager.activeWindow.map { "windowOrder=\($0.orderNumber)" } ?? "windowOrder=none"
+        let tabOrders = windowManager.allWindows
+            .map { "\($0.orderNumber)" }
+            .joined(separator: ",")
+        let tabOrdersToken = "windowTabOrders=\(tabOrders.isEmpty ? "none" : tabOrders)"
         let exportController = focusedController
         let contentToken = exportController?.renderedContentState
             ?? BibleReaderController.emptyRenderedContentState
@@ -577,7 +581,7 @@ public struct BibleReaderView: View {
         let destinationToken = "readerDestination=\(activeReaderDestination?.rawValue ?? "none")"
         let modalToken = "readerModal=\(activeReaderModal?.rawValue ?? "none")"
         let searchToken = "searchVisible=\(showSearch ? "true" : "false")"
-        return "\(windowToken);\(contentToken);\(myNotesToken);\(studyPadToken);strongsMode=\(strongsMode);\(drawerToken);\(overflowToken);\(sheetToken);\(destinationToken);\(modalToken);\(searchToken)"
+        return "\(windowToken);\(contentToken);\(tabOrdersToken);\(myNotesToken);\(studyPadToken);strongsMode=\(strongsMode);\(drawerToken);\(overflowToken);\(sheetToken);\(destinationToken);\(modalToken);\(searchToken)"
     }
 
     /// Compact dedicated state export used by UI tests instead of snapshotting the full reader.

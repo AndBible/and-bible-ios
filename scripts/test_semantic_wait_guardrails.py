@@ -67,6 +67,29 @@ def swift_function_bodies(source: str, name: str) -> list[str]:
     return bodies
 
 
+def swift_property_body(source: str, name: str) -> str:
+    """Return the Swift computed property body for focused source-contract checks."""
+    match = re.search(rf"\bvar\s+{re.escape(name)}\b", source)
+    if match is None:
+        raise AssertionError(f"Expected Swift property {name} to exist.")
+
+    brace_index = source.find("{", match.end())
+    if brace_index == -1:
+        raise AssertionError(f"Expected Swift property {name} to have a body.")
+
+    depth = 0
+    for index in range(brace_index, len(source)):
+        char = source[index]
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return source[brace_index + 1 : index]
+
+    raise AssertionError(f"Expected Swift property {name} body to close.")
+
+
 class SemanticWaitGuardrailsTests(unittest.TestCase):
     """Protects pure semantic-state waits from regressing to ad hoc run-loop polling."""
 
@@ -204,6 +227,10 @@ class SemanticWaitGuardrailsTests(unittest.TestCase):
 
         candidates_body = swift_function_body(element_source, "windowTabBarButtonCandidates")
         tap_body = swift_function_body(element_source, "tapWindowTab")
+        coordinate_tap_body = swift_function_body(
+            element_source,
+            "tapWindowTabAtExpectedFooterCoordinate",
+        )
         add_body = swift_function_body(element_source, "addWindowTab")
         existence_body = swift_function_body(reader_source, "waitForElementExistence")
 
@@ -215,10 +242,24 @@ class SemanticWaitGuardrailsTests(unittest.TestCase):
 
         self.assertIn("requireWindowTabBarButton", tap_body)
         self.assertNotIn("requireElement(identifier", tap_body)
+        self.assertIn("tapWindowTabAtExpectedFooterCoordinate", tap_body)
+        self.assertIn('waitForReaderRenderedContentStateIfPresent', coordinate_tap_body)
+        self.assertIn('"windowOrder=\\(order)"', coordinate_tap_body)
         self.assertIn("requireWindowTabBarButton", add_body)
         self.assertIn("resolvedWindowTabBarButton", add_body)
         self.assertIn("isWindowTabBarButtonIdentifier", existence_body)
         self.assertIn("resolvedWindowTabBarButton", existence_body)
+
+    def test_reader_state_export_includes_window_tab_orders_for_tab_fallback(self) -> None:
+        """Expose tab order metadata so tests can tap the real footer without stale queries."""
+        source = (
+            REPO_ROOT / "Sources/BibleUI/Sources/BibleUI/Bible/BibleReaderView.swift"
+        ).read_text(encoding="utf-8")
+        body = swift_property_body(source, "readerRenderedContentStateValue")
+
+        self.assertIn("windowTabOrders=", body)
+        self.assertIn("windowManager.allWindows", body)
+        self.assertIn('return "\\(windowToken);\\(contentToken);\\(tabOrdersToken);', body)
 
     def test_resolved_semantic_wait_uses_xctest_waiter_not_run_loop_polling(self) -> None:
         """Ensure the shared pure-observation wait is backed by XCTest wait primitives."""
