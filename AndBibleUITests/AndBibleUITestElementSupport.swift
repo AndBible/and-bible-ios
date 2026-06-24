@@ -1623,8 +1623,10 @@ extension AndBibleUITests {
      *   - file: Source file used for XCTest failure attribution.
      *   - line: Source line used for XCTest failure attribution.
      * - Side effects:
-     *   - taps the real tab-bar control, retrying inside the original timeout when XCTest reports
-     *     a successful tap but the semantic active-window state does not change
+     *   - waits for the requested tab to appear, then starts a separate activation wait so slow
+     *     CI accessibility resolution cannot consume the whole post-tap confirmation window
+     *   - taps the real tab-bar control, retrying while XCTest reports a successful tap but the
+     *     semantic active-window state does not change
      *   - samples fresh tab and rendered-reader state on each poll so SwiftUI view replacement does
      *     not leave the helper waiting on a stale `XCUIElement` instance
      * - Failure modes:
@@ -1649,14 +1651,49 @@ extension AndBibleUITests {
         }
 
         let identifier = "windowTabButton::\(order)"
-        let deadline = Date().addingTimeInterval(timeout)
+        let appearanceDeadline = Date().addingTimeInterval(timeout)
         var didTap = false
         var lastTapTime = Date.distantPast
         var lastValue = "nil"
         var lastRenderedState = "nil"
+        var firstResolvedTab: XCUIElement?
 
         repeat {
+            lastRenderedState = readerRenderedContentStateValue(in: app) ?? "nil"
+            if lastRenderedState.contains("windowOrder=\(order)") {
+                return
+            }
+
             if let tabButton = resolvedWindowTabBarButton(identifier, in: app) {
+                firstResolvedTab = tabButton
+                lastValue = tabButton.value.map { "\($0)" } ?? "nil"
+
+                if lastValue.contains("state=active") {
+                    return
+                }
+                break
+            } else {
+                lastValue = "missing"
+            }
+
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        } while Date() < appearanceDeadline
+
+        guard firstResolvedTab != nil else {
+            XCTFail(
+                "Expected window tab \(order) to appear within \(timeout) seconds; last reader state was '\(lastRenderedState)'.",
+                file: file,
+                line: line
+            )
+            return
+        }
+
+        let activationDeadline = Date().addingTimeInterval(timeout)
+        repeat {
+            let tabButton = firstResolvedTab ?? resolvedWindowTabBarButton(identifier, in: app)
+            firstResolvedTab = nil
+
+            if let tabButton {
                 lastValue = tabButton.value.map { "\($0)" } ?? "nil"
                 lastRenderedState = readerRenderedContentStateValue(in: app) ?? "nil"
 
@@ -1665,7 +1702,7 @@ extension AndBibleUITests {
                 }
 
                 if !didTap || Date().timeIntervalSince(lastTapTime) >= 1.0 {
-                    let remaining = max(0.1, deadline.timeIntervalSinceNow)
+                    let remaining = max(0.1, activationDeadline.timeIntervalSinceNow)
                     if tapElementIfPossible(tabButton, timeout: min(1, remaining)) {
                         didTap = true
                         lastTapTime = Date()
@@ -1677,7 +1714,7 @@ extension AndBibleUITests {
             }
 
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-        } while Date() < deadline
+        } while Date() < activationDeadline
 
         let coordinateNote = attemptedCoordinateTap ? " after coordinate fallback missed" : ""
         XCTFail(
