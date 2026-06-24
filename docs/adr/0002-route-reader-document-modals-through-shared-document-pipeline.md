@@ -74,18 +74,16 @@ Every reader parity decision should use an honest evaluation:
 
 - Native iOS sheets for Strong's, Compare, and multi-reference content are not
   accepted final parity endpoints.
-- #8 and #123 have replaced the Strong's and Compare native sheets with shared
-  document-pipeline routing. Until #124 replaces the remaining multi-reference
-  native sheet path, that surface remains a known parity gap rather than an
-  intentional adaptation.
+- #8, #123, and #124 have replaced the Strong's, Compare, and
+  multi-reference native sheet paths with shared document-pipeline routing.
+- The legacy `CrossReferenceView` callback is not a final parity endpoint for
+  multi-reference content and should not be expanded as a replacement for the
+  shared Vue `MultiDocument` path.
 - A native iOS sheet may still be the right answer for a future surface, but
   only after the evaluation above shows that it is the honest parity or platform
   answer.
-- Existing tests that prove native presentation payloads still have value
-  protect the current bridge path rather than closing the parity gap.
-- Focused implementation work for the remaining document-pipeline gap is
-  tracked by #124. #125 implemented the related modal-open host-gating
-  behavior.
+- Existing tests for the shared document routes protect the current bridge path.
+  #125 implemented the related modal-open host-gating behavior.
 - Future reader modal audits should first classify whether Android treats a
   surface as document-pipeline content, app-level native UI, shared Vue modal
   UI, or platform-only behavior before creating implementation work.

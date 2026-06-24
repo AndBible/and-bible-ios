@@ -19,6 +19,7 @@ This is the current validation snapshot for the reader surface. It covers:
 - Vue modal-state host-navigation gating
 - auto-fullscreen scroll-threshold policy
 - documentation-only classification of the #122 reader-modal audit
+- ADR 0006 ownership classification for current reader sheet/modal/destination routes
 - document chooser all-types entry, installed-module category/language/search
   filtering, and explicit classification of remaining Android `ChooseDocument`
   gaps
@@ -71,6 +72,7 @@ Related domain references:
 - `AndBibleTests/testBibleReaderModulePickerBuildsForBibleCategory`
 - `AndBibleTests/testBibleReaderModulePickerFiltersAndroidChooserCategoriesAndSearch`
 - `AndBibleTests/testBibleReaderModulePickerMapsAndroidDocumentTypeCategories`
+- `scripts/test_reader_modal_ownership_matrix.py`
 
 ### UI
 
@@ -91,6 +93,11 @@ Related domain references:
 - the reader shell exposes the expected overflow rows for Section titles, Strong's numbers, and Chapter & verse numbers
 - the real reader shell can still open core destinations such as Downloads, Bookmarks, About, and Settings through the correct menu surface
 - search result selection returns the app to a new reader reference, not only a search-side state change
+- every `ReaderSheet`, `ReaderDestination`, and `ReaderModal` enum case is
+  represented in the ADR 0006 reader ownership matrix
+- state-backed reader presentations outside those enums, including Search,
+  startup download prompt, Strong's mode dialog, sharing, cross references, and
+  reference chooser, are represented in the same matrix
 
 ### History
 
@@ -221,6 +228,10 @@ Taken together, this gives the reader domain current regression evidence for:
 - double-tap fullscreen preference gating
 - bridge-driven compare document-pipeline payload construction
 - Strong's / dictionary document-pipeline routing
+- multi-reference document-pipeline routing through the shared Vue
+  `MultiDocument` path
+- reader presentation ownership classification through
+  [modal-ownership-matrix.md](modal-ownership-matrix.md)
 - document chooser all-types entry and installed-module filtering, with
   remaining Android chooser gaps recorded in
   [document-chooser-matrix.md](document-chooser-matrix.md)
@@ -229,22 +240,22 @@ Taken together, this gives the reader domain current regression evidence for:
 - auto-fullscreen threshold and lockout policy
 - the audited #122 classification in the reader contract, dispositions, and
   verification matrix
+  is superseded by the ADR 0006 ownership matrix for future presentation work
 
 That is a much healthier place than the branch was in earlier. The remaining
 reader risk is no longer the basic shell/menu flow; it is the deeper
-document-routing branches we still have not moved to the Android-aligned
-paths or isolated with focused checks.
+reader-owned chooser, bookmark, label, and StudyPad presentation behavior that
+still needs Android-aligned completion or tighter focused checks.
 
 ## What Is Still Not Well Locked Yet
 
 The reader shell baseline is in much better shape now. The parts that still
 need implementation and/or tighter protection are:
 
-- #124 multi-reference / cross-reference document-pipeline routing
-- #119 follow-ups for chooser pseudo-documents/add-ons, encrypted-module unlock
-  prompts, and row context actions
+- #245 document chooser completion
+- #246 bookmark, label, and StudyPad presentation ownership details
 
-Those areas show up as `Partial` in
+The remaining open areas show up as `Partial` in
 [verification-matrix.md](verification-matrix.md). Existing tests still protect
 the current implementation paths, but they should not be read as closing those
 Android parity gaps.
