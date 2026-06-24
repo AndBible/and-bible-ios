@@ -750,10 +750,10 @@ extension AndBibleUITests {
             ]
         case "aboutDoneButton", "labelAssignmentDoneButton", "bookmarkListDoneButton":
             return [
-                app.buttons[identifier].firstMatch,
                 app.navigationBars.buttons[identifier].firstMatch,
                 app.toolbars.buttons[identifier].firstMatch,
                 app.collectionViews.buttons[identifier].firstMatch,
+                app.buttons[identifier].firstMatch,
                 app.otherElements[identifier].firstMatch,
             ]
         case "aboutScreen":
