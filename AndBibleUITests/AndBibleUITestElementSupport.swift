@@ -262,12 +262,9 @@ extension AndBibleUITests {
     /**
      Returns state-bearing elements in the order safest for repeated value polling.
      *
-     * Screen roots are preferred when they publish the same accessibility value and the screen is
-     * stable because reading a known root avoids enumerating every `StaticText` in dynamic lists.
-     * Transition-prone surfaces put the direct hidden export before the root so a temporarily
-     * absent sheet root does not register an XCTest snapshot failure during polling. Search is the
-     * exception because its root owns the same accessibility value and hosted XCTest can spend
-     * multiple retry cycles resolving the hidden static-text export while the root is already ready.
+     * Dedicated state exports are preferred before screen roots when available because they avoid
+     * snapshotting full dynamic surfaces. Screen roots remain fallbacks for states that publish the
+     * same compact value directly on the container.
      */
     func semanticStateValueCandidates(
         for identifier: String,
@@ -275,7 +272,7 @@ extension AndBibleUITests {
     ) -> [XCUIElement] {
         switch identifier {
         case "searchStateExport":
-            return [
+            return screenScopedStateCandidates(identifier, within: "searchScreen", in: app) + [
                 app.otherElements["searchScreen"].firstMatch,
             ]
         case "bookmarkListStateExport":

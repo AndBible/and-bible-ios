@@ -114,8 +114,8 @@ class SemanticWaitGuardrailsTests(unittest.TestCase):
         self.assertLess(body.find(scoped_button_candidates), body.find(identifier_candidate))
         self.assertLess(body.find(title_candidate), body.find(identifier_candidate))
 
-    def test_search_state_candidates_use_screen_root_without_hidden_export_fallback(self) -> None:
-        """Keep Search readiness polling off the volatile hidden static-text export."""
+    def test_search_state_candidates_prefer_hidden_export_before_screen_root(self) -> None:
+        """Keep Search state polling on the dedicated lightweight export before the root."""
         element_source = (
             REPO_ROOT / "AndBibleUITests/AndBibleUITestElementSupport.swift"
         ).read_text(encoding="utf-8")
@@ -132,7 +132,11 @@ class SemanticWaitGuardrailsTests(unittest.TestCase):
         )
 
         self.assertIn(root_candidate, search_case)
-        self.assertNotIn(hidden_export_candidate, search_case)
+        self.assertIn(hidden_export_candidate, search_case)
+        self.assertLess(
+            search_case.find(hidden_export_candidate),
+            search_case.find(root_candidate),
+        )
 
     def test_search_interaction_ready_does_not_read_state_before_poll_loop(self) -> None:
         """Keep the Search readiness timeout from being consumed by a pre-loop XCTest snapshot."""
