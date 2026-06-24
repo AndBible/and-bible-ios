@@ -1609,12 +1609,26 @@ extension AndBibleUITests {
     }
 
     /**
-     Taps one bottom window-tab pill by order number and waits for its active state to surface.
+     Taps one bottom window-tab pill by order number and waits for activation to surface.
 
      The coordinate path exercises the real Android-parity footer strip without forcing XCTest to
      snapshot the full reader hierarchy. If that coordinate misses because the footer geometry differs
      on a runner, the scoped `windowTabBar` accessibility path is still a valid user tap target and is
      cheaper than app-wide button queries.
+     *
+     * - Parameters:
+     *   - order: Stable window order encoded in the tab accessibility identifier.
+     *   - app: Running application under test.
+     *   - timeout: Maximum time allowed for the tab to become active.
+     *   - file: Source file used for XCTest failure attribution.
+     *   - line: Source line used for XCTest failure attribution.
+     * - Side effects:
+     *   - taps the real tab-bar control, retrying inside the original timeout when XCTest reports
+     *     a successful tap but the semantic active-window state does not change
+     *   - samples fresh tab and rendered-reader state on each poll so SwiftUI view replacement does
+     *     not leave the helper waiting on a stale `XCUIElement` instance
+     * - Failure modes:
+     *   - fails if the requested tab never appears, cannot be tapped, or never becomes active
      */
     func tapWindowTab(
         _ order: Int,
@@ -1635,26 +1649,39 @@ extension AndBibleUITests {
         }
 
         let identifier = "windowTabButton::\(order)"
-        let tabButton = requireWindowTabBarButton(identifier, in: app, timeout: timeout, file: file, line: line)
-        tapElementReliably(tabButton, timeout: timeout, file: file, line: line)
-
         let deadline = Date().addingTimeInterval(timeout)
+        var didTap = false
+        var lastTapTime = Date.distantPast
+        var lastValue = "nil"
+        var lastRenderedState = "nil"
+
         repeat {
-            if readerRenderedContentStateContains("windowOrder=\(order)", in: app) {
-                return
+            if let tabButton = resolvedWindowTabBarButton(identifier, in: app) {
+                lastValue = tabButton.value.map { "\($0)" } ?? "nil"
+                lastRenderedState = readerRenderedContentStateValue(in: app) ?? "nil"
+
+                if lastValue.contains("state=active") || lastRenderedState.contains("windowOrder=\(order)") {
+                    return
+                }
+
+                if !didTap || Date().timeIntervalSince(lastTapTime) >= 1.0 {
+                    let remaining = max(0.1, deadline.timeIntervalSinceNow)
+                    if tapElementIfPossible(tabButton, timeout: min(1, remaining)) {
+                        didTap = true
+                        lastTapTime = Date()
+                    }
+                }
+            } else {
+                lastValue = "missing"
+                lastRenderedState = readerRenderedContentStateValue(in: app) ?? "nil"
             }
-            if let value = tabButton.value as? String,
-               value.contains("state=active") {
-                return
-            }
+
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         } while Date() < deadline
 
-        let lastValue = tabButton.value.map { "\($0)" } ?? "nil"
-        let finalState = readerRenderedContentStateValue(in: app) ?? "nil"
         let coordinateNote = attemptedCoordinateTap ? " after coordinate fallback missed" : ""
         XCTFail(
-            "Expected window tab \(order) to become active\(coordinateNote) within \(timeout) seconds; last value was '\(lastValue)' and final reader state was '\(finalState)'.",
+            "Expected window tab \(order) to become active\(coordinateNote) within \(timeout) seconds; last tab value was '\(lastValue)' and last reader state was '\(lastRenderedState)'.",
             file: file,
             line: line
         )

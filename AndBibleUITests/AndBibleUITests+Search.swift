@@ -626,10 +626,8 @@ extension AndBibleUITests {
 
         let noahResultIdentifier = "searchResultRow::Genesis_6_8"
         waitForSearchResultRow(noahResultIdentifier, in: app, shouldExist: true, timeout: 20)
-        let noahResult = requireElement(noahResultIdentifier, in: app, timeout: 20)
-        tapElementReliably(noahResult, timeout: 10)
-
-        let updatedReference = waitForReaderReferenceValueToChange(
+        let updatedReference = tapSearchResultRowAndWaitForReaderReferenceChange(
+            noahResultIdentifier,
             from: initialReference,
             in: app,
             timeout: 20
