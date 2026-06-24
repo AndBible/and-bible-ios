@@ -35,10 +35,10 @@ extension AndBibleUITests {
         )
         if let promptElement = waitForAnyElement(
             [
-                "workspaceNamePromptConfirmButton",
-                "workspaceNamePromptCancelButton",
                 "workspaceNamePromptScreen",
                 "workspaceNamePromptTextField",
+                "workspaceNamePromptConfirmButton",
+                "workspaceNamePromptCancelButton",
             ],
             in: app,
             timeout: timeout

@@ -94,15 +94,24 @@ class SearchFixtureGuardrailsTests(unittest.TestCase):
                 re.DOTALL,
             ),
         )
+        open_search_body = swift_function_body(support_source, "openSearch")
+        presentation_body = swift_function_body(support_source, "presentSearchFromReader")
+
         for expected_pattern in [
             r"resolveFixtureScenario\(\s*environment:\s*ProcessInfo\.processInfo\.environment,"
             r"\s*file:\s*file,\s*line:\s*line\s*\)",
-            r"tapReaderSearchEntry\(\s*in:\s*app\s*,\s*(?:timeout:\s*[^,]+,\s*)?file:\s*file,"
-            r"\s*line:\s*line\s*\)",
-            r"requireSearchScreen\(\s*in:\s*app\s*,\s*(?:timeout:\s*[^,]+,\s*)?file:\s*file,"
+            r"presentSearchFromReader\(\s*in:\s*app\s*,\s*timeout:\s*20,\s*file:\s*file,"
             r"\s*line:\s*line\s*\)",
         ]:
-            self.assertRegex(support_source, re.compile(expected_pattern, re.DOTALL))
+            self.assertRegex(open_search_body, re.compile(expected_pattern, re.DOTALL))
+
+        for expected_pattern in [
+            r"tapReaderSearchEntry\(\s*in:\s*app\s*,[\s\S]*?file:\s*file,"
+            r"\s*line:\s*line\s*\)",
+            r"tapReaderAction\(\s*\"readerOpenSearchAction\",\s*in:\s*app,[\s\S]*?file:\s*file,"
+            r"\s*line:\s*line\s*\)",
+        ]:
+            self.assertRegex(presentation_body, re.compile(expected_pattern, re.DOTALL))
 
         readiness_calls = re.findall(
             r"waitForSearchInteractionReady\([\s\S]*?"

@@ -236,6 +236,92 @@ extension AndBibleUITests {
         }
     }
 
+    /// Returns whether the identifier belongs to a control rendered inside the reader window tab bar.
+    func isWindowTabBarButtonIdentifier(_ identifier: String) -> Bool {
+        identifier.hasPrefix("windowTabButton::") ||
+            identifier == "windowTabAddButton" ||
+            identifier == "windowTabRestoreToggleButton" ||
+            identifier == "windowTabUnmaximizeButton"
+    }
+
+    /**
+     Resolves window-tab controls only through the tab bar container that owns them.
+
+     The bottom tab bar sits above web-reader content, and app-wide button snapshots can time out in
+     CI while XCTest walks the whole reader hierarchy. These controls always live in `windowTabBar`,
+     so callers should fail against that scoped contract instead of falling back to broad queries.
+     */
+    func windowTabBarButtonCandidates(
+        _ identifier: String,
+        in app: XCUIApplication
+    ) -> [XCUIElement] {
+        [
+            app.scrollViews["windowTabBar"].firstMatch,
+            app.otherElements["windowTabBar"].firstMatch,
+        ].flatMap { tabBar in
+            [
+                tabBar.buttons[identifier].firstMatch,
+                tabBar.otherElements[identifier].firstMatch,
+            ]
+        }
+    }
+
+    /**
+     Resolves one tab-bar control without falling back to unrelated app-wide button queries.
+
+     - Parameters:
+       - identifier: Accessibility identifier for a button owned by `windowTabBar`.
+       - app: Running application under test.
+     - Returns: The first existing scoped tab-bar control, or `nil` when the tab bar has not exposed it.
+     - Side effects: none.
+     - Failure modes: none; callers decide whether absence should fail the test.
+     */
+    func resolvedWindowTabBarButton(
+        _ identifier: String,
+        in app: XCUIApplication
+    ) -> XCUIElement? {
+        windowTabBarButtonCandidates(identifier, in: app).first(where: { $0.exists })
+    }
+
+    /**
+     Requires one tab-bar control to appear under the `windowTabBar` accessibility container.
+
+     - Parameters:
+       - identifier: Accessibility identifier for a button owned by `windowTabBar`.
+       - app: Running application under test.
+       - timeout: Maximum time to wait for the scoped control.
+       - file: Source file used for XCTest failure attribution.
+       - line: Source line used for XCTest failure attribution.
+     - Returns: The resolved tab-bar button.
+     - Side effects: polls only the tab-bar subtree until the control appears.
+     - Failure modes: records an XCTest failure when the tab bar never exposes the requested control.
+     */
+    func requireWindowTabBarButton(
+        _ identifier: String,
+        in app: XCUIApplication,
+        timeout: TimeInterval = 10,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) -> XCUIElement {
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            if let element = resolvedWindowTabBarButton(identifier, in: app) {
+                return element
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        } while Date() < deadline
+
+        let element = windowTabBarButtonCandidates(identifier, in: app).first ??
+            app.otherElements["windowTabBar"].firstMatch
+        XCTAssertTrue(
+            element.exists,
+            "Expected tab-bar control '\(identifier)' to exist within \(timeout) seconds.",
+            file: file,
+            line: line
+        )
+        return element
+    }
+
     /**
      Resolves lightweight state-export or status candidates without probing broad `Other` queries.
 
@@ -262,10 +348,9 @@ extension AndBibleUITests {
     /**
      Returns state-bearing elements in the order safest for repeated value polling.
      *
-     * Screen roots are preferred when they publish the same accessibility value and the screen is
-     * stable because reading a known root avoids enumerating every `StaticText` in dynamic lists.
-     * Transition-prone surfaces put the direct hidden export before the root so a temporarily
-     * absent sheet root does not register an XCTest snapshot failure during polling.
+     * Dedicated state exports are preferred before screen roots when available because they avoid
+     * snapshotting full dynamic surfaces. Screen roots remain fallbacks for states that publish the
+     * same compact value directly on the container.
      */
     func semanticStateValueCandidates(
         for identifier: String,
@@ -415,7 +500,7 @@ extension AndBibleUITests {
         return titledCandidates
     }
 
-    /// Returns workspace-name prompt buttons without walking the custom sheet hierarchy.
+    /// Returns workspace-name prompt buttons without starting from expensive app-wide id queries.
     func workspaceNamePromptButtonCandidates(
         _ identifier: String,
         in app: XCUIApplication
@@ -430,19 +515,20 @@ extension AndBibleUITests {
             titles = []
         }
 
-        let directIdentifierCandidates = [
-            app.navigationBars.buttons[identifier].firstMatch,
-            app.toolbars.buttons[identifier].firstMatch,
-            app.buttons[identifier].firstMatch,
-            app.collectionViews.buttons[identifier].firstMatch,
-            app.tables.buttons[identifier].firstMatch,
-            app.scrollViews.buttons[identifier].firstMatch,
-            app.otherElements[identifier].firstMatch,
-        ]
+        let prompt = app.otherElements["workspaceNamePromptScreen"].firstMatch
+        let promptScopedCandidates = modalButtonCandidates(
+            in: prompt,
+            identifiers: [identifier],
+            titles: titles
+        )
         let directTitleCandidates = titles.map { title in
             app.buttons[title].firstMatch
         }
-        return directIdentifierCandidates + directTitleCandidates
+        let directIdentifierCandidates = [
+            app.buttons[identifier].firstMatch,
+            app.otherElements[identifier].firstMatch,
+        ]
+        return promptScopedCandidates + directTitleCandidates + directIdentifierCandidates
     }
 
     /// Returns screen-aware candidates for small exported semantic state controls.
@@ -1422,6 +1508,107 @@ extension AndBibleUITests {
     }
 
     /**
+     Reads one semicolon-delimited token from the compact reader state export.
+
+     - Parameters:
+       - key: Token key without the trailing equals sign.
+       - state: Semicolon-delimited reader state export.
+     - Returns: The token value, or `nil` when the export does not contain the key.
+     - Side effects: none.
+     - Failure modes: malformed tokens are ignored and returned as absent.
+     */
+    func readerRenderedContentStateToken(_ key: String, in state: String) -> String? {
+        let prefix = "\(key)="
+        return state
+            .split(separator: ";")
+            .first { $0.hasPrefix(prefix) }
+            .map { String($0.dropFirst(prefix.count)) }
+    }
+
+    /**
+     Reads the rendered window-tab order from the compact reader state export.
+
+     The footer renders tabs from `WindowManager.allWindows`; this state token mirrors that order so
+     coordinate fallback taps can target the real footer without walking the full SwiftUI/WebView
+     accessibility hierarchy.
+
+     - Parameters:
+       - app: Running application under test.
+     - Returns: Ordered tab button order numbers, or `nil` when the state export is unavailable.
+     - Side effects: snapshots only the compact reader state export.
+     - Failure modes: malformed order values are dropped; an empty token returns an empty array.
+     */
+    func windowTabOrdersFromReaderState(in app: XCUIApplication) -> [Int]? {
+        guard let state = readerRenderedContentStateValue(in: app),
+              let rawOrders = readerRenderedContentStateToken("windowTabOrders", in: state) else {
+            return nil
+        }
+        guard rawOrders != "none" else {
+            return []
+        }
+        return rawOrders
+            .split(separator: ",")
+            .compactMap { Int($0) }
+    }
+
+    /**
+     Taps a bottom window-tab button by deriving its real footer coordinate from exported tab order.
+
+     - Parameters:
+       - order: Window order number to activate.
+       - app: Running application under test.
+       - timeout: Maximum time to wait for the active-window state export after the tap.
+       - file: Source file used for XCTest failure attribution.
+       - line: Source line used for XCTest failure attribution.
+     - Returns: `true` when a coordinate tap was attempted and the reader state reports the requested
+       active window.
+     - Side effects:
+       - performs one real coordinate tap against the footer area
+       - polls the compact reader state export for the active window order
+     - Failure modes: returns `false` when tab-order metadata, app frame, or activation is unavailable.
+     */
+    func tapWindowTabAtExpectedFooterCoordinate(
+        _ order: Int,
+        in app: XCUIApplication,
+        timeout: TimeInterval,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) -> Bool {
+        guard let tabOrders = windowTabOrdersFromReaderState(in: app),
+              let tabIndex = tabOrders.firstIndex(of: order),
+              !tabOrders.isEmpty else {
+            return false
+        }
+
+        let appFrame = app.frame
+        guard elementFrameIsUsable(appFrame) else {
+            return false
+        }
+
+        let fixedButtonSize: CGFloat = 40
+        let spacing: CGFloat = 6
+        let trailingPadding: CGFloat = 12
+        let barHeight: CGFloat = 52
+        let tabsToRight = tabOrders.count - tabIndex - 1
+        let x = appFrame.maxX
+            - trailingPadding
+            - (fixedButtonSize / 2)
+            - (CGFloat(tabsToRight) * (fixedButtonSize + spacing))
+        let y = appFrame.maxY - (barHeight / 2)
+        guard appFrame.contains(CGPoint(x: x, y: y)) else {
+            return false
+        }
+
+        let origin = app.coordinate(withNormalizedOffset: CGVector(dx: 0, dy: 0))
+        origin.withOffset(CGVector(dx: x - appFrame.minX, dy: y - appFrame.minY)).tap()
+        return waitForReaderRenderedContentStateIfPresent(
+            containing: "windowOrder=\(order)",
+            in: app,
+            timeout: timeout
+        )
+    }
+
+    /**
      Taps one bottom window-tab pill by order number and waits for its active state to surface.
      */
     func tapWindowTab(
@@ -1431,8 +1618,30 @@ extension AndBibleUITests {
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
+        if readerRenderedContentStateContains("windowOrder=\(order)", in: app) {
+            return
+        }
+        if windowTabOrdersFromReaderState(in: app) != nil {
+            if tapWindowTabAtExpectedFooterCoordinate(
+                order,
+                in: app,
+                timeout: timeout,
+                file: file,
+                line: line
+            ) {
+                return
+            }
+            let finalState = readerRenderedContentStateValue(in: app) ?? "nil"
+            XCTFail(
+                "Expected footer coordinate tap for window tab \(order) to activate that window within \(timeout) seconds; final reader state was '\(finalState)'.",
+                file: file,
+                line: line
+            )
+            return
+        }
+
         let identifier = "windowTabButton::\(order)"
-        let tabButton = requireElement(identifier, in: app, timeout: timeout, file: file, line: line)
+        let tabButton = requireWindowTabBarButton(identifier, in: app, timeout: timeout, file: file, line: line)
         tapElementReliably(tabButton, timeout: timeout, file: file, line: line)
 
         let deadline = Date().addingTimeInterval(timeout)
@@ -1484,7 +1693,7 @@ extension AndBibleUITests {
 
         for attempt in 1...2 {
             tapElementReliably(
-                requireElement("windowTabAddButton", in: app, timeout: timeout, file: file, line: line),
+                requireWindowTabBarButton("windowTabAddButton", in: app, timeout: timeout, file: file, line: line),
                 timeout: timeout,
                 file: file,
                 line: line
@@ -1492,7 +1701,7 @@ extension AndBibleUITests {
 
             let deadline = Date().addingTimeInterval(timeout)
             repeat {
-                if let tabButton = resolvedElement(identifier, in: app) {
+                if let tabButton = resolvedWindowTabBarButton(identifier, in: app) {
                     sawExpectedTab = true
                     lastTabValue = tabButton.value.map { "\($0)" } ?? "nil"
                     lastRenderedState = readerRenderedContentStateValue(in: app) ?? "nil"

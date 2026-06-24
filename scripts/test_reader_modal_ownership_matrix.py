@@ -138,15 +138,14 @@ class ReaderModalOwnershipMatrixTests(unittest.TestCase):
         Keep incomplete reader modal routes tied to explicit follow-up work.
 
         Android parity is not satisfied by labeling an iOS sheet as native.
-        These rows intentionally remain partial, so their issue references must
-        stay visible in the disposition column until the owning behavior is
-        migrated or completed.
+        Rows listed here intentionally remain partial, so their issue references
+        must stay visible in the disposition column until the owning behavior is
+        migrated or completed. Completed chooser routes should not remain in this
+        sentinel because that would normalize stale partial-parity language.
         """
         matrix = MATRIX.read_text(encoding="utf-8")
 
         expected_issues = {
-            "ReaderModal.chooseDocument": "#245",
-            "ReaderModal.modulePicker": "#245",
             "ReaderModal.labelManager": "#246",
             "ReaderModal.studyPadSelector": "#246",
         }

@@ -167,6 +167,15 @@ public struct BibleReaderView: View {
                 return true
             }
         }
+
+        var isDocumentChooserRoute: Bool {
+            switch self {
+            case .modulePicker, .chooseDocument:
+                return true
+            default:
+                return false
+            }
+        }
     }
 
     /// Internal reader-overflow destinations that should run only after the overflow sheet dismisses.
@@ -552,6 +561,10 @@ public struct BibleReaderView: View {
     /// Accessibility-exported state for the content most recently rendered in the active pane.
     private var readerRenderedContentStateValue: String {
         let windowToken = windowManager.activeWindow.map { "windowOrder=\($0.orderNumber)" } ?? "windowOrder=none"
+        let tabOrders = windowManager.allWindows
+            .map { "\($0.orderNumber)" }
+            .joined(separator: ",")
+        let tabOrdersToken = "windowTabOrders=\(tabOrders.isEmpty ? "none" : tabOrders)"
         let exportController = focusedController
         let contentToken = exportController?.renderedContentState
             ?? BibleReaderController.emptyRenderedContentState
@@ -568,7 +581,7 @@ public struct BibleReaderView: View {
         let destinationToken = "readerDestination=\(activeReaderDestination?.rawValue ?? "none")"
         let modalToken = "readerModal=\(activeReaderModal?.rawValue ?? "none")"
         let searchToken = "searchVisible=\(showSearch ? "true" : "false")"
-        return "\(windowToken);\(contentToken);\(myNotesToken);\(studyPadToken);strongsMode=\(strongsMode);\(drawerToken);\(overflowToken);\(sheetToken);\(destinationToken);\(modalToken);\(searchToken)"
+        return "\(windowToken);\(contentToken);\(tabOrdersToken);\(myNotesToken);\(studyPadToken);strongsMode=\(strongsMode);\(drawerToken);\(overflowToken);\(sheetToken);\(destinationToken);\(modalToken);\(searchToken)"
     }
 
     /// Compact dedicated state export used by UI tests instead of snapshotting the full reader.
@@ -818,7 +831,10 @@ public struct BibleReaderView: View {
         } message: {
             startupDownloadPromptMessage
         }
-        .sheet(item: $activeReaderModal) { modal in
+        .sheet(item: readerSheetModalBinding) { modal in
+            readerModalContent(modal)
+        }
+        .fullScreenCover(item: readerDocumentChooserModalBinding) { modal in
             readerModalContent(modal)
         }
         .confirmationDialog(
@@ -1974,6 +1990,43 @@ public struct BibleReaderView: View {
         activeReaderModal = nil
     }
 
+    /**
+     Filters coordinator-owned modal state into the generic sheet presenter.
+
+     Android `ChooseDocument` routes are full-screen app-owned surfaces, so they are intentionally
+     excluded from the sheet binding and routed through `readerDocumentChooserModalBinding`.
+     */
+    private var readerSheetModalBinding: Binding<ReaderModal?> {
+        Binding(
+            get: {
+                guard activeReaderModal?.isDocumentChooserRoute != true else {
+                    return nil
+                }
+                return activeReaderModal
+            },
+            set: { activeReaderModal = $0 }
+        )
+    }
+
+    /**
+     Filters coordinator-owned modal state into Android-style full-screen chooser presentation.
+
+     Both the all-types drawer route and the category-scoped toolbar route map to Android
+     `ChooseDocument`, with or without a type extra. Keeping them in the same full-screen presenter
+     prevents one entry point from silently preserving the old iOS sheet behavior.
+     */
+    private var readerDocumentChooserModalBinding: Binding<ReaderModal?> {
+        Binding(
+            get: {
+                guard activeReaderModal?.isDocumentChooserRoute == true else {
+                    return nil
+                }
+                return activeReaderModal
+            },
+            set: { activeReaderModal = $0 }
+        )
+    }
+
     /// Presents the document-category module picker for a pane-scoped action.
     private func presentModulePicker(_ category: DocumentCategory, from windowId: UUID? = nil) {
         pickerCategory = category
@@ -2019,7 +2072,8 @@ public struct BibleReaderView: View {
                     onOpenDownloads: { presentDownloadsPreservingPane() },
                     onOpenDictionaryBrowser: { presentReaderModalPreservingPane(.dictionaryBrowser) },
                     onOpenGeneralBookBrowser: { presentReaderModalPreservingPane(.generalBookBrowser) },
-                    onOpenMapBrowser: { presentReaderModalPreservingPane(.mapBrowser) }
+                    onOpenMapBrowser: { presentReaderModalPreservingPane(.mapBrowser) },
+                    onOpenStudyPadSelector: { presentReaderModalPreservingPane(.studyPadSelector) }
                 )
             } else {
                 readerPanePreparationContent
@@ -2130,7 +2184,8 @@ public struct BibleReaderView: View {
                     onOpenDownloads: { presentDownloadsPreservingPane() },
                     onOpenDictionaryBrowser: { presentReaderModalPreservingPane(.dictionaryBrowser) },
                     onOpenGeneralBookBrowser: { presentReaderModalPreservingPane(.generalBookBrowser) },
-                    onOpenMapBrowser: { presentReaderModalPreservingPane(.mapBrowser) }
+                    onOpenMapBrowser: { presentReaderModalPreservingPane(.mapBrowser) },
+                    onOpenStudyPadSelector: { presentReaderModalPreservingPane(.studyPadSelector) }
                 )
             } else {
                 readerPanePreparationContent

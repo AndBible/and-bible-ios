@@ -75,7 +75,6 @@ struct WindowTabBar: View {
                     isCollapsed: isCollapsed
                 )
             }
-            .accessibilityIdentifier("windowTabBar")
             .foregroundStyle(surfacePalette.foregroundColor)
             .alert(String(localized: "go_to_reference"), isPresented: $showGoToRefAlert) {
                 TextField(String(localized: "go_to_reference_placeholder"), text: $goToRefText)
@@ -135,6 +134,8 @@ struct WindowTabBar: View {
                 .padding(.vertical, WindowTabBarLayout.verticalPadding)
                 .frame(minWidth: geometry.size.width, alignment: .trailing)
             }
+            .accessibilityIdentifier("windowTabBar")
+            .accessibilityElement(children: .contain)
         }
         .frame(
             width: isCollapsed ? WindowTabBarLayout.collapsedControlWidth : nil,
