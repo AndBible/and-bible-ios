@@ -2032,6 +2032,88 @@ extension AndBibleTests {
         XCTAssertNil(coordinator.consumePendingClientReadyRequest())
     }
 
+    /**
+     Protects My Documents active-page identity as a coordinator-owned reader state rule.
+
+     Android treats My Documents as generated general-book modules, so iOS must keep the active
+     local page only while the rendered content still points at the same general-book document. The
+     setup records one active page, exercises an unrelated module/category render, and expects the
+     coordinator to preserve or clear the page key exactly where the controller previously did. A
+     failure means #146 moved state ownership without preserving the reload/delete guard that keeps
+     My Documents bridge actions scoped to the visible local document.
+     */
+    func testReaderMyDocumentCoordinatorTracksActivePageUntilDifferentRenderedContent() {
+        var coordinator = BibleReaderMyDocumentCoordinator()
+
+        coordinator.setActivePage(bookInitials: "MYDOC", pageKey: "intro")
+
+        XCTAssertEqual(coordinator.activePageKey(for: "MYDOC"), "intro")
+        XCTAssertNil(coordinator.activePageKey(for: "OTHER"))
+
+        coordinator.clearActivePageUnless(category: .generalBook, moduleName: "MYDOC")
+        XCTAssertEqual(coordinator.activePageKey(for: "MYDOC"), "intro")
+
+        coordinator.clearActivePageUnless(category: .commentary, moduleName: "MYDOC")
+        XCTAssertNil(coordinator.activePageKey(for: "MYDOC"))
+
+        coordinator.setActivePage(bookInitials: "MYDOC", pageKey: "intro")
+        coordinator.clearActivePageUnless(category: .generalBook, moduleName: "OTHER")
+
+        XCTAssertNil(coordinator.activePageKey(for: "MYDOC"))
+    }
+
+    /**
+     Protects the Android-compatible My Documents document payload outside the reader controller.
+
+     Android exposes My Documents through the general-book document pipeline while retaining raw
+     editable content behind bridge calls. The setup builds a Markdown page containing XML-sensitive
+     characters and expects the coordinator to emit a valid Vue `OsisDocument` JSON payload with the
+     same category, identity, AI metadata, and escaped markup fields used by the current reader. A
+     failure means the extraction changed the WebView payload contract rather than simply moving it
+     out of `BibleReaderController`.
+     */
+    func testReaderMyDocumentCoordinatorBuildsAndroidGeneralBookDocumentPayload() throws {
+        let coordinator = BibleReaderMyDocumentCoordinator()
+        let pageId = try XCTUnwrap(UUID(uuidString: "77777777-7777-7777-7777-777777777777"))
+        let sourcePromptId = try XCTUnwrap(UUID(uuidString: "88888888-8888-8888-8888-888888888888"))
+        let document = MyDocument(name: "My Document", initials: "MYDOC")
+        let page = MyDocumentPage(
+            id: pageId,
+            title: "Intro",
+            pageKey: "intro",
+            contentType: .markdown,
+            sourcePromptId: sourcePromptId,
+            languageCode: "en"
+        )
+        let content = MyDocumentPageContent(pageId: pageId, content: "Raw <markdown> & \"quoted\"")
+        page.pageContent = content
+        page.document = document
+
+        let json = try XCTUnwrap(coordinator.documentJSON(document: document, page: page))
+        let renderedDocument = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any]
+        )
+        let osisFragment = try XCTUnwrap(renderedDocument["osisFragment"] as? [String: Any])
+
+        XCTAssertEqual(renderedDocument["type"] as? String, "osis")
+        XCTAssertEqual(renderedDocument["bookInitials"] as? String, "MYDOC")
+        XCTAssertEqual(renderedDocument["bookCategory"] as? String, DocumentCategory.generalBook.rawValue)
+        XCTAssertEqual(renderedDocument["bookName"] as? String, "My Document")
+        XCTAssertEqual(renderedDocument["key"] as? String, "intro")
+        XCTAssertEqual(renderedDocument["isMyDocument"] as? Bool, true)
+        XCTAssertEqual(renderedDocument["isAiDocument"] as? Bool, false)
+        XCTAssertEqual(renderedDocument["myDocumentPageId"] as? String, pageId.uuidString)
+        XCTAssertEqual(renderedDocument["sourcePromptId"] as? String, sourcePromptId.uuidString)
+        XCTAssertEqual(osisFragment["bookCategory"] as? String, DocumentCategory.generalBook.rawValue)
+        XCTAssertEqual(osisFragment["bookInitials"] as? String, "MYDOC")
+        XCTAssertEqual(osisFragment["keyName"] as? String, "Intro")
+        XCTAssertEqual(osisFragment["language"] as? String, "en")
+        XCTAssertEqual(
+            osisFragment["xml"] as? String,
+            "<div class=\"mydoc-markdown\"><markdown>Raw &lt;markdown&gt; &amp; &quot;quoted&quot;</markdown></div>"
+        )
+    }
+
     @MainActor
     func testRequestMoreToBeginningSendsDocumentResponseWithOriginalCallId() throws {
         let (bridge, recordedScripts) = makeRecordingBridge()
