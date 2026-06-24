@@ -3,6 +3,37 @@ import SwiftUI
 import SwordKit
 
 /**
+ Light document-selection palette matching Android's `ChooseDocument` activity surface.
+
+ The chooser shares Android's `DocumentSelectionBase` layout with Downloads, but Android renders
+ this route with a light content surface and a dark gray app bar. These constants keep the custom
+ SwiftUI layout independent from reader theme colors so changing Bible text colors does not
+ accidentally recolor the document-management screen.
+ */
+private enum DocumentChooserPalette {
+    /// Activity background behind filters and rows.
+    static let background = Color.white
+
+    /// Android action bar chrome for the Document activity.
+    static let appBar = Color(red: 0.27, green: 0.27, blue: 0.27)
+
+    /// Overflow menu surface anchored to the app bar.
+    static let menuSurface = Color.white
+
+    /// Thin row separators and filter dividers.
+    static let divider = Color.black.opacity(0.12)
+
+    /// Primary row and filter text.
+    static let primaryText = Color(red: 0.13, green: 0.13, blue: 0.13)
+
+    /// Secondary row metadata and labels.
+    static let secondaryText = Color(red: 0.47, green: 0.47, blue: 0.47)
+
+    /// Template icon tint used by Android-style document rows.
+    static let icon = Color(red: 0.49, green: 0.49, blue: 0.49)
+}
+
+/**
  Presents document rows for the currently focused pane and routes selections through the same
  document outcomes as Android's `ChooseDocument` activity.
 
@@ -25,6 +56,9 @@ struct BibleReaderModulePicker: View {
     /// Search-index service used by Android's Delete Index row action.
     @Environment(SearchIndexService.self) private var searchIndexService
 
+    /// Dynamic Type category used to split Android's compact filter row when large text needs space.
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
     /// Selected Android document-type filter.
     @State private var selectedFilter: DocumentTypeFilter
 
@@ -42,6 +76,9 @@ struct BibleReaderModulePicker: View {
 
     /// Last row-action failure surfaced to the user.
     @State private var rowActionErrorMessage: String?
+
+    /// Whether the Android-style app-bar overflow menu is visible.
+    @State private var showOverflowMenu = false
 
     /// Repository service used by Android's Delete document row action.
     private let repository = ModuleRepository()
@@ -137,42 +174,7 @@ struct BibleReaderModulePicker: View {
      row actions, and a persistent Downloads handoff.
      */
     var body: some View {
-        NavigationStack {
-            List {
-                filterControls
-
-                if shouldShowFilterEmptyState {
-                    emptyState
-                } else if filteredDocumentRows.isEmpty {
-                    noMatchesState
-                } else {
-                    documentRows
-                }
-            }
-            .accessibilityIdentifier("modulePickerScreen")
-            .navigationTitle(navigationTitle)
-            .searchable(text: $searchText, prompt: String(localized: "search_modules"))
-            #if os(iOS)
-            .navigationBarTitleDisplayMode(.inline)
-            #endif
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button(String(localized: "done"), action: onDismiss)
-                }
-                ToolbarItem(placement: .primaryAction) {
-                    Button(String(localized: "download_modules"), systemImage: "arrow.down.circle") {
-                        openDownloadsAfterDismiss()
-                    }
-                    .accessibilityIdentifier("modulePickerDownloadsButton")
-                }
-            }
-            .onChange(of: searchText) { oldValue, newValue in
-                if oldValue.isEmpty && !newValue.isEmpty {
-                    selectedFilter = .all
-                    selectedLanguage = ""
-                }
-            }
-        }
+        androidDocumentChooserScreen
         .sheet(item: $selectedModuleDetails) { details in
             NavigationStack {
                 ModuleBrowserModuleDetailsView(details: details)
@@ -228,72 +230,376 @@ struct BibleReaderModulePicker: View {
     }
 
     /**
-     Builds the document-type and language controls that correspond to Android's spinners.
+     Builds Android's full-screen `ChooseDocument` surface.
 
-     The document-type picker starts on the requested category, while the language picker starts at
-     the all-language default used by Android `ChooseDocument`.
+     Android uses `DocumentSelectionBase`: top app bar, inline language/search/type controls with a
+     result count, and custom document rows. This view intentionally avoids SwiftUI `List`,
+     `.searchable`, and navigation toolbar chrome so the chooser visually matches Android instead of
+     inheriting iOS sheet styling.
+
+     - Returns: Full-screen document chooser content with Android-owned controls.
+     - Side effects: Toolbar and row actions can dismiss, open Downloads, switch reader documents, or
+       show the shared module details surface.
+     - Failure modes: Empty document sets render explicit Android-style rows instead of a blank list.
      */
-    private var filterControls: some View {
-        Section {
-            Picker(String(localized: "document_type", defaultValue: "Document type"), selection: $selectedFilter) {
-                ForEach(Self.documentTypeFilterOrder, id: \.self) { filter in
-                    Text(Self.documentTypeFilterTitle(for: filter)).tag(filter)
-                }
-            }
-            .pickerStyle(.menu)
-            .accessibilityIdentifier("modulePickerCategoryFilter")
+    private var androidDocumentChooserScreen: some View {
+        let visibleRows = filteredDocumentRows
 
-            if !availableLanguages.isEmpty {
-                Picker(String(localized: "settings_language"), selection: $selectedLanguage) {
-                    Text(String(localized: "all_languages_count \(availableLanguages.count)"))
-                        .tag("")
-                    ForEach(availableLanguages, id: \.self) { language in
-                        Text(Self.displayName(for: language))
-                            .tag(language)
+        return ZStack(alignment: .topTrailing) {
+            documentChooserScreenMarker
+            VStack(spacing: 0) {
+                androidTopAppBar
+                androidFilterBar(visibleDocumentCount: visibleRows.count)
+                androidDocumentRowsContent(visibleRows)
+            }
+            if showOverflowMenu {
+                Color.black.opacity(0.001)
+                    .ignoresSafeArea()
+                    .accessibilityHidden(true)
+                    .onTapGesture {
+                        showOverflowMenu = false
                     }
-                }
-                .pickerStyle(.menu)
-                .accessibilityIdentifier("modulePickerLanguageFilter")
+                androidChooserOverflowMenu
+                    .padding(.top, 56)
+                    .padding(.trailing, 8)
+                    .zIndex(1)
             }
         }
+        .background(DocumentChooserPalette.background.ignoresSafeArea())
+        .onChange(of: searchText) { oldValue, newValue in
+            if oldValue.isEmpty && !newValue.isEmpty {
+                selectedFilter = .all
+                selectedLanguage = ""
+            }
+        }
+        .navigationBarBackButtonHidden(true)
+        #if os(iOS)
+        .toolbar(.hidden, for: .navigationBar)
+        #endif
     }
 
-    /// Empty state shown when no installed or pseudo rows exist for the selected document type.
-    private var emptyState: some View {
-        VStack(spacing: 12) {
-            Text(emptyMessage)
-                .foregroundStyle(.secondary)
-            Button(String(localized: "download_modules")) {
+    /**
+     Builds a stable screen marker without making every child inherit the same identifier.
+
+     SwiftUI accessibility identifiers can propagate from container views. Android parity tests need
+     a route-level marker and concrete row/filter identifiers, so this tiny non-interactive element
+     carries `modulePickerScreen` while the visible layout remains accessible by its own labels.
+     */
+    private var documentChooserScreenMarker: some View {
+        Rectangle()
+            .fill(DocumentChooserPalette.background.opacity(0.001))
+            .frame(width: 1, height: 1)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(String(localized: "document", defaultValue: "Document"))
+            .accessibilityIdentifier("modulePickerScreen")
+            .allowsHitTesting(false)
+    }
+
+    /**
+     Builds Android's `Document` app bar with back navigation and overflow access.
+
+     - Returns: A 56-point top bar matching Android `ChooseDocument` title chrome.
+     - Side effects: Back dismisses the chooser; overflow toggles the Android-style menu.
+     - Failure modes: none.
+     */
+    private var androidTopAppBar: some View {
+        HStack(spacing: 16) {
+            Button(action: onDismiss) {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 24, weight: .semibold))
+                    .frame(width: 44, height: 44)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(Color.white)
+            .accessibilityLabel(String(localized: "back_to_previous", defaultValue: "Back"))
+            .accessibilityIdentifier("modulePickerBackButton")
+
+            Text(String(localized: "document", defaultValue: "Document"))
+                .font(.system(size: 24, weight: .semibold))
+                .foregroundStyle(Color.white)
+                .lineLimit(1)
+
+            Spacer(minLength: 8)
+
+            Button {
+                showOverflowMenu.toggle()
+            } label: {
+                Image(systemName: "ellipsis.vertical")
+                    .font(.system(size: 24, weight: .bold))
+                    .frame(width: 44, height: 44)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(Color.white)
+            .accessibilityLabel(String(localized: "more", defaultValue: "More"))
+            .accessibilityIdentifier("modulePickerOverflowButton")
+        }
+        .padding(.horizontal, 8)
+        .frame(height: 56)
+        .background(DocumentChooserPalette.appBar)
+    }
+
+    /**
+     Builds Android's chooser overflow menu.
+
+     Android exposes document-management actions from this app bar. iOS currently has a real
+     Downloads handoff from the chooser, so it is surfaced here instead of as a native toolbar item.
+     */
+    private var androidChooserOverflowMenu: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            androidOverflowMenuButton(
+                title: String(localized: "download_modules"),
+                accessibilityIdentifier: "modulePickerDownloadsButton"
+            ) {
+                showOverflowMenu = false
                 openDownloadsAfterDismiss()
             }
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical)
+        .frame(width: 260, alignment: .leading)
+        .background(DocumentChooserPalette.menuSurface)
+        .clipShape(RoundedRectangle(cornerRadius: 2, style: .continuous))
+        .shadow(color: Color.black.opacity(0.25), radius: 8, x: 0, y: 4)
     }
 
-    /// Empty state shown when chooser rows exist but the active filters hide all rows.
-    private var noMatchesState: some View {
-        Text(String(localized: "no_modules_match_filters"))
-            .foregroundStyle(.secondary)
+    /**
+     Builds one row in the Android-style overflow menu.
+
+     - Parameters:
+       - title: User-visible row title.
+       - accessibilityIdentifier: Stable UI-test identifier.
+       - action: Command executed when the row is tapped.
+     - Returns: A full-width menu row.
+     - Side effects: Executes `action`.
+     - Failure modes: none.
+     */
+    private func androidOverflowMenuButton(
+        title: String,
+        accessibilityIdentifier: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 18, weight: .regular))
+                .foregroundStyle(DocumentChooserPalette.primaryText)
+                .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
+                .padding(.horizontal, 16)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier(accessibilityIdentifier)
     }
 
-    /// Rows for the currently filtered document set.
-    private var documentRows: some View {
-        Section(String(localized: "document_filter_results \(filteredDocumentRows.count)")) {
-            ForEach(filteredDocumentRows) { row in
-                documentRow(row)
+    /**
+     Builds Android's inline language, search, type, and result-count filters.
+
+     - Parameter visibleDocumentCount: Number of rows after current filters.
+     - Returns: The compact filter strip from Android `document_selection.xml`.
+     - Side effects: Menus and the text field mutate the active picker filters.
+     - Failure modes: Large Dynamic Type splits controls into two rows to avoid overlap.
+     */
+    private func androidFilterBar(visibleDocumentCount: Int) -> some View {
+        VStack(spacing: 4) {
+            Group {
+                if dynamicTypeSize.isAccessibilitySize {
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack(alignment: .bottom, spacing: 14) {
+                            androidLanguageFilterMenu()
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            androidDocumentTypeFilterMenu(visibleDocumentCount: visibleDocumentCount)
+                                .frame(maxWidth: .infinity, alignment: .trailing)
+                        }
+                        androidSearchFilterField()
+                    }
+                } else {
+                    HStack(alignment: .bottom, spacing: 14) {
+                        androidLanguageFilterMenu()
+                            .frame(minWidth: 96, maxWidth: .infinity, alignment: .leading)
+                            .layoutPriority(1)
+                        androidSearchFilterField()
+                            .frame(minWidth: 96)
+                            .layoutPriority(2)
+                        androidDocumentTypeFilterMenu(visibleDocumentCount: visibleDocumentCount)
+                            .frame(minWidth: 112, maxWidth: .infinity, alignment: .trailing)
+                            .layoutPriority(1)
+                    }
+                }
             }
+            .padding(.horizontal, 16)
+            .padding(.top, 18)
+            .padding(.bottom, 10)
+
+            Rectangle()
+                .fill(DocumentChooserPalette.divider)
+                .frame(height: 1)
+        }
+        .background(DocumentChooserPalette.background)
+    }
+
+    /**
+     Builds Android's language autocomplete affordance as a compact menu.
+
+     - Returns: Underlined language label with all installed chooser languages.
+     - Side effects: Selecting a row mutates `selectedLanguage`.
+     - Failure modes: Empty language lists still expose the all-language placeholder.
+     */
+    private func androidLanguageFilterMenu() -> some View {
+        Menu {
+            Button(String(localized: "settings_language")) {
+                selectedLanguage = ""
+            }
+            if !availableLanguages.isEmpty {
+                Divider()
+            }
+            ForEach(availableLanguages, id: \.self) { language in
+                Button(Self.displayName(for: language)) {
+                    selectedLanguage = language
+                }
+            }
+        } label: {
+            androidFilterLabel(languageFilterTitle(for: selectedLanguage))
+        }
+        .accessibilityIdentifier("modulePickerLanguageFilter")
+    }
+
+    /**
+     Builds Android's inline free-text document search field.
+
+     - Returns: Plain underlined search input.
+     - Side effects: Typing mutates `searchText` and the root screen aligns filters with Android's
+       search-focus behavior.
+     - Failure modes: none.
+     */
+    private func androidSearchFilterField() -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            TextField(String(localized: "search", defaultValue: "Search"), text: $searchText)
+                .textFieldStyle(.plain)
+                .foregroundStyle(DocumentChooserPalette.primaryText)
+                .tint(DocumentChooserPalette.primaryText)
+                .submitLabel(.search)
+            Rectangle()
+                .fill(DocumentChooserPalette.secondaryText)
+                .frame(height: 1)
+        }
+        .accessibilityIdentifier("modulePickerSearchField")
+    }
+
+    /**
+     Builds Android's document-type spinner and visible document count.
+
+     - Parameter visibleDocumentCount: Number of rows after current filters.
+     - Returns: Count text stacked above the document-type menu.
+     - Side effects: Selecting a type mutates `selectedFilter`.
+     - Failure modes: Unsupported filters are not generated because the order is static.
+     */
+    private func androidDocumentTypeFilterMenu(visibleDocumentCount: Int) -> some View {
+        VStack(alignment: .trailing, spacing: 2) {
+            Text(String(localized: "documents_count \(visibleDocumentCount)"))
+                .font(.system(size: 14, weight: .regular))
+                .foregroundStyle(DocumentChooserPalette.secondaryText)
+                .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
+                .multilineTextAlignment(.trailing)
+            Menu {
+                ForEach(Self.documentTypeFilterOrder, id: \.self) { filter in
+                    Button(Self.documentTypeFilterTitle(for: filter)) {
+                        selectedFilter = filter
+                    }
+                }
+            } label: {
+                HStack(spacing: 6) {
+                    Text(Self.documentTypeFilterTitle(for: selectedFilter))
+                        .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
+                        .multilineTextAlignment(.trailing)
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 11, weight: .semibold))
+                }
+                .foregroundStyle(DocumentChooserPalette.primaryText)
+            }
+        }
+        .accessibilityIdentifier("modulePickerCategoryFilter")
+    }
+
+    /**
+     Builds one underlined Android filter label.
+
+     - Parameter title: User-visible label text.
+     - Returns: Compact label with Android-style underline.
+     - Side effects: none.
+     - Failure modes: Accessibility text sizes allow two lines to avoid truncating long languages.
+     */
+    private func androidFilterLabel(_ title: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+                .font(.system(size: 22, weight: .regular))
+                .foregroundStyle(DocumentChooserPalette.primaryText)
+                .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
+            Rectangle()
+                .fill(DocumentChooserPalette.secondaryText)
+                .frame(height: 1)
         }
     }
 
     /**
-     Builds one selectable document row.
+     Builds the scrollable Android document rows.
 
-     - Parameter row: Installed module or Android visible pseudo-document.
-     - Returns: A row that performs the Android-equivalent document action when selected.
+     - Parameter visibleRows: Rows that survived the active filters.
+     - Returns: Empty, no-match, or document row content.
+     - Side effects: Row actions can mutate reader state or document management state.
+     - Failure modes: Empty states include a Downloads handoff when the active document type has no
+       installed rows.
      */
     @ViewBuilder
-    private func documentRow(_ row: DocumentChooserRow) -> some View {
+    private func androidDocumentRowsContent(_ visibleRows: [DocumentChooserRow]) -> some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 0) {
+                if shouldShowFilterEmptyState {
+                    VStack(spacing: 12) {
+                        androidMessageRow(emptyMessage)
+                        Button(String(localized: "download_modules")) {
+                            openDownloadsAfterDismiss()
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 24)
+                } else if visibleRows.isEmpty {
+                    androidMessageRow(String(localized: "no_modules_match_filters"))
+                } else {
+                    ForEach(visibleRows) { row in
+                        androidDocumentRow(row)
+                    }
+                }
+            }
+        }
+        .scrollContentBackground(.hidden)
+        .background(DocumentChooserPalette.background)
+    }
+
+    /**
+     Builds one centered message row for Android chooser empty states.
+
+     - Parameter message: User-visible text.
+     - Returns: Full-width text row.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    private func androidMessageRow(_ message: String) -> some View {
+        Text(message)
+            .font(.body)
+            .foregroundStyle(DocumentChooserPalette.secondaryText)
+            .frame(maxWidth: .infinity, alignment: .center)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 24)
+    }
+
+    /**
+     Builds one selectable Android document row.
+
+     - Parameter row: Installed module or visible Android pseudo-document.
+     - Returns: A row matching Android `document_list_item` structure.
+     - Side effects: Selection performs the row's document action.
+     - Failure modes: Add-ons keep Android's non-selecting behavior through `select(_:)`.
+     */
+    @ViewBuilder
+    private func androidDocumentRow(_ row: DocumentChooserRow) -> some View {
         switch row {
         case .module(let module):
             moduleRow(module)
@@ -303,50 +609,56 @@ struct BibleReaderModulePicker: View {
     }
 
     /**
-     Builds one selectable module row with active-state, lock-state, and management affordances.
+     Builds one installed module row with Android list-item columns and row actions.
 
-     - Parameter module: Installed module metadata from the active reader controller.
-     - Returns: A row that switches to the module's own category when selected.
+     - Parameter module: Installed module metadata from the active controller.
+     - Returns: Tappable row that switches or opens the selected document.
      */
     private func moduleRow(_ module: ModuleInfo) -> some View {
         let actions = Self.rowActions(for: module)
-        return Button {
-            select(module)
-        } label: {
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 6) {
-                        Text(module.name)
-                            .font(.headline)
-                        if module.isEncrypted && !module.isUnlocked {
-                            Image(systemName: "lock.fill")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .accessibilityLabel(String(localized: "locked", defaultValue: "Locked"))
-                        }
+        return androidRowContainer(
+            accessibilityIdentifier: "modulePickerRow::\(module.name)",
+            leading: {
+                VStack(spacing: 5) {
+                    categoryIcon(for: module.category)
+                    if module.isEncrypted && !module.isUnlocked {
+                        Image(systemName: "lock.fill")
+                            .font(.system(size: 15, weight: .bold))
+                            .foregroundStyle(DocumentChooserPalette.icon)
+                            .accessibilityLabel(String(localized: "locked", defaultValue: "Locked"))
                     }
+                    Text(Self.displayName(for: module.language))
+                        .font(.system(size: 17, weight: .regular))
+                        .foregroundStyle(DocumentChooserPalette.secondaryText)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+                }
+                .frame(width: 70)
+            },
+            center: {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(module.name)
+                        .font(.system(size: 22, weight: .regular))
+                        .foregroundStyle(DocumentChooserPalette.primaryText)
+                        .lineLimit(1)
                     Text(module.description)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .font(.system(size: 18, weight: .regular))
+                        .foregroundStyle(DocumentChooserPalette.secondaryText)
                         .lineLimit(2)
-                    HStack(spacing: 6) {
-                        Text(Self.displayName(for: module.language))
-                        Text(Self.moduleCategoryTitle(for: module.category))
+                }
+            },
+            trailing: {
+                VStack(alignment: .trailing, spacing: 10) {
+                    if actions.contains(.about) {
+                        aboutButton(for: module)
                     }
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
                 }
-                Spacer()
-                if isActive(module) {
-                    Image(systemName: "checkmark")
-                        .foregroundStyle(Color.accentColor)
-                        .fontWeight(.semibold)
-                }
+                .frame(width: 48, alignment: .trailing)
+            },
+            selection: {
+                select(module)
             }
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier("modulePickerRow::\(module.name)")
+        )
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
             if actions.contains(.uninstall) {
                 Button(role: .destructive) {
@@ -385,39 +697,183 @@ struct BibleReaderModulePicker: View {
     }
 
     /**
-     Builds one Android visible pseudo-document row.
+     Builds one visible Android pseudo-document row.
 
      - Parameter document: Pseudo-document identity from Android `FakeBookFactory`.
-     - Returns: A row that opens the equivalent iOS reader document or selector.
+     - Returns: Tappable row that opens the equivalent iOS document route.
      */
     private func pseudoDocumentRow(_ document: AndroidPseudoDocument) -> some View {
-        Button {
-            select(document)
-        } label: {
-            HStack {
-                Image(systemName: document.iconName)
-                    .foregroundStyle(.secondary)
-                    .frame(width: 24)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(document.title)
-                        .font(.headline)
-                    Text(document.description)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
-                    HStack(spacing: 6) {
-                        Text(Self.displayName(for: document.language))
-                        Text(Self.categoryFilterTitle(for: document.category))
-                    }
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
+        androidRowContainer(
+            accessibilityIdentifier: "modulePickerPseudoRow::\(document.rawValue)",
+            leading: {
+                VStack(spacing: 5) {
+                    pseudoDocumentIcon(for: document)
+                    Text(Self.displayName(for: document.language))
+                        .font(.system(size: 17, weight: .regular))
+                        .foregroundStyle(DocumentChooserPalette.secondaryText)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
                 }
+                .frame(width: 70)
+            },
+            center: {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(document.androidInitials)
+                        .font(.system(size: 22, weight: .regular))
+                        .foregroundStyle(DocumentChooserPalette.primaryText)
+                        .lineLimit(1)
+                    Text(document.description)
+                        .font(.system(size: 18, weight: .regular))
+                        .foregroundStyle(DocumentChooserPalette.secondaryText)
+                        .lineLimit(2)
+                }
+            },
+            trailing: {
                 Spacer()
+                    .frame(width: 48)
+            },
+            selection: {
+                select(document)
             }
-            .contentShape(Rectangle())
+        )
+    }
+
+    /**
+     Builds the shared Android `document_list_item` row frame.
+
+     - Parameters:
+       - accessibilityIdentifier: Stable identifier for the concrete row.
+       - leading: Left icon/language column.
+       - center: Main abbreviation and description column.
+       - trailing: Right action/status column.
+       - selection: Primary row action matching Android list-item selection.
+     - Returns: A full-width row with Android spacing and divider placement.
+     - Side effects: Executes `selection` when the row body is tapped.
+     - Failure modes: Row-level context and swipe actions are supplied by the caller.
+     */
+    private func androidRowContainer<Leading: View, Center: View, Trailing: View>(
+        accessibilityIdentifier: String,
+        @ViewBuilder leading: () -> Leading,
+        @ViewBuilder center: () -> Center,
+        @ViewBuilder trailing: () -> Trailing,
+        selection: @escaping () -> Void
+    ) -> some View {
+        VStack(spacing: 0) {
+            HStack(alignment: .top, spacing: 12) {
+                leading()
+                center()
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                trailing()
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+
+            Rectangle()
+                .fill(DocumentChooserPalette.divider)
+                .frame(height: 1)
+                .padding(.leading, 96)
+        }
+        .contentShape(Rectangle())
+        .onTapGesture(perform: selection)
+        .accessibilityIdentifier(accessibilityIdentifier)
+    }
+
+    /**
+     Builds Android's row-level About action button.
+
+     - Parameter module: Installed module whose details should be shown.
+     - Returns: Template info icon matching Android's `aboutButton` column.
+     - Side effects: Sets `selectedModuleDetails`, presenting the shared details sheet.
+     - Failure modes: Details payload falls back to installed-module metadata when repository source
+       metadata is unavailable.
+     */
+    private func aboutButton(for module: ModuleInfo) -> some View {
+        Button {
+            selectedModuleDetails = moduleDetails(for: module)
+        } label: {
+            Image(systemName: "info.circle")
+                .font(.system(size: 28, weight: .regular))
+                .foregroundStyle(DocumentChooserPalette.icon)
+                .frame(width: 44, height: 44)
         }
         .buttonStyle(.plain)
-        .accessibilityIdentifier("modulePickerPseudoRow::\(document.rawValue)")
+        .accessibilityLabel(String(localized: "about"))
+        .accessibilityIdentifier("modulePickerAboutButton::\(module.name)")
+    }
+
+    /**
+     Renders the Android-sourced document category icon for a chooser row.
+
+     - Parameter category: Installed module category.
+     - Returns: Template icon matching the closest bundled Android document glyph.
+     - Side effects: Loads local image assets when rendered.
+     - Failure modes: Unknown categories use the generic document icon.
+     */
+    @ViewBuilder
+    private func categoryIcon(for category: ModuleCategory) -> some View {
+        switch category {
+        case .bible:
+            AndBibleIconView(name: "ToolbarBible", size: 28)
+                .foregroundStyle(DocumentChooserPalette.icon)
+        case .commentary:
+            AndBibleIconView(name: "ToolbarCommentary", size: 28)
+                .foregroundStyle(DocumentChooserPalette.icon)
+        case .dictionary:
+            AndBibleIconView(name: "SettingsIconDictionary", size: 28)
+                .foregroundStyle(DocumentChooserPalette.icon)
+        case .generalBook:
+            AndBibleIconView(name: "DrawerDocuments", size: 28)
+                .foregroundStyle(DocumentChooserPalette.icon)
+        case .map:
+            Image(systemName: "map")
+                .font(.system(size: 26, weight: .regular))
+                .foregroundStyle(DocumentChooserPalette.icon)
+        case .addon:
+            AndBibleIconView(name: "DrawerDownloads", size: 28)
+                .foregroundStyle(DocumentChooserPalette.icon)
+        default:
+            AndBibleIconView(name: "DrawerDocuments", size: 28)
+                .foregroundStyle(DocumentChooserPalette.icon)
+        }
+    }
+
+    /**
+     Renders the category icon for one Android pseudo-document.
+
+     - Parameter document: Pseudo-document identity.
+     - Returns: Icon based on the same document category mapping Android rows use.
+     - Side effects: Loads local image assets when rendered.
+     - Failure modes: Unsupported pseudo categories use the generic document icon.
+     */
+    @ViewBuilder
+    private func pseudoDocumentIcon(for document: AndroidPseudoDocument) -> some View {
+        switch document.category {
+        case .commentary:
+            categoryIcon(for: .commentary)
+        case .generalBook:
+            categoryIcon(for: .generalBook)
+        case .dictionary:
+            categoryIcon(for: .dictionary)
+        case .map:
+            categoryIcon(for: .map)
+        default:
+            categoryIcon(for: .generalBook)
+        }
+    }
+
+    /**
+     Resolves Android's language filter label for the chooser.
+
+     - Parameter language: Selected ISO language code, or empty when no language is selected.
+     - Returns: Android's placeholder label for no selection, otherwise the localized language name.
+     - Side effects: none.
+     - Failure modes: Unknown language codes fall back through `displayName(for:)`.
+     */
+    private func languageFilterTitle(for language: String) -> String {
+        guard !language.isEmpty else {
+            return String(localized: "settings_language")
+        }
+        return Self.displayName(for: language)
     }
 
     /// Message shown when the requested filter has no selectable rows.
@@ -436,11 +892,6 @@ struct BibleReaderModulePicker: View {
         default:
             return String(localized: "picker_no_bible_modules")
         }
-    }
-
-    /// Android chooser title.
-    private var navigationTitle: String {
-        String(localized: "choose_document", defaultValue: "Choose Document")
     }
 
     /**
@@ -519,17 +970,6 @@ struct BibleReaderModulePicker: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
             onOpenDownloads()
         }
-    }
-
-    /**
-     Tests whether a module is the currently active module for its own category.
-
-     - Parameter module: Installed module metadata to compare against the reader controller.
-     - Returns: `true` when the module name matches the active module for its category.
-     */
-    private func isActive(_ module: ModuleInfo) -> Bool {
-        guard let documentCategory = Self.documentCategory(for: module.category) else { return false }
-        return module.name == controller.activeModuleName(for: documentCategory)
     }
 
     /**

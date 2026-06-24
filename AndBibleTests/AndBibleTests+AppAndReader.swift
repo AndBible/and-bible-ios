@@ -1303,6 +1303,32 @@ extension AndBibleTests {
     }
 
     /**
+     Guards Android `DocumentSelectionBase` visual parity for the full document chooser.
+
+     Android renders `ChooseDocument` with an app-owned toolbar, inline language/search/type filters,
+     a visible document count, and `document_list_item` rows. iOS must not regress to a native
+     `NavigationStack`/`List`/`.searchable` sheet because that preserves iOS chrome instead of the
+     shared AndBible document-management surface.
+     */
+    func testBibleReaderDocumentChooserUsesAndroidDocumentSelectionLayout() throws {
+        let pickerSource = try bibleUISource(named: "BibleReaderModulePicker.swift")
+
+        XCTAssertTrue(pickerSource.contains("private var androidDocumentChooserScreen"))
+        XCTAssertTrue(pickerSource.contains("private var androidTopAppBar"))
+        XCTAssertTrue(pickerSource.contains("private func androidFilterBar(visibleDocumentCount: Int)"))
+        XCTAssertTrue(pickerSource.contains("private func androidDocumentRow(_ row: DocumentChooserRow)"))
+        XCTAssertTrue(pickerSource.contains("private func androidLanguageFilterMenu()"))
+        XCTAssertTrue(pickerSource.contains("private func androidSearchFilterField()"))
+        XCTAssertTrue(pickerSource.contains("private func androidDocumentTypeFilterMenu(visibleDocumentCount: Int)"))
+        XCTAssertTrue(pickerSource.contains("private var androidChooserOverflowMenu"))
+        XCTAssertTrue(pickerSource.contains("String(localized: \"document\", defaultValue: \"Document\")"))
+        XCTAssertTrue(pickerSource.contains(".toolbar(.hidden, for: .navigationBar)"))
+        XCTAssertFalse(pickerSource.contains("NavigationStack {\n            List {"))
+        XCTAssertFalse(pickerSource.contains(".searchable(text: $searchText"))
+        XCTAssertFalse(pickerSource.contains("Section(String(localized: \"document_filter_results"))
+    }
+
+    /**
      Protects Android `MainBibleActivity.menuForDocs` parity for the Bible toolbar quick menu.
 
      Android sorts quick-menu entries by language code and then book abbreviation, renders labels as
