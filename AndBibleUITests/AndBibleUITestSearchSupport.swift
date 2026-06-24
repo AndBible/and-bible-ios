@@ -744,13 +744,7 @@ extension AndBibleUITests {
 
                 let remaining = deadline.timeIntervalSinceNow
                 if remaining > 0,
-                   searchTranslationPickerStateIsOpen(in: app, timeout: min(1.5, max(0.25, remaining))) {
-                    return
-                }
-
-                let descendantWait = min(0.5, max(0, deadline.timeIntervalSinceNow))
-                if descendantWait > 0,
-                   firstExistingElement(searchTranslationPickerOpenCandidates(in: app), timeout: descendantWait) != nil {
+                   searchTranslationPickerIsOpen(in: app, timeout: min(1.5, max(0.25, remaining))) {
                     return
                 }
             }
@@ -862,7 +856,7 @@ extension AndBibleUITests {
         repeat {
             if let row = firstExistingElement(
                 searchTranslationRowCandidates(identifier, moduleName: moduleName, in: app),
-                timeout: 0.2
+                timeout: 0
             ) {
                 let expectedValue = expectedSearchTranslationRowValue(afterTapping: row)
                 if waitForElementToBecomeHittable(row, timeout: 1),
@@ -1013,23 +1007,13 @@ extension AndBibleUITests {
     /// Returns row candidates for one Search translation picker module.
     func searchTranslationRowCandidates(
         _ identifier: String,
-        moduleName: String,
+        moduleName _: String,
         in app: XCUIApplication
     ) -> [XCUIElement] {
-        let scoped = searchTranslationPickerListCandidates(in: app).flatMap { list in
-            [
-                list.buttons[identifier].firstMatch,
-                list.cells[identifier].firstMatch,
-                list.otherElements[identifier].firstMatch,
-                list.staticTexts[moduleName].firstMatch,
-            ]
-        }
-        return scoped + [
+        [
             app.buttons[identifier].firstMatch,
-            app.collectionViews.buttons[identifier].firstMatch,
             app.cells[identifier].firstMatch,
             app.otherElements[identifier].firstMatch,
-            app.staticTexts[moduleName].firstMatch,
         ]
     }
 

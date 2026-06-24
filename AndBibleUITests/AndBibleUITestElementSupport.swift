@@ -500,7 +500,13 @@ extension AndBibleUITests {
         return titledCandidates
     }
 
-    /// Returns workspace-name prompt buttons without starting from expensive app-wide id queries.
+    /**
+     Returns workspace-name prompt buttons without walking unrelated container hierarchies.
+
+     The workspace prompt is rendered as a selector-owned overlay, not as a navigation bar, toolbar,
+     table, or scroll-view control. Keeping this lookup on the actual button surface avoids hosted
+     XCTest snapshot stalls while preserving the production accessibility contract.
+     */
     func workspaceNamePromptButtonCandidates(
         _ identifier: String,
         in app: XCUIApplication
@@ -526,7 +532,6 @@ extension AndBibleUITests {
         }
         let directIdentifierCandidates = [
             app.buttons[identifier].firstMatch,
-            app.otherElements[identifier].firstMatch,
         ]
         return promptScopedCandidates + directTitleCandidates + directIdentifierCandidates
     }

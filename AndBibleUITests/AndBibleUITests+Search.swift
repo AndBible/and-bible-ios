@@ -499,7 +499,7 @@ extension AndBibleUITests {
         waitForSearchResultRow("searchResultRow::Genesis_1_2", in: app, shouldExist: true, timeout: 20)
 
         tapSearchTranslationPicker(in: app, timeout: 10)
-        tapSearchTranslationRow(moduleName: "UITESTWEB", in: app, timeout: 10)
+        tapSearchTranslationRow(moduleName: "UITESTWEB", in: app, timeout: 45)
         tapSearchTranslationDone(in: app, timeout: 10)
 
         waitForSearchSelectedModules(

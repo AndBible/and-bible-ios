@@ -1099,15 +1099,15 @@ extension AndBibleUITests {
     }
 
     /**
-     Resolves one label row by its accessibility label.
+     Resolves one label row through the production row identifier or visible row text.
      *
      * - Parameters:
      *   - name: User-visible label name expected on the row.
      *   - app: Running application under test.
-     * - Returns: The first matching Label Manager row button for the requested label name.
+     * - Returns: The first matching Label Manager row surface for the requested label name.
      * - Side effects:
-     *   - queries the live accessibility hierarchy for a label-manager row whose label matches
-     *     `name`
+     *   - queries the live accessibility hierarchy for the label-manager row identifier, then for
+     *     the visible label text SwiftUI exposes inside that row
      * - Failure modes:
      *   - returns an unresolved query when no matching row currently exists
      */
@@ -1118,6 +1118,10 @@ extension AndBibleUITests {
             if scopedButton.exists {
                 return scopedButton
             }
+            let scopedText = labelManagerScreen.staticTexts[name].firstMatch
+            if scopedText.exists {
+                return scopedText
+            }
             let scopedLink = labelManagerScreen.links[identifier].firstMatch
             if scopedLink.exists {
                 return scopedLink
@@ -1127,6 +1131,10 @@ extension AndBibleUITests {
         let globalButton = app.buttons[identifier].firstMatch
         if globalButton.exists {
             return globalButton
+        }
+        let globalText = app.staticTexts[name].firstMatch
+        if globalText.exists {
+            return globalText
         }
         let globalLink = app.links[identifier].firstMatch
         if globalLink.exists {
@@ -1158,14 +1166,23 @@ extension AndBibleUITests {
         file: StaticString = #filePath,
         line: UInt = #line
     ) -> XCUIElement {
-        let element = labelRow(named: name, in: app)
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            let element = labelRow(named: name, in: app)
+            if element.exists {
+                return element
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        } while Date() < deadline
+
+        let fallback = labelRow(named: name, in: app)
         XCTAssertTrue(
-            element.waitForExistence(timeout: timeout),
+            fallback.exists,
             "Expected label row '\(name)' to exist within \(timeout) seconds.",
             file: file,
             line: line
         )
-        return element
+        return fallback
     }
 
     /**

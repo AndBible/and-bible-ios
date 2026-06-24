@@ -57,6 +57,29 @@ class WorkspacePromptUITestContractTests(unittest.TestCase):
         self.assertNotIn("descendants(matching: .any)", candidates_body)
         self.assertNotIn("prompt.textFields", candidates_body)
 
+    def test_workspace_prompt_button_candidates_stay_on_prompt_buttons(self) -> None:
+        """The prompt button lookup avoids unrelated containers that can stall hosted XCTest.
+
+        The prompt confirm and cancel controls are selector-owned overlay buttons. They should not
+        be looked up through navigation bars, toolbars, table rows, scroll views, or generic
+        `otherElements` before the actual button surface has had a chance to appear.
+        """
+        source = (
+            REPO_ROOT / "AndBibleUITests" / "AndBibleUITestElementSupport.swift"
+        ).read_text()
+        candidates_start = source.index("func workspaceNamePromptButtonCandidates")
+        candidates_end = source.index("func semanticStateCandidates", candidates_start)
+        candidates_body = source[candidates_start:candidates_end]
+
+        self.assertIn("app.buttons[identifier].firstMatch", candidates_body)
+        self.assertIn("app.buttons[title].firstMatch", candidates_body)
+        self.assertNotIn("app.navigationBars.buttons[identifier]", candidates_body)
+        self.assertNotIn("app.toolbars.buttons[identifier]", candidates_body)
+        self.assertNotIn("app.collectionViews.buttons[identifier]", candidates_body)
+        self.assertNotIn("app.tables.buttons[identifier]", candidates_body)
+        self.assertNotIn("app.scrollViews.buttons[identifier]", candidates_body)
+        self.assertNotIn("app.otherElements[identifier]", candidates_body)
+
     def test_workspace_prompt_screen_uses_prompt_specific_container_lookup(self) -> None:
         """The prompt surface lookup must stay bounded and must not drive text-entry focus.
 
