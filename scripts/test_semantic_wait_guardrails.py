@@ -70,6 +70,30 @@ def swift_function_bodies(source: str, name: str) -> list[str]:
 class SemanticWaitGuardrailsTests(unittest.TestCase):
     """Protects pure semantic-state waits from regressing to ad hoc run-loop polling."""
 
+    def test_search_state_candidates_prefer_screen_root_before_hidden_export(self) -> None:
+        """Keep Search readiness polling off the volatile hidden static-text export first."""
+        element_source = (
+            REPO_ROOT / "AndBibleUITests/AndBibleUITestElementSupport.swift"
+        ).read_text(encoding="utf-8")
+        body = swift_function_body(element_source, "semanticStateValueCandidates")
+        search_case_start = body.find('case "searchStateExport":')
+        bookmark_case_start = body.find('case "bookmarkListStateExport":')
+        self.assertNotEqual(search_case_start, -1)
+        self.assertNotEqual(bookmark_case_start, -1)
+
+        search_case = body[search_case_start:bookmark_case_start]
+        root_candidate = 'app.otherElements["searchScreen"].firstMatch'
+        hidden_export_candidate = (
+            'screenScopedStateCandidates(identifier, within: "searchScreen", in: app)'
+        )
+
+        self.assertIn(root_candidate, search_case)
+        self.assertIn(hidden_export_candidate, search_case)
+        self.assertLess(
+            search_case.find(root_candidate),
+            search_case.find(hidden_export_candidate),
+        )
+
     def test_resolved_semantic_wait_uses_xctest_waiter_not_run_loop_polling(self) -> None:
         """Ensure the shared pure-observation wait is backed by XCTest wait primitives."""
         state_source = (
