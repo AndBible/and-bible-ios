@@ -301,33 +301,22 @@ async function handle(event: MouseEvent) {
     const eventFunctions = getHighestPriorityEventFunctions(event);
     const allEventFunctions = getAllEventFunctions(event);
     const hasParticularClicks = eventFunctions.filter(f => !f.options.hidden).length > 0; // let's not show only "hidden" items
-    console.log('[AmbiguousSelection] handle: eventFunctions=' + eventFunctions.length +
-        ', allEventFunctions=' + allEventFunctions.length +
-        ', hasParticularClicks=' + hasParticularClicks +
-        ', isActive=' + isActive +
-        ', actionMode=' + appSettings.actionMode +
-        ', activeWindow=' + appSettings.activeWindow);
     if (appSettings.actionMode) {
-        console.log('[AmbiguousSelection] RETURNING: actionMode is true');
         return;
     }
     const hadHighlights = hasHighlights.value;
     resetHighlights();
     if (hadHighlights && !showModal.value && !hasParticularClicks) {
-        console.log('[AmbiguousSelection] RETURNING: hadHighlights + no particular clicks');
         return;
     }
     if (!isActive && !hasParticularClicks) {
-        console.log('[AmbiguousSelection] RETURNING: not active + no particular clicks');
         return;
     }
     emit("back_clicked");
     const _verseInfo: Nullable<EventVerseInfo> = getEventVerseInfo(event);
     const _ordinalInfo: Nullable<EventOrdinalInfo> = getEventOrdinalInfo(event);
-    console.log('[AmbiguousSelection] verseInfo=' + !!_verseInfo + ', ordinalInfo=' + !!_ordinalInfo);
 
     if (multiSelectionMode.value && multiSelect(_verseInfo, _ordinalInfo)) {
-        console.log('[AmbiguousSelection] RETURNING: multiSelect handled');
         return;
     }
     multiSelectionMode.value = false;
@@ -336,24 +325,16 @@ async function handle(event: MouseEvent) {
         const firstFunc = eventFunctions[0];
         const singleHighPriority = eventFunctions.length === 1 && firstFunc.options.priority > 0 && !firstFunc.options.dottedStrongs && !firstFunc.options.hiddenStrongs;
         const singleDotted = allEventFunctions.length === 1 && firstFunc?.options.dottedStrongs && !firstFunc?.options.hiddenStrongs;
-        console.log('[AmbiguousSelection] singleHighPriority=' + singleHighPriority +
-            ', singleDotted=' + singleDotted +
-            ', firstFunc.priority=' + firstFunc?.options?.priority +
-            ', firstFunc.title=' + firstFunc?.options?.title +
-            ', firstFunc.bookmarkId=' + firstFunc?.options?.bookmarkId);
         if (singleHighPriority || singleDotted) {
             if (eventFunctions[0].options.bookmarkId || firstFunc.options.hiddenStrongs) {
-                console.log('[AmbiguousSelection] emitting bookmark_clicked');
                 emit("bookmark_clicked", eventFunctions[0].options.bookmarkId, {locateTop: isBottomHalfClicked(event)});
             } else {
                 const cb = eventFunctions[0].callback;
-                console.log('[AmbiguousSelection] calling callback directly, cb=' + !!cb);
                 if (cb) {
                     cb();
                 }
             }
         } else {
-            console.log('[AmbiguousSelection] MULTI/ELSE path: modalOpen=' + modalOpen.value + ', verseInfo=' + !!_verseInfo + ', ordinalInfo=' + !!_ordinalInfo);
             if (modalOpen.value && !hasParticularClicks) {
                 if (!props.doNotCloseModals) {
                     closeModals();
@@ -366,12 +347,9 @@ async function handle(event: MouseEvent) {
                 setInitialOrdinal(_ordinalInfo);
                 const s = await select(event, allEventFunctions);
                 if (s && s.type === "callback" && s.callback) s.callback();
-            } else {
-                console.log('[AmbiguousSelection] FELL THROUGH: no verseInfo, no ordinalInfo, not modal — LINK WILL NOT FIRE');
             }
         }
     } else {
-        console.log('[AmbiguousSelection] NO eventFunctions and no verse/ordinal info');
         $emit("back-clicked");
         if (!props.doNotCloseModals) {
             closeModals();

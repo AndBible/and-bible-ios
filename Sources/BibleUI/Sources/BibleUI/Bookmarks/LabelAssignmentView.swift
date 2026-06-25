@@ -35,7 +35,7 @@ struct LabelAssignmentView: View {
     /// SwiftData context used for bookmark fetches, relationship creation, and persistence.
     @Environment(\.modelContext) private var modelContext
 
-    /// Dismiss action for closing the sheet.
+    /// Dismiss action for closing the current presentation route.
     @Environment(\.dismiss) private var dismiss
 
     /// All labels queried from SwiftData, including system labels.

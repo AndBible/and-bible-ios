@@ -140,6 +140,20 @@ public struct BibleReaderView: View {
         }
     }
 
+    /// Label-assignment route requested by a specific WebView-backed reader pane.
+    private struct ReaderLabelAssignmentRoute: Identifiable, Hashable {
+        /// Bookmark whose labels should be edited.
+        let bookmarkId: UUID
+
+        /// Window whose WebView should be refreshed after label assignment closes.
+        let windowId: UUID?
+
+        /// Stable presentation identity for SwiftUI's item-based full-screen cover.
+        var id: String {
+            "labelAssignment::\(windowId?.uuidString ?? "active")::\(bookmarkId.uuidString)"
+        }
+    }
+
     /// Coordinator-owned modal flows that do not require payload-backed sheet state.
     private enum ReaderModal: String, Identifiable {
         case syncSettings
@@ -248,6 +262,9 @@ public struct BibleReaderView: View {
 
     /// Presents the current coordinator-owned modal flow.
     @State private var activeReaderModal: ReaderModal?
+
+    /// Presents WebView-originated bookmark label assignment as a reader-owned app surface.
+    @State private var activeReaderLabelAssignmentRoute: ReaderLabelAssignmentRoute?
 
     /// Presents the reader's overflow action sheet.
     @State private var showReaderOverflowMenu = false
@@ -837,6 +854,9 @@ public struct BibleReaderView: View {
         .fullScreenCover(item: readerDocumentChooserModalBinding) { modal in
             readerModalContent(modal)
         }
+        .fullScreenCover(item: $activeReaderLabelAssignmentRoute) { route in
+            readerLabelAssignmentContent(route)
+        }
         .confirmationDialog(
             localizedAndroidOverflowString(
                 androidKey: "strongs_mode_title",
@@ -1111,6 +1131,51 @@ public struct BibleReaderView: View {
             chapterReadHistoryTarget: chapterReadHistoryTarget,
             onDismiss: dismissReaderSheet
         )
+    }
+
+    /// Builds reader-owned label assignment for WebView bookmark action events.
+    private func readerLabelAssignmentContent(_ route: ReaderLabelAssignmentRoute) -> some View {
+        NavigationStack {
+            LabelAssignmentView(
+                bookmarkId: route.bookmarkId,
+                onDismiss: { activeReaderLabelAssignmentRoute = nil }
+            )
+        }
+        .onDisappear {
+            refreshReaderLabelAssignment(route)
+        }
+    }
+
+    /**
+     Presents app-owned label assignment for the pane that requested it through the WebView bridge.
+
+     - Parameters:
+       - bookmarkId: Bookmark whose labels should be edited.
+       - windowId: Originating pane identifier, used to refresh the correct Vue document afterward.
+     - Side effects: Captures pane presentation target state and presents a full-screen route.
+     - Failure modes: Missing window identifiers fall back to the currently active pane.
+     */
+    private func presentReaderLabelAssignment(bookmarkId: UUID, from windowId: UUID?) {
+        setPanePresentationTarget(windowId)
+        activeReaderLabelAssignmentRoute = ReaderLabelAssignmentRoute(
+            bookmarkId: bookmarkId,
+            windowId: panePresentationTargetWindowId
+        )
+    }
+
+    /**
+     Refreshes the WebView bookmark row that launched label assignment.
+
+     - Parameter route: Completed label-assignment route.
+     - Side effects: Emits the updated bookmark payload into the originating pane's Vue bridge.
+     - Failure modes: Returns without action when the originating pane has been closed.
+     */
+    private func refreshReaderLabelAssignment(_ route: ReaderLabelAssignmentRoute) {
+        if let windowId = route.windowId {
+            controller(for: windowId)?.refreshBookmarkInVueJS(bookmarkId: route.bookmarkId)
+        } else {
+            focusedController?.refreshBookmarkInVueJS(bookmarkId: route.bookmarkId)
+        }
     }
 
     /// Builds reader-stack destinations opened from the drawer, overflow, or keyboard shortcuts.
@@ -2624,6 +2689,9 @@ public struct BibleReaderView: View {
                 passageChooserProgressContext = makePassageChooserProgressContext()
                 refChooserCompletion = completion
                 showRefChooser = true
+            },
+            onAssignLabels: { bookmarkId in
+                presentReaderLabelAssignment(bookmarkId: bookmarkId, from: window.id)
             },
             onUserScrollDeltaY: { deltaY in
                 handleAutoFullscreenScroll(from: window, deltaY: deltaY)
