@@ -1583,6 +1583,131 @@ extension AndBibleTests {
     }
 
     /**
+     Protects Android-style external-link classification outside controller orchestration.
+
+     Android splits responsibilities between `BibleJavascriptInterface.openExternalLink`,
+     `BibleView.openLink`, and `LinkControl`: pseudo-links become typed app routes while unknown
+     web links remain platform URLs. The setup exercises the new pure router with Strong's,
+     morphology, MyBible, MySword, multi-reference, EPUB, Downloads, My Notes, and StudyPad inputs.
+     The expected result is typed route data with no bridge, SWORD, pasteboard, or simulator side
+     effects. A failure means the extraction preserved the controller code shape without preserving
+     Android's routing contract.
+     */
+    func testExternalLinkRouterClassifiesAndroidPseudoSchemes() {
+        let router = BibleReaderExternalLinkRouter()
+
+        XCTAssertEqual(
+            router.route(for: "ab-w://?strong=H0430&robinson=N-NSM"),
+            .definition(strongs: ["H0430"], robinson: ["N-NSM"])
+        )
+        XCTAssertEqual(
+            router.route(for: "strongs://G2316"),
+            .definition(strongs: ["G2316"], robinson: [])
+        )
+        XCTAssertEqual(
+            router.route(for: "morphology://robinson/V-PAI-3S"),
+            .definition(strongs: [], robinson: ["V-PAI-3S"])
+        )
+        XCTAssertEqual(
+            router.route(for: "ab-find-all://?type=hebrew&name=5775"),
+            .findAllOccurrences("H5775")
+        )
+        XCTAssertEqual(
+            router.route(for: "download://?initials=KJV"),
+            .downloads(searchText: "KJV")
+        )
+        XCTAssertEqual(
+            router.route(for: "epub-ref://?book=Pilgrim&toKey=chapter1.xhtml&toId=anchor"),
+            .epubReference(book: "Pilgrim", toKey: "chapter1.xhtml", toId: "anchor")
+        )
+        XCTAssertEqual(
+            router.route(for: "my-notes://?osis=Gen.1.1&ordinal=1"),
+            .myNotes(osisRef: "Gen.1.1", ordinal: 1)
+        )
+        XCTAssertEqual(
+            router.route(for: "journal://?id=00000000-0000-0000-0000-000000000001&bookmarkId=00000000-0000-0000-0000-000000000002"),
+            .studyPad(
+                labelId: UUID(uuidString: "00000000-0000-0000-0000-000000000001")!,
+                bookmarkId: UUID(uuidString: "00000000-0000-0000-0000-000000000002")!
+            )
+        )
+        XCTAssertEqual(
+            router.route(for: "osis://?osis=Gen.1.1,Exod.2.1&v11n=KJVA"),
+            .osisReferences(["Gen.1.1,Exod.2.1"])
+        )
+        XCTAssertEqual(
+            router.route(for: "multi://?osis=Gen.1.1&osis=Exod.2.1&v11n=KJVA"),
+            .multiReferences(["Gen.1.1", "Exod.2.1"])
+        )
+        XCTAssertEqual(
+            router.route(for: "sword://Bible/John.3.16"),
+            .swordReference("John.3.16")
+        )
+        XCTAssertEqual(
+            router.route(for: "B:470 1:1"),
+            .osisNavigation("Matt.1.1")
+        )
+        XCTAssertEqual(
+            router.route(for: "#b40.1.1"),
+            .osisNavigation("Matt.1.1")
+        )
+        XCTAssertEqual(
+            router.route(for: "S:G2424"),
+            .definition(strongs: ["G2424"], robinson: [])
+        )
+        XCTAssertEqual(
+            router.route(for: "#dH0430"),
+            .definition(strongs: ["H0430"], robinson: [])
+        )
+        XCTAssertEqual(
+            router.route(for: "https://andbible.org"),
+            .platformURL(URL(string: "https://andbible.org")!)
+        )
+    }
+
+    /**
+     Protects multi-reference document construction as its own Android `Multi` responsibility.
+
+     Android stores cross-reference results as `FakeBookFactory.multiDocument` backed by a
+     `BookAndKeyList`, not as a controller-local sheet. The setup feeds parsed references into the
+     builder without an active SWORD module so fallback XML is deterministic. The expected JSON has
+     the Vue `type: "multi"` shape, one OSIS fragment per reference, stable module/key metadata, and
+     escaped fallback text. A failure means the extraction left document construction coupled to the
+     controller or changed the persisted/rendered document contract.
+     */
+    func testMultiReferenceDocumentBuilderCreatesAndroidMultiPayload() throws {
+        let refs = [
+            OsisRef(book: "Genesis", chapter: 1, verse: 1, osisId: "Gen"),
+            OsisRef(book: "Exodus", chapter: 2, verse: 1, osisId: "Exod"),
+        ]
+        let builder = BibleReaderMultiReferenceDocumentBuilder(
+            activeModule: nil,
+            activeModuleName: "KJV",
+            compatibilityOrdinal: { chapter, verse in chapter * 1_000 + verse },
+            isNewTestament: { $0 == "Matthew" }
+        )
+
+        let json = try XCTUnwrap(builder.buildDocumentJSON(refs: refs))
+        let data = try XCTUnwrap(json.data(using: .utf8))
+        let payload = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let fragments = try XCTUnwrap(payload["osisFragments"] as? [[String: Any]])
+
+        XCTAssertEqual(payload["type"] as? String, "multi")
+        XCTAssertEqual(payload["compare"] as? Bool, false)
+        XCTAssertEqual(fragments.count, 2)
+        XCTAssertEqual(fragments[0]["key"] as? String, "KJV--Gen.1.1")
+        XCTAssertEqual(fragments[0]["osisRef"] as? String, "Gen.1.1")
+        XCTAssertEqual(fragments[0]["bookCategory"] as? String, "BIBLE")
+        XCTAssertEqual(fragments[0]["ordinalRange"] as? [Int], [1001, 1001])
+        XCTAssertTrue(
+            (fragments[0]["xml"] as? String)?.contains("Genesis 1:1") == true,
+            "Expected fallback XML to include the display reference when no module is available."
+        )
+        XCTAssertEqual(fragments[1]["key"] as? String, "KJV--Exod.2.1")
+        XCTAssertEqual(fragments[1]["ordinalRange"] as? [Int], [2001, 2001])
+    }
+
+    /**
      Validates the native-to-WebView reader configuration contract for Android parity fields.
 
      The setup writes pane text-display settings, app settings, workspace state, and reading
