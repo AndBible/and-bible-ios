@@ -51,6 +51,7 @@ Android references:
 
 | iOS route token | Current iOS surface | ADR 0006 owner | Android owner or target | Disposition |
 | --- | --- | --- | --- | --- |
+| `ReaderDestination.search` | `SearchView` pushed as a reader destination | `Android app-owned` | Android `Search` activity from `MenuCommandHandler` | Adapted app-owned route with UI coverage protecting destination presentation and translation-picker parity. |
 | `ReaderDestination.settings` | `SettingsView` pushed as a reader destination | `Android app-owned` | `SettingsActivity` from drawer/menu routing | Adapted app-owned route with Settings UI coverage. |
 | `ReaderDestination.downloads` | `ModuleBrowserView` pushed as a reader destination | `Android app-owned` | `DownloadActivity` from drawer/chooser/startup flows | Adapted app-owned route. Repository/source and list details live in downloads docs. |
 | `ReaderDestination.globalTextOptions` | `TextDisplaySettingsView` with global scope | `Android app-owned` | `TextDisplaySettingsActivity` with `SettingsLevel.GLOBAL` | App-owned settings route. Scope semantics are governed by settings docs and ADR 0005. |
@@ -81,7 +82,6 @@ Android references:
 
 | iOS route token | Current iOS surface | ADR 0006 owner | Android owner or target | Disposition |
 | --- | --- | --- | --- | --- |
-| `showSearch` | `SearchView` in a reader sheet | `Android app-owned` | Android `Search` activity from `MenuCommandHandler` | Adapted app-owned route. Search translation-picker parity is tracked by #247. |
 | `showStartupDownloadPrompt` | SwiftUI `confirmationDialog` | `Android app-owned` | Android startup/download prompt dialogs | Acceptable dialog adaptation if labels, cancel/default behavior, and Downloads handoff remain equivalent. |
 | `showReaderStrongsModeDialog` | SwiftUI `confirmationDialog` | `Android app-owned` | `StrongsPreference.openDialog` / Android option dialog | Acceptable dialog adaptation if choices, reset/default semantics, and preference mutation match Android. |
 | `shareSheetBinding` | `ShareSheet` / `UIActivityViewController` | `iOS system boundary` | Android share intents/widgets | Acceptable platform boundary when it only hands selected/generated content to OS sharing. |
