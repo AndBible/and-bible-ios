@@ -2245,7 +2245,10 @@ extension AndBibleTests {
 
         let source = try String(contentsOf: readerViewURL, encoding: .utf8)
         guard let drawerStart = source.range(of: "private var bookChooserDrawerContent"),
-              let nextSection = source.range(of: "/// Search sheet", range: drawerStart.upperBound..<source.endIndex) else {
+              let nextSection = source.range(
+                of: "private var searchSheetContent",
+                range: drawerStart.upperBound..<source.endIndex
+              ) else {
             return XCTFail("Could not locate book chooser drawer content in BibleReaderView.swift")
         }
 
