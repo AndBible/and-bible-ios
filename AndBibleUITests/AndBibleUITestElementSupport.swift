@@ -1610,6 +1610,11 @@ extension AndBibleUITests {
 
     /**
      Taps one bottom window-tab pill by order number and waits for its active state to surface.
+
+     The coordinate path exercises the real Android-parity footer strip without forcing XCTest to
+     snapshot the full reader hierarchy. If that coordinate misses because the footer geometry differs
+     on a runner, the scoped `windowTabBar` accessibility path is still a valid user tap target and is
+     cheaper than app-wide button queries.
      */
     func tapWindowTab(
         _ order: Int,
@@ -1621,23 +1626,12 @@ extension AndBibleUITests {
         if readerRenderedContentStateContains("windowOrder=\(order)", in: app) {
             return
         }
+        var attemptedCoordinateTap = false
         if windowTabOrdersFromReaderState(in: app) != nil {
-            if tapWindowTabAtExpectedFooterCoordinate(
-                order,
-                in: app,
-                timeout: timeout,
-                file: file,
-                line: line
-            ) {
+            attemptedCoordinateTap = true
+            if tapWindowTabAtExpectedFooterCoordinate(order, in: app, timeout: min(timeout, 3), file: file, line: line) {
                 return
             }
-            let finalState = readerRenderedContentStateValue(in: app) ?? "nil"
-            XCTFail(
-                "Expected footer coordinate tap for window tab \(order) to activate that window within \(timeout) seconds; final reader state was '\(finalState)'.",
-                file: file,
-                line: line
-            )
-            return
         }
 
         let identifier = "windowTabButton::\(order)"
@@ -1646,6 +1640,9 @@ extension AndBibleUITests {
 
         let deadline = Date().addingTimeInterval(timeout)
         repeat {
+            if readerRenderedContentStateContains("windowOrder=\(order)", in: app) {
+                return
+            }
             if let value = tabButton.value as? String,
                value.contains("state=active") {
                 return
@@ -1654,8 +1651,10 @@ extension AndBibleUITests {
         } while Date() < deadline
 
         let lastValue = tabButton.value.map { "\($0)" } ?? "nil"
+        let finalState = readerRenderedContentStateValue(in: app) ?? "nil"
+        let coordinateNote = attemptedCoordinateTap ? " after coordinate fallback missed" : ""
         XCTFail(
-            "Expected window tab \(order) to become active within \(timeout) seconds; last value was '\(lastValue)'.",
+            "Expected window tab \(order) to become active\(coordinateNote) within \(timeout) seconds; last value was '\(lastValue)' and final reader state was '\(finalState)'.",
             file: file,
             line: line
         )
