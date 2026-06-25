@@ -813,6 +813,76 @@ extension AndBibleUITests {
     }
 
     /**
+     Taps one inline Label Assignment control until the row reports the expected semantic value.
+     *
+     * - Parameters:
+     *   - controlPrefix: Accessibility identifier prefix for the inline control to tap.
+     *   - labelSegment: Identifier-safe label segment shared by the row and inline controls.
+     *   - expectedRowValue: Full row accessibility value expected after the mutation.
+     *   - expectedControlValue: Control accessibility value expected after the mutation.
+     *   - app: Running application under test.
+     *   - timeout: Maximum time allowed for the row state to settle.
+     *   - file: Source file used for XCTest failure attribution.
+     *   - line: Source line used for XCTest failure attribution.
+     * - Side effects:
+     *   - re-resolves the row and inline control while polling
+     *   - retries the tap only while the control itself still reports the pre-mutation state
+     * - Failure modes:
+     *   - fails if the row never reaches `expectedRowValue` before timeout
+     */
+    func tapLabelAssignmentControlUntilRowValue(
+        _ controlPrefix: String,
+        labelSegment: String,
+        expectedRowValue: String,
+        expectedControlValue: String,
+        in app: XCUIApplication,
+        timeout: TimeInterval = 10,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let rowIdentifier = "labelAssignmentRow::\(labelSegment)"
+        let controlIdentifier = "\(controlPrefix)::\(labelSegment)"
+        let deadline = Date().addingTimeInterval(timeout)
+        var didTap = false
+        var lastTapTime = Date.distantPast
+        var lastRowValue = "nil"
+        var lastControlValue = "nil"
+
+        repeat {
+            if let row = resolvedElement(rowIdentifier, in: app) {
+                lastRowValue = row.value.map { "\($0)" } ?? "nil"
+                if lastRowValue == expectedRowValue {
+                    return
+                }
+            } else {
+                lastRowValue = "missing"
+            }
+
+            if let control = resolvedElement(controlIdentifier, in: app) {
+                lastControlValue = control.value.map { "\($0)" } ?? "nil"
+                if lastControlValue != expectedControlValue,
+                   !didTap || Date().timeIntervalSince(lastTapTime) >= 1.0 {
+                    let remaining = max(0.1, deadline.timeIntervalSinceNow)
+                    if tapElementIfPossible(control, timeout: min(1, remaining)) {
+                        didTap = true
+                        lastTapTime = Date()
+                    }
+                }
+            } else {
+                lastControlValue = "missing"
+            }
+
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        } while Date() < deadline
+
+        XCTFail(
+            "Expected label assignment row '\(rowIdentifier)' to reach value '\(expectedRowValue)' within \(timeout) seconds; last row value was '\(lastRowValue)' and last control value for '\(controlIdentifier)' was '\(lastControlValue)'.",
+            file: file,
+            line: line
+        )
+    }
+
+    /**
      Toggles the seeded label row inside Label Assignment and verifies the combined state change.
      *
      * - Parameter app: Running application under test.
@@ -831,27 +901,48 @@ extension AndBibleUITests {
             "Expected the seeded label row to start in a known non-favourite state, got '\(initialState ?? "nil")'."
         )
 
-        let favouriteButton = requireElement(
+        _ = requireElement(
             "labelAssignmentFavouriteButton::UI_Test_Seed",
             in: app,
             timeout: 10
         )
-        let toggleButton = requireElement(
+        _ = requireElement(
             "labelAssignmentToggleButton::UI_Test_Seed",
             in: app,
             timeout: 10
         )
 
-        tapElementReliably(favouriteButton, timeout: 10)
-        waitForElementValue("labelAssignmentRow::UI_Test_Seed", toEqual: "assigned,favourite", in: app, timeout: 10)
+        let favouritedState = initialState == "assigned,notFavourite"
+            ? "assigned,favourite"
+            : "unassigned,favourite"
+        tapLabelAssignmentControlUntilRowValue(
+            "labelAssignmentFavouriteButton",
+            labelSegment: "UI_Test_Seed",
+            expectedRowValue: favouritedState,
+            expectedControlValue: "favourite",
+            in: app,
+            timeout: 10
+        )
 
         if initialState == "assigned,notFavourite" {
-            tapElementReliably(toggleButton, timeout: 10)
-            waitForElementValue("labelAssignmentRow::UI_Test_Seed", toEqual: "unassigned,favourite", in: app, timeout: 10)
+            tapLabelAssignmentControlUntilRowValue(
+                "labelAssignmentToggleButton",
+                labelSegment: "UI_Test_Seed",
+                expectedRowValue: "unassigned,favourite",
+                expectedControlValue: "unassigned",
+                in: app,
+                timeout: 10
+            )
         }
 
-        tapElementReliably(toggleButton, timeout: 10)
-        waitForElementValue("labelAssignmentRow::UI_Test_Seed", toEqual: "assigned,favourite", in: app, timeout: 10)
+        tapLabelAssignmentControlUntilRowValue(
+            "labelAssignmentToggleButton",
+            labelSegment: "UI_Test_Seed",
+            expectedRowValue: "assigned,favourite",
+            expectedControlValue: "assigned",
+            in: app,
+            timeout: 10
+        )
     }
 
     /**
@@ -1008,15 +1099,15 @@ extension AndBibleUITests {
     }
 
     /**
-     Resolves one label row by its accessibility label.
+     Resolves one label row through the production row identifier or visible row text.
      *
      * - Parameters:
      *   - name: User-visible label name expected on the row.
      *   - app: Running application under test.
-     * - Returns: The first matching Label Manager row button for the requested label name.
+     * - Returns: The first matching Label Manager row surface for the requested label name.
      * - Side effects:
-     *   - queries the live accessibility hierarchy for a label-manager row whose label matches
-     *     `name`
+     *   - queries the live accessibility hierarchy for the label-manager row identifier, then for
+     *     the visible label text SwiftUI exposes inside that row
      * - Failure modes:
      *   - returns an unresolved query when no matching row currently exists
      */
@@ -1027,6 +1118,10 @@ extension AndBibleUITests {
             if scopedButton.exists {
                 return scopedButton
             }
+            let scopedText = labelManagerScreen.staticTexts[name].firstMatch
+            if scopedText.exists {
+                return scopedText
+            }
             let scopedLink = labelManagerScreen.links[identifier].firstMatch
             if scopedLink.exists {
                 return scopedLink
@@ -1036,6 +1131,10 @@ extension AndBibleUITests {
         let globalButton = app.buttons[identifier].firstMatch
         if globalButton.exists {
             return globalButton
+        }
+        let globalText = app.staticTexts[name].firstMatch
+        if globalText.exists {
+            return globalText
         }
         let globalLink = app.links[identifier].firstMatch
         if globalLink.exists {
@@ -1067,14 +1166,23 @@ extension AndBibleUITests {
         file: StaticString = #filePath,
         line: UInt = #line
     ) -> XCUIElement {
-        let element = labelRow(named: name, in: app)
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            let element = labelRow(named: name, in: app)
+            if element.exists {
+                return element
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        } while Date() < deadline
+
+        let fallback = labelRow(named: name, in: app)
         XCTAssertTrue(
-            element.waitForExistence(timeout: timeout),
+            fallback.exists,
             "Expected label row '\(name)' to exist within \(timeout) seconds.",
             file: file,
             line: line
         )
-        return element
+        return fallback
     }
 
     /**

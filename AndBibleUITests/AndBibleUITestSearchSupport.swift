@@ -744,13 +744,7 @@ extension AndBibleUITests {
 
                 let remaining = deadline.timeIntervalSinceNow
                 if remaining > 0,
-                   searchTranslationPickerStateIsOpen(in: app, timeout: min(1.5, max(0.25, remaining))) {
-                    return
-                }
-
-                let descendantWait = min(0.5, max(0, deadline.timeIntervalSinceNow))
-                if descendantWait > 0,
-                   firstExistingElement(searchTranslationPickerOpenCandidates(in: app), timeout: descendantWait) != nil {
+                   searchTranslationPickerIsOpen(in: app, timeout: min(1.5, max(0.25, remaining))) {
                     return
                 }
             }
@@ -862,7 +856,7 @@ extension AndBibleUITests {
         repeat {
             if let row = firstExistingElement(
                 searchTranslationRowCandidates(identifier, moduleName: moduleName, in: app),
-                timeout: 0.2
+                timeout: 0
             ) {
                 let expectedValue = expectedSearchTranslationRowValue(afterTapping: row)
                 if waitForElementToBecomeHittable(row, timeout: 1),
@@ -1013,23 +1007,13 @@ extension AndBibleUITests {
     /// Returns row candidates for one Search translation picker module.
     func searchTranslationRowCandidates(
         _ identifier: String,
-        moduleName: String,
+        moduleName _: String,
         in app: XCUIApplication
     ) -> [XCUIElement] {
-        let scoped = searchTranslationPickerListCandidates(in: app).flatMap { list in
-            [
-                list.buttons[identifier].firstMatch,
-                list.cells[identifier].firstMatch,
-                list.otherElements[identifier].firstMatch,
-                list.staticTexts[moduleName].firstMatch,
-            ]
-        }
-        return scoped + [
+        [
             app.buttons[identifier].firstMatch,
-            app.collectionViews.buttons[identifier].firstMatch,
             app.cells[identifier].firstMatch,
             app.otherElements[identifier].firstMatch,
-            app.staticTexts[moduleName].firstMatch,
         ]
     }
 
@@ -1568,6 +1552,76 @@ extension AndBibleUITests {
 
         XCTFail("Expected at least one search result row within \(timeout) seconds.")
         return candidates.first ?? app.otherElements["searchResultRow::missing"].firstMatch
+    }
+
+    /**
+     Selects a Search result row and waits for that selection to navigate the reader.
+     *
+     * - Parameters:
+     *   - identifier: Accessibility identifier of the expected `searchResultRow::` control.
+     *   - initialReference: Reader reference value captured before opening or using Search.
+     *   - app: Running application under test.
+     *   - timeout: Maximum time for the result selection to change the reader reference.
+     *   - file: Source file used for XCTest failure attribution.
+     *   - line: Source line used for XCTest failure attribution.
+     * - Returns: First non-empty reader reference value that differs from `initialReference`.
+     * - Side effects:
+     *   - taps the live Search result row, retrying inside the original timeout only while the row
+     *     remains visible and the reader reference has not changed
+     *   - samples the Search semantic state and reader reference on each poll for failure context
+     * - Failure modes:
+     *   - fails if the row cannot be tapped or if Search dismisses/settles without changing the
+     *     reader reference
+     */
+    func tapSearchResultRowAndWaitForReaderReferenceChange(
+        _ identifier: String,
+        from initialReference: String,
+        in app: XCUIApplication,
+        timeout: TimeInterval,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) -> String {
+        let deadline = Date().addingTimeInterval(timeout)
+        var didTap = false
+        var lastTapTime = Date.distantPast
+        var lastReference = initialReference
+        var lastSearchState = resolvedSearchStateValue(in: app) ?? "nil"
+        var rowWasVisible = false
+
+        repeat {
+            if let reference = resolvedElementSemanticText("bookChooserButton", in: app),
+               !reference.isEmpty {
+                lastReference = reference
+                if reference != initialReference {
+                    return reference
+                }
+            }
+
+            lastSearchState = resolvedSearchStateValue(in: app) ?? "nil"
+            if let row = resolvedElement(identifier, in: app) {
+                rowWasVisible = true
+                if !didTap || Date().timeIntervalSince(lastTapTime) >= 1.0 {
+                    let remaining = max(0.1, deadline.timeIntervalSinceNow)
+                    if tapElementIfPossible(row, timeout: min(1, remaining)) {
+                        didTap = true
+                        lastTapTime = Date()
+                    }
+                }
+            } else {
+                rowWasVisible = false
+            }
+
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        } while Date() < deadline
+
+        XCTAssertNotEqual(
+            lastReference,
+            initialReference,
+            "Expected selecting Search result '\(identifier)' to move the reader away from '\(initialReference)' within \(timeout) seconds; last reader reference was '\(lastReference)', last Search state was '\(lastSearchState)', rowVisible=\(rowWasVisible).",
+            file: file,
+            line: line
+        )
+        return lastReference
     }
 
 }

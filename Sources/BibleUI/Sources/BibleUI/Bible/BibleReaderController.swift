@@ -1412,7 +1412,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         compareDocumentRequestID = requestID
 
         DispatchQueue.global(qos: .userInitiated).async {
-            let documentJSON = Self.buildBibleCompareDocumentJSON(request)
+            let documentJSON = BibleReaderCompareDocumentBuilder.buildDocumentJSON(request)
             DispatchQueue.main.async { [weak self] in
                 guard let self,
                       self.compareDocumentRequestID == requestID,
@@ -4767,69 +4767,30 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     }
 
     /**
-     Captures all main-reader state needed to build a compare payload away from the main queue.
+     Builds the compare document builder bound to this pane's SWORD and installed-module state.
      */
-    private struct BibleCompareDocumentRequest {
-        /// Modules to include in compare output, paired with their SWORD readers.
-        let modules: [(info: ModuleInfo, module: SwordModule)]
-
-        /// Active passage OSIS book id.
-        let osisBookId: String
-
-        /// User-facing active book name.
-        let bookName: String
-
-        /// One-based active chapter.
-        let chapter: Int
-
-        /// Whether the active book is in the New Testament.
-        let isNewTestament: Bool
-
-        /// Optional first selected verse.
-        let startVerse: Int?
-
-        /// Optional last selected verse.
-        let endVerse: Int?
+    private func compareDocumentBuilder() -> BibleReaderCompareDocumentBuilder {
+        BibleReaderCompareDocumentBuilder(
+            swordManager: swordManager,
+            installedBibleModules: installedBibleModules,
+            activeModuleName: activeModuleName
+        )
     }
 
     /**
-     Builds the Vue `MultiDocument` payload Android uses for Compare.
+     Builds the background-safe Compare request for the active passage.
 
-     Android opens `FakeBookFactory.compareDocument` and renders a `MultiFragmentDocument` with
-     `compare=true`, one fragment per installed Bible. iOS mirrors that shape so Vue owns the
-     translation list, hide buttons, and restore affordance.
-
-     - Parameters:
-       - startVerse: Optional first verse requested by the selection or bridge action. `nil`
-         starts at verse 1.
-       - endVerse: Optional final verse requested by the selection or bridge action. `nil` uses the
-         chapter's module-reported final verse.
-     - Returns: Serialized compare `MultiDocument`, or `nil` when no installed Bible can render the
-       requested range.
-     - Side effects: reads installed SWORD Bible modules and temporarily moves each module cursor
-       while extracting raw OSIS.
-     - Failure modes: logs and returns `nil` when SWORD is unavailable, every module misses the
-       requested range, or JSON serialization fails.
+     The controller supplies live reader coordinates while `BibleReaderCompareDocumentBuilder` owns
+     module ordering and payload construction.
      */
-    private func makeBibleCompareDocumentRequest(startVerse: Int?, endVerse: Int?) -> BibleCompareDocumentRequest? {
-        guard let manager = swordManager else {
-            logger.warning("Compare requested without an active SwordManager")
-            return nil
-        }
-
-        let modules = installedCompareBibleModules(using: manager).compactMap { moduleInfo in
-            manager.module(named: moduleInfo.name).map { (info: moduleInfo, module: $0) }
-        }
-        guard !modules.isEmpty else {
-            logger.warning("Compare requested with no installed Bible modules")
-            return nil
-        }
-
+    private func makeBibleCompareDocumentRequest(
+        startVerse: Int?,
+        endVerse: Int?
+    ) -> BibleReaderCompareDocumentBuilder.Request? {
         let bookName = currentBook
         let chapter = currentChapter
         let osisBookId = osisBookId(for: bookName)
-        return BibleCompareDocumentRequest(
-            modules: modules,
+        return compareDocumentBuilder().makeRequest(
             osisBookId: osisBookId,
             bookName: bookName,
             chapter: chapter,
@@ -4837,223 +4798,6 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             startVerse: startVerse,
             endVerse: endVerse
         )
-    }
-
-    /**
-     Builds the Vue `MultiDocument` payload Android uses for Compare.
-
-     - Parameter request: Captured compare request containing module readers and passage metadata.
-     - Returns: Serialized compare `MultiDocument`, or `nil` when no installed Bible can render the
-       requested range.
-     - Side effects: temporarily moves each module cursor while extracting raw OSIS.
-     - Failure modes: logs and returns `nil` when every module misses the requested range or JSON
-       serialization fails.
-    */
-    private static func buildBibleCompareDocumentJSON(_ request: BibleCompareDocumentRequest) -> String? {
-        let fragments = request.modules.compactMap { modulePair -> [String: Any]? in
-            buildBibleCompareFragment(
-                module: modulePair.module,
-                moduleInfo: modulePair.info,
-                osisBookId: request.osisBookId,
-                bookName: request.bookName,
-                chapter: request.chapter,
-                isNewTestament: request.isNewTestament,
-                startVerse: request.startVerse,
-                endVerse: request.endVerse
-            )
-        }
-
-        guard !fragments.isEmpty else {
-            logger.warning(
-                "Compare requested but no module rendered \(request.osisBookId, privacy: .public) \(request.chapter)"
-            )
-            return nil
-        }
-
-        let document: [String: Any] = [
-            "id": "compare-\(UUID().uuidString)",
-            "type": "multi",
-            "osisFragments": fragments,
-            "compare": true,
-        ]
-
-        guard let data = try? JSONSerialization.data(withJSONObject: document, options: [.sortedKeys]),
-              let json = String(data: data, encoding: .utf8) else {
-            logger.error("Failed to serialize compare document JSON")
-            return nil
-        }
-        return json
-    }
-
-    /**
-     Resolves installed Bible modules eligible for Compare.
-
-     - Parameter manager: Active SWORD manager used as a fallback when cached module metadata is
-       empty.
-     - Returns: Installed Bible module metadata in active-reader order.
-     - Side effects: may read the SWORD module list when cached `installedBibleModules` is empty.
-     - Failure modes: returns an empty array when no installed module is categorized as a Bible.
-     */
-    private func installedCompareBibleModules(using manager: SwordManager) -> [ModuleInfo] {
-        let cached = installedBibleModules
-        let modules = cached.isEmpty
-            ? manager.installedModules().filter { $0.category == .bible }
-            : cached
-
-        guard let activeIndex = modules.firstIndex(where: { $0.name == activeModuleName }) else {
-            return modules
-        }
-        var orderedModules = modules
-        let activeModule = orderedModules.remove(at: activeIndex)
-        orderedModules.insert(activeModule, at: 0)
-        return orderedModules
-    }
-
-    /**
-     Builds one compare fragment for one installed Bible module.
-
-     - Parameters:
-       - module: SWORD Bible module to read.
-       - moduleInfo: Metadata for `module`, used for Vue labels and language/direction flags.
-       - osisBookId: Active passage OSIS book identifier.
-       - bookName: User-facing active book name.
-       - chapter: One-based active chapter number.
-       - startVerse: Optional one-based first verse to compare.
-       - endVerse: Optional one-based final verse to compare.
-     - Returns: Vue OSIS fragment dictionary, or `nil` when the module cannot resolve any verse in
-       the requested range.
-     - Side effects: temporarily moves the SWORD module cursor once per inspected verse and restores
-       the previous cursor after each read.
-     - Failure modes: returns `nil` if the first requested verse cannot be resolved in the target
-       module's versification or if all raw entries in the range are empty.
-     */
-    private static func buildBibleCompareFragment(
-        module: SwordModule,
-        moduleInfo: ModuleInfo,
-        osisBookId: String,
-        bookName: String,
-        chapter: Int,
-        isNewTestament: Bool,
-        startVerse: Int?,
-        endVerse: Int?
-    ) -> [String: Any]? {
-        let normalizedStart = max(1, startVerse ?? 1)
-        let firstInspection = module.inspectVerseKeyAndRawEntryRestoringPrevious(
-            "=\(osisBookId).\(chapter).\(normalizedStart)"
-        )
-        guard let firstKey = firstInspection.verseKey,
-              firstKey.osisBookName == osisBookId,
-              firstKey.chapter == chapter,
-              firstKey.verse == normalizedStart else {
-            return nil
-        }
-
-        let chapterMaxVerse = max(normalizedStart, firstKey.verseMax)
-        let normalizedEnd = min(max(normalizedStart, endVerse ?? chapterMaxVerse), chapterMaxVerse)
-        var verseXML: [String] = []
-
-        for verse in normalizedStart...normalizedEnd {
-            guard let ordinal = module.verseOrdinal(osisBookId: osisBookId, chapter: chapter, verse: verse) else {
-                return nil
-            }
-            let inspection: (actualKey: String, verseKey: VerseKeyChildren?, rawEntry: String)
-            if verse == normalizedStart {
-                inspection = firstInspection
-            } else {
-                inspection = module.inspectVerseKeyAndRawEntryRestoringPrevious(
-                    "=\(osisBookId).\(chapter).\(verse)"
-                )
-            }
-
-            guard let key = inspection.verseKey,
-                  key.osisBookName == osisBookId,
-                  key.chapter == chapter,
-                  key.verse == verse else {
-                continue
-            }
-
-            let rawText = inspection.rawEntry.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !rawText.isEmpty else { continue }
-
-            let osisRef = "\(osisBookId).\(chapter).\(verse)"
-            verseXML.append(
-                "<verse osisID=\"\(osisRef)\" verseOrdinal=\"\(ordinal)\">\(rawText) </verse>"
-            )
-        }
-
-        guard !verseXML.isEmpty else { return nil }
-
-        let osisRef = compareOsisRef(
-            osisBookId: osisBookId,
-            chapter: chapter,
-            startVerse: normalizedStart,
-            endVerse: normalizedEnd
-        )
-        let keyName = compareRangeTitle(
-            bookName: bookName,
-            chapter: chapter,
-            startVerse: normalizedStart,
-            endVerse: normalizedEnd
-        )
-        guard let ordinalStart = module.verseOrdinal(osisBookId: osisBookId, chapter: chapter, verse: normalizedStart),
-              let ordinalEnd = module.verseOrdinal(osisBookId: osisBookId, chapter: chapter, verse: normalizedEnd) else {
-            return nil
-        }
-
-        return [
-            "xml": "<div>\(verseXML.joined())</div>",
-            "key": "\(moduleInfo.name)--\(osisRef)",
-            "keyName": keyName,
-            "v11n": "KJVA",
-            "bookCategory": DocumentCategory.bible.rawValue,
-            "bookInitials": moduleInfo.name,
-            "bookAbbreviation": moduleInfo.name,
-            "osisRef": osisRef,
-            "isNewTestament": isNewTestament,
-            "features": [String: Any](),
-            "hasStrongs": moduleInfo.features.contains(.strongsNumbers),
-            "ordinalRange": [ordinalStart, ordinalEnd],
-            "language": moduleInfo.language.isEmpty ? "en" : moduleInfo.language,
-            "direction": moduleInfo.isRightToLeft ? "rtl" : "ltr",
-        ]
-    }
-
-    /**
-     Formats the OSIS reference carried by a compare fragment.
-
-     - Parameters:
-       - osisBookId: OSIS book identifier.
-       - chapter: One-based chapter number.
-       - startVerse: First verse in the rendered range.
-       - endVerse: Last verse in the rendered range.
-     - Returns: Single-verse OSIS ref or Android-style repeated-book range ref.
-     - Side effects: none.
-     - Failure modes: none; inputs are expected to be normalized by the caller.
-     */
-    private static func compareOsisRef(osisBookId: String, chapter: Int, startVerse: Int, endVerse: Int) -> String {
-        if startVerse == endVerse {
-            return "\(osisBookId).\(chapter).\(startVerse)"
-        }
-        return "\(osisBookId).\(chapter).\(startVerse)-\(osisBookId).\(chapter).\(endVerse)"
-    }
-
-    /**
-     Formats the user-visible compare range title used by Vue `MultiDocument`.
-
-     - Parameters:
-       - bookName: User-facing book name.
-       - chapter: One-based chapter number.
-       - startVerse: First verse in the rendered range.
-       - endVerse: Last verse in the rendered range.
-     - Returns: Title such as `Genesis 1:1` or `Genesis 1:1-3`.
-     - Side effects: none.
-     - Failure modes: none; inputs are expected to be normalized by the caller.
-     */
-    private static func compareRangeTitle(bookName: String, chapter: Int, startVerse: Int, endVerse: Int) -> String {
-        if startVerse == endVerse {
-            return "\(bookName) \(chapter):\(startVerse)"
-        }
-        return "\(bookName) \(chapter):\(startVerse)-\(endVerse)"
     }
 
     /**

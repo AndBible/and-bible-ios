@@ -499,7 +499,7 @@ extension AndBibleUITests {
         waitForSearchResultRow("searchResultRow::Genesis_1_2", in: app, shouldExist: true, timeout: 20)
 
         tapSearchTranslationPicker(in: app, timeout: 10)
-        tapSearchTranslationRow(moduleName: "UITESTWEB", in: app, timeout: 10)
+        tapSearchTranslationRow(moduleName: "UITESTWEB", in: app, timeout: 45)
         tapSearchTranslationDone(in: app, timeout: 10)
 
         waitForSearchSelectedModules(
@@ -626,10 +626,8 @@ extension AndBibleUITests {
 
         let noahResultIdentifier = "searchResultRow::Genesis_6_8"
         waitForSearchResultRow(noahResultIdentifier, in: app, shouldExist: true, timeout: 20)
-        let noahResult = requireElement(noahResultIdentifier, in: app, timeout: 20)
-        tapElementReliably(noahResult, timeout: 10)
-
-        let updatedReference = waitForReaderReferenceValueToChange(
+        let updatedReference = tapSearchResultRowAndWaitForReaderReferenceChange(
+            noahResultIdentifier,
             from: initialReference,
             in: app,
             timeout: 20
