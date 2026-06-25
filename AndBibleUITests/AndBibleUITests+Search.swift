@@ -345,9 +345,9 @@ extension AndBibleUITests {
      *
      * - Side effects:
      *   - launches the app on the reader shell with the initial query `earth` queued for Search
-     *   - opens Search from the toolbar and waits for the search sheet to settle
+     *   - opens Search from the toolbar and waits for the Search destination to settle
      * - Failure modes:
-     *   - fails if the Search sheet never appears
+     *   - fails if the Search screen never appears
      *   - fails if the seeded query is dropped before the Search screen reaches its settled state
      */
     func testSearchDirectLaunchRetainsSeededQuery() {
@@ -357,6 +357,32 @@ extension AndBibleUITests {
         _ = openSearch(in: app)
         waitForSearchQuery("earth", in: app, timeout: 20)
         waitForSearchResultRow("searchResultRow::Genesis_1_2", in: app, shouldExist: true, timeout: 20)
+    }
+
+    /**
+     Verifies Search opens as an integrated reader destination instead of an iOS sheet.
+     *
+     * Android Search is a full activity with toolbar navigation, not a bottom/large iOS sheet with a
+     * `Done` affordance. This test protects that presentation contract separately from Search's
+     * query behavior so future visual parity work does not accidentally reintroduce sheet chrome.
+     *
+     * - Setup: Launches the standard seeded Search fixture and opens Search through the reader entry.
+     * - Expected result: The reader state reports `readerDestination=search`, and no navigation-bar
+     *   `Done` button is exposed by the Search surface.
+     * - Failure meaning: Search has drifted back to sheet/modal presentation instead of Android's
+     *   destination-style surface.
+     * - Side effects: Presents Search from the reader shell.
+     */
+    func testSearchPresentsAsReaderDestinationInsteadOfSheet() {
+        let app = makeApp(searchQuery: "earth")
+        app.launch()
+
+        _ = openSearch(in: app)
+        waitForReaderRenderedContentState(containing: "readerDestination=search", in: app, timeout: 10)
+        XCTAssertFalse(
+            app.navigationBars.buttons["Done"].firstMatch.exists,
+            "Search should not expose iOS sheet-style Done chrome when opened from the reader."
+        )
     }
 
     /**
@@ -474,21 +500,26 @@ extension AndBibleUITests {
      *
      * - Side effects:
      *   - launches Search with deterministic KJV and UITESTWEB index rows for `earth`
+     *   - uses the seeded startup reader reference `Genesis 1:1` as the before-navigation value
      *   - verifies picker Cancel ignores a draft UITESTWEB row selection
+     *   - verifies outside dismissal ignores a draft UITESTWEB row selection
      *   - verifies Select all followed by Select none and OK preserves the prior selection
      *   - opens the real translation picker, selects UITESTWEB, and commits with OK
+     *   - verifies the visible selected-translation summary matches Android's abbreviation list
      *   - waits for the active query to rerun and export grouped per-translation counts
      * - Failure modes:
      *   - fails if the translation picker is not reachable from Search options
-     *   - fails if Cancel or empty OK mutates the committed module selection
+     *   - fails if Cancel, outside dismissal, or empty OK mutates the committed module selection
      *   - fails if selecting a second translation does not rerun the active query with KJV first
+     *   - fails if the selected-translation button collapses Android's abbreviation list into a
+     *     generic iOS count label
      *   - fails if grouped totals collapse to single-translation results
      */
     func testSearchMultiTranslationSelectionUpdatesGroupedTotals() {
         let app = makeApp(searchQuery: "earth")
         app.launch()
 
-        let initialReference = requireReaderReferenceValue(in: app, timeout: 15)
+        let initialReference = "Genesis 1:1"
 
         _ = openSearch(in: app)
         waitForSearchState(containing: "query=earth", in: app, timeout: 20)
@@ -508,6 +539,17 @@ extension AndBibleUITests {
             in: app,
             timeout: 10,
             description: "still exactly KJV after cancel"
+        ) { modules in
+            modules == Set(["KJV"])
+        }
+
+        tapSearchTranslationPicker(in: app, timeout: 10)
+        tapSearchTranslationRow(moduleName: "UITESTWEB", in: app, timeout: 45)
+        tapSearchTranslationOutsideDismiss(in: app, timeout: 10)
+        waitForSearchSelectedModules(
+            in: app,
+            timeout: 10,
+            description: "still exactly KJV after outside dismissal"
         ) { modules in
             modules == Set(["KJV"])
         }
@@ -536,6 +578,10 @@ extension AndBibleUITests {
             modules.count > 1 && modules.contains("UITESTWEB")
         }
         waitForSearchState(containing: "selectedModuleOrder=KJV,UITESTWEB", in: app, timeout: 20)
+        XCTAssertTrue(
+            app.staticTexts["KJV, UITESTWEB"].waitForExistence(timeout: 5),
+            "Expected the Search translation button to show Android's selected abbreviation list."
+        )
         waitForSearchState(containing: "groupedTotal=3", in: app, timeout: 20)
         waitForSearchState(containing: "KJV:1", in: app, timeout: 20)
         waitForSearchState(containing: "UITESTWEB:2", in: app, timeout: 20)

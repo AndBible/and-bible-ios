@@ -27,6 +27,7 @@
   "AndBibleUITests/AndBibleUITests/testSearchDirectLaunchStrongsQueryReturnsBundledResults": "search-indexed",
   "AndBibleUITests/AndBibleUITests/testSearchDirectLaunchUsesSeededIndexAndReturnsBundledResults": "search-indexed",
   "AndBibleUITests/AndBibleUITests/testSearchMultiTranslationSelectionUpdatesGroupedTotals": "search-multi-translation",
+  "AndBibleUITests/AndBibleUITests/testSearchPresentsAsReaderDestinationInsteadOfSheet": "search-indexed",
   "AndBibleUITests/AndBibleUITests/testSearchDirectLaunchRetainsSeededQuery": "search-indexed",
   "AndBibleUITests/AndBibleUITests/testSearchResultSelectionNavigatesReaderToBundledReference": "search-indexed",
   "AndBibleUITests/AndBibleUITests/testSearchScopeChangeRerunsQueryAndUpdatesResults": "search-indexed",

@@ -103,7 +103,7 @@ extension AndBibleUITests {
             : seededSearchReadinessTimeout
     }
 
-    /// Reuses a Search sheet that the app auto-presented from a launch-seeded UI-test query.
+    /// Reuses a Search destination that the app auto-presented from a launch-seeded UI-test query.
     func waitForSearchScreenIfAlreadySeeded(
         in app: XCUIApplication,
         timeout: TimeInterval
@@ -1128,6 +1128,40 @@ extension AndBibleUITests {
         } while Date() < deadline
 
         XCTFail("Expected Search translation Cancel button to exist within \(timeout) seconds.")
+    }
+
+    /**
+     Dismisses the Search translation picker by tapping its dimmed area outside the dialog.
+     *
+     * Android `AlertDialog` cancellation returns an empty multiselect result, which Search ignores
+     * rather than committing draft row changes. This helper exercises the equivalent iOS overlay path
+     * without relying on a button-specific action.
+     *
+     * - Parameters:
+     *   - app: Running application under test.
+     *   - timeout: Maximum time to wait for the overlay to appear and then close.
+     * - Side effects:
+     *   - taps an app-level top-leading coordinate in the dimmed area outside the centered picker
+     *     dialog
+     * - Failure modes:
+     *   - fails when the picker overlay is not reachable or does not close after the outside tap
+     */
+    func tapSearchTranslationOutsideDismiss(
+        in app: XCUIApplication,
+        timeout: TimeInterval
+    ) {
+        let overlay = app.otherElements["searchTranslationPickerOverlay"].firstMatch
+        guard overlay.waitForExistence(timeout: timeout) else {
+            XCTFail("Expected Search translation overlay to exist within \(timeout) seconds.")
+            return
+        }
+
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.05, dy: 0.2)).tap()
+        if !searchTranslationPickerIsOpen(in: app, timeout: 2) {
+            return
+        }
+
+        XCTFail("Expected Search translation overlay to close after outside dismissal.")
     }
 
     /**

@@ -61,7 +61,7 @@ enum UITestSearchQuerySeed {
  - `onAppear` seeds initial module selection, applies `initialQuery`, and triggers the index check
  - `startIndexCreation()` launches asynchronous index creation through `SearchIndexService`
  - `performSearch()` launches detached search work and marshals results back onto the main actor
- - `navigateTo(_:)` dismisses the sheet and notifies the caller with the selected passage
+ - `navigateTo(_:)` notifies the caller and dismisses Search with the active presentation mechanism
  */
 public struct SearchView: View {
     /// Callback invoked when the user selects a search hit and wants to navigate to it.
@@ -127,7 +127,7 @@ public struct SearchView: View {
     /// Navigation-title summary of the most recent search results.
     @State private var resultSummary: String = ""
 
-    /// Dismiss action for closing the search sheet after navigation or cancellation.
+    /// Dismiss action for popping Search after result navigation.
     @Environment(\.dismiss) private var dismiss
 
     /**
@@ -278,9 +278,6 @@ public struct SearchView: View {
         .navigationBarTitleDisplayMode(.inline)
         #endif
         .toolbar {
-            ToolbarItem(placement: .cancellationAction) {
-                Button(String(localized: "done")) { dismiss() }
-            }
             if case .ready = viewState {
                 ToolbarItem(placement: .primaryAction) {
                     Button {
@@ -376,6 +373,31 @@ public struct SearchView: View {
             installedModules: installedBibleModules
         )
         return "selectedModules=\(selectedModules.sorted().joined(separator: ","));selectedModuleOrder=\(orderedModules.joined(separator: ","))"
+    }
+
+    /**
+     User-visible selected translation summary shown on the Search translation picker button.
+
+     Android renders the committed selected translations as a comma-separated abbreviation list after
+     moving the primary document to the front. iOS uses the same helper as search execution so the
+     visible control, request order, and grouped result order cannot drift independently.
+
+     - Returns: Ordered abbreviations such as `KJV, UITESTWEB`, or a localized fallback label when
+       no module can be resolved.
+     - Side effects: none.
+     - Failure modes: Empty selection and missing primary module metadata produce the generic
+       `search_translations` fallback instead of a malformed empty button.
+     */
+    private var selectedTranslationSummaryLabel: String {
+        let orderedModules = Self.androidOrderedSelectedSearchModuleNames(
+            selectedModuleNames: selectedModules,
+            primaryModuleName: swordModule?.info.name,
+            installedModules: installedBibleModules
+        )
+        guard !orderedModules.isEmpty else {
+            return String(localized: "search_translations", defaultValue: "Translations")
+        }
+        return orderedModules.joined(separator: ", ")
     }
 
     /**
@@ -629,11 +651,8 @@ public struct SearchView: View {
                     HStack {
                         Image(systemName: "book.closed")
                             .font(.caption)
-                        if selectedModules.count == 1, let name = selectedModules.first {
-                            Text(name)
-                        } else {
-                            Text("\(selectedModules.count) translations")
-                        }
+                        Text(selectedTranslationSummaryLabel)
+                            .lineLimit(1)
                         Image(systemName: "chevron.right")
                             .font(.caption2)
                     }
@@ -1262,7 +1281,7 @@ public struct SearchView: View {
     // MARK: - Navigation
 
     /**
-     Forwards the selected result to the caller and dismisses the search sheet.
+     Forwards the selected result to the caller and dismisses Search.
 
      - Parameter hit: Selected search result.
      */

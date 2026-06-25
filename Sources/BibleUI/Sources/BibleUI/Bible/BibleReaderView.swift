@@ -105,6 +105,7 @@ public struct BibleReaderView: View {
 
     /// Reader-stack destinations opened from global reader actions.
     enum ReaderDestination: String, Identifiable, Hashable {
+        case search
         case settings
         case downloads
         case globalTextOptions
@@ -229,9 +230,6 @@ public struct BibleReaderView: View {
 
     /// Snapshot-backed chooser progress context captured when the chooser is presented.
     @State private var passageChooserProgressContext = PassageChooserProgressContext.empty
-
-    /// Presents the full-text search sheet for the focused module.
-    @State private var showSearch = false
 
     /// Presents the current top-level reader sheet driven by the overflow menu and shortcuts.
     @State private var activeReaderSheet: ReaderSheet?
@@ -400,7 +398,7 @@ public struct BibleReaderView: View {
     /// Window that owns the currently presented pane-scoped sheet or chooser flow.
     @State private var panePresentationTargetWindowId: UUID?
 
-    /// Ensures the launch-seeded UI-test Search sheet is only auto-presented once per app session.
+    /// Ensures the launch-seeded UI-test Search destination is only auto-presented once per app session.
     @State private var didPresentUITestLaunchSearch = false
 
     /// Presents the reference chooser used by bridge-driven dialogs.
@@ -597,7 +595,7 @@ public struct BibleReaderView: View {
         let sheetToken = "readerSheet=\(activeReaderSheet?.rawValue ?? "none")"
         let destinationToken = "readerDestination=\(activeReaderDestination?.rawValue ?? "none")"
         let modalToken = "readerModal=\(activeReaderModal?.rawValue ?? "none")"
-        let searchToken = "searchVisible=\(showSearch ? "true" : "false")"
+        let searchToken = "searchVisible=\(activeReaderDestination == .search ? "true" : "false")"
         return "\(windowToken);\(contentToken);\(tabOrdersToken);\(myNotesToken);\(studyPadToken);strongsMode=\(strongsMode);\(drawerToken);\(overflowToken);\(sheetToken);\(destinationToken);\(modalToken);\(searchToken)"
     }
 
@@ -830,9 +828,6 @@ public struct BibleReaderView: View {
         }
         #endif
         .preferredColorScheme(preferredColorSchemeOverride)
-        .sheet(isPresented: $showSearch, onDismiss: { searchInitialQuery = "" }) {
-            searchSheetContent
-        }
         .sheet(item: $activeReaderSheet) { presentedSheet in
             activeReaderSheetContent(presentedSheet)
         }
@@ -1099,23 +1094,27 @@ public struct BibleReaderView: View {
         .background(PassageChooserSurfacePalette.background.swiftUIColor.ignoresSafeArea())
     }
 
-    /// Search sheet seeded from toolbar, keyboard, or Android-compatible link routing.
+    /// Search destination seeded from toolbar, keyboard, or Android-compatible link routing.
     private var searchSheetContent: some View {
-        NavigationStack {
-            SearchView(
-                swordModule: panePresentationController?.activeModule,
-                swordManager: panePresentationController?.swordManager,
-                searchIndexService: searchIndexService,
-                installedBibleModules: panePresentationController?.installedBibleModules ?? [],
-                currentBook: panePresentationController?.currentBook ?? "Genesis",
-                currentOsisBookId: searchSheetCurrentOsisBookId,
-                initialQuery: searchInitialQuery,
-                onNavigate: navigateFromSearch
-            )
+        SearchView(
+            swordModule: panePresentationController?.activeModule,
+            swordManager: panePresentationController?.swordManager,
+            searchIndexService: searchIndexService,
+            installedBibleModules: panePresentationController?.installedBibleModules ?? [],
+            currentBook: panePresentationController?.currentBook ?? "Genesis",
+            currentOsisBookId: searchSheetCurrentOsisBookId,
+            initialQuery: searchInitialQuery,
+            onNavigate: navigateFromSearch
+        )
+        #if os(iOS)
+        .toolbar(.visible, for: .navigationBar)
+        #endif
+        .overlay(alignment: .topLeading) {
+            readerRenderedContentStateExport
         }
     }
 
-    /// OSIS book id shown as the Search sheet's current context.
+    /// OSIS book id shown as the Search destination's current context.
     private var searchSheetCurrentOsisBookId: String {
         let currentBook = panePresentationController?.currentBook ?? "Genesis"
         return panePresentationController?.osisBookId(for: currentBook)
@@ -1182,6 +1181,8 @@ public struct BibleReaderView: View {
     @ViewBuilder
     private func readerDestinationContent(_ destination: ReaderDestination) -> some View {
         switch destination {
+        case .search:
+            searchSheetContent
         case .settings:
             SettingsView(
                 nightMode: $nightMode,
@@ -1439,14 +1440,15 @@ public struct BibleReaderView: View {
        - chapter: Chapter selected by Search.
        - verse: Verse selected by Search.
      Side effects:
-     - dismisses the Search sheet
+     - dismisses the Search destination
      - updates the active pane's reader location
      Failure modes:
      - does nothing when no pane presentation controller is available
      */
     private func navigateFromSearch(book: String, chapter: Int, verse: Int) {
         panePresentationController?.navigateTo(book: book, chapter: chapter, verse: verse)
-        showSearch = false
+        activeReaderDestination = nil
+        searchInitialQuery = ""
     }
 
     // MARK: - Sheet and Destination Routing
@@ -1708,6 +1710,8 @@ public struct BibleReaderView: View {
             return
         }
         switch previousDestination {
+        case .search:
+            searchInitialQuery = ""
         case .settings:
             reloadBehaviorPreferences()
         case .downloads:
@@ -4169,12 +4173,12 @@ public struct BibleReaderView: View {
      Presents Search after first staging the latest initial-query state.
 
      Side effects:
-     - mutates `searchInitialQuery` so the sheet can seed its query field from the latest caller
-     - schedules `showSearch = true` for the next main-actor turn so the staged query wins over
+     - mutates `searchInitialQuery` so the Search destination can seed its query field from the latest caller
+     - schedules the `.search` destination for the next main-actor turn so the staged query wins over
        the current render pass
 
      Failure modes:
-     - uses an asynchronous handoff, so callers should not assume the sheet is visible until the
+     - uses an asynchronous handoff, so callers should not assume Search is visible until the
        next render pass completes
      */
     @MainActor
@@ -4190,7 +4194,7 @@ public struct BibleReaderView: View {
         }
         Task { @MainActor in
             await Task.yield()
-            showSearch = true
+            activeReaderDestination = .search
         }
     }
 
