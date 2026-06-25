@@ -194,6 +194,39 @@ extension AndBibleTests {
         )
     }
 
+    /**
+     Verifies the Search criteria screen uses Android's form structure instead of iOS controls.
+
+     Android `Search` renders a top edit field, two radio groups, a translations row, and a bottom
+     submit button from `app/src/main/res/layout/search.xml`. The iOS Search destination should
+     therefore avoid SwiftUI-only segmented controls, toolbar filter toggles, and empty-state cards
+     on the criteria screen.
+
+     - Expected result: `SearchView` exposes named Android-form building blocks and omits the
+       previous iOS-specific segmented/card/toggle affordances.
+     - Failure meaning: Search has drifted into a visually custom iOS screen even if the
+       translation picker itself uses an Android-style dialog.
+     - Side effects: Reads `SearchView.swift` from the checked-out source tree.
+     */
+    func testSearchCriteriaScreenUsesAndroidFormStructure() throws {
+        let testFileURL = URL(fileURLWithPath: #filePath)
+        let repoRoot = testFileURL
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let searchViewURL = repoRoot.appendingPathComponent(
+            "Sources/BibleUI/Sources/BibleUI/Search/SearchView.swift"
+        )
+
+        let source = try String(contentsOf: searchViewURL, encoding: .utf8)
+
+        XCTAssertTrue(source.contains("private var searchCriteriaForm"))
+        XCTAssertTrue(source.contains("private var searchSubmitButton"))
+        XCTAssertTrue(source.contains("private func searchRadioRow"))
+        XCTAssertFalse(source.contains(".pickerStyle(.segmented)"))
+        XCTAssertFalse(source.contains("ContentUnavailableView("))
+        XCTAssertFalse(source.contains("searchOptionsToggleButton"))
+    }
+
     func testStrongsQueryNormalizationHandlesLeadingZeroes() {
         let options = StrongsSearchSupport.normalizedQueryOptions(for: "H02022")
         XCTAssertEqual(options?.canonicalStrongTokens, ["H2022"])

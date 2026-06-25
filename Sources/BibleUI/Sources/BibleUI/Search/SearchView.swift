@@ -115,9 +115,6 @@ public struct SearchView: View {
     /// Draft module names edited inside the Android-style translation picker before OK commits.
     @State private var pendingTranslationSelection: Set<String> = []
 
-    /// Whether the options panel is expanded above the results list.
-    @State private var showOptions = true
-
     /// Whether the system search field currently owns focus.
     @FocusState private var isSearchFieldFocused: Bool
 
@@ -277,19 +274,6 @@ public struct SearchView: View {
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
-        .toolbar {
-            if case .ready = viewState {
-                ToolbarItem(placement: .primaryAction) {
-                    Button {
-                        withAnimation { showOptions.toggle() }
-                    } label: {
-                        Image(systemName: showOptions ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
-                    }
-                    .accessibilityIdentifier("searchOptionsToggleButton")
-                    .accessibilityValue(showOptions ? "visible" : "hidden")
-                }
-            }
-        }
         .onAppear {
             if selectedModules.isEmpty, let mod = swordModule {
                 selectedModules = [mod.info.name]
@@ -537,11 +521,7 @@ public struct SearchView: View {
     /// Main search UI shown once the view reaches the `.ready` state.
     private var searchContent: some View {
         VStack(spacing: 0) {
-            searchQueryBar
-
-            if showOptions {
-                searchOptionsPanel
-            }
+            searchCriteriaForm
 
             List {
                 if isSearching {
@@ -552,63 +532,41 @@ public struct SearchView: View {
                     multiResultsSection(multi)
                 } else if !results.isEmpty {
                     singleResultsSection
-                } else if query.isEmpty {
-                    ContentUnavailableView(
-                        String(localized: "search_bible"),
-                        systemImage: "magnifyingglass",
-                        description: Text(String(localized: "search_enter_prompt"))
-                    )
-                } else if !resultSummary.isEmpty {
-                    ContentUnavailableView(
-                        String(localized: "no_results"),
-                        systemImage: "magnifyingglass",
-                        description: Text("No matches found for \"\(query)\"")
-                    )
+                } else if !query.isEmpty, !resultSummary.isEmpty {
+                    Text(String(localized: "no_results"))
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .listRowSeparator(.hidden)
                 }
             }
+            .listStyle(.plain)
             .accessibilityIdentifier("searchResultsList")
+
+            searchSubmitButton
         }
     }
 
     /// Stable app-owned query field used for both user input and UI automation.
     private var searchQueryBar: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "magnifyingglass")
-                .foregroundStyle(.secondary)
-
-            TextField(String(localized: "search_bible_text"), text: $query)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled(true)
-                .submitLabel(.search)
-                .focused($isSearchFieldFocused)
-                .accessibilityIdentifier("searchQueryField")
-                .onSubmit {
-                    isSearchFieldFocused = false
-                    performSearch()
-                }
-
-            if !query.isEmpty {
-                Button {
-                    query = ""
-                    clearSearchResults()
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(String(localized: "clear"))
-                .accessibilityIdentifier("searchClearQueryButton")
-            }
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(.quaternary)
+        TextField(
+            String(localized: "type_text_or_bible_reference", defaultValue: "Type text or Bible reference"),
+            text: $query
         )
-        .padding(.horizontal)
+        .textInputAutocapitalization(.never)
+        .autocorrectionDisabled(true)
+        .submitLabel(.search)
+        .focused($isSearchFieldFocused)
+        .padding(.horizontal, 16)
         .padding(.top, 10)
         .padding(.bottom, 8)
+        .overlay(alignment: .bottom) {
+            Divider()
+        }
+        .accessibilityIdentifier("searchQueryField")
+        .onSubmit {
+            isSearchFieldFocused = false
+            performSearch()
+        }
         .onAppear {
             if UITestRuntimeConfiguration.shouldAutofocusSearchField {
                 DispatchQueue.main.async {
@@ -618,87 +576,175 @@ public struct SearchView: View {
         }
     }
 
-    // MARK: - Search Options Panel
+    // MARK: - Search Criteria Form
 
-    /// Search-mode, scope, and translation controls shown above the result list.
-    private var searchOptionsPanel: some View {
-        VStack(spacing: 12) {
-            Picker(String(localized: "search_match"), selection: $wordMode) {
-                ForEach(SearchWordMode.allCases, id: \.self) { mode in
-                    Text(mode.rawValue)
-                        .tag(mode)
-                        .accessibilityIdentifier("searchWordModeButton::\(searchWordModeToken(for: mode))")
-                }
-            }
-            .pickerStyle(.segmented)
-            .accessibilityIdentifier("searchWordModePicker")
+    /// Android-style Search criteria form shown above inline results.
+    private var searchCriteriaForm: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            searchQueryBar
 
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    scopeButton(String(localized: "search_scope_all"), choice: .wholeBible)
-                    scopeButton(String(localized: "search_scope_ot"), choice: .oldTestament)
-                    scopeButton(String(localized: "search_scope_nt"), choice: .newTestament)
-                    scopeButton(currentBook, choice: .currentBook)
-                }
-                .font(.subheadline)
+            HStack(alignment: .top, spacing: 16) {
+                searchScopeRadioGroup
+                searchWordModeRadioGroup
             }
-            .accessibilityIdentifier("searchScopeStrip")
+            .padding(.horizontal, 16)
+            .padding(.top, 12)
+            .padding(.bottom, 10)
 
-            if installedBibleModules.count > 1 {
-                Button {
-                    openTranslationPicker()
-                } label: {
-                    HStack {
-                        Image(systemName: "book.closed")
-                            .font(.caption)
-                        Text(selectedTranslationSummaryLabel)
-                            .lineLimit(1)
-                        Image(systemName: "chevron.right")
-                            .font(.caption2)
-                    }
-                    .font(.subheadline)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
-                }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("searchTranslationPickerButton")
-                .accessibilityValue("\(searchAccessibilitySelectionToken);\(searchAccessibilityTranslationPickerToken)")
-            }
+            searchTranslationsSection
         }
-        .padding(.horizontal)
-        .padding(.vertical, 10)
-        .background(.bar)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("searchOptionsPanel")
         .accessibilityValue("visible")
     }
 
+    /// Android search-scope radio group.
+    private var searchScopeRadioGroup: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(String(localized: "search_bible_section_group_prompt", defaultValue: "Bible section"))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            searchRadioRow(
+                label: String(localized: "search_scope_all", defaultValue: "All Bible"),
+                isSelected: scopeOption == .wholeBible,
+                identifier: searchScopeIdentifier(for: .wholeBible)
+            ) {
+                scopeOption = .wholeBible
+            }
+
+            searchRadioRow(
+                label: String(localized: "search_scope_ot", defaultValue: "Old Testament"),
+                isSelected: scopeOption == .oldTestament,
+                identifier: searchScopeIdentifier(for: .oldTestament)
+            ) {
+                scopeOption = .oldTestament
+            }
+
+            searchRadioRow(
+                label: String(localized: "search_scope_nt", defaultValue: "New Testament"),
+                isSelected: scopeOption == .newTestament,
+                identifier: searchScopeIdentifier(for: .newTestament)
+            ) {
+                scopeOption = .newTestament
+            }
+
+            searchRadioRow(
+                label: currentBook,
+                isSelected: scopeOption == .currentBook,
+                identifier: searchScopeIdentifier(for: .currentBook)
+            ) {
+                scopeOption = .currentBook
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("searchScopeStrip")
+    }
+
+    /// Android word-matching radio group.
+    private var searchWordModeRadioGroup: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(String(localized: "search_words_group_prompt", defaultValue: "Words"))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            ForEach(SearchWordMode.allCases, id: \.self) { mode in
+                searchRadioRow(
+                    label: mode.rawValue,
+                    isSelected: wordMode == mode,
+                    identifier: "searchWordModeButton::\(searchWordModeToken(for: mode))"
+                ) {
+                    wordMode = mode
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .accessibilityElement(children: .contain)
+    }
+
+    /// Android translations selector row.
+    private var searchTranslationsSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(String(localized: "search_translations", defaultValue: "Translations"))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Button {
+                openTranslationPicker()
+            } label: {
+                HStack(spacing: 10) {
+                    Text(selectedTranslationSummaryLabel)
+                        .lineLimit(1)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Image(systemName: "pencil")
+                        .foregroundStyle(.secondary)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("searchTranslationPickerButton")
+            .accessibilityValue("\(searchAccessibilitySelectionToken);\(searchAccessibilityTranslationPickerToken)")
+        }
+        .padding(.horizontal, 16)
+        .padding(.bottom, 10)
+        .overlay(alignment: .bottom) {
+            Divider()
+        }
+    }
+
+    /// Android-style bottom submit button for executing Search criteria.
+    private var searchSubmitButton: some View {
+        Button {
+            isSearchFieldFocused = false
+            performSearch()
+        } label: {
+            Text(String(localized: "search", defaultValue: "Search"))
+                .font(.body.weight(.medium))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 11)
+        }
+        .buttonStyle(.borderedProminent)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .overlay(alignment: .top) {
+            Divider()
+        }
+        .accessibilityIdentifier("searchSubmitButton")
+    }
+
     /**
-     Builds one pill-style scope selector button.
+     Builds an Android-style radio row used by Search criteria groups.
 
      - Parameters:
-       - label: User-visible scope label.
-       - choice: Scope value activated when the button is tapped.
+       - label: User-visible option label.
+       - isSelected: Whether this option is the active value.
+       - identifier: Stable UI automation identifier for the row.
+       - action: Mutation performed when the row is tapped.
      */
-    private func scopeButton(_ label: String, choice: ScopeChoice) -> some View {
-        Button(label) {
-            scopeOption = choice
+    private func searchRadioRow(
+        label: String,
+        isSelected: Bool,
+        identifier: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                Image(systemName: isSelected ? "largecircle.fill.circle" : "circle")
+                    .font(.caption)
+                    .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
+                Text(label)
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .contentShape(Rectangle())
+            .accessibilityIdentifier(identifier)
         }
-        .font(.subheadline)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .background(
-            scopeOption == choice ? Color.accentColor.opacity(0.2) : Color.clear,
-            in: RoundedRectangle(cornerRadius: 8)
-        )
-        .foregroundStyle(scopeOption == choice ? Color.accentColor : Color.primary)
-        .lineLimit(1)
-        .accessibilityElement(children: .ignore)
+        .buttonStyle(.plain)
+        .foregroundStyle(.primary)
         .accessibilityLabel(label)
-        .accessibilityValue(scopeOption == choice ? "selected" : "unselected")
-        .accessibilityAddTraits(.isButton)
-        .accessibilityIdentifier(searchScopeIdentifier(for: choice))
+        .accessibilityValue(isSelected ? "selected" : "unselected")
+        .accessibilityIdentifier(identifier)
     }
 
     /**
@@ -751,14 +797,6 @@ public struct SearchView: View {
         case .phrase:
             return "phrase"
         }
-    }
-
-    /// Resets Search result state when the visible query is explicitly cleared.
-    private func clearSearchResults() {
-        results = []
-        multiResults = nil
-        resultSummary = ""
-        isSearching = false
     }
 
     // MARK: - Results Sections
