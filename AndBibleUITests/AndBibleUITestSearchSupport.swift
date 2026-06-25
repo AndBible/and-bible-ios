@@ -103,7 +103,7 @@ extension AndBibleUITests {
             : seededSearchReadinessTimeout
     }
 
-    /// Reuses a Search sheet that the app auto-presented from a launch-seeded UI-test query.
+    /// Reuses a Search destination that the app auto-presented from a launch-seeded UI-test query.
     func waitForSearchScreenIfAlreadySeeded(
         in app: XCUIApplication,
         timeout: TimeInterval
@@ -760,12 +760,12 @@ extension AndBibleUITests {
     }
 
     /**
-     Returns true once the Search translation picker sheet has exposed any stable child element.
+     Returns true once the Search translation picker overlay has exposed any stable child element.
      *
      * - Parameters:
      *   - app: Running application under test.
      *   - timeout: Total time budget for polling the candidate set.
-     * - Returns: `true` when a picker-specific Done button or picker list exists.
+     * - Returns: `true` when a picker-specific OK button or picker list exists.
      * - Side effects:
      *   - polls the live Search state export and picker accessibility hierarchy while SwiftUI
      *     presents or dismisses the picker
@@ -797,9 +797,9 @@ extension AndBibleUITests {
     /**
      Returns whether Search has published the translation-picker presentation state.
      *
-     * The Search screen exports this state separately from sheet descendants so UI tests can
+     * The Search screen exports this state separately from overlay descendants so UI tests can
      * distinguish "the button action has toggled presentation" from "SwiftUI has finished exposing
-     * the sheet hierarchy." That keeps picker-opening retries focused on missed actions instead of
+     * the picker hierarchy." That keeps picker-opening retries focused on missed actions instead of
      * treating slow accessibility snapshots as proof that the tap failed.
      *
      * - Parameters:
@@ -827,9 +827,10 @@ extension AndBibleUITests {
         return searchStateCandidateValues(in: app).contains { $0.contains("translationPicker=open") }
     }
 
-    /// Returns stable picker descendants that prove the Search translation picker sheet is open.
+    /// Returns stable picker descendants that prove the Search translation picker overlay is open.
     func searchTranslationPickerOpenCandidates(in app: XCUIApplication) -> [XCUIElement] {
-        searchTranslationDoneCandidates(in: app, includeLocalizedFallbacks: false)
+        searchTranslationOKCandidates(in: app, includeLocalizedFallbacks: false)
+            + searchTranslationCancelCandidates(in: app, includeLocalizedFallbacks: false)
             + searchTranslationPickerListCandidates(in: app)
     }
 
@@ -897,40 +898,61 @@ extension AndBibleUITests {
     }
 
     /**
-     Returns scoped Done button candidates for the Search translation picker.
+     Returns scoped OK button candidates for the Search translation picker.
      *
-     * SwiftUI can expose toolbar buttons through navigation bars, toolbars, sheets, or finally the
-     * app-wide button query depending on runtime. The helper keeps the app-wide query as a fallback
-     * only, because broad button snapshots are the least stable while the picker list is refreshing
-     * after a translation row toggles.
+     * The Android-parity picker is an in-place overlay with an explicit OK action, not a SwiftUI
+     * sheet toolbar. Stable identifiers are preferred; localized fallbacks are broad only for
+     * recovery after the picker state export has already confirmed the overlay is open.
      *
      * - Parameters:
      *   - app: Running application under test.
-     *   - includeLocalizedFallbacks: Whether to include generic localized Done buttons after the
-     *     stable identifier candidates. Picker-open checks pass `false` to avoid matching keyboard
-     *     or unrelated toolbar Done controls before the translation picker is open.
-     * - Returns: Ordered button candidates, from picker-scoped surfaces to broad fallbacks.
+     *   - includeLocalizedFallbacks: Whether to include generic OK labels after stable identifiers.
+     * - Returns: Ordered OK button candidates.
      * - Side effects: none.
      * - Failure modes: This helper does not fail directly.
      */
-    func searchTranslationDoneCandidates(
+    func searchTranslationOKCandidates(
         in app: XCUIApplication,
         includeLocalizedFallbacks: Bool = true
     ) -> [XCUIElement] {
         let identifiedCandidates = [
-            app.navigationBars.buttons["searchTranslationDoneButton"].firstMatch,
-            app.toolbars.buttons["searchTranslationDoneButton"].firstMatch,
-            app.sheets.buttons["searchTranslationDoneButton"].firstMatch,
-            app.buttons["searchTranslationDoneButton"].firstMatch,
+            app.buttons["searchTranslationOKButton"].firstMatch,
+            app.otherElements["searchTranslationOKButton"].firstMatch,
         ]
         guard includeLocalizedFallbacks else {
             return identifiedCandidates
         }
         return identifiedCandidates + [
-            app.navigationBars.buttons["Done"].firstMatch,
-            app.toolbars.buttons["Done"].firstMatch,
-            app.sheets.buttons["Done"].firstMatch,
-            app.buttons["Done"].firstMatch,
+            app.buttons["OK"].firstMatch,
+            app.buttons["Ok"].firstMatch,
+            app.buttons["ok"].firstMatch,
+        ]
+    }
+
+    /**
+     Returns scoped Cancel button candidates for the Search translation picker.
+     *
+     * - Parameters:
+     *   - app: Running application under test.
+     *   - includeLocalizedFallbacks: Whether to include generic Cancel labels after stable IDs.
+     * - Returns: Ordered Cancel button candidates.
+     * - Side effects: none.
+     * - Failure modes: This helper does not fail directly.
+     */
+    func searchTranslationCancelCandidates(
+        in app: XCUIApplication,
+        includeLocalizedFallbacks: Bool = true
+    ) -> [XCUIElement] {
+        let identifiedCandidates = [
+            app.buttons["searchTranslationCancelButton"].firstMatch,
+            app.otherElements["searchTranslationCancelButton"].firstMatch,
+        ]
+        guard includeLocalizedFallbacks else {
+            return identifiedCandidates
+        }
+        return identifiedCandidates + [
+            app.buttons["Cancel"].firstMatch,
+            app.buttons["cancel"].firstMatch,
         ]
     }
 
@@ -1018,13 +1040,13 @@ extension AndBibleUITests {
     }
 
     /**
-     Selects every module in the Search translation picker.
+     Taps the neutral Select all/Select none action in the Search translation picker.
      *
      * - Parameters:
      *   - app: Running application under test.
      *   - timeout: Maximum time to wait for the toolbar action.
      * - Side effects:
-     *   - taps the picker toolbar Search All action
+     *   - taps the picker dialog neutral select toggle
      * - Failure modes:
      *   - fails when the Search All action is not reachable
      */
@@ -1038,34 +1060,34 @@ extension AndBibleUITests {
             return
         }
 
-        let fallbackSelectAll = app.buttons["All"].firstMatch
+        let fallbackSelectAll = app.buttons["Select all"].firstMatch
         XCTAssertTrue(
             fallbackSelectAll.waitForExistence(timeout: timeout),
-            "Expected Search translation All button to exist within \(timeout) seconds."
+            "Expected Search translation select toggle to exist within \(timeout) seconds."
         )
         tapElementReliably(fallbackSelectAll, timeout: timeout)
     }
 
     /**
-     Closes the Search translation picker.
+     Commits the Search translation picker with its OK action.
      *
      * - Parameters:
      *   - app: Running application under test.
-     *   - timeout: Maximum time to wait for the Done action.
+     *   - timeout: Maximum time to wait for the OK action.
      * - Side effects:
-     *   - taps the picker toolbar Done action
+     *   - taps the picker dialog OK action
      * - Failure modes:
-     *   - fails when the Done action is not reachable
+     *   - fails when the OK action is not reachable
      */
-    func tapSearchTranslationDone(
+    func tapSearchTranslationOK(
         in app: XCUIApplication,
         timeout: TimeInterval
     ) {
         let deadline = Date().addingTimeInterval(timeout)
 
         repeat {
-            if let done = firstExistingElement(searchTranslationDoneCandidates(in: app), timeout: 0.2) {
-                tapElementReliably(done, timeout: min(2, max(0.5, deadline.timeIntervalSinceNow)))
+            if let ok = firstExistingElement(searchTranslationOKCandidates(in: app), timeout: 0.2) {
+                tapElementReliably(ok, timeout: min(2, max(0.5, deadline.timeIntervalSinceNow)))
                 if !searchTranslationPickerIsOpen(in: app, timeout: 2) {
                     return
                 }
@@ -1074,7 +1096,72 @@ extension AndBibleUITests {
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         } while Date() < deadline
 
-        XCTFail("Expected Search translation Done button to exist within \(timeout) seconds.")
+        XCTFail("Expected Search translation OK button to exist within \(timeout) seconds.")
+    }
+
+    /**
+     Cancels the Search translation picker without committing draft row changes.
+     *
+     * - Parameters:
+     *   - app: Running application under test.
+     *   - timeout: Maximum time to wait for the Cancel action.
+     * - Side effects:
+     *   - taps the picker dialog Cancel action
+     * - Failure modes:
+     *   - fails when the Cancel action is not reachable
+     */
+    func tapSearchTranslationCancel(
+        in app: XCUIApplication,
+        timeout: TimeInterval
+    ) {
+        let deadline = Date().addingTimeInterval(timeout)
+
+        repeat {
+            if let cancel = firstExistingElement(searchTranslationCancelCandidates(in: app), timeout: 0.2) {
+                tapElementReliably(cancel, timeout: min(2, max(0.5, deadline.timeIntervalSinceNow)))
+                if !searchTranslationPickerIsOpen(in: app, timeout: 2) {
+                    return
+                }
+            }
+
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        } while Date() < deadline
+
+        XCTFail("Expected Search translation Cancel button to exist within \(timeout) seconds.")
+    }
+
+    /**
+     Dismisses the Search translation picker by tapping its dimmed area outside the dialog.
+     *
+     * Android `AlertDialog` cancellation returns an empty multiselect result, which Search ignores
+     * rather than committing draft row changes. This helper exercises the equivalent iOS overlay path
+     * without relying on a button-specific action.
+     *
+     * - Parameters:
+     *   - app: Running application under test.
+     *   - timeout: Maximum time to wait for the overlay to appear and then close.
+     * - Side effects:
+     *   - taps an app-level top-leading coordinate in the dimmed area outside the centered picker
+     *     dialog
+     * - Failure modes:
+     *   - fails when the picker overlay is not reachable or does not close after the outside tap
+     */
+    func tapSearchTranslationOutsideDismiss(
+        in app: XCUIApplication,
+        timeout: TimeInterval
+    ) {
+        let overlay = app.otherElements["searchTranslationPickerOverlay"].firstMatch
+        guard overlay.waitForExistence(timeout: timeout) else {
+            XCTFail("Expected Search translation overlay to exist within \(timeout) seconds.")
+            return
+        }
+
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.05, dy: 0.2)).tap()
+        if !searchTranslationPickerIsOpen(in: app, timeout: 2) {
+            return
+        }
+
+        XCTFail("Expected Search translation overlay to close after outside dismissal.")
     }
 
     /**

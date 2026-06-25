@@ -32,6 +32,7 @@
   "AndBibleUITests/AndBibleUITests/testSearchDirectLaunchStrongsQueryReturnsBundledResults": 93.984,
   "AndBibleUITests/AndBibleUITests/testSearchDirectLaunchUsesSeededIndexAndReturnsBundledResults": 100.089,
   "AndBibleUITests/AndBibleUITests/testSearchMultiTranslationSelectionUpdatesGroupedTotals": 176.783,
+  "AndBibleUITests/AndBibleUITests/testSearchPresentsAsReaderDestinationInsteadOfSheet": 87.628,
   "AndBibleUITests/AndBibleUITests/testSearchResultSelectionNavigatesReaderToBundledReference": 174.437,
   "AndBibleUITests/AndBibleUITests/testSearchScopeChangeRerunsQueryAndUpdatesResults": 117.399,
   "AndBibleUITests/AndBibleUITests/testSearchWordModeChangeRerunsQueryAndUpdatesResults": 114.75,

@@ -65,6 +65,168 @@ extension AndBibleTests {
         XCTAssertEqual(AppPreferenceRegistry.decodeCSVSet(""), [])
     }
 
+    /**
+     Verifies Search's translation picker orders Bible modules the same way Android builds its
+     multiselect dialog.
+
+     Android `Search.showTranslationSelector` sorts all Bible modules by abbreviation before
+     rendering rows. This pure helper test keeps iOS from drifting back to installer order or
+     SwiftUI list order, both of which make subsequent primary-first ordering ambiguous.
+
+     - Setup: Uses intentionally unsorted installed Bible module metadata.
+     - Expected result: Abbreviations are returned in Android's sorted order.
+     - Failure meaning: Search may present or commit multi-translation choices in an iOS-specific
+       order instead of Android's deterministic dialog order.
+     - Side effects: none.
+     */
+    func testSearchTranslationPickerSortsModulesByAndroidAbbreviationOrder() {
+        let modules = [
+            ModuleInfo(name: "WEB", description: "World English Bible", category: .bible, language: "en"),
+            ModuleInfo(name: "KJV", description: "King James Version", category: .bible, language: "en"),
+            ModuleInfo(name: "ASV", description: "American Standard Version", category: .bible, language: "en"),
+        ]
+
+        XCTAssertEqual(
+            SearchView.androidSortedTranslationModules(modules).map(\.name),
+            ["ASV", "KJV", "WEB"]
+        )
+    }
+
+    /**
+     Verifies Search commits Android multiselect choices with the active document preserved first.
+
+     Android collects the checked rows from its abbreviation-sorted dialog, then calls
+     `ensurePrimaryDocumentFirst()` so the current document remains the primary search target.
+     This protects the iOS search request and grouped result order from `Set` iteration.
+
+     - Setup: Selects all modules while the primary/current module is in the middle of Android's
+       sorted order.
+     - Expected result: The primary module is first, with all other selected modules still in
+       Android abbreviation order.
+     - Failure meaning: Multi-translation Search can send or display modules in unstable iOS order.
+     - Side effects: none.
+     */
+    func testSearchTranslationSelectionKeepsPrimaryFirstAfterAndroidSortedCommit() {
+        let modules = [
+            ModuleInfo(name: "WEB", description: "World English Bible", category: .bible, language: "en"),
+            ModuleInfo(name: "KJV", description: "King James Version", category: .bible, language: "en"),
+            ModuleInfo(name: "ASV", description: "American Standard Version", category: .bible, language: "en"),
+        ]
+
+        XCTAssertEqual(
+            SearchView.androidOrderedSelectedSearchModuleNames(
+                selectedModuleNames: ["WEB", "KJV", "ASV"],
+                primaryModuleName: "KJV",
+                installedModules: modules
+            ),
+            ["KJV", "ASV", "WEB"]
+        )
+    }
+
+    /**
+     Verifies empty Search translation dialog confirmation preserves the prior selection.
+
+     Android's multiselect dialog returns an empty list for both cancel and OK-with-no-checked-rows,
+     and `Search.showTranslationSelector` ignores that empty result. iOS must not clear the active
+     search modules when the draft selection has been toggled down to none.
+
+     - Setup: Provides an existing two-module selection and an empty draft.
+     - Expected result: The committed order still reflects the previous selection, with the primary
+       module first.
+     - Failure meaning: Users can accidentally clear Search translations through an iOS-only empty
+       commit path.
+     - Side effects: none.
+     */
+    func testSearchTranslationEmptyDialogConfirmationPreservesPreviousSelection() {
+        let modules = [
+            ModuleInfo(name: "WEB", description: "World English Bible", category: .bible, language: "en"),
+            ModuleInfo(name: "KJV", description: "King James Version", category: .bible, language: "en"),
+            ModuleInfo(name: "ASV", description: "American Standard Version", category: .bible, language: "en"),
+        ]
+
+        XCTAssertEqual(
+            SearchView.androidCommittedTranslationSelection(
+                previousModuleNames: ["KJV", "WEB"],
+                draftModuleNames: [],
+                primaryModuleName: "KJV",
+                installedModules: modules
+            ),
+            ["KJV", "WEB"]
+        )
+    }
+
+    /**
+     Verifies Search translation picker row labels expose index readiness like Android.
+
+     Android appends the localized `search_index_not_created` status to unindexed modules inside
+     the multiselect dialog. This protects the iOS picker from showing visually selectable modules
+     without the same readiness warning.
+
+     - Setup: Builds one Bible module label with indexed and unindexed status inputs.
+     - Expected result: Indexed rows omit the status suffix; unindexed rows include it in
+       parentheses.
+     - Failure meaning: Search can hide Android's index-readiness information from the picker.
+     - Side effects: none.
+     */
+    func testSearchTranslationPickerLabelsExposeAndroidIndexReadiness() {
+        let module = ModuleInfo(
+            name: "KJV",
+            description: "King James Version",
+            category: .bible,
+            language: "en"
+        )
+
+        XCTAssertEqual(
+            SearchView.androidTranslationPickerLabel(
+                for: module,
+                isIndexed: true,
+                unindexedStatus: "Search index not created"
+            ),
+            "KJV - King James Version"
+        )
+        XCTAssertEqual(
+            SearchView.androidTranslationPickerLabel(
+                for: module,
+                isIndexed: false,
+                unindexedStatus: "Search index not created"
+            ),
+            "KJV - King James Version (Search index not created)"
+        )
+    }
+
+    /**
+     Verifies the Search criteria screen uses Android's form structure instead of iOS controls.
+
+     Android `Search` renders a top edit field, two radio groups, a translations row, and a bottom
+     submit button from `app/src/main/res/layout/search.xml`. The iOS Search destination should
+     therefore avoid SwiftUI-only segmented controls, toolbar filter toggles, and empty-state cards
+     on the criteria screen.
+
+     - Expected result: `SearchView` exposes named Android-form building blocks and omits the
+       previous iOS-specific segmented/card/toggle affordances.
+     - Failure meaning: Search has drifted into a visually custom iOS screen even if the
+       translation picker itself uses an Android-style dialog.
+     - Side effects: Reads `SearchView.swift` from the checked-out source tree.
+     */
+    func testSearchCriteriaScreenUsesAndroidFormStructure() throws {
+        let testFileURL = URL(fileURLWithPath: #filePath)
+        let repoRoot = testFileURL
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let searchViewURL = repoRoot.appendingPathComponent(
+            "Sources/BibleUI/Sources/BibleUI/Search/SearchView.swift"
+        )
+
+        let source = try String(contentsOf: searchViewURL, encoding: .utf8)
+
+        XCTAssertTrue(source.contains("private var searchCriteriaForm"))
+        XCTAssertTrue(source.contains("private var searchSubmitButton"))
+        XCTAssertTrue(source.contains("private func searchRadioRow"))
+        XCTAssertFalse(source.contains(".pickerStyle(.segmented)"))
+        XCTAssertFalse(source.contains("ContentUnavailableView("))
+        XCTAssertFalse(source.contains("searchOptionsToggleButton"))
+    }
+
     func testStrongsQueryNormalizationHandlesLeadingZeroes() {
         let options = StrongsSearchSupport.normalizedQueryOptions(for: "H02022")
         XCTAssertEqual(options?.canonicalStrongTokens, ["H2022"])
