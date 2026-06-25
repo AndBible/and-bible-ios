@@ -1425,6 +1425,15 @@ extension AndBibleTests {
         )
     }
 
+    /**
+     Verifies Android-style `multi://` links render as a Vue MultiDocument instead of a native sheet.
+
+     Setup uses a temporary bundled KJV module and a recording bridge, then invokes the production
+     external-link bridge path with two OSIS parameters. The expected result is an `add_documents`
+     payload containing a multi document and no cross-reference sheet callback. A failure means iOS
+     regressed to an iOS-only presentation path for links Android handles as in-reader documents. The
+     test is main-actor isolated for controller callbacks and creates only temporary module fixtures.
+     */
     @MainActor
     func testMultiReferenceLinkEmitsVueMultiDocumentInsteadOfCrossReferenceSheet() throws {
         let (bridge, recordedScripts) = makeRecordingBridge()
@@ -1450,6 +1459,15 @@ extension AndBibleTests {
         XCTAssertTrue(addDocumentsScript.contains(#""osisRef":"Exod.2.1""#))
     }
 
+    /**
+     Verifies comma-separated `osis://` links use the same MultiDocument path as Android.
+
+     Setup records bridge emissions from the production external-link handler with a temporary KJV
+     module. The expected result is one Vue multi-document payload containing both references and no
+     cross-reference sheet callback. A failure means iOS is splitting or presenting multi-reference
+     OSIS links differently from Android. The test is synchronous except for the main-run-loop drain
+     needed to capture bridge emission.
+     */
     @MainActor
     func testMultiReferenceOsisLinkEmitsVueMultiDocumentInsteadOfCrossReferenceSheet() throws {
         let (bridge, recordedScripts) = makeRecordingBridge()
@@ -1540,6 +1558,15 @@ extension AndBibleTests {
         XCTAssertTrue(addDocumentsScript.contains(#""osisRef":"Exod.2.1""#))
     }
 
+    /**
+     Protects the single-reference `osis://` path from being widened into MultiDocument behavior.
+
+     Android opens a single OSIS reference as normal reader navigation, while multi-reference links
+     become MultiDocument content. Setup drives the bridge with one OSIS reference and a recording
+     bridge. The expected result is controller navigation to Exodus 2 without a multi-document payload
+     or cross-reference sheet. A failure means the resolver/link split changed user-visible
+     navigation semantics.
+     */
     @MainActor
     func testSingleOsisReferenceStillNavigatesWithoutMultiDocument() throws {
         let (bridge, recordedScripts) = makeRecordingBridge()
@@ -2361,6 +2388,17 @@ extension AndBibleTests {
         XCTAssertEqual(recordedScripts().last, #"bibleView.response(3702, "Gen.1.1");"#)
     }
 
+    /**
+     Verifies the bridge `parseRef` response preserves call IDs and JSword-compatible parsing.
+
+     Setup uses a recording bridge and temporary KJV module so reference parsing goes through the
+     active-module parser path, matching Android's JSword `PassageKeyFactory` behavior. The expected
+     result is a response with the original call ID for each request, compact OSIS serialization for
+     valid references/lists/ranges, and `null` for out-of-range or reverse inputs. Failures indicate
+     either bridge response routing drift or parser semantics that diverge from Android. The test is
+     main-actor isolated, uses temporary module files only, and has deterministic synchronous parser
+     inputs.
+     */
     @MainActor
     func testParseRefSendsResponseWithOriginalCallId() throws {
         let (bridge, recordedScripts) = makeRecordingBridge()
@@ -2443,6 +2481,76 @@ extension AndBibleTests {
             "bibleView.response(3712, null);",
             "parseRef must reject reverse ranges using active module ordinals instead of accepting fabricated ordering values."
         )
+    }
+
+    /**
+     Protects reference parsing as a standalone reader responsibility instead of controller state.
+
+     The resolver must preserve Android/JSword `PassageKeyFactory` behavior while being usable
+     without routing through the bridge: active-module parsing accepts JSword-compatible book names,
+     serializes verse lists and chapter ranges in compact OSIS form, and rejects coordinates SWORD
+     would otherwise normalize. A failure means the controller extraction changed reference parsing
+     semantics or left this behavior coupled to `BibleReaderController` orchestration.
+
+     Setup uses the bundled temporary KJV SWORD module because Android validates these cases through
+     the active document's JSword versification rather than a static iOS table. The expected result is
+     exact OSIS serialization for valid references and `nil` for invalid explicit coordinates. The
+     test creates only temporary module files through the shared fixture helper, performs no persisted
+     app-state writes, and is deterministic because all parsing runs synchronously against the fixture
+     module.
+     */
+    func testReferenceResolverPreservesActiveModuleParseRefSemantics() throws {
+        let modulePath = try makeTemporaryBundledSwordPath()
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let module = try XCTUnwrap(manager.module(named: "KJV"))
+        let books = BibleReaderSwordCoordinator().bookList(for: module)
+        let resolver = BibleReaderReferenceResolver(
+            activeModule: module,
+            bookList: books,
+            fallbackBooks: BibleReaderController.defaultBooks,
+            fallbackVerseCount: BibleReaderController.verseCount(for:chapter:)
+        )
+
+        XCTAssertEqual(resolver.resolveReference("Genesis 1:1"), "Gen.1.1")
+        XCTAssertEqual(resolver.resolveReference("III John 1:2"), "3John.1.2")
+        XCTAssertEqual(resolver.resolveReference("Genesis 1:1, Exodus 2:1"), "Gen.1.1 Exod.2.1")
+        XCTAssertEqual(resolver.resolveReference("Genesis 1:1, 2"), "Gen.1.1-Gen.1.2")
+        XCTAssertEqual(resolver.resolveReference("Genesis 1"), "Gen.1")
+        XCTAssertEqual(resolver.resolveReference("Genesis 1-2"), "Gen.1-Gen.2")
+        XCTAssertNil(resolver.resolveReference("Gen.1.99"))
+        XCTAssertNil(resolver.resolveReference("Genesis 1:1, 99"))
+        XCTAssertNil(resolver.resolveReference("Genesis 1:1-99"))
+        XCTAssertNil(resolver.resolveReference("Genesis 2-1"))
+    }
+
+    /**
+     Guards active-module reference resolution against static-canon fallback drift.
+
+     Android resolves editor references through the active document versification. If iOS has an
+     active SWORD module but cannot expose that module's book list, the resolver must fail closed
+     instead of accepting KJV/default-canon names and OSIS IDs. A failure means the extraction
+     reintroduced iOS-only fallback behavior that can fabricate references for the active module.
+
+     Setup intentionally supplies a valid active KJV module with an empty book list, which models a
+     metadata failure after module selection. The expected result is rejection from the full parser,
+     direct OSIS parser, and human-readable parser. The test creates only temporary module files via
+     the shared fixture helper, performs no persisted app-state writes, and has no async ordering
+     assumptions.
+     */
+    func testReferenceResolverRejectsStaticFallbackWhenActiveModuleBookListIsUnavailable() throws {
+        let modulePath = try makeTemporaryBundledSwordPath()
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let module = try XCTUnwrap(manager.module(named: "KJV"))
+        let resolver = BibleReaderReferenceResolver(
+            activeModule: module,
+            bookList: [],
+            fallbackBooks: BibleReaderController.defaultBooks,
+            fallbackVerseCount: BibleReaderController.verseCount(for:chapter:)
+        )
+
+        XCTAssertNil(resolver.resolveReference("Genesis 1:1"))
+        XCTAssertNil(resolver.resolveOsisRef("Gen.1.1"))
+        XCTAssertNil(resolver.resolveHumanRef("Genesis 1:1"))
     }
 
     @MainActor
