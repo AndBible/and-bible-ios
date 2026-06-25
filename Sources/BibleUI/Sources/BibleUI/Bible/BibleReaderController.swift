@@ -135,11 +135,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     /// Reader-local My Documents active page state and document payload assembly.
     private var myDocumentCoordinator = BibleReaderMyDocumentCoordinator()
 
-    /// Infinite scroll: tracks the range of chapters/books currently loaded in the WebView.
-    private var minLoadedChapter: Int = 0
-    private var maxLoadedChapter: Int = 0
-    private var minLoadedBook: String = "Genesis"
-    private var maxLoadedBook: String = "Genesis"
+    /// Reader-local loaded-range state for Vue infinite-scroll prepend/append requests.
+    private var infiniteScrollCoordinator = BibleReaderInfiniteScrollCoordinator()
 
     /**
      Serialized payload rebuilt from Android's durable `Multi` PageManager key.
@@ -2860,28 +2857,17 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             bridge.sendResponse(callId: callId, value: "null")
             return
         }
-        let newChapter = minLoadedChapter - 1
-        if newChapter < 1 {
-            // Cross-book: try loading the last chapter of the previous book
-            if let prevBook = previousBook(before: minLoadedBook) {
-                let lastChap = chapterCount(for: prevBook)
-                if let document = loadChapterJSON(book: prevBook, chapter: lastChap) {
-                    minLoadedBook = prevBook
-                    minLoadedChapter = lastChap
-                    bridge.sendResponse(callId: callId, value: document)
-                } else {
-                    bridge.sendResponse(callId: callId, value: "null")
-                }
-            } else {
-                bridge.sendResponse(callId: callId, value: "null")
-            }
+        guard let candidate = infiniteScrollCoordinator.previousCandidate(
+            previousBook: { [self] in previousBook(before: $0) },
+            chapterCount: { [self] in chapterCount(for: $0) }
+        ) else {
+            bridge.sendResponse(callId: callId, value: "null")
             return
         }
-        minLoadedChapter = newChapter
-        if let document = loadChapterJSON(book: minLoadedBook, chapter: newChapter) {
+        if let document = loadChapterJSON(book: candidate.book, chapter: candidate.chapter) {
+            infiniteScrollCoordinator.commitPrevious(candidate)
             bridge.sendResponse(callId: callId, value: document)
         } else {
-            minLoadedChapter = newChapter + 1 // revert
             bridge.sendResponse(callId: callId, value: "null")
         }
     }
@@ -2904,28 +2890,17 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             bridge.sendResponse(callId: callId, value: "null")
             return
         }
-        let lastChapter = chapterCount(for: maxLoadedBook)
-        let newChapter = maxLoadedChapter + 1
-        if newChapter > lastChapter {
-            // Cross-book: try loading chapter 1 of the next book
-            if let nextBk = nextBook(after: maxLoadedBook) {
-                if let document = loadChapterJSON(book: nextBk, chapter: 1) {
-                    maxLoadedBook = nextBk
-                    maxLoadedChapter = 1
-                    bridge.sendResponse(callId: callId, value: document)
-                } else {
-                    bridge.sendResponse(callId: callId, value: "null")
-                }
-            } else {
-                bridge.sendResponse(callId: callId, value: "null")
-            }
+        guard let candidate = infiniteScrollCoordinator.nextCandidate(
+            nextBook: { [self] in nextBook(after: $0) },
+            chapterCount: { [self] in chapterCount(for: $0) }
+        ) else {
+            bridge.sendResponse(callId: callId, value: "null")
             return
         }
-        maxLoadedChapter = newChapter
-        if let document = loadChapterJSON(book: maxLoadedBook, chapter: newChapter) {
+        if let document = loadChapterJSON(book: candidate.book, chapter: candidate.chapter) {
+            infiniteScrollCoordinator.commitNext(candidate)
             bridge.sendResponse(callId: callId, value: document)
         } else {
-            maxLoadedChapter = newChapter - 1 // revert
             bridge.sendResponse(callId: callId, value: "null")
         }
     }
@@ -6260,11 +6235,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         ) else { return }
         bridge.emit(event: "add_documents", data: document)
 
-        // Track loaded chapter/book range for infinite scroll
-        minLoadedChapter = currentChapter
-        maxLoadedChapter = currentChapter
-        minLoadedBook = currentBook
-        maxLoadedBook = currentBook
+        infiniteScrollCoordinator.reset(book: currentBook, chapter: currentChapter)
 
         // Restore either the exact verse anchor or the chapter-top reading context.
         let restoreTarget = navigationCoordinator.consumeContentRestoreTarget(
