@@ -60,9 +60,6 @@ struct BibleWindowPane: View {
     /// Controller that owns module state, navigation, and bridge callbacks for this pane.
     @State private var controller: BibleReaderController?
 
-    /// Bookmark awaiting label-assignment sheet presentation.
-    @State private var pendingLabelBookmarkId: UUID?
-
     /// Whether the custom Android-style pane hamburger menu is visible.
     @State private var isWindowMenuPresented = false
 
@@ -170,6 +167,9 @@ struct BibleWindowPane: View {
     /// Requests the parent reader to open the reference chooser dialog and return a result.
     var onRefChooserDialog: ((@escaping (String?) -> Void) -> Void)?
 
+    /// Requests app-owned label assignment for a WebView-created or WebView-selected bookmark.
+    var onAssignLabels: ((UUID) -> Void)?
+
     /// Reports user-driven vertical scroll deltas to the parent reader.
     var onUserScrollDeltaY: ((Double) -> Void)?
 
@@ -225,20 +225,6 @@ struct BibleWindowPane: View {
         }
         .onChange(of: displaySettings) { _, newValue in
             controller?.updateDisplaySettings(newValue, nightMode: nightMode)
-        }
-        .sheet(item: $pendingLabelBookmarkId) { bookmarkId in
-            let _ = logger.info("LabelAssignment sheet PRESENTING for bookmarkId=\(bookmarkId)")
-            NavigationStack {
-                LabelAssignmentView(
-                    bookmarkId: bookmarkId,
-                    onDismiss: {
-                        let id = bookmarkId
-                        logger.info("LabelAssignment sheet onDismiss: refreshing bookmark \(id)")
-                        pendingLabelBookmarkId = nil
-                        controller?.refreshBookmarkInVueJS(bookmarkId: id)
-                    }
-                )
-            }
         }
     }
 
@@ -561,7 +547,7 @@ struct BibleWindowPane: View {
         ctrl.onShowChapterReadHistory = { target in onShowChapterReadHistory?(target) }
         ctrl.onAssignLabels = { bookmarkId in
             logger.info("onAssignLabels triggered: bookmarkId=\(bookmarkId)")
-            pendingLabelBookmarkId = bookmarkId
+            onAssignLabels?(bookmarkId)
         }
         ctrl.onPersistState = { try? modelContext.save() }
         ctrl.onShowToast = { text in onShowToast?(text) }

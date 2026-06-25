@@ -8,7 +8,7 @@ import BibleCore
  Manages user-created bookmark labels and launches label-specific editing flows.
 
  The screen lists all real user labels, supports creating new labels inline, presents a dedicated
- edit sheet for label styling changes, and optionally forwards the selected label into the
+ edit destination for label styling changes, and optionally forwards the selected label into the
  StudyPad flow.
 
  Data dependencies:
