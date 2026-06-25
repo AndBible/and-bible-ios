@@ -1583,6 +1583,28 @@ extension AndBibleTests {
     }
 
     /**
+     Protects Android's boundary between `osis://` navigation and `multi://` MultiDocument links.
+
+     Android's `SCHEME_REFERENCE` handler reads only `getQueryParameter("osis")`; repeated `osis`
+     query values are not a MultiDocument signal. Setup sends a deliberately duplicated `osis://`
+     link through the native bridge with no SWORD module so the route is deterministic. The expected
+     result is navigation to the first reference only and no transient multi-document payload. A
+     failure means iOS widened single-reference links into invented multi-reference behavior instead
+     of requiring Android's `multi://` route.
+     */
+    @MainActor
+    func testOsisReferenceUsesFirstQueryValueLikeAndroidReferenceScheme() throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let controller = BibleReaderController(bridge: bridge)
+
+        controller.bridge(bridge, openExternalLink: "osis://?osis=Exod.2.1&osis=Gen.1.1&v11n=KJVA")
+
+        XCTAssertEqual(controller.currentBook, "Exodus")
+        XCTAssertEqual(controller.currentChapter, 2)
+        XCTAssertFalse(recordedScripts().contains { $0.contains(#""type":"multi""#) })
+    }
+
+    /**
      Protects Android-style external-link classification outside controller orchestration.
 
      Android splits responsibilities between `BibleJavascriptInterface.openExternalLink`,

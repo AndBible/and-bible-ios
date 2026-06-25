@@ -4685,7 +4685,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      - Failure modes: Invalid values are ignored; no side effects occur when nothing parses.
      */
     private func handleOsisReferenceValues(_ values: [String]) {
-        let refs = values.flatMap(parseOsisReferences)
+        guard let value = values.first else { return }
+        let refs = parseOsisReferences(value)
         if refs.count == 1, let ref = refs.first {
             if let openInLinks = onOpenInLinksWindow {
                 openInLinks(ref.book, ref.chapter)
