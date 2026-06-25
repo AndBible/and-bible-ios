@@ -2167,6 +2167,78 @@ extension AndBibleTests {
         )
     }
 
+    /**
+     Protects infinite-scroll loaded-range state as a coordinator-owned reader concern.
+
+     Android advances the loaded Bible range only after an adjacent chapter document is available.
+     The setup asks for a previous chapter, deliberately does not commit it, and then asks again to
+     prove failed document loading cannot advance the lower bound. It then commits the candidate and
+     verifies the next request crosses into the previous book. A failure means the controller has
+     regained mutate-and-revert loaded-range state that can drift after failed prepend loads.
+     */
+    func testReaderInfiniteScrollCoordinatorKeepsPreviousCandidateUncommittedUntilLoadSucceeds() {
+        var coordinator = BibleReaderInfiniteScrollCoordinator()
+        coordinator.reset(book: "Exodus", chapter: 2)
+
+        let firstCandidate = coordinator.previousCandidate(
+            previousBook: { $0 == "Exodus" ? "Genesis" : nil },
+            chapterCount: { $0 == "Genesis" ? 50 : 40 }
+        )
+        XCTAssertEqual(firstCandidate, BibleReaderInfiniteScrollChapter(book: "Exodus", chapter: 1))
+
+        XCTAssertEqual(
+            coordinator.previousCandidate(
+                previousBook: { $0 == "Exodus" ? "Genesis" : nil },
+                chapterCount: { $0 == "Genesis" ? 50 : 40 }
+            ),
+            BibleReaderInfiniteScrollChapter(book: "Exodus", chapter: 1)
+        )
+
+        if let firstCandidate {
+            coordinator.commitPrevious(firstCandidate)
+        }
+
+        XCTAssertEqual(
+            coordinator.previousCandidate(
+                previousBook: { $0 == "Exodus" ? "Genesis" : nil },
+                chapterCount: { $0 == "Genesis" ? 50 : 40 }
+            ),
+            BibleReaderInfiniteScrollChapter(book: "Genesis", chapter: 50)
+        )
+    }
+
+    /**
+     Protects infinite-scroll append range state as a coordinator-owned reader concern.
+
+     Android appends within the current book until the active versification reaches the final
+     chapter, then crosses to the next book. The setup starts at the final Genesis chapter, verifies
+     that the next candidate is Exodus 1, commits it, and then verifies normal same-book append
+     resumes at Exodus 2. A failure means the extraction changed cross-book append behavior instead
+     of only moving loaded-range ownership out of `BibleReaderController`.
+     */
+    func testReaderInfiniteScrollCoordinatorCrossesToNextBookAfterFinalChapter() {
+        var coordinator = BibleReaderInfiniteScrollCoordinator()
+        coordinator.reset(book: "Genesis", chapter: 50)
+
+        let nextBookCandidate = coordinator.nextCandidate(
+            nextBook: { $0 == "Genesis" ? "Exodus" : nil },
+            chapterCount: { $0 == "Genesis" ? 50 : 40 }
+        )
+        XCTAssertEqual(nextBookCandidate, BibleReaderInfiniteScrollChapter(book: "Exodus", chapter: 1))
+
+        if let nextBookCandidate {
+            coordinator.commitNext(nextBookCandidate)
+        }
+
+        XCTAssertEqual(
+            coordinator.nextCandidate(
+                nextBook: { $0 == "Genesis" ? "Exodus" : nil },
+                chapterCount: { $0 == "Genesis" ? 50 : 40 }
+            ),
+            BibleReaderInfiniteScrollChapter(book: "Exodus", chapter: 2)
+        )
+    }
+
     @MainActor
     func testRequestMoreToBeginningSendsDocumentResponseWithOriginalCallId() throws {
         let (bridge, recordedScripts) = makeRecordingBridge()
