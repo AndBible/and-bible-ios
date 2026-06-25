@@ -2208,6 +2208,39 @@ extension AndBibleTests {
     }
 
     /**
+     Protects the controller's pre-render infinite-scroll sentinel behavior during extraction.
+
+     The legacy controller kept its loaded range at Genesis chapter 0 until the first reader render.
+     Vue can still request append/prepend during that window: prepend has no valid chapter, while
+     append resolves to Genesis 1. A failure here means the extracted coordinator changed startup
+     bridge behavior instead of only moving the range ownership out of `BibleReaderController`.
+     */
+    func testReaderInfiniteScrollCoordinatorPreservesPreRenderAppendSentinel() {
+        let coordinator = BibleReaderInfiniteScrollCoordinator()
+
+        XCTAssertNil(
+            coordinator.previousCandidate(
+                previousBook: { $0 == "Genesis" ? nil : "Genesis" },
+                chapterCount: { book in
+                    XCTFail("Genesis sentinel prepend should not query chapter count, got \(book)")
+                    return 0
+                }
+            )
+        )
+
+        XCTAssertEqual(
+            coordinator.nextCandidate(
+                nextBook: { book in
+                    XCTFail("Genesis sentinel append should not query a next book, got \(book)")
+                    return nil
+                },
+                chapterCount: { $0 == "Genesis" ? 50 : 0 }
+            ),
+            BibleReaderInfiniteScrollChapter(book: "Genesis", chapter: 1)
+        )
+    }
+
+    /**
      Protects infinite-scroll append range state as a coordinator-owned reader concern.
 
      Android appends within the current book until the active versification reaches the final
@@ -2266,6 +2299,48 @@ extension AndBibleTests {
         XCTAssertTrue(
             responseScript.contains(#""key":"Gen.1""#),
             "Expected the previous chapter document to be returned. Script: \(responseScript)"
+        )
+        XCTAssertTrue(
+            responseScript.contains(#""osisFragment""#),
+            "Expected the response payload to preserve the Bible document shape. Script: \(responseScript)"
+        )
+    }
+
+    /**
+     Protects append infinite-scroll bridge responses after the reader content is rendered.
+
+     The setup loads Genesis 1 through the real controller path, records the existing bridge output,
+     then requests more content at the end and verifies the original call id receives a full Genesis 2
+     document payload. A failure means the coordinator extraction broke the controller delegate path,
+     stale call id handling, or the Android-compatible document shape used by Vue infinite scroll.
+     */
+    @MainActor
+    func testRequestMoreToEndSendsDocumentResponseWithOriginalCallId() throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let modulePath = try makeTemporaryBundledSwordPath()
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+
+        controller.navigateTo(book: "Genesis", chapter: 1, verse: 1)
+        controller.loadCurrentContent()
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.1))
+
+        let baselineCount = recordedScripts().count
+        controller.bridge(bridge, requestMoreToEnd: 3703)
+
+        let responseScript = try XCTUnwrap(
+            recordedScripts().dropFirst(baselineCount).first {
+                $0.contains("bibleView.response(3703")
+            }
+        )
+
+        XCTAssertTrue(
+            responseScript.hasPrefix("bibleView.response(3703, {"),
+            "Expected a document JSON response for the original callId. Script: \(responseScript)"
+        )
+        XCTAssertTrue(
+            responseScript.contains(#""key":"Gen.2""#),
+            "Expected the next chapter document to be returned. Script: \(responseScript)"
         )
         XCTAssertTrue(
             responseScript.contains(#""osisFragment""#),

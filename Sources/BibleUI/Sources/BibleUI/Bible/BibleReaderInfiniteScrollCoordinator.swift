@@ -19,18 +19,20 @@ struct BibleReaderInfiniteScrollChapter: Equatable {
  prepend/append requests ask for the adjacent chapter, and the range advances only when the
  adjacent document was actually loaded. This coordinator keeps that state rule out of
  `BibleReaderController` while leaving document construction and bridge responses with the
- controller.
+ controller. The initial Genesis 0 sentinel mirrors the controller's pre-render bridge behavior:
+ prepend has no chapter to load, while append starts at Genesis 1 until the first rendered chapter
+ resets the range.
 
  - Side effects: Mutates only the in-memory lower/upper loaded range.
  - Failure modes: Returns `nil` when there is no adjacent book or chapter. Failed document loading is
    reported by simply not committing the candidate, so the range remains unchanged.
  */
 struct BibleReaderInfiniteScrollCoordinator {
-    /// Earliest chapter currently loaded in the WebView.
-    private var lowerBound = BibleReaderInfiniteScrollChapter(book: "Genesis", chapter: 1)
+    /// Earliest chapter currently loaded in the WebView, or Genesis 0 before the first render.
+    private var lowerBound = BibleReaderInfiniteScrollChapter(book: "Genesis", chapter: 0)
 
-    /// Latest chapter currently loaded in the WebView.
-    private var upperBound = BibleReaderInfiniteScrollChapter(book: "Genesis", chapter: 1)
+    /// Latest chapter currently loaded in the WebView, or Genesis 0 before the first render.
+    private var upperBound = BibleReaderInfiniteScrollChapter(book: "Genesis", chapter: 0)
 
     /**
      Resets the loaded range to the currently rendered Bible chapter.
