@@ -1136,6 +1136,55 @@ extension AndBibleTests {
 
     #if os(iOS)
     /**
+     Protects native selection state and payload decisions as a focused reader responsibility.
+
+     Android action mode tracks selection state separately from page navigation, and `Multi`/generic
+     pages must not fabricate Bible references from the pane that opened them. The setup exercises the
+     coordinator directly with a normal Bible page and an Android-style non-Bible page. The expected
+     result is a Bible copy/share payload only for Bible-capable pages, text-only copy for non-Bible
+     pages, and cleared state after deselection. A failure means the selection extraction either lost
+     state transitions or reintroduced stale Bible-reference behavior outside controller orchestration.
+     The test performs no simulator, pasteboard, or persistence side effects and is deterministic.
+     */
+    func testReaderSelectionCoordinatorOwnsSelectionStateAndReferencePayloads() {
+        var coordinator = BibleReaderSelectionCoordinator()
+        let bibleContext = BibleReaderSelectionPageContext(
+            canUseBibleReferenceActions: true,
+            currentBook: "Genesis",
+            currentChapter: 1,
+            activeModuleName: "KJV"
+        )
+        let multiContext = BibleReaderSelectionPageContext(
+            canUseBibleReferenceActions: false,
+            currentBook: "Genesis",
+            currentChapter: 1,
+            activeModuleName: "KJV"
+        )
+
+        coordinator.selectionChanged("In the beginning")
+
+        XCTAssertTrue(coordinator.hasActiveSelection)
+        XCTAssertEqual(coordinator.selectedText, "In the beginning")
+        XCTAssertEqual(
+            coordinator.copyText(context: bibleContext),
+            "In the beginning\n\u{2014} Genesis 1 (KJV)"
+        )
+        XCTAssertEqual(
+            coordinator.shareText(context: bibleContext),
+            "In the beginning\n\u{2014} Genesis 1 (KJV)"
+        )
+        XCTAssertEqual(coordinator.copyText(context: multiContext), "In the beginning")
+        XCTAssertNil(coordinator.shareText(context: multiContext))
+
+        coordinator.clearSelection()
+
+        XCTAssertFalse(coordinator.hasActiveSelection)
+        XCTAssertEqual(coordinator.selectedText, "")
+        XCTAssertNil(coordinator.copyText(context: bibleContext))
+        XCTAssertNil(coordinator.shareText(context: bibleContext))
+    }
+
+    /**
      Protects native selection actions from falling back to the stale Bible page behind `Multi`.
 
      Android treats `FakeBookFactory.multiDocument` as a special general-book page. Bible-only

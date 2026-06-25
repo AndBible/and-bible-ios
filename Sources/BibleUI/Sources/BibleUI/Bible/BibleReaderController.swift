@@ -474,6 +474,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     private let swordCoordinator = BibleReaderSwordCoordinator()
     /// Reader config/window-state collaborator that owns bridge payload projection and compare visibility state.
     private var configurationCoordinator = BibleReaderConfigurationCoordinator()
+    /// Reader-local native selection state and pure action-payload decisions.
+    private var selectionCoordinator = BibleReaderSelectionCoordinator()
     /// Workspace store for history recording
     var workspaceStore: WorkspaceStore?
     /// The current window (for history recording)
@@ -1481,8 +1483,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         activeStudyPadLabelId = nil
         activeStudyPadLabelName = nil
         editingInWebView = false
-        hasActiveSelection = false
-        selectedText = ""
+        clearNativeSelectionState()
         applyTransientPageIdentity(request)
 
         bridge.emit(event: "clear_document")
@@ -1574,8 +1575,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         activeStudyPadLabelId = nil
         activeStudyPadLabelName = nil
         editingInWebView = false
-        hasActiveSelection = false
-        selectedText = ""
+        clearNativeSelectionState()
 
         let osisBookId = osisBookId(for: currentBook)
         let chapter = currentChapter
@@ -1776,8 +1776,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         activeStudyPadLabelId = nil
         activeStudyPadLabelName = nil
         editingInWebView = false
-        hasActiveSelection = false
-        selectedText = ""
+        clearNativeSelectionState()
     }
 
     /**
@@ -1922,8 +1921,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         activeStudyPadLabelId = nil
         activeStudyPadLabelName = nil
         editingInWebView = false
-        hasActiveSelection = false
-        selectedText = ""
+        clearNativeSelectionState()
 
         guard let reader = activeEpubReader else {
             bridge.emit(event: "clear_document")
@@ -3394,8 +3392,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      Records the latest text selection reported by the web client and enables native action mode UI.
      */
     public func bridge(_ bridge: BibleBridge, selectionChanged text: String) {
-        hasActiveSelection = true
-        selectedText = text
+        selectionCoordinator.selectionChanged(text)
         bridge.emit(event: "set_action_mode", data: "true")
     }
 
@@ -3403,12 +3400,41 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      Clears native selection state when the web client deselects text.
      */
     public func bridgeSelectionCleared(_ bridge: BibleBridge) {
-        hasActiveSelection = false
-        selectedText = ""
+        clearNativeSelectionState()
         bridge.emit(event: "set_action_mode", data: "false")
     }
 
     // MARK: - Selection Actions
+
+    /**
+     Builds the current page context used by pure native-selection payload decisions.
+
+     - Returns: A snapshot of the page identity and Bible-reference eligibility at action time.
+     - Side effects: None.
+     - Failure modes: None.
+     */
+    private func selectionPageContext() -> BibleReaderSelectionPageContext {
+        BibleReaderSelectionPageContext(
+            canUseBibleReferenceActions: canUseBibleReferenceActions,
+            currentBook: currentBook,
+            currentChapter: currentChapter,
+            activeModuleName: activeModuleName
+        )
+    }
+
+    /**
+     Clears native selection bookkeeping without emitting bridge action-mode events.
+
+     Document replacement paths already clear the WebView selection separately when needed. This
+     helper centralizes the native state reset so those paths do not mutate selection fields owned by
+     the coordinator.
+
+     - Side effects: Mutates only native selection state.
+     - Failure modes: None.
+     */
+    private func clearNativeSelectionState() {
+        selectionCoordinator.clearSelection()
+    }
 
     /**
      Queries the active web selection using Android-compatible selection metadata.
@@ -3592,12 +3618,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      - Failure modes: Returns `nil` for an empty native selection.
      */
     func selectionCopyTextForCurrentPage() -> String? {
-        guard !selectedText.isEmpty else { return nil }
-        if canUseBibleReferenceActions {
-            let reference = "\(currentBook) \(currentChapter)"
-            return "\(selectedText)\n\u{2014} \(reference) (\(activeModuleName))"
-        }
-        return selectedText
+        selectionCoordinator.copyText(context: selectionPageContext())
     }
 
     /**
@@ -3621,10 +3642,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
     /// Share the selected text.
     func shareSelection() {
-        guard canUseBibleReferenceActions else { return }
-        guard !selectedText.isEmpty else { return }
-        let reference = "\(currentBook) \(currentChapter)"
-        let shareText = "\(selectedText)\n\u{2014} \(reference) (\(activeModuleName))"
+        guard let shareText = selectionCoordinator.shareText(context: selectionPageContext()) else { return }
         onShareVerseText?(shareText)
         bridge.clearSelection()
     }
@@ -3668,9 +3686,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
     /// Open a web search for the currently selected text.
     func webSearchSelection() {
-        guard !selectedText.isEmpty else { return }
-        guard let encoded = selectedText.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
-              let url = URL(string: "https://www.google.com/search?q=\(encoded)") else { return }
+        guard let url = selectionCoordinator.webSearchURL() else { return }
         #if os(iOS)
         UIApplication.shared.open(url)
         #elseif os(macOS)
@@ -3685,7 +3701,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      enabled unless they are explicitly disabled, and successful lookups render as transient
      document content instead of an iOS-only sheet.
 
-     - Parameters: None; the method reads the controller's current `selectedText`.
+     - Parameters: None; the method reads the current selection from the selection coordinator.
      - Returns: No direct return value; a successful lookup emits a Vue document payload through
        the current pane or configured links-window target.
      - Side effects: May show a localized "not found" toast, route a dictionary document payload,
@@ -3695,8 +3711,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
        required.
      */
     func lookupSelectionInDictionaries() {
-        guard !selectedText.isEmpty else { return }
-        let query = BibleReaderWordLookupDocumentBuilder.normalizeQuery(selectedText)
+        guard let query = selectionCoordinator.normalizedDictionaryQuery() else { return }
         guard !query.isEmpty else {
             onShowToast?(String(
                 localized: "word_not_found_in_dictionaries",
@@ -3735,9 +3750,9 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     var onOpenExternalURL: ((URL) -> Void)?
 
     /// Whether there's an active text selection in the WebView.
-    private(set) var hasActiveSelection = false
+    var hasActiveSelection: Bool { selectionCoordinator.hasActiveSelection }
     /// The currently selected text.
-    private(set) var selectedText: String = ""
+    var selectedText: String { selectionCoordinator.selectedText }
     /// Whether any plain word-lookup dictionaries are currently available.
     var hasWordLookupDictionaries: Bool { wordLookupDocumentBuilder().hasWordLookupDictionaries }
 
@@ -3821,8 +3836,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         activeStudyPadLabelId = nil
         activeStudyPadLabelName = nil
         editingInWebView = false
-        hasActiveSelection = false
-        selectedText = ""
+        clearNativeSelectionState()
         currentCategory = .generalBook
         myDocumentCoordinator.setActivePage(bookInitials: bookInitials, pageKey: pageKey)
         setRenderedContentState(
@@ -4191,8 +4205,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         activeStudyPadLabelId = nil
         activeStudyPadLabelName = nil
         editingInWebView = false
-        hasActiveSelection = false
-        selectedText = ""
+        clearNativeSelectionState()
 
         let osisBookId = osisBookId(for: currentBook)
         guard let range = currentChapterOrdinalRange() else {
@@ -4258,8 +4271,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         activeStudyPadLabelId = nil
         activeStudyPadLabelName = nil
         editingInWebView = false
-        hasActiveSelection = false
-        selectedText = ""
+        clearNativeSelectionState()
 
         bridge.emit(event: "clear_document")
         bridge.emit(event: "add_documents", data: document)
@@ -4301,8 +4313,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         activeStudyPadLabelId = labelId
         activeStudyPadLabelName = label.name
         editingInWebView = false
-        hasActiveSelection = false
-        selectedText = ""
+        clearNativeSelectionState()
 
         // Fetch all data for this StudyPad
         let bibleBookmarks = service.bibleBookmarks(withLabel: labelId)
@@ -5590,8 +5601,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         activeStudyPadLabelId = nil
         activeStudyPadLabelName = nil
         editingInWebView = false
-        hasActiveSelection = false
-        selectedText = ""
+        clearNativeSelectionState()
         let osisBookId = osisBookId(for: currentBook)
         let isNT = isNewTestament(currentBook)
 
