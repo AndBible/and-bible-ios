@@ -97,7 +97,6 @@ class ReaderModalOwnershipMatrixTests(unittest.TestCase):
         matrix = MATRIX.read_text(encoding="utf-8")
 
         for token in [
-            "`showSearch`",
             "`showStartupDownloadPrompt`",
             "`showReaderStrongsModeDialog`",
             "`shareSheetBinding`",
@@ -120,7 +119,7 @@ class ReaderModalOwnershipMatrixTests(unittest.TestCase):
         matrix = MATRIX.read_text(encoding="utf-8")
 
         expected_owners = {
-            "showSearch": "`Android app-owned`",
+            "ReaderDestination.search": "`Android app-owned`",
             "showRefChooser": "`Android app-owned`",
             "ReaderModal.chooseDocument": "`Android app-owned`",
             "ReaderModal.modulePicker": "`Android app-owned`",
