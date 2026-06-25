@@ -67,6 +67,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     /// Router for bridge events whose behavior is limited to pane-local modal and host callbacks.
     @ObservationIgnored
     private lazy var bridgeEventRouter = makeBridgeEventRouter()
+    /// Pure classifier for Android-compatible external link and pseudo-link strings.
+    private let externalLinkRouter = BibleReaderExternalLinkRouter()
 
     /// SWORD module manager and active Bible module
     private(set) var swordManager: SwordManager?
@@ -4373,90 +4375,65 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      - unrecognized schemes fall through to the platform URL-opening path
      */
     public func bridge(_ bridge: BibleBridge, openExternalLink link: String) {
-        // Handle Strong's/morphology links: ab-w://?strong=H1234&robinson=...
-        if link.hasPrefix("ab-w://") {
-            handleStrongsLink(link)
-            return
-        }
-        // Handle document-independent Strong's links: strongs://G2316, strongs://H430.
-        if link.hasPrefix("strongs://") {
-            handleStandaloneStrongsLink(link)
-            return
-        }
-        // Handle document-independent morphology links: morphology://robinson/V-PAI-3S.
-        if link.hasPrefix("morphology://") {
-            handleStandaloneMorphologyLink(link)
-            return
-        }
-        // Handle "Find all occurrences" links from FeaturesLink.vue
-        if link.hasPrefix("ab-find-all://") {
-            handleFindAllLink(link)
-            return
-        }
-        // Handle error-report links surfaced in web-rendered error overlays.
-        if link.hasPrefix("ab-error://") {
+        guard let route = externalLinkRouter.route(for: link) else { return }
+        handleExternalLinkRoute(route)
+    }
+
+    /**
+     Executes a typed Android-compatible external link route for this reader pane.
+
+     `BibleReaderExternalLinkRouter` owns pure parsing and classification. This method owns the
+     side effects Android performs through `LinkControl`: navigation, transient `MultiDocument`
+     emission, downloads presentation, EPUB jumps, My Notes, StudyPad, and platform URL opening.
+
+     - Parameter route: Classified route generated from a bridge link.
+     - Side effects: May navigate the active pane, emit transient documents, invoke owner callbacks,
+       or open platform URLs.
+     - Failure modes: Invalid references or payload-build failures are ignored, matching Android's
+       no-op behavior for unresolved links.
+     */
+    private func handleExternalLinkRoute(_ route: BibleReaderExternalLinkRouter.Route) {
+        switch route {
+        case let .definition(strongs, robinson):
+            logger.info("handleExternalLinkRoute.definition: strongs=\(strongs), robinson=\(robinson)")
+            guard let multiDocJSON = buildStrongsMultiDocJSON(
+                strongs: strongs,
+                robinson: robinson,
+                stateJSON: currentStrongsDocumentStateJSON()
+            ) else {
+                return
+            }
+            openDefinitionDocument(
+                multiDocJSON,
+                renderedBook: "Strongs",
+                renderedKey: "strongs"
+            )
+        case let .findAllOccurrences(name):
+            onShowStrongsSearch?(name)
+        case .errorReport:
             handleErrorReportLink()
-            return
+        case let .epubReference(book, toKey, toId):
+            bridge(self.bridge, openEpubLink: book, toKey: toKey, toId: toId)
+        case let .downloads(searchText):
+            bridgeEventRouter.requestOpenDownloads(searchText: searchText)
+        case let .myNotes(osisRef, ordinal):
+            if let osisRef, let ref = parseOsisReferences(osisRef).first {
+                navigateTo(book: ref.book, chapter: ref.chapter, verse: ref.verse)
+                loadMyNotesDocument(jumpToOrdinal: ordinal)
+            } else {
+                loadMyNotesDocument(jumpToOrdinal: ordinal)
+            }
+        case let .studyPad(labelId, bookmarkId):
+            loadStudyPadDocument(labelId: labelId, bookmarkId: bookmarkId)
+        case let .osisReferences(values):
+            handleOsisReferenceValues(values)
+        case let .multiReferences(values):
+            handleMultiReferenceValues(values)
+        case let .swordReference(ref), let .osisNavigation(ref):
+            _ = navigateToOsisRef(ref)
+        case let .platformURL(url):
+            openPlatformURL(url)
         }
-        // Handle EPUB internal reference links when surfaced as raw anchors.
-        if link.hasPrefix("epub-ref://") {
-            handleEpubRefLink(link)
-            return
-        }
-        // Handle Downloads links surfaced in web-rendered help/error content.
-        if link.hasPrefix("download://") {
-            bridgeEventRouter.requestOpenDownloads(searchText: Self.downloadSearchText(from: link))
-            return
-        }
-        // Handle My Notes links surfaced in bookmark metadata.
-        if link.hasPrefix("my-notes://") {
-            handleMyNotesLink(link)
-            return
-        }
-        // Handle StudyPad links surfaced in bookmark metadata.
-        if link.hasPrefix("journal://") {
-            handleJournalLink(link)
-            return
-        }
-        // Handle cross-reference links: osis://?osis=Matt.1.1&v11n=KJV
-        if link.hasPrefix("osis://") {
-            handleOsisLink(link)
-            return
-        }
-        // Handle multi cross-reference links: multi://?osis=Matt.1.1&osis=Mark.2.3
-        if link.hasPrefix("multi://") {
-            handleMultiLink(link)
-            return
-        }
-        // Handle sword:// links (e.g. sword://Bible/John.17.11 from Calvin's commentary)
-        if link.hasPrefix("sword://") {
-            handleSwordLink(link)
-            return
-        }
-        // Handle MyBible cross-reference links: "B:bookInt chapter:verse"
-        if link.hasPrefix("B:") {
-            handleMyBibleLink(link)
-            return
-        }
-        // Handle MyBible Strong's links: "S:G2424" or "S:H1234"
-        if link.hasPrefix("S:") {
-            let strongRef = String(link.dropFirst(2))
-            handleStrongsLink("ab-w://?strong=\(strongRef)")
-            return
-        }
-        // Handle MySword Bible links: "#bBookInt.Chapter.Verse"
-        if link.hasPrefix("#b") {
-            handleMySwordBibleLink(link)
-            return
-        }
-        // Handle MySword Strong's links: "#sG2424" or "#dH1234"
-        if link.hasPrefix("#s") || link.hasPrefix("#d") {
-            let strongRef = String(link.dropFirst(2))
-            handleStrongsLink("ab-w://?strong=\(strongRef)")
-            return
-        }
-        guard let url = URL(string: link) else { return }
-        openPlatformURL(url)
     }
 
     /**
@@ -4488,61 +4465,6 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         #elseif os(macOS)
         NSWorkspace.shared.open(url)
         #endif
-    }
-
-    /**
-     Parses Strong's and morphology link payloads from `ab-w://` URLs.
-
-     Android routes these links through normal document/window handling. iOS follows that route by
-     building the shared Vue `MultiDocument` payload with `contentType: "strongs"` and then handing
-     it to the pane-owned definition document router.
-
-     - Parameter link: `ab-w://` URL containing one or more `strong` or `robinson` query items.
-     - Returns: No direct return value; valid links route a transient Strong's document payload.
-     - Side effects: May emit an `add_documents` event in the current pane or configured links
-       target window. Preserves saved Strong's tab state when recursive Strong's links are opened
-       from an existing Strong's document.
-     - Failure modes: Malformed URLs, links without recognized query items, or payload-build
-       failures are ignored, matching the existing bridge-link behavior.
-     */
-    private func handleStrongsLink(_ link: String) {
-        logger.info("handleStrongsLink: \(link)")
-        guard let components = URLComponents(string: link) else {
-            logger.warning("handleStrongsLink: failed to parse URL")
-            return
-        }
-        let items = components.queryItems ?? []
-
-        var strongs: [String] = []
-        var robinson: [String] = []
-
-        for item in items {
-            guard let value = item.value, !value.isEmpty else { continue }
-            switch item.name {
-            case "strong":
-                strongs.append(value)
-            case "robinson":
-                robinson.append(value)
-            default:
-                break
-            }
-        }
-
-        logger.info("handleStrongsLink: strongs=\(strongs), robinson=\(robinson)")
-        if strongs.isEmpty && robinson.isEmpty { return }
-
-        let multiDocJSON = buildStrongsMultiDocJSON(
-            strongs: strongs,
-            robinson: robinson,
-            stateJSON: currentStrongsDocumentStateJSON()
-        )
-        guard let multiDocJSON else { return }
-
-        openDefinitionDocument(
-            multiDocJSON,
-            renderedBook: "Strongs",
-            renderedKey: "strongs"
-        )
     }
 
     /**
@@ -4628,30 +4550,6 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         return activeWindow?.pageManager?.jsState
     }
 
-    private func handleStandaloneStrongsLink(_ link: String) {
-        guard let components = URLComponents(string: link) else { return }
-        let ref = components.host ?? components.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        guard !ref.isEmpty else { return }
-        handleStrongsLink("ab-w://?strong=\(ref)")
-    }
-
-    private func handleStandaloneMorphologyLink(_ link: String) {
-        guard let components = URLComponents(string: link) else { return }
-        let code = components.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        guard !code.isEmpty else { return }
-        handleStrongsLink("ab-w://?robinson=\(code)")
-    }
-
-    private func handleEpubRefLink(_ link: String) {
-        guard let components = URLComponents(string: link),
-              let items = components.queryItems,
-              let book = items.first(where: { $0.name == "book" })?.value,
-              let toKey = items.first(where: { $0.name == "toKey" })?.value,
-              let toId = items.first(where: { $0.name == "toId" })?.value else { return }
-
-        bridge(self.bridge, openEpubLink: book, toKey: toKey, toId: toId)
-    }
-
     /**
      Builds the Android-style Strong's `MultiDocument` payload for bridge routing.
 
@@ -4695,61 +4593,6 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
                 Set(self?.settingsStore?.getStringSet(.disabledWordLookupDictionaries) ?? [])
             }
         )
-    }
-
-    /// Handle "Find all occurrences" links: ab-find-all://?type=hebrew&name=H05775
-    private func handleFindAllLink(_ link: String) {
-        logger.info("handleFindAllLink: \(link)")
-        guard let components = URLComponents(string: link) else { return }
-        let items = components.queryItems ?? []
-        let type = items.first(where: { $0.name == "type" })?.value
-        var name = items.first(where: { $0.name == "name" })?.value ?? ""
-
-        // Ensure name has H/G prefix
-        if !name.isEmpty && name.first?.isLetter != true {
-            if type == "hebrew" {
-                name = "H\(name)"
-            } else if type == "greek" {
-                name = "G\(name)"
-            }
-        }
-
-        if !name.isEmpty {
-            onShowStrongsSearch?(name)
-        }
-    }
-
-    private func handleMyNotesLink(_ link: String) {
-        logger.info("handleMyNotesLink: \(link)")
-        guard let components = URLComponents(string: link) else {
-            loadMyNotesDocument()
-            return
-        }
-
-        let items = components.queryItems ?? []
-        let ordinal = items.first(where: { $0.name == "ordinal" })?.value.flatMap(Int.init)
-
-        if let osisRef = items.first(where: { $0.name == "osis" })?.value,
-           let ref = parseOsisReferences(osisRef).first {
-            navigateTo(book: ref.book, chapter: ref.chapter, verse: ref.verse)
-            loadMyNotesDocument(jumpToOrdinal: ordinal)
-            return
-        }
-
-        loadMyNotesDocument(jumpToOrdinal: ordinal)
-    }
-
-    private func handleJournalLink(_ link: String) {
-        logger.info("handleJournalLink: \(link)")
-        guard let components = URLComponents(string: link),
-              let items = components.queryItems,
-              let labelId = items.first(where: { $0.name == "id" })?.value,
-              let labelUUID = UUID(uuidString: labelId) else { return }
-
-        let entryId = items.first(where: { $0.name == "bookmarkId" })?.value
-            ?? items.first(where: { $0.name == "entryId" })?.value
-        let bookmarkUUID = entryId.flatMap(UUID.init(uuidString:))
-        loadStudyPadDocument(labelId: labelUUID, bookmarkId: bookmarkUUID)
     }
 
     /**
@@ -4800,56 +4643,17 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
        documents to `MultiDocument`, matching Android's `FakeBookFactory.multiDocument` path.
      */
     private func buildBibleMultiReferenceDocumentJSON(refs: [OsisRef]) -> String? {
-        guard !refs.isEmpty else { return nil }
-
-        let moduleName = activeModuleName
-        let fragments: [[String: Any]] = refs.compactMap { ref in
-            let osisRef = "\(ref.osisId).\(ref.chapter).\(ref.verse)"
-            let ordinal: Int
-            if let activeModule {
-                guard let moduleOrdinal = activeModule.verseOrdinal(
-                    osisBookId: ref.osisId,
-                    chapter: ref.chapter,
-                    verse: ref.verse
-                ) else {
-                    return nil
-                }
-                ordinal = moduleOrdinal
-            } else {
-                ordinal = compatibilityOrdinal(chapter: ref.chapter, verse: ref.verse)
+        BibleReaderMultiReferenceDocumentBuilder(
+            activeModule: activeModule,
+            activeModuleName: activeModuleName,
+            compatibilityOrdinal: { [weak self] chapter, verse in
+                self?.compatibilityOrdinal(chapter: chapter, verse: verse)
+                    ?? BibleChapterDocumentBuilder.ordinal(chapter: chapter, verse: verse)
+            },
+            isNewTestament: { [weak self] bookName in
+                self?.isNewTestament(bookName) ?? Self.isNewTestament(bookName)
             }
-            return [
-                "xml": buildBibleMultiReferenceXML(ref: ref, module: activeModule, ordinal: ordinal),
-                "key": "\(moduleName)--\(osisRef)",
-                "keyName": ref.displayName,
-                "v11n": "KJVA",
-                "bookCategory": DocumentCategory.bible.rawValue,
-                "bookInitials": moduleName,
-                "bookAbbreviation": ref.osisId,
-                "osisRef": osisRef,
-                "isNewTestament": isNewTestament(ref.book),
-                "features": [String: Any](),
-                "hasStrongs": activeModule?.info.features.contains(.strongsNumbers) ?? false,
-                "ordinalRange": [ordinal, ordinal],
-                "language": "en",
-                "direction": "ltr",
-            ]
-        }
-        guard fragments.count == refs.count else { return nil }
-
-        let document: [String: Any] = [
-            "id": "multi-\(UUID().uuidString)",
-            "type": "multi",
-            "osisFragments": fragments,
-            "compare": false,
-        ]
-
-        guard let data = try? JSONSerialization.data(withJSONObject: document, options: [.sortedKeys]),
-              let json = String(data: data, encoding: .utf8) else {
-            logger.error("Failed to serialize multi-reference document JSON")
-            return nil
-        }
-        return json
+        ).buildDocumentJSON(refs: refs)
     }
 
     /**
@@ -4866,33 +4670,11 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
        fragment contains an escaped display label rather than throwing.
      */
     private func buildBibleMultiReferenceXML(ref: OsisRef, module: SwordModule?, ordinal: Int) -> String {
-        let osisRef = "\(ref.osisId).\(ref.chapter).\(ref.verse)"
-        let rawText: String
-
-        if let module {
-            let inspection = module.inspectVerseKeyAndRawEntryRestoringPrevious("=\(osisRef)")
-            if let key = inspection.verseKey,
-               key.osisBookName == ref.osisId,
-               key.chapter == ref.chapter,
-               key.verse == ref.verse {
-                rawText = inspection.rawEntry.trimmingCharacters(in: .whitespacesAndNewlines)
-            } else {
-                rawText = ""
-            }
-        } else {
-            rawText = ""
-        }
-
-        let body = rawText.isEmpty ? escapeXML(ref.displayName) : rawText
-        return "<div><verse osisID=\"\(osisRef)\" verseOrdinal=\"\(ordinal)\">\(body) </verse></div>"
-    }
-
-    /// Escape special XML characters in text content.
-    private func escapeXML(_ text: String) -> String {
-        text.replacingOccurrences(of: "&", with: "&amp;")
-            .replacingOccurrences(of: "<", with: "&lt;")
-            .replacingOccurrences(of: ">", with: "&gt;")
-            .replacingOccurrences(of: "\"", with: "&quot;")
+        BibleReaderMultiReferenceDocumentBuilder.buildBibleMultiReferenceXML(
+            ref: ref,
+            module: module,
+            ordinal: ordinal
+        )
     }
 
     /**
@@ -4905,16 +4687,18 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         BibleReaderStrongsDocumentBuilder.lookupInModule(module, keyOptions: keyOptions)
     }
 
-    /// Handle a single cross-reference link: osis://?osis=Matt.1.1&v11n=KJV
-    private func handleOsisLink(_ link: String) {
-        logger.info("handleOsisLink: \(link)")
-        guard let components = URLComponents(string: link) else { return }
-        let items = components.queryItems ?? []
-        guard let osisRef = items.first(where: { $0.name == "osis" })?.value else { return }
+    /**
+     Handles already-classified `osis://` query values from Android-compatible links.
 
-        let refs = parseOsisReferences(osisRef)
+     - Parameter values: Raw OSIS query values preserved in link order.
+     - Side effects: Navigates a single reference or opens Android's transient `Multi` document for
+       range/list references.
+     - Failure modes: Invalid values are ignored; no side effects occur when nothing parses.
+     */
+    private func handleOsisReferenceValues(_ values: [String]) {
+        guard let value = values.first else { return }
+        let refs = parseOsisReferences(value)
         if refs.count == 1, let ref = refs.first {
-            // Single reference: if links window callback is available, use it
             if let openInLinks = onOpenInLinksWindow {
                 openInLinks(ref.book, ref.chapter)
             } else {
@@ -4926,18 +4710,16 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         }
     }
 
-    /// Handle multi cross-reference links: multi://?osis=Matt.1.1&osis=Mark.2.3&...
-    private func handleMultiLink(_ link: String) {
-        logger.info("handleMultiLink: \(link)")
-        guard let components = URLComponents(string: link) else { return }
-        let items = components.queryItems ?? []
-        let osisValues = items.filter { $0.name == "osis" }.compactMap(\.value)
+    /**
+     Handles already-classified `multi://` OSIS query values from Android-compatible links.
 
-        var allRefs: [OsisRef] = []
-        for value in osisValues {
-            allRefs.append(contentsOf: parseOsisReferences(value))
-        }
-
+     - Parameter values: OSIS query values from the pseudo-link.
+     - Side effects: Navigates a single parsed reference or opens a transient `Multi` document for
+       multiple parsed references.
+     - Failure modes: Invalid values are ignored; no side effects occur when nothing parses.
+     */
+    private func handleMultiReferenceValues(_ values: [String]) {
+        let allRefs = values.flatMap(parseOsisReferences)
         guard !allRefs.isEmpty else { return }
 
         if allRefs.count == 1, let ref = allRefs.first {
@@ -4966,148 +4748,6 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             loadMultiReferenceDocument(documentJSON)
         }
     }
-
-    /**
-     Handle sword:// links (e.g. sword://Bible/John.17.11 from Calvin's commentary).
-     Format: sword://moduleName/OsisRef or sword://Bible/OsisRef
-     */
-    private func handleSwordLink(_ link: String) {
-        logger.info("handleSwordLink: \(link)")
-        // Strip "sword://" prefix
-        var ref = String(link.dropFirst("sword://".count))
-        // Strip leading/trailing slashes
-        while ref.hasPrefix("/") { ref = String(ref.dropFirst()) }
-        while ref.hasSuffix("/") { ref = String(ref.dropLast()) }
-
-        guard !ref.isEmpty else { return }
-
-        if let slashIdx = ref.firstIndex(of: "/") {
-            let modulePart = String(ref[ref.startIndex..<slashIdx]).lowercased()
-            let osisRef = String(ref[ref.index(after: slashIdx)...])
-            // If module is "Bible" (generic), just navigate to the OSIS ref
-            if modulePart == "bible" {
-                _ = navigateToOsisRef(osisRef)
-            } else {
-                // Try to navigate with the OSIS ref regardless of module name
-                // (we don't switch modules for now, just navigate to the reference)
-                _ = navigateToOsisRef(osisRef)
-            }
-        } else {
-            // No slash — treat the whole thing as an OSIS reference
-            _ = navigateToOsisRef(ref)
-        }
-    }
-
-    /**
-     Handle MyBible cross-reference links: "B:bookInt chapter:verse"
-     Example: "B:470 1:1" → Matthew 1:1
-     */
-    private func handleMyBibleLink(_ link: String) {
-        logger.info("handleMyBibleLink: \(link)")
-        // Format: "B:bookInt chapter:verse" (e.g. "B:470 1:1")
-        let parts = link.split(separator: " ", maxSplits: 1)
-        guard parts.count >= 2 else { return }
-
-        // Extract book number from "B:470"
-        let bookPart = String(parts[0])
-        guard bookPart.hasPrefix("B:"),
-              let bookInt = Int(bookPart.dropFirst(2)) else { return }
-
-        // Look up OSIS ID from MyBible book number
-        guard let osisId = Self.myBibleIntToOsisId[bookInt] else {
-            logger.warning("Unknown MyBible book number: \(bookInt)")
-            return
-        }
-
-        // Parse "chapter:verse"
-        let chapVerse = String(parts[1]).components(separatedBy: ":")
-        guard let chapter = Int(chapVerse[0]) else { return }
-        let verse = chapVerse.count >= 2 ? Int(chapVerse[1]) : nil
-
-        let osisRef = verse != nil ? "\(osisId).\(chapter).\(verse!)" : "\(osisId).\(chapter)"
-        _ = navigateToOsisRef(osisRef)
-    }
-
-    /**
-     Handle MySword Bible links: "#bBookInt.Chapter.Verse"
-     Example: "#b40.1.1" → Matthew 1:1 (MySword uses sequential 1-66 numbering)
-     */
-    private func handleMySwordBibleLink(_ link: String) {
-        logger.info("handleMySwordBibleLink: \(link)")
-        // Format: "#bBookInt.Chapter.Verse" (e.g. "#b40.1.1")
-        let rest = String(link.dropFirst(2)) // strip "#b"
-        let parts = rest.split(separator: ".").compactMap { Int($0) }
-        guard parts.count >= 2 else { return }
-
-        let bookInt = parts[0]
-        let chapter = parts[1]
-        let verse = parts.count >= 3 ? parts[2] : nil
-
-        // MySword uses sequential 1-66 numbering (1=Gen, 40=Matt, 66=Rev)
-        guard let osisId = Self.mySwordIntToOsisId[bookInt] else {
-            logger.warning("Unknown MySword book number: \(bookInt)")
-            return
-        }
-
-        let osisRef = verse != nil ? "\(osisId).\(chapter).\(verse!)" : "\(osisId).\(chapter)"
-        _ = navigateToOsisRef(osisRef)
-    }
-
-    // MARK: - MySword/MyBible Book Number Mappings
-
-    /**
-     MySword sequential book numbering (1-66, Protestant canon).
-     Matches Android's mySwordIntToBibleBook in MySwordBookMap.kt.
-     */
-    private static let mySwordIntToOsisId: [Int: String] = [
-        1: "Gen", 2: "Exod", 3: "Lev", 4: "Num", 5: "Deut",
-        6: "Josh", 7: "Judg", 8: "Ruth", 9: "1Sam", 10: "2Sam",
-        11: "1Kgs", 12: "2Kgs", 13: "1Chr", 14: "2Chr",
-        15: "Ezra", 16: "Neh", 17: "Esth", 18: "Job",
-        19: "Ps", 20: "Prov", 21: "Eccl", 22: "Song",
-        23: "Isa", 24: "Jer", 25: "Lam", 26: "Ezek", 27: "Dan",
-        28: "Hos", 29: "Joel", 30: "Amos", 31: "Obad", 32: "Jonah",
-        33: "Mic", 34: "Nah", 35: "Hab", 36: "Zeph",
-        37: "Hag", 38: "Zech", 39: "Mal",
-        40: "Matt", 41: "Mark", 42: "Luke", 43: "John",
-        44: "Acts", 45: "Rom", 46: "1Cor", 47: "2Cor",
-        48: "Gal", 49: "Eph", 50: "Phil", 51: "Col",
-        52: "1Thess", 53: "2Thess", 54: "1Tim", 55: "2Tim",
-        56: "Titus", 57: "Phlm", 58: "Heb",
-        59: "Jas", 60: "1Pet", 61: "2Pet",
-        62: "1John", 63: "2John", 64: "3John",
-        65: "Jude", 66: "Rev",
-    ]
-
-    /**
-     MyBible non-sequential book numbering.
-     Matches Android's myBibleIntToBibleBook in MyBibleBookMap.kt.
-     */
-    private static let myBibleIntToOsisId: [Int: String] = [
-        10: "Gen", 20: "Exod", 30: "Lev", 40: "Num", 50: "Deut",
-        60: "Josh", 70: "Judg", 80: "Ruth",
-        90: "1Sam", 100: "2Sam", 110: "1Kgs", 120: "2Kgs",
-        130: "1Chr", 140: "2Chr",
-        150: "Ezra", 160: "Neh", 190: "Esth",
-        220: "Job", 230: "Ps", 240: "Prov", 250: "Eccl", 260: "Song",
-        290: "Isa", 300: "Jer", 310: "Lam", 320: "Bar",
-        330: "Ezek", 340: "Dan",
-        350: "Hos", 360: "Joel", 370: "Amos", 380: "Obad",
-        390: "Jonah", 400: "Mic", 410: "Nah", 420: "Hab",
-        430: "Zeph", 440: "Hag", 450: "Zech", 460: "Mal",
-        470: "Matt", 480: "Mark", 490: "Luke", 500: "John",
-        510: "Acts", 520: "Rom", 530: "1Cor", 540: "2Cor",
-        550: "Gal", 560: "Eph", 570: "Phil", 580: "Col",
-        590: "1Thess", 600: "2Thess", 610: "1Tim", 620: "2Tim",
-        630: "Titus", 640: "Phlm", 650: "Heb",
-        660: "Jas", 670: "1Pet", 680: "2Pet",
-        690: "1John", 700: "2John", 710: "3John",
-        720: "Jude", 730: "Rev",
-        // Deuterocanonical / Apocrypha (MyBible includes these)
-        170: "Tob", 180: "Jdt", 270: "Wis", 280: "Sir",
-        462: "1Macc", 464: "2Macc", 466: "3Macc", 467: "4Macc",
-        468: "2Esd",
-    ]
 
     /**
      Parses an OSIS reference string into structured verse references.
