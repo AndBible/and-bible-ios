@@ -37,7 +37,16 @@ import {
 window.bibleView = {};
 window.bibleViewDebug = {};
 
-function mountAmbiguousSelection() {
+function testBookmark(id = "bookmark-1") {
+    return {
+        id,
+        text: "And God said",
+    };
+}
+
+function mountAmbiguousSelection({bookmarks = []} = {}) {
+    const bookmarkMap = new Map(bookmarks.map(bookmark => [bookmark.id, bookmark]));
+
     return mount(AmbiguousSelection, {
         global: {
             provide: {
@@ -56,7 +65,7 @@ function mountAmbiguousSelection() {
                 [configKey]: {},
                 [globalBookmarksKey]: {
                     bookmarkIdsByOrdinal: new Map(),
-                    bookmarkMap: new Map(),
+                    bookmarkMap,
                 },
                 [keyboardKey]: {
                     editorMode: ref(0),
@@ -74,10 +83,22 @@ function mountAmbiguousSelection() {
             },
             stubs: {
                 AmbiguousActionButtons: true,
-                AmbiguousSelectionBookmarkButton: true,
+                AmbiguousSelectionBookmarkButton: {
+                    props: ["bookmarkId"],
+                    emits: ["selected"],
+                    template: `
+                        <button
+                            data-test="ambiguous-bookmark-button"
+                            @click="$emit('selected')"
+                        >
+                            {{ bookmarkId }}
+                        </button>
+                    `,
+                },
                 ModalDialog: {
                     template: "<div><slot name=\"title\"/><slot name=\"extra-buttons\"/><slot/></div>",
                 },
+                FontAwesomeIcon: true,
             },
         },
     });
@@ -91,17 +112,19 @@ describe("AmbiguousSelection bookmark routing", () => {
     /**
      * Protects Android bookmark popup parity for taps on visible bookmarked verse text.
      *
-     * Android opens the bookmark detail modal for a bookmark-owned tap instead of showing the
-     * general verse action chooser. The event still carries verse metadata because the tap occurs
-     * inside scripture text, so this test prevents that metadata from demoting the bookmark action.
+     * Android assigns visible highlight ranges `VISIBLE_BOOKMARK` priority, which stays in the
+     * ambiguous selection chooser when verse metadata is present. Only bookmark marker/icon taps
+     * use positive priority and bypass the chooser. This prevents iOS from treating every
+     * highlighted bookmark span as if the user tapped Android's marker affordance.
      */
-    it("opens a single visible bookmark directly even when verse metadata is present", async () => {
+    it("keeps a single visible bookmark highlight in the chooser when verse metadata is present", async () => {
         const bookmarkEvents = [];
         const listener = args => bookmarkEvents.push(args);
         eventBus.on("bookmark_clicked", listener);
 
         try {
-            const wrapper = mountAmbiguousSelection();
+            const bookmark = testBookmark();
+            const wrapper = mountAmbiguousSelection({bookmarks: [bookmark]});
             const event = new MouseEvent("click", {
                 bubbles: true,
                 cancelable: true,
@@ -126,10 +149,57 @@ describe("AmbiguousSelection bookmark routing", () => {
             const handlePromise = wrapper.vm.handle(event);
             await Promise.resolve();
 
+            expect(bookmarkEvents).toEqual([]);
+            expect(wrapper.text()).toContain("Genesis 1:9");
+            expect(wrapper.find("[data-test='ambiguous-bookmark-button']").exists()).toBe(true);
+
+            await wrapper.find("[data-test='ambiguous-bookmark-button']").trigger("click");
+            await handlePromise;
+        } finally {
+            eventBus.off("bookmark_clicked", listener);
+        }
+    });
+
+    /**
+     * Protects Android bookmark marker parity for direct bookmark modal opening.
+     *
+     * Android's marker/icon event functions use `BOOKMARK_MARKER` priority, so a single marker tap
+     * opens the bookmark detail modal without first showing the generic ambiguous chooser. This
+     * keeps iOS aligned with Android's marker affordance while leaving highlighted text spans in
+     * the chooser path.
+     */
+    it("opens a single bookmark marker directly even when verse metadata is present", async () => {
+        const bookmarkEvents = [];
+        const listener = args => bookmarkEvents.push(args);
+        eventBus.on("bookmark_clicked", listener);
+
+        try {
+            const wrapper = mountAmbiguousSelection();
+            const event = new MouseEvent("click", {
+                bubbles: true,
+                cancelable: true,
+                clientY: 100,
+            });
+
+            addEventFunction(event, null, {
+                bookmarkId: "bookmark-1",
+                priority: EventPriorities.BOOKMARK_MARKER,
+            });
+            addEventVerseInfo(event, {
+                bibleBookName: "Genesis",
+                bookInitials: "KJV",
+                chapter: 1,
+                ordinal: 9,
+                osisRef: "Gen.1.9",
+                verse: 9,
+                verseTo: "",
+            });
+
+            await wrapper.vm.handle(event);
+
             expect(bookmarkEvents).toEqual([
                 ["bookmark-1", {locateTop: false}],
             ]);
-            await handlePromise;
         } finally {
             eventBus.off("bookmark_clicked", listener);
         }

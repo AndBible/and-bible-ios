@@ -323,10 +323,9 @@ async function handle(event: MouseEvent) {
 
     if (eventFunctions.length > 0 || _verseInfo != null || _ordinalInfo != null) {
         const firstFunc = eventFunctions[0];
-        const singleVisibleBookmark = eventFunctions.length === 1 && firstFunc.options.bookmarkId && !firstFunc.options.hidden;
         const singleHighPriority = eventFunctions.length === 1 && firstFunc.options.priority > 0 && !firstFunc.options.dottedStrongs && !firstFunc.options.hiddenStrongs;
         const singleDotted = allEventFunctions.length === 1 && firstFunc?.options.dottedStrongs && !firstFunc?.options.hiddenStrongs;
-        if (singleVisibleBookmark || singleHighPriority || singleDotted) {
+        if (singleHighPriority || singleDotted) {
             if (eventFunctions[0].options.bookmarkId || firstFunc.options.hiddenStrongs) {
                 emit("bookmark_clicked", eventFunctions[0].options.bookmarkId, {locateTop: isBottomHalfClicked(event)});
             } else {

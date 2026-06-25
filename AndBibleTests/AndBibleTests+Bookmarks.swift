@@ -165,6 +165,35 @@ extension AndBibleTests {
     }
 
     #if os(iOS)
+    /**
+     Verifies the reader WebView bridge hands label assignment to native reader-owned routing.
+
+     Android opens `ManageLabels.Mode.ASSIGN` from `BibleView.assignLabels` rather than letting the
+     web document own label assignment. iOS mirrors that by translating the WebView `assignLabels`
+     bridge call into `BibleReaderController.onAssignLabels`, which the SwiftUI reader coordinator
+     presents as the app-owned label assignment route.
+
+     Expected result:
+     - a valid bookmark UUID is forwarded exactly once to the native assignment callback
+     - malformed bookmark identifiers are ignored without presenting a stale route
+
+     Failure meaning:
+     - reader-origin bookmark label editing has drifted back toward WebView-owned or invalid native
+     routing instead of Android's app-owned assignment flow.
+     */
+    @MainActor
+    func testReaderAssignLabelsBridgeRequestsNativeLabelAssignment() {
+        let bookmarkId = UUID(uuidString: "10000000-0000-0000-0000-000000000246")!
+        let controller = BibleReaderController(bridge: BibleBridge())
+        var requestedBookmarkIds: [UUID] = []
+        controller.onAssignLabels = { requestedBookmarkIds.append($0) }
+
+        controller.bridge(BibleBridge(), assignLabels: "not-a-uuid")
+        controller.bridge(BibleBridge(), assignLabels: bookmarkId.uuidString)
+
+        XCTAssertEqual(requestedBookmarkIds, [bookmarkId])
+    }
+
     @MainActor
     func testReaderBookmarkBridgeUpdateEmitsTypedPayloadShape() throws {
         let (bridge, recordedScripts) = makeRecordingBridge()
