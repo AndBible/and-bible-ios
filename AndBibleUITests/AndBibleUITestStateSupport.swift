@@ -211,10 +211,11 @@ extension AndBibleUITests {
                     normalizedOffset: CGVector(dx: 0.5, dy: 0.52)
                 )
             case "workspaceNamePromptTextField":
-                // The workspace prompt resolver already found the text field. Re-sampling the
-                // custom SwiftUI prompt root for its frame can wedge hosted XCTest snapshots, so
-                // let `focusResolvedPromptTextEntryElement` use the resolved field directly.
-                return nil
+                // The workspace prompt is a centered selector-owned dialog. Hosted XCTest can
+                // wedge when re-sampling either the resolved SwiftUI field or prompt root for a
+                // frame after the field was found, so focus through the dialog's stable text-entry
+                // band without asking XCTest for another hosted snapshot.
+                return app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.46))
             default:
                 return nil
             }

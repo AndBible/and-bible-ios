@@ -115,7 +115,9 @@ class WorkspacePromptUITestContractTests(unittest.TestCase):
         self.assertNotIn("workspaceNamePromptScreenCandidates(in: app)", coordinate_body)
         self.assertNotIn('app.collectionViews["workspaceNamePromptScreen"]', coordinate_body)
         self.assertNotIn('app.scrollViews["workspaceNamePromptScreen"]', coordinate_body)
-        self.assertIn("return nil", coordinate_body)
+        self.assertIn("app.coordinate(withNormalizedOffset:", coordinate_body)
+        self.assertIn("CGVector(dx: 0.5, dy: 0.46)", coordinate_body)
+        self.assertNotIn("return nil", coordinate_body)
         self.assertIn(
             'case "workspaceNamePromptScreen":\n'
             "            return workspaceNamePromptScreenCandidates(in: app)",
