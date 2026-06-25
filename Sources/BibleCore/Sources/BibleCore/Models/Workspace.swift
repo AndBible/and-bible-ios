@@ -413,17 +413,19 @@ public struct TextDisplaySettings: Codable, Sendable, Equatable {
      Provides the fully populated application-level fallback settings.
 
      The values are encoded using the same conventions expected by the Vue reader and the
-     Android-compatible settings model. Accessing this constant does not read or write user
-     defaults; it is an in-memory baseline used by resolution helpers.
+     Android-compatible settings model. Numeric reader defaults mirror Android's
+     `WorkspaceEntities.TextDisplaySettings.default` so global reset and inherited reader state
+     resolve to the same concrete values on both platforms. Accessing this constant does not read
+     or write user defaults; it is an in-memory baseline used by resolution helpers.
      */
     public static let appDefaults: TextDisplaySettings = {
         var s = TextDisplaySettings()
-        s.fontSize = 18
+        s.fontSize = 16
         s.fontFamily = "sans-serif"
-        s.lineSpacing = 10
-        s.marginLeft = 2
-        s.marginRight = 2
-        s.maxWidth = 600
+        s.lineSpacing = 16
+        s.marginLeft = 3
+        s.marginRight = 3
+        s.maxWidth = 170
         s.topMargin = 0
         s.strongsMode = 0
         s.showMorphology = false

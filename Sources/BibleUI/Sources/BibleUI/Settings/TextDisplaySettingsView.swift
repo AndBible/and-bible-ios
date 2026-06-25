@@ -250,8 +250,23 @@ public struct TextDisplaySettingsView: View {
     /// Local staged editor values that mirror Android dialog widgets.
     @State private var preferenceEditorDraft = TextDisplayPreferenceEditorDraft(settings: TextDisplaySettings())
 
+    /// Inclusive Android-backed slider bounds used by `FONTSIZE`.
+    static let androidFontSizeRange: ClosedRange<Int> = 1...60
+
+    /// Inclusive Android-backed slider bounds used by left and right `MARGINSIZE` controls.
+    static let androidMarginRange: ClosedRange<Int> = 0...30
+
+    /// Inclusive Android-backed slider bounds used by the maximum text-width `MARGINSIZE` control.
+    static let androidMaxTextWidthRange: ClosedRange<Int> = 0...500
+
+    /// Inclusive Android-backed slider bounds used by `TOPMARGIN`.
+    static let androidTopMarginRange: ClosedRange<Int> = 0...60
+
     /// Inclusive Android-backed slider bounds used by `LINE_SPACING`.
-    private static let lineSpacingRange: ClosedRange<Int> = 10...30
+    static let androidLineSpacingRange: ClosedRange<Int> = 10...30
+
+    /// Android seekbar-backed text-display numeric editors all move in whole-number increments.
+    static let androidNumericSliderStep: Double = 1
 
     /**
      Creates a text-display settings editor bound to a persisted settings model.
@@ -334,7 +349,10 @@ public struct TextDisplaySettingsView: View {
      - Failure modes: none; nil settings fall back to Android-compatible default spacing.
      */
     private var displayedLineSpacing: Int {
-        min(max(settings.lineSpacing ?? 10, Self.lineSpacingRange.lowerBound), Self.lineSpacingRange.upperBound)
+        min(
+            max(settings.lineSpacing ?? TextDisplaySettings.appDefaults.lineSpacing ?? 16, Self.androidLineSpacingRange.lowerBound),
+            Self.androidLineSpacingRange.upperBound
+        )
     }
 
     /**
@@ -410,7 +428,7 @@ public struct TextDisplaySettingsView: View {
                 localized: "text_display_font_size_title_format",
                 defaultValue: "Font size (%d pt)"
             ),
-            settings.fontSize ?? 18
+            settings.fontSize ?? TextDisplaySettings.appDefaults.fontSize ?? 16
         )
     }
 
@@ -443,9 +461,9 @@ public struct TextDisplaySettingsView: View {
                 localized: "text_display_margin_size_title_format",
                 defaultValue: "Margin size (%d/%d/%d mm)"
             ),
-            settings.marginLeft ?? 2,
-            settings.marginRight ?? 2,
-            settings.maxWidth ?? 600
+            settings.marginLeft ?? TextDisplaySettings.appDefaults.marginLeft ?? 3,
+            settings.marginRight ?? TextDisplaySettings.appDefaults.marginRight ?? 3,
+            settings.maxWidth ?? TextDisplaySettings.appDefaults.maxWidth ?? 170
         )
     }
 
@@ -1226,9 +1244,9 @@ public struct TextDisplaySettingsView: View {
                         String(localized: "font_size_pt", defaultValue: "%d pt"),
                         displayedDraftFontSize
                     ),
-                    binding: draftDoubleBinding(\.fontSize, fallback: 18),
-                    range: 1...60,
-                    step: 1
+                    binding: draftDoubleBinding(\.fontSize, fallback: TextDisplaySettings.appDefaults.fontSize ?? 16),
+                    range: Double(Self.androidFontSizeRange.lowerBound)...Double(Self.androidFontSizeRange.upperBound),
+                    step: Self.androidNumericSliderStep
                 )
             }
         case .fontFamily:
@@ -1254,23 +1272,23 @@ public struct TextDisplaySettingsView: View {
                 dialogNumericSlider(
                     title: String(localized: "text_display_left_margin_label", defaultValue: "Left margin"),
                     valueText: millimeterValueText(displayedDraftMarginLeft),
-                    binding: draftDoubleBinding(\.marginLeft, fallback: 2),
-                    range: 0...30,
-                    step: 1
+                    binding: draftDoubleBinding(\.marginLeft, fallback: TextDisplaySettings.appDefaults.marginLeft ?? 3),
+                    range: Double(Self.androidMarginRange.lowerBound)...Double(Self.androidMarginRange.upperBound),
+                    step: Self.androidNumericSliderStep
                 )
                 dialogNumericSlider(
                     title: String(localized: "text_display_right_margin_label", defaultValue: "Right margin"),
                     valueText: millimeterValueText(displayedDraftMarginRight),
-                    binding: draftDoubleBinding(\.marginRight, fallback: 2),
-                    range: 0...30,
-                    step: 1
+                    binding: draftDoubleBinding(\.marginRight, fallback: TextDisplaySettings.appDefaults.marginRight ?? 3),
+                    range: Double(Self.androidMarginRange.lowerBound)...Double(Self.androidMarginRange.upperBound),
+                    step: Self.androidNumericSliderStep
                 )
                 dialogNumericSlider(
                     title: String(localized: "text_display_max_width_label", defaultValue: "Maximum width of text"),
                     valueText: millimeterValueText(displayedDraftMaxWidth),
-                    binding: draftDoubleBinding(\.maxWidth, fallback: 600),
-                    range: 0...1000,
-                    step: 10
+                    binding: draftDoubleBinding(\.maxWidth, fallback: TextDisplaySettings.appDefaults.maxWidth ?? 170),
+                    range: Double(Self.androidMaxTextWidthRange.lowerBound)...Double(Self.androidMaxTextWidthRange.upperBound),
+                    step: Self.androidNumericSliderStep
                 )
             }
         case .topMargin:
@@ -1278,8 +1296,8 @@ public struct TextDisplaySettingsView: View {
                 title: String(localized: "prefs_top_margin_title", defaultValue: "Top margin"),
                 valueText: millimeterValueText(displayedDraftTopMargin),
                 binding: draftDoubleBinding(\.topMargin, fallback: 0),
-                range: 0...60,
-                step: 1
+                range: Double(Self.androidTopMarginRange.lowerBound)...Double(Self.androidTopMarginRange.upperBound),
+                step: Self.androidNumericSliderStep
             )
         case .lineSpacing:
             dialogNumericSlider(
@@ -1288,9 +1306,9 @@ public struct TextDisplaySettingsView: View {
                     String(localized: "prefs_line_spacing_pt", defaultValue: "Line spacing %1.1fx"),
                     Double(displayedDraftLineSpacing) / 10.0
                 ),
-                binding: draftDoubleBinding(\.lineSpacing, fallback: 10),
-                range: Double(Self.lineSpacingRange.lowerBound)...Double(Self.lineSpacingRange.upperBound),
-                step: 1
+                binding: draftDoubleBinding(\.lineSpacing, fallback: TextDisplaySettings.appDefaults.lineSpacing ?? 16),
+                range: Double(Self.androidLineSpacingRange.lowerBound)...Double(Self.androidLineSpacingRange.upperBound),
+                step: Self.androidNumericSliderStep
             )
         case .pageScrollAmount:
             dialogChoiceList(
@@ -1522,22 +1540,22 @@ public struct TextDisplaySettingsView: View {
 
     /// Draft font size shown in the active dialog.
     private var displayedDraftFontSize: Int {
-        preferenceEditorDraft.fontSize ?? TextDisplaySettings.appDefaults.fontSize ?? 18
+        preferenceEditorDraft.fontSize ?? TextDisplaySettings.appDefaults.fontSize ?? 16
     }
 
     /// Draft left margin shown in the active dialog.
     private var displayedDraftMarginLeft: Int {
-        preferenceEditorDraft.marginLeft ?? TextDisplaySettings.appDefaults.marginLeft ?? 2
+        preferenceEditorDraft.marginLeft ?? TextDisplaySettings.appDefaults.marginLeft ?? 3
     }
 
     /// Draft right margin shown in the active dialog.
     private var displayedDraftMarginRight: Int {
-        preferenceEditorDraft.marginRight ?? TextDisplaySettings.appDefaults.marginRight ?? 2
+        preferenceEditorDraft.marginRight ?? TextDisplaySettings.appDefaults.marginRight ?? 3
     }
 
     /// Draft maximum text width shown in the active dialog.
     private var displayedDraftMaxWidth: Int {
-        preferenceEditorDraft.maxWidth ?? TextDisplaySettings.appDefaults.maxWidth ?? 600
+        preferenceEditorDraft.maxWidth ?? TextDisplaySettings.appDefaults.maxWidth ?? 170
     }
 
     /// Draft top margin shown in the active dialog.
@@ -1548,8 +1566,11 @@ public struct TextDisplaySettingsView: View {
     /// Draft line-spacing value clamped to Android's 10...30 seekbar range.
     private var displayedDraftLineSpacing: Int {
         min(
-            max(preferenceEditorDraft.lineSpacing ?? TextDisplaySettings.appDefaults.lineSpacing ?? 10, Self.lineSpacingRange.lowerBound),
-            Self.lineSpacingRange.upperBound
+            max(
+                preferenceEditorDraft.lineSpacing ?? TextDisplaySettings.appDefaults.lineSpacing ?? 16,
+                Self.androidLineSpacingRange.lowerBound
+            ),
+            Self.androidLineSpacingRange.upperBound
         )
     }
 

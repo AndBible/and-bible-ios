@@ -603,9 +603,34 @@ extension AndBibleTests {
     }
 
     func testTextDisplaySliderIntegerRoundsSteppedFloatingPointValues() {
-        XCTAssertEqual(TextDisplaySettingsView.sliderInteger(639.999999999, fallback: 600), 640)
-        XCTAssertEqual(TextDisplaySettingsView.sliderInteger(640.000000001, fallback: 600), 640)
-        XCTAssertEqual(TextDisplaySettingsView.sliderInteger(.nan, fallback: 600), 600)
+        XCTAssertEqual(TextDisplaySettingsView.sliderInteger(259.999999999, fallback: 170), 260)
+        XCTAssertEqual(TextDisplaySettingsView.sliderInteger(260.000000001, fallback: 170), 260)
+        XCTAssertEqual(TextDisplaySettingsView.sliderInteger(.nan, fallback: 170), 170)
+    }
+
+    /**
+     Protects the numeric defaults and ranges used by Android text-display widgets.
+
+     Android seeds text-display settings from `WorkspaceEntities.TextDisplaySettings.default`, and
+     the font, margin, top-margin, and line-spacing dialogs constrain their seekbars in
+     `FontSizeWidget.kt`, `MarginSizeWidget.kt`, and `LineSpacing.kt`. A failure here means iOS can
+     display or persist old platform-shaped defaults or unsupported slider values instead of the
+     Android baseline used by inheritance, sync, and reset behavior.
+     */
+    func testTextDisplayNumericDefaultsAndRangesMirrorAndroidWidgets() {
+        XCTAssertEqual(TextDisplaySettings.appDefaults.fontSize, 16)
+        XCTAssertEqual(TextDisplaySettings.appDefaults.lineSpacing, 16)
+        XCTAssertEqual(TextDisplaySettings.appDefaults.marginLeft, 3)
+        XCTAssertEqual(TextDisplaySettings.appDefaults.marginRight, 3)
+        XCTAssertEqual(TextDisplaySettings.appDefaults.maxWidth, 170)
+        XCTAssertEqual(TextDisplaySettings.appDefaults.topMargin, 0)
+
+        XCTAssertEqual(TextDisplaySettingsView.androidFontSizeRange, 1...60)
+        XCTAssertEqual(TextDisplaySettingsView.androidMarginRange, 0...30)
+        XCTAssertEqual(TextDisplaySettingsView.androidMaxTextWidthRange, 0...500)
+        XCTAssertEqual(TextDisplaySettingsView.androidTopMarginRange, 0...60)
+        XCTAssertEqual(TextDisplaySettingsView.androidLineSpacingRange, 10...30)
+        XCTAssertEqual(TextDisplaySettingsView.androidNumericSliderStep, 1)
     }
 
     /**
@@ -654,13 +679,13 @@ extension AndBibleTests {
      */
     func testTextDisplayPreferenceEditorDraftStagesCommitsAndResetsLikeAndroid() {
         var stored = TextDisplaySettings()
-        stored.fontSize = 18
+        stored.fontSize = 16
         stored.fontFamily = "sans-serif"
-        stored.lineSpacing = 10
+        stored.lineSpacing = 16
         stored.topMargin = 0
-        stored.marginLeft = 2
+        stored.marginLeft = 3
         stored.marginRight = 3
-        stored.maxWidth = 640
+        stored.maxWidth = 170
 
         var draft = TextDisplayPreferenceEditorDraft(settings: stored)
         draft.fontSize = 26
@@ -669,15 +694,15 @@ extension AndBibleTests {
         draft.topMargin = 12
         draft.marginLeft = 4
         draft.marginRight = 5
-        draft.maxWidth = 700
+        draft.maxWidth = 260
 
-        XCTAssertEqual(stored.fontSize, 18)
+        XCTAssertEqual(stored.fontSize, 16)
         XCTAssertEqual(stored.fontFamily, "sans-serif")
-        XCTAssertEqual(stored.lineSpacing, 10)
+        XCTAssertEqual(stored.lineSpacing, 16)
         XCTAssertEqual(stored.topMargin, 0)
-        XCTAssertEqual(stored.marginLeft, 2)
+        XCTAssertEqual(stored.marginLeft, 3)
         XCTAssertEqual(stored.marginRight, 3)
-        XCTAssertEqual(stored.maxWidth, 640)
+        XCTAssertEqual(stored.maxWidth, 170)
 
         draft.commit(.fontSize, scope: .global, to: &stored)
         XCTAssertEqual(stored.fontSize, 26)
@@ -689,10 +714,13 @@ extension AndBibleTests {
         draft.commit(.margins, scope: .global, to: &stored)
         XCTAssertEqual(stored.marginLeft, 4)
         XCTAssertEqual(stored.marginRight, 5)
-        XCTAssertEqual(stored.maxWidth, 700)
+        XCTAssertEqual(stored.maxWidth, 260)
 
         draft.commit(.topMargin, scope: .global, to: &stored)
         XCTAssertEqual(stored.topMargin, 12)
+
+        draft.commit(.lineSpacing, scope: .global, to: &stored)
+        XCTAssertEqual(stored.lineSpacing, 18)
 
         draft.reset(.fontFamily, scope: .window)
         draft.commit(.fontFamily, scope: .window, to: &stored)
@@ -704,9 +732,23 @@ extension AndBibleTests {
         XCTAssertNil(stored.marginRight)
         XCTAssertNil(stored.maxWidth)
 
+        draft.reset(.fontSize, scope: .global)
+        draft.commit(.fontSize, scope: .global, to: &stored)
+        XCTAssertEqual(stored.fontSize, 16)
+
+        draft.reset(.margins, scope: .global)
+        draft.commit(.margins, scope: .global, to: &stored)
+        XCTAssertEqual(stored.marginLeft, 3)
+        XCTAssertEqual(stored.marginRight, 3)
+        XCTAssertEqual(stored.maxWidth, 170)
+
+        draft.reset(.topMargin, scope: .global)
+        draft.commit(.topMargin, scope: .global, to: &stored)
+        XCTAssertEqual(stored.topMargin, 0)
+
         draft.reset(.lineSpacing, scope: .global)
         draft.commit(.lineSpacing, scope: .global, to: &stored)
-        XCTAssertEqual(stored.lineSpacing, TextDisplaySettings.appDefaults.lineSpacing)
+        XCTAssertEqual(stored.lineSpacing, 16)
     }
 
     /**
