@@ -474,11 +474,14 @@ extension AndBibleUITests {
      *
      * - Side effects:
      *   - launches Search with deterministic KJV and UITESTWEB index rows for `earth`
-     *   - opens the real translation picker and selects UITESTWEB
+     *   - verifies picker Cancel ignores a draft UITESTWEB row selection
+     *   - verifies Select all followed by Select none and OK preserves the prior selection
+     *   - opens the real translation picker, selects UITESTWEB, and commits with OK
      *   - waits for the active query to rerun and export grouped per-translation counts
      * - Failure modes:
      *   - fails if the translation picker is not reachable from Search options
-     *   - fails if selecting a second translation does not rerun the active query
+     *   - fails if Cancel or empty OK mutates the committed module selection
+     *   - fails if selecting a second translation does not rerun the active query with KJV first
      *   - fails if grouped totals collapse to single-translation results
      */
     func testSearchMultiTranslationSelectionUpdatesGroupedTotals() {
@@ -500,7 +503,30 @@ extension AndBibleUITests {
 
         tapSearchTranslationPicker(in: app, timeout: 10)
         tapSearchTranslationRow(moduleName: "UITESTWEB", in: app, timeout: 45)
-        tapSearchTranslationDone(in: app, timeout: 10)
+        tapSearchTranslationCancel(in: app, timeout: 10)
+        waitForSearchSelectedModules(
+            in: app,
+            timeout: 10,
+            description: "still exactly KJV after cancel"
+        ) { modules in
+            modules == Set(["KJV"])
+        }
+
+        tapSearchTranslationPicker(in: app, timeout: 10)
+        tapSearchTranslationSelectAll(in: app, timeout: 10)
+        tapSearchTranslationSelectAll(in: app, timeout: 10)
+        tapSearchTranslationOK(in: app, timeout: 10)
+        waitForSearchSelectedModules(
+            in: app,
+            timeout: 10,
+            description: "still exactly KJV after empty OK"
+        ) { modules in
+            modules == Set(["KJV"])
+        }
+
+        tapSearchTranslationPicker(in: app, timeout: 10)
+        tapSearchTranslationRow(moduleName: "UITESTWEB", in: app, timeout: 45)
+        tapSearchTranslationOK(in: app, timeout: 10)
 
         waitForSearchSelectedModules(
             in: app,
@@ -509,6 +535,7 @@ extension AndBibleUITests {
         ) { modules in
             modules.count > 1 && modules.contains("UITESTWEB")
         }
+        waitForSearchState(containing: "selectedModuleOrder=KJV,UITESTWEB", in: app, timeout: 20)
         waitForSearchState(containing: "groupedTotal=3", in: app, timeout: 20)
         waitForSearchState(containing: "KJV:1", in: app, timeout: 20)
         waitForSearchState(containing: "UITESTWEB:2", in: app, timeout: 20)
