@@ -1661,7 +1661,13 @@ extension AndBibleUITests {
         var lastTapTime = Date.distantPast
         var lastValue = "nil"
         var lastRenderedState = "nil"
-        var firstResolvedTab: XCUIElement?
+        var firstResolvedTab: XCUIElement? = requireWindowTabBarButton(
+            identifier,
+            in: app,
+            timeout: timeout,
+            file: file,
+            line: line
+        )
 
         repeat {
             lastRenderedState = readerRenderedContentStateValue(in: app) ?? "nil"
@@ -1669,7 +1675,7 @@ extension AndBibleUITests {
                 return
             }
 
-            if let tabButton = resolvedWindowTabBarButton(identifier, in: app) {
+            if let tabButton = firstResolvedTab ?? resolvedWindowTabBarButton(identifier, in: app) {
                 firstResolvedTab = tabButton
                 lastValue = tabButton.value.map { "\($0)" } ?? "nil"
 
