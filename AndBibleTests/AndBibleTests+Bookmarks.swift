@@ -248,6 +248,49 @@ extension AndBibleTests {
     }
 
     /**
+     Verifies native reader label assignment refreshes generic bookmarks as well as Bible
+     bookmarks.
+
+     Android's bookmark bridge event model emits both Bible and generic bookmark payloads through
+     the same `add_or_update_bookmarks` event. iOS label assignment supports `GenericBookmark`
+     records too, so the reader refresh path must not silently drop generic bookmark updates after
+     the native label editor dismisses.
+
+     Failure meaning:
+     - the reader label-assignment refresh path only supports Bible bookmarks and leaves generic
+       bookmark rows stale in Vue after native label edits.
+     */
+    @MainActor
+    func testReaderBookmarkBridgeRefreshEmitsGenericBookmarkPayload() throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let container = try makeBookmarkRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        let bookmarkStore = BookmarkStore(modelContext: modelContext)
+        let bookmarkService = BookmarkService(store: bookmarkStore)
+        let controller = BibleReaderController(bridge: bridge)
+        controller.bookmarkService = bookmarkService
+
+        let bookmark = bookmarkService.addGenericBookmark(
+            bookInitials: "MHC",
+            key: "Gen.1.1",
+            startOrdinal: 1,
+            endOrdinal: 1
+        )
+        bookmarkService.saveBibleBookmarkNote(bookmarkId: bookmark.id, note: "Generic note")
+
+        controller.refreshBookmarkInVueJS(bookmarkId: bookmark.id)
+
+        let payload = try XCTUnwrap(
+            bridgeEmissionPayload(from: recordedScripts(), event: "add_or_update_bookmarks") as? [[String: Any]]
+        )
+        let bookmarkObject = try XCTUnwrap(payload.first)
+        XCTAssertEqual(bookmarkObject["type"] as? String, "generic-bookmark")
+        XCTAssertEqual(bookmarkObject["bookInitials"] as? String, "MHC")
+        XCTAssertEqual(bookmarkObject["key"] as? String, "Gen.1.1")
+        XCTAssertEqual(bookmarkObject["notes"] as? String, "Generic note")
+    }
+
+    /**
      Verifies bookmark bridge payloads derive range fields from the same ordinal-backed
      JSword-style verse range Android serializes through `ClientBibleBookmark`.
      *
