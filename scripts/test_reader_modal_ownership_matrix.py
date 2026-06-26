@@ -163,7 +163,6 @@ class ReaderModalOwnershipMatrixTests(unittest.TestCase):
             "ReaderModal.chooseDocument": "`Android app-owned`",
             "ReaderModal.modulePicker": "`Android app-owned`",
             "ReaderModal.labelManager": "`Android app-owned`",
-            "ReaderModal.studyPadSelector": "`Android app-owned`",
             "shareSheetBinding": "`iOS system boundary`",
             "crossReferenceSheetBinding": "`Vue/WebView-owned`",
             "BibleReaderModulePicker.AndroidPseudoDocument.myNotes": "`Vue/WebView-owned`",
@@ -196,6 +195,33 @@ class ReaderModalOwnershipMatrixTests(unittest.TestCase):
             self.assertNotIn("presentReaderSheet", body)
             self.assertNotIn("presentReaderModal", body)
 
+    def test_destination_owned_reader_routes_cannot_fall_back_to_legacy_ios_presentations(self) -> None:
+        """
+        Prevent Android app-owned destination screens from regressing into iOS sheet chrome.
+
+        Bookmarks, StudyPads, and Reading Plans can be launched from several reader surfaces:
+        drawer, pane menus, overflow callbacks, keyboard shortcuts, and chooser pseudo-documents.
+        Android treats each as an app-owned screen, so iOS must keep those routes on
+        `ReaderDestination` instead of preserving legacy `ReaderSheet` or nested modal cases.
+        A failure means a route was reintroduced through one of the sibling entry points and the
+        user will see platform sheet behavior again.
+        """
+        source = READER_VIEW.read_text(encoding="utf-8")
+
+        sheet_cases = swift_enum_cases(source, "ReaderSheet")
+        modal_cases = swift_enum_cases(source, "ReaderModal")
+
+        self.assertNotIn("bookmarks", sheet_cases)
+        self.assertNotIn("readingPlans", sheet_cases)
+        self.assertNotIn("studyPadSelector", modal_cases)
+
+        self.assertNotIn("presentReaderSheet(.bookmarks", source)
+        self.assertNotIn("presentReaderSheet(.readingPlans", source)
+        self.assertNotIn("presentReaderModalPreservingPane(.studyPadSelector", source)
+        self.assertIn("presentReaderDestination(.bookmarks", source)
+        self.assertIn("presentReaderDestination(.readingPlans", source)
+        self.assertIn("onOpenStudyPadSelector: presentStudyPadsDestinationPreservingPane", source)
+
     def test_known_partial_routes_link_to_their_follow_up_issues(self) -> None:
         """
         Keep incomplete reader modal routes tied to explicit follow-up work.
@@ -210,7 +236,6 @@ class ReaderModalOwnershipMatrixTests(unittest.TestCase):
 
         expected_issues = {
             "ReaderModal.labelManager": "#246",
-            "ReaderModal.studyPadSelector": "#246",
         }
 
         for token, issue in expected_issues.items():

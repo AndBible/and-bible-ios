@@ -91,9 +91,7 @@ struct ReaderWindowControlsAvoidanceMetrics {
 public struct BibleReaderView: View {
     /// Top-level sheets launched from the reader shell or its global shortcuts.
     enum ReaderSheet: String, Identifiable {
-        case bookmarks
         case history
-        case readingPlans
         case readingProgress
         case readingProgressSettings
         case chapterReadHistory
@@ -176,7 +174,6 @@ public struct BibleReaderView: View {
         case epubBrowser
         case epubSearch
         case labelManager
-        case studyPadSelector
         case chooseDocument
         case help
 
@@ -1446,7 +1443,7 @@ public struct BibleReaderView: View {
         BibleReaderKeyboardShortcuts(
             onSearch: { presentSearch(from: windowManager.activeWindow?.id) },
             onShowBookChooser: { presentBookChooser(from: windowManager.activeWindow?.id) },
-            onOpenBookmarks: { presentReaderSheet(.bookmarks, from: windowManager.activeWindow?.id) },
+            onOpenBookmarks: { presentReaderDestination(.bookmarks, from: windowManager.activeWindow?.id) },
             onNavigatePrevious: { navigatePreviousIfReaderCanHostNavigate(focusedController) },
             onNavigateNext: { navigateNextIfReaderCanHostNavigate(focusedController) },
             onCloseClientModal: { _ = closeFocusedWebModalIfNeeded() },
@@ -1848,6 +1845,25 @@ public struct BibleReaderView: View {
     }
 
     /**
+     Moves the document chooser's StudyPads action onto the reader destination stack.
+
+     Android treats StudyPads as an app-owned `ManageLabels` route rather than a nested chooser
+     sheet. The chooser has already captured the pane target, so this closes the active chooser
+     modal and pushes the existing `.studyPads` destination without changing pane ownership.
+
+     Side effects:
+     - clears `activeReaderModal`
+     - sets `activeReaderDestination` to `.studyPads`
+
+     Failure modes:
+     - if no pane controller is available, the destination renders its normal preparation fallback
+     */
+    private func presentStudyPadsDestinationPreservingPane() {
+        activeReaderModal = nil
+        presentReaderDestinationPreservingPane(.studyPads)
+    }
+
+    /**
      Opens Downloads after a pane-scoped flow has already captured the owning pane.
 
      - Parameters:
@@ -2207,7 +2223,7 @@ public struct BibleReaderView: View {
                     onOpenDictionaryBrowser: { presentReaderModalPreservingPane(.dictionaryBrowser) },
                     onOpenGeneralBookBrowser: { presentReaderModalPreservingPane(.generalBookBrowser) },
                     onOpenMapBrowser: { presentReaderModalPreservingPane(.mapBrowser) },
-                    onOpenStudyPadSelector: { presentReaderModalPreservingPane(.studyPadSelector) }
+                    onOpenStudyPadSelector: presentStudyPadsDestinationPreservingPane
                 )
             } else {
                 readerPanePreparationContent
@@ -2296,18 +2312,6 @@ public struct BibleReaderView: View {
                         }
                     }
             }
-        case .studyPadSelector:
-            NavigationStack {
-                LabelManagerView(onOpenStudyPad: { labelId in
-                    dismissReaderModal()
-                    panePresentationController?.loadStudyPadDocument(labelId: labelId)
-                })
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button(String(localized: "done"), action: dismissReaderModal)
-                    }
-                }
-            }
         case .chooseDocument:
             if let controller = panePresentationController {
                 BibleReaderModulePicker(
@@ -2319,7 +2323,7 @@ public struct BibleReaderView: View {
                     onOpenDictionaryBrowser: { presentReaderModalPreservingPane(.dictionaryBrowser) },
                     onOpenGeneralBookBrowser: { presentReaderModalPreservingPane(.generalBookBrowser) },
                     onOpenMapBrowser: { presentReaderModalPreservingPane(.mapBrowser) },
-                    onOpenStudyPadSelector: { presentReaderModalPreservingPane(.studyPadSelector) }
+                    onOpenStudyPadSelector: presentStudyPadsDestinationPreservingPane
                 )
             } else {
                 readerPanePreparationContent
@@ -2601,11 +2605,11 @@ public struct BibleReaderView: View {
             case .labelManager:
                 presentReaderModal(.labelManager)
             case .bookmarks:
-                presentReaderSheet(.bookmarks, from: windowManager.activeWindow?.id)
+                presentReaderDestination(.bookmarks, from: windowManager.activeWindow?.id)
             case .history:
                 presentReaderSheet(.history, from: windowManager.activeWindow?.id)
             case .readingPlans:
-                presentReaderSheet(.readingPlans, from: windowManager.activeWindow?.id)
+                presentReaderDestination(.readingPlans, from: windowManager.activeWindow?.id)
             case .settings:
                 presentSettings(from: windowManager.activeWindow?.id)
             case .textOptions:
@@ -2630,7 +2634,7 @@ public struct BibleReaderView: View {
 
     /** Opens Bookmarks from the reader shell. */
     private func openBookmarksFromReaderAction() {
-        presentReaderSheet(.bookmarks, from: windowManager.activeWindow?.id)
+        presentReaderDestination(.bookmarks, from: windowManager.activeWindow?.id)
     }
 
     /** Opens History from the reader shell. */
@@ -2640,7 +2644,7 @@ public struct BibleReaderView: View {
 
     /** Opens Reading Plans from the reader shell. */
     private func openReadingPlansFromReaderAction() {
-        presentReaderSheet(.readingPlans, from: windowManager.activeWindow?.id)
+        presentReaderDestination(.readingPlans, from: windowManager.activeWindow?.id)
     }
 
     /** Opens Settings from the reader shell. */
@@ -2681,7 +2685,7 @@ public struct BibleReaderView: View {
             speakService: speakService,
             onShowBookChooser: { presentBookChooser(from: window.id) },
             onShowSearch: { presentSearch(from: window.id) },
-            onShowBookmarks: { presentReaderSheet(.bookmarks, from: window.id) },
+            onShowBookmarks: { presentReaderDestination(.bookmarks, from: window.id) },
             onShowSettings: { presentSettings(from: window.id) },
             onShowWindowTextOptions: { presentWindowTextOptions(from: window.id) },
             onShowWindowColorSettings: { presentWindowColorSettings(from: window.id) },
@@ -2710,7 +2714,7 @@ public struct BibleReaderView: View {
             onShowCompare: {
                 (windowManager.controllers[window.id] as? BibleReaderController)?.loadCompareDocument()
             },
-            onShowReadingPlans: { presentReaderSheet(.readingPlans, from: window.id) },
+            onShowReadingPlans: { presentReaderDestination(.readingPlans, from: window.id) },
             onShowReadingProgress: { tab in
                 readingProgressInitialTab = ReadingProgressTab(androidTab: tab)
                 presentReaderSheet(.readingProgress, from: window.id)
