@@ -53,7 +53,7 @@
   "AndBibleUITests/AndBibleUITests/testSyncSettingsCategoryToggleMutatesExportedState": 110.332,
   "AndBibleUITests/AndBibleUITests/testSyncSettingsMyDocumentsCategoryToggleStartsManualSyncPath": 84.062,
   "AndBibleUITests/AndBibleUITests/testSyncSettingsNextCloudInvalidURLShowsValidationStatus": 151.4,
-  "AndBibleUITests/AndBibleUITests/testTextDisplayFontFamilyButtonPresentsFontPicker": 139.231,
+  "AndBibleUITests/AndBibleUITests/testTextDisplayFontFamilyButtonPresentsAndroidDialog": 139.231,
   "AndBibleUITests/AndBibleUITests/testTextDisplayJustifyToggleMutatesControlState": 158.857,
   "AndBibleUITests/AndBibleUITests/testTextEntrySemanticValueCandidatesUnwrapOptionalPlaceholderForms": 0.874,
   "AndBibleUITests/AndBibleUITests/testThirdWindowBookmarkNavigationUpdatesOnlyTargetPaneContent": 122.35,

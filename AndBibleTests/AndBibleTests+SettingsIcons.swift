@@ -603,9 +603,175 @@ extension AndBibleTests {
     }
 
     func testTextDisplaySliderIntegerRoundsSteppedFloatingPointValues() {
-        XCTAssertEqual(TextDisplaySettingsView.sliderInteger(639.999999999, fallback: 600), 640)
-        XCTAssertEqual(TextDisplaySettingsView.sliderInteger(640.000000001, fallback: 600), 640)
-        XCTAssertEqual(TextDisplaySettingsView.sliderInteger(.nan, fallback: 600), 600)
+        XCTAssertEqual(TextDisplaySettingsView.sliderInteger(259.999999999, fallback: 170), 260)
+        XCTAssertEqual(TextDisplaySettingsView.sliderInteger(260.000000001, fallback: 170), 260)
+        XCTAssertEqual(TextDisplaySettingsView.sliderInteger(.nan, fallback: 170), 170)
+    }
+
+    /**
+     Protects the numeric defaults and ranges used by Android text-display widgets.
+
+     Android seeds text-display settings from `WorkspaceEntities.TextDisplaySettings.default`, and
+     the font, margin, top-margin, and line-spacing dialogs constrain their seekbars in
+     `FontSizeWidget.kt`, `MarginSizeWidget.kt`, and `LineSpacing.kt`. A failure here means iOS can
+     display or persist old platform-shaped defaults or unsupported slider values instead of the
+     Android baseline used by inheritance, sync, and reset behavior.
+     */
+    func testTextDisplayNumericDefaultsAndRangesMirrorAndroidWidgets() {
+        XCTAssertEqual(TextDisplaySettings.appDefaults.fontSize, 16)
+        XCTAssertEqual(TextDisplaySettings.appDefaults.lineSpacing, 16)
+        XCTAssertEqual(TextDisplaySettings.appDefaults.marginLeft, 3)
+        XCTAssertEqual(TextDisplaySettings.appDefaults.marginRight, 3)
+        XCTAssertEqual(TextDisplaySettings.appDefaults.maxWidth, 170)
+        XCTAssertEqual(TextDisplaySettings.appDefaults.topMargin, 0)
+
+        XCTAssertEqual(TextDisplaySettingsView.androidFontSizeRange, 1...60)
+        XCTAssertEqual(TextDisplaySettingsView.androidMarginRange, 0...30)
+        XCTAssertEqual(TextDisplaySettingsView.androidMaxTextWidthRange, 0...500)
+        XCTAssertEqual(TextDisplaySettingsView.androidTopMarginRange, 0...60)
+        XCTAssertEqual(TextDisplaySettingsView.androidLineSpacingRange, 10...30)
+        XCTAssertEqual(TextDisplaySettingsView.androidNumericSliderStep, 1)
+    }
+
+    /**
+     Verifies the iOS font-family editor uses Android's fixed widget list instead of the iOS font
+     catalog.
+
+     Android `FontSizeWidget.kt` appends this standard family list after any add-on fonts and writes
+     the selected `realFontFamily` string directly into text-display settings. iOS does not currently
+     have Android add-on font files, so the standard families are the parity floor and must not be
+     replaced by `UIFontPickerViewController` choices.
+     */
+    func testTextDisplayFontFamilyOptionsMirrorAndroidWidgetList() {
+        let options = TextDisplaySettingsView.androidFontFamilyOptions()
+
+        XCTAssertEqual(
+            options.map(\.value),
+            [
+                "sans-serif-thin",
+                "sans-serif-light",
+                "sans-serif",
+                "sans-serif-medium",
+                "sans-serif-black",
+                "sans-serif-condensed-light",
+                "sans-serif-condensed",
+                "sans-serif-condensed-medium",
+                "sans-serif-condensed",
+                "serif",
+                "monospace",
+                "serif-monospace",
+                "casual",
+                "cursive",
+                "sans-serif-smallcaps",
+            ]
+        )
+        XCTAssertEqual(options[0].label, "Sans serif thin")
+        XCTAssertEqual(options[7].label, "Sans serif condensed medium")
+        XCTAssertEqual(options.last?.label, "Sans serif smallcaps")
+    }
+
+    /**
+     Protects Android AlertDialog editor behavior for high-risk text-display fields.
+
+     Android's font-size, font-family, top-margin, line-spacing, and margin widgets mutate local
+     widget state while the dialog is open. OK commits the field, Cancel discards it, and Reset
+     clears scope-specific overrides while global settings fall back to concrete defaults.
+     */
+    func testTextDisplayPreferenceEditorDraftStagesCommitsAndResetsLikeAndroid() {
+        var stored = TextDisplaySettings()
+        stored.fontSize = 16
+        stored.fontFamily = "sans-serif"
+        stored.lineSpacing = 16
+        stored.topMargin = 0
+        stored.marginLeft = 3
+        stored.marginRight = 3
+        stored.maxWidth = 170
+
+        var draft = TextDisplayPreferenceEditorDraft(settings: stored)
+        draft.fontSize = 26
+        draft.fontFamily = "serif"
+        draft.lineSpacing = 18
+        draft.topMargin = 12
+        draft.marginLeft = 4
+        draft.marginRight = 5
+        draft.maxWidth = 260
+
+        XCTAssertEqual(stored.fontSize, 16)
+        XCTAssertEqual(stored.fontFamily, "sans-serif")
+        XCTAssertEqual(stored.lineSpacing, 16)
+        XCTAssertEqual(stored.topMargin, 0)
+        XCTAssertEqual(stored.marginLeft, 3)
+        XCTAssertEqual(stored.marginRight, 3)
+        XCTAssertEqual(stored.maxWidth, 170)
+
+        draft.commit(.fontSize, scope: .global, to: &stored)
+        XCTAssertEqual(stored.fontSize, 26)
+        XCTAssertEqual(stored.fontFamily, "sans-serif")
+
+        draft.commit(.fontFamily, scope: .global, to: &stored)
+        XCTAssertEqual(stored.fontFamily, "serif")
+
+        draft.commit(.margins, scope: .global, to: &stored)
+        XCTAssertEqual(stored.marginLeft, 4)
+        XCTAssertEqual(stored.marginRight, 5)
+        XCTAssertEqual(stored.maxWidth, 260)
+
+        draft.commit(.topMargin, scope: .global, to: &stored)
+        XCTAssertEqual(stored.topMargin, 12)
+
+        draft.commit(.lineSpacing, scope: .global, to: &stored)
+        XCTAssertEqual(stored.lineSpacing, 18)
+
+        draft.reset(.fontFamily, scope: .window)
+        draft.commit(.fontFamily, scope: .window, to: &stored)
+        XCTAssertNil(stored.fontFamily)
+
+        draft.reset(.margins, scope: .workspace)
+        draft.commit(.margins, scope: .workspace, to: &stored)
+        XCTAssertNil(stored.marginLeft)
+        XCTAssertNil(stored.marginRight)
+        XCTAssertNil(stored.maxWidth)
+
+        draft.reset(.fontSize, scope: .global)
+        draft.commit(.fontSize, scope: .global, to: &stored)
+        XCTAssertEqual(stored.fontSize, 16)
+
+        draft.reset(.margins, scope: .global)
+        draft.commit(.margins, scope: .global, to: &stored)
+        XCTAssertEqual(stored.marginLeft, 3)
+        XCTAssertEqual(stored.marginRight, 3)
+        XCTAssertEqual(stored.maxWidth, 170)
+
+        draft.reset(.topMargin, scope: .global)
+        draft.commit(.topMargin, scope: .global, to: &stored)
+        XCTAssertEqual(stored.topMargin, 0)
+
+        draft.reset(.lineSpacing, scope: .global)
+        draft.commit(.lineSpacing, scope: .global, to: &stored)
+        XCTAssertEqual(stored.lineSpacing, 16)
+    }
+
+    /**
+     Guards issue #248 against reintroducing iOS-native editor presentation.
+
+     The text-display row UI is intentionally SwiftUI, but editor presentation must mirror Android's
+     in-place `AlertDialog` widgets. A failure here means the route drifted back to a UIKit font
+     picker or SwiftUI sheet/Form editor with iOS chrome.
+     */
+    func testTextDisplayPreferenceEditorsAvoidNativeIOSPickerAndSheetRoutes() throws {
+        let testFileURL = URL(fileURLWithPath: #filePath)
+        let repoRoot = testFileURL
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let sourceURL = repoRoot.appendingPathComponent(
+            "Sources/BibleUI/Sources/BibleUI/Settings/TextDisplaySettingsView.swift"
+        )
+        let source = try String(contentsOf: sourceURL, encoding: .utf8)
+
+        XCTAssertFalse(source.contains("UIFontPickerViewController"))
+        XCTAssertFalse(source.contains(".sheet(item: $activePreferenceEditor)"))
+        XCTAssertFalse(source.contains(".sheet(isPresented: $showFontPicker)"))
+        XCTAssertTrue(source.contains("textDisplayPreferenceEditorOverlay"))
     }
 
     /**
