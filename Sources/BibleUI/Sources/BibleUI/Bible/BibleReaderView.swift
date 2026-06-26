@@ -110,6 +110,8 @@ public struct BibleReaderView: View {
         case bookmarks
         /// Drawer-owned StudyPads selector that opens the selected StudyPad document.
         case studyPads
+        /// Drawer-owned My Documents selector that opens the selected document page.
+        case myDocuments
         /// Drawer-owned reading-plan list destination that avoids legacy sheet chrome.
         case readingPlans
         case settings
@@ -1225,6 +1227,17 @@ public struct BibleReaderView: View {
             .overlay(alignment: .topLeading) {
                 readerRenderedContentStateExport
             }
+        case .myDocuments:
+            MyDocumentsListView { bookInitials, pageKey in
+                activeReaderDestination = nil
+                _ = panePresentationController?.loadMyDocumentPage(bookInitials: bookInitials, pageKey: pageKey)
+            }
+            #if os(iOS)
+            .toolbar(.visible, for: .navigationBar)
+            #endif
+            .overlay(alignment: .topLeading) {
+                readerRenderedContentStateExport
+            }
         case .readingPlans:
             ReadingPlanListView()
             #if os(iOS)
@@ -1762,7 +1775,7 @@ public struct BibleReaderView: View {
         switch previousDestination {
         case .search:
             searchInitialQuery = ""
-        case .bookmarks, .studyPads, .readingPlans:
+        case .bookmarks, .studyPads, .myDocuments, .readingPlans:
             break
         case .settings:
             reloadBehaviorPreferences()
@@ -3159,8 +3172,7 @@ public struct BibleReaderView: View {
             }
         case .myNotes:
             dismissReaderNavigationDrawerAndPerform {
-                setPanePresentationTarget(windowManager.activeWindow?.id)
-                panePresentationController?.loadMyNotesDocument()
+                presentReaderDestination(.myDocuments, from: windowManager.activeWindow?.id)
             }
         case .readingPlans:
             dismissReaderNavigationDrawerAndPerform {

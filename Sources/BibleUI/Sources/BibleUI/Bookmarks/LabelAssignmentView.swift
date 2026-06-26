@@ -29,13 +29,19 @@ struct LabelAssignmentView: View {
     /// Bookmark identifier for either a Bible or generic bookmark.
     let bookmarkId: UUID
 
-    /// Optional callback invoked before the view dismisses itself.
+    /**
+     Caller-owned dismissal action for parent-managed navigation routes.
+
+     When this callback is provided, the parent owns the navigation state and the view must not
+     also call SwiftUI's environment dismiss. Doing both can pop past the parent list after route
+     state has already been cleared.
+     */
     var onDismiss: (() -> Void)?
 
     /// SwiftData context used for bookmark fetches, relationship creation, and persistence.
     @Environment(\.modelContext) private var modelContext
 
-    /// Dismiss action for closing the current presentation route.
+    /// Dismiss action for standalone presentations that do not provide `onDismiss`.
     @Environment(\.dismiss) private var dismiss
 
     /// All labels queried from SwiftData, including system labels.
@@ -125,8 +131,11 @@ struct LabelAssignmentView: View {
             ToolbarItem(placement: .confirmationAction) {
                 Button("Done") {
                     logger.info("Done button tapped, onDismiss=\(onDismiss != nil)")
-                    onDismiss?()
-                    dismiss()
+                    if let onDismiss {
+                        onDismiss()
+                    } else {
+                        dismiss()
+                    }
                 }
                 .accessibilityIdentifier("labelAssignmentDoneButton")
             }

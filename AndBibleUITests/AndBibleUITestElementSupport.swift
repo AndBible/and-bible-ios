@@ -784,7 +784,9 @@ extension AndBibleUITests {
             "bookmarkListStateExport",
             "readingPlanListStateExport",
             "availablePlansStateExport",
-            "labelManagerStateExport":
+            "labelManagerStateExport",
+            "myDocumentsListStateExport",
+            "myDocumentPagesStateExport":
             return semanticStateCandidates(for: identifier, in: app)
         case "searchResultsList":
             return [

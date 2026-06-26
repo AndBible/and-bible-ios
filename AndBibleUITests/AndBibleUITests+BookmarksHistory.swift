@@ -31,16 +31,20 @@ extension AndBibleUITests {
     }
 
     /**
-     Verifies StudyPads opens from the drawer as an app-owned reader destination.
+     Verifies StudyPads opens from the drawer and selecting a row opens the StudyPad document.
      *
      * Android launches `ManageLabels` in `Mode.STUDYPAD` from the drawer, so iOS should expose the
      * StudyPads selector as a reader-owned destination instead of the legacy modal sheet route.
+     * Android then opens the selected StudyPad through `studyPadSelected`, so the regression also
+     * proves a seeded row exits the destination and renders the corresponding StudyPad document.
      *
      * - Side effects:
      *   - opens the reader drawer and activates StudyPads
+     *   - selects the seeded StudyPad row
      * - Failure modes:
      *   - fails if StudyPads does not appear, if the route regresses to a sheet/modal, or if sheet
      *     Done chrome is visible on the drawer-owned screen
+     *   - fails if selecting the row does not open the matching StudyPad document
      */
     func testStudyPadsScreenOpensFromReaderMenu() {
         let app = makeApp()
@@ -60,30 +64,66 @@ extension AndBibleUITests {
             app.navigationBars.buttons["Done"].firstMatch.exists,
             "Drawer StudyPads should use reader destination back chrome, not iOS sheet Done chrome."
         )
+        waitForLabelManagerState(containing: labelManagerRowStateToken("UI Test Seed"), in: app, timeout: 10)
+        tapElementReliably(labelRow(named: "UI Test Seed", in: app), timeout: 10)
+        waitForReaderRenderedContentState(containing: "readerDestination=none", in: app, timeout: 10)
+        waitForStudyPadPresentation(in: app, timeout: 20)
+        XCTAssertEqual(requireElement("readerStudyPadTitle", in: app, timeout: 10).label, "UI Test Seed")
     }
 
     /**
-     Verifies My Notes opens from the drawer without native sheet/modal presentation.
+     Verifies the drawer My Notes/My Documents action opens Android's app-owned document manager.
      *
-     * Android opens the drawer My Notes entry as an app-owned document surface. The current iOS
-     * parity route loads the My Notes document into the reader pane, so the regression contract is
-     * that no `ReaderSheet`, `ReaderModal`, or pushed destination owns this drawer action.
+     * Android's drawer `myDocumentsButton` launches `MyDocumentsActivity`, then
+     * `MyDocumentPagesActivity`; selecting a page returns to the reader and opens that generated
+     * general-book document. iOS should therefore present a reader destination for the document
+     * manager instead of directly loading the current-passage My Notes pseudo-document.
      *
      * - Side effects:
-     *   - opens the reader drawer and activates My Notes
+     *   - opens the reader drawer and activates My Documents
+     *   - selects the seeded document and its first page
      * - Failure modes:
-     *   - fails if My Notes does not become visible or if the drawer action regresses to native
-     *     sheet/modal presentation
+     *   - fails if the drawer action regresses to sheet/modal presentation, skips the document
+     *     manager, or does not load the selected My Documents page in the reader
      */
-    func testMyNotesScreenOpensFromReaderMenuWithoutSheet() {
+    func testMyDocumentsScreenOpensFromReaderMenuAndOpensPage() {
         let app = makeApp()
         app.launch()
 
-        openMyNotesFromReader(in: app)
+        openReaderActionDestination(
+            actionIdentifier: "readerOpenMyNotesAction",
+            destinationIdentifier: "myDocumentsListScreen",
+            readinessIdentifiers: ["myDocumentsListStateExport"],
+            in: app,
+            timeout: 20
+        )
         waitForReaderRenderedContentState(containing: "readerSheet=none", in: app, timeout: 10)
         waitForReaderRenderedContentState(containing: "readerModal=none", in: app, timeout: 10)
+        waitForReaderRenderedContentState(containing: "readerDestination=myDocuments", in: app, timeout: 10)
+        XCTAssertFalse(
+            app.navigationBars.buttons["Done"].firstMatch.exists,
+            "Drawer My Documents should use reader destination back chrome, not iOS sheet Done chrome."
+        )
+        waitForMyDocumentsListState(containing: "total=1", in: app, timeout: 10)
+        waitForMyDocumentsListState(containing: myDocumentsRowStateToken("UITESTDOC"), in: app, timeout: 10)
+
+        tapElementReliably(
+            requireElement("myDocumentsDocumentRow::UITESTDOC", in: app, timeout: 10),
+            timeout: 10
+        )
+        waitForMyDocumentPagesState(containing: "document=UITESTDOC", in: app, timeout: 10)
+        waitForMyDocumentPagesState(containing: myDocumentsRowStateToken("intro"), in: app, timeout: 10)
+        tapElementReliably(
+            requireElement("myDocumentsPageRow::UITESTDOC::intro", in: app, timeout: 10),
+            timeout: 10
+        )
+
         waitForReaderRenderedContentState(containing: "readerDestination=none", in: app, timeout: 10)
-        waitForVisibleMyNotesState(containing: "myNotesVisible=true", in: app, timeout: 20)
+        waitForReaderRenderedContentState(
+            containing: "category=general_book;module=UITESTDOC;book=UI Test Document;chapter=none;key=intro",
+            in: app,
+            timeout: 20
+        )
     }
 
     /**

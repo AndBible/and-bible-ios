@@ -865,7 +865,24 @@ extension AndBibleUITests {
     }
 
     /**
-     Opens the My Notes document through the production reader navigation drawer.
+     Opens the current-passage My Notes pseudo-document through the production Choose Document flow.
+     *
+     * Android exposes My Notes in `ChooseDocument` as a `FakeBookFactory` pseudo-document while the
+     * drawer My Documents row launches the app-owned My Documents manager. This helper intentionally
+     * follows the chooser pseudo-document route so My Notes lifecycle tests do not preserve the old
+     * iOS drawer deviation.
+     *
+     * - Parameters:
+     *   - app: Running application under test.
+     *   - timeout: Maximum time to wait for the chooser row and visible My Notes document.
+     *   - file: Source file used for XCTest failure attribution.
+     *   - line: Source line used for XCTest failure attribution.
+     * - Side effects:
+     *   - opens the reader drawer, launches Choose Document, selects the My Notes pseudo-document,
+     *     and waits for the WebView-owned My Notes document to render
+     * - Failure modes:
+     *   - records an XCTest failure if the chooser, pseudo-document row, or My Notes state never
+     *     becomes visible
      */
     func openMyNotesFromReader(
         in app: XCUIApplication,
@@ -873,7 +890,12 @@ extension AndBibleUITests {
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
-        tapReaderAction("readerOpenMyNotesAction", in: app, timeout: timeout, file: file, line: line)
+        tapReaderAction("readerChooseDocumentAction", in: app, timeout: timeout, file: file, line: line)
+        _ = requireElement("modulePickerScreen", in: app, timeout: timeout, file: file, line: line)
+        tapElementReliably(
+            requireElement("modulePickerPseudoRow::myNotes", in: app, timeout: timeout, file: file, line: line),
+            timeout: timeout
+        )
         waitForMyNotesPresentation(in: app, timeout: timeout, file: file, line: line)
         waitForVisibleMyNotesState(
             containing: "myNotesVisible=true",

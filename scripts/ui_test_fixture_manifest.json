@@ -14,6 +14,8 @@
   "AndBibleUITests/AndBibleUITests/testBookmarkRowDeletePreservesOtherRowsAcrossReopen": "bookmark-multirow",
   "AndBibleUITests/AndBibleUITests/testBookmarkSelectionNavigatesReaderToSeededReference": "bookmark-navigation",
   "AndBibleUITests/AndBibleUITests/testBookmarksScreenOpensFromReaderMenu": "baseline",
+  "AndBibleUITests/AndBibleUITests/testStudyPadsScreenOpensFromReaderMenu": "bookmark-studypad",
+  "AndBibleUITests/AndBibleUITests/testMyDocumentsScreenOpensFromReaderMenuAndOpensPage": "my-documents-single",
   "AndBibleUITests/AndBibleUITests/testColorSettingsResetRestoresDefaultThemeColors": "display-colors-custom",
   "AndBibleUITests/AndBibleUITests/testDownloadsRepositoryManagerAddSourceCancelFlow": "baseline",
   "AndBibleUITests/AndBibleUITests/testDownloadsScreenOpensFromReaderMenu": "baseline",

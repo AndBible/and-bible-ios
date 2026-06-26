@@ -136,7 +136,7 @@ class ReaderModalOwnershipMatrixTests(unittest.TestCase):
             "`shareSheetBinding`",
             "`crossReferenceSheetBinding`",
             "`showRefChooser`",
-            "`BibleReaderNavigationDrawerAction.myNotes`",
+            "`BibleReaderModulePicker.AndroidPseudoDocument.myNotes`",
         ]:
             self.assertIn(token, matrix)
 
@@ -157,6 +157,7 @@ class ReaderModalOwnershipMatrixTests(unittest.TestCase):
             "ReaderDestination.search": "`Android app-owned`",
             "ReaderDestination.bookmarks": "`Android app-owned`",
             "ReaderDestination.studyPads": "`Android app-owned`",
+            "ReaderDestination.myDocuments": "`Android app-owned`",
             "ReaderDestination.readingPlans": "`Android app-owned`",
             "showRefChooser": "`Android app-owned`",
             "ReaderModal.chooseDocument": "`Android app-owned`",
@@ -165,7 +166,7 @@ class ReaderModalOwnershipMatrixTests(unittest.TestCase):
             "ReaderModal.studyPadSelector": "`Android app-owned`",
             "shareSheetBinding": "`iOS system boundary`",
             "crossReferenceSheetBinding": "`Vue/WebView-owned`",
-            "BibleReaderNavigationDrawerAction.myNotes": "`Vue/WebView-owned`",
+            "BibleReaderModulePicker.AndroidPseudoDocument.myNotes": "`Vue/WebView-owned`",
         }
 
         for token, owner in expected_owners.items():
@@ -185,6 +186,7 @@ class ReaderModalOwnershipMatrixTests(unittest.TestCase):
         expected_destinations = {
             "bookmarks": "bookmarks",
             "studyPads": "studyPads",
+            "myNotes": "myDocuments",
             "readingPlans": "readingPlans",
         }
 
@@ -193,11 +195,6 @@ class ReaderModalOwnershipMatrixTests(unittest.TestCase):
             self.assertIn(f"presentReaderDestination(.{destination_case}", body)
             self.assertNotIn("presentReaderSheet", body)
             self.assertNotIn("presentReaderModal", body)
-
-        my_notes_body = swift_switch_case_body(drawer_handler, "myNotes")
-        self.assertIn("loadMyNotesDocument", my_notes_body)
-        self.assertNotIn("presentReaderSheet", my_notes_body)
-        self.assertNotIn("presentReaderModal", my_notes_body)
 
     def test_known_partial_routes_link_to_their_follow_up_issues(self) -> None:
         """

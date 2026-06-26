@@ -50,6 +50,7 @@ private enum FixtureScenario: String, CaseIterable {
     case historySingle = "history-single"
     case historyMultiRow = "history-multirow"
     case myNotesSingle = "my-notes-single"
+    case myDocumentsSingle = "my-documents-single"
     case syncNextCloud = "sync-nextcloud"
     case syncNextCloudBookmarksEnabled = "sync-nextcloud-bookmarks-enabled"
     case displayColorsCustom = "display-colors-custom"
@@ -433,6 +434,8 @@ private final class FixtureContext {
             seedHistoryMultiRow(window: baseline.window)
         case .myNotesSingle:
             try seedMyNotesSingle()
+        case .myDocumentsSingle:
+            try seedMyDocumentsSingle()
         case .syncNextCloud:
             seedSyncNextCloud(enabledCategories: [])
         case .syncNextCloudBookmarksEnabled:
@@ -1272,6 +1275,53 @@ private final class FixtureContext {
             createdAt: seededDate(offset: 20)
         )
         bookmarkService.saveBibleBookmarkNote(bookmarkId: bookmark.id, note: "UI_Test_My_Notes_Note")
+    }
+
+    /**
+     Seeds one My Document with a single Markdown page for drawer routing coverage.
+     *
+     * Android's drawer opens `MyDocumentsActivity`, then a page selector. The seeded graph uses the
+     * same SwiftData model and stable initials/page key as synced or user-created documents so UI
+     * tests can prove row selection reaches the reader's My Documents page loader.
+     *
+     * - Throws: `FixtureToolError.usage` if the deterministic UUID literals are malformed.
+     */
+    private func seedMyDocumentsSingle() throws {
+        guard let documentId = UUID(uuidString: "44444444-4444-4444-4444-444444444444"),
+              let pageId = UUID(uuidString: "55555555-5555-5555-5555-555555555555") else {
+            throw FixtureToolError.usage("Invalid deterministic My Documents fixture UUID.")
+        }
+
+        let createdAt = seededDate(offset: 20)
+        let document = MyDocument(
+            id: documentId,
+            name: "UI Test Document",
+            documentDescription: "Seeded My Documents entry",
+            initials: "UITESTDOC",
+            orderNumber: 0,
+            createdAt: createdAt,
+            updatedAt: createdAt
+        )
+        let page = MyDocumentPage(
+            id: pageId,
+            title: "Intro",
+            pageKey: "intro",
+            contentType: .markdown,
+            orderNumber: 0,
+            createdAt: createdAt,
+            updatedAt: createdAt
+        )
+        let content = MyDocumentPageContent(
+            pageId: pageId,
+            content: "# UI Test My Document\n\nSeeded body for drawer routing coverage."
+        )
+
+        page.pageContent = content
+        page.document = document
+        document.pages = [page]
+        modelContext.insert(document)
+        modelContext.insert(page)
+        modelContext.insert(content)
     }
 
     /**

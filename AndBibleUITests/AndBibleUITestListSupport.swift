@@ -551,6 +551,74 @@ extension AndBibleUITests {
     }
 
     /**
+     Builds one row token for My Documents semantic state assertions.
+
+     - Parameter value: Raw document initials or page key rendered by the My Documents UI.
+     - Returns: Token formatted the same way as the `MyDocumentsListView` state export.
+     - Side effects: none.
+     - Failure modes: This helper cannot fail.
+     */
+    func myDocumentsRowStateToken(_ value: String) -> String {
+        "|\(sanitizedLabelManagerStateToken(value))|"
+    }
+
+    /**
+     Waits for the My Documents list state export to contain one expected token.
+
+     - Parameters:
+       - token: Serialized token expected in the list state.
+       - app: Running application whose My Documents destination should publish the state.
+       - timeout: Maximum number of seconds to wait before failing.
+     - Side effects:
+       - polls the compact accessibility state export instead of walking every visible row
+     - Failure modes:
+       - records an XCTest failure when the expected token never appears
+     */
+    func waitForMyDocumentsListState(
+        containing token: String,
+        in app: XCUIApplication,
+        timeout: TimeInterval = 10
+    ) {
+        waitForResolvedSemanticState(
+            named: "myDocumentsListStateExport",
+            timeout: timeout,
+            valueProvider: { self.resolvedMyDocumentsListStateValue(in: app) },
+            success: { $0.contains(token) },
+            failureDescription: { finalValue in
+                "Expected element 'myDocumentsListStateExport' to contain token '\(token)' within \(timeout) seconds. Final value: '\(finalValue)'."
+            }
+        )
+    }
+
+    /**
+     Waits for the My Document pages state export to contain one expected token.
+
+     - Parameters:
+       - token: Serialized token expected in the page-list state.
+       - app: Running application whose page-list destination should publish the state.
+       - timeout: Maximum number of seconds to wait before failing.
+     - Side effects:
+       - polls the compact accessibility state export instead of walking every visible row
+     - Failure modes:
+       - records an XCTest failure when the expected token never appears
+     */
+    func waitForMyDocumentPagesState(
+        containing token: String,
+        in app: XCUIApplication,
+        timeout: TimeInterval = 10
+    ) {
+        waitForResolvedSemanticState(
+            named: "myDocumentPagesStateExport",
+            timeout: timeout,
+            valueProvider: { self.resolvedMyDocumentPagesStateValue(in: app) },
+            success: { $0.contains(token) },
+            failureDescription: { finalValue in
+                "Expected element 'myDocumentPagesStateExport' to contain token '\(token)' within \(timeout) seconds. Final value: '\(finalValue)'."
+            }
+        )
+    }
+
+    /**
      Waits for the exported bookmark-list state to report one specific visible row ordering.
      *
      * - Parameters:
