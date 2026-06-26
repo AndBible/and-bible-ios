@@ -601,10 +601,23 @@ private struct WorkspaceNamePromptView: View {
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("workspaceNamePromptScreen")
         .tint(dialogAccent)
-        .task {
-            await MainActor.run {
-                isNameFieldFocused = true
-            }
+        .onAppear {
+            requestNameFieldFocus()
         }
+        .task(id: prompt.id) {
+            await requestNameFieldFocusAfterAttachment()
+        }
+    }
+
+    @MainActor
+    private func requestNameFieldFocus() {
+        isNameFieldFocused = true
+    }
+
+    @MainActor
+    private func requestNameFieldFocusAfterAttachment() async {
+        requestNameFieldFocus()
+        await Task.yield()
+        requestNameFieldFocus()
     }
 }

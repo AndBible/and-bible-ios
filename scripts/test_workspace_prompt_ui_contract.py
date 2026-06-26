@@ -105,8 +105,8 @@ class WorkspacePromptUITestContractTests(unittest.TestCase):
         element_candidates_start = source.index("func elementCandidates(")
         element_candidates_end = source.index("func resolvedElement(", element_candidates_start)
         element_candidates_body = source[element_candidates_start:element_candidates_end]
-        coordinate_start = state_source.index('case "workspaceNamePromptTextField":')
-        coordinate_end = state_source.index("default:", coordinate_start)
+        coordinate_start = state_source.index("func promptOwnedTextEntryTapCoordinate")
+        coordinate_end = state_source.index("func observedPromptTextValue", coordinate_start)
         coordinate_body = state_source[coordinate_start:coordinate_end]
 
         self.assertIn("app.otherElements[identifier].firstMatch", prompt_candidates_body)
@@ -115,9 +115,8 @@ class WorkspacePromptUITestContractTests(unittest.TestCase):
         self.assertNotIn("workspaceNamePromptScreenCandidates(in: app)", coordinate_body)
         self.assertNotIn('app.collectionViews["workspaceNamePromptScreen"]', coordinate_body)
         self.assertNotIn('app.scrollViews["workspaceNamePromptScreen"]', coordinate_body)
-        self.assertIn("app.coordinate(withNormalizedOffset:", coordinate_body)
-        self.assertIn("CGVector(dx: 0.5, dy: 0.46)", coordinate_body)
-        self.assertNotIn("return nil", coordinate_body)
+        self.assertNotIn('case "workspaceNamePromptTextField"', coordinate_body)
+        self.assertNotIn("CGVector(dx: 0.5, dy: 0.46)", coordinate_body)
         self.assertIn(
             'case "workspaceNamePromptScreen":\n'
             "            return workspaceNamePromptScreenCandidates(in: app)",
@@ -147,18 +146,42 @@ class WorkspacePromptUITestContractTests(unittest.TestCase):
         submit_helper_end = typing_body.index("func clearObservedPromptTextValue", submit_helper_start)
         submit_helper_body = typing_body[submit_helper_start:submit_helper_end]
         workspace_branch_start = typing_body.index("if skipsPromptValueObservation")
-        workspace_branch_end = typing_body.index(
-            "let existingValue = observedPromptTextValue",
-            workspace_branch_start,
-        )
+        workspace_branch_end = typing_body.index("focusResolvedPromptTextEntryElement", workspace_branch_start)
         workspace_branch = typing_body[workspace_branch_start:workspace_branch_end]
 
         self.assertIn('resolvedIdentifier == "workspaceNamePromptTextField"', typing_body)
         self.assertIn("waitForWorkspacePromptSubmitButtonToEnable", typing_body)
         self.assertIn('"workspaceNamePromptConfirmButton"', submit_helper_body)
-        self.assertIn("app.typeText(text)", workspace_branch)
+        self.assertIn("promptTextField.typeText(text)", workspace_branch)
+        self.assertNotIn("app.typeText(text)", workspace_branch)
+        self.assertNotIn("focusResolvedPromptTextEntryElement", workspace_branch)
         self.assertNotIn("observedPromptTextValue", workspace_branch)
         self.assertNotIn("currentTextEntryValue", workspace_branch)
+
+    def test_workspace_prompt_requests_focus_after_attachment(self) -> None:
+        """The workspace name prompt owns focus like Android's `EditText` dialog.
+
+        Android calls `requestFocus()` and shows the soft input when creating, renaming, or cloning a
+        workspace. The iOS prompt must keep that behavior in product code so tests do not focus the
+        field by tapping an approximate screen coordinate that can dismiss the dialog.
+        """
+        source = (
+            REPO_ROOT
+            / "Sources"
+            / "BibleUI"
+            / "Sources"
+            / "BibleUI"
+            / "Workspace"
+            / "WorkspaceSelectorView.swift"
+        ).read_text()
+        prompt_start = source.index("private struct WorkspaceNamePromptView")
+        prompt_source = source[prompt_start:]
+
+        self.assertIn(".focused($isNameFieldFocused)", prompt_source)
+        self.assertIn(".onAppear", prompt_source)
+        self.assertIn("requestNameFieldFocus()", prompt_source)
+        self.assertIn(".task(id: prompt.id)", prompt_source)
+        self.assertIn("await Task.yield()", prompt_source)
 
     def test_workspace_prompt_is_selector_owned_instead_of_nested_sheet(self) -> None:
         """The create/rename/clone prompt is owned by the selector, matching Android dialog scope.
