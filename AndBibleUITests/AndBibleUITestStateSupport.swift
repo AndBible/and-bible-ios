@@ -114,8 +114,9 @@ extension AndBibleUITests {
      - Side effects:
        - taps the resolved prompt field, verifies or clears any existing prompt value, emits
          keyboard input, and clears/retries if CI drops the input without appending duplicate text
-       - for the workspace creation prompt, verifies text entry through the prompt-owned submit
-         button because hosted XCTest can lose the SwiftUI text-field snapshot after focus
+       - for the workspace creation prompt, relies on the prompt's Android-parity autofocus and
+         verifies text entry through the prompt-owned submit button because hosted XCTest can lose
+         the SwiftUI text-field snapshot after focus
      - Failure modes:
        - records an XCTest failure when the field value or prompt-owned submit readiness never
          reflects `text`
@@ -214,12 +215,6 @@ extension AndBibleUITests {
                     for: prompt.frame,
                     normalizedOffset: CGVector(dx: 0.5, dy: 0.52)
                 )
-            case "workspaceNamePromptTextField":
-                // The workspace prompt is a centered selector-owned dialog. Hosted XCTest can
-                // wedge when re-sampling either the resolved SwiftUI field or prompt root for a
-                // frame after the field was found, so focus through the dialog's stable text-entry
-                // band without asking XCTest for another hosted snapshot.
-                return app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.46))
             default:
                 return nil
             }
@@ -372,16 +367,8 @@ extension AndBibleUITests {
         repeat {
             let promptTextField = resolvedPromptTextField()
             let preferredPromptCandidates = [promptTextField]
-            focusResolvedPromptTextEntryElement(
-                promptTextField,
-                in: app,
-                promptTapCoordinate: promptOwnedTextEntryTapCoordinate,
-                timeout: min(5, max(1, deadline.timeIntervalSinceNow)),
-                file: file,
-                line: line
-            )
             if skipsPromptValueObservation {
-                app.typeText(text)
+                promptTextField.typeText(text)
                 if waitForWorkspacePromptSubmitButtonToEnable(
                     timeout: min(5, max(0.5, deadline.timeIntervalSinceNow))
                 ) {
@@ -390,6 +377,14 @@ extension AndBibleUITests {
                 RunLoop.current.run(until: Date().addingTimeInterval(0.2))
                 continue
             }
+            focusResolvedPromptTextEntryElement(
+                promptTextField,
+                in: app,
+                promptTapCoordinate: promptOwnedTextEntryTapCoordinate,
+                timeout: min(5, max(1, deadline.timeIntervalSinceNow)),
+                file: file,
+                line: line
+            )
             let existingValue = observedPromptTextValue(preferred: preferredPromptCandidates)
             if existingValue == text {
                 return true
@@ -443,6 +438,16 @@ extension AndBibleUITests {
             _ = clearObservedPromptTextValue(preferred: preferredPromptCandidates, forceKeyboardDelete: true)
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         } while Date() < deadline
+
+        if skipsPromptValueObservation {
+            XCTAssertTrue(
+                waitForWorkspacePromptSubmitButtonToEnable(timeout: 0),
+                "Expected workspace prompt submit button to become enabled after typing '\(text)'.",
+                file: file,
+                line: line
+            )
+            return false
+        }
 
         XCTAssertEqual(
             observedPromptTextValue(),
