@@ -9,6 +9,7 @@ import os
 import signal
 import shlex
 import subprocess
+from collections.abc import Callable
 from typing import Mapping, Sequence
 
 
@@ -17,7 +18,25 @@ def parse_test_selection_args(selection_text: str) -> list[str]:
     return [line.strip() for line in selection_text.splitlines() if line.strip()]
 
 
-def selected_ui_test_developer_dir(environment: Mapping[str, str]) -> str | None:
+def selected_xcode_developer_dir_from_link(
+    link_path: str = "/var/db/xcode_select_link",
+) -> str | None:
+    """Return the global xcode-select developer directory without honoring DEVELOPER_DIR."""
+    try:
+        selected_path = os.readlink(link_path).strip()
+    except OSError:
+        return None
+    if not selected_path:
+        return None
+    if selected_path.endswith(".app"):
+        return os.path.join(selected_path, "Contents", "Developer")
+    return selected_path
+
+
+def selected_ui_test_developer_dir(
+    environment: Mapping[str, str],
+    selected_xcode_developer_dir: Callable[[], str | None] = selected_xcode_developer_dir_from_link,
+) -> str | None:
     """Return the selected Xcode developer directory for UI-test host commands."""
     ui_test_developer_dir = environment.get("UITEST_DEVELOPER_DIR")
     if ui_test_developer_dir:
@@ -26,6 +45,10 @@ def selected_ui_test_developer_dir(environment: Mapping[str, str]) -> str | None
     sdk_root = environment.get("MD_APPLE_SDK_ROOT")
     if sdk_root:
         return os.path.join(sdk_root, "Contents", "Developer")
+
+    xcode_select_developer_dir = selected_xcode_developer_dir()
+    if xcode_select_developer_dir:
+        return xcode_select_developer_dir
 
     developer_dir = environment.get("DEVELOPER_DIR")
     if developer_dir:

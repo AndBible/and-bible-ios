@@ -19,6 +19,7 @@ from run_xcodebuild_with_test_selection import (
     main,
     parse_test_selection_args,
     result_bundle_reports_passing_tests,
+    selected_xcode_developer_dir_from_link,
     selected_ui_test_developer_dir,
 )
 
@@ -144,6 +145,30 @@ class BuildXcodebuildCommandTests(unittest.TestCase):
 
 
 class SelectedUITestDeveloperDirTests(unittest.TestCase):
+    @mock.patch("run_xcodebuild_with_test_selection.os.readlink")
+    def test_selected_xcode_developer_dir_from_link_normalizes_xcode_app_root(
+        self,
+        readlink_mock: mock.Mock,
+    ) -> None:
+        readlink_mock.return_value = "/Applications/Xcode_26.3.app"
+
+        self.assertEqual(
+            selected_xcode_developer_dir_from_link(),
+            "/Applications/Xcode_26.3.app/Contents/Developer",
+        )
+
+    @mock.patch("run_xcodebuild_with_test_selection.os.readlink")
+    def test_selected_xcode_developer_dir_from_link_uses_developer_dir_link(
+        self,
+        readlink_mock: mock.Mock,
+    ) -> None:
+        readlink_mock.return_value = "/Applications/Xcode_26.3.app/Contents/Developer"
+
+        self.assertEqual(
+            selected_xcode_developer_dir_from_link(),
+            "/Applications/Xcode_26.3.app/Contents/Developer",
+        )
+
     def test_selected_ui_test_developer_dir_prefers_existing_ui_test_override(self) -> None:
         environment = {
             "UITEST_DEVELOPER_DIR": "/Applications/Custom.app/Contents/Developer",
@@ -160,7 +185,10 @@ class SelectedUITestDeveloperDirTests(unittest.TestCase):
         environment = {"DEVELOPER_DIR": "/Applications/Xcode_26.3.app/Contents/Developer"}
 
         self.assertEqual(
-            selected_ui_test_developer_dir(environment),
+            selected_ui_test_developer_dir(
+                environment,
+                selected_xcode_developer_dir=lambda: None,
+            ),
             "/Applications/Xcode_26.3.app/Contents/Developer",
         )
 
@@ -169,6 +197,21 @@ class SelectedUITestDeveloperDirTests(unittest.TestCase):
 
         self.assertEqual(
             selected_ui_test_developer_dir(environment),
+            "/Applications/Xcode_26.3.app/Contents/Developer",
+        )
+
+    def test_selected_ui_test_developer_dir_prefers_xcode_select_link_over_stale_developer_dir(
+        self,
+    ) -> None:
+        environment = {"DEVELOPER_DIR": "/Applications/Xcode_16.4.app/Contents/Developer"}
+
+        self.assertEqual(
+            selected_ui_test_developer_dir(
+                environment,
+                selected_xcode_developer_dir=(
+                    lambda: "/Applications/Xcode_26.3.app/Contents/Developer"
+                ),
+            ),
             "/Applications/Xcode_26.3.app/Contents/Developer",
         )
 
@@ -296,6 +339,50 @@ class MainTests(unittest.TestCase):
                 "DEVELOPER_DIR": "/Applications/Xcode_16.4.app/Contents/Developer",
                 "MD_APPLE_SDK_ROOT": "/Applications/Xcode_26.3.app",
             },
+            clear=True,
+        ):
+            exit_code = main(
+                [
+                    "--project",
+                    "AndBible.xcodeproj",
+                    "--scheme",
+                    "AndBible",
+                    "--configuration",
+                    "Debug",
+                    "--destination",
+                    "id=DEVICE",
+                    "--derived-data-path",
+                    ".derivedData",
+                    "--result-bundle-path",
+                    ".artifacts/AndBibleTests-ui.xcresult",
+                    "--action",
+                    "test-without-building",
+                ]
+            )
+            self.assertEqual(
+                os.environ["UITEST_DEVELOPER_DIR"],
+                "/Applications/Xcode_26.3.app/Contents/Developer",
+            )
+            self.assertEqual(
+                os.environ["DEVELOPER_DIR"],
+                "/Applications/Xcode_26.3.app/Contents/Developer",
+            )
+
+        self.assertEqual(exit_code, 0)
+        run_mock.assert_called_once()
+
+    @mock.patch("run_xcodebuild_with_test_selection.os.readlink")
+    @mock.patch("run_xcodebuild_with_test_selection.subprocess.run")
+    def test_main_overwrites_stale_developer_dir_from_xcode_select_link(
+        self,
+        run_mock: mock.Mock,
+        readlink_mock: mock.Mock,
+    ) -> None:
+        """Keep UI-test host tools on selected Xcode when SDK env is not exported."""
+        readlink_mock.return_value = "/Applications/Xcode_26.3.app/Contents/Developer"
+        with mock.patch.dict(
+            os.environ,
+            {"DEVELOPER_DIR": "/Applications/Xcode_16.4.app/Contents/Developer"},
             clear=True,
         ):
             exit_code = main(
