@@ -23,13 +23,13 @@ def selected_ui_test_developer_dir(environment: Mapping[str, str]) -> str | None
     if ui_test_developer_dir:
         return ui_test_developer_dir
 
-    developer_dir = environment.get("DEVELOPER_DIR")
-    if developer_dir:
-        return developer_dir
-
     sdk_root = environment.get("MD_APPLE_SDK_ROOT")
     if sdk_root:
         return os.path.join(sdk_root, "Contents", "Developer")
+
+    developer_dir = environment.get("DEVELOPER_DIR")
+    if developer_dir:
+        return developer_dir
 
     return None
 
@@ -183,8 +183,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     if selection_args_text is None:
         selection_args_text = os.environ.get("TEST_SELECTION_ARGS", "")
     developer_dir = selected_ui_test_developer_dir(os.environ)
-    if developer_dir and not os.environ.get("UITEST_DEVELOPER_DIR"):
+    if developer_dir:
         os.environ["UITEST_DEVELOPER_DIR"] = developer_dir
+        os.environ["DEVELOPER_DIR"] = developer_dir
     command = build_xcodebuild_command(
         project=args.project,
         scheme=args.scheme,

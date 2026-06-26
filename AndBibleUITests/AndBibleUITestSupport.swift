@@ -800,8 +800,8 @@ extension AndBibleUITests {
      * - Side effects:
      *   - spawns one host-side child process from the XCTest runner
      *   - passes through the test-runner environment so Xcode tool lookup and fixture overrides
-     *     match the parent test process, including `UITEST_DEVELOPER_DIR` when XCTest strips the
-     *     selected `DEVELOPER_DIR`
+     *     match the selected CI Xcode, including `UITEST_DEVELOPER_DIR` and
+     *     `MD_APPLE_SDK_ROOT` when XCTest inherits a stale `DEVELOPER_DIR`
      *   - drains stdout and stderr while the child runs so pipe buffers cannot stall the child
      *   - terminates the child process when it exceeds the timeout budget
      * - Failure modes:
@@ -851,27 +851,33 @@ extension AndBibleUITests {
         argv[cArguments.count] = nil
 
         var childEnvironment = ProcessInfo.processInfo.environment
-        if childEnvironment["DEVELOPER_DIR"]?.isEmpty != false {
+        let selectedDeveloperDir: String? = {
             if let uiTestDeveloperDir = childEnvironment["UITEST_DEVELOPER_DIR"],
                !uiTestDeveloperDir.isEmpty,
                FileManager.default.fileExists(atPath: uiTestDeveloperDir) {
-                childEnvironment["DEVELOPER_DIR"] = uiTestDeveloperDir
+                return uiTestDeveloperDir
             }
-        }
-        if childEnvironment["DEVELOPER_DIR"]?.isEmpty != false {
             if let sdkRoot = childEnvironment["MD_APPLE_SDK_ROOT"], !sdkRoot.isEmpty {
                 let developerDir = URL(fileURLWithPath: sdkRoot)
                     .appendingPathComponent("Contents", isDirectory: true)
                     .appendingPathComponent("Developer", isDirectory: true)
                     .path
                 if FileManager.default.fileExists(atPath: developerDir) {
-                    childEnvironment["DEVELOPER_DIR"] = developerDir
+                    return developerDir
                 }
             }
-        }
-        if childEnvironment["DEVELOPER_DIR"]?.isEmpty != false,
-           FileManager.default.fileExists(atPath: "/Applications/Xcode.app/Contents/Developer") {
-            childEnvironment["DEVELOPER_DIR"] = "/Applications/Xcode.app/Contents/Developer"
+            if let developerDir = childEnvironment["DEVELOPER_DIR"],
+               !developerDir.isEmpty,
+               FileManager.default.fileExists(atPath: developerDir) {
+                return developerDir
+            }
+            if FileManager.default.fileExists(atPath: "/Applications/Xcode.app/Contents/Developer") {
+                return "/Applications/Xcode.app/Contents/Developer"
+            }
+            return nil
+        }()
+        if let selectedDeveloperDir {
+            childEnvironment["DEVELOPER_DIR"] = selectedDeveloperDir
         }
         if childEnvironment["PATH"]?.isEmpty != false {
             childEnvironment["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"

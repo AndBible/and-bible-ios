@@ -157,10 +157,7 @@ class SelectedUITestDeveloperDirTests(unittest.TestCase):
         )
 
     def test_selected_ui_test_developer_dir_uses_developer_dir(self) -> None:
-        environment = {
-            "DEVELOPER_DIR": "/Applications/Xcode_26.3.app/Contents/Developer",
-            "MD_APPLE_SDK_ROOT": "/Applications/Xcode_26.3.app",
-        }
+        environment = {"DEVELOPER_DIR": "/Applications/Xcode_26.3.app/Contents/Developer"}
 
         self.assertEqual(
             selected_ui_test_developer_dir(environment),
@@ -169,6 +166,18 @@ class SelectedUITestDeveloperDirTests(unittest.TestCase):
 
     def test_selected_ui_test_developer_dir_derives_from_md_apple_sdk_root(self) -> None:
         environment = {"MD_APPLE_SDK_ROOT": "/Applications/Xcode_26.3.app"}
+
+        self.assertEqual(
+            selected_ui_test_developer_dir(environment),
+            "/Applications/Xcode_26.3.app/Contents/Developer",
+        )
+
+    def test_selected_ui_test_developer_dir_prefers_sdk_root_over_stale_developer_dir(self) -> None:
+        """Keep CI host tools on the selected Xcode when runners inherit an old DEVELOPER_DIR."""
+        environment = {
+            "DEVELOPER_DIR": "/Applications/Xcode_16.4.app/Contents/Developer",
+            "MD_APPLE_SDK_ROOT": "/Applications/Xcode_26.3.app",
+        }
 
         self.assertEqual(
             selected_ui_test_developer_dir(environment),
@@ -265,6 +274,54 @@ class MainTests(unittest.TestCase):
             )
             self.assertEqual(
                 os.environ["UITEST_DEVELOPER_DIR"],
+                "/Applications/Xcode_26.3.app/Contents/Developer",
+            )
+            self.assertEqual(
+                os.environ["DEVELOPER_DIR"],
+                "/Applications/Xcode_26.3.app/Contents/Developer",
+            )
+
+        self.assertEqual(exit_code, 0)
+        run_mock.assert_called_once()
+
+    @mock.patch("run_xcodebuild_with_test_selection.subprocess.run")
+    def test_main_overwrites_stale_developer_dir_with_selected_xcode(
+        self,
+        run_mock: mock.Mock,
+    ) -> None:
+        """Prevent shard host tools from falling back to a stale inherited Xcode path."""
+        with mock.patch.dict(
+            os.environ,
+            {
+                "DEVELOPER_DIR": "/Applications/Xcode_16.4.app/Contents/Developer",
+                "MD_APPLE_SDK_ROOT": "/Applications/Xcode_26.3.app",
+            },
+            clear=True,
+        ):
+            exit_code = main(
+                [
+                    "--project",
+                    "AndBible.xcodeproj",
+                    "--scheme",
+                    "AndBible",
+                    "--configuration",
+                    "Debug",
+                    "--destination",
+                    "id=DEVICE",
+                    "--derived-data-path",
+                    ".derivedData",
+                    "--result-bundle-path",
+                    ".artifacts/AndBibleTests-ui.xcresult",
+                    "--action",
+                    "test-without-building",
+                ]
+            )
+            self.assertEqual(
+                os.environ["UITEST_DEVELOPER_DIR"],
+                "/Applications/Xcode_26.3.app/Contents/Developer",
+            )
+            self.assertEqual(
+                os.environ["DEVELOPER_DIR"],
                 "/Applications/Xcode_26.3.app/Contents/Developer",
             )
 
