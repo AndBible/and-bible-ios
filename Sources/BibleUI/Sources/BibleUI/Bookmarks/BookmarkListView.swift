@@ -107,6 +107,9 @@ public struct BookmarkListView: View {
     /// Optional SWORD-backed resolver for Bible bookmark ordinals.
     var bibleOrdinalResolver: ((String, Int) -> BookmarkListVerseReference?)?
 
+    /// Whether the list should expose sheet-style explicit dismiss chrome.
+    private let showsDismissButton: Bool
+
     /**
      Creates the bookmark list view.
 
@@ -115,15 +118,19 @@ public struct BookmarkListView: View {
        - onOpenStudyPad: Callback invoked when the user wants to open a selected label's study pad.
        - bibleOrdinalResolver: Optional resolver that maps `(bookName, ordinal)` to a concrete
          chapter/verse using the active Bible versification.
+       - showsDismissButton: Whether to show the sheet-style Done button; app-owned destination
+         routes rely on navigation-stack back chrome instead.
      */
     public init(
         onNavigate: ((String, Int) -> Void)? = nil,
         onOpenStudyPad: ((UUID) -> Void)? = nil,
-        bibleOrdinalResolver: ((String, Int) -> BookmarkListVerseReference?)? = nil
+        bibleOrdinalResolver: ((String, Int) -> BookmarkListVerseReference?)? = nil,
+        showsDismissButton: Bool = true
     ) {
         self.onNavigate = onNavigate
         self.onOpenStudyPad = onOpenStudyPad
         self.bibleOrdinalResolver = bibleOrdinalResolver
+        self.showsDismissButton = showsDismissButton
     }
 
     /**
@@ -205,9 +212,11 @@ public struct BookmarkListView: View {
         .navigationBarTitleDisplayMode(.inline)
         #endif
         .toolbar {
-            ToolbarItem(placement: .cancellationAction) {
-                Button(String(localized: "done")) { dismiss() }
-                    .accessibilityIdentifier("bookmarkListDoneButton")
+            if showsDismissButton {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(String(localized: "done")) { dismiss() }
+                        .accessibilityIdentifier("bookmarkListDoneButton")
+                }
             }
             ToolbarItem(placement: .primaryAction) {
                 HStack(spacing: 12) {

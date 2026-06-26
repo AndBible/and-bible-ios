@@ -160,7 +160,7 @@ extension AndBibleUITests {
      * - Parameter app: Running application whose reader shell should present the bookmark list.
      * - Returns: The root accessibility-identified bookmark list element.
      * - Side effects:
-     *   - opens the reader overflow menu and pushes the bookmark list
+     *   - opens the reader drawer and pushes the bookmark list
      * - Failure modes:
      *   - fails if the reader menu button, bookmark action, or bookmark list root never appears
      */
@@ -181,10 +181,10 @@ extension AndBibleUITests {
     /**
      Dismisses the bookmark list and reopens it from the reader shell.
      *
-     * - Parameter app: Running application whose bookmark sheet should be reopened.
+     * - Parameter app: Running application whose bookmark surface should be reopened.
      * - Side effects:
-     *   - dismisses the bookmark sheet through the real Done button when available and falls back
-     *     to a top-edge sheet drag gesture otherwise
+     *   - dismisses the bookmark surface through the real Done button, navigation-stack back
+     *     affordance, or legacy sheet drag fallback when available
      *   - opens the bookmark list again through the standard reader navigation path
      * - Failure modes:
      *   - fails when the bookmark list cannot be dismissed or reopened
@@ -197,7 +197,22 @@ extension AndBibleUITests {
         _ = openBookmarkList(in: app, timeout: 20)
     }
 
-    /// Dismisses the bookmark-list sheet, retrying the real close affordance while search focus settles.
+    /**
+     Dismisses the bookmark-list surface from either the legacy sheet host or reader destination.
+
+     - Parameters:
+       - app: Running application whose bookmark list should close.
+       - timeout: Maximum number of seconds to spend on close attempts.
+       - file: Source file used for XCTest failure attribution.
+       - line: Source line used for XCTest failure attribution.
+     - Returns: `true` once the reader shell is visible and the bookmark-list sentinels disappear.
+     - Side effects:
+       - taps the sheet `Done` button when present
+       - taps the navigation-stack back button for drawer-owned destination hosting
+       - falls back to a top-edge drag for the older sheet route
+     - Failure modes:
+       - returns `false` when no close path dismisses the list before the timeout
+     */
     func dismissBookmarkList(
         in app: XCUIApplication,
         timeout: TimeInterval,
@@ -219,6 +234,11 @@ extension AndBibleUITests {
             dismissKeyboardIfPresent(in: app)
             let refreshedDoneButton = app.buttons["bookmarkListDoneButton"].firstMatch
             if tapElementIfPossible(refreshedDoneButton, timeout: min(1, max(0.1, deadline.timeIntervalSinceNow))) {
+                continue
+            }
+
+            let backButton = app.navigationBars.buttons.element(boundBy: 0)
+            if tapElementIfPossible(backButton, timeout: min(1, max(0.1, deadline.timeIntervalSinceNow))) {
                 continue
             }
 
@@ -256,7 +276,7 @@ extension AndBibleUITests {
             || (readerDocumentHeaderStateValue(in: app) != nil && bookmarkListHidden)
     }
 
-    /// Returns whether the bookmark-list sheet still exposes one of its lightweight sentinels.
+    /// Returns whether the bookmark-list surface still exposes one of its lightweight sentinels.
     func bookmarkListSurfaceIsVisible(in app: XCUIApplication) -> Bool {
         let doneButton = app.buttons["bookmarkListDoneButton"].firstMatch
         if doneButton.exists {

@@ -106,6 +106,12 @@ public struct BibleReaderView: View {
     /// Reader-stack destinations opened from global reader actions.
     enum ReaderDestination: String, Identifiable, Hashable {
         case search
+        /// Drawer-owned bookmark list destination that avoids legacy sheet chrome.
+        case bookmarks
+        /// Drawer-owned StudyPads selector that opens the selected StudyPad document.
+        case studyPads
+        /// Drawer-owned reading-plan list destination that avoids legacy sheet chrome.
+        case readingPlans
         case settings
         case downloads
         case globalTextOptions
@@ -1183,6 +1189,50 @@ public struct BibleReaderView: View {
         switch destination {
         case .search:
             searchSheetContent
+        case .bookmarks:
+            BookmarkListView(
+                onNavigate: { book, chapter in
+                    panePresentationController?.navigateTo(book: book, chapter: chapter)
+                    activeReaderDestination = nil
+                },
+                onOpenStudyPad: { labelId in
+                    activeReaderDestination = nil
+                    panePresentationController?.loadStudyPadDocument(labelId: labelId)
+                },
+                bibleOrdinalResolver: { book, ordinal in
+                    panePresentationController?.bookmarkListVerseReference(book: book, ordinal: ordinal)
+                },
+                showsDismissButton: false
+            )
+            #if os(iOS)
+            .toolbar(.visible, for: .navigationBar)
+            #endif
+            .overlay(alignment: .topLeading) {
+                readerRenderedContentStateExport
+            }
+        case .studyPads:
+            LabelManagerView(
+                onOpenStudyPad: { labelId in
+                    activeReaderDestination = nil
+                    panePresentationController?.loadStudyPadDocument(labelId: labelId)
+                },
+                navigationTitle: String(localized: "studypads"),
+                opensStudyPadOnRowTap: true
+            )
+            #if os(iOS)
+            .toolbar(.visible, for: .navigationBar)
+            #endif
+            .overlay(alignment: .topLeading) {
+                readerRenderedContentStateExport
+            }
+        case .readingPlans:
+            ReadingPlanListView()
+            #if os(iOS)
+            .toolbar(.visible, for: .navigationBar)
+            #endif
+            .overlay(alignment: .topLeading) {
+                readerRenderedContentStateExport
+            }
         case .settings:
             SettingsView(
                 nightMode: $nightMode,
@@ -1712,6 +1762,8 @@ public struct BibleReaderView: View {
         switch previousDestination {
         case .search:
             searchInitialQuery = ""
+        case .bookmarks, .studyPads, .readingPlans:
+            break
         case .settings:
             reloadBehaviorPreferences()
         case .downloads:
@@ -3099,11 +3151,11 @@ public struct BibleReaderView: View {
             }
         case .bookmarks:
             dismissReaderNavigationDrawerAndPerform {
-                presentReaderSheet(.bookmarks, from: windowManager.activeWindow?.id)
+                presentReaderDestination(.bookmarks, from: windowManager.activeWindow?.id)
             }
         case .studyPads:
             dismissReaderNavigationDrawerAndPerform {
-                presentReaderModal(.studyPadSelector, from: windowManager.activeWindow?.id)
+                presentReaderDestination(.studyPads, from: windowManager.activeWindow?.id)
             }
         case .myNotes:
             dismissReaderNavigationDrawerAndPerform {
@@ -3112,7 +3164,7 @@ public struct BibleReaderView: View {
             }
         case .readingPlans:
             dismissReaderNavigationDrawerAndPerform {
-                presentReaderSheet(.readingPlans, from: windowManager.activeWindow?.id)
+                presentReaderDestination(.readingPlans, from: windowManager.activeWindow?.id)
             }
         case .history:
             dismissReaderNavigationDrawerAndPerform {

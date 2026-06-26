@@ -6,11 +6,84 @@ import UIKit
 #endif
 
 extension AndBibleUITests {
+    /**
+     Verifies Bookmarks opens from the drawer as an app-owned reader destination.
+     *
+     * Android launches Bookmarks as an app activity from the drawer, so iOS should not expose the
+     * route through `activeReaderSheet` or sheet-only Done chrome when the drawer action is used.
+     *
+     * - Side effects:
+     *   - opens the reader drawer and activates Bookmarks
+     * - Failure modes:
+     *   - fails if Bookmarks does not appear or if the route regresses to sheet presentation
+     */
     func testBookmarksScreenOpensFromReaderMenu() {
         let app = makeApp()
         app.launch()
 
         XCTAssertTrue(openBookmarkList(in: app).exists)
+        waitForReaderRenderedContentState(containing: "readerSheet=none", in: app, timeout: 10)
+        waitForReaderRenderedContentState(containing: "readerDestination=bookmarks", in: app, timeout: 10)
+        XCTAssertFalse(
+            app.navigationBars.buttons["Done"].firstMatch.exists,
+            "Drawer Bookmarks should use reader destination back chrome, not iOS sheet Done chrome."
+        )
+    }
+
+    /**
+     Verifies StudyPads opens from the drawer as an app-owned reader destination.
+     *
+     * Android launches `ManageLabels` in `Mode.STUDYPAD` from the drawer, so iOS should expose the
+     * StudyPads selector as a reader-owned destination instead of the legacy modal sheet route.
+     *
+     * - Side effects:
+     *   - opens the reader drawer and activates StudyPads
+     * - Failure modes:
+     *   - fails if StudyPads does not appear, if the route regresses to a sheet/modal, or if sheet
+     *     Done chrome is visible on the drawer-owned screen
+     */
+    func testStudyPadsScreenOpensFromReaderMenu() {
+        let app = makeApp()
+        app.launch()
+
+        openReaderActionDestination(
+            actionIdentifier: "readerOpenStudyPadsAction",
+            destinationIdentifier: "labelManagerScreen",
+            readinessIdentifiers: ["labelManagerAddButton", "labelManagerStateExport"],
+            in: app,
+            timeout: 20
+        )
+        waitForReaderRenderedContentState(containing: "readerSheet=none", in: app, timeout: 10)
+        waitForReaderRenderedContentState(containing: "readerModal=none", in: app, timeout: 10)
+        waitForReaderRenderedContentState(containing: "readerDestination=studyPads", in: app, timeout: 10)
+        XCTAssertFalse(
+            app.navigationBars.buttons["Done"].firstMatch.exists,
+            "Drawer StudyPads should use reader destination back chrome, not iOS sheet Done chrome."
+        )
+    }
+
+    /**
+     Verifies My Notes opens from the drawer without native sheet/modal presentation.
+     *
+     * Android opens the drawer My Notes entry as an app-owned document surface. The current iOS
+     * parity route loads the My Notes document into the reader pane, so the regression contract is
+     * that no `ReaderSheet`, `ReaderModal`, or pushed destination owns this drawer action.
+     *
+     * - Side effects:
+     *   - opens the reader drawer and activates My Notes
+     * - Failure modes:
+     *   - fails if My Notes does not become visible or if the drawer action regresses to native
+     *     sheet/modal presentation
+     */
+    func testMyNotesScreenOpensFromReaderMenuWithoutSheet() {
+        let app = makeApp()
+        app.launch()
+
+        openMyNotesFromReader(in: app)
+        waitForReaderRenderedContentState(containing: "readerSheet=none", in: app, timeout: 10)
+        waitForReaderRenderedContentState(containing: "readerModal=none", in: app, timeout: 10)
+        waitForReaderRenderedContentState(containing: "readerDestination=none", in: app, timeout: 10)
+        waitForVisibleMyNotesState(containing: "myNotesVisible=true", in: app, timeout: 20)
     }
 
     /**

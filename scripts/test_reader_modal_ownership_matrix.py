@@ -55,6 +55,40 @@ def swift_enum_cases(source: str, enum_name: str) -> list[str]:
     return cases
 
 
+def swift_function_body(source: str, function_name: str) -> str:
+    """Return one Swift function body by matching balanced braces."""
+    match = re.search(rf"\bfunc\s+{re.escape(function_name)}\b[^\{{]*\{{", source)
+    if match is None:
+        raise AssertionError(f"Expected function {function_name} to exist.")
+
+    start = match.end()
+    depth = 1
+    index = start
+    while index < len(source) and depth > 0:
+        char = source[index]
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+        index += 1
+
+    if depth != 0:
+        raise AssertionError(f"Expected function {function_name} body to close.")
+    return source[start : index - 1]
+
+
+def swift_switch_case_body(function_body: str, case_name: str) -> str:
+    """Return the body for one simple `case .name:` inside a Swift switch."""
+    case_match = re.search(rf"^\s*case\s+\.{re.escape(case_name)}\s*:", function_body, re.MULTILINE)
+    if case_match is None:
+        raise AssertionError(f"Expected switch case .{case_name} to exist.")
+
+    next_case = re.search(r"^\s*case\s+\.", function_body[case_match.end() :], re.MULTILINE)
+    if next_case is None:
+        return function_body[case_match.end() :]
+    return function_body[case_match.end() : case_match.end() + next_case.start()]
+
+
 def matrix_row(matrix: str, token: str) -> list[str]:
     """Return the Markdown table cells for one reader presentation route."""
     for line in matrix.splitlines():
@@ -102,6 +136,7 @@ class ReaderModalOwnershipMatrixTests(unittest.TestCase):
             "`shareSheetBinding`",
             "`crossReferenceSheetBinding`",
             "`showRefChooser`",
+            "`BibleReaderNavigationDrawerAction.myNotes`",
         ]:
             self.assertIn(token, matrix)
 
@@ -120,6 +155,9 @@ class ReaderModalOwnershipMatrixTests(unittest.TestCase):
 
         expected_owners = {
             "ReaderDestination.search": "`Android app-owned`",
+            "ReaderDestination.bookmarks": "`Android app-owned`",
+            "ReaderDestination.studyPads": "`Android app-owned`",
+            "ReaderDestination.readingPlans": "`Android app-owned`",
             "showRefChooser": "`Android app-owned`",
             "ReaderModal.chooseDocument": "`Android app-owned`",
             "ReaderModal.modulePicker": "`Android app-owned`",
@@ -127,10 +165,39 @@ class ReaderModalOwnershipMatrixTests(unittest.TestCase):
             "ReaderModal.studyPadSelector": "`Android app-owned`",
             "shareSheetBinding": "`iOS system boundary`",
             "crossReferenceSheetBinding": "`Vue/WebView-owned`",
+            "BibleReaderNavigationDrawerAction.myNotes": "`Vue/WebView-owned`",
         }
 
         for token, owner in expected_owners.items():
             self.assertEqual(owner, matrix_row(matrix, token)[2])
+
+    def test_drawer_owned_destinations_do_not_route_through_reader_sheets(self) -> None:
+        """
+        Keep left-drawer app screens on the reader destination stack.
+
+        Android launches Bookmarks, StudyPads, and Reading Plan as app-owned activities from the
+        drawer. The iOS drawer route must therefore not preserve the old SwiftUI sheet/modal path
+        just because a legacy non-drawer shortcut still has a row in the matrix.
+        """
+        source = READER_VIEW.read_text(encoding="utf-8")
+        drawer_handler = swift_function_body(source, "handleReaderNavigationDrawerAction")
+
+        expected_destinations = {
+            "bookmarks": "bookmarks",
+            "studyPads": "studyPads",
+            "readingPlans": "readingPlans",
+        }
+
+        for drawer_case, destination_case in expected_destinations.items():
+            body = swift_switch_case_body(drawer_handler, drawer_case)
+            self.assertIn(f"presentReaderDestination(.{destination_case}", body)
+            self.assertNotIn("presentReaderSheet", body)
+            self.assertNotIn("presentReaderModal", body)
+
+        my_notes_body = swift_switch_case_body(drawer_handler, "myNotes")
+        self.assertIn("loadMyNotesDocument", my_notes_body)
+        self.assertNotIn("presentReaderSheet", my_notes_body)
+        self.assertNotIn("presentReaderModal", my_notes_body)
 
     def test_known_partial_routes_link_to_their_follow_up_issues(self) -> None:
         """

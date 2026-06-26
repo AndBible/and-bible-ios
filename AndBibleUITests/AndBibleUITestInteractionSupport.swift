@@ -1395,17 +1395,31 @@ extension AndBibleUITests {
     }
 
     /**
-     Dismisses the bookmark list sheet if the StudyPad handoff leaves it visible over the reader.
+     Dismisses the bookmark list surface if the StudyPad handoff leaves it visible over the reader.
+
+     - Parameters:
+       - app: Running application that may still show the bookmark list.
+       - timeout: Maximum number of seconds to spend on the close attempt.
+     - Side effects:
+       - taps the sheet Done button or destination back button when either is visible
+     - Failure modes:
+       - returns without failing when the bookmark list is not visible
      */
     func dismissBookmarkListIfVisible(
         in app: XCUIApplication,
         timeout: TimeInterval = 10
     ) {
-        let doneButton = app.buttons["bookmarkListDoneButton"].firstMatch
-        guard doneButton.exists || doneButton.waitForExistence(timeout: min(timeout, 2)) else {
+        guard bookmarkListSurfaceIsVisible(in: app) else {
             return
         }
-        tapElementReliably(doneButton, timeout: timeout)
+        let doneButton = app.buttons["bookmarkListDoneButton"].firstMatch
+        if tapElementIfPossible(doneButton, timeout: min(timeout, 2)) {
+            _ = waitForBookmarkListDismissal(in: app, timeout: timeout)
+            return
+        }
+
+        let backButton = app.navigationBars.buttons.element(boundBy: 0)
+        _ = tapElementIfPossible(backButton, timeout: min(timeout, 2))
         _ = waitForBookmarkListDismissal(in: app, timeout: timeout)
     }
 
