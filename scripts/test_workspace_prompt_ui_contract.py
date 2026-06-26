@@ -129,6 +129,37 @@ class WorkspacePromptUITestContractTests(unittest.TestCase):
             element_candidates_body,
         )
 
+    def test_workspace_prompt_typing_avoids_text_field_value_reads(self) -> None:
+        """The workspace prompt typing path verifies submit readiness instead of field value.
+
+        Hosted XCTest can resolve the SwiftUI `Name` text field, focus it through a stable app
+        coordinate, and then lose that text-field snapshot when the helper reads `value`. The
+        workspace create flow should prove text entry by the prompt submit button becoming enabled
+        and by the later workspace-row assertions, not by re-sampling the transient field.
+        """
+        state_source = (
+            REPO_ROOT / "AndBibleUITests" / "AndBibleUITestStateSupport.swift"
+        ).read_text()
+        typing_start = state_source.index("func typePromptText(")
+        typing_end = state_source.index("func dismissLabelAssignment", typing_start)
+        typing_body = state_source[typing_start:typing_end]
+        submit_helper_start = typing_body.index("func waitForWorkspacePromptSubmitButtonToEnable")
+        submit_helper_end = typing_body.index("func clearObservedPromptTextValue", submit_helper_start)
+        submit_helper_body = typing_body[submit_helper_start:submit_helper_end]
+        workspace_branch_start = typing_body.index("if skipsPromptValueObservation")
+        workspace_branch_end = typing_body.index(
+            "let existingValue = observedPromptTextValue",
+            workspace_branch_start,
+        )
+        workspace_branch = typing_body[workspace_branch_start:workspace_branch_end]
+
+        self.assertIn('resolvedIdentifier == "workspaceNamePromptTextField"', typing_body)
+        self.assertIn("waitForWorkspacePromptSubmitButtonToEnable", typing_body)
+        self.assertIn('"workspaceNamePromptConfirmButton"', submit_helper_body)
+        self.assertIn("app.typeText(text)", workspace_branch)
+        self.assertNotIn("observedPromptTextValue", workspace_branch)
+        self.assertNotIn("currentTextEntryValue", workspace_branch)
+
     def test_workspace_prompt_is_selector_owned_instead_of_nested_sheet(self) -> None:
         """The create/rename/clone prompt is owned by the selector, matching Android dialog scope.
 

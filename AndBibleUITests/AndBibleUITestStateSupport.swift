@@ -114,8 +114,11 @@ extension AndBibleUITests {
      - Side effects:
        - taps the resolved prompt field, verifies or clears any existing prompt value, emits
          keyboard input, and clears/retries if CI drops the input without appending duplicate text
+       - for the workspace creation prompt, verifies text entry through the prompt-owned submit
+         button because hosted XCTest can lose the SwiftUI text-field snapshot after focus
      - Failure modes:
-       - records an XCTest failure when the field value never matches `text`
+       - records an XCTest failure when the field value or prompt-owned submit readiness never
+         reflects `text`
      */
     @discardableResult
     func typePromptText(
@@ -136,6 +139,7 @@ extension AndBibleUITests {
             "labelManagerNewLabelNameField",
             "workspaceNamePromptTextField",
         ].contains(resolvedIdentifier)
+        let skipsPromptValueObservation = resolvedIdentifier == "workspaceNamePromptTextField"
 
         func promptFocusedTextEntryCandidates() -> [XCUIElement] {
             usesPromptScopedResolvedField ? [] : focusedTextEntryCandidates(in: app)
@@ -268,6 +272,30 @@ extension AndBibleUITests {
             return observedPromptTextValue(preferred: preferredCandidates).isEmpty
         }
 
+        func waitForWorkspacePromptSubmitButtonToEnable(timeout: TimeInterval) -> Bool {
+            let submitDeadline = Date().addingTimeInterval(timeout)
+            repeat {
+                let submitCandidates = workspaceNamePromptButtonCandidates(
+                    "workspaceNamePromptConfirmButton",
+                    in: app
+                )
+                for submitButton in submitCandidates where submitButton.exists {
+                    if submitButton.isEnabled {
+                        return true
+                    }
+                }
+                RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+            } while Date() < submitDeadline
+
+            let submitCandidates = workspaceNamePromptButtonCandidates(
+                "workspaceNamePromptConfirmButton",
+                in: app
+            )
+            return submitCandidates.contains { submitButton in
+                submitButton.exists && submitButton.isEnabled
+            }
+        }
+
         func clearObservedPromptTextValue(
             preferred preferredCandidates: [XCUIElement],
             forceKeyboardDelete: Bool = false
@@ -352,6 +380,16 @@ extension AndBibleUITests {
                 file: file,
                 line: line
             )
+            if skipsPromptValueObservation {
+                app.typeText(text)
+                if waitForWorkspacePromptSubmitButtonToEnable(
+                    timeout: min(5, max(0.5, deadline.timeIntervalSinceNow))
+                ) {
+                    return true
+                }
+                RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+                continue
+            }
             let existingValue = observedPromptTextValue(preferred: preferredPromptCandidates)
             if existingValue == text {
                 return true
