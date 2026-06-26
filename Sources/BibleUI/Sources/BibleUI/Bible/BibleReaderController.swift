@@ -2917,22 +2917,18 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         startOffset: Int? = nil,
         endOffset: Int? = nil
     ) {
-        guard let coordinator = bookmarkActionCoordinator() else {
+        guard let coordinator = annotationBridgeCoordinator(bridge: bridge) else {
             logger.warning("addBookmark: bookmarkService is nil")
             return
         }
-        applyBookmarkActionResult(
-            coordinator.addOrUpdateBibleBookmark(
-                bookInitials: bookInitials,
-                startOrdinal: startOrdinal,
-                endOrdinal: endOrdinal,
-                addNote: addNote,
-                wholeVerse: wholeVerse,
-                startOffset: startOffset,
-                endOffset: endOffset,
-                workspaceSettings: activeWindow?.workspace?.workspaceSettings
-            ),
-            bridge: bridge
+        coordinator.addOrUpdateBibleBookmark(
+            bookInitials: bookInitials,
+            startOrdinal: startOrdinal,
+            endOrdinal: endOrdinal,
+            addNote: addNote,
+            wholeVerse: wholeVerse,
+            startOffset: startOffset,
+            endOffset: endOffset
         )
     }
 
@@ -2979,46 +2975,36 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      */
     public func bridge(_ bridge: BibleBridge, addGenericBookmark bookInitials: String, osisRef: String, startOrdinal: Int, endOrdinal: Int, addNote: Bool) {
         logger.info("Add generic bookmark: \(bookInitials) ref=\(osisRef)")
-        guard let coordinator = bookmarkActionCoordinator() else { return }
-        applyBookmarkActionResult(
-            coordinator.addGenericBookmark(
-                bookInitials: bookInitials,
-                osisRef: osisRef,
-                startOrdinal: startOrdinal,
-                endOrdinal: endOrdinal,
-                addNote: addNote,
-                workspaceSettings: activeWindow?.workspace?.workspaceSettings
-            ),
-            bridge: bridge
+        guard let coordinator = annotationBridgeCoordinator(bridge: bridge) else { return }
+        coordinator.addGenericBookmark(
+            bookInitials: bookInitials,
+            osisRef: osisRef,
+            startOrdinal: startOrdinal,
+            endOrdinal: endOrdinal,
+            addNote: addNote
         )
     }
 
     /// Creates a Bible paragraph-break bookmark requested from the web client.
     public func bridge(_ bridge: BibleBridge, addParagraphBreakBookmark bookInitials: String, startOrdinal: Int, endOrdinal: Int) {
         logger.info("Add paragraph break bookmark: \(bookInitials)")
-        guard let coordinator = bookmarkActionCoordinator() else { return }
-        applyBookmarkActionResult(
-            coordinator.addParagraphBreakBibleBookmark(
-                bookInitials: bookInitials,
-                startOrdinal: startOrdinal,
-                endOrdinal: endOrdinal
-            ),
-            bridge: bridge
+        guard let coordinator = annotationBridgeCoordinator(bridge: bridge) else { return }
+        coordinator.addParagraphBreakBibleBookmark(
+            bookInitials: bookInitials,
+            startOrdinal: startOrdinal,
+            endOrdinal: endOrdinal
         )
     }
 
     /// Creates a generic paragraph-break bookmark requested from the web client.
     public func bridge(_ bridge: BibleBridge, addGenericParagraphBreakBookmark bookInitials: String, osisRef: String, startOrdinal: Int, endOrdinal: Int) {
         logger.info("Add generic paragraph break bookmark: \(bookInitials) ref=\(osisRef)")
-        guard let coordinator = bookmarkActionCoordinator() else { return }
-        applyBookmarkActionResult(
-            coordinator.addGenericParagraphBreakBookmark(
-                bookInitials: bookInitials,
-                osisRef: osisRef,
-                startOrdinal: startOrdinal,
-                endOrdinal: endOrdinal
-            ),
-            bridge: bridge
+        guard let coordinator = annotationBridgeCoordinator(bridge: bridge) else { return }
+        coordinator.addGenericParagraphBreakBookmark(
+            bookInitials: bookInitials,
+            osisRef: osisRef,
+            startOrdinal: startOrdinal,
+            endOrdinal: endOrdinal
         )
     }
 
@@ -3035,8 +3021,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      */
     public func bridge(_ bridge: BibleBridge, removeBookmark bookmarkId: String) {
         logger.info("Remove bookmark: \(bookmarkId)")
-        guard let coordinator = bookmarkActionCoordinator() else { return }
-        applyBookmarkActionResult(coordinator.removeBookmark(bookmarkId), bridge: bridge)
+        annotationBridgeCoordinator(bridge: bridge)?.removeBookmark(bookmarkId)
     }
 
     /**
@@ -3052,8 +3037,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      */
     public func bridge(_ bridge: BibleBridge, removeGenericBookmark bookmarkId: String) {
         logger.info("Remove generic bookmark: \(bookmarkId)")
-        guard let coordinator = bookmarkActionCoordinator() else { return }
-        applyBookmarkActionResult(coordinator.removeGenericBookmark(bookmarkId), bridge: bridge)
+        annotationBridgeCoordinator(bridge: bridge)?.removeGenericBookmark(bookmarkId)
     }
 
     /**
@@ -3071,11 +3055,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      */
     public func bridge(_ bridge: BibleBridge, saveBookmarkNote bookmarkId: String, note: String?) {
         logger.info("Save bookmark note: \(bookmarkId)")
-        guard let coordinator = bookmarkActionCoordinator() else { return }
-        applyBookmarkActionResult(
-            coordinator.saveBookmarkNote(bookmarkId: bookmarkId, note: note),
-            bridge: bridge
-        )
+        annotationBridgeCoordinator(bridge: bridge)?.saveBookmarkNote(bookmarkId: bookmarkId, note: note)
     }
 
     private func applyUITestMyNotesAppendTextIfNeeded() {
@@ -3164,10 +3144,10 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      */
     @discardableResult
     private func saveBookmarkNoteAndNotify(bookmarkId: UUID, note: String?) -> Bool {
-        guard let coordinator = bookmarkActionCoordinator() else { return false }
-        let result = coordinator.saveBookmarkNote(bookmarkId: bookmarkId.uuidString, note: note)
-        applyBookmarkActionResult(result, bridge: bridge)
-        return result.incrementsMyNotesRevision || !result.events.isEmpty
+        annotationBridgeCoordinator(bridge: bridge)?.saveBookmarkNote(
+            bookmarkId: bookmarkId.uuidString,
+            note: note
+        ) ?? false
     }
 
     /**
@@ -3189,12 +3169,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
     /// Refresh bookmark data in Vue.js after label changes (called after LabelAssignmentView dismisses).
     public func refreshBookmarkInVueJS(bookmarkId: UUID) {
-        guard let service = bookmarkService,
-              let bookmark = service.bibleBookmark(id: bookmarkId) else { return }
-        bridge.emit(event: "add_or_update_bookmarks", data: [buildBookmarkJSON(bookmark)])
-        sendLabelsToVueJS()
-        // Re-send config to update favouriteLabels in Vue.js appSettings
-        bridge.emit(event: "set_config", data: buildConfigJSON())
+        annotationBridgeCoordinator(bridge: bridge)?.refreshBookmark(bookmarkId: bookmarkId)
     }
 
     /**
@@ -3202,11 +3177,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      */
     public func bridge(_ bridge: BibleBridge, toggleBookmarkLabel bookmarkId: String, labelId: String) {
         logger.info("Toggle label \(labelId) on bookmark \(bookmarkId)")
-        guard let coordinator = bookmarkActionCoordinator() else { return }
-        applyBookmarkActionResult(
-            coordinator.toggleBookmarkLabel(bookmarkId: bookmarkId, labelId: labelId),
-            bridge: bridge
-        )
+        annotationBridgeCoordinator(bridge: bridge)?.toggleBookmarkLabel(bookmarkId: bookmarkId, labelId: labelId)
     }
 
     /**
@@ -3214,11 +3185,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      */
     public func bridge(_ bridge: BibleBridge, removeBookmarkLabel bookmarkId: String, labelId: String) {
         logger.info("Remove label \(labelId) from bookmark \(bookmarkId)")
-        guard let coordinator = bookmarkActionCoordinator() else { return }
-        applyBookmarkActionResult(
-            coordinator.removeBookmarkLabel(bookmarkId: bookmarkId, labelId: labelId),
-            bridge: bridge
-        )
+        annotationBridgeCoordinator(bridge: bridge)?.removeBookmarkLabel(bookmarkId: bookmarkId, labelId: labelId)
     }
 
     /**
@@ -3226,11 +3193,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      */
     public func bridge(_ bridge: BibleBridge, setPrimaryLabel bookmarkId: String, labelId: String) {
         logger.info("Set primary label \(labelId) on bookmark \(bookmarkId)")
-        guard let coordinator = bookmarkActionCoordinator() else { return }
-        applyBookmarkActionResult(
-            coordinator.setPrimaryLabel(bookmarkId: bookmarkId, labelId: labelId),
-            bridge: bridge
-        )
+        annotationBridgeCoordinator(bridge: bridge)?.setPrimaryLabel(bookmarkId: bookmarkId, labelId: labelId)
     }
 
     /**
@@ -3238,11 +3201,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      */
     public func bridge(_ bridge: BibleBridge, setBookmarkWholeVerse bookmarkId: String, value: Bool) {
         logger.info("Set whole verse \(value) for bookmark \(bookmarkId)")
-        guard let coordinator = bookmarkActionCoordinator() else { return }
-        applyBookmarkActionResult(
-            coordinator.setBookmarkWholeVerse(bookmarkId: bookmarkId, value: value),
-            bridge: bridge
-        )
+        annotationBridgeCoordinator(bridge: bridge)?.setBookmarkWholeVerse(bookmarkId: bookmarkId, value: value)
     }
 
     /**
@@ -3250,11 +3209,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      */
     public func bridge(_ bridge: BibleBridge, setBookmarkCustomIcon bookmarkId: String, value: String?) {
         logger.info("Set custom icon for bookmark \(bookmarkId)")
-        guard let coordinator = bookmarkActionCoordinator() else { return }
-        applyBookmarkActionResult(
-            coordinator.setBookmarkCustomIcon(bookmarkId: bookmarkId, value: value),
-            bridge: bridge
-        )
+        annotationBridgeCoordinator(bridge: bridge)?.setBookmarkCustomIcon(bookmarkId: bookmarkId, value: value)
     }
 
     // MARK: - BibleBridgeDelegate — StudyPad
@@ -3275,14 +3230,11 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      */
     public func bridge(_ bridge: BibleBridge, createNewStudyPadEntry labelId: String, entryType: String, afterEntryId: String) {
         logger.info("Create StudyPad entry type=\(entryType) after \(afterEntryId) in label \(labelId)")
-        guard let coordinator = studyPadActionCoordinator() else { return }
-        applyStudyPadActionResult(
-            coordinator.createNewStudyPadEntry(
-                labelId: labelId,
-                entryType: entryType,
-                afterEntryId: afterEntryId
-            ),
-            bridge: bridge
+        guard let coordinator = annotationBridgeCoordinator(bridge: bridge) else { return }
+        coordinator.createNewStudyPadEntry(
+            labelId: labelId,
+            entryType: entryType,
+            afterEntryId: afterEntryId
         )
         applyUITestStudyPadCreatedNoteTextIfNeeded()
     }
@@ -3292,8 +3244,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      */
     public func bridge(_ bridge: BibleBridge, deleteStudyPadEntry studyPadId: String) {
         logger.info("Delete StudyPad entry: \(studyPadId)")
-        guard let coordinator = studyPadActionCoordinator() else { return }
-        applyStudyPadActionResult(coordinator.deleteStudyPadEntry(studyPadId), bridge: bridge)
+        annotationBridgeCoordinator(bridge: bridge)?.deleteStudyPadEntry(studyPadId)
     }
 
     /**
@@ -3301,8 +3252,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      */
     public func bridge(_ bridge: BibleBridge, updateStudyPadTextEntry data: String) {
         logger.info("Update StudyPad text entry metadata")
-        guard let coordinator = studyPadActionCoordinator() else { return }
-        applyStudyPadActionResult(coordinator.updateStudyPadTextEntry(data: data), bridge: bridge)
+        annotationBridgeCoordinator(bridge: bridge)?.updateStudyPadTextEntry(data: data)
     }
 
     /**
@@ -3310,11 +3260,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      */
     public func bridge(_ bridge: BibleBridge, updateStudyPadTextEntryText id: String, text: String) {
         logger.info("Update StudyPad entry text: \(id)")
-        guard let coordinator = studyPadActionCoordinator() else { return }
-        applyStudyPadActionResult(
-            coordinator.updateStudyPadTextEntryText(id: id, text: text),
-            bridge: bridge
-        )
+        annotationBridgeCoordinator(bridge: bridge)?.updateStudyPadTextEntryText(id: id, text: text)
     }
 
     /**
@@ -3322,11 +3268,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      */
     public func bridge(_ bridge: BibleBridge, updateOrderNumber labelId: String, data: String) {
         logger.info("Update order numbers for label \(labelId)")
-        guard let coordinator = studyPadActionCoordinator() else { return }
-        applyStudyPadActionResult(
-            coordinator.updateOrderNumber(labelId: labelId, data: data),
-            bridge: bridge
-        )
+        annotationBridgeCoordinator(bridge: bridge)?.updateOrderNumber(labelId: labelId, data: data)
     }
 
     /**
@@ -3334,8 +3276,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      */
     public func bridge(_ bridge: BibleBridge, updateBookmarkToLabel data: String) {
         logger.info("Update BibleBookmarkToLabel")
-        guard let coordinator = studyPadActionCoordinator() else { return }
-        applyStudyPadActionResult(coordinator.updateBookmarkToLabel(data: data), bridge: bridge)
+        annotationBridgeCoordinator(bridge: bridge)?.updateBookmarkToLabel(data: data)
     }
 
     /**
@@ -3343,8 +3284,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      */
     public func bridge(_ bridge: BibleBridge, updateGenericBookmarkToLabel data: String) {
         logger.info("Update GenericBookmarkToLabel")
-        guard let coordinator = studyPadActionCoordinator() else { return }
-        applyStudyPadActionResult(coordinator.updateGenericBookmarkToLabel(data: data), bridge: bridge)
+        annotationBridgeCoordinator(bridge: bridge)?.updateGenericBookmarkToLabel(data: data)
     }
 
     /**
@@ -3352,11 +3292,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      */
     public func bridge(_ bridge: BibleBridge, setBookmarkEditAction bookmarkId: String, value: String) {
         logger.info("Set edit action on bookmark \(bookmarkId): \(value)")
-        guard let coordinator = bookmarkActionCoordinator() else { return }
-        applyBookmarkActionResult(
-            coordinator.setBookmarkEditAction(bookmarkId: bookmarkId, value: value),
-            bridge: bridge
-        )
+        annotationBridgeCoordinator(bridge: bridge)?.setBookmarkEditAction(bookmarkId: bookmarkId, value: value)
     }
 
     /**
@@ -3376,16 +3312,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      */
     public func bridge(_ bridge: BibleBridge, setStudyPadCursor labelId: String, orderNumber: Int) {
         logger.info("StudyPad cursor: label=\(labelId) order=\(orderNumber)")
-        guard let uuid = UUID(uuidString: labelId) else { return }
-        if let workspace = activeWindow?.workspace {
-            var settings = workspace.workspaceSettings ?? WorkspaceSettings()
-            settings.studyPadCursors[uuid] = orderNumber
-            settings.normalizeAutoAssignPrimaryLabel()
-            workspace.workspaceSettings = settings
-        }
-        onPersistState?()
-        // Re-emit config so Vue.js gets the updated cursor position
-        bridge.emit(event: "set_config", data: buildConfigJSON())
+        annotationBridgeCoordinator(bridge: bridge)?.setStudyPadCursor(labelId: labelId, orderNumber: orderNumber)
     }
 
     // MARK: - BibleBridgeDelegate — Selection
@@ -3579,8 +3506,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
        - startOrdinal: Inclusive start ordinal for the selected generic content.
        - endOrdinal: Inclusive end ordinal for the selected generic content.
        - addNote: Whether the bookmark modal should open with note editing active.
-     - Side effects: Inserts a generic bookmark, emits bookmark update events to Vue, may persist
-       workspace settings, and may refresh labels/config through `applyBookmarkActionResult`.
+     - Side effects: Inserts a generic bookmark through the annotation bridge coordinator, emits
+       bookmark update events to Vue, and may persist workspace settings or refresh labels/config.
      - Failure modes: Returns without side effects when bookmark services are unavailable.
      */
     private func addGenericBookmark(
@@ -3590,20 +3517,16 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         endOrdinal: Int,
         addNote: Bool
     ) {
-        guard let coordinator = bookmarkActionCoordinator() else {
+        guard let coordinator = annotationBridgeCoordinator(bridge: bridge) else {
             logger.warning("addGenericBookmark: bookmarkService is nil")
             return
         }
-        applyBookmarkActionResult(
-            coordinator.addGenericBookmark(
-                bookInitials: bookInitials,
-                osisRef: osisRef,
-                startOrdinal: startOrdinal,
-                endOrdinal: endOrdinal,
-                addNote: addNote,
-                workspaceSettings: activeWindow?.workspace?.workspaceSettings
-            ),
-            bridge: bridge
+        coordinator.addGenericBookmark(
+            bookInitials: bookInitials,
+            osisRef: osisRef,
+            startOrdinal: startOrdinal,
+            endOrdinal: endOrdinal,
+            addNote: addNote
         )
     }
 
@@ -5673,175 +5596,54 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         }
     }
 
-    // MARK: - Bookmark Event Helpers
+    // MARK: - Annotation Bridge Coordinator
 
     /**
-     Creates the coordinator that owns bookmark bridge action mutation rules.
+     Creates the coordinator that owns bookmark and StudyPad bridge result application.
 
-     - Returns: A coordinator bound to the current bookmark service and reader payload context, or
+     - Parameter bridge: Bridge instance associated with the delegate callback being handled.
+     - Returns: A coordinator bound to the current bookmark service and controller state hooks, or
        `nil` when bookmark persistence is not available.
-     - Side effects: None during construction; returned coordinator methods mutate persistence.
-     - Failure modes: Returns `nil` rather than accepting bookmark actions without persistence.
+     - Side effects: None during construction; returned coordinator methods mutate persistence,
+       controller-owned revision/config state, and bridge events.
+     - Failure modes: Returns `nil` rather than accepting annotation bridge actions without
+       persistence.
      */
-    private func bookmarkActionCoordinator() -> BibleReaderBookmarkActionCoordinator? {
+    private func annotationBridgeCoordinator(bridge: BibleBridge) -> BibleReaderAnnotationBridgeCoordinator? {
         guard let bookmarkService else { return nil }
-        return BibleReaderBookmarkActionCoordinator(
+        return BibleReaderAnnotationBridgeCoordinator(
+            bridge: bridge,
             bookmarkService: bookmarkService,
             payloadFactory: annotationPayloadFactory(),
             currentBook: currentBook,
             currentNotesContentType: { [weak self] in
                 self?.currentNotesContentType() ?? "HTML"
+            },
+            workspaceSettings: { [weak self] in
+                self?.activeWindow?.workspace?.workspaceSettings
+            },
+            setWorkspaceSettings: { [weak self] settings in
+                self?.activeWindow?.workspace?.workspaceSettings = settings
+            },
+            persistState: { [weak self] in
+                self?.onPersistState?()
+            },
+            incrementMyNotesRevision: { [weak self] in
+                self?.myNotesMutationRevision += 1
+            },
+            incrementStudyPadRevision: { [weak self] in
+                self?.studyPadMutationRevision += 1
+            },
+            trackRecentLabel: { [weak self] labelId in
+                self?.trackRecentLabel(labelId)
+            },
+            sendLabels: { [weak self] in
+                self?.sendLabelsToVueJS()
+            },
+            buildConfigJSON: { [weak self] in
+                self?.buildConfigJSON() ?? "{}"
             }
         )
-    }
-
-    /**
-     Applies a coordinated bookmark action result to controller-owned state and the active bridge.
-
-     - Parameters:
-       - result: Mutation result produced by `BibleReaderBookmarkActionCoordinator`.
-       - bridge: Bridge instance associated with the delegate callback being handled.
-     - Side effects: may advance My Notes revision state, update workspace settings, persist state,
-       refresh labels/config, track recent labels, and emit JavaScript events.
-     - Failure modes: Encoding failures inside `BibleBridge.emit` are swallowed by the bridge.
-     */
-    private func applyBookmarkActionResult(
-        _ result: BibleReaderBookmarkActionResult,
-        bridge: BibleBridge
-    ) {
-        if result.incrementsMyNotesRevision {
-            myNotesMutationRevision += 1
-        }
-        if var updatedWorkspaceSettings = result.updatedWorkspaceSettings {
-            updatedWorkspaceSettings.normalizeAutoAssignPrimaryLabel()
-            activeWindow?.workspace?.workspaceSettings = updatedWorkspaceSettings
-        }
-        if result.requiresPersistState {
-            onPersistState?()
-        }
-        if let recentLabelId = result.recentLabelId {
-            trackRecentLabel(recentLabelId)
-        }
-        for event in result.events {
-            emitBookmarkActionEvent(event, bridge: bridge)
-        }
-        if result.refreshesLabels {
-            sendLabelsToVueJS()
-        }
-        if result.refreshesConfig {
-            bridge.emit(event: "set_config", data: buildConfigJSON())
-        }
-    }
-
-    /**
-     Emits one bookmark action event into Vue.js.
-
-     - Parameters:
-       - event: Typed event produced by the bookmark action coordinator.
-       - bridge: Bridge instance associated with the delegate callback being handled.
-     - Side effects: Sends JavaScript to the web client.
-     - Failure modes: Encoding failures inside `BibleBridge.emit` are swallowed by the bridge.
-     */
-    private func emitBookmarkActionEvent(
-        _ event: BibleReaderBookmarkActionEvent,
-        bridge: BibleBridge
-    ) {
-        switch event {
-        case .bookmarksUpdated(let payloads):
-            bridge.emit(event: "add_or_update_bookmarks", data: payloads)
-        case .genericBookmarksUpdated(let payloads):
-            bridge.emit(event: "add_or_update_bookmarks", data: payloads)
-        case .bookmarksDeleted(let ids):
-            bridge.emitEncoded(event: "delete_bookmarks", data: ids)
-        case .bookmarkClicked(let id, let openLabels, let openNotes):
-            bridge.emit(
-                event: "bookmark_clicked",
-                data: "\"\(id)\", {\"openLabels\":\(openLabels),\"openNotes\":\(openNotes)}"
-            )
-        case .bookmarkNoteModified(let payload):
-            bridge.emit(event: "bookmark_note_modified", data: payload)
-        }
-    }
-
-    // MARK: - StudyPad Event Helpers
-
-    /**
-     Creates the coordinator that owns StudyPad bridge action mutation rules.
-
-     - Returns: A coordinator bound to the current bookmark service and reader payload context, or
-       `nil` when bookmark persistence is not available.
-     - Side effects: None during construction; returned coordinator methods mutate persistence.
-     - Failure modes: Returns `nil` rather than accepting StudyPad actions without persistence.
-     */
-    private func studyPadActionCoordinator() -> BibleReaderStudyPadActionCoordinator? {
-        guard let bookmarkService else { return nil }
-        return BibleReaderStudyPadActionCoordinator(
-            bookmarkService: bookmarkService,
-            payloadFactory: annotationPayloadFactory(),
-            currentNotesContentType: { [weak self] in
-                self?.currentNotesContentType() ?? "HTML"
-            }
-        )
-    }
-
-    /// Emit an updated bookmark (Bible or generic) back to Vue.js after label changes.
-    private func emitBookmarkUpdate(bookmarkId: UUID, type: String? = nil) {
-        guard let service = bookmarkService else { return }
-
-        // Try Bible bookmark first (or if type hint says "bible")
-        if type != "generic", let bookmark = service.bibleBookmark(id: bookmarkId) {
-            bridge.emit(event: "add_or_update_bookmarks", data: [buildBookmarkJSON(bookmark)])
-            return
-        }
-
-        // Try generic bookmark
-        if let bookmark = service.genericBookmark(id: bookmarkId) {
-            bridge.emit(event: "add_or_update_bookmarks", data: [buildGenericBookmarkJSONForStudyPad(bookmark)])
-        }
-    }
-
-    /**
-     Applies a coordinated StudyPad action result to controller-owned state and the active bridge.
-
-     - Parameters:
-       - result: Mutation result produced by `BibleReaderStudyPadActionCoordinator`.
-       - bridge: Bridge instance associated with the delegate callback being handled.
-     - Side effects: may advance `studyPadMutationRevision` and emits JavaScript events.
-     - Failure modes: Encoding failures inside `BibleBridge.emit` are swallowed by the bridge.
-     */
-    private func applyStudyPadActionResult(
-        _ result: BibleReaderStudyPadActionResult,
-        bridge: BibleBridge
-    ) {
-        if result.incrementsStudyPadRevision {
-            studyPadMutationRevision += 1
-        }
-        for event in result.events {
-            emitStudyPadActionEvent(event, bridge: bridge)
-        }
-    }
-
-    /**
-     Emits one StudyPad action event into Vue.js.
-
-     - Parameters:
-       - event: Typed event produced by the StudyPad action coordinator.
-       - bridge: Bridge instance associated with the delegate callback being handled.
-     - Side effects: Sends JavaScript to the web client.
-     - Failure modes: Encoding failures inside `BibleBridge.emit` are swallowed by the bridge.
-     */
-    private func emitStudyPadActionEvent(
-        _ event: BibleReaderStudyPadActionEvent,
-        bridge: BibleBridge
-    ) {
-        switch event {
-        case .studyPadUpdated(let payload):
-            bridge.emit(event: "add_or_update_study_pad", data: payload)
-        case .studyPadTextEntryDeleted(let id):
-            bridge.emitEncoded(event: "delete_study_pad_text_entry", data: id.uuidString)
-        case .bookmarkToLabelUpdated(let payload):
-            bridge.emit(event: "add_or_update_bookmark_to_label", data: payload)
-        }
     }
 
     // MARK: - Active Window State
