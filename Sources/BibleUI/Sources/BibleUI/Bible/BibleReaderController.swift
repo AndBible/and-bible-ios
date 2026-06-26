@@ -3097,6 +3097,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
               !text.isEmpty,
               let service = bookmarkService,
               let labelId = activeStudyPadLabelId,
+              let coordinator = annotationBridgeCoordinator(bridge: bridge),
               let entry = service.studyPadEntries(labelId: labelId).max(by: { lhs, rhs in
                   if lhs.orderNumber != rhs.orderNumber {
                       return lhs.orderNumber < rhs.orderNumber
@@ -3107,19 +3108,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             return false
         }
 
-        service.updateStudyPadTextEntryText(id: entry.id, text: text)
-        studyPadMutationRevision += 1
-        let updatedEntry = service.studyPadEntry(id: entry.id) ?? entry
-        bridge.emit(
-            event: "add_or_update_study_pad",
-            data: StudyPadUpdatePayload(
-                studyPadTextEntry: buildStudyPadEntryJSON(updatedEntry),
-                bookmarkToLabelsOrdered: [],
-                genericBookmarkToLabelsOrdered: [],
-                studyPadItemsOrdered: []
-            )
-        )
-        return true
+        return coordinator.updateStudyPadTextEntryText(id: entry.id.uuidString, text: text)
     }
 
     /**

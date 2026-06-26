@@ -212,8 +212,13 @@ struct BibleReaderAnnotationBridgeCoordinator {
 
     /// Refreshes one bookmark payload after native label assignment dismisses.
     func refreshBookmark(bookmarkId: UUID) {
-        guard let bookmark = bookmarkService.bibleBookmark(id: bookmarkId) else { return }
-        bridge.emit(event: "add_or_update_bookmarks", data: [payloadFactory.bookmarkJSONForStudyPad(bookmark)])
+        if let bookmark = bookmarkService.bibleBookmark(id: bookmarkId) {
+            bridge.emit(event: "add_or_update_bookmarks", data: [payloadFactory.bookmarkJSONForStudyPad(bookmark)])
+        } else if let bookmark = bookmarkService.genericBookmark(id: bookmarkId) {
+            bridge.emit(event: "add_or_update_bookmarks", data: [payloadFactory.genericBookmarkJSONForStudyPad(bookmark)])
+        } else {
+            return
+        }
         sendLabels()
         emitConfig()
     }
@@ -269,9 +274,16 @@ struct BibleReaderAnnotationBridgeCoordinator {
         apply(studyPadCoordinator.updateStudyPadTextEntry(data: data))
     }
 
-    /// Updates StudyPad journal text and emits the resulting row payload.
-    func updateStudyPadTextEntryText(id: String, text: String) {
-        apply(studyPadCoordinator.updateStudyPadTextEntryText(id: id, text: text))
+    /**
+     Updates StudyPad journal text and emits the resulting row payload.
+
+     - Returns: `true` when the action produced a native revision increment or bridge event.
+     */
+    @discardableResult
+    func updateStudyPadTextEntryText(id: String, text: String) -> Bool {
+        let result = studyPadCoordinator.updateStudyPadTextEntryText(id: id, text: text)
+        apply(result)
+        return result.incrementsStudyPadRevision || !result.events.isEmpty
     }
 
     /// Updates StudyPad row ordering from Android/shared-client payload keys.
