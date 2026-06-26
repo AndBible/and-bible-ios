@@ -206,7 +206,6 @@ public struct BookmarkListView: View {
         .overlay(alignment: .topLeading) {
             bookmarkListStateExport
         }
-        .searchable(text: $searchText, prompt: String(localized: "search_bookmarks"))
         .navigationTitle(String(localized: "bookmarks"))
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
@@ -259,6 +258,8 @@ public struct BookmarkListView: View {
                 labelFilterSection
             }
 
+            bookmarkSearchSection
+
             // Bookmark list
             ForEach(filteredBookmarks) { bookmark in
                 BookmarkRow(
@@ -288,6 +289,42 @@ public struct BookmarkListView: View {
                 }
             }
             .onDelete(perform: deleteBookmarks)
+        }
+    }
+
+    /**
+     Visible bookmark search control that mirrors Android's in-content bookmark search layout.
+
+     Android's `Bookmarks` activity owns an `EditText` under the label selector instead of relying
+     on action-bar search chrome. Keeping this as a normal list row makes the filter reachable when
+     the bookmark list is hosted inside the reader's app-owned destination stack, where SwiftUI's
+     navigation `.searchable` chrome is not reliably exposed.
+     */
+    private var bookmarkSearchSection: some View {
+        Section {
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
+
+                TextField(String(localized: "search_bookmarks"), text: $searchText)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .accessibilityIdentifier("bookmarkListSearchField")
+
+                if !searchText.isEmpty {
+                    Button {
+                        searchText = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("bookmarkListClearSearchButton")
+                    .accessibilityLabel(String(localized: "clear"))
+                }
+            }
+            .accessibilityElement(children: .contain)
         }
     }
 

@@ -545,6 +545,7 @@ extension AndBibleUITests {
         line: UInt = #line
     ) -> XCUIElement {
         let candidates = [
+            app.textFields["bookmarkListSearchField"].firstMatch,
             app.searchFields["Search bookmarks"].firstMatch,
             app.textFields["Search bookmarks"].firstMatch,
         ]
