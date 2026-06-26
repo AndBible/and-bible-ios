@@ -1136,6 +1136,55 @@ extension AndBibleTests {
 
     #if os(iOS)
     /**
+     Protects native selection state and payload decisions as a focused reader responsibility.
+
+     Android action mode tracks selection state separately from page navigation, and `Multi`/generic
+     pages must not fabricate Bible references from the pane that opened them. The setup exercises the
+     coordinator directly with a normal Bible page and an Android-style non-Bible page. The expected
+     result is a Bible copy/share payload only for Bible-capable pages, text-only copy for non-Bible
+     pages, and cleared state after deselection. A failure means the selection extraction either lost
+     state transitions or reintroduced stale Bible-reference behavior outside controller orchestration.
+     The test performs no simulator, pasteboard, or persistence side effects and is deterministic.
+     */
+    func testReaderSelectionCoordinatorOwnsSelectionStateAndReferencePayloads() {
+        var coordinator = BibleReaderSelectionCoordinator()
+        let bibleContext = BibleReaderSelectionPageContext(
+            canUseBibleReferenceActions: true,
+            currentBook: "Genesis",
+            currentChapter: 1,
+            activeModuleName: "KJV"
+        )
+        let multiContext = BibleReaderSelectionPageContext(
+            canUseBibleReferenceActions: false,
+            currentBook: "Genesis",
+            currentChapter: 1,
+            activeModuleName: "KJV"
+        )
+
+        coordinator.selectionChanged("In the beginning")
+
+        XCTAssertTrue(coordinator.hasActiveSelection)
+        XCTAssertEqual(coordinator.selectedText, "In the beginning")
+        XCTAssertEqual(
+            coordinator.copyText(context: bibleContext),
+            "In the beginning\n\u{2014} Genesis 1 (KJV)"
+        )
+        XCTAssertEqual(
+            coordinator.shareText(context: bibleContext),
+            "In the beginning\n\u{2014} Genesis 1 (KJV)"
+        )
+        XCTAssertEqual(coordinator.copyText(context: multiContext), "In the beginning")
+        XCTAssertNil(coordinator.shareText(context: multiContext))
+
+        coordinator.clearSelection()
+
+        XCTAssertFalse(coordinator.hasActiveSelection)
+        XCTAssertEqual(coordinator.selectedText, "")
+        XCTAssertNil(coordinator.copyText(context: bibleContext))
+        XCTAssertNil(coordinator.shareText(context: bibleContext))
+    }
+
+    /**
      Protects native selection actions from falling back to the stale Bible page behind `Multi`.
 
      Android treats `FakeBookFactory.multiDocument` as a special general-book page. Bible-only
@@ -1580,6 +1629,153 @@ extension AndBibleTests {
         XCTAssertEqual(controller.currentBook, "Exodus")
         XCTAssertEqual(controller.currentChapter, 2)
         XCTAssertFalse(recordedScripts().contains { $0.contains(#""type":"multi""#) })
+    }
+
+    /**
+     Protects Android's boundary between `osis://` navigation and `multi://` MultiDocument links.
+
+     Android's `SCHEME_REFERENCE` handler reads only `getQueryParameter("osis")`; repeated `osis`
+     query values are not a MultiDocument signal. Setup sends a deliberately duplicated `osis://`
+     link through the native bridge with no SWORD module so the route is deterministic. The expected
+     result is navigation to the first reference only and no transient multi-document payload. A
+     failure means iOS widened single-reference links into invented multi-reference behavior instead
+     of requiring Android's `multi://` route.
+     */
+    @MainActor
+    func testOsisReferenceUsesFirstQueryValueLikeAndroidReferenceScheme() throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let controller = BibleReaderController(bridge: bridge)
+
+        controller.bridge(bridge, openExternalLink: "osis://?osis=Exod.2.1&osis=Gen.1.1&v11n=KJVA")
+
+        XCTAssertEqual(controller.currentBook, "Exodus")
+        XCTAssertEqual(controller.currentChapter, 2)
+        XCTAssertFalse(recordedScripts().contains { $0.contains(#""type":"multi""#) })
+    }
+
+    /**
+     Protects Android-style external-link classification outside controller orchestration.
+
+     Android splits responsibilities between `BibleJavascriptInterface.openExternalLink`,
+     `BibleView.openLink`, and `LinkControl`: pseudo-links become typed app routes while unknown
+     web links remain platform URLs. The setup exercises the new pure router with Strong's,
+     morphology, MyBible, MySword, multi-reference, EPUB, Downloads, My Notes, and StudyPad inputs.
+     The expected result is typed route data with no bridge, SWORD, pasteboard, or simulator side
+     effects. A failure means the extraction preserved the controller code shape without preserving
+     Android's routing contract.
+     */
+    func testExternalLinkRouterClassifiesAndroidPseudoSchemes() {
+        let router = BibleReaderExternalLinkRouter()
+
+        XCTAssertEqual(
+            router.route(for: "ab-w://?strong=H0430&robinson=N-NSM"),
+            .definition(strongs: ["H0430"], robinson: ["N-NSM"])
+        )
+        XCTAssertEqual(
+            router.route(for: "strongs://G2316"),
+            .definition(strongs: ["G2316"], robinson: [])
+        )
+        XCTAssertEqual(
+            router.route(for: "morphology://robinson/V-PAI-3S"),
+            .definition(strongs: [], robinson: ["V-PAI-3S"])
+        )
+        XCTAssertEqual(
+            router.route(for: "ab-find-all://?type=hebrew&name=5775"),
+            .findAllOccurrences("H5775")
+        )
+        XCTAssertEqual(
+            router.route(for: "download://?initials=KJV"),
+            .downloads(searchText: "KJV")
+        )
+        XCTAssertEqual(
+            router.route(for: "epub-ref://?book=Pilgrim&toKey=chapter1.xhtml&toId=anchor"),
+            .epubReference(book: "Pilgrim", toKey: "chapter1.xhtml", toId: "anchor")
+        )
+        XCTAssertEqual(
+            router.route(for: "my-notes://?osis=Gen.1.1&ordinal=1"),
+            .myNotes(osisRef: "Gen.1.1", ordinal: 1)
+        )
+        XCTAssertEqual(
+            router.route(for: "journal://?id=00000000-0000-0000-0000-000000000001&bookmarkId=00000000-0000-0000-0000-000000000002"),
+            .studyPad(
+                labelId: UUID(uuidString: "00000000-0000-0000-0000-000000000001")!,
+                bookmarkId: UUID(uuidString: "00000000-0000-0000-0000-000000000002")!
+            )
+        )
+        XCTAssertEqual(
+            router.route(for: "osis://?osis=Gen.1.1,Exod.2.1&v11n=KJVA"),
+            .osisReferences(["Gen.1.1,Exod.2.1"])
+        )
+        XCTAssertEqual(
+            router.route(for: "multi://?osis=Gen.1.1&osis=Exod.2.1&v11n=KJVA"),
+            .multiReferences(["Gen.1.1", "Exod.2.1"])
+        )
+        XCTAssertEqual(
+            router.route(for: "sword://Bible/John.3.16"),
+            .swordReference("John.3.16")
+        )
+        XCTAssertEqual(
+            router.route(for: "B:470 1:1"),
+            .osisNavigation("Matt.1.1")
+        )
+        XCTAssertEqual(
+            router.route(for: "#b40.1.1"),
+            .osisNavigation("Matt.1.1")
+        )
+        XCTAssertEqual(
+            router.route(for: "S:G2424"),
+            .definition(strongs: ["G2424"], robinson: [])
+        )
+        XCTAssertEqual(
+            router.route(for: "#dH0430"),
+            .definition(strongs: ["H0430"], robinson: [])
+        )
+        XCTAssertEqual(
+            router.route(for: "https://andbible.org"),
+            .platformURL(URL(string: "https://andbible.org")!)
+        )
+    }
+
+    /**
+     Protects multi-reference document construction as its own Android `Multi` responsibility.
+
+     Android stores cross-reference results as `FakeBookFactory.multiDocument` backed by a
+     `BookAndKeyList`, not as a controller-local sheet. The setup feeds parsed references into the
+     builder without an active SWORD module so fallback XML is deterministic. The expected JSON has
+     the Vue `type: "multi"` shape, one OSIS fragment per reference, stable module/key metadata, and
+     escaped fallback text. A failure means the extraction left document construction coupled to the
+     controller or changed the persisted/rendered document contract.
+     */
+    func testMultiReferenceDocumentBuilderCreatesAndroidMultiPayload() throws {
+        let refs = [
+            OsisRef(book: "Genesis", chapter: 1, verse: 1, osisId: "Gen"),
+            OsisRef(book: "Exodus", chapter: 2, verse: 1, osisId: "Exod"),
+        ]
+        let builder = BibleReaderMultiReferenceDocumentBuilder(
+            activeModule: nil,
+            activeModuleName: "KJV",
+            compatibilityOrdinal: { chapter, verse in chapter * 1_000 + verse },
+            isNewTestament: { $0 == "Matthew" }
+        )
+
+        let json = try XCTUnwrap(builder.buildDocumentJSON(refs: refs))
+        let data = try XCTUnwrap(json.data(using: .utf8))
+        let payload = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let fragments = try XCTUnwrap(payload["osisFragments"] as? [[String: Any]])
+
+        XCTAssertEqual(payload["type"] as? String, "multi")
+        XCTAssertEqual(payload["compare"] as? Bool, false)
+        XCTAssertEqual(fragments.count, 2)
+        XCTAssertEqual(fragments[0]["key"] as? String, "KJV--Gen.1.1")
+        XCTAssertEqual(fragments[0]["osisRef"] as? String, "Gen.1.1")
+        XCTAssertEqual(fragments[0]["bookCategory"] as? String, "BIBLE")
+        XCTAssertEqual(fragments[0]["ordinalRange"] as? [Int], [1001, 1001])
+        XCTAssertTrue(
+            (fragments[0]["xml"] as? String)?.contains("Genesis 1:1") == true,
+            "Expected fallback XML to include the display reference when no module is available."
+        )
+        XCTAssertEqual(fragments[1]["key"] as? String, "KJV--Exod.2.1")
+        XCTAssertEqual(fragments[1]["ordinalRange"] as? [Int], [2001, 2001])
     }
 
     /**

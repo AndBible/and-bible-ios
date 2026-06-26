@@ -83,6 +83,8 @@ struct LabelAssignmentView: View {
                                 .font(.body)
                         }
                         .buttonStyle(.plain)
+                        .frame(minWidth: 44, minHeight: 44)
+                        .contentShape(Rectangle())
                         .accessibilityIdentifier(labelInlineActionIdentifier("labelAssignmentFavouriteButton", for: label))
                         .accessibilityValue(label.favourite ? "favourite" : "notFavourite")
 
@@ -94,6 +96,8 @@ struct LabelAssignmentView: View {
                                 .font(.body)
                         }
                         .buttonStyle(.plain)
+                        .frame(minWidth: 44, minHeight: 44)
+                        .contentShape(Rectangle())
                         .accessibilityIdentifier(labelInlineActionIdentifier("labelAssignmentToggleButton", for: label))
                         .accessibilityValue(assignedLabelIds.contains(label.id) ? "assigned" : "unassigned")
                     }
