@@ -800,7 +800,8 @@ extension AndBibleUITests {
      * - Side effects:
      *   - spawns one host-side child process from the XCTest runner
      *   - passes through the test-runner environment so Xcode tool lookup and fixture overrides
-     *     match the parent test process
+     *     match the parent test process, including `UITEST_DEVELOPER_DIR` when XCTest strips the
+     *     selected `DEVELOPER_DIR`
      *   - drains stdout and stderr while the child runs so pipe buffers cannot stall the child
      *   - terminates the child process when it exceeds the timeout budget
      * - Failure modes:
@@ -850,6 +851,13 @@ extension AndBibleUITests {
         argv[cArguments.count] = nil
 
         var childEnvironment = ProcessInfo.processInfo.environment
+        if childEnvironment["DEVELOPER_DIR"]?.isEmpty != false {
+            if let uiTestDeveloperDir = childEnvironment["UITEST_DEVELOPER_DIR"],
+               !uiTestDeveloperDir.isEmpty,
+               FileManager.default.fileExists(atPath: uiTestDeveloperDir) {
+                childEnvironment["DEVELOPER_DIR"] = uiTestDeveloperDir
+            }
+        }
         if childEnvironment["DEVELOPER_DIR"]?.isEmpty != false {
             if let sdkRoot = childEnvironment["MD_APPLE_SDK_ROOT"], !sdkRoot.isEmpty {
                 let developerDir = URL(fileURLWithPath: sdkRoot)

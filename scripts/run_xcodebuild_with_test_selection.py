@@ -9,12 +9,29 @@ import os
 import signal
 import shlex
 import subprocess
-from typing import Sequence
+from typing import Mapping, Sequence
 
 
 def parse_test_selection_args(selection_text: str) -> list[str]:
     """Split newline-delimited xcodebuild selection arguments."""
     return [line.strip() for line in selection_text.splitlines() if line.strip()]
+
+
+def selected_ui_test_developer_dir(environment: Mapping[str, str]) -> str | None:
+    """Return the selected Xcode developer directory for UI-test host commands."""
+    ui_test_developer_dir = environment.get("UITEST_DEVELOPER_DIR")
+    if ui_test_developer_dir:
+        return ui_test_developer_dir
+
+    developer_dir = environment.get("DEVELOPER_DIR")
+    if developer_dir:
+        return developer_dir
+
+    sdk_root = environment.get("MD_APPLE_SDK_ROOT")
+    if sdk_root:
+        return os.path.join(sdk_root, "Contents", "Developer")
+
+    return None
 
 
 def build_xcodebuild_command(
@@ -165,6 +182,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     selection_args_text = args.test_selection_args
     if selection_args_text is None:
         selection_args_text = os.environ.get("TEST_SELECTION_ARGS", "")
+    developer_dir = selected_ui_test_developer_dir(os.environ)
+    if developer_dir and not os.environ.get("UITEST_DEVELOPER_DIR"):
+        os.environ["UITEST_DEVELOPER_DIR"] = developer_dir
     command = build_xcodebuild_command(
         project=args.project,
         scheme=args.scheme,

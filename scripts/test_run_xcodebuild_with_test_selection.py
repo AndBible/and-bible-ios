@@ -19,6 +19,7 @@ from run_xcodebuild_with_test_selection import (
     main,
     parse_test_selection_args,
     result_bundle_reports_passing_tests,
+    selected_ui_test_developer_dir,
 )
 
 
@@ -142,6 +143,39 @@ class BuildXcodebuildCommandTests(unittest.TestCase):
         )
 
 
+class SelectedUITestDeveloperDirTests(unittest.TestCase):
+    def test_selected_ui_test_developer_dir_prefers_existing_ui_test_override(self) -> None:
+        environment = {
+            "UITEST_DEVELOPER_DIR": "/Applications/Custom.app/Contents/Developer",
+            "DEVELOPER_DIR": "/Applications/Xcode.app/Contents/Developer",
+            "MD_APPLE_SDK_ROOT": "/Applications/Xcode_26.3.app",
+        }
+
+        self.assertEqual(
+            selected_ui_test_developer_dir(environment),
+            "/Applications/Custom.app/Contents/Developer",
+        )
+
+    def test_selected_ui_test_developer_dir_uses_developer_dir(self) -> None:
+        environment = {
+            "DEVELOPER_DIR": "/Applications/Xcode_26.3.app/Contents/Developer",
+            "MD_APPLE_SDK_ROOT": "/Applications/Xcode_26.3.app",
+        }
+
+        self.assertEqual(
+            selected_ui_test_developer_dir(environment),
+            "/Applications/Xcode_26.3.app/Contents/Developer",
+        )
+
+    def test_selected_ui_test_developer_dir_derives_from_md_apple_sdk_root(self) -> None:
+        environment = {"MD_APPLE_SDK_ROOT": "/Applications/Xcode_26.3.app"}
+
+        self.assertEqual(
+            selected_ui_test_developer_dir(environment),
+            "/Applications/Xcode_26.3.app/Contents/Developer",
+        )
+
+
 class MainTests(unittest.TestCase):
     @mock.patch("run_xcodebuild_with_test_selection.subprocess.run")
     def test_main_reads_selection_args_from_environment_when_option_is_omitted(
@@ -199,6 +233,43 @@ class MainTests(unittest.TestCase):
             ],
             check=True,
         )
+
+    @mock.patch("run_xcodebuild_with_test_selection.subprocess.run")
+    def test_main_exports_ui_test_developer_dir_from_selected_xcode(
+        self,
+        run_mock: mock.Mock,
+    ) -> None:
+        """Pass the selected Xcode into UI tests for host-side xcrun/simctl calls."""
+        with mock.patch.dict(
+            os.environ,
+            {"MD_APPLE_SDK_ROOT": "/Applications/Xcode_26.3.app"},
+            clear=True,
+        ):
+            exit_code = main(
+                [
+                    "--project",
+                    "AndBible.xcodeproj",
+                    "--scheme",
+                    "AndBible",
+                    "--configuration",
+                    "Debug",
+                    "--destination",
+                    "id=DEVICE",
+                    "--derived-data-path",
+                    ".derivedData",
+                    "--result-bundle-path",
+                    ".artifacts/AndBibleTests-ui.xcresult",
+                    "--action",
+                    "test-without-building",
+                ]
+            )
+            self.assertEqual(
+                os.environ["UITEST_DEVELOPER_DIR"],
+                "/Applications/Xcode_26.3.app/Contents/Developer",
+            )
+
+        self.assertEqual(exit_code, 0)
+        run_mock.assert_called_once()
 
     @mock.patch("run_xcodebuild_with_test_selection.subprocess.run")
     def test_main_accepts_xctestrun_path_for_test_without_building(
