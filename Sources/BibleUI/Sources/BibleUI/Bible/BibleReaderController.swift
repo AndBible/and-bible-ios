@@ -45,6 +45,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
     /// Whether the WebView is currently showing the My Notes document (vs Bible text).
     private(set) var showingMyNotes = false
+    /// Optional My Notes row ordinal requested before the Vue client was ready.
+    private var pendingClientReadyMyNotesJumpOrdinal: Int?
     /// Monotonic marker used by lightweight UI-test exports when My Notes state or documents rebuild.
     private(set) var myNotesMutationRevision = 0
     /// Prevents a launch-seeded UI-test append from firing more than once in the same reader session.
@@ -2435,7 +2437,9 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         }
 
         if showingMyNotes {
-            loadMyNotesDocument()
+            let pendingJumpOrdinal = pendingClientReadyMyNotesJumpOrdinal
+            pendingClientReadyMyNotesJumpOrdinal = nil
+            loadMyNotesDocument(jumpToOrdinal: pendingJumpOrdinal)
             return
         }
 
@@ -4197,11 +4201,27 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     }
 
     /**
-     Load the My Notes document for the current chapter into the WebView.
-     Shows all bookmarks for the chapter in a personal-commentary style view.
+     Loads the My Notes document for the current chapter into the WebView.
+
+     - Parameter jumpToOrdinal: Optional rendered My Notes row ordinal to scroll to after loading.
+     - Side effects: Marks My Notes as the visible reader document, clears competing StudyPad and
+       editing state, rebuilds the chapter's note-backed bookmarks, emits the My Notes document to
+       Vue when the client is ready, or stores the request for client-ready replay when it is not.
+     - Failure modes: If the current chapter range cannot be resolved, logs the failure and leaves
+       the visible My Notes intent in place for the native header/state export.
      */
     public func loadMyNotesDocument(jumpToOrdinal: Int? = nil) {
-        guard clientReady else { return }
+        guard clientReady else {
+            pendingClientReadyMyNotesJumpOrdinal = jumpToOrdinal
+            showingMyNotes = true
+            showingStudyPad = false
+            activeStudyPadLabelId = nil
+            activeStudyPadLabelName = nil
+            editingInWebView = false
+            clearNativeSelectionState()
+            return
+        }
+        pendingClientReadyMyNotesJumpOrdinal = nil
         showingMyNotes = true
         showingStudyPad = false
         activeStudyPadLabelId = nil

@@ -747,7 +747,7 @@ struct BibleReaderModulePicker: View {
        - center: Main abbreviation and description column.
        - trailing: Right action/status column.
        - selection: Primary row action matching Android list-item selection.
-     - Returns: A full-width row with Android spacing and divider placement.
+     - Returns: A full-width button row with Android spacing and divider placement.
      - Side effects: Executes `selection` when the row body is tapped.
      - Failure modes: Row-level context and swipe actions are supplied by the caller.
      */
@@ -759,23 +759,33 @@ struct BibleReaderModulePicker: View {
         selection: @escaping () -> Void
     ) -> some View {
         VStack(spacing: 0) {
-            HStack(alignment: .top, spacing: 12) {
-                leading()
-                center()
-                    .frame(maxWidth: .infinity, alignment: .leading)
+            ZStack(alignment: .topTrailing) {
+                Button(action: selection) {
+                    HStack(alignment: .top, spacing: 12) {
+                        leading()
+                        center()
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        Color.clear
+                            .frame(width: 48, height: 44)
+                            .accessibilityHidden(true)
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 12)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier(accessibilityIdentifier)
+
                 trailing()
+                    .padding(.top, 12)
+                    .padding(.trailing, 14)
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 12)
 
             Rectangle()
                 .fill(DocumentChooserPalette.divider)
                 .frame(height: 1)
                 .padding(.leading, 96)
         }
-        .contentShape(Rectangle())
-        .onTapGesture(perform: selection)
-        .accessibilityIdentifier(accessibilityIdentifier)
     }
 
     /**
@@ -939,10 +949,11 @@ struct BibleReaderModulePicker: View {
      - dismisses the chooser
      - opens My Notes, Compare, or the StudyPad selector through existing reader routes
 
-     Failure modes:
-     - pseudo-document loading keeps the existing controller guards; a not-ready web client simply
-       ignores the load, matching other reader document actions.
-     */
+	     Failure modes:
+	     - pseudo-document loading keeps the controller's client-ready replay contract; selecting My
+	       Notes before the WebView client is ready records the visible route intent and replays the
+	       document load when the client finishes bootstrapping.
+	     */
     private func select(_ document: AndroidPseudoDocument) {
         switch document {
         case .myNotes:

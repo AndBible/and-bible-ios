@@ -877,25 +877,28 @@ extension AndBibleUITests {
      *   - timeout: Maximum time to wait for the chooser row and visible My Notes document.
      *   - file: Source file used for XCTest failure attribution.
      *   - line: Source line used for XCTest failure attribution.
-     * - Side effects:
-     *   - opens the reader drawer, launches Choose Document, selects the My Notes pseudo-document,
-     *     and waits for the WebView-owned My Notes document to render
-     * - Failure modes:
-     *   - records an XCTest failure if the chooser, pseudo-document row, or My Notes state never
-     *     becomes visible
+	     * - Side effects:
+	     *   - opens the reader drawer, launches Choose Document, filters the Android-style chooser to
+	     *     the `FakeBookFactory` `My Note` initials, selects that row, and waits for the
+	     *     WebView-owned My Notes document to render
+	     * - Failure modes:
+	     *   - records an XCTest failure if the chooser, pseudo-document row, or My Notes state never
+	     *     becomes visible
      */
-    func openMyNotesFromReader(
-        in app: XCUIApplication,
-        timeout: TimeInterval = 20,
-        file: StaticString = #filePath,
-        line: UInt = #line
-    ) {
-        tapReaderAction("readerChooseDocumentAction", in: app, timeout: timeout, file: file, line: line)
-        _ = requireElement("modulePickerScreen", in: app, timeout: timeout, file: file, line: line)
-        tapElementReliably(
-            requireElement("modulePickerPseudoRow::myNotes", in: app, timeout: timeout, file: file, line: line),
-            timeout: timeout
-        )
+	    func openMyNotesFromReader(
+	        in app: XCUIApplication,
+	        timeout: TimeInterval = 20,
+	        file: StaticString = #filePath,
+	        line: UInt = #line
+	    ) {
+	        tapReaderAction("readerChooseDocumentAction", in: app, timeout: timeout, file: file, line: line)
+	        _ = requireElement("modulePickerScreen", in: app, timeout: timeout, file: file, line: line)
+	        let searchField = requireElement("modulePickerSearchField", in: app, timeout: timeout, file: file, line: line)
+	        replaceText(in: searchField, with: "My Note", placeholderHints: ["Search"])
+	        tapElementReliably(
+	            requireElement("modulePickerPseudoRow::myNotes", in: app, timeout: timeout, file: file, line: line),
+	            timeout: timeout
+	        )
         waitForMyNotesPresentation(in: app, timeout: timeout, file: file, line: line)
         waitForVisibleMyNotesState(
             containing: "myNotesVisible=true",

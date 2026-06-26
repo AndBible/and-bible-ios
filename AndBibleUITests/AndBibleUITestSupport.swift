@@ -850,15 +850,7 @@ extension AndBibleUITests {
         }
         argv[cArguments.count] = nil
 
-        var childEnvironment = ProcessInfo.processInfo.environment
-        let selectedDeveloperDir = selectedDeveloperDirForHostProcess(environment: childEnvironment)
-        if let selectedDeveloperDir {
-            childEnvironment["DEVELOPER_DIR"] = selectedDeveloperDir
-            childEnvironment["UITEST_DEVELOPER_DIR"] = selectedDeveloperDir
-        }
-        if childEnvironment["PATH"]?.isEmpty != false {
-            childEnvironment["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
-        }
+        let childEnvironment = hostProcessEnvironment(from: ProcessInfo.processInfo.environment)
 
         let environmentStrings = childEnvironment
             .map { "\($0.key)=\($0.value)" }
@@ -922,6 +914,61 @@ extension AndBibleUITests {
             return (-3, stdout, stderr.isEmpty ? "Process terminated by signal \(terminatingSignal)." : stderr)
         }
         return (-4, stdout, stderr)
+    }
+
+    /**
+     Builds the macOS environment used for host-side subprocesses launched by UI tests.
+     *
+     * - Parameters:
+     *   - environment: Raw environment visible to the XCTest host process.
+     *   - selectedDeveloperDir: Optional test override for the selected Xcode developer directory.
+     * - Returns: A subprocess environment with simulator-capable Xcode tooling and macOS user
+     *   directory values restored for `xcrun`, `simctl`, and fixture tools.
+     * - Side effects: None.
+     * - Failure modes: Falls back to inherited values when explicit host overrides are absent.
+     */
+    func hostProcessEnvironment(
+        from environment: [String: String],
+        selectedDeveloperDir: String? = nil
+    ) -> [String: String] {
+        var childEnvironment = environment
+        let resolvedDeveloperDir = selectedDeveloperDir
+            ?? selectedDeveloperDirForHostProcess(environment: childEnvironment)
+        if let resolvedDeveloperDir {
+            childEnvironment["DEVELOPER_DIR"] = resolvedDeveloperDir
+            childEnvironment["UITEST_DEVELOPER_DIR"] = resolvedDeveloperDir
+        }
+        applyHostUserDirectoryOverrides(to: &childEnvironment)
+        if childEnvironment["PATH"]?.isEmpty != false {
+            childEnvironment["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
+        }
+        return childEnvironment
+    }
+
+    /**
+     Restores macOS user-directory values for host tools spawned from an XCTest environment.
+     *
+     * - Parameter environment: Environment dictionary to update in place.
+     * - Side effects: Rewrites `HOME`, `TMPDIR`, user identity, and CoreFoundation user-home values
+     *   from `UITEST_HOST_*` variables supplied by the CI wrapper.
+     * - Failure modes: Leaves existing values unchanged when no host override is available.
+     */
+    func applyHostUserDirectoryOverrides(to environment: inout [String: String]) {
+        let variablePairs = [
+            ("UITEST_HOST_HOME", "HOME"),
+            ("UITEST_HOST_TMPDIR", "TMPDIR"),
+            ("UITEST_HOST_USER", "USER"),
+            ("UITEST_HOST_LOGNAME", "LOGNAME"),
+            ("UITEST_HOST_CF_USER_TEXT_ENCODING", "__CF_USER_TEXT_ENCODING"),
+        ]
+        for (sourceKey, targetKey) in variablePairs {
+            if let value = environment[sourceKey], !value.isEmpty {
+                environment[targetKey] = value
+            }
+        }
+        if let home = environment["UITEST_HOST_HOME"], !home.isEmpty {
+            environment["CFFIXED_USER_HOME"] = home
+        }
     }
 
     /**

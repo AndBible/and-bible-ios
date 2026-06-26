@@ -78,11 +78,32 @@ def discover_single_xctestrun_path(derived_data_path: str | None) -> str | None:
     return xctestrun_paths[0]
 
 
-def patch_xctestrun_ui_test_developer_dir(xctestrun_path: str, developer_dir: str) -> bool:
+def ui_test_host_environment_variables(environment: Mapping[str, str]) -> dict[str, str]:
+    """Return host-side environment overrides needed by UI-test subprocesses."""
+    variable_map = {
+        "HOME": "UITEST_HOST_HOME",
+        "TMPDIR": "UITEST_HOST_TMPDIR",
+        "USER": "UITEST_HOST_USER",
+        "LOGNAME": "UITEST_HOST_LOGNAME",
+        "__CF_USER_TEXT_ENCODING": "UITEST_HOST_CF_USER_TEXT_ENCODING",
+    }
+    return {
+        target_key: environment[source_key]
+        for source_key, target_key in variable_map.items()
+        if environment.get(source_key)
+    }
+
+
+def patch_xctestrun_ui_test_developer_dir(
+    xctestrun_path: str,
+    developer_dir: str,
+    host_environment: Mapping[str, str] | None = None,
+) -> bool:
     """Inject selected Xcode paths into UI-test host environments in an .xctestrun file."""
     with open(xctestrun_path, "rb") as plist_file:
         xctestrun = plistlib.load(plist_file)
 
+    host_environment_variables = ui_test_host_environment_variables(host_environment or os.environ)
     patched = False
     for test_configuration in xctestrun.values():
         if not isinstance(test_configuration, dict):
@@ -93,6 +114,7 @@ def patch_xctestrun_ui_test_developer_dir(xctestrun_path: str, developer_dir: st
             environment = test_configuration.setdefault(environment_key, {})
             environment["DEVELOPER_DIR"] = developer_dir
             environment["UITEST_DEVELOPER_DIR"] = developer_dir
+            environment.update(host_environment_variables)
             patched = True
 
     if patched:

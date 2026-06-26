@@ -180,19 +180,22 @@ public struct LabelManagerView: View {
                     onOpenStudyPad(label.id)
                 } label: {
                     labelRowContent(label, showsDisclosureIndicator: false)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .accessibilityIdentifier(labelRowIdentifier(label))
+                .accessibilityLabel(label.name)
             } else {
                 NavigationLink {
                     labelEditDestination(for: label.id)
                 } label: {
                     labelRowContent(label, showsDisclosureIndicator: true)
                 }
+                .accessibilityIdentifier(labelRowIdentifier(label))
+                .accessibilityLabel(label.name)
             }
         }
-        .contentShape(Rectangle())
-        .accessibilityIdentifier(labelRowIdentifier(label))
-        .accessibilityLabel(label.name)
         .swipeActions(edge: .trailing) {
             Button(String(localized: "delete"), role: .destructive) {
                 deleteLabel(label)

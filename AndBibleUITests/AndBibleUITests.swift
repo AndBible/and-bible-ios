@@ -119,6 +119,59 @@ final class AndBibleUITests: XCTestCase {
     }
 
     /**
+     Protects host-side `xcrun simctl` calls from inheriting simulator/XCTest user-directory values.
+     *
+     * Setup:
+     * - starts from an environment with explicit CI host user-directory overrides
+     * - includes stale XCTest-style home values that should not reach host subprocesses
+     *
+     * Expected result:
+     * - subprocesses inherit the selected Xcode developer directory
+     * - `HOME`, `TMPDIR`, user identity, and CoreFoundation user-home values match the host runner
+     *
+     * Failure meaning:
+     * - UI-test fixture bootstrapping can fail before product behavior runs because `xcrun` cannot
+     *   resolve macOS user directories or CoreSimulator preferences from the XCTest process context
+     *
+     * Side effects: None.
+     */
+    func testHostProcessEnvironmentRestoresMacOSUserDirectories() {
+        let environment = [
+            "DEVELOPER_DIR": "/Applications/Xcode_16.4.app/Contents/Developer",
+            "PATH": "",
+            "HOME": "/var/empty",
+            "TMPDIR": "/var/folders/zz/zyxvpxvq6csfxvn_n00001ym0000gn/T/",
+            "CFFIXED_USER_HOME": "/var/folders/zz/zyxvpxvq6csfxvn_n00001ym0000gn/",
+            "UITEST_HOST_HOME": "/Users/runner",
+            "UITEST_HOST_TMPDIR": "/var/folders/ci/T/",
+            "UITEST_HOST_USER": "runner",
+            "UITEST_HOST_LOGNAME": "runner",
+            "UITEST_HOST_CF_USER_TEXT_ENCODING": "501:0:0",
+        ]
+
+        let sanitizedEnvironment = hostProcessEnvironment(
+            from: environment,
+            selectedDeveloperDir: "/Applications/Xcode_26.3.app/Contents/Developer"
+        )
+
+        XCTAssertEqual(
+            sanitizedEnvironment["DEVELOPER_DIR"],
+            "/Applications/Xcode_26.3.app/Contents/Developer"
+        )
+        XCTAssertEqual(
+            sanitizedEnvironment["UITEST_DEVELOPER_DIR"],
+            sanitizedEnvironment["DEVELOPER_DIR"]
+        )
+        XCTAssertEqual(sanitizedEnvironment["HOME"], "/Users/runner")
+        XCTAssertEqual(sanitizedEnvironment["CFFIXED_USER_HOME"], "/Users/runner")
+        XCTAssertEqual(sanitizedEnvironment["TMPDIR"], "/var/folders/ci/T/")
+        XCTAssertEqual(sanitizedEnvironment["USER"], "runner")
+        XCTAssertEqual(sanitizedEnvironment["LOGNAME"], "runner")
+        XCTAssertEqual(sanitizedEnvironment["__CF_USER_TEXT_ENCODING"], "501:0:0")
+        XCTAssertEqual(sanitizedEnvironment["PATH"], "/usr/bin:/bin:/usr/sbin:/sbin")
+    }
+
+    /**
      Protects CI host subprocesses from inheriting a stale Xcode path from the XCTest host.
      *
      * Setup:

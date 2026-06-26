@@ -26,6 +26,7 @@ from run_xcodebuild_with_test_selection import (
     selected_xcode_developer_dir_from_link,
     selected_ui_test_developer_dir,
     selection_requests_ui_tests,
+    ui_test_host_environment_variables,
 )
 
 
@@ -234,6 +235,27 @@ class SelectedUITestDeveloperDirTests(unittest.TestCase):
 
 
 class XctestrunEnvironmentTests(unittest.TestCase):
+    def test_ui_test_host_environment_variables_maps_runner_user_directories(self) -> None:
+        self.assertEqual(
+            ui_test_host_environment_variables(
+                {
+                    "HOME": "/Users/runner",
+                    "TMPDIR": "/var/folders/ci/T/",
+                    "USER": "runner",
+                    "LOGNAME": "runner",
+                    "__CF_USER_TEXT_ENCODING": "501:0:0",
+                    "EMPTY": "",
+                }
+            ),
+            {
+                "UITEST_HOST_HOME": "/Users/runner",
+                "UITEST_HOST_TMPDIR": "/var/folders/ci/T/",
+                "UITEST_HOST_USER": "runner",
+                "UITEST_HOST_LOGNAME": "runner",
+                "UITEST_HOST_CF_USER_TEXT_ENCODING": "501:0:0",
+            },
+        )
+
     def test_selection_requests_ui_tests_for_only_testing_ui_target(self) -> None:
         selection = """
         -only-testing:AndBibleUITests/AndBibleUITests/testAboutScreenOpensFromReaderMenu
@@ -285,6 +307,13 @@ class XctestrunEnvironmentTests(unittest.TestCase):
             patched = patch_xctestrun_ui_test_developer_dir(
                 str(xctestrun_path),
                 "/Applications/Xcode_26.3.app/Contents/Developer",
+                host_environment={
+                    "HOME": "/Users/runner",
+                    "TMPDIR": "/var/folders/ci/T/",
+                    "USER": "runner",
+                    "LOGNAME": "runner",
+                    "__CF_USER_TEXT_ENCODING": "501:0:0",
+                },
             )
 
             self.assertTrue(patched)
@@ -306,6 +335,18 @@ class XctestrunEnvironmentTests(unittest.TestCase):
             self.assertEqual(
                 ui_testing_environment["DEVELOPER_DIR"],
                 "/Applications/Xcode_26.3.app/Contents/Developer",
+            )
+            self.assertEqual(ui_environment["UITEST_HOST_HOME"], "/Users/runner")
+            self.assertEqual(ui_environment["UITEST_HOST_TMPDIR"], "/var/folders/ci/T/")
+            self.assertEqual(ui_environment["UITEST_HOST_USER"], "runner")
+            self.assertEqual(ui_environment["UITEST_HOST_LOGNAME"], "runner")
+            self.assertEqual(
+                ui_environment["UITEST_HOST_CF_USER_TEXT_ENCODING"],
+                "501:0:0",
+            )
+            self.assertEqual(
+                ui_testing_environment["UITEST_HOST_HOME"],
+                "/Users/runner",
             )
             self.assertNotIn(
                 "DEVELOPER_DIR",

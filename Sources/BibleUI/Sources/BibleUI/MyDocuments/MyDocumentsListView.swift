@@ -252,6 +252,8 @@ private struct MyDocumentPagesListView: View {
                             onOpenPage(document.initials, page.pageKey)
                         } label: {
                             MyDocumentPageRow(page: page)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
                         .accessibilityIdentifier(myDocumentPageRowIdentifier(for: page))

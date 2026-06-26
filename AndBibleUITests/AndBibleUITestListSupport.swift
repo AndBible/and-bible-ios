@@ -243,6 +243,10 @@ extension AndBibleUITests {
             if tapElementIfPossible(refreshedDoneButton, timeout: min(1, max(0.1, deadline.timeIntervalSinceNow))) {
                 continue
             }
+            let refreshedDestinationBackButton = app.buttons["readerDestinationBackButton"].firstMatch
+            if tapElementIfPossible(refreshedDestinationBackButton, timeout: min(1, max(0.1, deadline.timeIntervalSinceNow))) {
+                continue
+            }
 
             let backButton = app.navigationBars.buttons.element(boundBy: 0)
             if tapElementIfPossible(backButton, timeout: min(1, max(0.1, deadline.timeIntervalSinceNow))) {
