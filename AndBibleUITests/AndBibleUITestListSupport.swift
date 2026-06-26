@@ -208,6 +208,8 @@ extension AndBibleUITests {
      - Returns: `true` once the reader shell is visible and the bookmark-list sentinels disappear.
      - Side effects:
        - taps the sheet `Done` button when present
+       - taps the reader-destination back affordance when the bookmark list is hosted as an
+         Android-parity app route
        - taps the navigation-stack back button for drawer-owned destination hosting
        - falls back to a top-edge drag for the older sheet route
      - Failure modes:
@@ -228,6 +230,11 @@ extension AndBibleUITests {
             let remaining = max(0.1, deadline.timeIntervalSinceNow)
             let doneButton = app.buttons["bookmarkListDoneButton"].firstMatch
             if tapElementIfPossible(doneButton, timeout: min(1, remaining)) {
+                continue
+            }
+
+            let destinationBackButton = app.buttons["readerDestinationBackButton"].firstMatch
+            if tapElementIfPossible(destinationBackButton, timeout: min(1, max(0.1, deadline.timeIntervalSinceNow))) {
                 continue
             }
 

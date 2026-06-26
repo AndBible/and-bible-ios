@@ -1195,8 +1195,8 @@ public struct BibleReaderView: View {
                     activeReaderDestination = nil
                 },
                 onOpenStudyPad: { labelId in
-                    activeReaderDestination = nil
                     panePresentationController?.loadStudyPadDocument(labelId: labelId)
+                    activeReaderDestination = nil
                 },
                 bibleOrdinalResolver: { book, ordinal in
                     panePresentationController?.bookmarkListVerseReference(book: book, ordinal: ordinal)
@@ -1205,6 +1205,10 @@ public struct BibleReaderView: View {
             )
             #if os(iOS)
             .toolbar(.visible, for: .navigationBar)
+            .navigationBarBackButtonHidden(true)
+            .toolbar {
+                readerDestinationBackToolbarItem
+            }
             #endif
             .overlay(alignment: .topLeading) {
                 readerRenderedContentStateExport
@@ -1212,25 +1216,34 @@ public struct BibleReaderView: View {
         case .studyPads:
             LabelManagerView(
                 onOpenStudyPad: { labelId in
-                    activeReaderDestination = nil
                     panePresentationController?.loadStudyPadDocument(labelId: labelId)
+                    activeReaderDestination = nil
                 },
                 navigationTitle: String(localized: "studypads"),
                 opensStudyPadOnRowTap: true
             )
             #if os(iOS)
             .toolbar(.visible, for: .navigationBar)
+            .navigationBarBackButtonHidden(true)
+            .toolbar {
+                readerDestinationBackToolbarItem
+            }
             #endif
             .overlay(alignment: .topLeading) {
                 readerRenderedContentStateExport
             }
         case .myDocuments:
             MyDocumentsListView { bookInitials, pageKey in
-                activeReaderDestination = nil
-                _ = panePresentationController?.loadMyDocumentPage(bookInitials: bookInitials, pageKey: pageKey)
+                if panePresentationController?.loadMyDocumentPage(bookInitials: bookInitials, pageKey: pageKey) == true {
+                    activeReaderDestination = nil
+                }
             }
             #if os(iOS)
             .toolbar(.visible, for: .navigationBar)
+            .navigationBarBackButtonHidden(true)
+            .toolbar {
+                readerDestinationBackToolbarItem
+            }
             #endif
             .overlay(alignment: .topLeading) {
                 readerRenderedContentStateExport
@@ -1239,6 +1252,10 @@ public struct BibleReaderView: View {
             ReadingPlanListView()
             #if os(iOS)
             .toolbar(.visible, for: .navigationBar)
+            .navigationBarBackButtonHidden(true)
+            .toolbar {
+                readerDestinationBackToolbarItem
+            }
             #endif
             .overlay(alignment: .topLeading) {
                 readerRenderedContentStateExport
@@ -1335,6 +1352,32 @@ public struct BibleReaderView: View {
             .overlay(alignment: .topLeading) {
                 readerRenderedContentStateExport
             }
+        }
+    }
+
+    /**
+     Builds the app-owned reader-destination back action used by Android-parity drawer screens.
+
+     Android launches Bookmarks, StudyPads, My Documents, and Reading Plans as app routes with
+     app-bar back navigation rather than sheet Done chrome. This toolbar item gives those iOS
+     destinations the same explicit escape hatch while keeping the route on the reader navigation
+     stack.
+
+     - Outputs: A navigation-leading toolbar item with a stable UI-test identifier.
+     - Side effects: Tapping the button clears `activeReaderDestination` and returns to the reader.
+     - Failure modes: No throwing failure path; the button is inert only if SwiftUI does not render
+       the hosting navigation toolbar.
+     */
+    @ToolbarContentBuilder
+    private var readerDestinationBackToolbarItem: some ToolbarContent {
+        ToolbarItem(placement: .navigationBarLeading) {
+            Button {
+                activeReaderDestination = nil
+            } label: {
+                Image(systemName: "arrow.left")
+            }
+            .accessibilityLabel(String(localized: "back", defaultValue: "Back"))
+            .accessibilityIdentifier("readerDestinationBackButton")
         }
     }
 
