@@ -1999,6 +1999,46 @@ extension AndBibleTests {
     }
 
     /**
+     Verifies file-backed deflate extraction continues when an input chunk exactly fills the
+     inflater output buffer.
+
+     Setup:
+     - builds a valid Android-style ZIP entry with data-descriptor sizes
+     - crafts the raw deflate payload so zlib consumes one 64 KiB input chunk while producing
+       exactly one 64 KiB output chunk before the stream's final block arrives
+     - extracts through `ZipArchiveReader.data(for:inArchiveAt:)`, matching file-backed restore
+
+     Expected result:
+     - extraction reads the next input chunk instead of calling zlib again with zero input
+     - the restored payload matches the declared uncompressed bytes
+
+     Failure meaning:
+     - iOS rejects valid large Android ZIP entries with `decompressionFailed` when a stream boundary
+       lands on the file-backed inflater's chunk size.
+     */
+    func testZipArchiveReaderStreamsDeflatedEntryAcrossFullOutputChunkBoundary() throws {
+        let payload = Data(repeating: 0x41, count: 65_536)
+        let archiveData = try makeDeflatedDescriptorZip(
+            name: "db/bookmarks.sqlite3",
+            compressedData: makeBoundaryFillingRawDeflateData(),
+            uncompressedData: payload
+        )
+        let archiveURL = try writeTemporaryAndroidBackupArchive(
+            archiveData,
+            suffix: AndroidDatabaseBackupService.databaseBackupSuffix
+        )
+        let entry = try XCTUnwrap(ZipArchiveReader.fileEntries(inArchiveAt: archiveURL).first)
+
+        let restoredData = try ZipArchiveReader.data(
+            for: entry,
+            inArchiveAt: archiveURL,
+            maximumByteCount: payload.count
+        )
+
+        XCTAssertEqual(restoredData, payload)
+    }
+
+    /**
      Verifies that newer Android database versions are visible but cannot be applied.
 
      Setup:
@@ -3068,6 +3108,143 @@ extension AndBibleTests {
     }
 
     /**
+     Builds a raw-deflate stream that exposes the file-backed inflater's full-output-buffer
+     boundary condition.
+
+     The stream emits empty non-final blocks before a fixed-Huffman payload block so the first
+     extraction read consumes 64 KiB of compressed input and produces exactly 64 KiB of output.
+     A final empty stored block follows in the next input chunk, making the stream valid while
+     forcing the extractor to return to the outer read loop before invoking zlib again.
+
+     - Returns: Valid raw deflate bytes that inflate to 65,536 ASCII `A` bytes.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    private func makeBoundaryFillingRawDeflateData() -> Data {
+        var writer = DeflateBitWriter()
+        for _ in 0..<13_023 {
+            appendEmptyStoredDeflateBlock(final: false, to: &writer)
+        }
+        appendEmptyFixedHuffmanDeflateBlock(final: false, to: &writer)
+        appendEmptyFixedHuffmanDeflateBlock(final: false, to: &writer)
+        appendBoundaryPayloadFixedHuffmanBlock(final: false, to: &writer)
+        appendEmptyStoredDeflateBlock(final: true, to: &writer)
+        return writer.data()
+    }
+
+    /**
+     Appends an empty stored deflate block to a bit-level fixture writer.
+
+     - Parameters:
+       - final: Whether to mark this as the stream's final block.
+       - writer: Mutable deflate bit writer.
+     - Side effects: Appends block header, alignment padding, and zero-length block metadata.
+     - Failure modes: none.
+     */
+    private func appendEmptyStoredDeflateBlock(final: Bool, to writer: inout DeflateBitWriter) {
+        writer.appendBit(final ? 1 : 0)
+        writer.appendBit(0)
+        writer.appendBit(0)
+        writer.alignToByte()
+        writer.appendBits(0, count: 16)
+        writer.appendBits(0xffff, count: 16)
+    }
+
+    /**
+     Appends an empty fixed-Huffman deflate block to a bit-level fixture writer.
+
+     - Parameters:
+       - final: Whether to mark this as the stream's final block.
+       - writer: Mutable deflate bit writer.
+     - Side effects: Appends a fixed-Huffman block header and end-of-block symbol.
+     - Failure modes: none.
+     */
+    private func appendEmptyFixedHuffmanDeflateBlock(final: Bool, to writer: inout DeflateBitWriter) {
+        writer.appendBit(final ? 1 : 0)
+        writer.appendBit(1)
+        writer.appendBit(0)
+        appendFixedHuffmanSymbol(256, to: &writer)
+    }
+
+    /**
+     Appends a fixed-Huffman deflate block that expands to exactly 65,536 `A` bytes.
+
+     - Parameters:
+       - final: Whether to mark this as the stream's final block.
+       - writer: Mutable deflate bit writer.
+     - Side effects: Appends one literal, repeat-distance pairs, and an end-of-block symbol.
+     - Failure modes: none.
+     */
+    private func appendBoundaryPayloadFixedHuffmanBlock(final: Bool, to writer: inout DeflateBitWriter) {
+        writer.appendBit(final ? 1 : 0)
+        writer.appendBit(1)
+        writer.appendBit(0)
+        appendFixedHuffmanSymbol(65, to: &writer)
+        for _ in 0..<254 {
+            appendFixedHuffmanSymbol(285, to: &writer)
+            writer.appendBits(0, count: 5)
+        }
+        appendFixedHuffmanSymbol(257, to: &writer)
+        writer.appendBits(0, count: 5)
+        appendFixedHuffmanSymbol(256, to: &writer)
+    }
+
+    /**
+     Appends one fixed-Huffman deflate symbol using least-significant-bit wire order.
+
+     - Parameters:
+       - symbol: Deflate literal/length/end symbol in the fixed-Huffman alphabet.
+       - writer: Mutable deflate bit writer.
+     - Side effects: Appends the symbol code bits.
+     - Failure modes: none.
+     */
+    private func appendFixedHuffmanSymbol(_ symbol: Int, to writer: inout DeflateBitWriter) {
+        let code = fixedHuffmanCode(for: symbol)
+        writer.appendBits(code.value, count: code.bitCount)
+    }
+
+    /**
+     Returns the fixed-Huffman code for one deflate symbol.
+
+     - Parameter symbol: Deflate literal/length/end symbol.
+     - Returns: Bit-reversed wire value and bit count.
+     - Side effects: none.
+     - Failure modes: Callers must pass a fixed-Huffman symbol in `0...287`.
+     */
+    private func fixedHuffmanCode(for symbol: Int) -> (value: Int, bitCount: Int) {
+        if symbol <= 143 {
+            return (reversedBits(0x30 + symbol, count: 8), 8)
+        }
+        if symbol <= 255 {
+            return (reversedBits(0x190 + symbol - 144, count: 9), 9)
+        }
+        if symbol <= 279 {
+            return (reversedBits(symbol - 256, count: 7), 7)
+        }
+        return (reversedBits(0xc0 + symbol - 280, count: 8), 8)
+    }
+
+    /**
+     Reverses the low-order bits of a deflate Huffman code for wire emission.
+
+     - Parameters:
+       - value: Canonical Huffman code value.
+       - count: Number of bits to reverse.
+     - Returns: Bit-reversed value.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    private func reversedBits(_ value: Int, count: Int) -> Int {
+        var source = value
+        var result = 0
+        for _ in 0..<count {
+            result = (result << 1) | (source & 1)
+            source >>= 1
+        }
+        return result
+    }
+
+    /**
      Writes an Android backup ZIP fixture to a temporary file.
 
      - Parameters:
@@ -3167,6 +3344,81 @@ extension AndBibleTests {
         appendUInt16(0, to: &endRecord)
         try handle.write(contentsOf: endRecord)
         return url
+    }
+
+    /**
+     Writes low-level deflate fixture bits in least-significant-bit order.
+
+     The helper is intentionally scoped to ZIP/deflate regression tests so crafted fixtures can
+     describe zlib boundary conditions without checking opaque binary blobs into the repository.
+     */
+    private struct DeflateBitWriter {
+        /// Completed bytes ready to publish.
+        private var bytes: [UInt8] = []
+
+        /// Partially-filled byte being assembled least-significant bit first.
+        private var currentByte: UInt8 = 0
+
+        /// Number of bits already written into `currentByte`.
+        private var bitCount = 0
+
+        /**
+         Appends one bit to the fixture stream.
+
+         - Parameter bit: Low bit to append; other bits are ignored.
+         - Side effects: Mutates the pending byte and flushes it when it becomes full.
+         - Failure modes: none.
+         */
+        mutating func appendBit(_ bit: Int) {
+            if bit & 1 == 1 {
+                currentByte |= UInt8(1 << bitCount)
+            }
+            bitCount += 1
+            if bitCount == 8 {
+                bytes.append(currentByte)
+                currentByte = 0
+                bitCount = 0
+            }
+        }
+
+        /**
+         Appends the low-order bits of one integer to the fixture stream.
+
+         - Parameters:
+           - value: Source integer.
+           - count: Number of least-significant bits to append.
+         - Side effects: Mutates the fixture stream.
+         - Failure modes: none.
+         */
+        mutating func appendBits(_ value: Int, count: Int) {
+            for index in 0..<count {
+                appendBit((value >> index) & 1)
+            }
+        }
+
+        /**
+         Pads the fixture stream to the next byte boundary.
+
+         - Side effects: Appends zero bits until the pending byte is flushed.
+         - Failure modes: none.
+         */
+        mutating func alignToByte() {
+            while bitCount != 0 {
+                appendBit(0)
+            }
+        }
+
+        /**
+         Finalizes the fixture stream as bytes.
+
+         - Returns: Deflate fixture bytes.
+         - Side effects: Pads the pending byte with zeros before returning.
+         - Failure modes: none.
+         */
+        mutating func data() -> Data {
+            alignToByte()
+            return Data(bytes)
+        }
     }
 
     /**

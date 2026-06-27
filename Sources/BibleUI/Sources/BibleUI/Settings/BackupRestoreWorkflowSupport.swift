@@ -422,3 +422,42 @@ extension AndroidBackupResetCategory {
         "backupWorkflowReset.\(rawValue)Button"
     }
 }
+
+/**
+ Android module backup presentation strings shared by Settings and external file-open imports.
+
+ Android restores `.abmd.zip` archives through `InstallZip`, which reports successful document
+ installs with the generic `install_zip_successfull` toast instead of enumerating every module in
+ the backup. iOS keeps restore reports for diagnostics and tests, but user-facing completion copy
+ comes from this helper so both restore entry points stay aligned with Android.
+ */
+enum AndroidModuleBackupPresentation {
+    /**
+     Generic Android InstallZip success text for module backup restores.
+
+     - Returns: Localized success message equivalent to Android's `install_zip_successfull`.
+     - Side effects: Reads localization resources through Swift's localized string lookup.
+     - Failure modes: Missing localization falls back to Android's English string.
+     */
+    static var localizedInstallSuccessMessage: String {
+        String(
+            localized: "install_zip_successfull",
+            defaultValue: "Module was installed successfully"
+        )
+    }
+
+    /**
+     Converts a completed Android module-backup restore report into Android's success copy.
+
+     - Parameter report: Restore report retained by callers for diagnostics and future telemetry.
+     - Returns: Generic Android InstallZip success text, intentionally independent of module names,
+       entry counts, and skipped Android-only payloads because Android's success toast does not
+       expose those details.
+     - Side effects: Reads localization resources through Swift's localized string lookup.
+     - Failure modes: Missing localization falls back to Android's English string.
+     */
+    static func localizedRestoreSuccessMessage(for report: AndroidModuleBackupRestoreReport) -> String {
+        _ = report
+        return localizedInstallSuccessMessage
+    }
+}

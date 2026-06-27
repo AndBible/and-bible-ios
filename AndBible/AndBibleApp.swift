@@ -156,6 +156,10 @@ struct AndBibleApp: App {
     @State private var isImportingExternalDocument = false
     /// Pending app-level feedback for a document opened from Files, Mail, or another app.
     @State private var externalDocumentImportMessage: String?
+    /// Pending Android-style transient install-success toast for a confirmed external document.
+    @State private var externalDocumentImportToastMessage: String?
+    /// Scheduled dismissal for the current external document install-success toast.
+    @State private var externalDocumentImportToastWorkItem: DispatchWorkItem?
     private let remoteSyncNetworkMonitor: RemoteSyncNetworkMonitor
     #if os(iOS)
     private let remoteSyncBackgroundRefreshCoordinator: RemoteSyncBackgroundRefreshCoordinator
@@ -400,6 +404,7 @@ struct AndBibleApp: App {
             .onOpenURL { url in
                 handleExternalDocumentURL(url)
             }
+            .androidToastFeedback(externalDocumentImportToastMessage, bottomPadding: 96)
             .alert(
                 String(localized: "cloud_sync_title"),
                 isPresented: Binding(
@@ -550,6 +555,7 @@ struct AndBibleApp: App {
         let request = ExternalDocumentImportRequest(url: url)
         if pendingExternalDocumentImport == nil,
            externalDocumentImportMessage == nil,
+           externalDocumentImportToastMessage == nil,
            !isImportingExternalDocument {
             pendingExternalDocumentImport = request
         } else {
@@ -564,7 +570,8 @@ struct AndBibleApp: App {
      - Side effects:
        - marks the app-level import as active
        - runs the shared import service off the main actor
-       - publishes localized result feedback to SwiftUI alert state
+       - publishes Android install successes as transient toast feedback
+       - publishes unsupported-format and failure feedback to SwiftUI alert state
      - Failure modes: Service-level failures are surfaced as result feedback instead of thrown.
      */
     @MainActor
@@ -576,12 +583,46 @@ struct AndBibleApp: App {
                 ExternalDocumentImportService().importDocument(request)
             }.value
             isImportingExternalDocument = false
-            externalDocumentImportMessage = result.feedbackMessage
+            if result.usesAndroidInstallToastFeedback {
+                showExternalDocumentImportToast(result.feedbackMessage)
+            } else {
+                externalDocumentImportMessage = result.feedbackMessage
+            }
         }
     }
 
     /**
-     Presents the next queued external import when no prompt, task, or result alert is active.
+     Presents Android-style install-success feedback for app-opened documents.
+
+     Android `InstallZip` reports successful document installs with a short `ToastEvent`, not a
+     blocking dialog. This helper owns the app-level dismissal timing and resumes queued external
+     import prompts only after the toast clears so prompts do not stack over transient feedback.
+
+     - Parameter message: Localized toast text to display.
+     - Side effects:
+       - cancels any pending external-import toast dismissal
+       - mutates app-level toast state
+       - schedules automatic dismissal and queued-import advancement
+     - Failure modes: none; newer toast requests replace earlier requests.
+     */
+    @MainActor
+    private func showExternalDocumentImportToast(_ message: String) {
+        externalDocumentImportToastWorkItem?.cancel()
+        withAnimation { externalDocumentImportToastMessage = message }
+        let work = DispatchWorkItem {
+            withAnimation { externalDocumentImportToastMessage = nil }
+            externalDocumentImportToastWorkItem = nil
+            showNextPendingExternalDocumentImportIfNeeded()
+        }
+        externalDocumentImportToastWorkItem = work
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + AndroidToastFeedback.shortDuration,
+            execute: work
+        )
+    }
+
+    /**
+     Presents the next queued external import when no prompt, task, result alert, or toast is active.
 
      - Side effects: Mutates the external import queue and pending prompt state.
      - Failure modes: none.
@@ -590,6 +631,7 @@ struct AndBibleApp: App {
     private func showNextPendingExternalDocumentImportIfNeeded() {
         guard pendingExternalDocumentImport == nil,
               externalDocumentImportMessage == nil,
+              externalDocumentImportToastMessage == nil,
               !isImportingExternalDocument,
               !queuedExternalDocumentImports.isEmpty else {
             return

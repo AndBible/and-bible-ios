@@ -68,6 +68,12 @@ public struct ImportExportView: View {
     /// Pending user-visible success, failure, or guidance message for the feedback alert.
     @State private var statusMessage: String?
 
+    /// Pending Android-style transient install-success toast for document/module restores.
+    @State private var transientStatusMessage: String?
+
+    /// Scheduled dismissal for the current Android-style transient status toast.
+    @State private var transientStatusWorkItem: DispatchWorkItem?
+
     /// Controls presentation of the Android-style operation feedback alert.
     @State private var showStatusAlert = false
 
@@ -463,6 +469,7 @@ public struct ImportExportView: View {
         } message: {
             Text(androidModuleBackupOverwriteMessage())
         }
+        .androidToastFeedback(transientStatusMessage, bottomPadding: 48)
         .onChange(of: statusMessage) { _, newValue in
             showStatusAlert = newValue != nil
         }
@@ -1082,7 +1089,8 @@ public struct ImportExportView: View {
 
      - Parameter url: Security-scoped URL for a user-selected ZIP, EPUB, or TTF file.
      - Side effects: Mutates install progress state on the main actor, imports module, EPUB, or TTF
-       files into local app storage from a detached task, and presents feedback.
+       files into local app storage from a detached task, presents Android install successes as
+       transient toast feedback, and presents unsupported/error feedback as an alert.
      - Failure modes: Unsupported formats and installer errors are surfaced as feedback.
      */
     private func installSupportedDocument(from url: URL) {
@@ -1096,7 +1104,11 @@ public struct ImportExportView: View {
             let result = await Task.detached(priority: .userInitiated) {
                 ExternalDocumentImportService().importDocument(at: url)
             }.value
-            statusMessage = result.feedbackMessage
+            if result.usesAndroidInstallToastFeedback {
+                showTransientStatusMessage(result.feedbackMessage)
+            } else {
+                statusMessage = result.feedbackMessage
+            }
         }
     }
 
@@ -1210,7 +1222,7 @@ public struct ImportExportView: View {
      - copies the selected security-scoped file to a temporary archive
      - may write supported module files when no overwrite confirmation is required
      - may retain the temporary archive URL and existing paths for a later confirmation action
-     - presents feedback with restore success or failure details
+     - presents Android install success through a transient toast
      - Failure modes: Catches service errors and surfaces them to the settings screen.
      */
     private func prepareAndroidModuleBackupRestore(from url: URL) {
@@ -1251,7 +1263,7 @@ public struct ImportExportView: View {
                         allowOverwritingExistingFiles: true
                     )
                 }.value
-                statusMessage = androidModuleBackupRestoreStatusMessage(for: report)
+                showTransientStatusMessage(androidModuleBackupRestoreStatusMessage(for: report))
                 isRestoringAndroidModuleBackup = false
                 try? FileManager.default.removeItem(at: prepared.0)
                 temporaryArchiveURL = nil
@@ -1271,7 +1283,8 @@ public struct ImportExportView: View {
      Side effects:
      - writes supported SWORD module files into the local module directory
      - clears pending confirmation state
-     - presents feedback with success or failure details after the overwrite alert closes
+     - presents Android install success through a transient toast after the overwrite alert closes
+     - surfaces service errors through the feedback alert
      */
     private func restorePendingAndroidModuleBackup() {
         guard let archiveURL = pendingAndroidModuleBackupURL else {
@@ -1285,7 +1298,6 @@ public struct ImportExportView: View {
 
         Task { @MainActor in
             await Task.yield()
-            let feedbackMessage: String
             do {
                 let report = try await Task.detached(priority: .userInitiated) {
                     try AndroidModuleBackupService().restoreArchive(
@@ -1293,14 +1305,41 @@ public struct ImportExportView: View {
                         allowOverwritingExistingFiles: true
                     )
                 }.value
-                feedbackMessage = androidModuleBackupRestoreStatusMessage(for: report)
+                showTransientStatusMessage(androidModuleBackupRestoreStatusMessage(for: report))
             } catch {
-                feedbackMessage = localizedErrorMessage(error)
+                statusMessage = localizedErrorMessage(error)
             }
             try? FileManager.default.removeItem(at: archiveURL)
             isRestoringAndroidModuleBackup = false
-            statusMessage = feedbackMessage
         }
+    }
+
+    /**
+     Shows Android-style transient success feedback on the Backup & Restore screen.
+
+     Android document/module installs report successful completion with a short toast. Settings
+     retains alerts for failures and destructive confirmations, but success copy should not block
+     the screen or require an OK tap.
+
+     - Parameter message: Localized toast text to display.
+     - Side effects:
+       - cancels any pending toast dismissal
+       - mutates transient feedback state
+       - schedules automatic toast dismissal
+     - Failure modes: none; newer messages replace earlier transient feedback.
+     */
+    private func showTransientStatusMessage(_ message: String) {
+        transientStatusWorkItem?.cancel()
+        withAnimation { transientStatusMessage = message }
+        let work = DispatchWorkItem {
+            withAnimation { transientStatusMessage = nil }
+            transientStatusWorkItem = nil
+        }
+        transientStatusWorkItem = work
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + AndroidToastFeedback.shortDuration,
+            execute: work
+        )
     }
 
     /**
@@ -1356,25 +1395,14 @@ public struct ImportExportView: View {
      Builds the user-visible completion summary for Android module backup restore.
 
      - Parameter report: Restore report from `AndroidModuleBackupService`.
-     - Returns: Concise status message listing installed modules and skipped unsupported content.
+     - Returns: Android's generic module-install success message. The report remains an input so the
+       restore caller keeps the service contract explicit even though Android does not enumerate
+       restored module names in the success surface.
      - Side effects: none.
-     - Failure modes: Empty module names produce a generic success message, though the service
-       normally rejects archives without supported SWORD modules.
+     - Failure modes: Missing localization falls back to Android's English success string.
      */
     private func androidModuleBackupRestoreStatusMessage(for report: AndroidModuleBackupRestoreReport) -> String {
-        let modules = report.installedModuleNames.isEmpty
-            ? String(localized: "android_module_backup_modules_unknown", defaultValue: "modules")
-            : report.installedModuleNames.joined(separator: ", ")
-        if report.skippedUnsupportedEntryPaths.isEmpty {
-            return String(
-                localized: "android_module_backup_restored_summary",
-                defaultValue: "Restored Android module backup: \(modules)"
-            )
-        }
-        return String(
-            localized: "android_module_backup_restored_with_skips_summary",
-            defaultValue: "Restored Android module backup: \(modules). Skipped \(report.skippedUnsupportedEntryPaths.count) Android-only files."
-        )
+        AndroidModuleBackupPresentation.localizedRestoreSuccessMessage(for: report)
     }
 
     /**
