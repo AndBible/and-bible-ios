@@ -270,6 +270,70 @@ extension AndBibleTests {
         XCTAssertEqual(store.memorizedOrdinals(bookInitials: "KJV", startOrdinal: 1, endOrdinal: 3), [1])
     }
 
+    /**
+     Verifies the reader's Memorize bridge action emits Android's fake-document payload.
+
+     Android opens memorization practice as a reader document after adding the selected ordinal
+     range as a target. The iOS bridge must preserve that user-visible contract when document
+     assembly is moved out of `BibleReaderController`: the emitted document remains `type=memorize`,
+     includes selected verse text, carries target ordinals, and sends a normal `setup_content`
+     payload.
+
+     Setup:
+     - loads the bundled KJV module so ordinals resolve through SWORD/JSword-compatible metadata
+     - records bridge emissions instead of requiring a live WebView
+
+     Failure meaning:
+     - the refactor broke Android parity by mutating progress state without opening the expected
+       Memorize reader document, or by emitting a malformed document/setup payload.
+     */
+    @MainActor
+    func testReaderMemorizeBridgeEmitsAndroidStyleDocumentPayload() throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let modulePath = try makeTemporaryBundledSwordPath()
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        controller.settingsStore = try makeInMemorySettingsStore()
+        let module = try XCTUnwrap(manager.module(named: controller.activeModuleName))
+        let startOrdinal = try XCTUnwrap(module.verseOrdinal(osisBookId: "Gen", chapter: 1, verse: 1))
+        let endOrdinal = try XCTUnwrap(module.verseOrdinal(osisBookId: "Gen", chapter: 1, verse: 2))
+
+        controller.bridgeDidSetClientReady(bridge)
+        let initialScriptCount = recordedScripts().count
+
+        controller.bridge(
+            bridge,
+            memorize: "KJV",
+            startOrdinal: startOrdinal,
+            endOrdinal: endOrdinal
+        )
+
+        let memorizeScripts = Array(recordedScripts().dropFirst(initialScriptCount))
+        let document = try XCTUnwrap(
+            bridgeEmissionPayload(from: memorizeScripts, event: "add_documents") as? [String: Any]
+        )
+        XCTAssertEqual(document["type"] as? String, "memorize")
+        XCTAssertEqual(document["bookInitials"] as? String, "KJV")
+        XCTAssertEqual(document["title"] as? String, "Genesis 1:1-2")
+        XCTAssertEqual(document["osisRef"] as? String, "Gen.1.1-Gen.1.2")
+        XCTAssertEqual(document["startOrdinal"] as? Int, startOrdinal)
+        XCTAssertEqual(document["endOrdinal"] as? Int, endOrdinal)
+        XCTAssertEqual(document["targetOrdinals"] as? [Int], [startOrdinal, endOrdinal])
+
+        let texts = try XCTUnwrap(document["texts"] as? [[String: String]])
+        XCTAssertEqual(texts.map { $0["key"] }, ["Gen.1.1", "Gen.1.2"])
+        XCTAssertTrue(texts.first?["text"]?.contains("In the beginning") == true)
+
+        let setupPayload = try XCTUnwrap(
+            bridgeEmissionPayload(from: memorizeScripts, event: "setup_content") as? [String: Any]
+        )
+        XCTAssertTrue(setupPayload["jumpToOrdinal"] is NSNull)
+        XCTAssertTrue(setupPayload["jumpToAnchor"] is NSNull)
+        XCTAssertTrue(setupPayload["jumpToId"] is NSNull)
+        XCTAssertEqual(setupPayload["topOffset"] as? Int, 0)
+        XCTAssertEqual(setupPayload["bottomOffset"] as? Int, 0)
+    }
+
     func testReadingProgressStorePersistsChapterHistoryAndClearsActiveCycle() throws {
         let settingsStore = try makeInMemorySettingsStore()
         let store = ReadingProgressStore(settingsStore: settingsStore)
