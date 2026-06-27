@@ -18,6 +18,9 @@ struct BibleReaderSpecialDocumentPageIdentityUpdate {
     /// Whether the controller should clear its concrete general-book module reference.
     let clearsActiveGeneralBookModule: Bool
 
+    /// Whether the controller should assign `activeGeneralBookModuleName`, including `nil`.
+    let assignsActiveGeneralBookModuleName: Bool
+
     /// General-book document initials to expose when the transition targets Android `Multi`.
     let activeGeneralBookModuleName: String?
 
@@ -117,6 +120,7 @@ struct BibleReaderSpecialDocumentCoordinator {
             return BibleReaderSpecialDocumentPageIdentityUpdate(
                 currentCategory: .bible,
                 clearsActiveGeneralBookModule: false,
+                assignsActiveGeneralBookModuleName: false,
                 activeGeneralBookModuleName: nil,
                 currentGeneralBookKey: nil,
                 pageManagerCategoryName: nil,
@@ -132,6 +136,7 @@ struct BibleReaderSpecialDocumentCoordinator {
                 return BibleReaderSpecialDocumentPageIdentityUpdate(
                     currentCategory: pageCategory,
                     clearsActiveGeneralBookModule: true,
+                    assignsActiveGeneralBookModuleName: true,
                     activeGeneralBookModuleName: request.pageDocumentInitials,
                     currentGeneralBookKey: nil,
                     pageManagerCategoryName: nil,
@@ -143,6 +148,7 @@ struct BibleReaderSpecialDocumentCoordinator {
             return BibleReaderSpecialDocumentPageIdentityUpdate(
                 currentCategory: pageCategory,
                 clearsActiveGeneralBookModule: true,
+                assignsActiveGeneralBookModuleName: true,
                 activeGeneralBookModuleName: pageDocumentInitials,
                 currentGeneralBookKey: pageKey,
                 pageManagerCategoryName: pageCategory.pageManagerKey,
@@ -155,6 +161,7 @@ struct BibleReaderSpecialDocumentCoordinator {
         return BibleReaderSpecialDocumentPageIdentityUpdate(
             currentCategory: pageCategory,
             clearsActiveGeneralBookModule: false,
+            assignsActiveGeneralBookModuleName: false,
             activeGeneralBookModuleName: nil,
             currentGeneralBookKey: nil,
             pageManagerCategoryName: pageCategory.pageManagerKey,

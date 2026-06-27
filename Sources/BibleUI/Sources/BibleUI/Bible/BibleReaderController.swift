@@ -1301,8 +1301,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         if update.clearsActiveGeneralBookModule {
             activeGeneralBookModule = nil
         }
-        if let activeGeneralBookModuleName = update.activeGeneralBookModuleName {
-            self.activeGeneralBookModuleName = activeGeneralBookModuleName
+        if update.assignsActiveGeneralBookModuleName {
+            activeGeneralBookModuleName = update.activeGeneralBookModuleName
         }
         if let currentGeneralBookKey = update.currentGeneralBookKey {
             self.currentGeneralBookKey = currentGeneralBookKey

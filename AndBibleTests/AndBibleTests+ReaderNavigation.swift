@@ -2341,10 +2341,21 @@ extension AndBibleTests {
             pageDocumentInitials: "Multi",
             pageKey: nil
         )
+        let missingInitialsRequest = BibleReaderTransientDocumentRequest(
+            documentJSON: #"{"id":"missing-initials"}"#,
+            renderedBook: "Multi",
+            renderedKey: "multi",
+            renderedCategory: .generalBook,
+            renderedModuleName: "Multi",
+            pageCategory: .generalBook,
+            pageDocumentInitials: nil,
+            pageKey: "KJV:Gen.1.1"
+        )
 
         let validUpdate = coordinator.pageIdentityUpdate(for: validRequest)
         XCTAssertEqual(validUpdate.currentCategory, .generalBook)
         XCTAssertTrue(validUpdate.clearsActiveGeneralBookModule)
+        XCTAssertTrue(validUpdate.assignsActiveGeneralBookModuleName)
         XCTAssertEqual(validUpdate.activeGeneralBookModuleName, "Multi")
         XCTAssertEqual(validUpdate.currentGeneralBookKey, "KJV:Gen.1.1")
         XCTAssertEqual(validUpdate.pageManagerCategoryName, DocumentCategory.generalBook.pageManagerKey)
@@ -2355,9 +2366,18 @@ extension AndBibleTests {
         let malformedUpdate = coordinator.pageIdentityUpdate(for: malformedRequest)
         XCTAssertEqual(malformedUpdate.currentCategory, .generalBook)
         XCTAssertTrue(malformedUpdate.clearsActiveGeneralBookModule)
+        XCTAssertTrue(malformedUpdate.assignsActiveGeneralBookModuleName)
         XCTAssertEqual(malformedUpdate.activeGeneralBookModuleName, "Multi")
         XCTAssertNil(malformedUpdate.currentGeneralBookKey)
         XCTAssertFalse(malformedUpdate.persistsPageManagerState)
+
+        let missingInitialsUpdate = coordinator.pageIdentityUpdate(for: missingInitialsRequest)
+        XCTAssertEqual(missingInitialsUpdate.currentCategory, .generalBook)
+        XCTAssertTrue(missingInitialsUpdate.clearsActiveGeneralBookModule)
+        XCTAssertTrue(missingInitialsUpdate.assignsActiveGeneralBookModuleName)
+        XCTAssertNil(missingInitialsUpdate.activeGeneralBookModuleName)
+        XCTAssertNil(missingInitialsUpdate.currentGeneralBookKey)
+        XCTAssertFalse(missingInitialsUpdate.persistsPageManagerState)
     }
 
     /**
