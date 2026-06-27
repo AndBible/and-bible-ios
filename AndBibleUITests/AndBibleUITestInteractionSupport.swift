@@ -1056,6 +1056,14 @@ extension AndBibleUITests {
                     actionsControl,
                     timeout: min(1, max(0.1, deadline.timeIntervalSinceNow))
                 )
+                if waitForVisibleMyNotesEditorActivationAfterOpeningActions(
+                    editorLabel: editorLabel,
+                    marker: marker,
+                    in: app,
+                    deadline: deadline
+                ) {
+                    return
+                }
             }
 
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
@@ -1070,6 +1078,55 @@ extension AndBibleUITests {
             file: file,
             line: line
         )
+    }
+
+    /**
+     Selects the visible My Notes edit action after the row action menu has been opened.
+
+     - Parameters:
+       - editorLabel: Accessibility label for the row's edit action.
+       - marker: Persisted note text that proves the gated UI-test mutation has completed.
+       - app: Running application under test.
+       - deadline: Absolute retry deadline shared with the parent workflow.
+     - Returns: `true` when the editor opens or the UI-test mutation has already persisted.
+     - Side effects:
+       - taps the production edit command exposed by the expanded My Notes row action menu
+     - Failure modes:
+       - returns `false` when the edit command never becomes actionable before the deadline
+     */
+    private func waitForVisibleMyNotesEditorActivationAfterOpeningActions(
+        editorLabel: String,
+        marker: String,
+        in app: XCUIApplication,
+        deadline: Date
+    ) -> Bool {
+        repeat {
+            let state = readerRenderedContentStateValue(in: app)
+            if state?.contains("myNotesVisible=true") == true,
+               state?.contains("myNotesEditing=true") == true || state?.contains(marker) == true {
+                return true
+            }
+
+            guard let editorControl = optionalMyNotesWebControl(
+                named: editorLabel,
+                in: app,
+                timeout: min(0.5, max(0.1, deadline.timeIntervalSinceNow))
+            ) else {
+                RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+                continue
+            }
+
+            if tapElementIfPossible(editorControl, timeout: min(1, max(0.1, deadline.timeIntervalSinceNow))) {
+                let wait = min(2, max(0.1, deadline.timeIntervalSinceNow))
+                if waitForReaderRenderedContentStateIfPresent(containing: "myNotesEditing=true", in: app, timeout: wait)
+                    || waitForReaderRenderedContentStateIfPresent(containing: marker, in: app, timeout: wait)
+                {
+                    return true
+                }
+            }
+        } while Date() < deadline
+
+        return false
     }
 
     /**
@@ -1262,12 +1319,18 @@ extension AndBibleUITests {
     ) -> XCUIElement? {
         let deadline = Date().addingTimeInterval(max(0, timeout))
         repeat {
+            for candidate in candidates where candidate.exists && elementHasUsableFrame(candidate) {
+                return candidate
+            }
             for candidate in candidates where candidate.exists {
                 return candidate
             }
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         } while Date() < deadline
 
+        if let actionableCandidate = candidates.first(where: { $0.exists && elementHasUsableFrame($0) }) {
+            return actionableCandidate
+        }
         return candidates.first(where: { $0.exists })
     }
 

@@ -640,6 +640,10 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     /// Local iOS reading-progress state backing Android-style chapter-read bridge methods.
     var readingProgressStore: ReadingProgressStore?
 
+    /// Coordinates Android-compatible reading-progress and memorization bridge mutations.
+    @ObservationIgnored
+    private lazy var progressBridgeCoordinator = makeProgressBridgeCoordinator()
+
     /// Callback to persist SwiftData changes (called after PageManager updates).
     var onPersistState: (() -> Void)?
 
@@ -791,6 +795,53 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             },
             loadCurrentContent: { [weak self] in
                 self?.loadCurrentContent()
+            }
+        )
+    }
+
+    /**
+     Builds the coordinator for Android-compatible reading-progress and memorization bridge actions.
+
+     The controller still owns active-document validation, native presentation callbacks, and the
+     concrete `BibleBridge` emitter. The coordinator owns store mutations and emitted progress
+     events so these bridge concerns no longer live inline with the full reader controller.
+     */
+    private func makeProgressBridgeCoordinator() -> BibleReaderProgressBridgeCoordinator {
+        BibleReaderProgressBridgeCoordinator(
+            memorizationStore: { [weak self] in
+                self?.memorizationProgressStore
+            },
+            readingStore: { [weak self] in
+                self?.readingProgressStore
+            },
+            resolveReadingTarget: { [weak self] bookInitials, startOrdinal, chapter in
+                self?.readingProgressBridgeTarget(
+                    bookInitials: bookInitials,
+                    startOrdinal: startOrdinal,
+                    chapter: chapter
+                )
+            },
+            loadMemorizeDocument: { [weak self] bookInitials, startOrdinal, endOrdinal in
+                self?.loadMemorizeDocument(
+                    bookInitials: bookInitials,
+                    startOrdinal: startOrdinal,
+                    endOrdinal: endOrdinal
+                )
+            },
+            showReadingProgress: { [weak self] tab in
+                self?.onShowReadingProgress?(tab)
+            },
+            showReadingProgressSettings: { [weak self] in
+                self?.onShowReadingProgressSettings?()
+            },
+            showChapterReadHistory: { [weak self] target in
+                self?.onShowChapterReadHistory?(target)
+            },
+            emit: { [weak self] event, data in
+                self?.bridge.emit(event: event, data: data)
+            },
+            buildConfigJSON: { [weak self] in
+                self?.buildConfigJSON() ?? "{}"
             }
         )
     }
@@ -3607,100 +3658,57 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      Adds the selected verse range as a memorization target and opens the bundled Memorize document.
      */
     public func bridge(_ bridge: BibleBridge, memorize bookInitials: String, startOrdinal: Int, endOrdinal: Int) {
-        memorizationProgressStore?.addMemorizationTargetIfNeeded(
-            bookInitials: bookInitials,
-            startOrdinal: startOrdinal,
-            endOrdinal: endOrdinal
-        )
-        loadMemorizeDocument(bookInitials: bookInitials, startOrdinal: startOrdinal, endOrdinal: endOrdinal)
+        progressBridgeCoordinator.memorize(bookInitials: bookInitials, startOrdinal: startOrdinal, endOrdinal: endOrdinal)
     }
 
     /**
      Marks the selected verse range as memorized in local iOS memorization state.
      */
     public func bridge(_ bridge: BibleBridge, markAsMemorized bookInitials: String, startOrdinal: Int, endOrdinal: Int) {
-        memorizationProgressStore?.markAsMemorized(
-            bookInitials: bookInitials,
-            startOrdinal: startOrdinal,
-            endOrdinal: endOrdinal
-        )
+        progressBridgeCoordinator.markAsMemorized(bookInitials: bookInitials, startOrdinal: startOrdinal, endOrdinal: endOrdinal)
     }
 
     /**
      Adds the selected verse range to local iOS memorization targets.
      */
     public func bridge(_ bridge: BibleBridge, addMemorizationTarget bookInitials: String, startOrdinal: Int, endOrdinal: Int) {
-        memorizationProgressStore?.addMemorizationTarget(
-            bookInitials: bookInitials,
-            startOrdinal: startOrdinal,
-            endOrdinal: endOrdinal
-        )
+        progressBridgeCoordinator.addMemorizationTarget(bookInitials: bookInitials, startOrdinal: startOrdinal, endOrdinal: endOrdinal)
     }
 
     /**
      Removes the selected verse range from local iOS memorization targets.
      */
     public func bridge(_ bridge: BibleBridge, removeMemorizationTarget bookInitials: String, startOrdinal: Int, endOrdinal: Int) {
-        memorizationProgressStore?.removeMemorizationTarget(
-            bookInitials: bookInitials,
-            startOrdinal: startOrdinal,
-            endOrdinal: endOrdinal
-        )
+        progressBridgeCoordinator.removeMemorizationTarget(bookInitials: bookInitials, startOrdinal: startOrdinal, endOrdinal: endOrdinal)
     }
 
     /**
      Removes the selected verse range from local iOS memorized ranges.
      */
     public func bridge(_ bridge: BibleBridge, unmarkMemorized bookInitials: String, startOrdinal: Int, endOrdinal: Int) {
-        memorizationProgressStore?.unmarkMemorized(
-            bookInitials: bookInitials,
-            startOrdinal: startOrdinal,
-            endOrdinal: endOrdinal
-        )
+        progressBridgeCoordinator.unmarkMemorized(bookInitials: bookInitials, startOrdinal: startOrdinal, endOrdinal: endOrdinal)
     }
 
     /**
      Records one chapter-read history row in local iOS reading-progress state.
      */
     public func bridge(_ bridge: BibleBridge, recordChapterRead bookInitials: String, startOrdinal: Int, chapter: Int, source: String) {
-        guard let store = readingProgressStore,
-              let target = readingProgressBridgeTarget(
-                bookInitials: bookInitials,
-                startOrdinal: startOrdinal,
-                chapter: chapter
-              ) else {
-            return
-        }
-        let count = store.recordChapterRead(
+        progressBridgeCoordinator.recordChapterRead(
             bookInitials: bookInitials,
             startOrdinal: startOrdinal,
-            kjvBookOrdinal: target.kjvBookOrdinal,
             chapter: chapter,
-            source: ReadingProgressSource(bridgeValue: source)
+            source: source
         )
-        emitChapterReadStatus(chapter: chapter, count: count)
     }
 
     /**
      Opens native chapter-read history for the active Bible chapter identity.
      */
     public func bridge(_ bridge: BibleBridge, openChapterReadHistory bookInitials: String, startOrdinal: Int, chapter: Int) {
-        guard readingProgressStore != nil,
-              let target = readingProgressBridgeTarget(
-                bookInitials: bookInitials,
-                startOrdinal: startOrdinal,
-                chapter: chapter
-              ) else {
-            return
-        }
-        onShowChapterReadHistory?(
-            ChapterReadHistoryTarget(
-                bookInitials: bookInitials,
-                startOrdinal: startOrdinal,
-                kjvBookOrdinal: target.kjvBookOrdinal,
-                bookName: target.bookName,
-                chapter: chapter
-            )
+        progressBridgeCoordinator.openChapterReadHistory(
+            bookInitials: bookInitials,
+            startOrdinal: startOrdinal,
+            chapter: chapter
         )
     }
 
@@ -3708,41 +3716,28 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      Opens native reading-progress UI using Android's numeric tab positions.
      */
     public func bridge(_ bridge: BibleBridge, openReadingProgress tab: Int) {
-        onShowReadingProgress?(tab)
+        progressBridgeCoordinator.openReadingProgress(tab: tab)
     }
 
     /**
      Opens native reading-progress settings UI.
      */
     public func bridgeDidRequestOpenReadingProgressSettings(_ bridge: BibleBridge) {
-        onShowReadingProgressSettings?()
+        progressBridgeCoordinator.openReadingProgressSettings()
     }
 
     /**
      Persists Android-compatible reading-progress settings and notifies the embedded client.
      */
     public func bridge(_ bridge: BibleBridge, setReadingProgressSettings json: String) {
-        guard readingProgressStore?.applySettingsBundle(json: json) == true else {
-            return
-        }
-        emitReadingProgressSettings()
-        bridge.emit(event: "set_config", data: buildConfigJSON())
+        progressBridgeCoordinator.setReadingProgressSettings(json: json)
     }
 
     /**
      Clears chapter-read status for the active reading-progress cycle.
      */
     public func bridge(_ bridge: BibleBridge, unmarkChapterRead bookInitials: String, startOrdinal: Int, chapter: Int) {
-        guard let store = readingProgressStore,
-              let target = readingProgressBridgeTarget(
-                bookInitials: bookInitials,
-                startOrdinal: startOrdinal,
-                chapter: chapter
-              ) else {
-            return
-        }
-        let count = store.clearChapterReadStatus(kjvBookOrdinal: target.kjvBookOrdinal, chapter: chapter)
-        emitChapterReadStatus(chapter: chapter, count: count)
+        progressBridgeCoordinator.unmarkChapterRead(bookInitials: bookInitials, startOrdinal: startOrdinal, chapter: chapter)
     }
 
     // MARK: - BibleBridgeDelegate — Navigation Actions
@@ -4751,7 +4746,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
                 startOrdinal: startOrdinal,
                 endOrdinal: endOrdinal
             ) ?? [],
-            "readingProgressSettings": readingProgressSettingsPayload(),
+            "readingProgressSettings": progressBridgeCoordinator.readingProgressSettingsPayload(),
         ]
 
         guard JSONSerialization.isValidJSONObject(document),
@@ -5435,18 +5430,6 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         settingsStore?.getStringSet(key) ?? []
     }
 
-    private func readingProgressSettingsPayload() -> [String: Any] {
-        let bundle = readingProgressStore?.settingsBundle() ?? ReadingProgressSettingsBundle()
-        return [
-            "autoMarkMemorized": bundle.autoMarkMemorized,
-            "memorizeTypeFullWords": bundle.memorizeTypeFullWords,
-            "memorizeWordVisibility": bundle.memorizeWordVisibility,
-            "memorizeErrorHeatmap": bundle.memorizeErrorHeatmap,
-            "memorizeScrambleHideUsed": bundle.memorizeScrambleHideUsed,
-            "memorizeIncludeReference": bundle.memorizeIncludeReference,
-        ]
-    }
-
     /**
      Encodes the combined reader/configuration payload consumed by the Vue.js application.
 
@@ -5798,16 +5781,12 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         return Self.jswordBibleBookOrdinalByOsisId[osisId]
     }
 
-    private struct ReadingProgressBridgeTarget {
-        let kjvBookOrdinal: Int
-        let bookName: String
-    }
-
+    /// Resolves the active Bible chapter into the JSword/KJVA identity used by reading progress.
     private func readingProgressBridgeTarget(
         bookInitials: String,
         startOrdinal: Int,
         chapter: Int
-    ) -> ReadingProgressBridgeTarget? {
+    ) -> BibleReaderProgressBridgeCoordinator.ReadingProgressBridgeTarget? {
         guard let chapterRange = currentChapterOrdinalRange(),
               currentCategory == .bible,
               !bookInitials.isEmpty,
@@ -5818,28 +5797,15 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
               let kjvBookOrdinal = kjvBookOrdinal(for: currentBook) else {
             return nil
         }
-        return ReadingProgressBridgeTarget(kjvBookOrdinal: kjvBookOrdinal, bookName: currentBook)
-    }
-
-    private func emitChapterReadStatus(chapter: Int, count: Int) {
-        bridge.emit(
-            event: "update_chapter_read_status",
-            data: "{\"chapter\":\(chapter),\"count\":\(count)}"
+        return BibleReaderProgressBridgeCoordinator.ReadingProgressBridgeTarget(
+            kjvBookOrdinal: kjvBookOrdinal,
+            bookName: currentBook
         )
     }
 
     @discardableResult
     func saveReadingProgressSettings(_ settings: ReadingProgressSettingsSnapshot) -> ReadingProgressSettingsSnapshot? {
-        guard let store = readingProgressStore else { return nil }
-        let savedSettings = store.saveSettings(settings)
-        emitReadingProgressSettings()
-        bridge.emit(event: "set_config", data: buildConfigJSON())
-        return savedSettings
-    }
-
-    private func emitReadingProgressSettings() {
-        guard let settingsJSON = readingProgressStore?.settingsBundleJSON() else { return }
-        bridge.emit(event: "update_reading_progress_settings", data: settingsJSON)
+        progressBridgeCoordinator.saveReadingProgressSettings(settings)
     }
 
     /// Static OSIS book ID lookup using the default list.
