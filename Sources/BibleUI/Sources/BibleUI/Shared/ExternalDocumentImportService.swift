@@ -559,29 +559,18 @@ public enum ExternalDocumentImportResult: Equatable, Sendable {
     /**
       Localized user-visible feedback for the import result.
 
-      - Returns: Success, unsupported-format, or error text using the existing import/export
-          localization keys with English defaults for package tests and missing translations.
+      - Returns: Android's generic install-success text for handled successful installs, or
+          unsupported-format/error text for failures using existing localization keys with English
+          defaults for package tests and missing translations.
       - Side effects: none.
       - Failure modes: Missing localization entries fall back to the supplied default strings.
       */
     public var feedbackMessage: String {
         switch self {
-        case .installedModule(let name):
-            return String(
-                format: String(localized: "installed_module_%@", defaultValue: "Installed module: %@"),
-                name
-            )
-        case .installedEpub(let title):
-            return String(
-                format: String(localized: "installed_epub_%@", defaultValue: "Installed EPUB: %@"),
-                title
-            )
-        case .installedFont(let name):
-            return String(
-                format: String(localized: "installed_font_%@", defaultValue: "Installed font: %@"),
-                name
-            )
-        case .installedAndroidModuleBackup:
+        case .installedModule,
+             .installedEpub,
+             .installedFont,
+             .installedAndroidModuleBackup:
             return AndroidModuleBackupPresentation.localizedInstallSuccessMessage
         case .unsupportedFormat(let fileExtension):
             return String(
@@ -600,6 +589,31 @@ public enum ExternalDocumentImportResult: Equatable, Sendable {
                 ),
                 message
             )
+        }
+    }
+
+    /**
+      Whether this result should use Android's transient install-success toast presentation.
+
+      Android's `InstallZip` reports successful ZIP, EPUB, TTF, and module-backup installs by
+      posting `ToastEvent(R.string.install_zip_successfull)`. Errors, invalid files, and unsupported
+      formats remain interruptive feedback on iOS so users do not miss an action they may need to
+      correct.
+
+      - Returns: `true` for successful handled install results, otherwise `false`.
+      - Side effects: none.
+      - Failure modes: none.
+      */
+    public var usesAndroidInstallToastFeedback: Bool {
+        switch self {
+        case .installedModule,
+             .installedEpub,
+             .installedFont,
+             .installedAndroidModuleBackup:
+            return true
+        case .unsupportedFormat,
+             .failed:
+            return false
         }
     }
 }

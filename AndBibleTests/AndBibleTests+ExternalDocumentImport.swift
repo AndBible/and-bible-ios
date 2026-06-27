@@ -207,8 +207,11 @@ extension AndBibleTests {
     /**
      ZIP files are Android's SWORD module package path and must call only the module installer.
 
-     Failure indicates that Files/Mail opens could drift from the Backup & Restore document import
-     behavior or that arbitrary ZIP handling stopped using the SWORD repository path.
+     Android reports successful `InstallZip` work through the generic `install_zip_successfull`
+     short toast, not through a blocking module-specific alert. Failure indicates that Files/Mail
+     opens could drift from the Backup & Restore document import behavior, that arbitrary ZIP
+     handling stopped using the SWORD repository path, or that iOS reintroduced an install-success
+     presentation that does not match Android.
      */
     func testExternalDocumentImportZipUsesModuleInstaller() {
         let probe = ExternalDocumentImportProbe()
@@ -218,7 +221,8 @@ extension AndBibleTests {
         let result = service.importDocument(at: url)
 
         XCTAssertEqual(result, .installedModule(name: "FinRK"))
-        XCTAssertEqual(result.feedbackMessage, "Installed module: FinRK")
+        XCTAssertEqual(result.feedbackMessage, "Module was installed successfully")
+        XCTAssertTrue(result.usesAndroidInstallToastFeedback)
         XCTAssertEqual(probe.snapshot().moduleURLs, [url])
         XCTAssertEqual(probe.snapshot().epubURLs, [])
         XCTAssertEqual(probe.snapshot().fontURLs.map(\.url), [])
@@ -251,6 +255,7 @@ extension AndBibleTests {
             .installedAndroidModuleBackup(moduleNames: ["ESV2001", "ESV2011"], installedEntryCount: 14)
         )
         XCTAssertEqual(result.feedbackMessage, "Module was installed successfully")
+        XCTAssertTrue(result.usesAndroidInstallToastFeedback)
         XCTAssertFalse(result.feedbackMessage.contains("ESV2001"))
         XCTAssertEqual(probe.snapshot().androidModuleBackupURLs, [url])
         XCTAssertEqual(probe.snapshot().moduleURLs, [])
@@ -345,8 +350,10 @@ extension AndBibleTests {
     /**
      EPUB files are imported through the EPUB reader store and must not be treated as SWORD ZIPs.
 
-     Failure indicates that the scene-open path no longer matches the existing Settings document
-     import branch for EPUB documents.
+     Android's EPUB fallback still reports success through the generic InstallZip toast. Failure
+     indicates that the scene-open path no longer matches the existing Settings document import
+     branch for EPUB documents or that successful EPUB installs drifted back to iOS-specific alert
+     copy.
      */
     func testExternalDocumentImportEpubUsesEpubInstaller() {
         let probe = ExternalDocumentImportProbe()
@@ -356,7 +363,8 @@ extension AndBibleTests {
         let result = service.importDocument(at: url)
 
         XCTAssertEqual(result, .installedEpub(title: "Study Notes"))
-        XCTAssertEqual(result.feedbackMessage, "Installed EPUB: Study Notes")
+        XCTAssertEqual(result.feedbackMessage, "Module was installed successfully")
+        XCTAssertTrue(result.usesAndroidInstallToastFeedback)
         XCTAssertEqual(probe.snapshot().moduleURLs, [])
         XCTAssertEqual(probe.snapshot().epubURLs, [url])
         XCTAssertEqual(probe.snapshot().fontURLs.map(\.url), [])
@@ -365,8 +373,9 @@ extension AndBibleTests {
     /**
      TTF files follow Android's app-owned font installer route.
 
-     Failure indicates that iOS advertises Android's font document type without backing it with the
-     same `modulesDir/ttf` install semantics.
+     Android stores fonts under `modulesDir/ttf` and reports success through the generic InstallZip
+     toast. Failure indicates that iOS advertises Android's font document type without backing it
+     with the same storage semantics or that successful font installs use an iOS-specific alert.
      */
     func testExternalDocumentImportTtfUsesFontInstaller() {
         let probe = ExternalDocumentImportProbe()
@@ -376,7 +385,8 @@ extension AndBibleTests {
         let result = service.importDocument(at: url)
 
         XCTAssertEqual(result, .installedFont(name: "Gentium"))
-        XCTAssertEqual(result.feedbackMessage, "Installed font: Gentium")
+        XCTAssertEqual(result.feedbackMessage, "Module was installed successfully")
+        XCTAssertTrue(result.usesAndroidInstallToastFeedback)
         XCTAssertEqual(probe.snapshot().moduleURLs, [])
         XCTAssertEqual(probe.snapshot().epubURLs, [])
         XCTAssertEqual(probe.snapshot().fontURLs.map(\.url), [url])
@@ -419,6 +429,7 @@ extension AndBibleTests {
 
         XCTAssertEqual(result, .unsupportedFormat(fileExtension: "txt"))
         XCTAssertEqual(result.feedbackMessage, "Error: Unsupported file format (txt)")
+        XCTAssertFalse(result.usesAndroidInstallToastFeedback)
         XCTAssertEqual(probe.snapshot().moduleURLs, [])
         XCTAssertEqual(probe.snapshot().epubURLs, [])
         XCTAssertEqual(probe.snapshot().fontURLs.map(\.url), [])
@@ -438,6 +449,7 @@ extension AndBibleTests {
         let result = service.importDocument(at: url)
 
         XCTAssertEqual(result, .unsupportedFormat(fileExtension: "ttf"))
+        XCTAssertFalse(result.usesAndroidInstallToastFeedback)
         XCTAssertEqual(probe.snapshot().moduleURLs, [])
         XCTAssertEqual(probe.snapshot().epubURLs, [])
         XCTAssertEqual(probe.snapshot().fontURLs.map(\.url), [])
@@ -462,6 +474,7 @@ extension AndBibleTests {
         let result = service.importDocument(request)
 
         XCTAssertEqual(result, .unsupportedFormat(fileExtension: "bin"))
+        XCTAssertFalse(result.usesAndroidInstallToastFeedback)
         XCTAssertEqual(probe.snapshot().moduleURLs, [])
         XCTAssertEqual(probe.snapshot().epubURLs, [])
         XCTAssertEqual(probe.snapshot().fontURLs.map(\.url), [])
@@ -544,6 +557,7 @@ extension AndBibleTests {
         let result = service.importDocument(at: URL(fileURLWithPath: "/tmp/FinRK.zip"))
 
         XCTAssertEqual(result, .failed(message: "installer rejected file"))
+        XCTAssertFalse(result.usesAndroidInstallToastFeedback)
         XCTAssertEqual(probe.snapshot().epubArchiveDetectionCount, 1)
         XCTAssertEqual(probe.snapshot().epubURLs, [])
     }
@@ -579,7 +593,7 @@ extension AndBibleTests {
      Installer failures retain the existing import/export error-prefix surface.
 
      Failure means handled external documents could fail silently or show a different feedback shape
-     than the in-app Backup & Restore importer.
+     than the in-app Backup & Restore importer. Errors must not use the Android success-toast path.
      */
     func testExternalDocumentImportInstallerFailureUsesSharedErrorFeedback() {
         let service = ExternalDocumentImportService(
@@ -592,6 +606,7 @@ extension AndBibleTests {
 
         XCTAssertEqual(result, .failed(message: "installer rejected file"))
         XCTAssertEqual(result.feedbackMessage, "Error: installer rejected file")
+        XCTAssertFalse(result.usesAndroidInstallToastFeedback)
     }
 
     /**
