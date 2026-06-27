@@ -16,7 +16,7 @@ That runs `scripts/upload-testflight.sh`, which:
 2. Generates export options with the team resolved from local-only config
    (`ASC_TEAM_ID`, else `DEVELOPMENT_TEAM` from `Config/Secrets.xcconfig.local`),
    so no team identifier is committed.
-3. Stamps a unique build number (UTC `YYYY.MMDD.HHMM`, restored afterward so the
+3. Stamps a unique build number (UTC `YYYY.MMDD.HHMMSS`, restored afterward so the
    working tree stays clean).
 4. Archives the app for iOS (no Mac Catalyst) and uploads it via Xcode automatic
    (cloud) signing.
