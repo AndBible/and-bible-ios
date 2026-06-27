@@ -354,6 +354,30 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         )
     }
 
+    /**
+     Visible toolbar summary for Android's synthetic `Multi` document.
+
+     The page identity intentionally remains `general_book/Multi` for Android restore and links-window
+     parity. This summary is derived from the active transient Vue payload so the SwiftUI toolbar can
+     mirror Android's display title, for example `BDBT: H430`, without mutating the durable document
+     identity to the selected dictionary tab.
+     */
+    var androidMultiDocumentHeaderSummary: AndroidSpecialDocumentIdentity.MultiDocumentHeaderSummary? {
+        guard let activeRequest = specialDocumentCoordinator.activeRequest(
+            isShowingAndroidMultiDocument: isShowingAndroidMultiDocument
+        ) else {
+            return nil
+        }
+        return AndroidSpecialDocumentIdentity.multiDocumentHeaderSummary(
+            from: activeRequest.documentJSON,
+            subtitle: Bundle.main.localizedString(
+                forKey: "multi_description",
+                value: "Multiple references",
+                table: nil
+            )
+        )
+    }
+
     /// Whether the current page should expose Strong's actions (matching Android CurrentPageManager.hasStrongs).
     var hasStrongs: Bool {
         switch currentCategory {

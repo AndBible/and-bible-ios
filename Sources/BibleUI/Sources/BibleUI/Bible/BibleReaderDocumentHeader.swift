@@ -4,6 +4,7 @@ import SwiftUI
 enum BibleReaderDocumentHeaderMode: Equatable {
     case myNotes
     case studyPad(title: String)
+    case androidMulti(title: String, subtitle: String)
     case auxiliary(title: String, subtitle: String?, browseSystemImageName: String)
     case bible(title: String, subtitle: String, hasPrevious: Bool, hasNext: Bool)
 }
@@ -82,6 +83,8 @@ struct BibleReaderDocumentHeader<ToolbarActions: View>: View {
             return AnyView(myNotesHeader)
         case .studyPad(let title):
             return AnyView(studyPadHeader(title: title))
+        case .androidMulti(let title, let subtitle):
+            return AnyView(androidMultiHeader(title: title, subtitle: subtitle))
         case .auxiliary(let title, let subtitle, let browseSystemImageName):
             return AnyView(auxiliaryHeader(
                 title: title,
@@ -95,6 +98,34 @@ struct BibleReaderDocumentHeader<ToolbarActions: View>: View {
                 hasPrevious: hasPrevious,
                 hasNext: hasNext
             ))
+        }
+    }
+
+    /**
+     Renders Android's main-toolbar shape for `FakeBookFactory.multiDocument` pages.
+
+     The `Multi` page is technically a general book, but Android does not use the general-book
+     back/browse header for Strong's and multi-reference result windows. It keeps the drawer and
+     reader action icons visible while showing the first child reference as the title.
+     */
+    private func androidMultiHeader(title: String, subtitle: String) -> some View {
+        Group {
+            readerNavigationDrawerButton
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title)
+                    .font(.headline)
+                    .lineLimit(1)
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(surfacePalette.toolbarSecondaryForegroundColor)
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityIdentifier("readerAndroidMultiTitle")
+
+            toolbarActions()
+                .layoutPriority(1)
         }
     }
 

@@ -2881,6 +2881,17 @@ public struct BibleReaderView: View {
         if controller?.showingStudyPad == true {
             return .studyPad(title: controller?.activeStudyPadLabelName ?? String(localized: "study_pad"))
         }
+        if controller?.isShowingAndroidMultiDocument == true {
+            let summary = controller?.androidMultiDocumentHeaderSummary
+            return .androidMulti(
+                title: summary?.title ?? AndroidSpecialDocumentIdentity.multiDocumentInitials,
+                subtitle: summary?.subtitle ?? Bundle.main.localizedString(
+                    forKey: "multi_description",
+                    value: "Multiple references",
+                    table: nil
+                )
+            )
+        }
         if controller?.currentCategory == .dictionary ||
             controller?.currentCategory == .generalBook ||
             controller?.currentCategory == .map ||
