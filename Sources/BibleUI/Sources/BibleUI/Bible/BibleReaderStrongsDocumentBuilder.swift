@@ -108,11 +108,17 @@ struct BibleReaderStrongsDocumentBuilder {
                     let isHebrew = num.hasPrefix("H") || (!num.hasPrefix("G") && (Int(String(num.drop(while: { $0.isLetter || $0 == "0" }))) ?? 0) > 5624)
                     let featureType = isHebrew ? "hebrew" : "greek"
                     let keyName = Self.canonicalStrongsKeyName(requested: num, actualKey: lookup.actualKey, rawEntry: lookup.rawEntry)
-                    let xml = Self.buildDictionaryEntryXML(
-                        rawEntry: lookup.rawEntry,
-                        renderedText: lookup.renderedText,
-                        strongsLinkPrefix: Self.strongsLinkPrefix(for: num)
-                    )
+                    let strongsLinkPrefix = Self.strongsLinkPrefix(for: num)
+                    let xml = lookup.isNativeHtml
+                        ? Self.buildDictionaryEntryHTML(
+                            renderedText: lookup.renderedText,
+                            strongsLinkPrefix: strongsLinkPrefix
+                        )
+                        : Self.buildDictionaryEntryXML(
+                            rawEntry: lookup.rawEntry,
+                            renderedText: lookup.renderedText,
+                            strongsLinkPrefix: strongsLinkPrefix
+                        )
                     let features = OsisFeatures(type: featureType, keyName: keyName)
 
                     fragments.append((
@@ -121,7 +127,8 @@ struct BibleReaderStrongsDocumentBuilder {
                         keyName: keyName,
                         bookInitials: mod.name,
                         bookAbbreviation: mod.abbreviation,
-                        features: features
+                        features: features,
+                        isNativeHtml: lookup.isNativeHtml
                     ))
                 }
             }
@@ -133,18 +140,21 @@ struct BibleReaderStrongsDocumentBuilder {
                 for mod in morphModules {
                     let morphKeys = [code, code.uppercased(), code.lowercased()]
                     if let lookup = Self.lookupInModule(mod, keyOptions: morphKeys) {
-                        let xml = Self.buildDictionaryEntryXML(
-                            rawEntry: lookup.rawEntry,
-                            renderedText: lookup.renderedText,
-                            fallbackTitle: "Morphology: \(code)"
-                        )
+                        let xml = lookup.isNativeHtml
+                            ? Self.buildDictionaryEntryHTML(renderedText: lookup.renderedText)
+                            : Self.buildDictionaryEntryXML(
+                                rawEntry: lookup.rawEntry,
+                                renderedText: lookup.renderedText,
+                                fallbackTitle: "Morphology: \(code)"
+                            )
                         fragments.append((
                             xml: xml,
                             key: "\(mod.info.name)--\(code)",
                             keyName: code,
                             bookInitials: mod.info.name,
                             bookAbbreviation: moduleDisplayLabel(mod),
-                            features: OsisFeatures()
+                            features: OsisFeatures(),
+                            isNativeHtml: lookup.isNativeHtml
                         ))
                     }
                 }
@@ -209,7 +219,8 @@ struct BibleReaderStrongsDocumentBuilder {
             keyName: keyName,
             bookInitials: moduleName,
             bookAbbreviation: moduleName,
-            features: OsisFeatures(type: featureType, keyName: keyName)
+            features: OsisFeatures(type: featureType, keyName: keyName),
+            isNativeHtml: false
         )
     }
 
@@ -275,6 +286,27 @@ struct BibleReaderStrongsDocumentBuilder {
         let rawEntry: String
         /// SWORD-rendered text for the matched key.
         let renderedText: String
+        /// Whether `renderedText` is browser HTML that should bypass OSIS conversion.
+        let isNativeHtml: Bool
+
+        /**
+         Creates a dictionary lookup result with explicit renderer expectations.
+
+         - Parameters:
+           - actualKey: Key resolved by the backing module.
+           - rawEntry: Raw entry payload used for key validation and canonicalization.
+           - renderedText: Display-ready dictionary body from the backing module.
+           - isNativeHtml: `true` for Android MyBible dictionary HTML that should render as native
+             browser markup; `false` for SWORD output that remains in the OSIS fragment path.
+         - Side effects: None.
+         - Failure modes: None.
+         */
+        init(actualKey: String, rawEntry: String, renderedText: String, isNativeHtml: Bool = false) {
+            self.actualKey = actualKey
+            self.rawEntry = rawEntry
+            self.renderedText = renderedText
+            self.isNativeHtml = isNativeHtml
+        }
     }
 
     /**
@@ -343,7 +375,8 @@ struct BibleReaderStrongsDocumentBuilder {
             return DictionaryLookupResult(
                 actualKey: key.trimmingCharacters(in: .whitespacesAndNewlines),
                 rawEntry: entry,
-                renderedText: entry
+                renderedText: entry,
+                isNativeHtml: true
             )
         }
         return nil
@@ -465,6 +498,21 @@ struct BibleReaderStrongsDocumentBuilder {
         )
         let titlePrefix = fallbackTitle.map { "<title type=\"x-gen\">\(escapeXML($0))</title>" } ?? ""
         return "<div>\(titlePrefix)<div type=\"paragraph\">\(linkifiedHtml)</div></div>"
+    }
+
+    /**
+     Builds native HTML for restored Android MyBible dictionary entries.
+
+     Android reads MyBible dictionary `definition` values directly and lets the WebView render their
+     browser-oriented markup. iOS keeps the same content contract by only linkifying supported Strong's
+     references and then marking the fragment as native HTML instead of coercing tags such as `<ol>`,
+     `<li>`, `<b>`, and `<he>` into OSIS components.
+     */
+    static func buildDictionaryEntryHTML(
+        renderedText: String,
+        strongsLinkPrefix: String? = nil
+    ) -> String {
+        "<div>\(linkifyRenderedDictionaryHTML(renderedText, defaultPrefix: strongsLinkPrefix))</div>"
     }
 
     /**
@@ -938,6 +986,19 @@ struct BibleReaderStrongsDocumentBuilder {
 
         result = linkifyStructuredDictionaryRefs(in: result, defaultPrefix: defaultPrefix)
 
+        let myBibleStrongLinkPattern = try? NSRegularExpression(
+            pattern: #"<a\s+href=(['"])S:([HG]\d{1,5})\1>(.*?)</a>"#,
+            options: [.caseInsensitive, .dotMatchesLineSeparators]
+        )
+        if let regex = myBibleStrongLinkPattern {
+            let range = NSRange(result.startIndex..., in: result)
+            result = regex.stringByReplacingMatches(
+                in: result,
+                range: range,
+                withTemplate: "<a href=\"ab-w://?strong=$2\">$3</a>"
+            )
+        }
+
         let bareRefPattern = try? NSRegularExpression(
             pattern: #"<ref\s+target="[^"]*?/?(\d+)"[^>]*>(.*?)</ref>"#,
             options: [.dotMatchesLineSeparators]
@@ -1108,7 +1169,8 @@ enum BibleReaderMultiFragmentDocumentBuilder {
         keyName: String,
         bookInitials: String,
         bookAbbreviation: String,
-        features: OsisFeatures
+        features: OsisFeatures,
+        isNativeHtml: Bool
     )
 
     /**
@@ -1135,7 +1197,8 @@ enum BibleReaderMultiFragmentDocumentBuilder {
                 hasStrongs: frag.features.type != nil,
                 ordinalRange: [0, 0],
                 language: "en",
-                direction: "ltr"
+                direction: "ltr",
+                isNativeHtml: frag.isNativeHtml
             )
         }
 

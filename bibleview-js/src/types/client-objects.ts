@@ -54,6 +54,7 @@ export type OsisFragment = {
     readonly ordinalRange: number[],
     readonly language: string,
     readonly direction: "rtl" | "ltr",
+    readonly isNativeHtml?: boolean,
 }
 
 export type NumberRange = [start: number, end: number]

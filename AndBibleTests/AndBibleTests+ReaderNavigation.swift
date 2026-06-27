@@ -691,9 +691,11 @@ extension AndBibleTests {
                 "ordinalRange",
                 "language",
                 "direction",
+                "isNativeHtml",
             ]
         )
         XCTAssertEqual(fragmentObject["hasStrongs"] as? Bool, true)
+        XCTAssertEqual(fragmentObject["isNativeHtml"] as? Bool, false)
         let features = try XCTUnwrap(fragmentObject["features"] as? [String: Any])
         assertJSONKeys(features, ["type", "keyName"])
 

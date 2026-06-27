@@ -138,14 +138,17 @@ struct BibleReaderWordLookupDocumentBuilder {
 
         for module in enabledModules {
             guard let lookup = module.lookup(keyOptions) else { continue }
-            let xml = "<div><title type=\"x-gen\">\(escapedTitle)</title><div type=\"paragraph\">\(lookup.renderedText)</div></div>"
+            let xml = lookup.isNativeHtml
+                ? BibleReaderStrongsDocumentBuilder.buildDictionaryEntryHTML(renderedText: lookup.renderedText)
+                : "<div><title type=\"x-gen\">\(escapedTitle)</title><div type=\"paragraph\">\(lookup.renderedText)</div></div>"
             fragments.append((
                 xml: xml,
                 key: "\(module.name)--\(query)",
                 keyName: query,
                 bookInitials: module.name,
                 bookAbbreviation: module.abbreviation,
-                features: OsisFeatures()
+                features: OsisFeatures(),
+                isNativeHtml: lookup.isNativeHtml
             ))
         }
 

@@ -63,6 +63,27 @@ public struct OsisFragment: Codable, Sendable {
     public var language: String
     /// Text direction passed to the web client: `ltr` or `rtl`.
     public var direction: String // "ltr" or "rtl"
+    /// Whether `xml` is browser HTML that Vue should render without OSIS component conversion.
+    public var isNativeHtml: Bool
+
+    private enum CodingKeys: String, CodingKey {
+        case xml
+        case originalXml
+        case key
+        case keyName
+        case v11n
+        case bookCategory
+        case bookInitials
+        case bookAbbreviation
+        case osisRef
+        case isNewTestament
+        case features
+        case hasStrongs
+        case ordinalRange
+        case language
+        case direction
+        case isNativeHtml
+    }
 
     /// Creates an OSIS fragment payload ready for bridge serialization.
     public init(
@@ -79,7 +100,8 @@ public struct OsisFragment: Codable, Sendable {
         hasStrongs: Bool = false,
         ordinalRange: [Int] = [],
         language: String = "en",
-        direction: String = "ltr"
+        direction: String = "ltr",
+        isNativeHtml: Bool = false
     ) {
         self.xml = xml
         self.key = key
@@ -95,6 +117,35 @@ public struct OsisFragment: Codable, Sendable {
         self.ordinalRange = ordinalRange
         self.language = language
         self.direction = direction
+        self.isNativeHtml = isNativeHtml
+    }
+
+    /**
+     Decodes bridge fragments while tolerating payloads created before fragment-level HTML mode.
+
+     - Parameter decoder: Source decoder for a Swift/Vue bridge fragment.
+     - Side effects: None.
+     - Failure modes: Throws when required legacy fragment fields are absent or malformed; missing
+       `isNativeHtml` defaults to `false` so older persisted or test payloads remain OSIS-rendered.
+     */
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.xml = try container.decode(String.self, forKey: .xml)
+        self.originalXml = try container.decodeIfPresent(String.self, forKey: .originalXml)
+        self.key = try container.decode(String.self, forKey: .key)
+        self.keyName = try container.decode(String.self, forKey: .keyName)
+        self.v11n = try container.decode(String.self, forKey: .v11n)
+        self.bookCategory = try container.decode(String.self, forKey: .bookCategory)
+        self.bookInitials = try container.decode(String.self, forKey: .bookInitials)
+        self.bookAbbreviation = try container.decode(String.self, forKey: .bookAbbreviation)
+        self.osisRef = try container.decode(String.self, forKey: .osisRef)
+        self.isNewTestament = try container.decode(Bool.self, forKey: .isNewTestament)
+        self.features = try container.decode(OsisFeatures.self, forKey: .features)
+        self.hasStrongs = try container.decode(Bool.self, forKey: .hasStrongs)
+        self.ordinalRange = try container.decode([Int].self, forKey: .ordinalRange)
+        self.language = try container.decode(String.self, forKey: .language)
+        self.direction = try container.decode(String.self, forKey: .direction)
+        self.isNativeHtml = try container.decodeIfPresent(Bool.self, forKey: .isNativeHtml) ?? false
     }
 }
 

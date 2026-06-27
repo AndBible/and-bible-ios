@@ -1201,7 +1201,9 @@ extension AndBibleTests {
             named: "BDBT",
             modulePath: URL(fileURLWithPath: modulePath, isDirectory: true),
             topic: "H430",
-            definition: "Original: <b>אלהים</b><p>BDB Definition : God, gods</p>"
+            definition: """
+            Original: <b><he>אלהים</he></b> <p />Transliteration: <b>'ĕlôhı̂ym</b> <p />Phonetic: <b>el-o-heem'</b> <p class="bdb_def"><b>BDB Definition</b>:</p><ol><li>(plural)<ol type='a'><li>rulers, judges</li><li>divine ones</li></ol><li>(plural intensive - singular meaning)<ol type='a'><li>god, goddess</li><li>God</li></ol></li></ol> <p />Origin: plural of <a href='S:H433'>H433</a>
+            """
         )
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
         let builder = BibleReaderStrongsDocumentBuilder(
@@ -1220,9 +1222,13 @@ extension AndBibleTests {
 
         XCTAssertEqual(bdbt["bookAbbreviation"] as? String, "BDBT")
         XCTAssertEqual(bdbt["keyName"] as? String, "00430")
+        XCTAssertEqual(bdbt["isNativeHtml"] as? Bool, true)
         XCTAssertEqual(features["type"] as? String, "hebrew")
         XCTAssertEqual(features["keyName"] as? String, "00430")
-        XCTAssertTrue(xml.contains("BDB Definition : God, gods"))
+        XCTAssertTrue(xml.contains("<b><he>אלהים</he></b>"))
+        XCTAssertTrue(xml.contains("<ol><li>(plural)<ol type='a'><li>rulers, judges</li>"))
+        XCTAssertTrue(xml.contains(#"<a href="ab-w://?strong=H433">H433</a>"#))
+        XCTAssertFalse(xml.contains("type=\"paragraph\""))
         XCTAssertFalse(xml.contains("No dictionary module installed"))
     }
 
@@ -1242,7 +1248,8 @@ extension AndBibleTests {
                 keyName: "00430",
                 bookInitials: "BDBT",
                 bookAbbreviation: "BDBT",
-                features: OsisFeatures(type: "hebrew", keyName: "00430")
+                features: OsisFeatures(type: "hebrew", keyName: "00430"),
+                isNativeHtml: false
             )],
             contentType: "strongs"
         ))

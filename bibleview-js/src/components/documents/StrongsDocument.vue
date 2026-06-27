@@ -30,7 +30,7 @@
         </div>
         <div v-for="frag in fragments" :key="frag.key" class="strongs-entry">
           <div v-if="fragments.length > 1" class="dict-label">{{ frag.bookAbbreviation }}</div>
-          <OsisFragment hide-titles :fragment="frag"/>
+          <OsisFragment hide-titles :fragment="frag" :is-native-html="frag.isNativeHtml ?? false"/>
         </div>
         <div class="find-all" v-if="findAllLink(fragments[0])">
           <a :href="findAllLink(fragments[0])!">{{ strings.findAllOccurrences }}</a>
@@ -50,7 +50,7 @@
         <div class="morph-header">
           <span class="morph-code">{{ frag.keyName }}</span>
         </div>
-        <OsisFragment hide-titles :fragment="frag"/>
+        <OsisFragment hide-titles :fragment="frag" :is-native-html="frag.isNativeHtml ?? false"/>
       </div>
     </div>
   </div>
