@@ -3763,52 +3763,23 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             return
         }
         pendingClientReadyMyNotesJumpOrdinal = nil
-        showingMyNotes = true
-        showingStudyPad = false
-        activeStudyPadLabelId = nil
-        activeStudyPadLabelName = nil
-        editingInWebView = false
-        clearNativeSelectionState()
-
-        let osisBookId = osisBookId(for: currentBook)
-        guard let range = currentChapterOrdinalRange() else {
-            logger.error("Failed to resolve My Notes chapter range for \(self.currentBook, privacy: .public) \(self.currentChapter)")
-            return
-        }
-        let verseCount = range.verseCount
-
-        // Get bookmarks with notes for this chapter
-        let bookmarks = currentChapterMyNotesBookmarks()
-
-        let verseRange = "\(currentBook) \(currentChapter):1-\(verseCount)"
-        let docId = "\(osisBookId).\(currentChapter).1-\(osisBookId).\(currentChapter).\(verseCount)"
-
-        let document = MyNotesDocumentPayload(
-            id: docId,
-            type: "notes",
-            bookmarks: bookmarks.map { buildBookmarkJSONForMyNotes($0) },
-            verseRange: verseRange,
-            ordinalRange: [range.start, range.end]
+        annotationDocumentLoader().loadMyNotesDocument(
+            currentBook: currentBook,
+            currentChapter: currentChapter,
+            osisBookId: osisBookId(for: currentBook),
+            jumpToOrdinal: jumpToOrdinal,
+            chapterRange: { [weak self] in self?.currentChapterOrdinalRange() },
+            bookmarks: { [weak self] in self?.currentChapterMyNotesBookmarks() ?? [] },
+            bookmarkPayload: { [self] bookmark in buildBookmarkJSONForMyNotes(bookmark) },
+            prepareVisibleState: { [weak self] in
+                self?.showingMyNotes = true
+                self?.showingStudyPad = false
+                self?.activeStudyPadLabelId = nil
+                self?.activeStudyPadLabelName = nil
+                self?.editingInWebView = false
+                self?.clearNativeSelectionState()
+            }
         )
-
-        // Send to Vue.js using the same sequence as loadCurrentChapter
-        bridge.emit(event: "clear_document")
-        sendLabelsToVueJS()
-        bridge.emit(event: "add_documents", data: document)
-        bridge.emit(
-            event: "setup_content",
-            data: ReaderSetupContentPayload(jumpToOrdinal: jumpToOrdinal)
-        )
-
-        setRenderedContentState(
-            category: .bible,
-            moduleName: "My Notes",
-            book: "My Notes",
-            chapter: currentChapter,
-            key: docId
-        )
-
-        myNotesMutationRevision += 1
     }
 
     /**
@@ -3820,36 +3791,53 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      target/memorized controls.
      */
     private func loadMemorizeDocument(bookInitials: String, startOrdinal: Int, endOrdinal: Int) {
-        guard clientReady,
-              let document = buildMemorizeDocumentJSON(
+        guard clientReady else { return }
+        annotationDocumentLoader().loadMemorizeDocument(
+            request: MemorizeDocumentRequest(
                 bookInitials: bookInitials,
                 startOrdinal: startOrdinal,
-                endOrdinal: endOrdinal
-              ) else {
-            return
-        }
-
-        showingMyNotes = false
-        showingStudyPad = false
-        activeStudyPadLabelId = nil
-        activeStudyPadLabelName = nil
-        editingInWebView = false
-        clearNativeSelectionState()
-
-        bridge.emit(event: "clear_document")
-        bridge.emit(event: "add_documents", data: document)
-        bridge.emit(event: "setup_content", data: """
-        {"jumpToOrdinal":null,"jumpToAnchor":null,"jumpToId":null,"topOffset":0,"bottomOffset":0}
-        """)
-        setRenderedContentState(
-            category: .bible,
-            moduleName: activeModuleName,
-            book: "Memorize",
-            chapter: currentChapter,
-            key: "memorize:\(bookInitials):\(startOrdinal)-\(endOrdinal)"
+                endOrdinal: endOrdinal,
+                activeModuleName: activeModuleName,
+                currentBook: currentBook,
+                currentChapter: currentChapter,
+                osisBookId: osisBookId(for: currentBook),
+                activeModule: activeModule,
+                verseReference: { [weak self] book, ordinal in
+                    self?.verseReference(book: book, ordinal: ordinal)
+                },
+                parseVerseKey: { [weak self] key in
+                    self?.parseVerseKey(key)
+                },
+                placeholderVerseText: { book, chapter, verse in
+                    Self.placeholderVerseText(book: book, chapter: chapter, verse: verse)
+                },
+                memorizedOrdinals: { [memorizationProgressStore] bookInitials, startOrdinal, endOrdinal in
+                    memorizationProgressStore?.memorizedOrdinals(
+                        bookInitials: bookInitials,
+                        startOrdinal: startOrdinal,
+                        endOrdinal: endOrdinal
+                    ) ?? []
+                },
+                targetOrdinals: { [memorizationProgressStore] bookInitials, startOrdinal, endOrdinal in
+                    memorizationProgressStore?.targetOrdinals(
+                        bookInitials: bookInitials,
+                        startOrdinal: startOrdinal,
+                        endOrdinal: endOrdinal
+                    ) ?? []
+                },
+                readingProgressSettings: { [progressBridgeCoordinator] in
+                    progressBridgeCoordinator.readingProgressSettingsPayload()
+                }
+            ),
+            prepareVisibleState: { [weak self] in
+                self?.showingMyNotes = false
+                self?.showingStudyPad = false
+                self?.activeStudyPadLabelId = nil
+                self?.activeStudyPadLabelName = nil
+                self?.editingInWebView = false
+                self?.clearNativeSelectionState()
+            }
         )
-        bridge.clearSelection()
-        applyNightModeBackground()
     }
 
     /// Return from My Notes to the Bible text view.
@@ -3861,60 +3849,25 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
     /// Load a StudyPad document for a label into the WebView.
     public func loadStudyPadDocument(labelId: UUID, bookmarkId: UUID? = nil) {
-        guard clientReady, let service = bookmarkService else { return }
-        guard let label = service.label(id: labelId) else {
-            logger.warning("loadStudyPadDocument: label not found for \(labelId)")
-            return
-        }
-        guard let labelData = buildLabelData(label) else {
-            logger.warning("loadStudyPadDocument: label deleted before serialization for \(labelId)")
-            return
-        }
-
-        showingMyNotes = false
-        showingStudyPad = true
-        activeStudyPadLabelId = labelId
-        activeStudyPadLabelName = label.name
-        editingInWebView = false
-        clearNativeSelectionState()
-
-        // Fetch all data for this StudyPad
-        let bibleBookmarks = service.bibleBookmarks(withLabel: labelId)
-        let genericBookmarks = service.genericBookmarks(withLabel: labelId)
-        let bibleBtls = service.bibleBookmarkToLabels(labelId: labelId)
-        let genericBtls = service.genericBookmarkToLabels(labelId: labelId)
-        let entries = service.studyPadEntries(labelId: labelId)
-
-        let document = StudyPadDocumentPayload(
-            id: "journal_\(labelId.uuidString)",
-            type: "journal",
-            label: labelData,
-            bookmarks: bibleBookmarks.map { buildBookmarkJSONForStudyPad($0) },
-            genericBookmarks: genericBookmarks.map { buildGenericBookmarkJSONForStudyPad($0) },
-            bookmarkToLabels: bibleBtls.compactMap { buildBibleBookmarkToLabelJSON($0) },
-            genericBookmarkToLabels: genericBtls.compactMap { buildGenericBookmarkToLabelJSON($0) },
-            journalTextEntries: entries.map { buildStudyPadEntryJSON($0) }
+        guard clientReady else { return }
+        annotationDocumentLoader().loadStudyPadDocument(
+            labelId: labelId,
+            bookmarkId: bookmarkId,
+            labelPayload: { [self] label in buildLabelData(label) },
+            bookmarkPayload: { [self] bookmark in buildBookmarkJSONForStudyPad(bookmark) },
+            genericBookmarkPayload: { [self] bookmark in buildGenericBookmarkJSONForStudyPad(bookmark) },
+            bibleBookmarkToLabelPayload: { [self] relation in buildBibleBookmarkToLabelJSON(relation) },
+            genericBookmarkToLabelPayload: { [self] relation in buildGenericBookmarkToLabelJSON(relation) },
+            studyPadEntryPayload: { [self] entry in buildStudyPadEntryJSON(entry) },
+            prepareVisibleState: { [weak self] labelName in
+                self?.showingMyNotes = false
+                self?.showingStudyPad = true
+                self?.activeStudyPadLabelId = labelId
+                self?.activeStudyPadLabelName = labelName
+                self?.editingInWebView = false
+                self?.clearNativeSelectionState()
+            }
         )
-
-        // Send to Vue.js
-        bridge.emit(event: "clear_document")
-        sendLabelsToVueJS()
-        bridge.emit(event: "add_documents", data: document)
-
-        // Setup content with optional jump target
-        bridge.emit(
-            event: "setup_content",
-            data: ReaderSetupContentPayload(jumpToId: bookmarkId?.uuidString)
-        )
-
-        setRenderedContentState(
-            category: .bible,
-            moduleName: "StudyPad",
-            book: label.name,
-            key: "journal_\(labelId.uuidString)"
-        )
-
-        applyNightModeBackground()
     }
 
     /// Return from StudyPad to the Bible text view.
@@ -4674,118 +4627,6 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         return text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private func buildMemorizeDocumentJSON(
-        bookInitials: String,
-        startOrdinal: Int,
-        endOrdinal: Int
-    ) -> String? {
-        let textItems = memorizeTextItems(startOrdinal: startOrdinal, endOrdinal: endOrdinal)
-        guard !textItems.isEmpty else { return nil }
-
-        let document: [String: Any] = [
-            "id": "memorize-\(bookInitials)-\(startOrdinal)-\(endOrdinal)",
-            "type": "memorize",
-            "title": memorizeReferenceTitle(startOrdinal: startOrdinal, endOrdinal: endOrdinal),
-            "texts": textItems,
-            "state": [
-                "memorize": [
-                    "mode": "blur",
-                    "modeConfig": [String: Any](),
-                ] as [String: Any],
-            ] as [String: Any],
-            "bookInitials": bookInitials,
-            "v11n": "KJVA",
-            "osisRef": memorizeOsisRef(startOrdinal: startOrdinal, endOrdinal: endOrdinal),
-            "startOrdinal": startOrdinal,
-            "endOrdinal": endOrdinal,
-            "memorizedOrdinals": memorizationProgressStore?.memorizedOrdinals(
-                bookInitials: bookInitials,
-                startOrdinal: startOrdinal,
-                endOrdinal: endOrdinal
-            ) ?? [],
-            "targetOrdinals": memorizationProgressStore?.targetOrdinals(
-                bookInitials: bookInitials,
-                startOrdinal: startOrdinal,
-                endOrdinal: endOrdinal
-            ) ?? [],
-            "readingProgressSettings": progressBridgeCoordinator.readingProgressSettingsPayload(),
-        ]
-
-        guard JSONSerialization.isValidJSONObject(document),
-              let data = try? JSONSerialization.data(withJSONObject: document, options: [.sortedKeys]),
-              let json = String(data: data, encoding: .utf8) else {
-            logger.error("Failed to serialize Memorize document JSON")
-            return nil
-        }
-        return json
-    }
-
-    private func memorizeTextItems(startOrdinal: Int, endOrdinal: Int) -> [[String: String]] {
-        guard let startVerse = ordinalToVerse(startOrdinal),
-              let endVerse = ordinalToVerse(endOrdinal),
-              startVerse <= endVerse else {
-            return []
-        }
-
-        let osisBookId = osisBookId(for: currentBook)
-        let chapter = currentChapter
-
-        guard let module = activeModule else {
-            let verseCount = Self.verseCount(for: currentBook, chapter: chapter)
-            let boundedEndVerse = min(endVerse, verseCount)
-            guard startVerse <= boundedEndVerse else { return [] }
-            return (startVerse...boundedEndVerse).map { verse in
-                [
-                    "key": "\(osisBookId).\(chapter).\(verse)",
-                    "text": Self.placeholderVerseText(book: currentBook, chapter: chapter, verse: verse),
-                ]
-            }
-        }
-
-        module.setKey("\(osisBookId) \(chapter):1")
-        var items: [[String: String]] = []
-
-        while true {
-            let key = module.currentKey()
-            guard let (_, parsedChapter, parsedVerse) = parseVerseKey(key) else { break }
-            if parsedChapter != chapter { break }
-
-            if parsedVerse >= startVerse && parsedVerse <= endVerse {
-                let verseText = module.stripText().trimmingCharacters(in: .whitespacesAndNewlines)
-                if !verseText.isEmpty {
-                    items.append([
-                        "key": "\(osisBookId).\(chapter).\(parsedVerse)",
-                        "text": verseText,
-                    ])
-                }
-            }
-            if parsedVerse > endVerse { break }
-            if !module.next() { break }
-        }
-
-        return items
-    }
-
-    private func memorizeReferenceTitle(startOrdinal: Int, endOrdinal: Int) -> String {
-        guard let startVerse = ordinalToVerse(startOrdinal),
-              let endVerse = ordinalToVerse(endOrdinal) else {
-            return "\(currentBook) \(currentChapter)"
-        }
-        let verseSuffix = startVerse == endVerse ? "\(startVerse)" : "\(startVerse)-\(endVerse)"
-        return "\(currentBook) \(currentChapter):\(verseSuffix)"
-    }
-
-    private func memorizeOsisRef(startOrdinal: Int, endOrdinal: Int) -> String {
-        let osisBookId = osisBookId(for: currentBook)
-        guard let startVerse = ordinalToVerse(startOrdinal),
-              let endVerse = ordinalToVerse(endOrdinal) else {
-            return "\(osisBookId).\(currentChapter)"
-        }
-        let startRef = "\(osisBookId).\(currentChapter).\(startVerse)"
-        let endRef = "\(osisBookId).\(currentChapter).\(endVerse)"
-        return startVerse == endVerse ? startRef : "\(startRef)-\(endRef)"
-    }
-
     // MARK: - Content Loading
 
     /**
@@ -5235,6 +5076,48 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             logger.error("Failed to parse saved bridge state JSON: \(error.localizedDescription, privacy: .public)")
             return nil
         }
+    }
+
+    // MARK: - Annotation Document Loader
+
+    /**
+     Builds the loader for Android-style My Notes, StudyPad, and Memorize fake documents.
+
+     The controller keeps visible pane state and public entry points. The loader owns document
+     payload assembly and bridge emission order so annotation document rendering does not remain
+     embedded in the controller's bridge delegate surface.
+
+     - Returns: Loader bound to this pane's bridge and controller state callbacks.
+     - Side effects: None during construction; supplied closures may emit bridge events and mutate
+       rendered-content state when loader methods are invoked.
+     - Failure modes: None during construction.
+     */
+    private func annotationDocumentLoader() -> BibleReaderAnnotationDocumentLoader {
+        BibleReaderAnnotationDocumentLoader(
+            bridge: bridge,
+            bookmarkService: bookmarkService,
+            sendLabels: { [weak self] in
+                self?.sendLabelsToVueJS()
+            },
+            setRenderedContentState: { [weak self] category, moduleName, book, chapter, key in
+                self?.setRenderedContentState(
+                    category: category,
+                    moduleName: moduleName,
+                    book: book,
+                    chapter: chapter,
+                    key: key
+                )
+            },
+            incrementMyNotesRevision: { [weak self] in
+                self?.myNotesMutationRevision += 1
+            },
+            applyNightModeBackground: { [weak self] in
+                self?.applyNightModeBackground()
+            },
+            clearSelection: { [weak self] in
+                self?.bridge.clearSelection()
+            }
+        )
     }
 
     // MARK: - Annotation Bridge Coordinator
