@@ -2417,7 +2417,7 @@ public struct ModuleBrowserView: View {
                 recommendedDocuments: repository.loadCachedRecommendedDocuments(),
                 badDocuments: repository.loadCachedBadDocuments(),
                 defaultDocuments: repository.loadCachedDefaultDocuments(),
-                installedModules: (manager?.installedModules() ?? []) + repository.loadInstalledMyBibleModules(),
+                installedModules: manager?.installedModules() ?? [],
                 cachedModules: cachedModules,
                 shouldRefreshCatalogs: Self.shouldAutoRefreshCatalogs(
                     sources: sources,
@@ -2476,7 +2476,7 @@ public struct ModuleBrowserView: View {
             swordManager = mgr
         }
         guard let mgr = swordManager else { return }
-        installedModules = mgr.installedModules() + repository.loadInstalledMyBibleModules()
+        installedModules = mgr.installedModules()
     }
 
     /**

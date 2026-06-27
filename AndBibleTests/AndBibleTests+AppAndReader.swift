@@ -183,8 +183,17 @@ extension AndBibleTests {
         )
     }
 
-    func testTextDisplayAppDefaultsStartWithStrongsDisabled() {
+    func testTextDisplayAppDefaultsUseAndroidHiddenLinksStrongsMode() {
         XCTAssertEqual(TextDisplaySettings.appDefaults.strongsMode, 0)
+    }
+
+    func testReaderDisplayConfigNormalizesLegacyStrongsModeToAndroidHiddenLinks() {
+        var settings = TextDisplaySettings()
+        settings.strongsMode = 3
+
+        let config = BibleReaderDisplayConfig(settings: settings, defaults: .appDefaults)
+
+        XCTAssertEqual(config.strongsMode, StrongsMode.hiddenLinks.rawValue)
     }
 
     func testTextDisplaySettingsInheritanceUsesGlobalBeforeDefaults() {
@@ -320,9 +329,10 @@ extension AndBibleTests {
 
      Android applies reader display settings through JSword filters; iOS mirrors those options with
      SWORD global options. The setup collaborator must keep the always-on heading/red-letter base
-     configuration and the setting-driven Strong's, morphology, footnote, and cross-reference
-     toggles together so future controller refactors cannot silently stop applying display changes
-     to the SWORD manager.
+     configuration and the setting-driven morphology, footnote, and cross-reference toggles
+     together so future controller refactors cannot silently stop applying display changes to the
+     SWORD manager. Android's Strong's mode `0` is "Hidden Links", not "off", so the SWORD layer
+     must keep lemma output enabled while Vue decides whether to draw the underline.
      */
     func testReaderSwordCoordinatorAppliesBaseAndDisplayGlobalOptions() throws {
         let modulePath = try makeTemporaryBundledSwordPath()
@@ -358,7 +368,7 @@ extension AndBibleTests {
         settings.showXrefs = false
         BibleReaderSwordCoordinator().applyDisplayOptions(to: manager, settings: settings)
 
-        XCTAssertFalse(manager.isGlobalOptionEnabled(.strongsNumbers))
+        XCTAssertTrue(manager.isGlobalOptionEnabled(.strongsNumbers))
         XCTAssertFalse(manager.isGlobalOptionEnabled(.morphology))
         XCTAssertFalse(manager.isGlobalOptionEnabled(.footnotes))
         XCTAssertFalse(manager.isGlobalOptionEnabled(.crossReferences))
@@ -463,7 +473,7 @@ extension AndBibleTests {
             preferredSingleAccessory: .search,
             moduleHasStrongs: true,
             strongsIconAssetName: "ToolbarStrongsHebrewLinks",
-            strongsMode: StrongsMode.inline.rawValue,
+            strongsMode: StrongsMode.links.rawValue,
             strongsEnabled: true,
             isBibleActive: true,
             isCommentaryActive: false,

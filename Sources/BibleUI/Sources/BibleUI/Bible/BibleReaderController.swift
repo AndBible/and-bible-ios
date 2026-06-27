@@ -4897,10 +4897,13 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
     /**
      Load chapter text from the active SWORD module.
+     Reapplies the pane's current SWORD display options immediately before raw entry extraction
+     because controllers can share a manager whose global filter state is mutable.
      Returns (xml, verseCount) or nil if no module is available.
      */
     private func loadChapterFromSword(osisBookId: String, chapter: Int) -> BibleChapterDocumentBuilder.LoadedChapterContent? {
         guard let module = activeModule else { return nil }
+        applySwordOptions()
         let builder = BibleChapterDocumentBuilder(
             module: module,
             includeHeadings: shouldIncludeSwordHeadings()

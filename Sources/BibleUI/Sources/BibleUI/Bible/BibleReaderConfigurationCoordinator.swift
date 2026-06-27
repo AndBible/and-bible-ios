@@ -319,7 +319,8 @@ struct BibleReaderDisplayConfig: Encodable, Equatable {
         self.showAnnotations = true
         self.showChapterNumbers = true
         self.showVerseNumbers = s.showVerseNumbers ?? d.showVerseNumbers ?? true
-        self.strongsMode = s.strongsMode ?? d.strongsMode ?? 0
+        let rawStrongsMode = s.strongsMode ?? d.strongsMode ?? 0
+        self.strongsMode = StrongsMode(rawValue: rawStrongsMode)?.rawValue ?? StrongsMode.hiddenLinks.rawValue
         self.showMorphology = s.showMorphology ?? d.showMorphology ?? false
         self.showRedLetters = s.showRedLetters ?? d.showRedLetters ?? true
         self.showVersePerLine = s.showVersePerLine ?? d.showVersePerLine ?? false

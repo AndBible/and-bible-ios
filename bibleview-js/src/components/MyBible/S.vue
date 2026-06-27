@@ -24,7 +24,6 @@
 <script setup lang="ts">
 
 import {computed, inject, ref} from "vue";
-import {strongsModes} from "@/composables/config";
 import {useCommon} from "@/composables";
 import {buildStrongsLinkFromDisplayValue} from "@/composables/strongs-links";
 import {addEventFunction, EventPriorities, navigateLink} from "@/utils";
@@ -41,10 +40,10 @@ const link = computed(() => {
     const strongsNum = slot.value.innerText
     return buildStrongsLinkFromDisplayValue(letter, strongsNum)
 });
-const {config, strings} = useCommon();
+const {strings} = useCommon();
 
 const exportMode = inject(exportModeKey, ref(false));
-const showStrongs = computed(() => !exportMode.value && config.strongsMode !== strongsModes.off);
+const showStrongs = computed(() => !exportMode.value);
 
 function openLink(event: MouseEvent) {
     addEventFunction(event, () => {

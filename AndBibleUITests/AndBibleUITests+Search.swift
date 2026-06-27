@@ -179,7 +179,7 @@ extension AndBibleUITests {
 
         addWindowTab(expectingOrder: 1, in: app, timeout: 15)
         let paneMenu = requireElement("windowPaneMenuButton::1", in: app, timeout: 10)
-        tapElementReliably(paneMenu, timeout: 10)
+        openPaneMenu(paneMenu, in: app, timeout: 10)
         let textOptionsSubmenu = requirePaneMenuItem("windowPaneMenuItem::textOptions", in: app, timeout: 10)
         tapElementReliably(textOptionsSubmenu, timeout: 10)
         let allTextOptionsAction = requirePaneMenuItem("windowPaneMenuItem::allTextOptions", in: app, timeout: 10)
@@ -217,7 +217,7 @@ extension AndBibleUITests {
         app.launch()
 
         addWindowTab(expectingOrder: 1, in: app, timeout: 15)
-        tapElementReliably(requireElement("windowPaneMenuButton::1", in: app, timeout: 10), timeout: 10)
+        openPaneMenu(requireElement("windowPaneMenuButton::1", in: app, timeout: 10), in: app, timeout: 10)
         tapElementReliably(
             requirePaneMenuItem("windowPaneMenuItem::close", in: app, timeout: 12),
             timeout: 10
@@ -232,6 +232,50 @@ extension AndBibleUITests {
         XCTAssertFalse(finalState.contains("windowOrder=none"), "Expected an active reader window after Close; state=\(finalState)")
         XCTAssertTrue(requireElement("windowPaneMenuButton::0", in: app, timeout: 10).exists)
         XCTAssertTrue(requireElement("windowTabAddButton", in: app, timeout: 10).exists)
+    }
+
+    /**
+     Opens the Android-style pane popup menu and waits until its custom SwiftUI surface is visible.
+
+     CI can accept the tap on the small pane hamburger while SwiftUI still drops the presentation
+     transaction under load. This helper keeps the test anchored on the real user affordance by
+     retrying the pane-menu button only until the actual popup container appears.
+     *
+     * - Parameters:
+     *   - paneMenu: The pane hamburger button already resolved by accessibility identifier.
+     *   - app: Running application under test.
+     *   - timeout: Maximum time to retry the button/popup handshake.
+     *   - file: Source file used for XCTest failure attribution.
+     *   - line: Source line used for XCTest failure attribution.
+     * - Side effects: taps the pane hamburger button and polls the live accessibility hierarchy.
+     * - Failure modes: records an XCTest failure when the popup surface never appears.
+     */
+    private func openPaneMenu(
+        _ paneMenu: XCUIElement,
+        in app: XCUIApplication,
+        timeout: TimeInterval = 10,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            if resolvedPaneMenuSurface(in: app) != nil {
+                return
+            }
+
+            _ = tapElementIfPossible(paneMenu, timeout: 1)
+            if waitForPaneMenuSurface(in: app, timeout: 0.8) {
+                return
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        } while Date() < deadline
+
+        XCTAssertTrue(
+            resolvedPaneMenuSurface(in: app) != nil,
+            "Expected pane menu surface to appear within \(timeout) seconds.",
+            file: file,
+            line: line
+        )
     }
 
     /**
@@ -261,14 +305,8 @@ extension AndBibleUITests {
                 return item
             }
 
-            let menuScrollView = app.scrollViews["windowPaneMenu"].firstMatch
-            if elementHasUsableFrame(menuScrollView) {
-                menuScrollView.swipeUp()
-            } else if let menuSurface = resolvedElement("windowPaneMenu", in: app),
-                      elementHasUsableFrame(menuSurface) {
+            if let menuSurface = resolvedPaneMenuSurface(in: app) {
                 menuSurface.swipeUp()
-            } else {
-                app.swipeUp()
             }
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         } while Date() < deadline
@@ -296,7 +334,54 @@ extension AndBibleUITests {
             menuScrollView.otherElements[identifier].firstMatch,
             app.otherElements[identifier].firstMatch,
         ]
-        return candidates.first(where: { isElementHittable($0) })
+        return candidates.first(where: { elementHasUsableFrame($0) })
+    }
+
+    /**
+     Polls for the custom pane menu surface without recording an assertion failure.
+
+     - Parameters:
+     *   - app: Running application under test.
+     *   - timeout: Maximum time to wait for any accessibility surface that represents the popup.
+     * - Returns: `true` when a usable popup container appears before the timeout.
+     * - Side effects: repeatedly queries the live accessibility hierarchy.
+     * - Failure modes: This helper cannot fail directly.
+     */
+    private func waitForPaneMenuSurface(
+        in app: XCUIApplication,
+        timeout: TimeInterval
+    ) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            if resolvedPaneMenuSurface(in: app) != nil {
+                return true
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        } while Date() < deadline
+
+        return resolvedPaneMenuSurface(in: app) != nil
+    }
+
+    /**
+     Resolves the SwiftUI accessibility surface for the Android-style pane popup menu.
+
+     SwiftUI can expose the same custom menu as a scroll view, other element, or button depending
+     on the OS/XCTest runtime. The helper accepts any candidate with a usable frame so tests can
+     scroll or verify the real popup surface without depending on one platform-specific element
+     type.
+     *
+     * - Parameter app: Running application under test.
+     * - Returns: The first usable popup container, or `nil` when the menu is not visible.
+     * - Side effects: queries the live accessibility hierarchy only.
+     * - Failure modes: This helper cannot fail directly.
+     */
+    private func resolvedPaneMenuSurface(in app: XCUIApplication) -> XCUIElement? {
+        let candidates = [
+            app.scrollViews["windowPaneMenu"].firstMatch,
+            app.otherElements["windowPaneMenu"].firstMatch,
+            app.buttons["windowPaneMenu"].firstMatch,
+        ]
+        return candidates.first(where: { elementHasUsableFrame($0) })
     }
 
     /**

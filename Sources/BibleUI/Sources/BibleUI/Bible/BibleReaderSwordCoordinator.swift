@@ -200,10 +200,9 @@ struct BibleReaderSwordCoordinator {
         settings: TextDisplaySettings,
         defaults: TextDisplaySettings = .appDefaults
     ) {
-        let strongsOn = (settings.strongsMode ?? defaults.strongsMode ?? 0) > 0
         let xrefsOn = settings.showXrefs ?? defaults.showXrefs ?? false
         let footnotesOn = settings.showFootNotes ?? defaults.showFootNotes ?? false
-        manager.setGlobalOption(.strongsNumbers, enabled: strongsOn)
+        manager.setGlobalOption(.strongsNumbers, enabled: true)
         manager.setGlobalOption(.morphology, enabled: settings.showMorphology ?? defaults.showMorphology ?? false)
         manager.setGlobalOption(.footnotes, enabled: footnotesOn)
         manager.setGlobalOption(.crossReferences, enabled: xrefsOn)

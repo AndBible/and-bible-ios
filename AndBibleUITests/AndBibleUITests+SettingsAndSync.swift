@@ -397,7 +397,7 @@ extension AndBibleUITests {
         waitForLabelManagerState(notContaining: labelManagerRowStateToken(originalName), in: app, timeout: 10)
         waitForLabelManagerState(containing: labelManagerRowStateToken(renamedName), in: app, timeout: 10)
         let renamedRowToDelete = requireLabelRow(named: renamedName, in: app, timeout: 10)
-        renamedRowToDelete.swipeLeft()
+        revealTrailingSwipeAction("labelManagerDeleteAction", for: renamedRowToDelete, in: app, timeout: 10)
         tapElementReliably(requireElement("labelManagerDeleteAction", in: app, timeout: 10), timeout: 10)
         waitForLabelManagerState(notContaining: labelManagerRowStateToken(renamedName), in: app, timeout: 10)
     }

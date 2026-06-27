@@ -3348,12 +3348,12 @@ public struct BibleReaderView: View {
     /// Android vector resource name for the current Strong's testament/mode combination.
     private var strongsIconAssetName: String {
         let isNT = isCurrentBookNewTestament
-        switch StrongsMode(rawValue: displaySettings.strongsMode ?? 0) ?? .off {
-        case .inline:
-            return isNT ? "ToolbarStrongsGreekLinks" : "ToolbarStrongsHebrewLinks"
+        switch StrongsMode(rawValue: displaySettings.strongsMode ?? 0) ?? .hiddenLinks {
         case .links:
+            return isNT ? "ToolbarStrongsGreekLinks" : "ToolbarStrongsHebrewLinks"
+        case .textAndLinks:
             return isNT ? "ToolbarStrongsGreekLinksText" : "ToolbarStrongsHebrewLinksText"
-        case .off, .hidden:
+        case .hiddenLinks:
             return isNT ? "ToolbarStrongsGreek" : "ToolbarStrongsHebrew"
         }
     }
@@ -3479,7 +3479,7 @@ public struct BibleReaderView: View {
         .anchorPreference(key: ReaderOverflowButtonBoundsPreferenceKey.self, value: .bounds) { $0 }
     }
 
-    /// Whether Strong's numbers are currently enabled (strongsMode > 0).
+    /// Whether Strong's numbers should use Android's fully-bright toolbar state.
     private var strongsEnabled: Bool {
         (displaySettings.strongsMode ?? 0) > 0
     }
@@ -3505,7 +3505,7 @@ public struct BibleReaderView: View {
     /**
      Applies a Strong's display mode to the active window only and refreshes that pane.
 
-     - Parameter mode: Raw Vue.js/config mode value (`0...3`) matching `StrongsMode`.
+     - Parameter mode: Raw Vue.js/config mode value (`0...2`) matching Android `strongsModeEntries`.
      - Side effects: Persists the updated Strong's mode through the window-scope settings helper,
        refreshes the active pane controller, and re-syncs focused toolbar state.
      - Failure modes: If no active window or page manager exists, the persistence helper performs
@@ -3519,7 +3519,7 @@ public struct BibleReaderView: View {
      Applies a Strong's display mode to a specific window and refreshes that pane.
 
      - Parameters:
-       - mode: Raw Vue.js/config mode value (`0...3`) matching `StrongsMode`.
+       - mode: Raw Vue.js/config mode value (`0...2`) matching Android `strongsModeEntries`.
        - window: Pane whose window-scoped settings should be changed.
      - Side effects: Persists the updated Strong's mode through the window-scope settings helper and
        refreshes the affected pane.
@@ -4528,20 +4528,17 @@ private extension View {
 /**
  Strong's number display modes matching Android's `strongsModeEntries`.
 
- Vue.js config values: off=`0`, inline=`1`, links=`2`, hidden=`3`.
+ Vue.js config values: hidden links=`0`, links=`1`, text and links=`2`.
  */
 enum StrongsMode: Int, CaseIterable, Identifiable {
-    /// Hide Strong's numbers entirely.
-    case off = 0
+    /// Keep Strong's links tappable while hiding visible markers/underlines.
+    case hiddenLinks = 0
 
-    /// Render Strong's numbers inline in the verse text.
-    case inline = 1
+    /// Render words as tappable underlined Strong's links.
+    case links = 1
 
-    /// Render Strong's numbers as tappable links only.
-    case links = 2
-
-    /// Keep Strong's data available while suppressing visible markers in the text flow.
-    case hidden = 3
+    /// Render Strong's text next to linked words.
+    case textAndLinks = 2
 
     /// Stable raw-value identifier for `ForEach` and menu construction.
     var id: Int { rawValue }
@@ -4549,10 +4546,9 @@ enum StrongsMode: Int, CaseIterable, Identifiable {
     /// Localized label shown in the Strong's display-mode menu.
     var label: String {
         switch self {
-        case .off: String(localized: "strongs_off")
-        case .inline: String(localized: "strongs_inline")
+        case .hiddenLinks: String(localized: "strongs_hidden")
         case .links: String(localized: "strongs_links")
-        case .hidden: String(localized: "strongs_hidden")
+        case .textAndLinks: String(localized: "strongs_inline")
         }
     }
 }

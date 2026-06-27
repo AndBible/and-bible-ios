@@ -23,8 +23,8 @@ import {Deferred, setupWindowEventListener} from "@/utils";
 import {BibleViewDocumentType, ReadingProgressSettings} from "@/types/documents";
 import type {TextContentType} from "@/types/client-objects";
 
-export type StrongsMode = 0 | 1 | 2 | 3
-export const strongsModes: Record<string, StrongsMode> = {off: 0, inline: 1, links: 2, hidden: 3}
+export type StrongsMode = 0 | 1 | 2
+export const strongsModes: Record<string, StrongsMode> = {hidden: 0, inline: 1, links: 2}
 
 export let errorBox = false;
 export const white = -1;
@@ -150,7 +150,7 @@ export function useConfig(documentType: Ref<BibleViewDocumentType>) {
         showAnnotations: true,
         showChapterNumbers: true,
         showVerseNumbers: true,
-        strongsMode: strongsModes.off,
+        strongsMode: strongsModes.hidden,
         showMorphology: false,
         showRedLetters: false,
         showVersePerLine: false,
