@@ -5145,7 +5145,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             currentBook: currentBook,
             activeModuleName: activeModuleName,
             activeModule: activeModule,
-            bookList: bookList,
+            bookCatalog: bookCatalog,
             unlabeledLabelID: Self.unlabeledLabelId
         )
     }
