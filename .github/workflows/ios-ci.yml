@@ -131,6 +131,149 @@ jobs:
       - name: Run SETPAR-603 guardrails
         run: python3 scripts/check_settings_localization_guardrails.py
 
+  ios-swordkit-package-tests:
+    name: SwordKit Package Tests (Simulator)
+    runs-on: ${{ needs.repo-standards.outputs.required_checks_only == 'true' && 'ubuntu-latest' || 'macos-15' }}
+    needs:
+      - repo-standards
+      - localization-guardrails
+    timeout-minutes: 30
+    env:
+      DERIVED_DATA_PATH: .derivedData/SwordKitPackageTests
+      TEST_XCRESULT_BUNDLE_PATH: .artifacts/SwordKitTests-package.xcresult
+    steps:
+      - name: Required-checks-only pass
+        if: needs.repo-standards.outputs.required_checks_only == 'true'
+        run: echo "Required-checks-only change set; SwordKit package tests are not required."
+
+      - name: Checkout
+        if: needs.repo-standards.outputs.required_checks_only != 'true'
+        uses: actions/checkout@v6
+
+      - name: Select Xcode version
+        if: needs.repo-standards.outputs.required_checks_only != 'true'
+        uses: maxim-lobanov/setup-xcode@v1.6.0
+        with:
+          xcode-version: ${{ env.XCODE_VERSION }}
+
+      - name: Restore SwiftPM and build caches
+        if: needs.repo-standards.outputs.required_checks_only != 'true'
+        uses: actions/cache@v5
+        with:
+          path: |
+            .derivedData/SwordKitPackageTests/SourcePackages
+            ~/Library/Caches/org.swift.swiftpm
+            ~/.swiftpm
+          key: ${{ runner.os }}-xcode-${{ env.XCODE_VERSION }}-swordkit-package-${{ hashFiles('Package.swift', 'Sources/SwordKit/**', 'libsword/build-ios.sh') }}
+          restore-keys: |
+            ${{ runner.os }}-xcode-${{ env.XCODE_VERSION }}-swordkit-package-
+
+      - name: Restore libsword build cache
+        if: needs.repo-standards.outputs.required_checks_only != 'true'
+        uses: actions/cache@v5
+        with:
+          path: |
+            libsword/sword-src
+            libsword/build
+            libsword/libsword.xcframework
+          key: ${{ runner.os }}-xcode-${{ env.XCODE_VERSION }}-libsword-iosonly-${{ hashFiles('libsword/build-ios.sh') }}
+          restore-keys: |
+            ${{ runner.os }}-xcode-${{ env.XCODE_VERSION }}-libsword-iosonly-
+
+      - name: Show Xcode version
+        if: needs.repo-standards.outputs.required_checks_only != 'true'
+        run: xcodebuild -version
+
+      - name: Ensure iOS simulator runtime is available
+        if: needs.repo-standards.outputs.required_checks_only != 'true'
+        run: |
+          if xcrun simctl list runtimes available | grep -Fq 'iOS '; then
+            echo "An iOS simulator runtime is already installed."
+          else
+            echo "No iOS simulator runtime was found; downloading it for the selected Xcode."
+            xcodebuild -downloadPlatform iOS
+          fi
+
+      - name: Ensure libsword build prerequisites
+        if: needs.repo-standards.outputs.required_checks_only != 'true'
+        run: |
+          if ! command -v cmake >/dev/null 2>&1; then
+            brew install cmake
+          fi
+          if ! command -v svn >/dev/null 2>&1; then
+            brew install subversion
+          fi
+
+      - name: Build libsword XCFramework
+        if: needs.repo-standards.outputs.required_checks_only != 'true'
+        working-directory: libsword
+        env:
+          INCLUDE_MACOS_SLICE: "0"
+        run: |
+          if [ -f libsword.xcframework/ios-arm64/libsword.a ] && [ -f libsword.xcframework/ios-arm64_x86_64-simulator/libsword.a ]; then
+            echo "Using cached libsword.xcframework"
+          else
+            ./build-ios.sh
+          fi
+
+      - name: Resolve iOS simulator destination
+        id: simulator
+        if: needs.repo-standards.outputs.required_checks_only != 'true'
+        run: >-
+          python3 -u scripts/resolve_ios_simulator_destination.py
+          --project AndBible.xcodeproj
+          --scheme SwordKitTests
+          --create-dedicated-device
+          --device-name-prefix "AndBible CI SwordKit"
+
+      - name: Boot selected simulator
+        if: needs.repo-standards.outputs.required_checks_only != 'true'
+        run: >-
+          python3 -u scripts/wait_for_simulator_boot.py
+          --simulator-id "${{ steps.simulator.outputs.simulator_id }}"
+          --timeout-seconds 300
+
+      - name: Run SwordKit package tests
+        if: needs.repo-standards.outputs.required_checks_only != 'true'
+        timeout-minutes: 10
+        run: |
+          mkdir -p .artifacts
+          xcodebuild test \
+            -project AndBible.xcodeproj \
+            -scheme SwordKitTests \
+            -configuration Debug \
+            -destination "${{ steps.simulator.outputs.destination }}" \
+            -derivedDataPath "${DERIVED_DATA_PATH}" \
+            -resultBundlePath "${TEST_XCRESULT_BUNDLE_PATH}" \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: Upload SwordKit package test result bundle
+        id: upload_swordkit_package_xcresult
+        if: always() && needs.repo-standards.outputs.required_checks_only != 'true'
+        continue-on-error: true
+        uses: actions/upload-artifact@v6
+        with:
+          name: andbible-xcresult-${{ github.run_id }}-swordkit-package
+          path: .artifacts/*.xcresult
+          if-no-files-found: warn
+          include-hidden-files: true
+          retention-days: 14
+
+      - name: Retry upload SwordKit package test result bundle
+        if: always() && needs.repo-standards.outputs.required_checks_only != 'true' && steps.upload_swordkit_package_xcresult.outcome == 'failure'
+        uses: actions/upload-artifact@v6
+        with:
+          name: andbible-xcresult-${{ github.run_id }}-swordkit-package
+          path: .artifacts/*.xcresult
+          if-no-files-found: warn
+          include-hidden-files: true
+          retention-days: 14
+          overwrite: true
+
+      - name: Delete dedicated simulator
+        if: always() && needs.repo-standards.outputs.required_checks_only != 'true' && steps.simulator.outputs.simulator_created == 'true'
+        run: xcrun simctl delete "${{ steps.simulator.outputs.simulator_id }}"
+
   bibleview-js:
     name: BibleView JS
     runs-on: ubuntu-latest
