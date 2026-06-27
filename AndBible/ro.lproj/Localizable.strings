@@ -68,9 +68,9 @@
 "copy" = "Copy";
 "share" = "Share";
 "strongs_off" = "Off";
-"strongs_inline" = "Inline";
+"strongs_inline" = "Text and Links";
 "strongs_links" = "Links";
-"strongs_hidden" = "Hidden";
+"strongs_hidden" = "Hidden Links";
 "add_bookmark" = "Add Bookmark";
 "edit_bookmark" = "Edit Bookmark";
 "bookmark_note" = "Note";

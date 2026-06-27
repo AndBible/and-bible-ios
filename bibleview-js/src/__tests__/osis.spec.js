@@ -257,6 +257,35 @@ describe("OsisSegment.vue", () => {
     });
 
     /**
+     * Protects Android's Strong's mode contract for the default `0` value.
+     *
+     * Android names mode `0` "Hidden Links": Strong's lemma data remains clickable, but the word is
+     * not drawn with the dotted underline. iOS must not treat `0` as an off switch or Vue cannot
+     * show the ambiguous Strong's action for hidden-link words.
+     */
+    it("keeps hidden Strong's links clickable without decorated underline", () => {
+        const wrapper = mountBibleDocument(buildBibleDocument(
+            "<div><div><verse osisID=\"Gen.1.1\" verseOrdinal=\"1\"><w lemma=\"strong:H00430\">God</w> created.</verse></div></div>",
+            {
+                key: "Gen.1",
+                keyName: "Genesis 1",
+                osisRef: "Gen.1",
+                ordinalRange: [1, 1],
+                originalOrdinalRange: [1, 1],
+            }
+        ), {
+            configure: ({config}) => {
+                config.strongsMode = 0;
+            }
+        });
+
+        expect(wrapper.find("span.link-style").exists()).toBe(false);
+        const hiddenStrongWord = wrapper.find("span.highlight-transition.has-strongs");
+        expect(hiddenStrongWord.exists()).toBe(true);
+        expect(hiddenStrongWord.text()).toContain("God");
+    });
+
+    /**
      * Protects dictionary and Strong's lookup documents from Bible-only added-word styling.
      *
      * The setup mounts shared OSIS fragments with `nonStrongsWordItalic` enabled through the same

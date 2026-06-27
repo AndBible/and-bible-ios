@@ -100,9 +100,9 @@
 
 /* Strong's Modes */
 "strongs_off" = "Off";
-"strongs_inline" = "Inline";
+"strongs_inline" = "Text and Links";
 "strongs_links" = "Links";
-"strongs_hidden" = "Hidden";
+"strongs_hidden" = "Hidden Links";
 "find_all_occurrences" = "Find all occurrences";
 "no_dictionary_installed" = "No dictionary module installed. Download Strong's Hebrew/Greek from Downloads.";
 "back_to_previous" = "Back";

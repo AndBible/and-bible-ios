@@ -66,16 +66,26 @@ public final class SwordManager: @unchecked Sendable {
 
     // MARK: - Module Listing
 
-    /// Get the number of installed modules.
+    /// Get the number of installed modules visible to Android-compatible inventory.
     public var moduleCount: Int {
-        SwordRuntime.sync {
-            Int(SWMgr_getModuleCount(handle))
-        }
+        installedModules().count
     }
 
-    /// List all installed modules.
+    /**
+     Lists all installed modules visible to Android/JSword-style book inventory.
+
+     Normal SWORD modules come from libsword. Android custom drivers restored from Android module
+     backups, such as `MyBibleDictionary`, are stored as `.conf` rows plus SQLite payloads but are
+     not opened by libsword. Manifest-installed MyBible packages are stored in iOS' sidecar package
+     directory. Android exposes both families through `Books.installed().books`; iOS mirrors that
+     inventory here by projecting readable custom modules into `ModuleInfo` rows.
+
+     - Returns: SWORD modules and readable Android custom modules, de-duplicated by initials.
+     - Side effects: Reads `mods.d` configs, sidecar metadata, and checks custom payload files.
+     - Failure modes: Malformed metadata and custom rows without readable payloads are skipped.
+     */
     public func installedModules() -> [ModuleInfo] {
-        SwordRuntime.sync {
+        let swordModules = SwordRuntime.sync {
             let count = SWMgr_getModuleCount(handle)
             var modules: [ModuleInfo] = []
             modules.reserveCapacity(Int(count))
@@ -91,6 +101,12 @@ public final class SwordManager: @unchecked Sendable {
 
             return modules
         }
+
+        return Self.mergedInstalledModules(
+            swordModules: swordModules,
+            customModules: Self.androidCustomInstalledModules(modulePath: modulePath) +
+                Self.myBiblePackageInstalledModules(modulePath: modulePath)
+        )
     }
 
     /// List installed modules filtered by category.
@@ -116,6 +132,205 @@ public final class SwordManager: @unchecked Sendable {
         let mod = SwordModule(handle: handle, modulePath: modulePath)
         moduleCache[name] = mod
         return mod
+    }
+
+    /**
+     Merges libsword modules and Android custom-driver modules using Android's initials identity.
+
+     - Parameters:
+       - swordModules: Modules enumerated by libsword.
+       - customModules: Config-projected custom modules.
+     - Returns: De-duplicated modules sorted by localized initials.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    private static func mergedInstalledModules(
+        swordModules: [ModuleInfo],
+        customModules: [ModuleInfo]
+    ) -> [ModuleInfo] {
+        var seen = Set<String>()
+        return (swordModules + customModules)
+            .filter { seen.insert($0.name).inserted }
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    /**
+     Reads Android custom-driver configs that should be visible in installed-book inventory.
+
+     - Parameter modulePath: SWORD module root containing `mods.d` and module payloads.
+     - Returns: Module metadata rows for readable custom-driver modules.
+     - Side effects: Reads local config files and checks payload existence.
+     - Failure modes: Unsupported or incomplete custom-driver rows are skipped.
+     */
+    private static func androidCustomInstalledModules(modulePath: String) -> [ModuleInfo] {
+        SwordModuleConfig.readAll(modulePath: modulePath)
+            .filter { $0.isAndroidCustomDriver && customModulePayloadExists($0, modulePath: modulePath) }
+            .map(\.moduleInfo)
+    }
+
+    /**
+     Reads iOS sidecar-installed MyBible package modules into Android-compatible inventory rows.
+
+     - Parameter modulePath: SWORD module root containing the `mybible` sidecar package directory.
+     - Returns: Readable package modules sorted by initials.
+     - Side effects: Reads `module.json` sidecars and checks extracted package payload files.
+     - Failure modes: Missing directories, malformed sidecars, and sidecars without readable payloads
+       are skipped.
+     */
+    static func myBiblePackageInstalledModules(modulePath: String) -> [ModuleInfo] {
+        let fm = FileManager.default
+        let installDirectory = URL(fileURLWithPath: modulePath, isDirectory: true)
+            .appendingPathComponent("mybible", isDirectory: true)
+        guard let entries = try? fm.contentsOfDirectory(
+            at: installDirectory,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return []
+        }
+
+        return entries.compactMap { url in
+            guard (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true else {
+                return nil
+            }
+            let metadataURL = url.appendingPathComponent("module.json")
+            guard let data = try? Data(contentsOf: metadataURL),
+                  let metadata = try? JSONDecoder().decode(InstalledMyBibleModule.self, from: data),
+                  metadata.hasReadablePayload(in: url) else {
+                return nil
+            }
+            return metadata.moduleInfo
+        }
+        .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    /**
+     Validates that a custom Android module config points at a readable local payload.
+
+     - Parameters:
+       - config: Parsed module config.
+       - modulePath: SWORD module root.
+     - Returns: `true` when the expected payload exists.
+     - Side effects: Checks file metadata on disk.
+     - Failure modes: Missing or unreadable payloads return `false`.
+     */
+    private static func customModulePayloadExists(_ config: SwordModuleConfig, modulePath: String) -> Bool {
+        let driver = config.modDrv.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+
+        switch driver {
+        case "mybiblebible", "mybiblecommentary", "mybibledictionary":
+            guard !config.dataPath.isEmpty else { return false }
+            return readablePath(
+                appending: "module.SQLite3",
+                to: config.dataPath,
+                modulePath: modulePath,
+                isDirectory: false
+            )
+        case "myswordbible", "myswordcommentary", "mysworddictionary":
+            guard !config.dataPath.isEmpty else { return false }
+            return readablePath(
+                appending: "module.mybible",
+                to: config.dataPath,
+                modulePath: modulePath,
+                isDirectory: false
+            )
+        case "eswordbible":
+            return androidDatabaseFileExists(config, modulePath: modulePath)
+        case "epubbook":
+            guard !config.dataPath.isEmpty else { return false }
+            return readablePath(config.dataPath, modulePath: modulePath, isDirectory: true)
+        default:
+            if config.values["andbiblemyswordmodule"]?.isEmpty == false ||
+                config.values["andbibleeswordmodule"]?.isEmpty == false {
+                return androidDatabaseFileExists(config, modulePath: modulePath)
+            }
+            if config.values["andbibleepubmodule"]?.isEmpty == false,
+               let epubDir = config.values["andbibleepubdir"]?.first {
+                return readablePath(epubDir, modulePath: modulePath, isDirectory: true)
+            }
+            return false
+        }
+    }
+
+    /**
+     Checks a custom Android SQLite-backed module's `AndBibleDbFile` payload.
+
+     - Parameters:
+       - config: Parsed module config with `AndBibleDbFile` metadata.
+       - modulePath: SWORD module root.
+     - Returns: `true` when the referenced database file is readable.
+     - Side effects: Checks file metadata on disk.
+     - Failure modes: Missing or unsafe paths return `false`.
+     */
+    private static func androidDatabaseFileExists(_ config: SwordModuleConfig, modulePath: String) -> Bool {
+        guard let dbFile = config.values["andbibledbfile"]?.first else { return false }
+        return readablePath(dbFile, modulePath: modulePath, isDirectory: false)
+    }
+
+    /**
+     Builds and validates a child payload path under a config `DataPath`.
+
+     - Parameters:
+       - child: Expected payload filename.
+       - dataPath: Config `DataPath` value.
+       - modulePath: SWORD module root.
+       - isDirectory: Whether the target should be checked as a directory path.
+     - Returns: `true` when the resolved payload exists under the module root and is readable.
+     - Side effects: Checks file metadata on disk.
+     - Failure modes: Empty, escaped, missing, or unreadable paths return `false`.
+     */
+    private static func readablePath(
+        appending child: String,
+        to dataPath: String,
+        modulePath: String,
+        isDirectory: Bool
+    ) -> Bool {
+        let separator = dataPath.hasSuffix("/") ? "" : "/"
+        return readablePath(
+            "\(dataPath)\(separator)\(child)",
+            modulePath: modulePath,
+            isDirectory: isDirectory
+        )
+    }
+
+    /**
+     Resolves Android custom metadata paths inside the module root.
+
+     - Parameters:
+       - rawPath: Path from Android custom metadata.
+       - modulePath: SWORD module root.
+       - isDirectory: Whether the target should be checked as a directory path.
+     - Returns: `true` when the resolved target is readable.
+     - Side effects: Checks file metadata on disk.
+     - Failure modes: Empty paths, parent-directory traversal, escaped absolute paths, and missing
+       files return `false`.
+     */
+    private static func readablePath(_ rawPath: String, modulePath: String, isDirectory: Bool) -> Bool {
+        let normalized = rawPath
+            .replacingOccurrences(of: "\\", with: "/")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty,
+              !normalized.split(separator: "/", omittingEmptySubsequences: false).contains(where: { $0 == ".." }) else {
+            return false
+        }
+
+        let rootURL = URL(fileURLWithPath: modulePath, isDirectory: true).standardizedFileURL
+        let url = normalized.hasPrefix("/")
+            ? URL(fileURLWithPath: normalized, isDirectory: isDirectory).standardizedFileURL
+            : rootURL.appendingPathComponent(normalized, isDirectory: isDirectory).standardizedFileURL
+        let rootPath = rootURL.path.hasSuffix("/") ? rootURL.path : "\(rootURL.path)/"
+        guard url.path == rootURL.path || url.path.hasPrefix(rootPath) else {
+            return false
+        }
+
+        let fm = FileManager.default
+        if isDirectory {
+            var isDirectoryValue: ObjCBool = false
+            return fm.fileExists(atPath: url.path, isDirectory: &isDirectoryValue) &&
+                isDirectoryValue.boolValue &&
+                fm.isReadableFile(atPath: url.path)
+        }
+        return fm.isReadableFile(atPath: url.path)
     }
 
     // MARK: - Global Options

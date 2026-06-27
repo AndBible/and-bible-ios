@@ -97,7 +97,7 @@ function goToLink(event: MouseEvent, url: string) {
 }
 
 const exportMode = inject(exportModeKey, ref(false));
-const showStrongs = computed(() => !exportMode.value && config.strongsMode !== strongsModes.off);
+const showStrongs = computed(() => !exportMode.value);
 const showStrongsHidden = computed(() => !exportMode.value && config.strongsMode == strongsModes.hidden);
 const showStrongsSeparately = computed(() => !exportMode.value && config.strongsMode === strongsModes.links);
 
@@ -108,10 +108,13 @@ const showStrongsSeparately = computed(() => !exportMode.value && config.strongs
 
 .link-style {
   cursor: pointer;
-  text-decoration: underline dotted;
+  text-decoration-line: underline;
+  text-decoration-style: dotted;
+  text-decoration-color: currentColor;
 
-  .ios-pad & {
-    -webkit-text-decoration: underline dotted;
+  .platform-ios & {
+    -webkit-text-decoration-line: underline;
+    -webkit-text-decoration-style: dotted;
     text-decoration-thickness: 1.5px;
     text-underline-offset: 0.12em;
     text-decoration-skip-ink: none;
@@ -122,8 +125,9 @@ const showStrongsSeparately = computed(() => !exportMode.value && config.strongs
     text-decoration-style: solid;
     text-decoration-color: hsla(var(--text-color-h), var(--text-color-s), var(--text-color-l), 0.5);
 
-    .ios-pad & {
-      -webkit-text-decoration: underline;
+    .platform-ios & {
+      -webkit-text-decoration-line: underline;
+      -webkit-text-decoration-style: solid;
     }
   }
 }

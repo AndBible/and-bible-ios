@@ -557,6 +557,250 @@ extension AndBibleTests {
     }
 
     /**
+     Verifies SWORD-compatible Android custom-driver catalog rows classify by driver.
+
+     Android registers `MyBibleDictionary` as a dictionary `BookType`, so a repository or restored
+     catalog row with `Category=Unknown` must still appear in Downloads' dictionary filters.
+
+     - Setup: Serves a `mods.d.tar.gz` containing a BDBT-style `MyBibleDictionary` config.
+     - Expected result: Catalog refresh returns BDBT as a dictionary.
+     - Failure meaning: Downloads can hide Android-visible dictionaries before install.
+     */
+    func testModuleRepositoryClassifiesAndroidMyBibleDictionaryCatalogRowsByDriver() async throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let swordDir = tempDir.appendingPathComponent("sword", isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let source = SourceConfig(
+            name: "AndBible",
+            type: "HTTP",
+            host: "example.test",
+            catalogPath: "/raw"
+        )
+        let catalogData = try makeModuleRepositoryCatalogArchive(
+            moduleName: "BDBT",
+            category: "Unknown",
+            modDrv: "MyBibleDictionary",
+            dataPath: "./modules/texts/MyBible/BDBT/",
+            extraConf: """
+            Feature=GreekDef
+            Feature=HebrewDef
+            """
+        )
+
+        ModuleRepositoryDownloadMockURLProtocol.requestHandler = { request in
+            XCTAssertEqual(request.url?.path, "/raw/mods.d.tar.gz")
+            return (
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!,
+                catalogData
+            )
+        }
+        defer { ModuleRepositoryDownloadMockURLProtocol.requestHandler = nil }
+
+        let repository = ModuleRepository(
+            basePath: tempDir.path,
+            swordPath: swordDir.path,
+            session: makeModuleRepositoryDownloadMockSession()
+        )
+
+        let modules = try await repository.refreshCatalog(for: source)
+        let bdbt = try XCTUnwrap(modules.first { $0.name == "BDBT" })
+
+        XCTAssertEqual(bdbt.category, .dictionary)
+        XCTAssertEqual(bdbt.language, "en")
+        XCTAssertEqual(bdbt.sourceName, "AndBible")
+    }
+
+    /**
+     Verifies restored Android custom-driver modules are visible through `SwordManager`.
+
+     Android's installed-book registry includes `MyBibleDictionary` books such as BDBT. The iOS
+     inventory must expose the same row from `mods.d` plus `module.SQLite3` even though libsword does
+     not return a `SwordModule` handle for that driver.
+
+     - Setup: Writes a BDBT-style config and readable payload into a temporary SWORD tree.
+     - Expected result: `installedModules()` returns BDBT as a dictionary with Strong's features.
+     - Failure meaning: Settings, reader document pickers, or Downloads installed state can hide
+       restored Android dictionaries.
+     */
+    func testSwordManagerInstalledModulesIncludesRestoredAndroidMyBibleDictionary() throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let swordDir = tempDir.appendingPathComponent("sword", isDirectory: true)
+        let modsDir = swordDir.appendingPathComponent("mods.d", isDirectory: true)
+        let moduleDir = swordDir
+            .appendingPathComponent("modules/texts/MyBible/BDBT", isDirectory: true)
+        try FileManager.default.createDirectory(at: modsDir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: moduleDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        try """
+        [BDBT]
+        Description=Brown-Driver-Briggs' Hebrew Definitions / Thayer's Greek Definitions
+        Category=Unknown
+        DataPath=./modules/texts/MyBible/BDBT/
+        ModDrv=MyBibleDictionary
+        Lang=en
+        Feature=GreekDef
+        Feature=HebrewDef
+        """.write(
+            to: modsDir.appendingPathComponent("bdbt.conf"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try Data().write(to: moduleDir.appendingPathComponent("module.SQLite3"))
+
+        let manager = try XCTUnwrap(SwordManager(modulePath: swordDir.path))
+        let bdbt = try XCTUnwrap(manager.installedModules().first { $0.name == "BDBT" })
+
+        XCTAssertEqual(bdbt.category, .dictionary)
+        XCTAssertEqual(bdbt.language, "en")
+        XCTAssertTrue(bdbt.features.contains(.greekDef))
+        XCTAssertTrue(bdbt.features.contains(.hebrewDef))
+        XCTAssertTrue(manager.installedModules(category: .dictionary).contains { $0.name == "BDBT" })
+    }
+
+    /**
+     Verifies Android custom-driver configs cannot expose payloads outside the SWORD root.
+
+     Android backup metadata should describe restored module files under the local module tree. iOS
+     must not accept an absolute or escaped `DataPath` just because a readable SQLite file happens to
+     exist elsewhere on the device.
+
+     - Setup: Writes a `MyBibleDictionary` config whose `DataPath` points to a readable external
+       directory containing `module.SQLite3`.
+     - Expected result: `installedModules()` ignores the row.
+     - Failure meaning: Restored Android metadata can make unrelated files appear as installed
+       modules and mask import/layout bugs.
+     */
+    func testSwordManagerInstalledModulesRejectsCustomPayloadOutsideSwordRoot() throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let swordDir = tempDir.appendingPathComponent("sword", isDirectory: true)
+        let modsDir = swordDir.appendingPathComponent("mods.d", isDirectory: true)
+        let externalModuleDir = tempDir
+            .appendingPathComponent("outside", isDirectory: true)
+            .appendingPathComponent("BDBT", isDirectory: true)
+        try FileManager.default.createDirectory(at: modsDir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: externalModuleDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        try """
+        [BDBT]
+        Description=Brown-Driver-Briggs' Hebrew Definitions / Thayer's Greek Definitions
+        Category=Unknown
+        DataPath=\(externalModuleDir.path)
+        ModDrv=MyBibleDictionary
+        Lang=en
+        """.write(
+            to: modsDir.appendingPathComponent("bdbt.conf"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try Data().write(to: externalModuleDir.appendingPathComponent("module.SQLite3"))
+
+        let manager = try XCTUnwrap(SwordManager(modulePath: swordDir.path))
+
+        XCTAssertFalse(manager.installedModules().contains { $0.name == "BDBT" })
+    }
+
+    /**
+     Verifies iOS sidecar-installed MyBible packages participate in shared installed inventory.
+
+     Android exposes downloaded MyBible packages through `Books.installed().books`. iOS stores those
+     packages under `sword/mybible`, but the visible installed inventory must still come from
+     `SwordManager.installedModules()` instead of a Downloads-only append.
+
+     - Setup: Writes sidecar metadata and a readable extracted SQLite package payload.
+     - Expected result: `installedModules()` includes the MyBible row and `moduleCount` agrees.
+     - Failure meaning: MyBible package installs are visible in Downloads but missing elsewhere.
+     */
+    func testSwordManagerInstalledModulesIncludesMyBiblePackageSidecarModules() throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let swordDir = tempDir.appendingPathComponent("sword", isDirectory: true)
+        let moduleDir = swordDir
+            .appendingPathComponent("mybible", isDirectory: true)
+            .appendingPathComponent("MyBible-finrk_SQLite3", isDirectory: true)
+        try FileManager.default.createDirectory(at: moduleDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let metadata = InstalledMyBibleModule(
+            name: "MyBible-finrk_SQLite3",
+            description: "Finnish RK",
+            category: ModuleCategory.bible.rawValue,
+            language: "fi",
+            version: "2026-06-27",
+            sourceName: "Example MyBible",
+            packageFileName: "finrk.SQLite3.zip",
+            downloadURL: "https://example.test/finrk.SQLite3.zip",
+            installedAt: Date(timeIntervalSince1970: 0)
+        )
+        try JSONEncoder().encode(metadata).write(
+            to: moduleDir.appendingPathComponent("module.json"),
+            options: .atomic
+        )
+        try Data().write(to: moduleDir.appendingPathComponent("finrk.SQLite3"))
+
+        let manager = try XCTUnwrap(SwordManager(modulePath: swordDir.path))
+        let modules = manager.installedModules()
+        let finrk = try XCTUnwrap(modules.first { $0.name == "MyBible-finrk_SQLite3" })
+
+        XCTAssertEqual(finrk.description, "Finnish RK")
+        XCTAssertEqual(finrk.category, .bible)
+        XCTAssertEqual(finrk.language, "fi")
+        XCTAssertEqual(manager.moduleCount, modules.count)
+    }
+
+    /**
+     Verifies stale MyBible sidecar metadata does not create an installed module.
+
+     Android only adds a MyBible book when its SQLite file can be read. iOS should therefore ignore
+     `module.json` sidecars that no longer have a payload.
+
+     - Setup: Writes sidecar metadata without an extracted `.SQLite3`/`.mybible` file.
+     - Expected result: `installedModules()` skips the stale row.
+     - Failure meaning: UI surfaces can advertise an unusable MyBible module.
+     */
+    func testSwordManagerInstalledModulesSkipsMyBiblePackageSidecarWithoutPayload() throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let swordDir = tempDir.appendingPathComponent("sword", isDirectory: true)
+        let moduleDir = swordDir
+            .appendingPathComponent("mybible", isDirectory: true)
+            .appendingPathComponent("MyBible-finrk_SQLite3", isDirectory: true)
+        try FileManager.default.createDirectory(at: moduleDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let metadata = InstalledMyBibleModule(
+            name: "MyBible-finrk_SQLite3",
+            description: "Finnish RK",
+            category: ModuleCategory.bible.rawValue,
+            language: "fi",
+            version: "2026-06-27",
+            sourceName: "Example MyBible",
+            packageFileName: "finrk.SQLite3.zip",
+            downloadURL: "https://example.test/finrk.SQLite3.zip",
+            installedAt: Date(timeIntervalSince1970: 0)
+        )
+        try JSONEncoder().encode(metadata).write(
+            to: moduleDir.appendingPathComponent("module.json"),
+            options: .atomic
+        )
+
+        let manager = try XCTUnwrap(SwordManager(modulePath: swordDir.path))
+
+        XCTAssertFalse(manager.installedModules().contains { $0.name == "MyBible-finrk_SQLite3" })
+    }
+
+    /**
      Verifies that MyBible package installs and uninstalls publish installed-module mutations.
 
      Setup:

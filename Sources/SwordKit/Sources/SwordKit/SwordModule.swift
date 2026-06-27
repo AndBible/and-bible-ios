@@ -91,6 +91,8 @@ public final class SwordModule: @unchecked Sendable {
             let description = String(cString: SWModule_getDescription(handle))
             let typeStr = String(cString: SWModule_getType(handle))
             let language = String(cString: SWModule_getLanguage(handle))
+            let modDrvPtr = SWModule_getConfigEntry(handle, "ModDrv")
+            let modDrv = modDrvPtr != nil ? String(cString: modDrvPtr!) : ""
 
             // Detect features by parsing the .conf file directly from disk.
             // SWORD's flat API getConfigEntry() only returns the FIRST value for
@@ -111,7 +113,7 @@ public final class SwordModule: @unchecked Sendable {
             return ModuleInfo(
                 name: name,
                 description: description,
-                category: ModuleCategory(typeString: typeStr),
+                category: ModuleCategory(typeString: typeStr, modDrv: modDrv),
                 language: language,
                 version: versionStr,
                 isEncrypted: isEncrypted,
@@ -1003,59 +1005,24 @@ public final class SwordModule: @unchecked Sendable {
         handle: UnsafeMutableRawPointer,
         modulePath: String?
     ) -> ModuleFeatures {
-        var features: ModuleFeatures = []
+        var featureValues: [String] = []
 
         // Try reading .conf file directly (reliable for multi-value keys)
         if let modulePath,
-           let confLines = readConfFile(name: name, modulePath: modulePath) {
-            for line in confLines {
-                let trimmed = line.trimmingCharacters(in: .whitespaces)
-                if trimmed.hasPrefix("Feature=") || trimmed.hasPrefix("GlobalOptionFilter=") {
-                    let value = String(trimmed[trimmed.index(after: trimmed.firstIndex(of: "=")!)...])
-                        .trimmingCharacters(in: .whitespaces)
-                    if value.contains("Strongs") || value.contains("OSISStrongs") {
-                        features.insert(.strongsNumbers)
-                    }
-                    if value.contains("Morphology") || value.contains("OSISMorph") {
-                        features.insert(.morphology)
-                    }
-                    if value.contains("Footnotes") || value.contains("OSISFootnotes") {
-                        features.insert(.footnotes)
-                    }
-                    if value.contains("Headings") || value.contains("OSISHeadings") {
-                        features.insert(.headings)
-                    }
-                    if value.contains("RedLetterWords") || value.contains("OSISRedLetterWords") {
-                        features.insert(.redLetterWords)
-                    }
-                    if value.contains("GreekDef") { features.insert(.greekDef) }
-                    if value.contains("HebrewDef") { features.insert(.hebrewDef) }
-                    if value.contains("GreekParse") { features.insert(.greekParse) }
-                    if value.contains("HebrewParse") { features.insert(.hebrewParse) }
-                    if value.contains("DailyDevotion") { features.insert(.dailyDevotion) }
-                }
-            }
+           let config = SwordModuleConfig.read(name: name, modulePath: modulePath) {
+            featureValues = (config.values["feature"] ?? []) + (config.values["globaloptionfilter"] ?? [])
         } else {
             // Fallback: use C API (only gets first value for multi-value keys)
+            var features: ModuleFeatures = []
             if SWModule_hasFeature(handle, "StrongsNumbers") != 0 { features.insert(.strongsNumbers) }
             if SWModule_hasFeature(handle, "GreekDef") != 0 { features.insert(.greekDef) }
             if SWModule_hasFeature(handle, "HebrewDef") != 0 { features.insert(.hebrewDef) }
             if SWModule_hasFeature(handle, "GreekParse") != 0 { features.insert(.greekParse) }
             if SWModule_hasFeature(handle, "HebrewParse") != 0 { features.insert(.hebrewParse) }
             if SWModule_hasFeature(handle, "DailyDevotion") != 0 { features.insert(.dailyDevotion) }
+            return features
         }
 
-        return features
-    }
-
-    /// Read all lines from a module's .conf file.
-    private static func readConfFile(name: String, modulePath: String) -> [String]? {
-        let confPath = (modulePath as NSString)
-            .appendingPathComponent("mods.d")
-            .appending("/\(name.lowercased()).conf")
-        guard let contents = try? String(contentsOfFile: confPath, encoding: .utf8) else {
-            return nil
-        }
-        return contents.components(separatedBy: .newlines)
+        return ModuleFeatures.fromConfigValues(featureValues)
     }
 }

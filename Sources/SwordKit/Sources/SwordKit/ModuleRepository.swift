@@ -616,53 +616,6 @@ public final class ModuleRepository: @unchecked Sendable {
     }
 
     /**
-     Persisted metadata for one installed MyBible package.
-
-     The SQLite payload is not a SWORD module, so Downloads stores a small sidecar beside the
-     extracted package. This lets the list render installed state and uninstall safely without
-     inventing fake `mods.d` rows that SWORD would try to load.
-     */
-    private struct InstalledMyBibleModule: Codable {
-        /// Installed module initials used by Downloads and uninstall.
-        var name: String
-
-        /// User-visible module description from the repository manifest.
-        var description: String
-
-        /// Raw `ModuleCategory` value captured at install time.
-        var category: String
-
-        /// Module language code captured from the manifest row.
-        var language: String
-
-        /// Manifest update marker captured as the installed version.
-        var version: String
-
-        /// Repository source name that produced this installed module.
-        var sourceName: String
-
-        /// Original package filename from the MyBible manifest.
-        var packageFileName: String
-
-        /// HTTPS package URL used for the install.
-        var downloadURL: String
-
-        /// Local install timestamp for future diagnostics and migrations.
-        var installedAt: Date
-
-        /// Converts sidecar metadata into the common installed-module row model.
-        var moduleInfo: ModuleInfo {
-            ModuleInfo(
-                name: name,
-                description: description,
-                category: ModuleCategory(typeString: category),
-                language: language,
-                version: version
-            )
-        }
-    }
-
-    /**
      Reads cached catalog entries for one source.
 
      - Parameter sourceName: Repository source key from `SourceConfig.name`.
@@ -1033,7 +986,7 @@ public final class ModuleRepository: @unchecked Sendable {
             // Also restore in-memory catalogCache for install operations
             var entries: [CatalogModule] = []
             for m in cached.modules {
-                let cat = ModuleCategory(typeString: m.category)
+                let cat = ModuleCategory(typeString: m.category, modDrv: m.modDrv)
                 let entry = CatalogModule(
                     name: m.name,
                     description: m.description,
@@ -2264,40 +2217,18 @@ public final class ModuleRepository: @unchecked Sendable {
     }
 
     /**
-     Loads installed MyBible module metadata from the local non-SWORD module store.
+     Loads installed MyBible module metadata from the shared Android-compatible inventory scanner.
 
      - Returns: Installed MyBible modules as common `ModuleInfo` rows for Downloads state.
      - Side effects:
-       - creates the MyBible install directory if needed
        - reads `module.json` sidecars from installed MyBible module directories
+       - checks extracted MyBible payload files for readability
      - Failure modes:
-       - unreadable or malformed sidecars are logged and skipped so one bad install cannot hide the
-       rest of the Downloads list.
+       - unreadable or malformed sidecars and missing payloads are skipped so one bad install cannot
+       hide the rest of the Downloads list.
      */
     public func loadInstalledMyBibleModules() -> [ModuleInfo] {
-        let fm = FileManager.default
-        guard let entries = try? fm.contentsOfDirectory(
-            at: myBibleInstallDir,
-            includingPropertiesForKeys: [.isDirectoryKey],
-            options: [.skipsHiddenFiles]
-        ) else {
-            return []
-        }
-
-        return entries.compactMap { url in
-            guard (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true else {
-                return nil
-            }
-            let metadataURL = url.appendingPathComponent("module.json")
-            do {
-                let data = try Data(contentsOf: metadataURL)
-                return try JSONDecoder().decode(InstalledMyBibleModule.self, from: data).moduleInfo
-            } catch {
-                logger.warning("Failed to load MyBible install metadata \(metadataURL.path): \(error.localizedDescription)")
-                return nil
-            }
-        }
-        .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        SwordManager.myBiblePackageInstalledModules(modulePath: swordPath)
     }
 
     /**
@@ -2912,90 +2843,35 @@ public final class ModuleRepository: @unchecked Sendable {
 
     // MARK: - .conf File Parsing
 
+    /**
+     Parses one remote SWORD/Android config row into the Downloads catalog model.
+
+     Android custom drivers such as `MyBibleDictionary` derive their category from the registered
+     JSword `BookType`, not from an optional `Category=` property. The shared config projection keeps
+     that behavior aligned with `SwordManager.installedModules()` so catalog rows and installed rows
+     do not drift.
+
+     - Parameters:
+       - content: Raw `.conf` content from a repository catalog.
+       - sourceName: Repository source that supplied the config.
+     - Returns: Catalog row when the config has a module header and driver.
+     - Side effects: none.
+     - Failure modes: Malformed configs return `nil` and are skipped by catalog refresh.
+     */
     private func parseModuleConf(_ content: String, sourceName: String) -> CatalogModule? {
-        var name = ""
-        var description = ""
-        var categoryStr = ""
-        var language = "en"
-        var modDrv = ""
-        var dataPath = ""
-        var version = ""
-        var installSize = ""
-
-        for line in content.components(separatedBy: .newlines) {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-
-            // Section header [ModuleName]
-            if trimmed.hasPrefix("[") && trimmed.hasSuffix("]") {
-                if name.isEmpty {
-                    name = String(trimmed.dropFirst().dropLast())
-                }
-                continue
-            }
-
-            // Skip continuation lines and comments
-            if trimmed.isEmpty || trimmed.hasPrefix("#") { continue }
-
-            // Key=Value
-            guard let eqIdx = trimmed.firstIndex(of: "=") else { continue }
-            let key = String(trimmed[..<eqIdx]).trimmingCharacters(in: .whitespaces)
-            let value = String(trimmed[trimmed.index(after: eqIdx)...])
-                .trimmingCharacters(in: .whitespaces)
-
-            switch key {
-            case "Description": description = value
-            case "Category": categoryStr = value
-            case "Lang": language = value
-            case "ModDrv": modDrv = value
-            case "DataPath":
-                dataPath = value
-                // Strip leading ./ prefix
-                if dataPath.hasPrefix("./") {
-                    dataPath = String(dataPath.dropFirst(2))
-                }
-                // Ensure trailing slash
-                if !dataPath.hasSuffix("/") {
-                    dataPath += "/"
-                }
-            case "Version": version = value
-            case "InstallSize": installSize = value
-            default: break
-            }
-        }
-
-        guard !name.isEmpty, !modDrv.isEmpty else { return nil }
-
-        // Determine category
-        let category: ModuleCategory
-        if !categoryStr.isEmpty {
-            category = ModuleCategory(typeString: categoryStr)
-        } else {
-            // Infer from ModDrv
-            let driver = modDrv.lowercased()
-            if driver.contains("text") {
-                category = .bible
-            } else if driver.contains("com") {
-                category = .commentary
-            } else if driver.contains("ld") {
-                category = .dictionary
-            } else if driver.contains("genbook") {
-                category = .generalBook
-            } else {
-                category = .unknown
-            }
-        }
+        guard let config = SwordModuleConfig.parse(content) else { return nil }
 
         return CatalogModule(
-            name: name,
-            description: description,
-            category: category,
-            language: language,
-            modDrv: modDrv,
-            dataPath: dataPath,
+            name: config.name,
+            description: config.description,
+            category: config.category,
+            language: config.language,
+            modDrv: config.modDrv,
+            dataPath: config.dataPath,
             confContent: content,
             sourceName: sourceName,
-            version: version,
-            size: installSize
+            version: config.version,
+            size: config.installSize
         )
     }
 

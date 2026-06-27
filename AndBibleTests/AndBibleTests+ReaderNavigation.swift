@@ -1354,6 +1354,47 @@ extension AndBibleTests {
             "Expected an opening chapter marker in the emitted document payload, not only a closing tag. Script: \(addDocumentsScript)"
         )
     }
+
+    /**
+     Protects Android Strong's display parity at the native render boundary.
+
+     Android's Hidden Links/Links/Text and Links modes all keep JSword lexical markup available and
+     let the Vue OSIS renderer decide whether Strong's links are hidden, dotted, or shown as text.
+     iOS panes share a SWORD manager whose global options can be changed by another pane or speech
+     render, so loading a Bible chapter must reapply the current pane settings immediately before
+     reading raw entries. The setup starts with Strong's disabled on the manager, enables Android's
+     Links mode on the controller, and loads Genesis through the real controller path. The expected
+     result is emitted OSIS containing Strong's lemma attributes; a failure means the WebView cannot
+     render dotted Strong's links even when the persisted window setting requests them.
+     */
+    @MainActor
+    func testLoadCurrentContentReappliesStrongsOptionsBeforeReadingChapter() throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let modulePath = try makeTemporaryBundledSwordPath()
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+
+        var displaySettings = TextDisplaySettings.appDefaults
+        displaySettings.strongsMode = StrongsMode.links.rawValue
+
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        controller.displaySettings = displaySettings
+        manager.setGlobalOption(.strongsNumbers, enabled: false)
+        controller.navigateTo(book: "Genesis", chapter: 1, verse: 1)
+        controller.loadCurrentContent()
+
+        let payload = try XCTUnwrap(
+            bridgeEmissionPayload(from: recordedScripts(), event: "add_documents") as? [String: Any]
+        )
+        let fragment = try XCTUnwrap(payload["osisFragment"] as? [String: Any])
+        let xml = try XCTUnwrap(fragment["xml"] as? String)
+
+        XCTAssertTrue(manager.isGlobalOptionEnabled(.strongsNumbers))
+        XCTAssertTrue(
+            xml.contains(#"lemma="strong:H0430""#),
+            "Expected Genesis 1 emitted OSIS to retain Strong's lemma markup. XML: \(xml)"
+        )
+    }
+
     @MainActor
     func testLoadCurrentContentDoesNotHighlightRestoredReadingPosition() throws {
         let (bridge, recordedScripts) = makeRecordingBridge()
@@ -2108,6 +2149,57 @@ extension AndBibleTests {
         let payload = try setConfigPayload(from: recordedScripts())
         let config = try XCTUnwrap(payload["config"] as? [String: Any])
         XCTAssertEqual(config["pageScrollAmount"] as? Int, 100)
+    }
+
+    /**
+     Protects restored Strong's mode from splitting native toolbar state and Vue render state.
+
+     Android restores `strongsMode=1` as dotted Strong's links: JSword still emits lexical OSIS
+     markup and the shared Vue renderer receives mode `1` before the Bible document is added. This
+     setup mirrors an iOS process restart with a window-scoped Strong's setting and a Strong's-capable
+     KJV module, then drives the client-ready replay path. The expected result is a `set_config`
+     payload with `strongsMode=1` followed by emitted OSIS containing Strong's lemma attributes.
+     A failure means the visible toolbar/menu state can say Links while the WebView renders hidden
+     Strong's links or strips lexical data.
+     */
+    @MainActor
+    func testClientReadyReplayRestoresStrongsLinksModeAndLexicalMarkup() throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let modulePath = try makeTemporaryBundledSwordPath()
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+
+        var displaySettings = TextDisplaySettings.appDefaults
+        displaySettings.strongsMode = StrongsMode.links.rawValue
+
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        controller.displaySettings = displaySettings
+
+        let window = Window()
+        let pageManager = PageManager(id: window.id)
+        pageManager.bibleDocument = "KJV"
+        pageManager.bibleBibleBook = 0
+        pageManager.bibleChapterNo = 1
+        pageManager.bibleVerseNo = 1
+        pageManager.textDisplaySettings = displaySettings
+        window.pageManager = pageManager
+        controller.activeWindow = window
+        controller.restoreSavedPosition()
+
+        controller.bridgeDidSetClientReady(bridge)
+
+        let configPayload = try setConfigPayload(from: recordedScripts())
+        let config = try XCTUnwrap(configPayload["config"] as? [String: Any])
+        XCTAssertEqual(config["strongsMode"] as? Int, StrongsMode.links.rawValue)
+
+        let documentPayload = try XCTUnwrap(
+            bridgeEmissionPayload(from: recordedScripts(), event: "add_documents") as? [String: Any]
+        )
+        let fragment = try XCTUnwrap(documentPayload["osisFragment"] as? [String: Any])
+        let xml = try XCTUnwrap(fragment["xml"] as? String)
+        XCTAssertTrue(
+            xml.contains(#"lemma="strong:H0430""#),
+            "Expected client-ready replay to retain Strong's lemma markup. XML: \(xml)"
+        )
     }
 
     @MainActor
