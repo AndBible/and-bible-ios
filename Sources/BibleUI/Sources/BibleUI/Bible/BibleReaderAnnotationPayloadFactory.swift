@@ -33,8 +33,8 @@ struct BibleReaderAnnotationPayloadFactory {
     private let activeModuleName: String
     /// Active SWORD module used for ordinal and verse-text projection.
     private let activeModule: SwordModule?
-    /// Effective active book list used for OSIS lookup.
-    private let bookList: [BookInfo]
+    /// Active-module-aware catalog used for OSIS lookup and ordinal projection.
+    private let bookCatalog: BibleReaderBookCatalog
     /// Synthetic unlabeled label identifier required by the web client.
     private let unlabeledLabelID: String
 
@@ -61,7 +61,7 @@ struct BibleReaderAnnotationPayloadFactory {
        - currentBook: Display name for the reader's current Bible book.
        - activeModuleName: Initials/name of the active module.
        - activeModule: Active SWORD module, if one is loaded.
-       - bookList: Active module book list or the no-module compatibility list.
+       - bookCatalog: Active-module-aware catalog boundary for OSIS and ordinal projection.
        - unlabeledLabelID: Stable identifier for the synthetic unlabeled label.
      - Side effects: None during initialization.
      - Failure modes: None; per-payload methods handle missing model relationships.
@@ -70,13 +70,13 @@ struct BibleReaderAnnotationPayloadFactory {
         currentBook: String,
         activeModuleName: String,
         activeModule: SwordModule?,
-        bookList: [BookInfo],
+        bookCatalog: BibleReaderBookCatalog,
         unlabeledLabelID: String
     ) {
         self.currentBook = currentBook
         self.activeModuleName = activeModuleName
         self.activeModule = activeModule
-        self.bookList = bookList
+        self.bookCatalog = bookCatalog
         self.unlabeledLabelID = unlabeledLabelID
     }
 
@@ -392,21 +392,7 @@ struct BibleReaderAnnotationPayloadFactory {
        module is available.
      */
     private func verseReference(book: String, ordinal: Int) -> VerseKeyReference? {
-        guard ordinal > 0 else { return nil }
-        let osisBookId = osisBookId(for: book)
-        if let activeModule {
-            return activeModule.verseReference(osisBookId: osisBookId, ordinal: ordinal)
-        }
-
-        let chapter = max(1, ((ordinal - 1) / 40) + 1)
-        let verse = ordinal - ((chapter - 1) * 40)
-        guard verse > 0 else { return nil }
-        return VerseKeyReference(
-            osisBookId: osisBookId,
-            chapter: chapter,
-            verse: verse,
-            ordinal: ordinal
-        )
+        bookCatalog.verseReference(book: book, ordinal: ordinal)
     }
 
     /**
@@ -442,10 +428,7 @@ struct BibleReaderAnnotationPayloadFactory {
        the previous controller implementation.
      */
     private func osisBookId(for bookName: String) -> String {
-        if let osisId = bookList.first(where: { $0.name == bookName })?.osisId {
-            return osisId
-        }
-        return activeModule == nil ? BibleReaderController.osisBookId(for: bookName) : ""
+        bookCatalog.osisBookId(for: bookName)
     }
 
     /**

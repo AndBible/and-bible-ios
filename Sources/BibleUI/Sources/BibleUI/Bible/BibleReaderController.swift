@@ -87,10 +87,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
     /// The active book list: uses the module's versification, or the 66-book default only with no module.
     var bookList: [BookInfo] {
-        if !moduleBookList.isEmpty {
-            return moduleBookList
-        }
-        return activeModule == nil ? Self.defaultBooks : []
+        bookCatalog.books
     }
 
     /// Commentary module support
@@ -141,16 +138,14 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     /// Reader-local loaded-range state for Vue infinite-scroll prepend/append requests.
     private var infiniteScrollCoordinator = BibleReaderInfiniteScrollCoordinator()
 
-    /**
-     Legacy ordinal fallback used only when no SWORD verse-key module can resolve the reference.
+    /// Catalog boundary for active-module book metadata and SWORD/JSword versification lookup.
+    private var bookCatalog: BibleReaderBookCatalog {
+        BibleReaderBookCatalog(activeModule: activeModule, moduleBookList: moduleBookList)
+    }
 
-     Real Bible, commentary, cross-reference, bookmark, and memorization paths should use
-     `verseOrdinal(...)` so ordinals come from the active SWORD/JSword-style versification. This
-     fallback preserves placeholder rendering for startup and no-module states where there is no
-     module cursor to query.
-     */
+    /// Legacy ordinal fallback used only when no SWORD verse-key module can resolve the reference.
     private func compatibilityOrdinal(chapter: Int, verse: Int) -> Int {
-        BibleChapterDocumentBuilder.ordinal(chapter: chapter, verse: verse)
+        BibleReaderBookCatalog.compatibilityOrdinal(chapter: chapter, verse: verse)
     }
 
     /**
@@ -166,10 +161,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
        before returning.
      */
     private func verseOrdinal(osisBookId: String, chapter: Int, verse: Int) -> Int? {
-        if let activeModule {
-            return activeModule.verseOrdinal(osisBookId: osisBookId, chapter: chapter, verse: verse)
-        }
-        return compatibilityOrdinal(chapter: chapter, verse: verse)
+        bookCatalog.verseOrdinal(osisBookId: osisBookId, chapter: chapter, verse: verse)
     }
 
     /**
@@ -188,21 +180,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
        before returning.
      */
     private func verseReference(book: String, ordinal: Int) -> VerseKeyReference? {
-        guard ordinal > 0 else { return nil }
-        let osisBookId = osisBookId(for: book)
-        if let activeModule {
-            return activeModule.verseReference(osisBookId: osisBookId, ordinal: ordinal)
-        }
-
-        let chapter = max(1, ((ordinal - 1) / 40) + 1)
-        let verse = ordinal - ((chapter - 1) * 40)
-        guard verse > 0 else { return nil }
-        return VerseKeyReference(
-            osisBookId: osisBookId,
-            chapter: chapter,
-            verse: verse,
-            ordinal: ordinal
-        )
+        bookCatalog.verseReference(book: book, ordinal: ordinal)
     }
 
     /**
@@ -256,23 +234,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      - Side effects: May query the active SWORD module for verse counts and ordinals.
      */
     private func chapterOrdinalRange(book: String, chapter: Int, verseCount: Int? = nil) -> (start: Int, end: Int, verseCount: Int)? {
-        let osisBookId = osisBookId(for: book)
-        let resolvedVerseCount: Int
-        if let verseCount {
-            resolvedVerseCount = verseCount
-        } else if let activeModule {
-            guard let moduleVerseCount = activeModule.verseCount(osisBookId: osisBookId, chapter: chapter) else {
-                return nil
-            }
-            resolvedVerseCount = moduleVerseCount
-        } else {
-            resolvedVerseCount = Self.verseCount(for: book, chapter: chapter)
-        }
-        guard let ordinalStart = verseOrdinal(osisBookId: osisBookId, chapter: chapter, verse: 1),
-              let ordinalEnd = verseOrdinal(osisBookId: osisBookId, chapter: chapter, verse: resolvedVerseCount) else {
-            return nil
-        }
-        return (ordinalStart, ordinalEnd, resolvedVerseCount)
+        bookCatalog.chapterOrdinalRange(book: book, chapter: chapter, verseCount: verseCount)
     }
 
     /// Ordinal range for the current chapter using the active module's SWORD versification.
@@ -5183,7 +5145,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             currentBook: currentBook,
             activeModuleName: activeModuleName,
             activeModule: activeModule,
-            bookList: bookList,
+            bookCatalog: bookCatalog,
             unlabeledLabelID: Self.unlabeledLabelId
         )
     }
@@ -5646,67 +5608,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     // MARK: - Book Data
 
     /// Default 66-book Protestant canon, used as fallback when no module is loaded.
-    static let defaultBooks: [BookInfo] = {
-        let books: [(String, String, String, Int, Int)] = [
-            ("Genesis", "Gen", "Gen", 50, 1), ("Exodus", "Exod", "Exod", 40, 1),
-            ("Leviticus", "Lev", "Lev", 27, 1), ("Numbers", "Num", "Num", 36, 1),
-            ("Deuteronomy", "Deut", "Deut", 34, 1), ("Joshua", "Josh", "Josh", 24, 1),
-            ("Judges", "Judg", "Judg", 21, 1), ("Ruth", "Ruth", "Ruth", 4, 1),
-            ("1 Samuel", "1Sam", "1Sam", 31, 1), ("2 Samuel", "2Sam", "2Sam", 24, 1),
-            ("1 Kings", "1Kgs", "1Kgs", 22, 1), ("2 Kings", "2Kgs", "2Kgs", 25, 1),
-            ("1 Chronicles", "1Chr", "1Chr", 29, 1), ("2 Chronicles", "2Chr", "2Chr", 36, 1),
-            ("Ezra", "Ezra", "Ezra", 10, 1), ("Nehemiah", "Neh", "Neh", 13, 1),
-            ("Esther", "Esth", "Esth", 10, 1), ("Job", "Job", "Job", 42, 1),
-            ("Psalms", "Ps", "Ps", 150, 1), ("Proverbs", "Prov", "Prov", 31, 1),
-            ("Ecclesiastes", "Eccl", "Eccl", 12, 1), ("Song of Solomon", "Song", "Song", 8, 1),
-            ("Isaiah", "Isa", "Isa", 66, 1), ("Jeremiah", "Jer", "Jer", 52, 1),
-            ("Lamentations", "Lam", "Lam", 5, 1), ("Ezekiel", "Ezek", "Ezek", 48, 1),
-            ("Daniel", "Dan", "Dan", 12, 1), ("Hosea", "Hos", "Hos", 14, 1),
-            ("Joel", "Joel", "Joel", 3, 1), ("Amos", "Amos", "Amos", 9, 1),
-            ("Obadiah", "Obad", "Obad", 1, 1), ("Jonah", "Jonah", "Jonah", 4, 1),
-            ("Micah", "Mic", "Mic", 7, 1), ("Nahum", "Nah", "Nah", 3, 1),
-            ("Habakkuk", "Hab", "Hab", 3, 1), ("Zephaniah", "Zeph", "Zeph", 3, 1),
-            ("Haggai", "Hag", "Hag", 2, 1), ("Zechariah", "Zech", "Zech", 14, 1),
-            ("Malachi", "Mal", "Mal", 4, 1),
-            ("Matthew", "Matt", "Matt", 28, 2), ("Mark", "Mark", "Mark", 16, 2),
-            ("Luke", "Luke", "Luke", 24, 2), ("John", "John", "John", 21, 2),
-            ("Acts", "Acts", "Acts", 28, 2), ("Romans", "Rom", "Rom", 16, 2),
-            ("1 Corinthians", "1Cor", "1Cor", 16, 2), ("2 Corinthians", "2Cor", "2Cor", 13, 2),
-            ("Galatians", "Gal", "Gal", 6, 2), ("Ephesians", "Eph", "Eph", 6, 2),
-            ("Philippians", "Phil", "Phil", 4, 2), ("Colossians", "Col", "Col", 4, 2),
-            ("1 Thessalonians", "1Thess", "1Thess", 5, 2), ("2 Thessalonians", "2Thess", "2Thess", 3, 2),
-            ("1 Timothy", "1Tim", "1Tim", 6, 2), ("2 Timothy", "2Tim", "2Tim", 4, 2),
-            ("Titus", "Titus", "Titus", 3, 2), ("Philemon", "Phlm", "Phlm", 1, 2),
-            ("Hebrews", "Heb", "Heb", 13, 2), ("James", "Jas", "Jas", 5, 2),
-            ("1 Peter", "1Pet", "1Pet", 5, 2), ("2 Peter", "2Pet", "2Pet", 3, 2),
-            ("1 John", "1John", "1John", 5, 2), ("2 John", "2John", "2John", 1, 2),
-            ("3 John", "3John", "3John", 1, 2), ("Jude", "Jude", "Jude", 1, 2),
-            ("Revelation", "Rev", "Rev", 22, 2),
-        ]
-        return books.map { BookInfo(name: $0.0, osisId: $0.1, abbreviation: $0.2, chapterCount: $0.3, testament: $0.4) }
-    }()
-
-    /// JSword `BibleBook.ordinal` values persisted by Android reading-progress rows.
-    private static let jswordBibleBookOrdinalByOsisId: [String: Int] = [
-        "Gen": 2, "Exod": 3, "Lev": 4, "Num": 5, "Deut": 6,
-        "Josh": 7, "Judg": 8, "Ruth": 9, "1Sam": 10, "2Sam": 11,
-        "1Kgs": 12, "2Kgs": 13, "1Chr": 14, "2Chr": 15, "Ezra": 16,
-        "Neh": 17, "Esth": 18, "Job": 19, "Ps": 20, "Prov": 21,
-        "Eccl": 22, "Song": 23, "Isa": 24, "Jer": 25, "Lam": 26,
-        "Ezek": 27, "Dan": 28, "Hos": 29, "Joel": 30, "Amos": 31,
-        "Obad": 32, "Jonah": 33, "Mic": 34, "Nah": 35, "Hab": 36,
-        "Zeph": 37, "Hag": 38, "Zech": 39, "Mal": 40,
-        "Matt": 42, "Mark": 43, "Luke": 44, "John": 45, "Acts": 46,
-        "Rom": 47, "1Cor": 48, "2Cor": 49, "Gal": 50, "Eph": 51,
-        "Phil": 52, "Col": 53, "1Thess": 54, "2Thess": 55,
-        "1Tim": 56, "2Tim": 57, "Titus": 58, "Phlm": 59, "Heb": 60,
-        "Jas": 61, "1Pet": 62, "2Pet": 63, "1John": 64,
-        "2John": 65, "3John": 66, "Jude": 67, "Rev": 68,
-        "1Esd": 84, "2Esd": 85, "Tob": 69, "Jdt": 70, "AddEsth": 71,
-        "Wis": 72, "WisSol": 72, "Sir": 73, "Bar": 74, "EpJer": 75,
-        "PrAzar": 76, "Sus": 77, "Bel": 78, "PrMan": 83,
-        "1Macc": 79, "2Macc": 80,
-    ]
+    static let defaultBooks = BibleReaderBookCatalog.defaultBooks
 
     /// Backward-compatible static accessor — returns just the book names from the default list.
     static let allBooks: [String] = defaultBooks.map(\.name)
@@ -5742,43 +5644,32 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
     /// Chapter count for a book, using the active module's versification.
     func chapterCount(for book: String) -> Int {
-        if let chapterCount = bookList.first(where: { $0.name == book })?.chapterCount {
-            return chapterCount
-        }
-        return activeModule == nil ? Self.chapterCount(for: book) : 0
+        bookCatalog.chapterCount(for: book)
     }
 
     /// Static chapter count using the default 66-book list.
     static func chapterCount(for book: String) -> Int {
-        defaultBooks.first(where: { $0.name == book })?.chapterCount ?? 1
+        BibleReaderBookCatalog.chapterCount(for: book)
     }
 
     /// Next book after the given book in the active module's versification.
     func nextBook(after book: String) -> String? {
-        let books = bookList
-        guard let index = books.firstIndex(where: { $0.name == book }), index + 1 < books.count else { return nil }
-        return books[index + 1].name
+        bookCatalog.nextBook(after: book)
     }
 
     /// Previous book before the given book in the active module's versification.
     func previousBook(before book: String) -> String? {
-        let books = bookList
-        guard let index = books.firstIndex(where: { $0.name == book }), index > 0 else { return nil }
-        return books[index - 1].name
+        bookCatalog.previousBook(before: book)
     }
 
     /// OSIS book ID lookup, using the active module's versification.
     func osisBookId(for bookName: String) -> String {
-        if let osisId = bookList.first(where: { $0.name == bookName })?.osisId {
-            return osisId
-        }
-        return activeModule == nil ? Self.osisBookId(for: bookName) : ""
+        bookCatalog.osisBookId(for: bookName)
     }
 
     /// KJVA-compatible ordinal for the canonical book position used by local reading progress.
     private func kjvBookOrdinal(for bookName: String) -> Int? {
-        let osisId = osisBookId(for: bookName)
-        return Self.jswordBibleBookOrdinalByOsisId[osisId]
+        bookCatalog.kjvBookOrdinal(for: bookName)
     }
 
     /// Resolves the active Bible chapter into the JSword/KJVA identity used by reading progress.
@@ -5810,27 +5701,27 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
     /// Static OSIS book ID lookup using the default list.
     static func osisBookId(for bookName: String) -> String {
-        defaultBooks.first(where: { $0.name == bookName })?.osisId ?? bookName.prefix(3).description
+        BibleReaderBookCatalog.osisBookId(for: bookName)
     }
 
     /// Reverse lookup: OSIS ID → book name using the active module's versification.
     func bookName(forOsisId osisId: String) -> String? {
-        bookList.first(where: { $0.osisId == osisId })?.name
+        bookCatalog.bookName(forOsisId: osisId)
     }
 
     /// Static reverse lookup using the default list.
     static func bookName(forOsisId osisId: String) -> String? {
-        defaultBooks.first(where: { $0.osisId == osisId })?.name
+        BibleReaderBookCatalog.bookName(forOsisId: osisId)
     }
 
     /// Check if a book is in the New Testament, using the active module's versification.
     func isNewTestament(_ bookName: String) -> Bool {
-        bookList.first(where: { $0.name == bookName })?.isNewTestament ?? false
+        bookCatalog.isNewTestament(bookName)
     }
 
     /// Static NT check using the default list.
     static func isNewTestament(_ bookName: String) -> Bool {
-        defaultBooks.first(where: { $0.name == bookName })?.isNewTestament ?? false
+        BibleReaderBookCatalog.isNewTestament(bookName)
     }
 
     /**
@@ -5850,43 +5741,13 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
        method restores the previous key before returning.
      */
     func verseCountForActiveModule(book: String, chapter: Int) -> Int? {
-        let osisId = osisBookId(for: book)
-        if let activeModule {
-            guard let count = activeModule.verseCount(osisBookId: osisId, chapter: chapter),
-                  count > 0 else {
-                return nil
-            }
-            return count
-        }
-        return Self.verseCount(for: book, chapter: chapter)
+        bookCatalog.verseCount(book: book, chapter: chapter)
     }
 
     /// Returns the verse count for a book/chapter. Defaults to 30 if unknown.
     static func verseCount(for book: String, chapter: Int) -> Int {
-        // Common verse counts for well-known chapters
-        let key = "\(osisBookId(for: book)).\(chapter)"
-        return knownVerseCounts[key] ?? 30
+        BibleReaderBookCatalog.verseCount(for: book, chapter: chapter)
     }
-
-    private static let knownVerseCounts: [String: Int] = [
-        "Gen.1": 31, "Gen.2": 25, "Gen.3": 24, "Gen.4": 26, "Gen.5": 32,
-        "Gen.6": 22, "Gen.7": 24, "Gen.8": 22, "Gen.9": 29, "Gen.10": 32,
-        "Gen.11": 32, "Gen.12": 20, "Gen.50": 26,
-        "Ps.1": 6, "Ps.23": 6, "Ps.91": 16, "Ps.119": 176, "Ps.150": 6,
-        "Prov.1": 33, "Prov.3": 35, "Prov.31": 31,
-        "Isa.1": 31, "Isa.40": 31, "Isa.53": 12,
-        "Matt.1": 25, "Matt.5": 48, "Matt.6": 34, "Matt.28": 20,
-        "Mark.1": 45, "Mark.16": 20,
-        "Luke.1": 80, "Luke.2": 52, "Luke.24": 53,
-        "John.1": 51, "John.3": 36, "John.14": 31, "John.21": 25,
-        "Acts.1": 26, "Acts.2": 47,
-        "Rom.1": 32, "Rom.8": 39, "Rom.12": 21,
-        "1Cor.13": 13, "1Cor.15": 58,
-        "Eph.1": 23, "Eph.6": 24,
-        "Phil.4": 23,
-        "Heb.11": 40,
-        "Rev.1": 20, "Rev.21": 27, "Rev.22": 21,
-    ]
 
     /// Generate placeholder verse text for chapters without real content.
     private static func placeholderVerseText(book: String, chapter: Int, verse: Int) -> String {
