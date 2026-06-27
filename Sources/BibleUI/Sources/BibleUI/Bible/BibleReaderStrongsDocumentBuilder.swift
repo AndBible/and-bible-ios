@@ -34,6 +34,24 @@ struct BibleReaderStrongsDocumentBuilder {
     private let localizedString: LocalizedString
 
     /**
+     Common lookup facade for SWORD and restored MyBible Strong's dictionary modules.
+
+     Android exposes both module families through JSword `Book` discovery after MyBible import. iOS
+     keeps the render path shared by projecting each supported source into the same exact-key lookup
+     contract instead of branching the Vue document shape by backing store.
+     */
+    private struct LexiconModule {
+        /// Durable module initials used in Vue fragment identity and restored `BookAndKeyList` keys.
+        let name: String
+
+        /// User-facing tab label shown by the Vue `MultiDocument` tab rail.
+        let abbreviation: String
+
+        /// Exact-key dictionary lookup closure for the backing module type.
+        let lookup: ([String]) -> DictionaryLookupResult?
+    }
+
+    /**
      Creates a Strong's document builder with explicit dependencies.
 
      - Parameters:
@@ -82,28 +100,35 @@ struct BibleReaderStrongsDocumentBuilder {
 
         for num in strongs {
             let lexModules = findAllLexiconModules(for: num)
-            strongsDocumentBuilderLogger.info("buildStrongsMultiDocumentJSON: num=\(num), lexModules=\(lexModules.map { $0.info.name })")
+            strongsDocumentBuilderLogger.info("buildStrongsMultiDocumentJSON: num=\(num), lexModules=\(lexModules.map { $0.name })")
             let keyOptions = Self.strongsLookupKeyOptions(for: num)
             strongsDocumentBuilderLogger.info("buildStrongsMultiDocumentJSON: keyOptions=\(keyOptions)")
             for mod in lexModules {
-                if let lookup = Self.lookupInModule(mod, keyOptions: keyOptions) {
+                if let lookup = mod.lookup(keyOptions) {
                     let isHebrew = num.hasPrefix("H") || (!num.hasPrefix("G") && (Int(String(num.drop(while: { $0.isLetter || $0 == "0" }))) ?? 0) > 5624)
                     let featureType = isHebrew ? "hebrew" : "greek"
                     let keyName = Self.canonicalStrongsKeyName(requested: num, actualKey: lookup.actualKey, rawEntry: lookup.rawEntry)
-                    let xml = Self.buildDictionaryEntryXML(
-                        rawEntry: lookup.rawEntry,
-                        renderedText: lookup.renderedText,
-                        strongsLinkPrefix: Self.strongsLinkPrefix(for: num)
-                    )
+                    let strongsLinkPrefix = Self.strongsLinkPrefix(for: num)
+                    let xml = lookup.isNativeHtml
+                        ? Self.buildDictionaryEntryHTML(
+                            renderedText: lookup.renderedText,
+                            strongsLinkPrefix: strongsLinkPrefix
+                        )
+                        : Self.buildDictionaryEntryXML(
+                            rawEntry: lookup.rawEntry,
+                            renderedText: lookup.renderedText,
+                            strongsLinkPrefix: strongsLinkPrefix
+                        )
                     let features = OsisFeatures(type: featureType, keyName: keyName)
 
                     fragments.append((
                         xml: xml,
-                        key: "\(mod.info.name)--\(keyName)",
+                        key: "\(mod.name)--\(keyName)",
                         keyName: keyName,
-                        bookInitials: mod.info.name,
-                        bookAbbreviation: moduleDisplayLabel(mod),
-                        features: features
+                        bookInitials: mod.name,
+                        bookAbbreviation: mod.abbreviation,
+                        features: features,
+                        isNativeHtml: lookup.isNativeHtml
                     ))
                 }
             }
@@ -115,18 +140,21 @@ struct BibleReaderStrongsDocumentBuilder {
                 for mod in morphModules {
                     let morphKeys = [code, code.uppercased(), code.lowercased()]
                     if let lookup = Self.lookupInModule(mod, keyOptions: morphKeys) {
-                        let xml = Self.buildDictionaryEntryXML(
-                            rawEntry: lookup.rawEntry,
-                            renderedText: lookup.renderedText,
-                            fallbackTitle: "Morphology: \(code)"
-                        )
+                        let xml = lookup.isNativeHtml
+                            ? Self.buildDictionaryEntryHTML(renderedText: lookup.renderedText)
+                            : Self.buildDictionaryEntryXML(
+                                rawEntry: lookup.rawEntry,
+                                renderedText: lookup.renderedText,
+                                fallbackTitle: "Morphology: \(code)"
+                            )
                         fragments.append((
                             xml: xml,
                             key: "\(mod.info.name)--\(code)",
                             keyName: code,
                             bookInitials: mod.info.name,
                             bookAbbreviation: moduleDisplayLabel(mod),
-                            features: OsisFeatures()
+                            features: OsisFeatures(),
+                            isNativeHtml: lookup.isNativeHtml
                         ))
                     }
                 }
@@ -191,7 +219,8 @@ struct BibleReaderStrongsDocumentBuilder {
             keyName: keyName,
             bookInitials: moduleName,
             bookAbbreviation: moduleName,
-            features: OsisFeatures(type: featureType, keyName: keyName)
+            features: OsisFeatures(type: featureType, keyName: keyName),
+            isNativeHtml: false
         )
     }
 
@@ -257,6 +286,27 @@ struct BibleReaderStrongsDocumentBuilder {
         let rawEntry: String
         /// SWORD-rendered text for the matched key.
         let renderedText: String
+        /// Whether `renderedText` is browser HTML that should bypass OSIS conversion.
+        let isNativeHtml: Bool
+
+        /**
+         Creates a dictionary lookup result with explicit renderer expectations.
+
+         - Parameters:
+           - actualKey: Key resolved by the backing module.
+           - rawEntry: Raw entry payload used for key validation and canonicalization.
+           - renderedText: Display-ready dictionary body from the backing module.
+           - isNativeHtml: `true` for Android MyBible dictionary HTML that should render as native
+             browser markup; `false` for SWORD output that remains in the OSIS fragment path.
+         - Side effects: None.
+         - Failure modes: None.
+         */
+        init(actualKey: String, rawEntry: String, renderedText: String, isNativeHtml: Bool = false) {
+            self.actualKey = actualKey
+            self.rawEntry = rawEntry
+            self.renderedText = renderedText
+            self.isNativeHtml = isNativeHtml
+        }
     }
 
     /**
@@ -309,6 +359,118 @@ struct BibleReaderStrongsDocumentBuilder {
     }
 
     /**
+     Tries Android's Strong's key variants against a restored MyBible dictionary.
+
+     MyBible dictionary topics are exact keys, so unlike SWORD there is no nearest-entry cursor to
+     reject. The matched topic key is still returned as `actualKey` so canonical key-name derivation
+     can preserve Android's category-prefixed `H430` / `G123` MyBible lookup branch.
+     */
+    static func lookupInMyBibleDictionary(_ reader: MyBibleReader, keyOptions: [String]) -> DictionaryLookupResult? {
+        for key in keyOptions {
+            guard let entry = reader.getDictionaryEntry(key: key)?
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+                  !entry.isEmpty else {
+                continue
+            }
+            return DictionaryLookupResult(
+                actualKey: key.trimmingCharacters(in: .whitespacesAndNewlines),
+                rawEntry: entry,
+                renderedText: entry,
+                isNativeHtml: true
+            )
+        }
+        return nil
+    }
+
+    /**
+     Parsed SWORD-style module config with lowercased keys and duplicate values preserved.
+     */
+    private struct ParsedSwordConfig {
+        /// Bracketed module name from the config header, for example `BDBT`.
+        let name: String
+
+        /// Config entries keyed case-insensitively, preserving repeated keys such as `Feature`.
+        let values: [String: [String]]
+    }
+
+    /**
+     Parses the subset of SWORD `.conf` files needed for restored MyBible dictionaries.
+
+     - Parameter url: Config file URL under `mods.d`.
+     - Returns: Parsed module name and key/value arrays, or `nil` for unreadable or malformed files.
+     - Side effects: Reads one UTF-8 text file.
+     - Failure modes: Comments, blank lines, and malformed non-assignment lines are ignored; missing
+       module headers return `nil`.
+     */
+    private static func parseSwordConfig(at url: URL) -> ParsedSwordConfig? {
+        guard let contents = try? String(contentsOf: url, encoding: .utf8) else { return nil }
+        var moduleName: String?
+        var values: [String: [String]] = [:]
+
+        for rawLine in contents.components(separatedBy: .newlines) {
+            let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !line.isEmpty, !line.hasPrefix("#"), !line.hasPrefix(";") else { continue }
+
+            if line.hasPrefix("["), line.hasSuffix("]") {
+                let name = String(line.dropFirst().dropLast())
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                if !name.isEmpty {
+                    moduleName = name
+                }
+                continue
+            }
+
+            let parts = line.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
+            guard parts.count == 2 else { continue }
+            let key = String(parts[0])
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased()
+            let value = String(parts[1]).trimmingCharacters(in: .whitespacesAndNewlines)
+            values[key, default: []].append(value)
+        }
+
+        guard let moduleName else { return nil }
+        return ParsedSwordConfig(name: moduleName, values: values)
+    }
+
+    /**
+     Reads the first config value for a lowercased key.
+     */
+    private static func firstConfigValue(_ key: String, in values: [String: [String]]) -> String? {
+        values[key.lowercased()]?.first?.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /**
+     Resolves a restored MyBible `DataPath` to its SQLite database URL.
+     */
+    private static func myBibleDatabaseURL(dataPath: String, modulePathURL: URL) -> URL {
+        let normalizedPath = dataPath
+            .replacingOccurrences(of: "\\", with: "/")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let relativePath = normalizedPath.hasPrefix("./")
+            ? String(normalizedPath.dropFirst(2))
+            : normalizedPath
+        let directoryURL = relativePath.hasPrefix("/")
+            ? URL(fileURLWithPath: relativePath, isDirectory: true)
+            : modulePathURL.appendingPathComponent(relativePath, isDirectory: true)
+        return directoryURL.appendingPathComponent("module.SQLite3")
+    }
+
+    /**
+     Maps SWORD config `Feature` entries into the option set used by Strong's module selection.
+     */
+    private static func myBibleFeatures(from values: [String]) -> ModuleFeatures {
+        values.reduce(into: ModuleFeatures()) { features, value in
+            if value.localizedCaseInsensitiveContains("GreekDef") {
+                features.insert(.greekDef)
+            }
+            if value.localizedCaseInsensitiveContains("HebrewDef") {
+                features.insert(.hebrewDef)
+            }
+        }
+    }
+
+    /**
      Builds dictionary-entry XML suitable for the Vue OSIS fragment renderer.
      */
     static func buildDictionaryEntryXML(
@@ -336,6 +498,21 @@ struct BibleReaderStrongsDocumentBuilder {
         )
         let titlePrefix = fallbackTitle.map { "<title type=\"x-gen\">\(escapeXML($0))</title>" } ?? ""
         return "<div>\(titlePrefix)<div type=\"paragraph\">\(linkifiedHtml)</div></div>"
+    }
+
+    /**
+     Builds native HTML for restored Android MyBible dictionary entries.
+
+     Android reads MyBible dictionary `definition` values directly and lets the WebView render their
+     browser-oriented markup. iOS keeps the same content contract by only linkifying supported Strong's
+     references and then marking the fragment as native HTML instead of coercing tags such as `<ol>`,
+     `<li>`, `<b>`, and `<he>` into OSIS components.
+     */
+    static func buildDictionaryEntryHTML(
+        renderedText: String,
+        strongsLinkPrefix: String? = nil
+    ) -> String {
+        "<div>\(linkifyRenderedDictionaryHTML(renderedText, defaultPrefix: strongsLinkPrefix))</div>"
     }
 
     /**
@@ -584,7 +761,7 @@ struct BibleReaderStrongsDocumentBuilder {
     /**
      Finds all dictionary/glossary modules that can look up a given Strong's number.
      */
-    private func findAllLexiconModules(for strongsNumber: String) -> [SwordModule] {
+    private func findAllLexiconModules(for strongsNumber: String) -> [LexiconModule] {
         guard let mgr = swordManager else {
             strongsDocumentBuilderLogger.error("findAllLexiconModules: swordManager is nil")
             return []
@@ -593,19 +770,16 @@ struct BibleReaderStrongsDocumentBuilder {
         let isHebrew = Self.isHebrewStrongsNumber(strongsNumber)
         let feature: ModuleFeatures = isHebrew ? .hebrewDef : .greekDef
 
-        let allModules = mgr.installedModules()
-        strongsDocumentBuilderLogger.info("findAllLexiconModules: \(allModules.count) installed modules, isHebrew=\(isHebrew)")
-        var result: [SwordModule] = []
+        let candidates = lexiconCandidates(feature: feature, manager: mgr)
+        strongsDocumentBuilderLogger.info("findAllLexiconModules: \(candidates.count) installed lexicon candidates, isHebrew=\(isHebrew)")
+        var result: [LexiconModule] = []
         var seen = Set<String>()
 
         let selectionKey: AppPreferenceKey = isHebrew ? .strongsHebrewDictionary : .strongsGreekDictionary
         let selectedNames = selectedPreferenceValues(selectionKey)
         if !selectedNames.isEmpty {
             for name in selectedNames where seen.insert(name).inserted {
-                if let mod = mgr.module(named: name),
-                   StrongsDictionaryPolicy.isSupportedDictionaryModuleName(mod.info.name),
-                   (mod.info.category == .dictionary || mod.info.category == .glossary),
-                   mod.info.features.contains(feature) {
+                if let mod = candidates.first(where: { $0.name == name }) {
                     result.append(mod)
                 }
             }
@@ -614,11 +788,8 @@ struct BibleReaderStrongsDocumentBuilder {
             }
         }
 
-        for info in allModules where
-            (info.category == .dictionary || info.category == .glossary) &&
-                StrongsDictionaryPolicy.isSupportedDictionaryModuleName(info.name) &&
-                info.features.contains(feature) {
-            if seen.insert(info.name).inserted, let mod = mgr.module(named: info.name) {
+        for mod in Self.sortLexiconModulesForAndroidTabs(candidates) {
+            if seen.insert(mod.name).inserted {
                 result.append(mod)
             }
         }
@@ -632,11 +803,135 @@ struct BibleReaderStrongsDocumentBuilder {
             : ["StrongsGreek", "StrongsRealGreek", "Thayer", "ISBE"]
         for name in lexiconNames {
             if seen.insert(name).inserted, let mod = mgr.module(named: name) {
-                result.append(mod)
+                result.append(swordLexiconModule(mod))
             }
         }
 
         return result
+    }
+
+    /**
+     Builds the installed Strong's dictionary candidates Android would expose for one feature.
+
+     SWORD dictionaries come from libsword's installed module list. Restored MyBible dictionaries are
+     stored beside SWORD modules under `mods.d` with `ModDrv=MyBibleDictionary`, which libsword does
+     not open directly; this method reads those configs and projects them into the same lookup
+     contract when their database is a Strong's dictionary.
+     */
+    private func lexiconCandidates(feature: ModuleFeatures, manager: SwordManager) -> [LexiconModule] {
+        let swordModules = manager.installedModules().compactMap { info -> LexiconModule? in
+            guard (info.category == .dictionary || info.category == .glossary),
+                  StrongsDictionaryPolicy.isSupportedDictionaryModuleName(info.name),
+                  info.features.contains(feature),
+                  let mod = manager.module(named: info.name) else {
+                return nil
+            }
+            return swordLexiconModule(mod)
+        }
+
+        return swordModules + myBibleLexiconModules(feature: feature, modulePath: manager.modulePath)
+    }
+
+    /**
+     Wraps a SWORD dictionary module in the common lexicon lookup facade.
+
+     - Parameter module: Installed SWORD dictionary module.
+     - Returns: Lookup facade preserving module initials and display label.
+     - Side effects: None until the returned closure performs SWORD key lookup.
+     */
+    private func swordLexiconModule(_ module: SwordModule) -> LexiconModule {
+        LexiconModule(
+            name: module.info.name,
+            abbreviation: moduleDisplayLabel(module),
+            lookup: { keyOptions in
+                Self.lookupInModule(module, keyOptions: keyOptions)
+            }
+        )
+    }
+
+    /**
+     Finds restored MyBible Strong's dictionaries imported from Android module backups.
+
+     Android converts MyBible dictionaries into JSword books with `Lexicons / Dictionaries` category
+     and Greek/Hebrew definition features when `info.is_strong=true`. iOS mirrors that by reading
+     the generated `.conf` metadata and opening `module.SQLite3` through `MyBibleReader`.
+     */
+    private func myBibleLexiconModules(feature: ModuleFeatures, modulePath: String) -> [LexiconModule] {
+        let baseURL = URL(fileURLWithPath: modulePath, isDirectory: true)
+        let modsDirectory = baseURL.appendingPathComponent("mods.d", isDirectory: true)
+        let configs = (try? FileManager.default.contentsOfDirectory(
+            at: modsDirectory,
+            includingPropertiesForKeys: nil
+        )) ?? []
+
+        return configs
+            .filter { $0.pathExtension.lowercased() == "conf" }
+            .compactMap { myBibleLexiconModule(from: $0, modulePathURL: baseURL, requiredFeature: feature) }
+    }
+
+    /**
+     Parses one MyBible dictionary module config and opens its backing SQLite database.
+
+     - Parameters:
+       - configURL: Module `.conf` file generated under `mods.d` by the Android backup import.
+       - modulePathURL: Root SWORD module directory containing `mods.d` and `modules`.
+       - requiredFeature: Hebrew or Greek definition feature requested by the Strong's link.
+     - Returns: A lexicon facade when the config and SQLite database describe a supported Strong's
+       dictionary, otherwise `nil`.
+     - Side effects: Reads the config file and opens a read-only SQLite handle captured by the
+       returned lookup closure.
+     */
+    private func myBibleLexiconModule(
+        from configURL: URL,
+        modulePathURL: URL,
+        requiredFeature: ModuleFeatures
+    ) -> LexiconModule? {
+        guard let config = Self.parseSwordConfig(at: configURL),
+              Self.firstConfigValue("moddrv", in: config.values)?.caseInsensitiveCompare("MyBibleDictionary") == .orderedSame,
+              StrongsDictionaryPolicy.isSupportedDictionaryModuleName(config.name),
+              let dataPath = Self.firstConfigValue("datapath", in: config.values),
+              let reader = MyBibleReader(filePath: Self.myBibleDatabaseURL(
+                dataPath: dataPath,
+                modulePathURL: modulePathURL
+              ).path),
+              reader.isDictionary else {
+            return nil
+        }
+
+        var features = Self.myBibleFeatures(from: config.values["feature"] ?? [])
+        if reader.hasStrongsDefinitions {
+            features.insert(.hebrewDef)
+            features.insert(.greekDef)
+        }
+        guard features.contains(requiredFeature) else { return nil }
+
+        let abbreviation = Self.firstConfigValue("abbreviation", in: config.values) ?? config.name
+        return LexiconModule(
+            name: config.name,
+            abbreviation: abbreviation,
+            lookup: { keyOptions in
+                Self.lookupInMyBibleDictionary(reader, keyOptions: keyOptions)
+            }
+        )
+    }
+
+    /**
+     Sorts lexicon tabs by Android's visible module abbreviation order.
+
+     Android's book lists are abbreviation/name ordered after repository import. Sorting the combined
+     SWORD/MyBible candidate list keeps restored dictionaries such as `BDBT` from being appended
+     after built-in Strong's modules simply because libsword cannot enumerate MyBible dictionaries.
+     */
+    private static func sortLexiconModulesForAndroidTabs(_ modules: [LexiconModule]) -> [LexiconModule] {
+        modules.sorted { lhs, rhs in
+            let lhsLabel = lhs.abbreviation.isEmpty ? lhs.name : lhs.abbreviation
+            let rhsLabel = rhs.abbreviation.isEmpty ? rhs.name : rhs.abbreviation
+            let comparison = lhsLabel.localizedStandardCompare(rhsLabel)
+            if comparison == .orderedSame {
+                return lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
+            }
+            return comparison == .orderedAscending
+        }
     }
 
     /**
@@ -691,6 +986,19 @@ struct BibleReaderStrongsDocumentBuilder {
 
         result = linkifyStructuredDictionaryRefs(in: result, defaultPrefix: defaultPrefix)
 
+        let myBibleStrongLinkPattern = try? NSRegularExpression(
+            pattern: #"<a\s+href=(['"])S:([HG]\d{1,5})\1>(.*?)</a>"#,
+            options: [.caseInsensitive, .dotMatchesLineSeparators]
+        )
+        if let regex = myBibleStrongLinkPattern {
+            let range = NSRange(result.startIndex..., in: result)
+            result = regex.stringByReplacingMatches(
+                in: result,
+                range: range,
+                withTemplate: "<a href=\"ab-w://?strong=$2\">$3</a>"
+            )
+        }
+
         let bareRefPattern = try? NSRegularExpression(
             pattern: #"<ref\s+target="[^"]*?/?(\d+)"[^>]*>(.*?)</ref>"#,
             options: [.dotMatchesLineSeparators]
@@ -737,7 +1045,7 @@ struct BibleReaderStrongsDocumentBuilder {
         }
 
         let brBeforeSensePattern = try? NSRegularExpression(
-            pattern: #"<br\s*/?>\s*(?=<span\s+class="sense")"#,
+            pattern: "<br\\s*" + "/?>\\s*(?=<span\\s+class=\"sense\")",
             options: []
         )
         if let regex = brBeforeSensePattern {
@@ -861,7 +1169,8 @@ enum BibleReaderMultiFragmentDocumentBuilder {
         keyName: String,
         bookInitials: String,
         bookAbbreviation: String,
-        features: OsisFeatures
+        features: OsisFeatures,
+        isNativeHtml: Bool
     )
 
     /**
@@ -888,7 +1197,8 @@ enum BibleReaderMultiFragmentDocumentBuilder {
                 hasStrongs: frag.features.type != nil,
                 ordinalRange: [0, 0],
                 language: "en",
-                direction: "ltr"
+                direction: "ltr",
+                isNativeHtml: frag.isNativeHtml
             )
         }
 

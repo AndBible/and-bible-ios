@@ -28,6 +28,22 @@ enum AndroidSpecialDocumentIdentity {
         let key: String
     }
 
+    /**
+     User-visible toolbar summary for Android's synthetic `Multi` document.
+
+     Android keeps `FakeBookFactory.multiDocument` as the page document but derives the visible
+     toolbar title from the first `BookAndKey` child, for example `BDBT: H3478`, with the fake
+     document description as the subtitle. iOS uses this value only for display; durable page
+     identity remains `general_book/Multi`.
+     */
+    struct MultiDocumentHeaderSummary: Equatable {
+        /// First child module/key title displayed in the reader toolbar.
+        let title: String
+
+        /// Fake-document description displayed beneath the title.
+        let subtitle: String
+    }
+
     /// Android `FakeBookFactory.multiDocument.initials`.
     static let multiDocumentInitials = "Multi"
 
@@ -93,6 +109,35 @@ enum AndroidSpecialDocumentIdentity {
     }
 
     /**
+     Derives Android's visible toolbar title/subtitle for a Vue `MultiDocument` payload.
+
+     - Parameters:
+       - documentJSON: Serialized Vue `MultiDocument` payload.
+       - subtitle: Localized Android `multi_description` text.
+     - Returns: Header summary from the first usable fragment, or `nil` when the payload is
+       malformed or lacks module/key metadata.
+     - Side effects: None.
+     - Failure modes: Malformed JSON, missing fragments, or fragments without a displayable module
+       and key return `nil` so callers can fall back to the fake document initials.
+     */
+    static func multiDocumentHeaderSummary(
+        from documentJSON: String,
+        subtitle: String
+    ) -> MultiDocumentHeaderSummary? {
+        guard let data = documentJSON.data(using: .utf8),
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let fragments = root["osisFragments"] as? [[String: Any]],
+              let fragment = fragments.first,
+              let module = nonEmptyString(fragment["bookAbbreviation"])
+                ?? nonEmptyString(fragment["bookInitials"]),
+              let key = multiDocumentHeaderKey(from: fragment) else {
+            return nil
+        }
+
+        return MultiDocumentHeaderSummary(title: "\(module): \(key)", subtitle: subtitle)
+    }
+
+    /**
      Parses Android's persisted `BookAndKeyList.osisRef` value into document/key pairs.
 
      Android restores `FakeBookFactory.multiDocument` by splitting the saved key on `||`, then
@@ -118,6 +163,37 @@ enum AndroidSpecialDocumentIdentity {
                 let document = documentPart == "null" || documentPart.isEmpty ? nil : documentPart
                 return BookAndKeyReference(documentInitials: document, key: key)
             }
+    }
+
+    /**
+     Resolves the visible child key Android shows for a `MultiDocument` fragment.
+
+     Strong's dictionary fragments carry normalized numeric `features.keyName` values for Vue
+     highlighting, but Android's toolbar displays the source dictionary key with its Strong's
+     category prefix and without left padding. Other multi-reference fragments fall back to their
+     OSIS/key fields.
+     */
+    private static func multiDocumentHeaderKey(from fragment: [String: Any]) -> String? {
+        if let features = fragment["features"] as? [String: Any],
+           let type = nonEmptyString(features["type"]),
+           let keyName = nonEmptyString(features["keyName"]) {
+            let stripped = keyName.replacingOccurrences(
+                of: "^0+",
+                with: "",
+                options: .regularExpression
+            )
+            let digits = stripped.isEmpty ? keyName : stripped
+            if type.caseInsensitiveCompare("hebrew") == .orderedSame {
+                return "H\(digits)"
+            }
+            if type.caseInsensitiveCompare("greek") == .orderedSame {
+                return "G\(digits)"
+            }
+        }
+
+        return nonEmptyString(fragment["osisRef"])
+            ?? nonEmptyString(fragment["keyName"])
+            ?? nonEmptyString(fragment["key"])
     }
 
     /**

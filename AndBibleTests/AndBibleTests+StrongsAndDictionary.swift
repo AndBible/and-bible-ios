@@ -17,6 +17,9 @@ import WebKit
 import struct SwiftUI.Color
 #endif
 
+/// SQLite destructor marker used by the temporary MyBible dictionary fixtures in this file.
+private let myBibleDictionaryFixtureSQLiteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+
 /**
  Thread-safe recorder for SWORD concurrency regression failures.
 
@@ -1139,6 +1142,128 @@ extension AndBibleTests {
     }
 
     /**
+     Verifies restored Android MyBible Strong's dictionaries are detected as dictionaries, not Bible
+     texts.
+
+     Android's MyBible adapter treats a module with a `dictionary` table and `info.is_strong=true`
+     as a Hebrew/Greek Strong's dictionary. The iOS reader must expose that schema shape so restored
+     Android module backups can participate in dictionary lookup instead of being ignored as
+     non-Bible MyBible files.
+
+     - Setup: Creates a minimal MyBible `module.SQLite3` with `info` and `dictionary` tables.
+     - Expected result: The reader reports dictionary/Strong's metadata and resolves the unpadded
+       Android topic key `H430`.
+     - Failure meaning: Restored MyBible dictionaries such as BDBT will not appear in the Strong's
+       multi-window on iOS.
+     - Side effects: Creates and removes a temporary SQLite database.
+     */
+    func testMyBibleReaderDetectsStrongDictionarySchema() throws {
+        let fixtureDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("mybible-dictionary-reader-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: fixtureDirectory) }
+        try FileManager.default.createDirectory(at: fixtureDirectory, withIntermediateDirectories: true)
+        let databaseURL = fixtureDirectory.appendingPathComponent("module.SQLite3")
+        try writeMyBibleStrongDictionaryDatabase(
+            at: databaseURL,
+            topic: "H430",
+            definition: "Original: <b>אלהים</b><p>BDB Definition : God, gods</p>"
+        )
+
+        let reader = try XCTUnwrap(MyBibleReader(filePath: databaseURL.path))
+
+        XCTAssertFalse(reader.isBible)
+        XCTAssertTrue(reader.isDictionary)
+        XCTAssertTrue(reader.hasStrongsDefinitions)
+        XCTAssertEqual(
+            reader.getDictionaryEntry(key: "H430"),
+            "Original: <b>אלהים</b><p>BDB Definition : God, gods</p>"
+        )
+        XCTAssertEqual(reader.dictionaryKeys(), ["H430"])
+    }
+
+    /**
+     Verifies Strong's lookup includes MyBible dictionaries restored from Android module backups.
+
+     Android imports BDBT as `ModDrv=MyBibleDictionary`, marks it with Greek/Hebrew definition
+     features, and then includes it in Strong's dictionary tabs. iOS must scan those restored configs
+     beside normal SWORD modules because libsword does not enumerate MyBibleDictionary modules.
+
+     - Setup: Adds a BDBT-style `.conf` and `module.SQLite3` to the temporary bundled SWORD path.
+     - Expected result: A Hebrew Strong's lookup produces a BDBT dictionary fragment using Android's
+       `H430` topic variant while preserving Vue's canonical `00430` Strong's key name.
+     - Failure meaning: Android backups can restore the files successfully while the dictionary still
+       remains invisible in the iOS Multi window.
+     - Side effects: Creates temporary module files under the test SWORD path.
+     */
+    func testStrongsDocumentBuilderIncludesRestoredMyBibleStrongDictionary() throws {
+        let modulePath = try makeTemporaryBundledSwordPath()
+        try installMyBibleStrongDictionaryFixture(
+            named: "BDBT",
+            modulePath: URL(fileURLWithPath: modulePath, isDirectory: true),
+            topic: "H430",
+            definition: """
+            Original: <b><he>אלהים</he></b> <p />Transliteration: <b>'ĕlôhı̂ym</b> <p />Phonetic: <b>el-o-heem'</b> <p class="bdb_def"><b>BDB Definition</b>:</p><ol><li>(plural)<ol type='a'><li>rulers, judges</li><li>divine ones</li></ol><li>(plural intensive - singular meaning)<ol type='a'><li>god, goddess</li><li>God</li></ol></li></ol> <p />Origin: plural of <a href='S:H433'>H433</a>
+            """
+        )
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let builder = BibleReaderStrongsDocumentBuilder(
+            swordManager: manager,
+            selectedPreferenceValues: { _ in [] },
+            moduleDisplayLabel: { $0.info.name },
+            localizedString: { _, defaultValue in defaultValue }
+        )
+
+        let json = try XCTUnwrap(builder.buildStrongsMultiDocumentJSON(strongs: ["H00430"], robinson: []))
+        let payload = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any])
+        let fragments = try XCTUnwrap(payload["osisFragments"] as? [[String: Any]])
+        let bdbt = try XCTUnwrap(fragments.first { $0["bookInitials"] as? String == "BDBT" })
+        let features = try XCTUnwrap(bdbt["features"] as? [String: Any])
+        let xml = try XCTUnwrap(bdbt["xml"] as? String)
+
+        XCTAssertEqual(bdbt["bookAbbreviation"] as? String, "BDBT")
+        XCTAssertEqual(bdbt["keyName"] as? String, "00430")
+        XCTAssertEqual(bdbt["isNativeHtml"] as? Bool, true)
+        XCTAssertEqual(features["type"] as? String, "hebrew")
+        XCTAssertEqual(features["keyName"] as? String, "00430")
+        XCTAssertTrue(xml.contains("<b><he>אלהים</he></b>"))
+        XCTAssertTrue(xml.contains("<ol><li>(plural)<ol type='a'><li>rulers, judges</li>"))
+        XCTAssertTrue(xml.contains(#"<a href="ab-w://?strong=H433">H433</a>"#))
+        XCTAssertFalse(xml.contains("type=\"paragraph\""))
+        XCTAssertFalse(xml.contains("No dictionary module installed"))
+    }
+
+    /**
+     Verifies the Android `Multi` toolbar title is derived from the first dictionary fragment.
+
+     Android keeps the page document as `FakeBookFactory.multiDocument`, but the toolbar title uses
+     the first child `BookAndKey` display name such as `BDBT: H430` and the subtitle remains
+     `multi_description`. This test protects that display contract without changing durable
+     `general_book/Multi` identity.
+     */
+    func testAndroidMultiDocumentHeaderSummaryUsesFirstDictionaryFragmentLikeAndroidToolbar() throws {
+        let json = try XCTUnwrap(BibleReaderMultiFragmentDocumentBuilder.buildJSON(
+            fragments: [(
+                xml: "<div><p>BDB entry</p></div>",
+                key: "BDBT--00430",
+                keyName: "00430",
+                bookInitials: "BDBT",
+                bookAbbreviation: "BDBT",
+                features: OsisFeatures(type: "hebrew", keyName: "00430"),
+                isNativeHtml: false
+            )],
+            contentType: "strongs"
+        ))
+
+        let summary = try XCTUnwrap(AndroidSpecialDocumentIdentity.multiDocumentHeaderSummary(
+            from: json,
+            subtitle: "Multiple references"
+        ))
+
+        XCTAssertEqual(summary.title, "BDBT: H430")
+        XCTAssertEqual(summary.subtitle, "Multiple references")
+    }
+
+    /**
      Verifies selected-word lookup preserves Android's dictionary rendering contract.
 
      Android `LinkControl.lookupInDictionaries` resolves exact dictionary keys through JSword and
@@ -1202,5 +1327,134 @@ extension AndBibleTests {
             controller.renderedContentState,
             BibleReaderController.emptyRenderedContentState
         )
+    }
+
+    /**
+     Installs a minimal restored MyBible Strong's dictionary into a SWORD module directory.
+
+     - Parameters:
+       - name: Module initials and config header, for example `BDBT`.
+       - modulePath: Root SWORD path containing `mods.d` and `modules`.
+       - topic: MyBible dictionary topic key to insert.
+       - definition: Raw definition text returned by dictionary lookup.
+     - Side effects: Writes one `.conf` file and one SQLite database under the temporary module path.
+     - Failure modes: File and SQLite errors are thrown to the calling test.
+     */
+    private func installMyBibleStrongDictionaryFixture(
+        named name: String,
+        modulePath: URL,
+        topic: String,
+        definition: String
+    ) throws {
+        let modsDirectory = modulePath.appendingPathComponent("mods.d", isDirectory: true)
+        let dataDirectory = modulePath
+            .appendingPathComponent("modules/texts/MyBible/\(name)", isDirectory: true)
+        try FileManager.default.createDirectory(at: modsDirectory, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: dataDirectory, withIntermediateDirectories: true)
+
+        let config = """
+        [\(name)]
+        Abbreviation=\(name)
+        DataPath=./modules/texts/MyBible/\(name)/
+        AndBibleMinimumVersion=641
+        ModDrv=MyBibleDictionary
+        CompressType=ZIP
+        BlockType=BOOK
+        Encoding=UTF-8
+        SourceType=OSIS
+        Lang=en
+        LCSH=Dictionary.English
+        Feature=GreekDef
+        Feature=HebrewDef
+        Description=Brown-Driver-Briggs' Hebrew Definitions / Thayer's Greek Definitions
+        DistributionLicense=Public Domain
+        """
+        try config.write(
+            to: modsDirectory.appendingPathComponent("\(name).conf"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try writeMyBibleStrongDictionaryDatabase(
+            at: dataDirectory.appendingPathComponent("module.SQLite3"),
+            topic: topic,
+            definition: definition
+        )
+    }
+
+    /**
+     Writes the minimum MyBible dictionary SQLite schema needed by Android's Strong's adapter.
+
+     - Parameters:
+       - databaseURL: Destination SQLite file.
+       - topic: Dictionary topic key to insert.
+       - definition: Raw definition text returned for the topic.
+     - Side effects: Creates and writes a SQLite database file.
+     - Failure modes: Throws `NSError` with SQLite diagnostics for open, schema, prepare, bind, or
+       step failures.
+     */
+    private func writeMyBibleStrongDictionaryDatabase(
+        at databaseURL: URL,
+        topic: String,
+        definition: String
+    ) throws {
+        var database: OpaquePointer?
+        guard sqlite3_open_v2(
+            databaseURL.path,
+            &database,
+            SQLITE_OPEN_CREATE | SQLITE_OPEN_READWRITE,
+            nil
+        ) == SQLITE_OK, let database else {
+            throw NSError(domain: "MyBibleDictionaryFixture", code: 1, userInfo: [
+                NSLocalizedDescriptionKey: "Could not open fixture database"
+            ])
+        }
+        defer { sqlite3_close(database) }
+
+        let schema = """
+        CREATE TABLE info (name TEXT, value TEXT);
+        INSERT INTO info (name, value) VALUES
+            ('description', 'BDBT fixture'),
+            ('language', 'en'),
+            ('is_strong', 'true');
+        CREATE TABLE dictionary (
+            topic TEXT,
+            definition TEXT,
+            lexeme TEXT,
+            transliteration TEXT,
+            pronunciation TEXT,
+            short_definition TEXT
+        );
+        CREATE UNIQUE INDEX dictionary_topic ON dictionary(topic);
+        """
+        guard sqlite3_exec(database, schema, nil, nil, nil) == SQLITE_OK else {
+            throw sqliteFixtureError(database, message: "Could not create MyBible dictionary schema")
+        }
+
+        let insert = """
+        INSERT INTO dictionary (
+            topic, definition, lexeme, transliteration, pronunciation, short_definition
+        ) VALUES (?, ?, '', '', '', '')
+        """
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(database, insert, -1, &statement, nil) == SQLITE_OK, let statement else {
+            throw sqliteFixtureError(database, message: "Could not prepare MyBible dictionary insert")
+        }
+        defer { sqlite3_finalize(statement) }
+
+        sqlite3_bind_text(statement, 1, topic, -1, myBibleDictionaryFixtureSQLiteTransient)
+        sqlite3_bind_text(statement, 2, definition, -1, myBibleDictionaryFixtureSQLiteTransient)
+        guard sqlite3_step(statement) == SQLITE_DONE else {
+            throw sqliteFixtureError(database, message: "Could not insert MyBible dictionary entry")
+        }
+    }
+
+    /**
+     Builds a test failure error containing SQLite's latest diagnostic message.
+     */
+    private func sqliteFixtureError(_ database: OpaquePointer, message: String) -> NSError {
+        let detail = sqlite3_errmsg(database).map { String(cString: $0) } ?? message
+        return NSError(domain: "MyBibleDictionaryFixture", code: 1, userInfo: [
+            NSLocalizedDescriptionKey: "\(message): \(detail)"
+        ])
     }
 }

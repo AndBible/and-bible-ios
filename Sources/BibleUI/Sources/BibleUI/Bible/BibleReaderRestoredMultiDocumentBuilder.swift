@@ -279,13 +279,19 @@ struct BibleReaderRestoredMultiDocumentBuilder {
             )
             : lookup.actualKey
         let features = restoredDictionaryFeatures(for: sourceModule, keyName: keyName)
-        let xml = BibleReaderStrongsDocumentBuilder.buildDictionaryEntryXML(
-            rawEntry: lookup.rawEntry,
-            renderedText: lookup.renderedText,
-            fallbackTitle: keyName,
-            strongsLinkPrefix: BibleReaderStrongsDocumentBuilder.strongsLinkPrefix(forModuleName: sourceModule.info.name)
-                ?? BibleReaderStrongsDocumentBuilder.strongsLinkPrefix(for: key)
-        )
+        let strongsLinkPrefix = BibleReaderStrongsDocumentBuilder.strongsLinkPrefix(forModuleName: sourceModule.info.name)
+            ?? BibleReaderStrongsDocumentBuilder.strongsLinkPrefix(for: key)
+        let xml = lookup.isNativeHtml
+            ? BibleReaderStrongsDocumentBuilder.buildDictionaryEntryHTML(
+                renderedText: lookup.renderedText,
+                strongsLinkPrefix: strongsLinkPrefix
+            )
+            : BibleReaderStrongsDocumentBuilder.buildDictionaryEntryXML(
+                rawEntry: lookup.rawEntry,
+                renderedText: lookup.renderedText,
+                fallbackTitle: keyName,
+                strongsLinkPrefix: strongsLinkPrefix
+            )
         let fragment = OsisFragment(
             xml: xml,
             key: "\(sourceModule.info.name)--\(keyName)",
@@ -300,7 +306,8 @@ struct BibleReaderRestoredMultiDocumentBuilder {
             hasStrongs: features.type != nil,
             ordinalRange: [0, 0],
             language: sourceModule.info.language.isEmpty ? "en" : sourceModule.info.language,
-            direction: sourceModule.info.isRightToLeft ? "rtl" : "ltr"
+            direction: sourceModule.info.isRightToLeft ? "rtl" : "ltr",
+            isNativeHtml: lookup.isNativeHtml
         )
         return (fragment, isStrongsDefinition || isMorphologyDefinition)
     }

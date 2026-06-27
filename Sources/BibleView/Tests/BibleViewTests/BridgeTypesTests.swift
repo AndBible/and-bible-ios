@@ -38,7 +38,8 @@ final class BridgeTypesTests: XCTestCase {
             isNewTestament: false,
             ordinalRange: [0, 10],
             language: "en",
-            direction: "ltr"
+            direction: "ltr",
+            isNativeHtml: true
         )
 
         let data = try bridgeEncoder.encode(fragment)
@@ -50,6 +51,7 @@ final class BridgeTypesTests: XCTestCase {
         XCTAssertEqual(decoded.ordinalRange, [0, 10])
         XCTAssertNil(decoded.features.type)
         XCTAssertNil(decoded.features.keyName)
+        XCTAssertTrue(decoded.isNativeHtml)
     }
 
     /**
@@ -96,6 +98,7 @@ final class BridgeTypesTests: XCTestCase {
                 "ordinalRange",
                 "language",
                 "direction",
+                "isNativeHtml",
             ]
         )
         XCTAssertEqual(object["keyName"] as? String, "Genesis 1")
@@ -104,6 +107,7 @@ final class BridgeTypesTests: XCTestCase {
         XCTAssertEqual(object["osisRef"] as? String, "Gen.1")
         XCTAssertEqual(object["direction"] as? String, "ltr")
         XCTAssertEqual(object["hasStrongs"] as? Bool, true)
+        XCTAssertEqual(object["isNativeHtml"] as? Bool, false)
 
         let features = try XCTUnwrap(object["features"] as? [String: Any])
         XCTAssertJSONKeys(features, ["type", "keyName"])

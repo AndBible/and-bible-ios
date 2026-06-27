@@ -31,7 +31,7 @@
         </div>
       </div>
     </div>
-    <OsisFragment hide-titles :fragment="fragment"/>
+    <OsisFragment hide-titles :fragment="fragment" :is-native-html="fragment.isNativeHtml ?? false"/>
     <FeaturesLink :fragment="fragment"/>
     <div v-if="index < filteredOsisFragments.length - 1" class="separator"/>
   </div>

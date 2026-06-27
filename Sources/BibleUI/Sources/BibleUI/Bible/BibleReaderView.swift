@@ -2720,7 +2720,6 @@ public struct BibleReaderView: View {
     private func paneView(for window: Window) -> some View {
         BibleWindowPane(
             window: window,
-            isFocused: window.id == windowManager.activeWindow?.id,
             displaySettings: resolvedDisplaySettings(for: window),
             nightMode: nightMode,
             disableTwoStepBookmarking: disableTwoStepBookmarkingPref,
@@ -2881,6 +2880,17 @@ public struct BibleReaderView: View {
         }
         if controller?.showingStudyPad == true {
             return .studyPad(title: controller?.activeStudyPadLabelName ?? String(localized: "study_pad"))
+        }
+        if controller?.isShowingAndroidMultiDocument == true {
+            let summary = controller?.androidMultiDocumentHeaderSummary
+            return .androidMulti(
+                title: summary?.title ?? AndroidSpecialDocumentIdentity.multiDocumentInitials,
+                subtitle: summary?.subtitle ?? Bundle.main.localizedString(
+                    forKey: "multi_description",
+                    value: "Multiple references",
+                    table: nil
+                )
+            )
         }
         if controller?.currentCategory == .dictionary ||
             controller?.currentCategory == .generalBook ||

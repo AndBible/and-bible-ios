@@ -12,10 +12,11 @@ private let myBibleReaderSQLiteTransient = unsafeBitCast(-1, to: sqlite3_destruc
  The reader expects the MyBible schema:
  - `verses(book_number, chapter, verse, text)` for Bible text
  - `books(book_number, long_name, short_name)` for book metadata
+ - `dictionary(topic, definition, ...)` for MyBible lexicon/dictionary modules
  - `info(name, value)` for module metadata
 
- Some MyBible packages may not be Bible texts. `detectType()` checks for the `verses` table so
- callers can gate Bible-specific features when the schema diverges.
+ Some MyBible packages may not be Bible texts. `detectType()` checks for Bible and dictionary
+ tables so callers can gate schema-specific features when the module diverges from a Bible text.
 
  - Important: `MyBibleReader` is marked `@unchecked Sendable` so higher-level import and module
    management flows can store and pass reader instances across actor boundaries. The class does
@@ -36,7 +37,13 @@ public final class MyBibleReader: @unchecked Sendable {
     public private(set) var language: String = "en"
 
     /// Whether the opened database exposes a `verses` table and can be treated as a Bible.
-    public private(set) var isBible: Bool = true
+    public private(set) var isBible: Bool = false
+
+    /// Whether the opened database exposes a MyBible `dictionary` table.
+    public private(set) var isDictionary: Bool = false
+
+    /// Whether MyBible metadata marks the dictionary as a Strong's definition module.
+    public private(set) var hasStrongsDefinitions: Bool = false
 
     /**
      Opens a MyBible SQLite database in read-only mode.
@@ -71,6 +78,50 @@ public final class MyBibleReader: @unchecked Sendable {
     public func getVerse(book: Int, chapter: Int, verse: Int) -> String? {
         let query = "SELECT text FROM verses WHERE book_number = ? AND chapter = ? AND verse = ?"
         return executeTextQuery(query, params: [book, chapter, verse])
+    }
+
+    /**
+     Returns a dictionary entry by its MyBible topic key.
+
+     Android's MyBible adapter reads Strong's dictionaries from `dictionary.topic` and tries both
+     padded and category-prefixed keys such as `00430`, `H0430`, and `H430`. This method exposes
+     the same exact-key lookup primitive to higher-level dictionary builders.
+
+     - Parameter key: Dictionary topic key to resolve exactly.
+     - Returns: Raw definition text for the topic, or `nil` when the module is not a dictionary or
+       the key is absent.
+     - Side effects: Reads the opened SQLite database.
+     - Failure modes: SQLite prepare/step failures are treated as missing entries.
+     */
+    public func getDictionaryEntry(key: String) -> String? {
+        guard isDictionary else { return nil }
+        let query = "SELECT definition FROM dictionary WHERE topic = ?"
+        return executeTextQuery(query, textParam: key)
+    }
+
+    /**
+     Returns all dictionary topic keys exposed by the opened MyBible module.
+
+     - Returns: Topic keys ordered by MyBible's topic column for deterministic callers.
+     - Side effects: Reads the opened SQLite database.
+     - Failure modes: Non-dictionary modules or SQLite failures return an empty list.
+     */
+    public func dictionaryKeys() -> [String] {
+        guard isDictionary else { return [] }
+        let query = "SELECT topic FROM dictionary ORDER BY topic"
+        var results: [String] = []
+
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, query, -1, &stmt, nil) == SQLITE_OK else { return [] }
+        defer { sqlite3_finalize(stmt) }
+
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            if let textPtr = sqlite3_column_text(stmt, 0) {
+                results.append(String(cString: textPtr))
+            }
+        }
+
+        return results
     }
 
     /**
@@ -127,14 +178,30 @@ public final class MyBibleReader: @unchecked Sendable {
 
     // MARK: - Private
 
-    /// Detects whether the opened MyBible database exposes the `verses` table.
+    /// Detects the high-level MyBible schema and Strong's metadata exposed by the database.
     private func detectType() {
-        // Check if the 'verses' table exists (Bible) vs. other tables
-        let query = "SELECT name FROM sqlite_master WHERE type='table' AND name='verses'"
+        let tables = tableNames()
+        isBible = tables.contains("verses")
+        isDictionary = tables.contains("dictionary")
+        hasStrongsDefinitions = isDictionary && Self.parseMyBibleBoolean(getInfoValue("is_strong"))
+    }
+
+    /// Returns all table names from SQLite's schema catalog.
+    private func tableNames() -> Set<String> {
+        let query = "SELECT name FROM sqlite_master WHERE type='table'"
+        var names = Set<String>()
+
         var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, query, -1, &stmt, nil) == SQLITE_OK else { return }
+        guard sqlite3_prepare_v2(db, query, -1, &stmt, nil) == SQLITE_OK else { return names }
         defer { sqlite3_finalize(stmt) }
-        isBible = sqlite3_step(stmt) == SQLITE_ROW
+
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            if let textPtr = sqlite3_column_text(stmt, 0) {
+                names.insert(String(cString: textPtr))
+            }
+        }
+
+        return names
     }
 
     /// Loads common module metadata from the MyBible `info` table.
@@ -160,6 +227,16 @@ public final class MyBibleReader: @unchecked Sendable {
         return String(cString: textPtr)
     }
 
+    /// Parses MyBible boolean metadata values such as `true`, `1`, and `yes`.
+    private static func parseMyBibleBoolean(_ value: String?) -> Bool {
+        guard let normalized = value?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased() else {
+            return false
+        }
+        return ["1", "true", "yes", "on"].contains(normalized)
+    }
+
     /// Executes a positional text query against the open MyBible database.
     private func executeTextQuery(_ query: String, params: [Int]) -> String? {
         var stmt: OpaquePointer?
@@ -169,6 +246,19 @@ public final class MyBibleReader: @unchecked Sendable {
         for (index, param) in params.enumerated() {
             sqlite3_bind_int(stmt, Int32(index + 1), Int32(param))
         }
+
+        guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
+        guard let textPtr = sqlite3_column_text(stmt, 0) else { return nil }
+        return String(cString: textPtr)
+    }
+
+    /// Executes a single text-parameter query against the open MyBible database.
+    private func executeTextQuery(_ query: String, textParam: String) -> String? {
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, query, -1, &stmt, nil) == SQLITE_OK else { return nil }
+        defer { sqlite3_finalize(stmt) }
+
+        sqlite3_bind_text(stmt, 1, textParam, -1, myBibleReaderSQLiteTransient)
 
         guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
         guard let textPtr = sqlite3_column_text(stmt, 0) else { return nil }

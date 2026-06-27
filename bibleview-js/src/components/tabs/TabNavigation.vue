@@ -1,5 +1,5 @@
 <!--
-  - Copyright (c) 2021-2022 Martin Denham, Tuomas Airaksinen and the AndBible contributors.
+  - Copyright (c) 2021-2026 Sykerö Software / Tuomas Airaksinen and the AndBible contributors.
   -
   - This file is part of AndBible: Bible Study (http://github.com/AndBible/and-bible).
   -
@@ -16,35 +16,58 @@
   -->
 
 <template>
-  <div class="tab-navigation" :class="navigationClass">
-    <button
-        v-for="tab in tabs"
-        :key="tab.id"
-        type="button"
-        class="tab-button"
-        :class="{ 
-          active: activeTab === tab.id,
-          disabled: tab.disabled
-        }"
-        :disabled="tab.disabled"
-        @click="handleTabClick(tab.id)"
-        :aria-selected="activeTab === tab.id"
-        :aria-controls="`tabpanel-${tab.id}`"
-        role="tab"
-    >
-      <FontAwesomeIcon 
-          v-if="tab.icon" 
-          :icon="tab.icon" 
-          class="tab-icon"
-      />
-      <span class="tab-label">{{ tab.label }}</span>
-    </button>
+  <div
+      class="tab-navigation-wrapper"
+      :class="{
+        'can-scroll-left': canScrollLeft,
+        'can-scroll-right': canScrollRight
+      }"
+  >
+    <div ref="navRef" class="tab-navigation" :class="navigationClass">
+      <button
+          v-for="tab in tabs"
+          :key="tab.id"
+          type="button"
+          class="tab-button"
+          :class="{
+            active: activeTab === tab.id,
+            disabled: tab.disabled
+          }"
+          :disabled="tab.disabled"
+          @click="handleTabClick(tab.id)"
+          :aria-selected="activeTab === tab.id"
+          :aria-controls="`tabpanel-${tab.id}`"
+          role="tab"
+      >
+        <FontAwesomeIcon
+            v-if="tab.icon"
+            :icon="tab.icon"
+            class="tab-icon"
+        />
+        <span class="tab-label">{{ tab.label }}</span>
+      </button>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
+import {ref} from 'vue';
 import {FontAwesomeIcon} from '@fortawesome/vue-fontawesome';
 import type {Tab} from './TabContainer.vue';
+import {useScrollOverflow} from '@/composables/scroll-overflow';
+
+/**
+ * Renders the Android-style horizontal tab rail used by document subviews.
+ *
+ * @param tabs - Visible tab descriptors; disabled tabs stay rendered but cannot emit changes.
+ * @param activeTab - Identifier for the selected tab. The parent owns persistence and content state.
+ * @param navigationClass - Optional parent class for narrow styling hooks, not alternate tab rails.
+ * @fires tab-change Emitted only when the user selects an enabled, non-active tab.
+ * @remarks This component owns scroll overflow fades and deliberately avoids per-document rail
+ * backgrounds or inset margins so Strong's/dictionary tabs match Android inside multi-window panes.
+ */
+const navRef = ref<HTMLElement | null>(null);
+const {canScrollLeft, canScrollRight} = useScrollOverflow(navRef);
 
 const props = defineProps<{
   tabs: Tab[];
@@ -56,6 +79,13 @@ const emit = defineEmits<{
   'tab-change': [tabId: string];
 }>();
 
+/**
+ * Emits a selection change when a tab click represents a valid user navigation.
+ *
+ * @param tabId - Identifier of the clicked tab.
+ * @remarks No side effects occur for the current tab, unknown tabs, or disabled tabs; parents handle
+ * persistence and content updates after receiving `tab-change`.
+ */
 function handleTabClick(tabId: string) {
   if (tabId !== props.activeTab) {
     const tab = props.tabs.find(t => t.id === tabId);
@@ -69,51 +99,60 @@ function handleTabClick(tabId: string) {
 <style scoped lang="scss">
 @use "@/common.scss" as *;
 
+.tab-navigation-wrapper {
+  position: relative;
+  overflow: hidden;
+
+  &::before,
+  &::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 24px;
+    z-index: 1;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+
+    .noAnimation & {
+      transition: none;
+    }
+  }
+
+  &::before {
+    left: 0;
+    background: linear-gradient(to right, var(--background-color), transparent);
+  }
+
+  &::after {
+    right: 0;
+    background: linear-gradient(to left, var(--background-color), transparent);
+  }
+
+  &.can-scroll-left::before {
+    opacity: 1;
+  }
+
+  &.can-scroll-right::after {
+    opacity: 1;
+  }
+}
+
 .tab-navigation {
-  --tab-rail-bg: transparent;
-  --tab-hover-bg: #f8f9fa;
-  --tab-active-bg: #f1f3f4;
   display: flex;
-  width: 100%;
-  flex-wrap: nowrap;
   overflow-x: auto;
-  overflow-y: hidden;
-  -webkit-overflow-scrolling: touch;
-  scrollbar-width: none;
   &::-webkit-scrollbar { display: none; }
   border-bottom: 2px solid #eee;
 
   .monochrome & {
     border-bottom-color: black;
-    --tab-rail-bg: transparent;
-    --tab-hover-bg: transparent;
-    --tab-active-bg: transparent;
   }
   .night & {
     border-bottom-color: #444;
-    --tab-rail-bg: #2b2b2b;
-    --tab-hover-bg: #333;
-    --tab-active-bg: #3f3f3f;
   }
   .monochrome.night & {
     border-bottom-color: white;
-    --tab-rail-bg: transparent;
-    --tab-hover-bg: transparent;
-    --tab-active-bg: transparent;
-  }
-  background: var(--tab-rail-bg);
-
-  &.strongs-tabs,
-  &.morph-tabs {
-    --tab-rail-bg: #eceff1;
-    --tab-hover-bg: #e4e7ea;
-    --tab-active-bg: #d6dade;
-
-    .night & {
-      --tab-rail-bg: #3b3b3b;
-      --tab-hover-bg: #353535;
-      --tab-active-bg: #262626;
-    }
   }
 }
 
@@ -124,8 +163,6 @@ function handleTabClick(tabId: string) {
   padding: 12px 20px;
   border: none;
   background: transparent;
-  border-top-left-radius: 3px;
-  border-top-right-radius: 3px;
   cursor: pointer;
   font-size: 14px;
   font-weight: 500;
@@ -135,15 +172,13 @@ function handleTabClick(tabId: string) {
   .noAnimation & {
     transition: none;
   }
-  flex: 0 0 auto;
-  min-width: max-content;
+  flex-shrink: 0;
 
   .monochrome & {
     color: black;
   }
   .night & {
     color: #999;
-    background: transparent;
   }
   .monochrome.night & {
     color: white;
@@ -151,7 +186,7 @@ function handleTabClick(tabId: string) {
 
   &:hover:not(:disabled) {
     color: #007bff;
-    background: var(--tab-hover-bg);
+    background: #f8f9fa;
 
     .monochrome & {
       color: black;
@@ -160,6 +195,7 @@ function handleTabClick(tabId: string) {
     }
     .night & {
       color: #1e90ff;
+      background: #333;
     }
     .monochrome.night & {
       color: white;
@@ -171,15 +207,10 @@ function handleTabClick(tabId: string) {
   &.active {
     color: #007bff;
     border-bottom-color: #007bff;
-    background: var(--tab-active-bg);
-    box-shadow: inset 1px 0 0 rgba(255, 255, 255, 0.05),
-      inset -1px 0 0 rgba(255, 255, 255, 0.05);
 
     .monochrome & {
       color: black;
       border-bottom-color: black;
-      background: transparent;
-      box-shadow: none;
     }
     .night & {
       color: #1e90ff;
@@ -188,8 +219,6 @@ function handleTabClick(tabId: string) {
     .monochrome.night & {
       color: white;
       border-bottom-color: white;
-      background: transparent;
-      box-shadow: none;
     }
   }
 

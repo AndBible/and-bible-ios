@@ -691,9 +691,11 @@ extension AndBibleTests {
                 "ordinalRange",
                 "language",
                 "direction",
+                "isNativeHtml",
             ]
         )
         XCTAssertEqual(fragmentObject["hasStrongs"] as? Bool, true)
+        XCTAssertEqual(fragmentObject["isNativeHtml"] as? Bool, false)
         let features = try XCTUnwrap(fragmentObject["features"] as? [String: Any])
         assertJSONKeys(features, ["type", "keyName"])
 
@@ -2062,6 +2064,27 @@ extension AndBibleTests {
             Set(try XCTUnwrap(appSettings["enabledExperimentalFeatures"] as? [String])),
             ["add_paragraph_break", "bookmark_edit_actions"]
         )
+    }
+
+    /**
+     Protects the reader bridge's last-resort margin fallback from iOS-only layout drift.
+
+     Android's `WorkspaceEntities.kt` initializes text-display margins to left `3`, right `3`,
+     and max width `170`. The bridge normally receives resolved app defaults, but restored or
+     migrated data can temporarily leave both the pane settings and defaults empty; this test
+     verifies that even that edge case encodes Android's baseline instead of the older iOS
+     fallback (`2`, `2`, `600`). A failure means dictionary and reader panes can render with
+     platform-specific margins before persisted settings are available.
+     */
+    func testReaderConfigMarginFallbackMatchesAndroidDefaultsWhenSettingsAreEmpty() throws {
+        let config = BibleReaderDisplayConfig(settings: TextDisplaySettings(), defaults: TextDisplaySettings())
+        let data = try JSONEncoder().encode(config)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let marginSize = try XCTUnwrap(object["marginSize"] as? [String: Any])
+
+        XCTAssertEqual(marginSize["marginLeft"] as? Int, 3)
+        XCTAssertEqual(marginSize["marginRight"] as? Int, 3)
+        XCTAssertEqual(marginSize["maxWidth"] as? Int, 170)
     }
 
     /**

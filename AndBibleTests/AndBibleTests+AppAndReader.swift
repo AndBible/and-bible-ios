@@ -2053,6 +2053,30 @@ extension AndBibleTests {
     }
 
     /**
+     Verifies active-pane rendering stays owned by the Android/Vue active-window indicator.
+
+     Android emits `set_active` into each web reader and draws corner markers inside `BibleView.vue`.
+     A native SwiftUI border around the pane creates an extra full blue rectangle that Android does
+     not draw, especially visible in multi-window dictionary layouts. The source assertion protects
+     that boundary because the visual marker is intentionally split between native focus routing and
+     web-rendered reader chrome.
+     */
+    func testReaderPaneDoesNotAddNativeAccentBorderForActiveWindow() throws {
+        let paneSource = try bibleUISource(named: "BibleWindowPane.swift")
+        let readerSource = try bibleUISource(named: "BibleReaderView.swift")
+        let controllerSource = try bibleUISource(named: "BibleReaderController.swift")
+        let coordinatorSource = try bibleUISource(named: "BibleReaderConfigurationCoordinator.swift")
+        let paneViewSource = try extractFunction(named: "paneView", from: readerSource)
+
+        XCTAssertFalse(paneSource.contains(".border(isFocused"))
+        XCTAssertFalse(paneSource.contains("Color.accentColor"))
+        XCTAssertFalse(paneViewSource.contains("isFocused:"))
+        XCTAssertTrue(controllerSource.contains("activeWindowState()"))
+        XCTAssertTrue(controllerSource.contains("set_active"))
+        XCTAssertTrue(coordinatorSource.contains("hasActiveIndicator"))
+    }
+
+    /**
      Loads a Bible reader UI source file for source-level contract tests.
 
      Source assertions are used only where SwiftUI coordinator state is intentionally private and a

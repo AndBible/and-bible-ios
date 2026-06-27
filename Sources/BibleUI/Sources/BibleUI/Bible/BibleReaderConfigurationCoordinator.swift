@@ -269,8 +269,8 @@ struct BibleReaderSetConfigPayload: Encodable, Equatable {
    - settings: Window/workspace/global-resolved settings currently active for the pane.
    - defaults: App-level fallback values for unset fields.
  - Side effects: None.
- - Failure modes: None; unset settings fall back through `defaults` and bridge defaults preserved
-   from the previous controller implementation.
+ - Failure modes: None; unset settings fall back through `defaults` and Android-compatible bridge
+   defaults preserved for missing persisted data.
  */
 struct BibleReaderDisplayConfig: Encodable, Equatable {
     let developmentMode: Bool
@@ -384,7 +384,8 @@ struct BibleReaderDisplayColors: Encodable, Equatable {
  Margin sub-object inside the Vue reader `config` payload.
 
  - Side effects: None.
- - Failure modes: None; every field falls back to the bridge defaults preserved from the controller.
+ - Failure modes: None; every field falls back through app defaults and then Android's
+   `WorkspaceEntities.kt` text-display baseline (`3`, `3`, `170`) when persisted data is absent.
  */
 struct BibleReaderDisplayMarginSize: Encodable, Equatable {
     let marginLeft: Int
@@ -392,9 +393,10 @@ struct BibleReaderDisplayMarginSize: Encodable, Equatable {
     let maxWidth: Int
 
     init(settings s: TextDisplaySettings, defaults d: TextDisplaySettings) {
-        self.marginLeft = s.marginLeft ?? d.marginLeft ?? 2
-        self.marginRight = s.marginRight ?? d.marginRight ?? 2
-        self.maxWidth = s.maxWidth ?? d.maxWidth ?? 600
+        let appDefaults = TextDisplaySettings.appDefaults
+        self.marginLeft = s.marginLeft ?? d.marginLeft ?? appDefaults.marginLeft ?? 3
+        self.marginRight = s.marginRight ?? d.marginRight ?? appDefaults.marginRight ?? 3
+        self.maxWidth = s.maxWidth ?? d.maxWidth ?? appDefaults.maxWidth ?? 170
     }
 }
 
