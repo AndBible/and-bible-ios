@@ -249,7 +249,7 @@ public final class AndroidModuleBackupService {
     private static let unsupportedAndroidModulePrefixes = ["mybible/", "mysword/", "esword/", "epub/"]
 
     /// SWORD drivers whose `DataPath` points at a file stem inside the actual module directory.
-    private static let singleFileDataPathDrivers: Set<String> = ["rawld", "zld", "rawgenbook", "rawfiles"]
+    private static let singleFileDataPathDrivers: Set<String> = ["rawld", "rawld4", "zld", "rawgenbook", "rawfiles"]
 
     /// Largest manifest or SWORD config entry accepted for in-memory metadata parsing.
     private static let maximumMetadataEntryByteCount = 1024 * 1024
@@ -825,7 +825,7 @@ public final class AndroidModuleBackupService {
      */
     private func existingEntryPaths(in supportedEntries: [ZipArchiveEntry]) -> [String] {
         supportedEntries.map(\.name)
-            .filter { fileManager.fileExists(atPath: moduleDirectory.appendingPathComponent($0).path) }
+            .filter { existingPublishedURL(for: $0) != nil }
             .sorted()
     }
 
@@ -834,12 +834,15 @@ public final class AndroidModuleBackupService {
      */
     private func existingEntryPaths(in supportedEntries: [ClassifiedFileEntry]) -> [String] {
         supportedEntries.map(\.name)
-            .filter { fileManager.fileExists(atPath: moduleDirectory.appendingPathComponent($0).path) }
+            .filter { existingPublishedURL(for: $0) != nil }
             .sorted()
     }
 
     /**
      Atomically publishes staged module files with rollback protection for overwritten paths.
+
+     Existing files are resolved through actual directory entries so Android backups can replace
+     files whose casing differs from an installed iOS copy on case-insensitive filesystems.
      */
     private func publishStagedEntries(
         _ relativePaths: [String],
@@ -853,21 +856,25 @@ public final class AndroidModuleBackupService {
             for relativePath in relativePaths {
                 let finalURL = moduleDirectory.appendingPathComponent(relativePath)
                 let stagedURL = stagingDirectory.appendingPathComponent(relativePath)
-                let rollbackURL = rollbackDirectory.appendingPathComponent(relativePath)
                 try fileManager.createDirectory(
                     at: finalURL.deletingLastPathComponent(),
                     withIntermediateDirectories: true
                 )
 
-                if fileManager.fileExists(atPath: finalURL.path) {
+                if let existingURL = existingPublishedURL(for: relativePath) {
+                    let existingRelativePath = relativePublishedPath(for: existingURL)
                     try fileManager.createDirectory(
-                        at: rollbackURL.deletingLastPathComponent(),
+                        at: rollbackDirectory.appendingPathComponent(existingRelativePath).deletingLastPathComponent(),
                         withIntermediateDirectories: true
                     )
-                    try fileManager.moveItem(at: finalURL, to: rollbackURL)
-                    movedExistingPaths.append(relativePath)
+                    try fileManager.moveItem(
+                        at: existingURL,
+                        to: rollbackDirectory.appendingPathComponent(existingRelativePath)
+                    )
+                    movedExistingPaths.append(existingRelativePath)
                 }
 
+                try? fileManager.removeItem(at: finalURL)
                 try fileManager.copyItem(at: stagedURL, to: finalURL)
                 createdPaths.append(relativePath)
             }
@@ -886,6 +893,55 @@ public final class AndroidModuleBackupService {
             }
             throw error
         }
+    }
+
+    /**
+     Finds an existing published module file that collides with one archive-relative path.
+
+     The lookup walks the real directory entries instead of relying only on `fileExists(atPath:)`
+     so case-variant Android paths can overwrite iOS-installed files reliably on APFS.
+     */
+    private func existingPublishedURL(for relativePath: String) -> URL? {
+        var currentURL = moduleDirectory
+        for rawComponent in relativePath.split(separator: "/") {
+            let component = String(rawComponent)
+            let componentKey = filesystemCollisionKey(component)
+            if let childURLs = try? fileManager.contentsOfDirectory(
+                at: currentURL,
+                includingPropertiesForKeys: nil
+            ),
+               let matchingURL = childURLs.first(where: { filesystemCollisionKey($0.lastPathComponent) == componentKey }) {
+                currentURL = matchingURL
+                continue
+            }
+
+            let exactURL = currentURL.appendingPathComponent(component)
+            guard fileManager.fileExists(atPath: exactURL.path) else {
+                return nil
+            }
+            currentURL = exactURL
+        }
+        return currentURL
+    }
+
+    /**
+     Converts an existing module file URL back to its module-root-relative path.
+     */
+    private func relativePublishedPath(for url: URL) -> String {
+        let rootPath = moduleDirectory.standardizedFileURL.path
+        let filePath = url.standardizedFileURL.path
+        let prefix = rootPath.hasSuffix("/") ? rootPath : "\(rootPath)/"
+        guard filePath.hasPrefix(prefix) else {
+            return url.lastPathComponent
+        }
+        return String(filePath.dropFirst(prefix.count))
+    }
+
+    /**
+     Produces a conservative case-insensitive filesystem comparison key for one path component.
+     */
+    private func filesystemCollisionKey(_ component: String) -> String {
+        component.precomposedStringWithCanonicalMapping.lowercased(with: Locale(identifier: "en_US_POSIX"))
     }
 
     /**

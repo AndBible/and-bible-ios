@@ -147,6 +147,56 @@ extension AndBibleTests {
     }
 
     /**
+     Verifies that Android RawLD4 dictionary modules restore when their `DataPath` names a file
+     stem instead of the containing directory.
+
+     Setup:
+     - builds an Android-shaped `.abmd.zip` fixture with a `RawLD4` config matching Android
+       production backups
+     - stores `.dat` and `.idx` files under the containing SWORD data directory
+     - inspects and restores through file-backed APIs, matching external file import
+
+     Expected result:
+     - inspection treats the RawLD4 file stem as present when sibling data files exist
+     - restore writes the config and RawLD4 payload files into the module root
+
+     Failure meaning:
+     - iOS rejects valid Android production module backups with “references missing data path”
+       even though Android and SWORD store RawLD4 data as file-stem payloads.
+     */
+    func testAndroidModuleBackupRestoresRawLD4FileStemModuleFromFileURL() throws {
+        let moduleRoot = try makeTemporaryAndroidModuleBackupRoot()
+        let service = AndroidModuleBackupService(moduleDirectory: moduleRoot)
+        let archiveData = try makeAndroidModuleBackupArchiveData(entries: [
+            ("mods.d/acdcref.conf", makeAndroidRawLD4ModuleBackupConf()),
+            ("modules/lexdict/rawld4/acdcref/acdcref.dat", Data("dictionary data".utf8)),
+            ("modules/lexdict/rawld4/acdcref/acdcref.idx", Data("dictionary index".utf8)),
+        ])
+        let archiveURL = try writeTemporaryAndroidModuleBackupArchive(archiveData)
+
+        let inspection = try service.inspectArchive(fromArchiveAt: archiveURL)
+        let report = try service.restoreArchive(fromArchiveAt: archiveURL)
+
+        XCTAssertEqual(inspection.supportedModuleNames, ["ACDCREF"])
+        XCTAssertEqual(report.installedModuleNames, ["ACDCREF"])
+        XCTAssertEqual(report.installedEntryCount, 3)
+        XCTAssertEqual(
+            try String(
+                contentsOf: moduleRoot.appendingPathComponent("modules/lexdict/rawld4/acdcref/acdcref.dat"),
+                encoding: .utf8
+            ),
+            "dictionary data"
+        )
+        XCTAssertEqual(
+            try String(
+                contentsOf: moduleRoot.appendingPathComponent("modules/lexdict/rawld4/acdcref/acdcref.idx"),
+                encoding: .utf8
+            ),
+            "dictionary index"
+        )
+    }
+
+    /**
      Verifies that file-backed Android module backup restore announces the installed-module store
      change immediately after publishing SWORD files.
 
@@ -227,6 +277,51 @@ extension AndBibleTests {
 
         _ = try service.restoreArchive(from: archiveData, allowOverwritingExistingFiles: true)
         XCTAssertEqual(try String(contentsOf: existingURL, encoding: .utf8), "remote")
+    }
+
+    /**
+     Verifies Android module backup restore overwrites installed files whose casing differs from
+     the Android archive entry.
+
+     Setup:
+     - creates an existing lowercase SWORD config
+     - restores a file-backed Android backup containing the same config path with uppercase module
+       initials
+
+     Expected result:
+     - inspection reports the uppercase archive path as an existing entry
+     - restore replaces the lowercase installed file with the archive-cased file instead of
+       failing during publish
+
+     Failure meaning:
+     - iOS rejects valid Android production module backups when installed modules differ only by
+       filename casing from Android's backup entries.
+    */
+    func testAndroidModuleBackupOverwritesCaseVariantExistingFileFromFileURL() throws {
+        let moduleRoot = try makeTemporaryAndroidModuleBackupRoot()
+        let existingConfigURL = moduleRoot.appendingPathComponent("mods.d/acdcref.conf")
+        try Data("local config".utf8).write(to: existingConfigURL)
+        let service = AndroidModuleBackupService(moduleDirectory: moduleRoot)
+        let archiveData = try makeAndroidModuleBackupArchiveData(entries: [
+            ("mods.d/ACDCREF.conf", makeAndroidRawLD4ModuleBackupConf()),
+            ("modules/lexdict/rawld4/acdcref/acdcref.dat", Data("dictionary data".utf8)),
+            ("modules/lexdict/rawld4/acdcref/acdcref.idx", Data("dictionary index".utf8)),
+        ])
+        let archiveURL = try writeTemporaryAndroidModuleBackupArchive(archiveData)
+
+        let inspection = try service.inspectArchive(fromArchiveAt: archiveURL)
+        _ = try service.restoreArchive(fromArchiveAt: archiveURL)
+
+        let configNames = try FileManager.default.contentsOfDirectory(
+            atPath: moduleRoot.appendingPathComponent("mods.d").path
+        )
+        XCTAssertEqual(inspection.existingEntryPaths, ["mods.d/ACDCREF.conf"])
+        XCTAssertTrue(configNames.contains("ACDCREF.conf"))
+        XCTAssertFalse(configNames.contains("acdcref.conf"))
+        XCTAssertEqual(
+            try String(contentsOf: moduleRoot.appendingPathComponent("mods.d/ACDCREF.conf"), encoding: .utf8),
+            String(data: makeAndroidRawLD4ModuleBackupConf(), encoding: .utf8)
+        )
     }
 
     /**
@@ -440,6 +535,25 @@ extension AndBibleTests {
             DataPath=./modules/texts/rawtext/\(moduleName.lowercased())/
             ModDrv=RawText
             Description=\(moduleName)
+
+            """.utf8
+        )
+    }
+
+    /**
+     Builds a RawLD4 SWORD config matching Android production module-backup dictionaries.
+
+     - Returns: UTF-8 config bytes whose `DataPath` points to a RawLD4 file stem.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    private func makeAndroidRawLD4ModuleBackupConf() -> Data {
+        Data(
+            """
+            [ACDCref]
+            DataPath=./modules/lexdict/rawld4/acdcref/acdcref
+            ModDrv=RawLD4
+            Description=ACDCREF
 
             """.utf8
         )
