@@ -1,5 +1,5 @@
 <!--
-  - Copyright (c) 2021-2022 Martin Denham, Tuomas Airaksinen and the AndBible contributors.
+  - Copyright (c) 2021-2026 Sykerö Software / Tuomas Airaksinen and the AndBible contributors.
   -
   - This file is part of AndBible: Bible Study (http://github.com/AndBible/and-bible).
   -
@@ -17,13 +17,15 @@
 
 <template>
   <div class="tab-container" :class="containerClass">
-    <TabNavigation
-        v-if="showNavigation"
-        :tabs="tabs"
-        :active-tab="activeTab"
-        :navigation-class="navigationClass"
-        @tab-change="handleTabChange"
-    />
+    <div v-if="showNavigation" class="tab-navigation-row">
+      <TabNavigation
+          :tabs="tabs"
+          :active-tab="activeTab"
+          :navigation-class="navigationClass"
+          @tab-change="handleTabChange"
+      />
+      <slot name="trailing"></slot>
+    </div>
     
     <div class="tab-content" :class="contentClass">
       <TabPanel
@@ -40,6 +42,24 @@
 </template>
 
 <script setup lang="ts">
+/**
+ * Coordinates Android-style tab navigation with active panel rendering.
+ *
+ * @param tabs - Candidate tab descriptors. Entries without an id or label are filtered before
+ * rendering so parents can build lists defensively.
+ * @param defaultTab - Optional initial tab id. If omitted, the first enabled tab becomes active.
+ * @param showNavigation - Hides the navigation row when false while keeping panel rendering intact.
+ * @param containerClass - Optional class applied to the outer container.
+ * @param navigationClass - Optional class passed through to the shared `TabNavigation` rail.
+ * @param contentClass - Optional class applied to the panel content wrapper.
+ * @param panelClass - Optional class applied to each panel.
+ * @fires tabChange Emitted after selecting an enabled tab that differs from the active tab.
+ * @slot default Named tab slots receive `{ tab, active }` for the matching tab id.
+ * @slot trailing Optional controls rendered beside the tab rail in the Android `tab-navigation-row`.
+ * @remarks This component owns tab state and exposes imperative helpers for existing modal/document
+ * integrations. It has no persistence side effects; callers persist state from the emitted event or
+ * from their own watchers.
+ */
 import {computed, provide, ref, watch} from 'vue';
 import TabNavigation from './TabNavigation.vue';
 import TabPanel from './TabPanel.vue';
@@ -94,6 +114,13 @@ provide(setActiveTabKey, (tabId: string) => {
   }
 });
 
+/**
+ * Applies a requested tab change and notifies parents when the request is valid.
+ *
+ * @param tabId - Identifier received from the tab rail or imperative `setActiveTab` helper.
+ * @remarks Unknown, disabled, or already-active tab ids are ignored. Successful changes mutate only
+ * local reactive state and emit `tabChange`; parents remain responsible for external side effects.
+ */
 function handleTabChange(tabId: string) {
   const tab = tabs.value.find(t => t.id === tabId);
   if (tab && !tab.disabled && tabId !== activeTab.value) {
@@ -131,6 +158,16 @@ defineExpose({
 .tab-container {
   display: flex;
   flex-direction: column;
+}
+
+.tab-navigation-row {
+  display: flex;
+  align-items: stretch;
+
+  :deep(.tab-navigation-wrapper) {
+    flex: 1;
+    min-width: 0;
+  }
 }
 
 .tab-content {

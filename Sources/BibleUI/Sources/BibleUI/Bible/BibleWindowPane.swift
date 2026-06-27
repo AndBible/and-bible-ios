@@ -19,7 +19,7 @@ private let logger = Logger(subsystem: "org.andbible", category: "BibleWindowPan
  workspace-level state from `WindowManager`.
 
  Data dependencies:
- - `window`, `isFocused`, `displaySettings`, `nightMode`, `disableTwoStepBookmarking`, and
+ - `window`, `displaySettings`, `nightMode`, `disableTwoStepBookmarking`, and
    `hideWindowButtons` drive pane rendering and controller updates
  - `WindowManager` is required from the environment for controller registration, layout actions,
    active-window coordination, and window-menu actions
@@ -35,9 +35,6 @@ private let logger = Logger(subsystem: "org.andbible", category: "BibleWindowPan
 struct BibleWindowPane: View {
     /// Window model that owns this pane's persisted position, layout, and history state.
     let window: Window
-
-    /// Whether this pane is currently the active/focused pane in the workspace.
-    let isFocused: Bool
 
     /// Fully resolved text-display settings pushed into the pane's controller and web view.
     let displaySettings: TextDisplaySettings
@@ -209,7 +206,6 @@ struct BibleWindowPane: View {
                 windowMenuOverlay
             }
         }
-        .border(isFocused && windowManager.visibleWindows.count > 1 ? Color.accentColor : Color.clear, width: 2)
         .onAppear {
             if controller == nil {
                 initializeController()

@@ -2065,6 +2065,27 @@ extension AndBibleTests {
     }
 
     /**
+     Protects the reader bridge's last-resort margin fallback from iOS-only layout drift.
+
+     Android's `WorkspaceEntities.kt` initializes text-display margins to left `3`, right `3`,
+     and max width `170`. The bridge normally receives resolved app defaults, but restored or
+     migrated data can temporarily leave both the pane settings and defaults empty; this test
+     verifies that even that edge case encodes Android's baseline instead of the older iOS
+     fallback (`2`, `2`, `600`). A failure means dictionary and reader panes can render with
+     platform-specific margins before persisted settings are available.
+     */
+    func testReaderConfigMarginFallbackMatchesAndroidDefaultsWhenSettingsAreEmpty() throws {
+        let config = BibleReaderDisplayConfig(settings: TextDisplaySettings(), defaults: TextDisplaySettings())
+        let data = try JSONEncoder().encode(config)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let marginSize = try XCTUnwrap(object["marginSize"] as? [String: Any])
+
+        XCTAssertEqual(marginSize["marginLeft"] as? Int, 3)
+        XCTAssertEqual(marginSize["marginRight"] as? Int, 3)
+        XCTAssertEqual(marginSize["maxWidth"] as? Int, 170)
+    }
+
+    /**
      Protects the WebView paging contract from invalid synced or migrated `PAGE_SCROLL_AMOUNT` data.
 
      Android's `PageScrollAmountPreference` only accepts six discrete percentages and falls back to

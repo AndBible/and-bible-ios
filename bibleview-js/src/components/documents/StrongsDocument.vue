@@ -22,7 +22,6 @@
           v-if="strongsDictionaries.size > 1"
           :tabs="strongsTabsConfig"
           :active-tab="selectedStrongsDict ?? ''"
-          navigation-class="strongs-tabs"
           @tab-change="handleStrongsDictChange"
       />
       <div v-for="[strongsKey, fragments] in filteredStrongsEntries" :key="strongsKey" class="strongs-group">
@@ -45,7 +44,6 @@
           v-if="morphDictionaries.size > 1"
           :tabs="morphTabsConfig"
           :active-tab="selectedMorphDict ?? ''"
-          navigation-class="morph-tabs"
           @tab-change="handleMorphDictChange"
       />
       <div v-for="frag in filteredMorphFragments" :key="frag.key" class="morph-entry">
@@ -59,6 +57,15 @@
 </template>
 
 <script setup lang="ts">
+/**
+ * Displays Strong's and morphology dictionary fragments for the selected word.
+ *
+ * @param document - Multi-fragment dictionary payload from the native reader bridge. The component
+ * groups fragments by Strong's key and dictionary module, persists selected module tabs through the
+ * Android bridge state API, and renders dictionary tab navigation with the shared Android tab rail.
+ * @remarks The tab navigation intentionally has no Strong's-specific rail class or extra margin so
+ * dictionary windows match Android's multi-window presentation.
+ */
 import {useCommon} from "@/composables";
 import OsisFragment from "@/components/documents/OsisFragment.vue";
 import TabNavigation from "@/components/tabs/TabNavigation.vue";
@@ -261,11 +268,6 @@ function findAllLink(frag: OsisFragmentType): string | null {
 
 .morph-entry {
   margin-bottom: 0.35em;
-}
-
-:deep(.strongs-tabs),
-:deep(.morph-tabs) {
-  margin-bottom: 0.85em;
 }
 
 :deep(.strongs-entry ul),

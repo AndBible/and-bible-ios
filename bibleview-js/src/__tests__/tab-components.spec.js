@@ -1,4 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mount } from '@vue/test-utils'
 import TabContainer from '@/components/tabs/TabContainer.vue'
 import TabNavigation from '@/components/tabs/TabNavigation.vue'
@@ -15,6 +16,17 @@ vi.mock('@fortawesome/vue-fontawesome', () => ({
 
 // Mock the common SCSS file
 vi.mock('@/common.scss', () => ({}))
+
+beforeEach(() => {
+  vi.stubGlobal('ResizeObserver', class {
+    observe = vi.fn()
+    disconnect = vi.fn()
+  })
+})
+
+afterEach(() => {
+  vi.unstubAllGlobals()
+})
 
 describe('TabContainer.vue', () => {
   const mockTabs = [
@@ -41,7 +53,24 @@ describe('TabContainer.vue', () => {
   it('renders correctly with tabs', () => {
     expect(wrapper.exists()).toBe(true)
     expect(wrapper.find('.tab-container').exists()).toBe(true)
+    expect(wrapper.find('.tab-navigation-row').exists()).toBe(true)
     expect(wrapper.find('.tab-content').exists()).toBe(true)
+  })
+
+  it('uses Android tab navigation row and trailing slot structure', () => {
+    const wrapperWithTrailing = mount(TabContainer, {
+      props: {
+        tabs: mockTabs
+      },
+      slots: {
+        tab1: '<div>Tab 1</div>',
+        trailing: '<button class="trailing-action">More</button>'
+      }
+    })
+
+    expect(wrapperWithTrailing.find('.tab-navigation-row').exists()).toBe(true)
+    expect(wrapperWithTrailing.find('.tab-navigation-row .tab-navigation-wrapper').exists()).toBe(true)
+    expect(wrapperWithTrailing.find('.tab-navigation-row .trailing-action').exists()).toBe(true)
   })
 
   it('initializes with first non-disabled tab as active', async () => {
@@ -110,6 +139,7 @@ describe('TabContainer.vue', () => {
     })
 
     expect(wrapperNoNav.findComponent(TabNavigation).exists()).toBe(false)
+    expect(wrapperNoNav.find('.tab-navigation-row').exists()).toBe(false)
   })
 
   it('applies custom CSS classes', () => {
@@ -205,6 +235,11 @@ describe('TabNavigation.vue', () => {
     expect(buttons).toHaveLength(3)
   })
 
+  it('uses Android overflow wrapper around the tab rail', () => {
+    expect(wrapper.find('.tab-navigation-wrapper').exists()).toBe(true)
+    expect(wrapper.find('.tab-navigation').exists()).toBe(true)
+  })
+
   it('marks active tab correctly', () => {
     const buttons = wrapper.findAll('.tab-button')
     expect(buttons[0].classes()).toContain('active')
@@ -260,6 +295,30 @@ describe('TabNavigation.vue', () => {
     })
 
     expect(customWrapper.find('.tab-navigation').classes()).toContain('custom-nav')
+  })
+
+  it('does not use iOS-only Strong dictionary tab rail styling', () => {
+    const navigationSource = readFileSync(
+      `${process.cwd()}/src/components/tabs/TabNavigation.vue`,
+      'utf8'
+    )
+    const containerSource = readFileSync(
+      `${process.cwd()}/src/components/tabs/TabContainer.vue`,
+      'utf8'
+    )
+    const strongsSource = readFileSync(
+      `${process.cwd()}/src/components/documents/StrongsDocument.vue`,
+      'utf8'
+    )
+
+    expect(containerSource).toContain('class="tab-navigation-row"')
+    expect(containerSource).toContain('<slot name="trailing"></slot>')
+    expect(navigationSource).toContain('class="tab-navigation-wrapper"')
+    expect(navigationSource).not.toContain('--tab-rail-bg')
+    expect(navigationSource).not.toContain('strongs-tabs')
+    expect(navigationSource).not.toContain('morph-tabs')
+    expect(strongsSource).not.toContain('navigation-class="strongs-tabs"')
+    expect(strongsSource).not.toContain('navigation-class="morph-tabs"')
   })
 })
 
