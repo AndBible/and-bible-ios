@@ -2309,6 +2309,78 @@ extension AndBibleTests {
     }
 
     /**
+     Protects the extracted special-document coordinator's Android fake-document identity rule.
+
+     Android renders links-window results as Vue `MultiDocument` content while native page state is
+     persisted as `general_book/Multi` plus a `BookAndKeyList` key. The setup sends both a valid
+     durable `Multi` request and a malformed request without a durable key. The expected result is
+     that valid requests produce a PageManager persistence plan, while malformed requests still move
+     the visible category to general book without erasing the previous restorable key. A failure
+     means the controller could regress into either iOS-only transient state or data-lossy restore
+     semantics.
+     */
+    func testReaderSpecialDocumentCoordinatorBuildsAndroidMultiPageIdentityPlan() {
+        let coordinator = BibleReaderSpecialDocumentCoordinator()
+        let validRequest = BibleReaderTransientDocumentRequest(
+            documentJSON: #"{"id":"valid"}"#,
+            renderedBook: "Multi",
+            renderedKey: "multi",
+            renderedCategory: .generalBook,
+            renderedModuleName: "Multi",
+            pageCategory: .generalBook,
+            pageDocumentInitials: "Multi",
+            pageKey: "KJV:Gen.1.1"
+        )
+        let malformedRequest = BibleReaderTransientDocumentRequest(
+            documentJSON: #"{"id":"bad"}"#,
+            renderedBook: "Multi",
+            renderedKey: "multi",
+            renderedCategory: .generalBook,
+            renderedModuleName: "Multi",
+            pageCategory: .generalBook,
+            pageDocumentInitials: "Multi",
+            pageKey: nil
+        )
+        let missingInitialsRequest = BibleReaderTransientDocumentRequest(
+            documentJSON: #"{"id":"missing-initials"}"#,
+            renderedBook: "Multi",
+            renderedKey: "multi",
+            renderedCategory: .generalBook,
+            renderedModuleName: "Multi",
+            pageCategory: .generalBook,
+            pageDocumentInitials: nil,
+            pageKey: "KJV:Gen.1.1"
+        )
+
+        let validUpdate = coordinator.pageIdentityUpdate(for: validRequest)
+        XCTAssertEqual(validUpdate.currentCategory, .generalBook)
+        XCTAssertTrue(validUpdate.clearsActiveGeneralBookModule)
+        XCTAssertTrue(validUpdate.assignsActiveGeneralBookModuleName)
+        XCTAssertEqual(validUpdate.activeGeneralBookModuleName, "Multi")
+        XCTAssertEqual(validUpdate.currentGeneralBookKey, "KJV:Gen.1.1")
+        XCTAssertEqual(validUpdate.pageManagerCategoryName, DocumentCategory.generalBook.pageManagerKey)
+        XCTAssertEqual(validUpdate.pageManagerGeneralBookDocument, "Multi")
+        XCTAssertEqual(validUpdate.pageManagerGeneralBookKey, "KJV:Gen.1.1")
+        XCTAssertTrue(validUpdate.persistsPageManagerState)
+
+        let malformedUpdate = coordinator.pageIdentityUpdate(for: malformedRequest)
+        XCTAssertEqual(malformedUpdate.currentCategory, .generalBook)
+        XCTAssertTrue(malformedUpdate.clearsActiveGeneralBookModule)
+        XCTAssertTrue(malformedUpdate.assignsActiveGeneralBookModuleName)
+        XCTAssertEqual(malformedUpdate.activeGeneralBookModuleName, "Multi")
+        XCTAssertNil(malformedUpdate.currentGeneralBookKey)
+        XCTAssertFalse(malformedUpdate.persistsPageManagerState)
+
+        let missingInitialsUpdate = coordinator.pageIdentityUpdate(for: missingInitialsRequest)
+        XCTAssertEqual(missingInitialsUpdate.currentCategory, .generalBook)
+        XCTAssertTrue(missingInitialsUpdate.clearsActiveGeneralBookModule)
+        XCTAssertTrue(missingInitialsUpdate.assignsActiveGeneralBookModuleName)
+        XCTAssertNil(missingInitialsUpdate.activeGeneralBookModuleName)
+        XCTAssertNil(missingInitialsUpdate.currentGeneralBookKey)
+        XCTAssertFalse(missingInitialsUpdate.persistsPageManagerState)
+    }
+
+    /**
      Protects My Documents active-page identity as a coordinator-owned reader state rule.
 
      Android treats My Documents as generated general-book modules, so iOS must keep the active
